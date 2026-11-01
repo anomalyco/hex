@@ -26,7 +26,13 @@ use crate::desktop::onboarding::{ItemStatus, SetupItem};
 /// Total duration of the automated permissions step.
 pub(crate) const PERMISSIONS_SECS: f64 = 7.2;
 /// The automated microphone step.
-pub(crate) const MIC_SECS: f64 = 3.0;
+pub(crate) const MIC_SECS: f64 = MIC_FLOAT + FLOAT_OFF + 0.05;
+/// An allowed permission's check holds this long; then its card lets go
+/// and floats off upward for this long before the next page comes in.
+pub(crate) const GRANTED_BEAT: f64 = 0.6;
+pub(crate) const FLOAT_OFF: f64 = 0.7;
+const MIC_FLOAT: f64 = MIC_GRANT + GRANTED_BEAT;
+const AX_FLOAT: f64 = SETTINGS_CLOSE + 0.2;
 /// Where the Accessibility step starts on the shared timeline, and how
 /// long it then runs.
 pub(crate) const AX_SHIFT: f64 = AX_TRAY_OPEN - 0.6;
@@ -83,6 +89,41 @@ pub(crate) fn state_at(e: f64, ask: f64, grant: f64, primary: bool) -> PermState
     }
 }
 
+/// How far an allowed card has floated off, `e` seconds into its page.
+fn float_u(e: f64, from: f64) -> f32 {
+    ((e - from) / FLOAT_OFF).clamp(0.0, 1.0) as f32
+}
+
+/// An allowed card letting go: a small dip as it detaches, then up and
+/// away, faster as it goes, shrinking and fading into the void.
+fn float_off(card: El, u: f32, reduced: bool) -> El {
+    if u <= 0.0 {
+        return card;
+    }
+    if reduced {
+        return card.opacity(1.0 - u).opacity_motion(Anim::INSTANT);
+    }
+    const DIP: f32 = 0.16;
+    let (y, scale) = if u < DIP {
+        let d = (std::f32::consts::PI * u / DIP).sin();
+        (5.0 * d, 1.0 + 0.025 * d)
+    } else {
+        let v = (u - DIP) / (1.0 - DIP);
+        (-460.0 * v * v - 40.0 * v, 1.0 - 0.14 * v)
+    };
+    let v = ((u - DIP) / (1.0 - DIP)).max(0.0);
+    card.offset(0.0, y)
+        .offset_motion(Anim::INSTANT)
+        .scale(scale)
+        .scale_motion(Anim::INSTANT)
+        .rotate(-0.05 * v * v)
+        .rotate_motion(Anim::INSTANT)
+        .blur(6.0 * v * v)
+        .blur_motion(Anim::INSTANT)
+        .opacity(1.0 - smoothstep((v - 0.25) / 0.75))
+        .opacity_motion(Anim::INSTANT)
+}
+
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -99,13 +140,13 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
         Perm::Microphone
     };
     if let Some(live) = &s.live {
-        return live_page(p, live, s.motion, which);
+        return live_page(p, live, s, which);
     }
     let e = s.permissions_from.map_or(0.0, |from| s.now - from);
     let reduced = s.reduced.get();
     let (stage, continue_at) = match which {
         Perm::Microphone => (
-            microphone_stage(p, e, state_at(e, MIC_ASK, MIC_GRANT, true)),
+            microphone_stage(p, e, state_at(e, MIC_ASK, MIC_GRANT, true), reduced),
             MIC_CONTINUE,
         ),
         // Accessibility joins the shared timeline where its tray opens.
@@ -175,7 +216,7 @@ fn heading(p: Paint, motion: Motion, which: Perm) -> El {
 }
 
 /// The microphone alone: Hex's row, then macOS's prompt under it.
-fn microphone_stage(p: Paint, e: f64, mic: PermState) -> El {
+fn microphone_stage(p: Paint, e: f64, mic: PermState, reduced: bool) -> El {
     let k = p.k;
     let card = col()
         .key("setup-card")
@@ -195,7 +236,11 @@ fn microphone_stage(p: Paint, e: f64, mic: PermState) -> El {
     let mut stage = el()
         .key("microphone-stage")
         .size(COL_W, MIC_STAGE_H)
-        .child(k.elevate(card, &k.elevation.raised));
+        .child(float_off(
+            k.elevate(card, &k.elevation.raised),
+            float_u(e, MIC_FLOAT),
+            reduced,
+        ));
     if (MIC_ASK..MIC_GRANT).contains(&e) {
         stage = stage.child(
             microphone_prompt(p, e >= MIC_PRESS)
@@ -208,8 +253,9 @@ fn microphone_stage(p: Paint, e: f64, mic: PermState) -> El {
 
 /// The real first run's permissions: macOS's own prompt and System Settings
 /// with Hex's guide, and the rows follow what macOS reports.
-fn live_page(p: Paint, live: &Live, motion: Motion, which: Perm) -> El {
+fn live_page(p: Paint, live: &Live, s: &Onboard, which: Perm) -> El {
     let k = p.k;
+    let motion = s.motion;
     let mic_ready = live.microphone == ItemStatus::Ready;
     let ax_desc = match live.accessibility {
         ItemStatus::Stale => crate::desktop::i18n::tr("An older Hex entry can keep this off"),
@@ -233,24 +279,30 @@ fn live_page(p: Paint, live: &Live, motion: Motion, which: Perm) -> El {
         .w(COL_W)
         .radius(k.radius.lg)
         .fill(k.c.bg_base)
-        .border(p.hair, k.c.border_weak)
-        .child(mic_row);
+        .border(p.hair, k.c.border_weak);
+    // An allowed microphone has already floated off by Accessibility.
+    let card = match which {
+        Perm::Accessibility if mic_ready => card,
+        _ => card.child(mic_row),
+    };
     let card = match which {
         Perm::Microphone => card,
-        Perm::Accessibility => card.child(separator(p, "sep0")).child(perm_row(
-            p,
-            "ax-row",
-            &glyphs::CURSOR_TEXT,
-            "Accessibility",
-            ax_desc,
-            live_pill(
+        Perm::Accessibility => card
+            .children((!mic_ready).then(|| separator(p, "sep0")))
+            .child(perm_row(
                 p,
-                "ax-pill",
-                live.accessibility,
-                mic_ready,
-                SetupItem::Accessibility,
-            ),
-        )),
+                "ax-row",
+                &glyphs::CURSOR_TEXT,
+                "Accessibility",
+                ax_desc,
+                live_pill(
+                    p,
+                    "ax-pill",
+                    live.accessibility,
+                    mic_ready,
+                    SetupItem::Accessibility,
+                ),
+            )),
     };
     let action = if live.restart {
         Button::new("Restart Hex")
@@ -268,7 +320,11 @@ fn live_page(p: Paint, live: &Live, motion: Motion, which: Perm) -> El {
         .gap(22.0)
         .items_center()
         .child(heading(p, motion, which))
-        .child(motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0))
+        .child(float_off(
+            motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0),
+            live.floated(which == Perm::Accessibility, s.now),
+            s.reduced.get(),
+        ))
         .child(row().key("action").h(ACTION_H).center().child(action))
 }
 
@@ -317,7 +373,11 @@ fn stage(p: Paint, e: f64, mic: PermState, ax: PermState, reduced: bool) -> El {
     let mut stage = el().key("permissions-stage").size(COL_W, STAGE_H);
 
     // 1. Hex's own permissions card at the top of the `440 pt` column.
-    stage = stage.child(setup_card(p, mic, ax, tray_open, escaped));
+    stage = stage.child(float_off(
+        setup_card(p, mic, ax, tray_open, escaped),
+        float_u(e, AX_FLOAT),
+        reduced,
+    ));
 
     // 2. System Settings (`Privacy & Security › Accessibility`).
     if settings_open {

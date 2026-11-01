@@ -135,6 +135,8 @@ pub(crate) struct Onboard {
     /// Set when this is Hex's real first run (Labs):
     /// what the window's tour reports, in place of the fixtures.
     pub(crate) live: Option<Live>,
+    /// `"Hex is ready"`'s Launch at login ask.
+    pub(crate) login: super::login::LoginAsk,
     /// The dictated words flying into the practice field.
     pub(crate) dictated: Dictated,
     /// A story's stand-in for a real dictation on the interactive try.
@@ -148,7 +150,7 @@ pub(crate) struct Onboard {
     /// The shortcut starts and stops dictation instead of being held.
     pub(crate) toggle: bool,
     /// A story that plays the whole first run by itself: it presses
-    /// `"Watch what happens"`, and its scripted player ends the game.
+    /// the Launch Room's row, and its scripted player ends the game.
     pub(crate) autoplay: bool,
 }
 
@@ -260,6 +262,7 @@ impl Onboard {
             hud_landed: false,
             sfx: SfxTrack::default(),
             live: None,
+            login: super::login::LoginAsk::default(),
             dictated: Dictated::default(),
             rehearsal: None,
             game: None,
@@ -433,7 +436,7 @@ impl Onboard {
         park(self, self.now);
     }
 
-    /// `"Watch what happens"`: plays `"Without Hex"` from the top, then the
+    /// the Launch Room's row: plays `"Without Hex"` from the top, then the
     /// story moves on by itself.
     /// `Skip →` or Escape: leaves the comedy for whatever follows it. True
     /// when there was one to skip.
@@ -460,9 +463,13 @@ impl Onboard {
             return;
         }
         self.manual_override = true;
-        self.typing_from = Some(self.now);
-        self.sfx.on_without_hex(self.now, &self.scene);
-        self.auto_due_at = Some(self.now + self.scene.duration());
+        // The conversation opens on Jay finishing his question; the scene's
+        // clock starts once it lands.
+        let from = self.now + typing::INTRO;
+        self.typing_from = Some(from);
+        self.sfx.on_opened();
+        self.sfx.on_without_hex(from, &self.scene);
+        self.auto_due_at = Some(from + self.scene.duration());
     }
 
     /// Rebuilds [`Self::scene`] after a change to [`Self::timing`].
@@ -721,6 +728,7 @@ fn first_run() -> Story<Onboard> {
         || {
             let mut s = Onboard::new(Flow::FirstRun);
             s.speech = Speech::AfterDownload;
+            s.login = super::login::LoginAsk::preview();
             s
         },
         view,
@@ -738,6 +746,10 @@ fn first_run() -> Story<Onboard> {
     .variant("Mac in French", |s| s.wants = Language::Other)
     .variant("Model already downloaded", |s| s.had_model = true)
     .variant("Permissions already granted", |s| s.granted = true)
+    .variant("Hex is ready", |s| {
+        s.had_model = true;
+        s.jump_to_ready();
+    })
     .variant("Auto-play video", |s| s.scripted_try = true)
     .variant("Your turn, model streams", |s| {
         s.rehearsal = Some(Rehearsal::new(true));
@@ -799,6 +811,8 @@ fn view(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
 }
 
 fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
+    // A story opened on `"Hex is ready"` plays that page again.
+    let on_ready = s.step == Step::Ready;
     s.now = play.now();
     s.ready_from = None;
     s.manual_override = false;
@@ -811,6 +825,11 @@ fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
         s.had_model = true;
         s.granted = true;
         s.jump_to_try();
+        play.wake_after(Duration::ZERO);
+        return;
+    }
+    if on_ready {
+        s.jump_to_ready();
         play.wake_after(Duration::ZERO);
         return;
     }
@@ -829,7 +848,7 @@ fn start_first_run(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     play.wake_after(Duration::ZERO);
 }
 
-/// `"Without Hex"`, waiting for `"Watch what happens"`.
+/// `"Without Hex"`, waiting for the Launch Room's row.
 fn park(s: &mut Onboard, now: f64) {
     s.step = Step::Parked;
     s.parked_from = Some(now);
@@ -838,7 +857,7 @@ fn park(s: &mut Onboard, now: f64) {
 }
 
 /// Starts the first run at `now`; the story's next beat is due after the
-/// returned seconds, or waits for `"Watch what happens"`.
+/// returned seconds, or waits for the Launch Room's row.
 pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> Option<f64> {
     s.now = now;
     s.flow_hud = FlowHud::default();
@@ -971,9 +990,9 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
                 return Some(at - now);
             }
             s.start_scene();
-            Some(s.scene.duration() + COMEDY_HOLD)
+            Some(typing::INTRO + s.scene.duration() + COMEDY_HOLD)
         }
-        // `"Without Hex"` waits for `"Watch what happens"`, plays out, and
+        // `"Without Hex"` waits for the Launch Room's row, plays out, and
         // its last line holds a beat; then `"With Hex"` shows how it goes,
         // with nothing asked of the user yet.
         Step::Parked => {
@@ -997,7 +1016,17 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             s.step = Step::Heard;
             Some(versus::reply_secs(s))
         }
-        Step::Heard => leave_comedy(s, now),
+        // The happy ending holds a beat before the permissions come in.
+        Step::Heard => {
+            let done = s
+                .take_from
+                .map_or(now, |from| from + versus::hex_done_secs(s));
+            let left = done + ENDING_HOLD - now;
+            if left > 1e-3 {
+                return Some(left);
+            }
+            leave_comedy(s, now)
+        }
         Step::Microphone | Step::Waiting => to_practice(s, now),
         Step::Try => {
             if s.interactive_try() {
@@ -1038,11 +1067,13 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
 /// Short presses on the practice before it offers tap to start instead.
 pub(crate) const TAPS_BEFORE_TOGGLE: u8 = 2;
 
-/// How long an autoplaying story waits on `"Watch what happens"`.
-const WATCH_AFTER: f64 = 1.8;
+/// How long an autoplaying story waits on the Launch Room's row.
+const WATCH_AFTER: f64 = 2.4;
 
 /// How long `"Without Hex"`'s last line holds before the first run moves on.
 const COMEDY_HOLD: f64 = 1.6;
+/// How long `"With Hex"`'s happy ending stays before the first run moves on.
+const ENDING_HOLD: f64 = 1.5;
 
 /// Out of the comedy, by `"With Hex"`'s end or `Skip →`.
 fn leave_comedy(s: &mut Onboard, now: f64) -> Option<f64> {
@@ -1374,7 +1405,7 @@ mod tests {
     }
 
     #[test]
-    fn without_hex_waits_for_watch_what_happens() {
+    fn without_hex_waits_for_the_launch_room() {
         let mut s = Onboard::new(Flow::FirstRun);
         s.had_model = true;
         s.begin_live(0.0);
@@ -1383,7 +1414,11 @@ mod tests {
         assert_eq!(s.step, Step::Parked);
         assert!(versus::waiting_to_start(&s));
         s.start_scene();
-        let end = 30.0 + s.scene.duration();
+        // It opens on Jay's question, with him typing again.
+        let opened = 30.0 + typing::INTRO;
+        assert_eq!(s.scene.shown(30.0 - opened), 2);
+        assert!(s.scene.dots(-0.2).is_some());
+        let end = opened + s.scene.duration();
         poll(&mut s, end - 0.05, &mut tx);
         assert_eq!(s.step, Step::Parked);
         poll(&mut s, end + 0.01, &mut tx);
@@ -1425,12 +1460,15 @@ mod tests {
             ],
             "nothing asked of the user on the way"
         );
-        // From `⌥` going down to the microphone, polled every 0.05 s.
+        // From `⌥` going down to the microphone, polled every 0.05 s: the
+        // demo, then the end of the scene held for a beat.
         let with_hex = now - shortcut.unwrap();
         assert!(
-            with_hex <= super::super::triumph::MAX_SECS + 0.1,
+            with_hex <= super::super::triumph::MAX_SECS + ENDING_HOLD + 0.1,
             "{with_hex:.1} s"
         );
+        let demo = versus::hex_done_secs(&s);
+        assert!(with_hex >= demo + ENDING_HOLD - 0.1, "{with_hex:.1} s");
         let fired = |tone: Tone| s.sfx.fired_cues().iter().any(|&(_, t, _)| t == tone);
         assert!(fired(Tone::Onboarding(OnboardingTone::ShortcutDown)));
         assert!(
@@ -1520,10 +1558,11 @@ mod tests {
         let mut tx = Tx::default();
         poll(&mut s, 30.0, &mut tx);
         s.start_scene();
-        poll(&mut s, 31.0, &mut tx);
+        let opened = 30.0 + typing::INTRO;
+        poll(&mut s, opened + 1.0, &mut tx);
         assert!(!versus::skippable(&s));
         assert!(!s.skip_scene());
-        poll(&mut s, 32.1, &mut tx);
+        poll(&mut s, opened + 2.1, &mut tx);
         assert!(versus::skippable(&s));
         assert!(s.skip_scene());
         assert!(matches!(

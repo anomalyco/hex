@@ -22,6 +22,7 @@ use super::flows::continue_button;
 use super::hex_meter::hex_meter;
 use super::hud_stage::{flow_box, frame_slot, voice_or_idle_slot};
 use super::landing::{LEAD, arrives, keys, ready, title_font};
+use super::login::{self, Login, login_ask};
 use super::mic_line::mic_capsule;
 use super::pill::{CAPSULE, FLY, PILL, language_capsule, pill, slot};
 use super::sparks::impacts;
@@ -98,16 +99,20 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
         &s.caps,
         (!s.had_model).then_some(PILL),
         s.ready_age(),
-        s.now,
         s.reduced.get(),
         s.motion,
     );
+
     if s.live.is_some() {
         return col()
             .key("ready-live-wrap")
             .gap(20.0)
             .items_center()
             .child(core)
+            .children(
+                login_ask(p, &s.login, s.now, s.reduced.get(), login::toggle)
+                    .map(|ask| ask.transition(arrives())),
+            )
             .child(
                 row()
                     .key("ready-actions")
@@ -131,14 +136,30 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
                     ),
             );
     }
+    let ask = login_ask(p, &s.login, s.now, s.reduced.get(), |s: &mut Onboard| {
+        let next = if s.login.login == Login::On {
+            Login::Off
+        } else {
+            Login::On
+        };
+        if s.login.set(next, s.now) {
+            s.sfx.on_login(s.now);
+        }
+    });
     if !is_live_window() {
-        return core;
+        return col()
+            .key("ready-live-wrap")
+            .gap(20.0)
+            .items_center()
+            .child(core)
+            .children(ask);
     }
     col()
         .key("ready-live-wrap")
         .gap(20.0)
         .items_center()
         .child(core)
+        .children(ask)
         .child(
             Button::new("Try dictating again")
                 .variant(ButtonVariant::Neutral)
@@ -301,8 +322,6 @@ fn demo_page(p: Paint, s: &Onboard) -> El {
         .child(versus::stage(p, s))
         .child(action(if s.step == Step::Done {
             continue_button(p, s)
-        } else if versus::waiting_to_start(s) {
-            super::flows::watch_button(p, s)
         } else if versus::skippable(s) {
             super::flows::skip_button(p, s)
         } else {

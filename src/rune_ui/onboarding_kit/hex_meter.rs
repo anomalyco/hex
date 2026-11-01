@@ -223,7 +223,6 @@ pub(crate) fn hex_logo(
     key: &str,
     size: f32,
     age: f64,
-    now: f64,
     reduced: bool,
     handed: bool,
 ) -> El {
@@ -241,39 +240,10 @@ pub(crate) fn hex_logo(
         (1.0 + TRAVEL[i] * (1.0 - settle(t)), shown)
     };
 
-    let breath = if reduced {
-        1.0
-    } else {
-        0.84 + 0.16 * (0.5 + 0.5 * (now * std::f64::consts::TAU / 4.8).sin() as f32)
-    };
-    let halo = if p.k.dark {
-        rune_theme_opencode::scale("cobalt", true, 9).mix(p.text(), 0.45)
-    } else {
-        rune_theme_opencode::scale("cobalt", false, 8)
-    };
-    // The glow comes up as the last hexagon lands.
-    let lit = stage(2).1 * breath;
-    let outer_a = (if p.k.dark { 0.08 } else { 0.05 }) * lit;
-    let inner_a = (if p.k.dark { 0.17 } else { 0.10 }) * lit;
-
     let (scale, shown) = stage(0);
     let outline = rounded_hex(centre, OUTER * half * scale, line * 0.9);
-    let mut shape = Shape::new()
-        .stroke_with(
-            outline.clone(),
-            true,
-            line * 3.4,
-            LineCap::Round,
-            halo.alpha(outer_a),
-        )
-        .stroke_with(
-            outline.clone(),
-            true,
-            line * 1.9,
-            LineCap::Round,
-            halo.alpha(inner_a),
-        )
-        .stroke_with(outline, true, line, LineCap::Round, p.text().alpha(shown));
+    let mut shape =
+        Shape::new().stroke_with(outline, true, line, LineCap::Round, p.text().alpha(shown));
     let (scale, shown) = stage(1);
     if shown > 0.0 {
         let ring = rounded_hex(centre, MIDDLE * half * scale, line * 0.8);

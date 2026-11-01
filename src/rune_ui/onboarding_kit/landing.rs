@@ -143,19 +143,17 @@ pub(crate) fn keys(p: Paint, key: &str, caps: &[String], down: bool) -> El {
 }
 
 /// Final `"Hex is ready"` landing: the Hex logo builds outside in (its
-/// outline arriving from the top pill when `matched`), with a soft glow,
-/// followed by staggered copy and a quiet macOS menu-bar preview showing
+/// outline arriving from the top pill when `matched`), followed by staggered copy and a quiet macOS menu-bar preview showing
 /// where Hex lives. `age`: seconds since the page appeared.
 pub(crate) fn ready(
     p: Paint,
     caps: &[String],
     matched: Option<&str>,
     age: f64,
-    now: f64,
     reduced: bool,
     motion: Motion,
 ) -> El {
-    let mark = hex_logo(p, "meter", 64.0, age, now, reduced, matched.is_some());
+    let mark = hex_logo(p, "meter", 64.0, age, reduced, matched.is_some());
     let mark = match matched {
         Some(id) => el().key(id).matched(id).motion(FLY).child(mark),
         None => motion.staggered(mark.key("mark"), 0.0, 8.0),

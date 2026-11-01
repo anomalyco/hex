@@ -346,11 +346,35 @@ pub(crate) enum Side {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Caption<'a> {
     None,
-    /// The sender's name over the first of theirs in a group, in their
-    /// colour: an OpenCode theme scale such as `"cobalt"`.
-    From(&'a str, &'a str),
+    /// Theirs in a group, as Messages draws it: the sender's name, small
+    /// and grey, over the first of a run, and their face (in their colour,
+    /// an OpenCode theme scale such as `"cobalt"`) beside the last.
+    From(Sender<'a>),
     /// `"Read"` under one of yours, moving with it.
     Read,
+}
+
+/// Who sent one of theirs in a group, and where it sits in their run.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Sender<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) colour: &'a str,
+    pub(crate) first: bool,
+    pub(crate) last: bool,
+}
+
+/// A sender's face beside their messages in a group.
+const FACE: f32 = 24.0;
+const FACE_GAP: f32 = 7.0;
+
+/// The sender's face beside a line in a group, or the room it would take.
+fn face_slot(p: Paint, sender: Sender<'_>) -> El {
+    match sender {
+        sender if sender.last => {
+            super::inbox::face(p, sender.name, sender.colour, FACE).key("face")
+        }
+        _ => el().key("face").size(FACE, FACE),
+    }
 }
 
 /// One message in [`chat`]'s thread: theirs on the left, yours on the right
@@ -404,19 +428,27 @@ pub(crate) fn bubble(
     };
     match caption {
         Caption::None => line.child(bubble.shrink()),
-        Caption::From(from, colour) => line.child(
-            col()
-                .key("named")
-                .gap(2.0)
+        Caption::From(sender) => line.child(
+            row()
+                .key("sender")
+                .gap(FACE_GAP)
+                .items_end()
                 .shrink()
+                .child(face_slot(p, sender))
                 .child(
-                    text(from.to_string())
-                        .key("from")
-                        .font(k.ty.small_medium)
-                        .color(rune_theme_opencode::scale(colour, k.dark, 11))
-                        .ml(11.0),
-                )
-                .child(bubble.shrink()),
+                    col()
+                        .key("named")
+                        .gap(2.0)
+                        .shrink()
+                        .children(sender.first.then(|| {
+                            text(sender.name.to_string())
+                                .key("from")
+                                .font(k.ty.small)
+                                .color(p.faint())
+                                .ml(12.0)
+                        }))
+                        .child(bubble.shrink()),
+                ),
         ),
         Caption::Read => line.child(
             col()
@@ -464,8 +496,16 @@ pub(crate) fn line(key: String, side: Side, opacity: f32, reduced: bool) -> El {
         )))
 }
 
-/// Their three typing dots, pulsing in turn at `now`.
-pub(crate) fn typing_dots(p: Paint, key: String, now: f64, opacity: f32, reduced: bool) -> El {
+/// Their three typing dots, pulsing in turn at `now`, beside the typer's
+/// face in a group.
+pub(crate) fn typing_dots(
+    p: Paint,
+    key: String,
+    now: f64,
+    opacity: f32,
+    reduced: bool,
+    typer: Option<Sender<'_>>,
+) -> El {
     let k = p.k;
     let dot = |i: usize| {
         let phase = (now * 1.7 - i as f64 * 0.22).rem_euclid(1.0);
@@ -477,21 +517,31 @@ pub(crate) fn typing_dots(p: Paint, key: String, now: f64, opacity: f32, reduced
             .opacity(0.35 + 0.65 * lit)
             .opacity_motion(rune::Anim::INSTANT)
     };
-    line(key, Side::Them, opacity, reduced).child(
-        row()
-            .key("dots")
-            .h(27.0)
-            .px(12.0)
-            .gap(4.0)
-            .center_y()
-            .radius(13.0)
-            .continuous_corners()
-            .fill(if k.dark { k.c.layer_02 } else { k.c.layer_01 })
-            .border(p.hair, k.c.border_weak)
-            .child(dot(0))
-            .child(dot(1))
-            .child(dot(2)),
-    )
+    let dots = row()
+        .key("dots")
+        .h(27.0)
+        .px(12.0)
+        .gap(4.0)
+        .center_y()
+        .radius(13.0)
+        .continuous_corners()
+        .fill(if k.dark { k.c.layer_02 } else { k.c.layer_01 })
+        .border(p.hair, k.c.border_weak)
+        .child(dot(0))
+        .child(dot(1))
+        .child(dot(2));
+    let line = line(key, Side::Them, opacity, reduced);
+    match typer {
+        Some(typer) => line.child(
+            row()
+                .key("sender")
+                .gap(FACE_GAP)
+                .items_end()
+                .child(face_slot(p, typer))
+                .child(dots),
+        ),
+        None => line.child(dots),
+    }
 }
 
 /// A small red pill in a chat's header saying who is sharing their screen, its dot pulsing

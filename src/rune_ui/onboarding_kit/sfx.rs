@@ -148,6 +148,19 @@ impl SfxTrack {
         if !had_model {
             self.push(now + 0.12, Tone::Onboarding(OnboardingTone::Hexagon));
         }
+        // Jay's messages landing on the Launch Room's row.
+        for at in super::inbox::DINGS {
+            self.push(now + at, Tone::Onboarding(OnboardingTone::Incoming));
+        }
+    }
+
+    /// The Launch Room was opened before its row had finished dinging.
+    pub(crate) fn on_opened(&mut self) {
+        let incoming = Tone::Onboarding(OnboardingTone::Incoming);
+        let fired = self.fired.min(self.cues.len());
+        let mut kept = self.cues.split_off(fired);
+        kept.retain(|&(_, tone, _)| tone != incoming);
+        self.cues.extend(kept);
     }
 
     /// `"Without Hex"` from `from`: every keystroke, harder as panic builds
@@ -212,7 +225,7 @@ impl SfxTrack {
                 );
             }
         }
-        // Lines from before the button were already there.
+        // Lines from before the conversation opened were already there.
         for line in scene.lines().iter().filter(|l| l.at >= 0.0) {
             let at = from + line.at;
             match line.who {
@@ -333,6 +346,11 @@ impl SfxTrack {
             from + permissions::AX_GRANT,
             Tone::Onboarding(OnboardingTone::PermissionTick),
         );
+    }
+
+    /// Launch at login turning on: the same tick as a permission's switch.
+    pub(crate) fn on_login(&mut self, now: f64) {
+        self.push(now, Tone::Onboarding(OnboardingTone::PermissionTick));
     }
 
     /// `"With Hex"`'s score landing.

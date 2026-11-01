@@ -78,30 +78,6 @@ pub(super) fn continue_button(p: Paint, s: &Onboard) -> El {
     button.build_push(p.k).key("continue").transition(arrives())
 }
 
-/// Starts `"Without Hex"` once the user is watching.
-pub(super) fn watch_button(p: Paint, s: &Onboard) -> El {
-    let button = Button::new("Watch what happens")
-        .variant(ButtonVariant::Contrast)
-        .label_with(|font, ink| {
-            row()
-                .gap(7.0)
-                .center_y()
-                .child(icon(&glyphs::TRIANGLE_RIGHT, 13.0).key("play").color(ink))
-                .child(
-                    text("Watch what happens")
-                        .key("label")
-                        .font(font)
-                        .color(ink),
-                )
-        });
-    let button = if s.live.is_some() {
-        button.on_press(super::live::on_ui(Onboard::start_scene))
-    } else {
-        button.on_press(Onboard::start_scene)
-    };
-    button.build_push(p.k).key("watch").transition(arrives())
-}
-
 /// `Skip →`: a quiet way out once the comedy plays.
 pub(super) fn skip_button(p: Paint, s: &Onboard) -> El {
     let font = p.k.ty.small;
@@ -177,7 +153,6 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 &s.caps,
                 None,
                 s.ready_age(),
-                s.now,
                 s.reduced.get(),
                 s.motion,
             )),
@@ -275,7 +250,6 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 &s.caps,
                 Some(PILL),
                 s.ready_age(),
-                s.now,
                 s.reduced.get(),
                 s.motion,
             )),
@@ -388,15 +362,7 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
         _ => sentence(p, s, true),
     };
     let below = match s.step {
-        Step::Ready => ready(
-            p,
-            &s.caps,
-            None,
-            s.ready_age(),
-            s.now,
-            s.reduced.get(),
-            s.motion,
-        ),
+        Step::Ready => ready(p, &s.caps, None, s.ready_age(), s.reduced.get(), s.motion),
         Step::Pick | Step::Started => heading(
             p,
             "intro",

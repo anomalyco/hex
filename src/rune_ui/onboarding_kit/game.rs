@@ -20,8 +20,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use rune::{
-    Anim, Color, Cx, El, Playground, ScrollSpec, Story, TextEdit, TextStyle, Transition, Tx, col,
-    effect, el, row, text,
+    Anim, Color, Cx, El, Playground, ScrollSpec, Spring, Story, TextEdit, TextStyle, Transition,
+    Tx, col, effect, el, row, text,
 };
 use rune_kit::{Button, ButtonVariant, TextInput};
 
@@ -1090,7 +1090,7 @@ fn render<S: 'static>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<'_,
         .offset_motion(Anim::INSTANT)
         .rotate_motion(Anim::INSTANT)
         .child(header(p, g, destroyed, t, reduced, look))
-        .children(hud(g, t, look.hud))
+        .children(hud(p, g, t, reduced, look))
         .children(look.hint.map(|copy| hint(p, copy, look.offer.as_ref())));
 
     for r in &g.rounds {
@@ -1300,20 +1300,103 @@ fn header<S: 'static>(
         .children(done)
 }
 
-/// Hex's Dot scope, which the words fly out of; it steps aside for the
-/// score card.
-fn hud(g: &Play, t: f64, frame: Option<&DotFrame>) -> Option<El> {
-    let frame = frame.filter(|_| chrome(g, t) > 0.5)?;
-    Some(frame_slot("game-dot-hud", HUD_AT, HUD_SCALE, frame))
+/// Hex's Dot scope, which the words fly out of, while a take records and
+/// lands; between takes, a pill that says nothing is recording and asks for
+/// the shortcut. Both step aside for the score card.
+fn hud<S>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<S>) -> Vec<El> {
+    if chrome(g, t) <= 0.5 {
+        return Vec::new();
+    }
+    let scope = look
+        .hud
+        .map(|frame| frame_slot("game-dot-hud", HUD_AT, HUD_SCALE, frame));
+    let waiting = scope.is_none();
+    let pill = idle_pill(p, look.caps, look.toggle, t, reduced)
+        .opacity(if waiting { 1.0 } else { 0.0 })
+        .opacity_motion(Spring::new(if waiting { 0.35 } else { 0.12 }, 0.0))
+        .scale(if waiting || reduced { 1.0 } else { 0.92 })
+        .scale_motion(Spring::new(0.3, 0.0));
+    std::iter::once(pill).chain(scope).collect()
 }
 
-/// The game's Dot scope, as the desktop HUD runs: it rests while the game
-/// waits, records on the microphone's level while the shortcut is held,
-/// shows Done when the answer lands, and then rests again.
-#[derive(Default)]
+/// Seconds between the idle pill's invitations to press the shortcut.
+const INVITE_EVERY: f64 = 2.6;
+
+/// `Not recording · Hold ⌥ to answer`, centred on the HUD: its keys dip
+/// as if pressed every [`INVITE_EVERY`] seconds (still under Reduce Motion).
+fn idle_pill(p: Paint, caps: &[String], toggle: bool, t: f64, reduced: bool) -> El {
+    let k = p.k;
+    const H: f32 = 34.0;
+    let phase = t.rem_euclid(INVITE_EVERY);
+    let dip = !reduced && (1.2..1.38).contains(&phase);
+    let glow = if reduced {
+        0.0
+    } else {
+        (0.5 - 0.5 * (std::f64::consts::TAU * phase / INVITE_EVERY).cos()) as f32
+    };
+    let dot = el()
+        .key("idle-dot")
+        .size(7.0, 7.0)
+        .radius(3.5)
+        .border(1.5, p.faint());
+    let pill = row()
+        .key("idle-pill")
+        .h(H)
+        .px(14.0)
+        .gap(8.0)
+        .center_y()
+        .radius(H * 0.5)
+        .fill(k.c.bg_base)
+        .border(p.hair, p.faint().alpha(0.25 + 0.35 * glow))
+        .child(dot)
+        .child(
+            text("Not recording")
+                .key("idle-state")
+                .font(k.ty.small)
+                .color(p.faint()),
+        )
+        .child(
+            el().key("idle-rule")
+                .size(p.hair, 14.0)
+                .fill(k.c.border_weak),
+        )
+        .child(
+            text(if toggle { "Tap" } else { "Hold" })
+                .key("idle-hold")
+                .font(LEAD)
+                .color(p.text()),
+        )
+        .child(keys(p, "idle-keys", caps, dip))
+        .child(
+            text(if toggle { "to start" } else { "to answer" })
+                .key("idle-rest")
+                .font(LEAD)
+                .color(p.text()),
+        );
+    row()
+        .key("idle-at")
+        .absolute(0.0, HUD_AT[1] - H * 0.5)
+        .w(STAGE_W)
+        .justify_center()
+        .child(pill)
+}
+
+/// The game's Dot scope, as the desktop HUD runs: away while the game
+/// waits, it appears when the shortcut goes down, records on the
+/// microphone's level while it is held, shows Done when the answer lands,
+/// and leaves again.
 struct GameHud {
     hud: LiveHud,
     landed: usize,
+}
+
+impl Default for GameHud {
+    fn default() -> Self {
+        Self {
+            hud: LiveHud::until_pressed(),
+            landed: 0,
+        }
+    }
 }
 
 impl GameHud {
@@ -1321,10 +1404,6 @@ impl GameHud {
         let landed = play.landed != self.landed;
         self.landed = play.landed;
         self.hud.step(now, held, peak, landed, reduced);
-        if self.hud.finished() {
-            self.hud.clear();
-            self.hud.step(now, held, peak, false, reduced);
-        }
     }
 
     fn frame(&self) -> Option<&DotFrame> {

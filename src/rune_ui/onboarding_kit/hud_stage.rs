@@ -229,6 +229,15 @@ impl Default for LiveHud {
 }
 
 impl LiveHud {
+    /// A plate that stays away until the shortcut goes down, as the desktop
+    /// HUD does, rather than waiting on screen.
+    pub(crate) fn until_pressed() -> Self {
+        Self {
+            finished: true,
+            ..Self::default()
+        }
+    }
+
     /// Steps to now: `held` while the dictation records, `peak` the
     /// microphone's latest peak (`None`: no audio), `landed` once its text
     /// arrived. True while the plate still shows.

@@ -1,6 +1,7 @@
 //! Without Hex, then with it, in one Messages conversation:
 //!
-//! 1. `"Watch what happens"` starts it once the user is looking.
+//! 1. The Launch Room's row in a Messages list dings and pulses with an
+//!    unread badge; clicking it opens the conversation ([`super::inbox`]).
 //! 2. In the `"Launch Room"` group, Jay (CEO) has asked whether we're ready
 //!    to ship, investors in the room. You type the answer by hand, faster as
 //!    panic builds, and a finger slips onto Return: `"Yse, we're dead"`.
@@ -19,8 +20,8 @@ use rune::{Anim, El, Spring, SpringPair, TextStyle, Transition, col, el, row, te
 
 use super::super::controls::Paint;
 use super::cards::{
-    App, CHAT_W, Caption, FIELD_FONT, Notice, Notify, Reply, Side, bubble, chat, chat_height,
-    field_text_origin, presenting, system_line, typing_dots,
+    App, CHAT_W, Caption, FIELD_FONT, Notice, Notify, Reply, Sender, Side, bubble, chat,
+    chat_height, field_text_origin, presenting, system_line, typing_dots,
 };
 use super::field_text::{self, CHAT};
 use super::fixture::Take;
@@ -145,7 +146,7 @@ fn scene_over(s: &Onboard) -> bool {
     scene_time(s).is_some_and(|t| t >= s.scene.duration())
 }
 
-/// `"Without Hex"` is waiting for `"Watch what happens"`.
+/// `"Without Hex"` is waiting for the Launch Room's row.
 pub(crate) fn waiting_to_start(s: &Onboard) -> bool {
     s.step == Step::Parked && s.typing_from.is_none()
 }
@@ -212,6 +213,11 @@ pub(crate) fn send_at(take: &'static Take, streams: bool, timing: &Timing) -> f6
 }
 
 /// From `Heard` to the score.
+/// When `"With Hex"` has finished, from the shortcut going down.
+pub(crate) fn hex_done_secs(s: &Onboard) -> f64 {
+    hex_beats(s.streams(), &s.timing).done
+}
+
 pub(crate) fn reply_secs(s: &Onboard) -> f64 {
     hex_beats(s.streams(), &s.timing).done - (take().release + 0.1)
 }
@@ -264,7 +270,6 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
                 &s.caps,
                 None,
                 s.ready_age(),
-                s.now,
                 s.reduced.get(),
                 s.motion,
             )),
@@ -285,7 +290,6 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             .color(p.faint())
             .transition(Transition::opacity()),
         Step::Done => continue_button(p, s),
-        Step::Parked if waiting_to_start(s) => super::flows::watch_button(p, s),
         _ if skippable(s) => super::flows::skip_button(p, s),
         _ => el().key("none"),
     };
@@ -423,7 +427,23 @@ fn hex_time(s: &Onboard) -> Option<f64> {
         .map(|from| s.now - from)
 }
 
+/// When the Launch Room was clicked open.
+fn opened_at(s: &Onboard) -> Option<f64> {
+    s.typing_from.map(|from| from - super::typing::INTRO)
+}
+
+/// Where the Launch Room's row waits on the stage.
+const INBOX_TOP: f32 = 170.0;
+
 pub(super) fn stage(p: Paint, s: &Onboard) -> El {
+    if waiting_to_start(s) {
+        let since = s.parked_from.map_or(0.0, |from| s.now - from);
+        return el().key("stage").size(STAGE_W, STAGE_H).child(
+            el().key("inbox-slot")
+                .absolute(CENTRE_X - super::inbox::ROW_W * 0.5, INBOX_TOP)
+                .child(super::inbox::launch_row(p, s, since)),
+        );
+    }
     let (kw, kh) = keyboard::size();
     let voice_phase = s.step >= Step::YourTurn;
     let reduced = s.reduced.get();
@@ -436,7 +456,8 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     let enter_u = if reduced {
         1.0
     } else {
-        s.parked_from
+        opened_at(s)
+            .or(s.parked_from)
             .map_or(1.0, |from| s.motion.keyboard_progress(s.now - from))
     };
     // As the rewind settles, every key but the shortcut melts away.
@@ -541,8 +562,6 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
 
     el().key("stage")
         .size(STAGE_W, STAGE_H)
-        .opacity(if waiting_to_start(s) { 0.85 } else { 1.0 })
-        .opacity_motion(Spring::new(0.4, 0.0))
         .child(keys_el)
         .children(hud_el)
         .child(card)
@@ -676,15 +695,28 @@ fn room(title: &'static str) -> Notice {
     }
 }
 
-/// A name over the first of a run of theirs, in a group.
-fn caption(who: u8, named: bool) -> Caption<'static> {
+/// Who sent one of theirs in a group: a name over the first of a run and a
+/// face beside the last.
+fn sender(who: u8, first: bool, last: bool) -> Option<Sender<'static>> {
     let script = script();
-    if named && script.group.is_some() {
+    script.group.is_some().then(|| {
         let person = script.person(who);
-        Caption::From(person.name, person.colour)
-    } else {
-        Caption::None
-    }
+        Sender {
+            name: person.name,
+            colour: person.colour,
+            first,
+            last,
+        }
+    })
+}
+
+fn caption(who: u8, first: bool, last: bool) -> Caption<'static> {
+    sender(who, first, last).map_or(Caption::None, Caption::From)
+}
+
+/// The boss typing, beside their face in a group.
+fn boss_typing(p: Paint, now: f64, reduced: bool) -> El {
+    typing_dots(p, "dots".into(), now, 1.0, reduced, sender(0, false, true))
 }
 
 /// `"Without Hex"`'s thread at `t`: every line so far, each at
@@ -706,13 +738,18 @@ fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f3
             .collect();
         thread.push(match line.who {
             Who::Them(who) => {
-                // The sender's name over the first of a run, as in a group.
-                let named = i == 0 || lines[i - 1].who != line.who;
+                // The sender's name over the first of a run, as in a group,
+                // and their face beside the last, unless they're typing more.
+                let first = i == 0 || lines[i - 1].who != line.who;
+                let last = match lines.get(i + 1) {
+                    Some(next) => next.who != line.who,
+                    None => who != 0 || scene.dots(t).is_none(),
+                };
                 bubble(
                     p,
                     format!("l{i}"),
                     Side::Them,
-                    caption(who, named),
+                    caption(who, first, last),
                     &line.text,
                     &taps,
                     o,
@@ -741,7 +778,7 @@ fn thread_at(p: Paint, s: &Onboard, t: f64, opacity: impl Fn(usize, &Line) -> f3
         });
     }
     if scene.dots(t).is_some() {
-        thread.push(typing_dots(p, "dots".into(), s.now, 1.0, reduced));
+        thread.push(boss_typing(p, s.now, reduced));
     }
     thread
 }
@@ -859,25 +896,33 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         ));
     }
     if typing {
-        thread.push(typing_dots(p, "dots".into(), s.now, 1.0, reduced));
+        thread.push(boss_typing(p, s.now, reduced));
     }
-    let mut last: Option<u8> = None;
-    for (i, (_, said)) in beats
+    let cheers: Vec<_> = beats
         .lines
         .iter()
         .enumerate()
         .filter(|(_, (when, _))| at(*when))
-    {
+        .collect();
+    let by = |said: &Said| match *said {
+        Said::Them(who, _) => Some(who),
+        _ => None,
+    };
+    let mut last: Option<u8> = None;
+    for (n, &(i, (_, said))) in cheers.iter().enumerate() {
         let key = format!("cheer-{i}");
         thread.push(match *said {
             Said::Them(who, copy) => {
                 let named = last != Some(who);
                 last = Some(who);
+                let ends = cheers
+                    .get(n + 1)
+                    .is_none_or(|(_, (_, next))| by(next) != Some(who));
                 bubble(
                     p,
                     key,
                     Side::Them,
-                    caption(who, named),
+                    caption(who, named, ends),
                     copy,
                     &[],
                     1.0,

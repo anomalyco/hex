@@ -13,6 +13,7 @@ use rune::{El, TextEdit, Transition, Tx, text};
 use super::super::controls::Paint;
 use super::super::{Request, Ui, onboarding};
 use super::fixture::{Language, Speech};
+use super::permissions::{FLOAT_OFF, GRANTED_BEAT};
 use super::pill::set_other_label;
 use super::stories::{FRAME, Flow, Onboard, advance_to};
 use crate::desktop::onboarding::{
@@ -22,8 +23,6 @@ use crate::transcription::models::{
     self as transcription_models, TranscriptionModelId, TranscriptionSelection,
 };
 
-/// How long both permission checks show before the page moves on.
-const GRANTED_BEAT: f64 = 0.7;
 /// How often the first run looks at the model on disk and the permissions.
 const CHECK_EVERY: f64 = 0.25;
 
@@ -57,12 +56,25 @@ struct Checked {
 
 impl Live {
     pub(crate) fn granted_for(&self, now: f64) -> bool {
-        self.granted_at.is_some_and(|at| now - at >= GRANTED_BEAT)
+        self.granted_at
+            .is_some_and(|at| now - at >= GRANTED_BEAT + FLOAT_OFF)
     }
 
     pub(crate) fn mic_granted_for(&self, now: f64) -> bool {
         self.mic_granted_at
-            .is_some_and(|at| now - at >= GRANTED_BEAT)
+            .is_some_and(|at| now - at >= GRANTED_BEAT + FLOAT_OFF)
+    }
+
+    /// How far an allowed permission's card has floated off at `now`.
+    pub(crate) fn floated(&self, accessibility: bool, now: f64) -> f32 {
+        let at = if accessibility {
+            self.granted_at
+        } else {
+            self.mic_granted_at
+        };
+        at.map_or(0.0, |at| {
+            ((now - at - GRANTED_BEAT) / FLOAT_OFF).clamp(0.0, 1.0) as f32
+        })
     }
 }
 
@@ -248,9 +260,13 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         onboarding::input(ui, Input::Continue);
     }
     let asks_permissions = ui.platform.caps.permissions;
+    let login = super::login::of(&ui.platform);
     let Some(s) = ui.first_run.as_mut() else {
         return false;
     };
+    if s.login.set(login, now) {
+        s.sfx.on_login(now);
+    }
     let Some(live) = s.live.as_mut() else {
         return false;
     };

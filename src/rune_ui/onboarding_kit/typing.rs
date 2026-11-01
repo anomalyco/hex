@@ -4,7 +4,7 @@
 //! ship; you type the answer by hand, slow and shaky, then frantic, and every
 //! fix makes it worse until he removes you from the group mid-word.
 //!
-//! Lines before `start` are already there before `"Watch what happens"`:
+//! Lines before `start` are already there before the Launch Room's row:
 //! they sit at negative times, shown while the stage waits.
 //!
 //! [`Timing`] holds every pause and the key pace, so the playground can tune
@@ -78,9 +78,12 @@ pub(crate) enum Glyph {
 /// before the send.
 const SLOW_BEFORE: f64 = 0.6;
 const SLOW_AFTER: f64 = 0.8;
-/// Lines before the button sit this far apart, the last this long before it.
+/// From opening the conversation to the scene's clock. The lines before
+/// it are already there, this far apart; Jay starts typing again once it
+/// has opened.
+pub(crate) const INTRO: f64 = 1.6;
 const BEFORE_STEP: f64 = 0.4;
-const BEFORE_LAST: f64 = 0.5;
+const OPEN_SETTLE: f64 = 0.5;
 /// An untimed tapback lands this long after the last, the first this long
 /// after its command.
 const TAP_STEP: f64 = 0.2;
@@ -318,7 +321,8 @@ impl Scene {
             .take_while(|op| **op != Op::Start)
             .filter(|op| matches!(op, Op::Says { .. }))
             .count();
-        let mut at = -(BEFORE_LAST + BEFORE_STEP * before as f64);
+        // The lines from before land a beat before the conversation opens.
+        let mut at = -(INTRO + 0.1 + BEFORE_STEP * before as f64);
         let mut text = String::new();
         let mut caret = 0;
         let mut n = 0;
@@ -402,7 +406,10 @@ impl Scene {
                         at += hold.unwrap_or_else(|| t.read(line));
                     }
                 }
-                Op::Start => at = t.arrive,
+                Op::Start => {
+                    s.dots.push((OPEN_SETTLE - INTRO, t.arrive));
+                    at = t.arrive;
+                }
                 Op::Cut {
                     after,
                     who: speaker,

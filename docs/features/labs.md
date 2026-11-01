@@ -534,10 +534,16 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   chapters in the manifest, and the boundary pass after Stop.
 - New onboarding (no toggle; it runs only when invoked): the onboarding
   story, replayed on every OS
-  (`rune_ui/onboarding_kit/live.rs`), in order: "Without Hex" (the comedy
-  scene, `scenes/default.scene`, its heartbeat from the first typo) and a
+  (`rune_ui/onboarding_kit/live.rs`), in order: a parked Launch Room
+  conversation row (`onboarding_kit/inbox.rs`: two dings, a pulse, an
+  unread badge) that opens the chat when clicked; "Without Hex" (the comedy
+  scene, `scenes/default.scene`, Messages-style: a gray sender name over the
+  first bubble of a run, a small face beside the last, its heartbeat from
+  the first typo) and a
   scripted "With Hex" payoff (⌥ held, the line said, the triumph; no input
-  asked) while the real model downloads; the Microphone alone; the practice game as "With Hex" once the model is in
+  asked, then a 1.5 s hold on its ending) while the real model downloads;
+  the Microphone alone (an allowed row floats up and away before the next
+  one comes in); the practice game as "With Hex" once the model is in
   (a calm "Almost ready" until then; never Apple Speech); Accessibility
   ("Make it work everywhere"); "Hex is ready". Steps already granted pass
   at once (Linux and Windows ask for no permissions). Hex's shortcut needs
@@ -559,14 +565,25 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   against the best ever, calling out a new high score. The best lives in
   `game-best` in the data folder (owner-only, replaced whole, not a
   setting); only a real first run reads or writes it. Words fly out of the
-  real Dot scope HUD on the microphone's level. "Hex is ready" builds the
+  real Dot scope HUD on the microphone's level; until ⌥ is first pressed
+  the HUD is an idle pill ("Not recording · Hold ⌥ to answer", or Tap in
+  Toggle mode) whose key dips every 2.6 s. "Hex is ready" builds the
   Hex logo outside in (`onboarding_kit/hex_meter.rs` `hex_logo`): the
   outline, the middle line, then the filled centre, 150 ms apart, each on a
   0.36 s spring with 0.12 bounce and one rising note (A5, B5, then D6,
   `OnboardingTone::Build`) at the feedback volume. With Reduce Motion the
   logo shows built, with only the last note. Checks:
   `the_logo_builds_outside_in_and_settles`,
-  `reduce_motion_finishes_the_logo_on_one_note`.
+  `reduce_motion_finishes_the_logo_on_one_note`. Where the OS has a login
+  item (`caps.launch_at_login`), Ready also asks "Open Hex when your Mac
+  starts?" (`onboarding_kit/login.rs`): the button writes the real login
+  item (`SetLaunchAtLogin`, or Login Items settings while macOS wants
+  approval), and turning it on pops the button with a burst of confetti and
+  a tick (none with Reduce Motion). On macOS, the floating "Drag Hex into
+  the list" guide hides when System Settings closes and reopens the pane
+  (at most twice); when Settings' only window sits on another Space, it
+  quits and reopens Settings so it lands on this one
+  (`native/permission_guide.m`). Not yet observed live.
   The window's tour stays
   the state machine underneath. General's **Replay onboarding** and
   `hex onboarding reset` (macOS control socket, the Linux service socket,
