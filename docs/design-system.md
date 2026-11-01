@@ -1,6 +1,6 @@
 # Hex Design System
 
-Hex's window, meeting capsules, transcription picker, and onboarding tour are
+Hex's window, meeting capsules, transcription picker, and onboarding are
 drawn with [Rune](https://github.com/anomalyco/rune) in OpenCode's design
 language:
 
@@ -89,8 +89,8 @@ These live in [`rune_ui/controls.rs`](../src/rune_ui/controls.rs) and
 
 Pane-specific pieces stay in their pane module: the listener card and model
 cards in [`rune_ui/settings.rs`](../src/rune_ui/settings.rs) and
-[`rune_ui/picker.rs`](../src/rune_ui/picker.rs), the onboarding art in
-[`rune_ui/onboarding.rs`](../src/rune_ui/onboarding.rs), and the capsules in
+[`rune_ui/picker.rs`](../src/rune_ui/picker.rs), the onboarding pieces in
+[`rune_ui/onboarding_kit`](../src/rune_ui/onboarding_kit.rs), and the capsules in
 [`rune_ui/meeting_capsules.rs`](../src/rune_ui/meeting_capsules.rs).
 `platform::Capabilities` decides which panes and rows exist on each OS; a
 missing capability omits the row instead of imitating it.

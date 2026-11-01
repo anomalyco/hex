@@ -469,7 +469,7 @@ pub(super) fn sound_volume_index(settings: &AppSettings) -> usize {
 
 pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
     ui.open = (ui.open != Some(menu)).then_some(menu);
-    if matches!(ui.open, Some(Menu::Microphone | Menu::TourMicrophone)) {
+    if matches!(ui.open, Some(Menu::Microphone)) {
         refresh_microphones(ui);
     }
 }

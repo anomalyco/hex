@@ -1884,10 +1884,25 @@ fn settings_opens_the_picker_and_names_the_model_and_language_apart() {
 }
 
 #[test]
+fn a_new_install_opens_the_first_run() {
+    use crate::desktop::onboarding::{PermissionState, SetupStatus};
+    let fresh = SetupStatus {
+        microphone: PermissionState::Ready,
+        accessibility: PermissionState::Ready,
+        transcription_model: false,
+    };
+    let mut ui = portal_fixture();
+    ui.platform.permissions = fresh;
+    ui.picker.installed = Some(Vec::new());
+    ui.tour = Some(onboarding::Tour::replay(&ui.settings, &ui.platform));
+    onboarding_kit::live::open(&mut ui);
+    assert!(ui.first_run.is_some(), "the story opens over the tour");
+}
+
+#[test]
 fn onboarding_downloads_the_model_through_the_service() {
     let mut rt = runtime("onboarding", true, PANE_SIZE);
-    // Setup starts the download as soon as it opens.
-    tap(&mut rt, "tour-continue");
+    // The download starts as soon as onboarding opens.
     assert!(matches!(
         sent(&rt),
         [Request::ChooseModel {
@@ -1895,20 +1910,58 @@ fn onboarding_downloads_the_model_through_the_service() {
             ..
         }]
     ));
-    // The service finishes: the model is installed and setup moves on.
+    assert!(texts(&rt).contains(&"Setting up Hex".to_owned()));
+    // The service finishes: the model is installed and the practice opens.
     rt.state.picker.installed = Some(vec![TranscriptionModelId::ParakeetUnifiedEnglish]);
     settle(&mut rt);
-    std::thread::sleep(std::time::Duration::from_millis(750));
+    rt.update(|ui, _| onboarding_kit::live::fixture_resume(ui, Page::Try));
     settle(&mut rt);
-    // Setup moves on to the practice dictation, which can be skipped.
-    tap(&mut rt, "tour-skip");
-    tap(&mut rt, "tour-continue");
+    let step = |rt: &Runtime<Ui>| rt.state.tour.as_ref().unwrap().flow.step();
+    assert_eq!(step(&rt), crate::desktop::onboarding::Step::TryIt);
+    // The practice can be left with Done; Start using Hex closes onboarding.
+    tap(&mut rt, "done");
+    tap(&mut rt, "start-using-hex");
     assert!(rt.state.tour.is_none(), "Start using Hex closes setup");
+    assert!(rt.state.first_run.is_none());
+}
+
+#[test]
+fn a_found_model_moves_on_without_a_download_and_back_returns_to_it() {
+    let mut rt = runtime("onboarding-model-found", false, PANE_SIZE);
+    assert!(rt.find("model-list").is_some());
+    tap(&mut rt, "model1");
+    // The service saves the pick and has the found file ready: the list
+    // stays, with no "Setting up Hex" download page.
+    rt.state.settings.transcription = TranscriptionSelection {
+        model: TranscriptionModelId::ParakeetV3,
+        language: "en".into(),
+    };
+    rt.state.picker.installed = Some(vec![TranscriptionModelId::ParakeetV3]);
+    settle(&mut rt);
+    let shown = texts(&rt);
+    assert!(
+        shown.contains(&"Choose a speech model".to_owned()),
+        "{shown:?}"
+    );
+    assert!(!shown.contains(&"Setting up Hex".to_owned()), "{shown:?}");
+    assert!(
+        shown.contains(&"Parakeet Unified English".to_owned()),
+        "the rows stay"
+    );
+    tap(&mut rt, "continue");
+    rt.update(|ui, _| onboarding_kit::live::fixture_resume(ui, Page::Demo));
+    settle(&mut rt);
+    let s = rt.state.first_run.as_ref().unwrap();
+    assert!(s.had_model, "a model here needs no download pill");
+    assert!(!texts(&rt).contains(&"Setting up Hex".to_owned()));
+    // Back returns to the list to change the pick.
+    tap(&mut rt, "back");
+    assert!(rt.find("model-list").is_some());
 }
 
 #[test]
 fn a_failed_download_names_its_cause_and_offers_a_model_file() {
-    let mut rt = runtime("onboarding-setup", false, PANE_SIZE);
+    let mut rt = runtime("onboarding", false, PANE_SIZE);
     if let Some(view) = &mut rt.state.view {
         view.transcription.preparing = None;
         view.transcription.error = Some(
@@ -1927,13 +1980,13 @@ fn a_failed_download_names_its_cause_and_offers_a_model_file() {
         "{shown:?}"
     );
     assert!(shown.contains(&"Use a model file…".to_owned()), "{shown:?}");
-    assert!(shown.contains(&"Retry".to_owned()), "{shown:?}");
+    assert!(shown.contains(&"Try again".to_owned()), "{shown:?}");
 }
 
 #[test]
 fn with_no_model_found_onboarding_downloads_the_recommended_model_with_no_list() {
     for scene in ["onboarding", "mac-onboarding"] {
-        let mut rt = runtime(scene, false, PANE_SIZE);
+        let rt = runtime(scene, false, PANE_SIZE);
         assert!(rt.state.found.models.is_empty());
         // The download starts on its own, before any step or pick.
         assert!(
@@ -1947,9 +2000,12 @@ fn with_no_model_found_onboarding_downloads_the_recommended_model_with_no_list()
             "{scene}: {:?}",
             sent(&rt)
         );
-        tap(&mut rt, "tour-continue");
         let shown = texts(&rt);
         assert!(rt.find("model-list").is_none(), "{scene}: no model list");
+        assert!(
+            shown.contains(&"Setting up Hex".to_owned()),
+            "{scene}: {shown:?}"
+        );
         assert!(
             !shown.contains(&"Choose a speech model".to_owned()),
             "{scene}: {shown:?}"
@@ -1962,7 +2018,7 @@ fn the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one() {
     // Continue with no pick starts the selected, recommended model.
     let mut rt = runtime("onboarding-model-found", false, PANE_SIZE);
     assert!(sent(&rt).is_empty(), "nothing starts before a pick");
-    tap(&mut rt, "tour-continue");
+    tap(&mut rt, "continue");
     assert!(matches!(
         sent(&rt),
         [Request::ChooseModel {
@@ -2105,8 +2161,8 @@ fn render(scene: &str, dark: bool, size: (f32, f32)) -> Option<(u32, u32, Vec<u8
     );
     renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
-    // The window's own compositor: the UI, the welcome hero over its stage,
-    // and the Sounds sheet's HUD.
+    // The window's own compositor: the UI, the first run's GPU stage, and
+    // the Sounds sheet's HUD.
     rune::compose::Compositor::render(
         &mut super::WindowCompositor::default(),
         &mut rune::compose::Frame {

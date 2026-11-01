@@ -61,7 +61,7 @@ Settings › Labs                          // labs.page
 ├── One row per feature this OS has -> press flips it, saved at once
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
 │   └── Voice Filter while its driver is installed -> on, disabled, "Uninstall the driver in Voice Filter to turn it off."
-└── Run setup again -> replays the new onboarding (below)
+└── Run setup again -> replays the onboarding (below)
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature this build has: name, on/off, audience, description, its hex settings key
@@ -541,28 +541,16 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `labs.live_chapters` (off by default). The gate,
   `labs::live_chapters()`, is where the work starts: the recorder's chapter worker, recording
   chapters in the manifest, and the boundary pass after Stop.
-- New onboarding (no toggle; it runs only when invoked): the onboarding
-  story, replayed on every OS
-  (`rune_ui/onboarding_kit/live.rs`): the real model download, Microphone and
-  Accessibility rows that follow macOS (ready at once on Linux and Windows,
-  which ask for no permissions), and the practice step as a mini game
-  (`onboarding_kit/game.rs`): one lit message card at a time, answered by a
-  real dictation (live words fly in while the shortcut is held, the paste
-  lands in an unseen focused field), struck by lightning and burnt away,
-  then a score card with Keep playing and Continue; Done always skips on.
-  The window's tour stays
-  the state machine underneath. Labs' **Run setup again** and
+- Run setup again (not a feature toggle; every build): replays Hex's one
+  onboarding, the first-run story every new install gets
+  ([setup.tour](README.md)). Labs' **Run setup again** and
   `hex onboarding reset` (macOS control socket, the Linux service socket,
   and a named event on Windows) forget that onboarding finished
-  (`desktop::onboarding::reset_at`) and replay the first run without touching
-  settings, history, models, or permissions; ready steps pass at once. A new
-  install still gets the tour as its first run. Checks:
-  `labs_run_setup_again_opens_the_first_run` and
+  (`desktop::onboarding::reset_at`) and open it from the start without
+  touching settings, history, models, or permissions; ready pages pass at
+  once. Checks: `labs_run_setup_again_opens_the_first_run` and
   `run_setup_again_opens_the_first_run_on_linux_and_windows` in
-  [panes.rs](../../src/rune_ui/tests/panes.rs). Every OS reads the practice
-  dictation from the listener's event log (`rune_ui/practice.rs`). The
-  game's checks are the `onboarding_kit::game` tests; not yet observed: a
-  real dictation playing it end to end.
+  [panes.rs](../../src/rune_ui/tests/panes.rs).
 - Live text: a streaming dictation shows what you have said so far while
   you dictate, as one click-through line just past the recording HUD (every
   OS; see [Streaming Finish](dictation.md#streaming-finish)). Off macOS the
@@ -610,7 +598,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   └── Capture capsule   (macOS) whole flow and each state × flow, notch, family
   Window            every macOS-window fixture scene by pane, under a readable name
   ├── General       Settings, Microphone missing, Shortcut/…, Updates/…
-  ├── Output, Modes … HUD Lab, Activity, Transcription model, Shortcut explainer, Onboarding tour
+  ├── Output, Modes … HUD Lab, Activity, Transcription model, Shortcut explainer, Onboarding
   Linux & Windows   the portal and Windows fixtures
   ```
 

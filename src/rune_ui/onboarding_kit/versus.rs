@@ -11,6 +11,7 @@
 //!    delivering `"Every test is green and prod is warm. Ship it right now."`
 //!    in **1.5 seconds**.
 
+use crate::desktop::i18n::tr;
 use rune::{Anim, Color, El, SpringPair, Transition, col, el, row, text};
 
 use super::super::controls::Paint;
@@ -100,9 +101,15 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             top_bar()
                 .justify_center()
                 .child(pill(p, download(s), s.closed)),
-            middle()
-                .pb(TOP_BAR)
-                .child(ready(p, &s.caps, None, s.now, s.reduced.get(), s.motion)),
+            middle().pb(TOP_BAR).child(ready(
+                p,
+                &s.caps,
+                None,
+                s.now,
+                s.reduced.get(),
+                s.motion,
+                s.home,
+            )),
         ];
     }
     let parked = s.step >= Step::Parked;
@@ -114,7 +121,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     let act = match s.step {
         Step::Pick => language_pick(p, Onboard::pick),
         Step::Started => pill(p, download(s), s.closed),
-        Step::Heard if !s.downloaded() => text("Finishing the download…")
+        Step::Heard if !s.downloaded() => text(tr("Finishing the download…"))
             .key("finishing")
             .font(p.k.ty.small)
             .color(p.faint())
@@ -162,10 +169,10 @@ fn typed_secs() -> f64 {
 
 fn faster_headline() -> &'static str {
     match (typed_secs() / ANSWER_JAY.release).round() as u32 {
-        0..=2 => "Twice as fast",
-        3 => "Three times faster",
-        4 => "Four times faster",
-        _ => "Five times faster",
+        0..=2 => tr("Twice as fast"),
+        3 => tr("Three times faster"),
+        4 => tr("Four times faster"),
+        _ => tr("Five times faster"),
     }
 }
 
@@ -180,51 +187,56 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
     let (key, title, lead) = match s.step {
         Step::Pick | Step::Started => (
             "intro",
-            "Talk instead of typing",
+            tr("Talk instead of typing"),
             line(
                 "lead-intro",
-                "Hold a key and talk. Hex types it wherever your cursor is.".into(),
+                tr("Hold a key and talk. Hex types it wherever your cursor is.").into(),
             ),
         ),
         Step::Parked if !typed_done(s) => (
             "without",
-            "Without Hex",
+            tr("Without Hex"),
             line(
                 "lead-usual",
-                "Answering under pressure, the usual way.".into(),
+                tr("Answering under pressure, the usual way.").into(),
             ),
         ),
         Step::Parked if s.demo_hears() => (
             "without",
-            "Without Hex",
-            line("lead-sent", "Two panic typos later.".into()),
+            tr("Without Hex"),
+            line("lead-sent", tr("Two panic typos later.").into()),
         ),
         Step::Parked => (
             "with",
-            "With Hex",
+            tr("With Hex"),
             line(
                 "lead-wait",
-                "Hex starts listening once the speech model has downloaded.".into(),
+                tr("Hex starts listening once the speech model has downloaded.").into(),
             ),
         ),
         Step::YourTurn | Step::Hearing => (
             "with",
-            "With Hex",
+            tr("With Hex"),
             row()
                 .key("hold")
                 .gap(8.0)
                 .center_y()
                 .transition(Transition::opacity())
-                .child(text("Hold").key("hold").font(LEAD).color(p.muted()))
+                .child(text(tr("Hold")).key("hold").font(LEAD).color(p.muted()))
                 .child(keys(p, "keys", &s.caps, s.step == Step::Hearing))
-                .child(text("and say it.").key("rest").font(LEAD).color(p.muted())),
+                .child(
+                    text(tr("and say it."))
+                        .key("rest")
+                        .font(LEAD)
+                        .color(p.muted()),
+                ),
         ),
         _ if s.flow == Flow::FirstRun => (
             "heard",
             faster_headline(),
             line(
                 "lead-done",
-                "Typed with two typos. Spoken without any.".into(),
+                tr("Typed with two typos. Spoken without any.").into(),
             ),
         ),
         _ => (
@@ -475,8 +487,8 @@ fn stopwatch_pill(p: Paint, s: &Onboard) -> El {
     let typing = verdict(
         p,
         "typed-stat",
-        "Typing",
-        typed_done(s).then_some("too long"),
+        tr("Typing"),
+        typed_done(s).then_some(tr("too long")),
         if voice_stage { p.muted() } else { p.text() },
     );
 
@@ -507,7 +519,7 @@ fn stopwatch_pill(p: Paint, s: &Onboard) -> El {
                 p,
                 "voice-stat",
                 "Hex",
-                finished.then_some("fast"),
+                finished.then_some(tr("fast")),
                 if finished { p.success() } else { p.text() },
             ));
     }

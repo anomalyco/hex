@@ -20,7 +20,6 @@ mod found;
 mod found_choice;
 mod fun;
 mod general;
-mod hero;
 mod history;
 #[cfg_attr(target_os = "linux", path = "rune_ui/linux_host.rs")]
 #[cfg_attr(target_os = "windows", path = "rune_ui/windows_host.rs")]
@@ -76,6 +75,7 @@ use crate::desktop::i18n::{tr, tr_fill};
 use crate::transcription::models::TranscriptionModelId;
 use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
+use onboarding_kit::live::Page;
 use settings::Capture;
 
 /// How long typing pauses before a text field's edit is saved.
@@ -275,30 +275,50 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
     app
 }
 
-/// The window's compositor: the UI, then the welcome hero over the tour's
-/// stage and the Sounds sheet's HUD over its stage.
+/// The window's compositor: the UI (through the first run's GPU stage or
+/// the practice game's strike and burn while they show), then the Sounds
+/// sheet's HUD over its stage.
 #[derive(Default)]
 pub(crate) struct WindowCompositor {
-    hero: hero::HeroCompositor,
+    onboarding: Option<onboarding_kit::gpu_stage::OnboardingGpu>,
+    game: Option<onboarding_kit::game_fx::GameFx>,
     sounds: sound_sets::Preview,
 }
 
 impl rune::compose::Compositor<Ui> for WindowCompositor {
     fn features(&self) -> wgpu::Features {
         // The Sounds sheet's HUD, and one device shared with the HUD overlay.
-        self.hero.features() | crate::rune_hud::Painter::FEATURES
-    }
-
-    fn animating(&self) -> bool {
-        self.hero.animating()
-    }
-
-    fn summary(&mut self, device: &wgpu::Device) -> Option<String> {
-        self.hero.summary(device)
+        crate::rune_hud::Painter::FEATURES
     }
 
     fn render(&mut self, f: &mut rune::compose::Frame<'_, Ui>) {
-        self.hero.render(f);
+        if f.rt
+            .marks
+            .iter()
+            .any(|&m| onboarding_kit::game_fx::is_game_mark(m))
+        {
+            self.game
+                .get_or_insert_with(|| onboarding_kit::game_fx::GameFx::new(f.device))
+                .render(f);
+        } else if self.onboarding.is_some()
+            || f.rt
+                .marks
+                .iter()
+                .any(|&m| onboarding_kit::gpu_stage::is_onboard_mark(m))
+        {
+            if self
+                .onboarding
+                .as_ref()
+                .is_none_or(|g| !g.matches(f.format))
+            {
+                self.onboarding = Some(onboarding_kit::gpu_stage::OnboardingGpu::new(
+                    f.device, f.format,
+                ));
+            }
+            self.onboarding.as_mut().expect("created above").render(f);
+        } else {
+            f.draw_ui();
+        }
         self.sounds.render(f);
     }
 }
@@ -721,8 +741,6 @@ enum Menu {
     InputSourceModel(usize),
     /// An input source's language in keyboard model switching.
     InputSourceLanguage(usize),
-    /// The microphone under the tour's practice field.
-    TourMicrophone,
     /// How long History keeps dictations.
     HistoryRetention,
     /// The OpenCode thinking variant.
@@ -856,6 +874,7 @@ impl Ui {
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.hud.tuning = crate::rune_hud::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
+        onboarding_kit::live::open(&mut ui);
         ui.platform.set_login_item(host::launch_at_login());
         ui
     }
@@ -913,6 +932,11 @@ impl Ui {
 
     fn live(&self) -> bool {
         matches!(self.service, Service::Live(_))
+    }
+
+    /// A scene or test: nothing here runs on real time.
+    fn is_fixture(&self) -> bool {
+        matches!(self.service, Service::Fixture(_))
     }
 
     fn send(&mut self, request: Request) {
@@ -1349,7 +1373,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     // General names the input in use; list again when the OS reports an
     // input change. Windows reports a default change only to an open
     // default stream, so there the list is also refreshed every few seconds.
-    if (ui.pane == Pane::General || onboarding::shows_microphone(ui))
+    if ui.pane == Pane::General
         && ui.live()
         && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
         && (ui.microphones_route != Some(crate::audio::input_route_generation())
@@ -1495,12 +1519,8 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     if let Some(modal) = vocabulary::modal(ui, p) {
         layer.extend(modal);
     }
-    let mut tour_layer = Vec::new();
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
-    } else if let Some(tour) = onboarding::overlay(ui, p, &mut tour_layer) {
-        layer.push(tour);
-        layer.extend(tour_layer);
     }
     rune_kit::root(window, layer).on_window_focus(window_focused)
 }
@@ -2119,18 +2139,41 @@ const SCENES: &[Scene] = &[
         ui.settings.double_tap_lock = true;
         explainer::fixture(ui, None);
     }),
+    // The first run on Linux (Windows is the same window): setting up Hex
+    // with nothing found, the model step with models found here, the demo,
+    // waiting for the model, the practice game, and Hex is ready.
     ("onboarding", |ui| {
-        *ui = portal_fixture();
-        onboarding::fixture(ui, crate::desktop::onboarding::Step::Welcome, false);
+        first_run(ui, FirstRun::Fresh, Page::Download)
     }),
-    ("onboarding-setup", |ui| {
-        *ui = portal_fixture();
-        onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
+    ("onboarding-download-failed", |ui| {
+        first_run(ui, FirstRun::Failed, Page::Download)
     }),
-    // Onboarding's model list with models found here (`found` scenes).
     ("onboarding-model-found", found::listed),
     ("onboarding-model-found-downloading", found::loading),
     ("onboarding-model-found-recommended", found::present),
+    ("onboarding-model-found-back", found::chosen),
+    ("onboarding-demo", |ui| {
+        first_run(ui, FirstRun::Downloading, Page::Demo)
+    }),
+    ("onboarding-waiting", |ui| {
+        first_run(ui, FirstRun::Downloading, Page::Waiting)
+    }),
+    ("onboarding-try", |ui| {
+        first_run(ui, FirstRun::Ready, Page::Try)
+    }),
+    ("onboarding-ready", |ui| {
+        first_run(ui, FirstRun::Ready, Page::Ready)
+    }),
+    // Windows with its microphone privacy switch off.
+    ("windows-onboarding-microphone", |ui| {
+        *ui = fixture(DesktopShortcuts::Registered);
+        ui.platform = platform::PlatformState::preview(platform::Capabilities::WINDOWS);
+        ui.host = platform::PlatformHost::Fixture(Vec::new());
+        ui.platform.permissions.microphone =
+            crate::desktop::onboarding::PermissionState::NeedsSettings;
+        onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
+        onboarding_kit::live::fixture(ui, Page::Permissions);
+    }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
     // The microphone row following a recorded voice (`--video`), and with
@@ -2499,61 +2542,74 @@ const SCENES: &[Scene] = &[
             key: None,
         };
     }),
+    // The first run on macOS: setting up Hex, each permission state, the
+    // practice game, and Hex is ready.
     ("mac-onboarding", |ui| {
-        mac_tour(ui, onboarding::MacStep::Welcome)
+        mac_first_run(ui, onboarding::MacStep::Setup, Page::Download)
     }),
-    ("mac-onboarding-setup", |ui| {
-        mac_tour(ui, onboarding::MacStep::Setup)
-    }),
-    ("mac-onboarding-progress", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupProgress)
-    }),
-    ("mac-onboarding-stale", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupStale)
+    ("mac-onboarding-permissions", |ui| {
+        mac_first_run(ui, onboarding::MacStep::Setup, Page::Permissions)
     }),
     ("mac-onboarding-denied", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupDenied)
+        mac_first_run(ui, onboarding::MacStep::SetupDenied, Page::Permissions)
+    }),
+    ("mac-onboarding-stale", |ui| {
+        mac_first_run(ui, onboarding::MacStep::SetupStale, Page::Permissions)
     }),
     ("mac-onboarding-restart", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupRestart)
-    }),
-    ("mac-onboarding-download-failed", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupDownloadFailed)
+        mac_first_run(ui, onboarding::MacStep::SetupRestart, Page::Permissions)
     }),
     ("mac-onboarding-try", |ui| {
-        mac_tour(ui, onboarding::MacStep::TryIt)
-    }),
-    ("mac-onboarding-listening", |ui| {
-        mac_tour(ui, onboarding::MacStep::TryItListening)
-    }),
-    ("mac-onboarding-landed", |ui| {
-        mac_tour(ui, onboarding::MacStep::TryItLanded)
+        mac_first_run(ui, onboarding::MacStep::TryIt, Page::Try)
     }),
     ("mac-onboarding-reopen", |ui| {
-        mac_tour(ui, onboarding::MacStep::TryItReopen)
+        mac_first_run(ui, onboarding::MacStep::TryItReopen, Page::Try)
     }),
-    ("mac-onboarding-done", |ui| {
-        mac_tour(ui, onboarding::MacStep::Done)
+    ("mac-onboarding-ready", |ui| {
+        mac_first_run(ui, onboarding::MacStep::Done, Page::Ready)
     }),
-    ("mac-onboarding-mic", |ui| mic_tour(ui, MicScene::Hearing)),
-    ("mac-onboarding-mic-open", |ui| mic_tour(ui, MicScene::Open)),
-    ("mac-onboarding-mic-silent", |ui| {
-        mic_tour(ui, MicScene::Silent)
-    }),
-    ("mac-onboarding-mic-lid", |ui| {
-        mic_tour(ui, MicScene::LidClosed)
-    }),
-    // The welcome hero animating (`--video`, or a live window), and settled as
-    // Reduce Motion shows it.
-    ("onboarding-hero", |ui| hero_tour(ui, false)),
-    ("onboarding-hero-still", |ui| hero_tour(ui, true)),
 ];
 
-fn hero_tour(ui: &mut Ui, still: bool) {
-    mac_tour(ui, onboarding::MacStep::Welcome);
-    if let Some(tour) = &mut ui.tour {
-        tour.hero_still = still;
+/// The tour state a Linux first-run scene starts from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FirstRun {
+    /// Nothing installed; the recommended model just started downloading.
+    Fresh,
+    /// The download is a third of the way.
+    Downloading,
+    /// The download stopped.
+    Failed,
+    /// The model is installed.
+    Ready,
+}
+
+fn first_run(ui: &mut Ui, state: FirstRun, page: Page) {
+    *ui = portal_fixture();
+    onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
+    match state {
+        FirstRun::Fresh => onboarding::set_downloaded(ui, 8),
+        FirstRun::Downloading => onboarding::set_downloaded(ui, 31),
+        FirstRun::Failed => {
+            if let Some(view) = &mut ui.view {
+                view.transcription.preparing = None;
+                view.transcription.error = Some("The connection was reset.".into());
+            }
+        }
+        FirstRun::Ready => {
+            ui.picker.installed = Some(vec![ui.settings.transcription.model]);
+            if let Some(view) = &mut ui.view {
+                view.transcription.preparing = None;
+            }
+        }
     }
+    onboarding::poll(ui);
+    onboarding_kit::live::fixture(ui, page);
+}
+
+fn mac_first_run(ui: &mut Ui, step: onboarding::MacStep, page: Page) {
+    *ui = mac_fixture();
+    onboarding::mac_fixture(ui, step);
+    onboarding_kit::live::fixture(ui, page);
 }
 
 /// The Annotate pane with captures `enabled`, a 3-day video retention, and
@@ -2620,67 +2676,6 @@ fn listening(message: Option<&'static str>, held: HotkeyModifiers) -> Capture {
         target: ShortcutTarget::Dictation,
         message,
         held,
-    }
-}
-
-fn mac_tour(ui: &mut Ui, step: onboarding::MacStep) {
-    *ui = mac_fixture();
-    onboarding::mac_fixture(ui, step);
-}
-
-/// What the tour's practice microphone shows in a scene.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MicScene {
-    /// Recording, and Hex hears the person.
-    Hearing,
-    /// Its menu of inputs open.
-    Open,
-    /// Recording, and Hex hears nothing.
-    Silent,
-    /// The lid closed and no other input.
-    LidClosed,
-}
-
-fn mic_tour(ui: &mut Ui, scene: MicScene) {
-    let recording = matches!(scene, MicScene::Hearing | MicScene::Silent);
-    mac_tour(
-        ui,
-        if recording {
-            onboarding::MacStep::TryItListening
-        } else {
-            onboarding::MacStep::TryIt
-        },
-    );
-    let built_in = "MacBook Pro Microphone".to_owned();
-    ui.microphones = Ok(if scene == MicScene::LidClosed {
-        crate::audio::InputDevices {
-            names: vec![built_in.clone()],
-            system_default: None,
-            off_with_lid_closed: Some(built_in),
-            default_is_off_with_lid_closed: true,
-            ..Default::default()
-        }
-    } else {
-        crate::audio::InputDevices {
-            names: vec![
-                "Kit Pods".into(),
-                built_in.clone(),
-                "Studio Display Microphone".into(),
-            ],
-            system_default: Some(built_in),
-            ..Default::default()
-        }
-    });
-    if scene == MicScene::Open {
-        ui.open = Some(Menu::TourMicrophone);
-    }
-    let microphone = ui.settings.microphone.clone();
-    if let Some(tour) = &mut ui.tour {
-        match scene {
-            MicScene::Hearing => tour.mic.level = 0.6,
-            MicScene::Silent => tour.mic.silent = Some(microphone),
-            _ => {}
-        }
     }
 }
 

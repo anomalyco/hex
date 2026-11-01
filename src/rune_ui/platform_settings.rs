@@ -123,15 +123,11 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
 /// so the macOS host clears retired Hex bundle IDs' stale TCC rows once in the
 /// background when a row appears.
 pub(super) fn update_shown_permissions(ui: &mut Ui) {
-    use crate::desktop::onboarding::{PermissionState, Step};
+    use crate::desktop::onboarding::PermissionState;
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     let mut shown = Vec::new();
     if visible && ui.platform.caps.permissions {
-        let setup_showing = ui
-            .tour
-            .as_ref()
-            .is_some_and(|tour| tour.flow.step() == Step::Setup)
-            || ui.first_run.is_some()
+        let setup_showing = ui.first_run.is_some()
             || (ui.tour.is_none() && !ui.labs_open && ui.pane == Pane::General);
         if setup_showing
             && matches!(

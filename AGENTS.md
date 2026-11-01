@@ -408,7 +408,7 @@ substitute for source inspection or a second roadmap.
   the Labs switch and the opt-ins) Annotate and the Voice Filter, plus in
   Playground (`⇧⌘D`) HUD Lab's live Dot scope sliders (`hud_stories`), the transcription
   picker, the Sounds sheet (its stage replays `rune_hud`'s HUD, drawn by the
-  window's compositor with `rune_hud.wgsl`), the onboarding tour, the macOS
+  window's compositor with `rune_hud.wgsl`), the onboarding pages, the macOS
   meeting capsules, the `--snap`
   fixture scenes, and the macOS `hex://story/…` playground links
   (`story_link`, `hex-test://` in test builds). `platform::Capabilities` decides which panes and rows exist (and, through `rune_ui::capabilities`, which `hex settings` keys act and what `hex status` reports); every difference between the OSes names a reason in `platform::DIFFERENCES` (an OS pattern, impossible, or pending), which `parity_tests` enforce;
@@ -612,9 +612,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   tap of unassigned VK 0xE8, so the menu bar and Start stay closed (not with
   Share shortcut). Hex marks every event it injects with `HEX_INJECTED` and its
   hook skips them, so a paste's Ctrl never presses a Ctrl-alone shortcut.
-- Windows onboarding adds a Microphone row only while Settings' microphone
-  switch (device, user, or "Let desktop apps access your microphone") is off;
-  Allow opens `ms-settings:privacy-microphone`, and setup waits for it.
+- Windows onboarding shows its permissions page, with one Microphone row,
+  only while Settings' microphone switch (device, user, or "Let desktop apps
+  access your microphone") is off; Open Settings opens
+  `ms-settings:privacy-microphone`, and setup waits for it. Linux has no
+  permissions page. The practice game on every OS follows Hex's own
+  dictation of the saved shortcut (the listener's event log on Linux and
+  Windows), and Done always skips it.
 - GUI startup must successfully call `keyboard::initialize_layout` on the OS
   main thread before settings, keyboard-using workers, or Rune start. That
   snapshot is fixed until restart; cached misses must not re-enter TIS/TSM.
@@ -750,13 +754,25 @@ CoreAudio formats, AppleScript details, or event serialization.
   read-only: Hex never writes, moves, or deletes anything in the cache, keeps
   its receipts in its own models folder, hashes a file in full once when it is
   chosen (against the pin or the blob name), and removing one only forgets it.
-- Onboarding shows its model list only when the scan found a compatible
-  model; otherwise the flow is unchanged. The list is one card of radio rows
-  with no buttons or file details: Hex's recommended model first and
-  selected (its exact copy on this computer is that same row), then the found
-  files. Picking a row starts it, and Continue starts the selected row. The
-  tour's own download is held while the scan runs and until a pick, and only
-  through setup. A found model is never picked for the person.
+- Hex has one onboarding, on every build and OS, stable and dev alike: the
+  first-run story (`rune_ui/onboarding_kit/live.rs`) over the tour state
+  machine (`rune_ui/onboarding.rs`, `desktop::onboarding::Flow`). No flag,
+  experiment, or build type chooses another. `Ui::new` opens it whenever
+  `Tour::start` says this run needs it: a new install, a run quit part-way
+  (resumed at its saved step), or an upgrader from 2.3.1 or earlier whose
+  setup isn't ready (#475). Run setup again (Labs) and `hex onboarding reset`
+  replay it from the start on every build. Start using Hex records completion
+  only once setup is ready.
+- Onboarding shows its model step only when the scan found a compatible
+  model; otherwise Setting up Hex is unchanged and the recommended model
+  downloads by itself. The step is one card of radio rows with no buttons or
+  file details: Hex's recommended model first and selected (its exact copy on
+  this computer is that same row), then the found files. Picking a row starts
+  it, and Continue starts the selected row and moves on once the pick is
+  under way; a found pick shows no download page or pill. The tour's own
+  download is held while the scan runs and until a pick, and only through
+  setup. Back on the pages after the step returns to it. A found model is
+  never picked for the person.
 - The menu-bar model picker lists only downloaded, available models and remembers
   each model's last selected language. It works without a
   Settings window. Settings and the menu bar share one preparation owner; a newer
@@ -1477,11 +1493,13 @@ hooks or persist a second launch-at-login flag.
 Onboarding gates every stable release. Before any stable release, run
 `scripts/check-onboarding.sh` on the release candidate commit and include its
 result, with the scene images it writes, in the go/no-go given to Dax. It
-renders every onboarding scene (fresh install, permissions, the model step with
-nothing found, with found models, with the recommended model already present,
-download in progress, practice, done) in both appearances against the approved
-goldens, and walks a first run through the real tour in a clean temporary data
-folder until a model is downloaded and the tour reaches Done. Any unexpected
+renders every onboarding scene (Setting up Hex with nothing found, a stopped
+download, the model step with found models, with the recommended model already
+present, ours downloading, and Back to it, the demo, the macOS permissions and
+Windows' microphone switch, Almost ready, the practice game, Hex is ready) in
+both appearances against the approved goldens, and walks a first run through
+the real onboarding in a clean temporary data folder until a model is
+downloaded and it reaches Hex is ready. Any unexpected
 visual or flow change blocks the release; an intentional change refreshes the
 goldens in its own PR. It runs on Linux, like every golden; the macOS and
 Windows scenes are fixtures of the same window and render there too, but

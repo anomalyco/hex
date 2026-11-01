@@ -20,6 +20,7 @@ use super::hex_meter::hex_meter;
 use super::landing::{LEAD, Motion, arrives, title_font};
 use super::live::Live;
 use super::stories::Onboard;
+use crate::desktop::i18n::tr;
 use crate::desktop::onboarding::{ItemStatus, SetupItem};
 
 /// Total duration of the automated permissions step.
@@ -92,7 +93,12 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
     let mic = state_at(e, MIC_ASK, MIC_GRANT, true);
     let ax = state_at(e, AX_ESCAPE, AX_GRANT, mic == PermState::Allowed);
 
-    let head = heading(p, s.motion);
+    let head = heading(
+        p,
+        s.motion,
+        "Let Hex hear you and type for you",
+        "macOS asks once. You can change these any time in System Settings.",
+    );
 
     col()
         .key("permissions")
@@ -113,20 +119,15 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
         )
 }
 
-fn heading(p: Paint, motion: Motion) -> El {
+fn heading(p: Paint, motion: Motion, title: &str, lead: &str) -> El {
     motion.heading(
         col()
             .key("permissions-head")
             .gap(8.0)
             .items_center()
+            .child(text(title).key("title").font(title_font(p)).color(p.text()))
             .child(
-                text("Let Hex hear you and type for you")
-                    .key("title")
-                    .font(title_font(p))
-                    .color(p.text()),
-            )
-            .child(
-                text("macOS asks once. You can change these any time in System Settings.")
+                text(lead)
                     .key("lead")
                     .font(LEAD)
                     .color(p.muted())
@@ -135,21 +136,22 @@ fn heading(p: Paint, motion: Motion) -> El {
     )
 }
 
-/// The real first run's permissions: macOS's own prompt and System Settings
-/// with Hex's guide, and the rows follow what macOS reports.
+/// The real first run's permissions, following what the OS reports. macOS:
+/// its own prompt and System Settings with Hex's guide, for Microphone and
+/// Accessibility. Windows asks nothing, so this page shows only while its
+/// microphone privacy switch is off, with the one row that opens Settings.
 fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
     let k = p.k;
     let mic_ready = live.microphone == ItemStatus::Ready;
-    let ax_desc = match live.accessibility {
-        ItemStatus::Stale => crate::desktop::i18n::tr("An older Hex entry can keep this off"),
-        ItemStatus::Waiting => "Switch on Hex in System Settings",
-        _ => "Notices the shortcut and pastes your words in any app",
-    };
+    let windows = !live.accessibility_row;
     let mic_desc = match live.microphone {
-        ItemStatus::Denied => "Switch on Hex in System Settings",
-        _ => "Hears you while you hold the shortcut",
+        ItemStatus::Denied | ItemStatus::Waiting if windows => {
+            tr("Turn on “Let desktop apps access your microphone” in Windows Settings.")
+        }
+        ItemStatus::Denied => tr("Switch on Hex in System Settings"),
+        _ => tr("Hears you only while you hold the shortcut"),
     };
-    let card = col()
+    let mut card = col()
         .key("setup-card")
         .w(COL_W)
         .radius(k.radius.lg)
@@ -159,27 +161,42 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
             p,
             "mic-row",
             &glyphs::MIC,
-            "Microphone",
+            tr("Microphone"),
             mic_desc,
-            live_pill(p, "mic-pill", live.microphone, true, SetupItem::Microphone),
-        ))
-        .child(separator(p, "sep0"))
-        .child(perm_row(
+            live_pill(
+                p,
+                "mic-pill",
+                live,
+                live.microphone,
+                true,
+                SetupItem::Microphone,
+            ),
+        ));
+    if live.accessibility_row {
+        let ax_desc = match live.accessibility {
+            ItemStatus::Stale => tr("An older Hex entry can keep this off"),
+            ItemStatus::Waiting => tr("Switch on Hex in System Settings"),
+            ItemStatus::Restart => tr("Turns on when Hex restarts"),
+            _ => tr("Notices the shortcut and pastes your words in any app"),
+        };
+        card = card.child(separator(p, "sep0")).child(perm_row(
             p,
             "ax-row",
             &glyphs::CURSOR_TEXT,
-            "Accessibility",
+            super::super::platform_settings::accessibility_name(live.accessibility_renamed),
             ax_desc,
             live_pill(
                 p,
                 "ax-pill",
+                live,
                 live.accessibility,
                 mic_ready,
                 SetupItem::Accessibility,
             ),
         ));
+    }
     let action = if live.restart {
-        Button::new("Restart Hex")
+        Button::new(tr("Restart Hex"))
             .variant(ButtonVariant::Contrast)
             .on_press(super::live::restart_hex)
             .build_push(k)
@@ -189,16 +206,47 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
     } else {
         el().key("none")
     };
+    let (title, lead) = if windows {
+        (
+            tr("Let Hex hear you"),
+            tr("Windows has the microphone turned off for desktop apps."),
+        )
+    } else {
+        (
+            tr("Let Hex hear you and type for you"),
+            tr("macOS asks once. You can change these any time in System Settings."),
+        )
+    };
+    let relaunch = live.relaunch_failed.then(|| {
+        text(tr(
+            "Quit and reopen Hex to finish setup. macOS applies some permissions only after a restart.",
+        ))
+        .key("relaunch-notice")
+        .font(LEAD)
+        .color(p.muted())
+        .align(rune::Align::Center)
+        .wrap()
+        .w(COL_W)
+        .transition(arrives())
+    });
     col()
         .key("permissions")
         .gap(22.0)
         .items_center()
-        .child(heading(p, motion))
+        .child(heading(p, motion, title, lead))
         .child(motion.staggered(k.elevate(card, &k.elevation.raised), 1.0, 8.0))
+        .children(relaunch)
         .child(row().key("action").h(ACTION_H).center().child(action))
 }
 
-fn live_pill(p: Paint, key: &str, status: ItemStatus, primary: bool, item: SetupItem) -> El {
+fn live_pill(
+    p: Paint,
+    key: &str,
+    live: &Live,
+    status: ItemStatus,
+    primary: bool,
+    item: SetupItem,
+) -> El {
     let k = p.k;
     let allow = |label: &str, primary: bool| {
         Button::new(label)
@@ -212,13 +260,18 @@ fn live_pill(p: Paint, key: &str, status: ItemStatus, primary: bool, item: Setup
             .key(format!("{key}-allow"))
             .transition(arrives())
     };
+    let settings = if live.accessibility_row {
+        tr("Open System Settings")
+    } else {
+        tr("Open Settings")
+    };
     match status {
         ItemStatus::Ready => perm_pill(p, key, PermState::Allowed),
-        ItemStatus::Todo => allow("Allow", primary),
-        ItemStatus::Denied => allow("Open System Settings", primary),
-        // Pressing again reopens macOS's prompt or System Settings.
-        ItemStatus::Waiting => allow("Open", false),
-        ItemStatus::Stale => allow(crate::desktop::i18n::tr("Still grey? Fix it"), false),
+        ItemStatus::Todo => allow(tr("Allow"), primary),
+        ItemStatus::Denied => allow(settings, primary),
+        // Pressing again reopens the prompt or Settings.
+        ItemStatus::Waiting => allow(tr("Open"), false),
+        ItemStatus::Stale => allow(tr("Still grey? Fix it"), false),
         ItemStatus::Restart => row()
             .key(format!("{key}-restart"))
             .h(28.0)
@@ -226,7 +279,7 @@ fn live_pill(p: Paint, key: &str, status: ItemStatus, primary: bool, item: Setup
             .center_y()
             .transition(arrives())
             .child(
-                text("Needs a restart")
+                text(tr("Needs a restart"))
                     .key("lbl")
                     .font(k.ty.small_medium)
                     .color(p.muted()),
@@ -354,9 +407,11 @@ fn perm_row(
     control: El,
 ) -> El {
     let k = p.k;
+    // Longer copy (Windows' switch, other languages) wraps in the row.
     row()
         .key(key)
-        .h(ROW_H)
+        .min_h(ROW_H)
+        .py(8.0)
         .px(16.0)
         .gap(12.0)
         .center_y()
@@ -365,6 +420,7 @@ fn perm_row(
             col()
                 .key("copy")
                 .grow(1.0)
+                .w(0.0)
                 .gap(2.0)
                 .child(
                     text(title)
@@ -372,7 +428,13 @@ fn perm_row(
                         .font(k.ty.ui_medium)
                         .color(p.text()),
                 )
-                .child(text(desc).key("desc").font(k.ty.small).color(p.muted())),
+                .child(
+                    text(desc)
+                        .key("desc")
+                        .font(k.ty.small)
+                        .color(p.muted())
+                        .wrap(),
+                ),
         )
         .child(control)
 }

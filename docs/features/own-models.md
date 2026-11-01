@@ -83,10 +83,11 @@ API's `/models` and the SDK's `ModelInfo.source` carry the same field.
 ## Onboarding Choice
 
 ```ts
-Onboarding opens -> scan; the tour's own download waits until it answers  // setup.found-choice
-├── Nothing compatible found -> today's flow, unchanged: the recommended model downloads
-└── Something found -> "Choose a speech model": one card of radio rows in place
-    of the model row (below the permission rows on macOS), no buttons inside
+Onboarding opens -> scan; its own download waits until it answers  // setup.found-choice
+├── Nothing compatible found -> Setting up Hex, unchanged: the recommended
+│   model downloads by itself, and the model step never shows
+└── Something found -> the first run's model step in place of Setting up Hex:
+    "Choose a speech model", one card of radio rows, no buttons inside
     ├── Hex's recommended model first, selected, [Recommended] -> "731 MB
     │   download", or "On this computer" when its exact file (same SHA-256) is
     │   in the cache (one row, never two)
@@ -96,10 +97,13 @@ Onboarding opens -> scan; the tour's own download waits until it answers  // set
     ├── Picking a row starts it: ours downloads ("Downloading… 42%" on the row)
     │   or, already here, is checked in place; a found file is used where it
     │   is ("Checking…"). A later pick supersedes one still preparing
-    ├── Continue with no pick starts the selected row (the recommended one),
-    │   then works as today: it waits for the model where setup needs it
-    │   (Linux, Windows) and moves on while it downloads where it doesn't
-    └── The held download is released once the tour passes setup, so a tour
+    ├── Continue starts the selected row if none was picked, then the story
+    │   moves on once the pick is under way: ours with its download pill on
+    │   top, a found one with no download page or pill at all
+    ├── A pick that fails asks again on the list
+    ├── Back on the pages after it returns to the list to change the pick,
+    │   even with the model ready
+    └── The held download is released once the tour passes setup, so a run
         that skips the step still gets the recommended model
 ```
 
@@ -119,8 +123,11 @@ Checks: `transcription::found_models::tests` (scan, cache, catalog match,
 in-place use and forgetting, the full check refusing a mismatched file),
 `transcription::gguf_header::tests`, `transcription::custom_models::tests`,
 `desktop::onboarding::tests::a_held_download_waits_for_the_person`,
+`a_found_model_moves_on_without_a_download_and_back_returns_to_it`,
+`the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one`,
 `labs::tests::graduated_features_answer_by_name`, and the goldens
 `rune-picker-custom-models-light`, `rune-picker-found-light`, and
 `rune-onboarding-model-found-light`,
-`rune-onboarding-model-found-downloading-light`, and
-`rune-onboarding-model-found-recommended-light`.
+`rune-onboarding-model-found-downloading-light`,
+`rune-onboarding-model-found-recommended-light`, and
+`rune-onboarding-model-found-back-light`.

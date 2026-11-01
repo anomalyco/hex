@@ -202,60 +202,29 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-labs-link", "Window/General/Labs link"),
     ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),
-    ("mac-onboarding", "Window/Onboarding tour/Welcome"),
-    ("onboarding-hero", "Window/Onboarding tour/Welcome · hero"),
+    ("mac-onboarding", "Window/Onboarding/Setting up Hex"),
     (
-        "onboarding-hero-still",
-        "Window/Onboarding tour/Welcome · still",
-    ),
-    ("mac-onboarding-setup", "Window/Onboarding tour/Setup"),
-    (
-        "mac-onboarding-progress",
-        "Window/Onboarding tour/Setup · progress",
-    ),
-    (
-        "mac-onboarding-stale",
-        "Window/Onboarding tour/Setup · stale entry",
+        "mac-onboarding-permissions",
+        "Window/Onboarding/Permissions",
     ),
     (
         "mac-onboarding-denied",
-        "Window/Onboarding tour/Setup · denied",
+        "Window/Onboarding/Permissions · denied",
+    ),
+    (
+        "mac-onboarding-stale",
+        "Window/Onboarding/Permissions · stale entry",
     ),
     (
         "mac-onboarding-restart",
-        "Window/Onboarding tour/Setup · restart",
+        "Window/Onboarding/Permissions · restart",
     ),
-    (
-        "mac-onboarding-download-failed",
-        "Window/Onboarding tour/Setup · download failed",
-    ),
-    ("mac-onboarding-try", "Window/Onboarding tour/Try it"),
-    (
-        "mac-onboarding-listening",
-        "Window/Onboarding tour/Try it · listening",
-    ),
-    (
-        "mac-onboarding-landed",
-        "Window/Onboarding tour/Try it · landed",
-    ),
+    ("mac-onboarding-try", "Window/Onboarding/Your turn"),
     (
         "mac-onboarding-reopen",
-        "Window/Onboarding tour/Try it · reopen",
+        "Window/Onboarding/Your turn · reopen",
     ),
-    ("mac-onboarding-mic", "Window/Onboarding tour/Mic · hearing"),
-    (
-        "mac-onboarding-mic-open",
-        "Window/Onboarding tour/Mic · open",
-    ),
-    (
-        "mac-onboarding-mic-silent",
-        "Window/Onboarding tour/Mic · silent",
-    ),
-    (
-        "mac-onboarding-mic-lid",
-        "Window/Onboarding tour/Mic · lid closed",
-    ),
-    ("mac-onboarding-done", "Window/Onboarding tour/Done"),
+    ("mac-onboarding-ready", "Window/Onboarding/Hex is ready"),
     ("portal", "Linux & Windows/Settings · portal shortcuts"),
     ("commands", "Linux & Windows/Settings · hex commands"),
     ("portal-mouse", "Linux & Windows/Settings · mouse button"),
@@ -270,7 +239,10 @@ const PATHS: &[(&str, &str)] = &[
         "Linux & Windows/Voice Filter unavailable",
     ),
     ("onboarding", "Linux & Windows/Onboarding"),
-    ("onboarding-setup", "Linux & Windows/Onboarding · setup"),
+    (
+        "onboarding-download-failed",
+        "Linux & Windows/Onboarding · download failed",
+    ),
     (
         "onboarding-model-found",
         "Linux & Windows/Onboarding · models on this computer",
@@ -282,6 +254,21 @@ const PATHS: &[(&str, &str)] = &[
     (
         "onboarding-model-found-recommended",
         "Linux & Windows/Onboarding · recommended model on this computer",
+    ),
+    (
+        "onboarding-model-found-back",
+        "Linux & Windows/Onboarding · back to the models",
+    ),
+    ("onboarding-demo", "Linux & Windows/Onboarding · demo"),
+    (
+        "onboarding-waiting",
+        "Linux & Windows/Onboarding · almost ready",
+    ),
+    ("onboarding-try", "Linux & Windows/Onboarding · your turn"),
+    ("onboarding-ready", "Linux & Windows/Onboarding · ready"),
+    (
+        "windows-onboarding-microphone",
+        "Linux & Windows/Onboarding · Windows microphone",
     ),
 ];
 
@@ -626,10 +613,9 @@ mod tests {
             ("general-mac-settings", "Window/General/Settings"),
             ("Meetings/meetings-calendar", "Window/Meetings/Calendar"),
             (
-                "onboarding-onboarding-setup",
-                "Linux & Windows/Onboarding · setup",
+                "onboarding-onboarding-demo",
+                "Linux & Windows/Onboarding · demo",
             ),
-            ("onboarding-hero", "Window/Onboarding tour/Welcome · hero"),
             ("HUD/Processing", "Prototypes/HUD/Processing"),
             (
                 "hud-recording-your-voice",
