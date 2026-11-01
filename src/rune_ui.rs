@@ -53,6 +53,7 @@ mod practice;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
+mod shortcut_mode;
 mod sidebar_update;
 mod sound_sets;
 mod spark;
@@ -1234,7 +1235,7 @@ impl Ui {
 }
 
 /// Shortcut recording takes every key; Command-1 through 9 open the
-/// sidebar's panes in order; otherwise Escape closes the shortcut explainer,
+/// sidebar's panes in order; otherwise Escape closes Shortcut mode,
 /// the sound sets sheet, the picker, or the open menu.
 fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     if settings::on_key(ui, event, tx) {
@@ -2095,16 +2096,10 @@ const SCENES: &[Scene] = &[
         ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
         ui.open = Some(Menu::Pick("transcription-language"));
     }),
-    ("shortcut-explainer", |ui| {
-        *ui = mac_fixture();
-        ui.settings.double_tap_lock = true;
-        explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
-    }),
-    ("shortcut-explainer-toggle", |ui| {
-        *ui = mac_fixture();
-        ui.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
-        explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
-    }),
+    ("shortcut-mode", shortcut_mode::scene_modifier),
+    ("shortcut-mode-key", shortcut_mode::scene_key),
+    ("shortcut-mode-chord", shortcut_mode::scene_chord),
+    ("shortcut-mode-motion", shortcut_mode::scene_motion),
     // The Shortcut row with a modifier-only shortcut, Left Option, beside
     // its side picker (macOS), in each face of the recorder.
     ("shortcut-row", |ui| shortcut_row(ui, Capture::Idle)),
@@ -2135,20 +2130,6 @@ const SCENES: &[Scene] = &[
                 until: None,
             },
         );
-    }),
-    // A three-key chord: Control-Option-Space.
-    ("shortcut-explainer-chord", |ui| {
-        *ui = mac_fixture();
-        ui.settings.double_tap_lock = true;
-        let modifiers = &mut ui.settings.dictation_hotkey.modifiers;
-        modifiers.control = modifiers.option;
-        explainer::fixture(ui, Some(explainer::SNAPSHOT_MS));
-    }),
-    // Loops, for `--frames` clips.
-    ("shortcut-explainer-motion", |ui| {
-        *ui = mac_fixture();
-        ui.settings.double_tap_lock = true;
-        explainer::fixture(ui, None);
     }),
     // The first run on Linux (Windows is the same window): setting up Hex
     // with nothing found, the model step with models found here, the demo,

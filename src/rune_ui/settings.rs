@@ -1306,12 +1306,6 @@ pub(super) fn shortcut_caps(binding: &HotkeyBinding, side_picker: bool) -> Vec<S
         .collect()
 }
 
-pub(super) fn double_tap_only_applies(settings: &AppSettings) -> bool {
-    settings.shortcut_mode == ShortcutMode::Hold
-        && settings.double_tap_lock
-        && settings.dictation_hotkey.key.is_some()
-}
-
 /// Stable or Dev shows only while this install updates itself: test,
 /// source, managed, and package-manager installs never check a channel.
 pub(super) fn updates_itself(ui: &Ui) -> bool {
