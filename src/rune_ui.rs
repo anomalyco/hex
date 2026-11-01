@@ -1329,7 +1329,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         settings::refresh_microphones(ui);
         ui.microphones_listed_at = clock;
     }
-    update_shown_permissions(ui);
+    platform_settings::update_shown_permissions(ui);
     changed |= ui.host.poll(&mut ui.platform);
     #[cfg(not(target_os = "macos"))]
     {
@@ -1395,52 +1395,6 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= explainer::poll(ui, clock, visible, tx);
     changed |= sound_sets::poll(ui, clock, visible, tx);
     changed | settings::advance_capture(ui, clock, tx)
-}
-
-/// Records which untrusted permission rows are currently visible in the window
-/// so the macOS host clears retired Hex bundle IDs' stale TCC rows once in the
-/// background when a row appears.
-fn update_shown_permissions(ui: &mut Ui) {
-    use crate::desktop::onboarding::{PermissionKind, PermissionState, Step};
-    let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
-    let mut shown = Vec::new();
-    if visible && ui.platform.caps.permissions {
-        let setup_showing = ui
-            .tour
-            .as_ref()
-            .is_some_and(|tour| tour.flow.step() == Step::Setup)
-            || ui.first_run.is_some()
-            || (ui.tour.is_none() && !ui.labs_open && ui.pane == Pane::General);
-        if setup_showing
-            && matches!(
-                ui.platform.permissions.accessibility,
-                PermissionState::NeedsRequest | PermissionState::NeedsSettings
-            )
-        {
-            shown.push(PermissionKind::Accessibility);
-        }
-        if ui.tour.is_none() && !ui.labs_open {
-            if ui.pane == Pane::Meetings
-                && meetings::available(ui)
-                && ui.meetings.view == meetings::View::Settings
-                && !ui.platform.system_audio
-            {
-                shown.push(PermissionKind::SystemAudio);
-            }
-            #[cfg(hex_capture)]
-            if ui.pane == Pane::Annotate
-                && ui.settings.capture.enabled
-                && ui
-                    .platform
-                    .scrawl
-                    .as_ref()
-                    .is_some_and(|view| !view.screen_recording && !view.screen_needs_restart)
-            {
-                shown.push(PermissionKind::ScreenRecording);
-            }
-        }
-    }
-    ui.platform.permissions_shown = shown;
 }
 
 // ---------------------------------------------------------------------------
@@ -2283,26 +2237,10 @@ const SCENES: &[Scene] = &[
         };
     }),
     ("mac-settings-permissions", |ui| {
-        *ui = mac_fixture();
-        use crate::desktop::onboarding::PermissionState;
-        ui.platform.permissions.microphone = PermissionState::NeedsSettings;
-        ui.platform.permissions.accessibility = PermissionState::NeedsSettings;
-        ui.platform
-            .permissions_asked
-            .push(crate::desktop::onboarding::PermissionKind::Accessibility);
-        ui.platform.login_item =
-            Some(crate::desktop::login_item::LoginItemStatus::RequiresApproval);
-        ui.platform.accessibility_renamed = true;
+        platform_settings::mac_permissions_fixture(ui, false)
     }),
     ("mac-settings-permissions-stale", |ui| {
-        *ui = mac_fixture();
-        use crate::desktop::onboarding::{PermissionKind, PermissionState};
-        ui.platform.permissions.microphone = PermissionState::NeedsSettings;
-        ui.platform.permissions.accessibility = PermissionState::NeedsSettings;
-        ui.platform.note_stale(PermissionKind::Accessibility);
-        ui.platform.login_item =
-            Some(crate::desktop::login_item::LoginItemStatus::RequiresApproval);
-        ui.platform.accessibility_renamed = true;
+        platform_settings::mac_permissions_fixture(ui, true)
     }),
     ("mac-settings-pause-browser", |ui| {
         *ui = mac_fixture();

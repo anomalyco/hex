@@ -119,6 +119,67 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
     Some(section(p, "permissions", tr("Permissions needed"), rows))
 }
 
+/// Records which untrusted permission rows are currently visible in the window
+/// so the macOS host clears retired Hex bundle IDs' stale TCC rows once in the
+/// background when a row appears.
+pub(super) fn update_shown_permissions(ui: &mut Ui) {
+    use crate::desktop::onboarding::{PermissionState, Step};
+    let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
+    let mut shown = Vec::new();
+    if visible && ui.platform.caps.permissions {
+        let setup_showing = ui
+            .tour
+            .as_ref()
+            .is_some_and(|tour| tour.flow.step() == Step::Setup)
+            || ui.first_run.is_some()
+            || (ui.tour.is_none() && !ui.labs_open && ui.pane == Pane::General);
+        if setup_showing
+            && matches!(
+                ui.platform.permissions.accessibility,
+                PermissionState::NeedsRequest | PermissionState::NeedsSettings
+            )
+        {
+            shown.push(PermissionKind::Accessibility);
+        }
+        if ui.tour.is_none() && !ui.labs_open {
+            if ui.pane == Pane::Meetings
+                && super::meetings::available(ui)
+                && ui.meetings.view == super::meetings::View::Settings
+                && !ui.platform.system_audio
+            {
+                shown.push(PermissionKind::SystemAudio);
+            }
+            #[cfg(hex_capture)]
+            if ui.pane == Pane::Annotate
+                && ui.settings.capture.enabled
+                && ui
+                    .platform
+                    .scrawl
+                    .as_ref()
+                    .is_some_and(|view| !view.screen_recording && !view.screen_needs_restart)
+            {
+                shown.push(PermissionKind::ScreenRecording);
+            }
+        }
+    }
+    ui.platform.permissions_shown = shown;
+}
+
+/// Fixture setup for General's missing-permissions scenes (`waiting` vs `stale`).
+pub(super) fn mac_permissions_fixture(ui: &mut Ui, stale: bool) {
+    use crate::desktop::onboarding::PermissionState;
+    *ui = super::mac_fixture();
+    ui.platform.permissions.microphone = PermissionState::NeedsSettings;
+    ui.platform.permissions.accessibility = PermissionState::NeedsSettings;
+    if stale {
+        ui.platform.note_stale(PermissionKind::Accessibility);
+    } else {
+        ui.platform.note_asked(PermissionKind::Accessibility);
+    }
+    ui.platform.login_item = Some(crate::desktop::login_item::LoginItemStatus::RequiresApproval);
+    ui.platform.accessibility_renamed = true;
+}
+
 /// A save error where the OS has no listener card to show it in.
 pub(super) fn error_section(ui: &Ui, p: Paint) -> Option<El> {
     if ui.platform.caps.listener_control {
