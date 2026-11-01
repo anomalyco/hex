@@ -633,6 +633,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   300 ms discard. A 450 ms hotkey pre-roll
   protects speech onset. Capture has no automatic duration limit; release,
   explicit stop, or Escape ends it.
+- A dictation discarded for silence (level under the silence threshold, or no
+  speech the detector hears) is never silent, on every OS (#782): the error
+  tone, a short note beside the HUD ("too quiet, check your mic level"), the
+  measured level and peak against the thresholds in the log, and a "Last
+  dictation discarded" line in Settings' status until a dictation goes through
+  (`dictation::silence`).
 - When enabled, a second shortcut tap within 300 ms locks dictation. Press the
   shortcut again to finish or Escape to cancel.
 - Recording audio behavior and idle-sleep prevention begin only after the
