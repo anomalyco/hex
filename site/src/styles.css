@@ -328,6 +328,11 @@ a {
   transition: none;
 }
 
+/* The key is hidden for good: stop its glow so the page stops restyling every frame. */
+.page[data-key-exploded] .keycap__glow {
+  animation: none;
+}
+
 .header__tools {
   display: flex;
   align-items: center;
