@@ -108,7 +108,6 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             ));
         }
         rows.extend(configure_shortcuts_row(ui, p).map(CardRow::from));
-        rows.extend(cancel_shortcut_row(ui, p).map(CardRow::from));
     }
     let picker_button = value_button(
         p,
@@ -316,21 +315,6 @@ fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
                 ),
             )
         })
-}
-
-/// Cancel dictation, once the desktop gave it a key: Hex suggests none, so
-/// the key came from the desktop and is taken from every app (#624).
-/// Desktop shortcuts' Open changes it.
-fn cancel_shortcut_row(ui: &Ui, p: Paint) -> Option<El> {
-    let trigger = s::cancel_grant(ui)?;
-    Some(icon_described_row(
-        p,
-        "cancel-shortcut",
-        &KEYBOARD,
-        tr("Cancel dictation"),
-        Some((tr_fill("Your desktop granted {}", trigger), p.warning())),
-        row().key("cancel-shortcut-control"),
-    ))
 }
 
 /// Labs › Also pause the browser's permission, under Pause media on macOS:

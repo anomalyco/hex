@@ -80,7 +80,6 @@ pub enum Tone {
     /// A dictation pasted at least [`DONE_MIN_AFTER_STOP`] after its stop
     /// sound, such as after a slow rewrite.
     DictationDone,
-    Cancel,
     /// The first-run tour reached its last step.
     OnboardingSuccess,
     /// A first-run onboarding cue (typing clacks, shortcut keycap, motion landings).
@@ -380,8 +379,8 @@ pub fn play(tone: Tone) {
     }
 }
 
-/// A set of feedback sounds, chosen in Settings. Every set has its own start,
-/// stop and cancel, and all are level-matched, so a volume sounds the same in
+/// A set of feedback sounds, chosen in Settings. Every set has its own start
+/// and stop, and all are level-matched, so a volume sounds the same in
 /// each. `scripts/sounds/synth.py` makes their files.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -465,18 +464,11 @@ pub enum Cue {
     Start,
     Stop,
     Done,
-    Cancel,
     Error,
 }
 
 impl Cue {
-    pub const ALL: [Self; 5] = [
-        Self::Start,
-        Self::Stop,
-        Self::Done,
-        Self::Cancel,
-        Self::Error,
-    ];
+    pub const ALL: [Self; 4] = [Self::Start, Self::Stop, Self::Done, Self::Error];
 
     /// The English label the sound picker shows, translated where shown.
     pub fn name(self) -> &'static str {
@@ -484,7 +476,6 @@ impl Cue {
             Self::Start => "Start",
             Self::Stop => "Stop",
             Self::Done => "Done",
-            Self::Cancel => "Cancel",
             Self::Error => "Error",
         }
     }
@@ -515,7 +506,6 @@ impl Audition {
             Self::Cue(Cue::Start) => &[(Cue::Start, Duration::ZERO)],
             Self::Cue(Cue::Stop) => &[(Cue::Stop, Duration::ZERO)],
             Self::Cue(Cue::Done) => &[(Cue::Done, Duration::ZERO)],
-            Self::Cue(Cue::Cancel) => &[(Cue::Cancel, Duration::ZERO)],
             Self::Cue(Cue::Error) => &[(Cue::Error, Duration::ZERO)],
         }
     }
@@ -588,7 +578,6 @@ struct BundledSet {
     start: &'static [u8],
     stop: &'static [u8],
     done: Option<&'static [u8]>,
-    cancel: &'static [u8],
     error: Option<&'static [u8]>,
     success: Option<&'static [u8]>,
 }
@@ -614,7 +603,6 @@ macro_rules! synthesized_set {
             start: bundled_sound!($set, "start"),
             stop: bundled_sound!($set, "stop"),
             done: Some(bundled_sound!($set, "done")),
-            cancel: bundled_sound!($set, "cancel"),
             error: Some(bundled_sound!($set, "error")),
             success: Some(bundled_sound!($set, "success")),
         }
@@ -628,7 +616,6 @@ const BUNDLED_SETS: [BundledSet; 7] = [
         start: bundled_sound!("classic", "start"),
         stop: bundled_sound!("classic", "stop"),
         done: None,
-        cancel: bundled_sound!("classic", "cancel"),
         // macOS plays Basso; elsewhere Classic borrows Signature's error.
         error: if cfg!(target_os = "macos") {
             None
@@ -646,7 +633,6 @@ const BUNDLED_SETS: [BundledSet; 7] = [
         start: bundled_sound!("thock", "start"),
         stop: bundled_sound!("thock", "stop"),
         done: None,
-        cancel: bundled_sound!("thock", "cancel"),
         error: Some(bundled_sound!("thock", "error")),
         success: Some(bundled_sound!("thock", "success")),
     },
@@ -657,7 +643,6 @@ struct SetSounds {
     start: SamplesBuffer,
     stop: SamplesBuffer,
     done: Option<SamplesBuffer>,
-    cancel: SamplesBuffer,
     /// Played for failures; `None` plays macOS Basso.
     error: Option<SamplesBuffer>,
     success: Option<SamplesBuffer>,
@@ -670,7 +655,6 @@ impl SetSounds {
             start: decode_wav(bundled.start)?,
             stop: decode_wav(bundled.stop)?,
             done: optional(bundled.done)?,
-            cancel: decode_wav(bundled.cancel)?,
             error: optional(bundled.error)?,
             success: optional(bundled.success)?,
         })
@@ -802,7 +786,6 @@ impl Sounds {
                     Cue::Start => Some(&sounds.start),
                     Cue::Stop => Some(&sounds.stop),
                     Cue::Done => sounds.done.as_ref(),
-                    Cue::Cancel => Some(&sounds.cancel),
                     Cue::Error => sounds.error.as_ref(),
                 };
                 sound.map(|sound| (sound.clone(), at, cue))
@@ -817,7 +800,6 @@ impl Sounds {
             Tone::DictationStart => &sounds.start,
             Tone::DictationStop => &sounds.stop,
             Tone::DictationDone => return sounds.done.as_ref(),
-            Tone::Cancel => &sounds.cancel,
             Tone::OnboardingSuccess => {
                 return sounds.success.as_ref().or(Some(&sounds.stop));
             }
@@ -1230,7 +1212,6 @@ mod tests {
         let mut sounds = vec![
             ("start", bundled.start, budget(130, 300)),
             ("stop", bundled.stop, budget(250, 450)),
-            ("cancel", bundled.cancel, budget(250, 2_100)),
         ];
         let optional = [
             ("done", bundled.done, budget(350, 0)),
@@ -1256,8 +1237,8 @@ mod tests {
         Duration::from_secs_f64((first / channels) as f64 / f64::from(rate))
     }
 
-    /// Every start sounds at once. The classic stop and cancel keep their
-    /// original soft onsets.
+    /// Every start sounds at once. The classic stop keeps its original soft
+    /// onset.
     #[test]
     fn bundled_sounds_are_short_and_sound_immediately() {
         for set in SoundSet::ALL {
@@ -1845,12 +1826,12 @@ mod tests {
         let (sender, receiver) = mpsc::sync_channel(2);
         enqueue(Some(&sender), Request::ProvisionalStart);
         enqueue(Some(&sender), Request::RetractStart);
-        enqueue(Some(&sender), Request::Play(Tone::Cancel));
+        enqueue(Some(&sender), Request::Play(Tone::DictationStop));
         assert_eq!(receiver.try_recv().unwrap(), Request::ProvisionalStart);
         assert_eq!(receiver.try_recv().unwrap(), Request::RetractStart);
         assert!(receiver.try_recv().is_err());
         drop(receiver);
-        enqueue(Some(&sender), Request::Play(Tone::Cancel));
+        enqueue(Some(&sender), Request::Play(Tone::DictationStop));
         enqueue(None, Request::ProvisionalStart);
     }
 

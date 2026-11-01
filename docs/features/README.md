@@ -546,9 +546,7 @@ worker readiness; a later worker-load failure does not roll back saved selection
 Saved shortcut                           // dictation; Option by default; Windows and X11 accept mouse buttons, macOS with Labs > Mouse shortcuts
 ├── Hold -> Speak -> Release
 ├── Tap, tap -> Speak hands-free -> Press again   // Double-tap to lock enabled
-└── Escape
-    ├── Capture active -> Cancel that capture
-    └── Otherwise -> Cancel newest cancellable job
+└── Escape -> Nothing: no cancel, every dictation finishes and pastes (#786)
 
 General > Advanced > Double-tap only     // optional for key bindings
   -> Disable single-hold activation
@@ -556,7 +554,7 @@ General > Advanced > Double-tap only     // optional for key bindings
 
 Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)
-  -> it dictates like the shortcut: Hold/Toggle, double-tap lock, Escape, release
+  -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
 
 Labs > Unload model when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription/engine
@@ -1251,7 +1249,7 @@ Linux beta                               // not macOS feature parity
 ├── hex start -> One per-user Hex -> Alt-Space capture -> Stream (Vulkan GPU) -> Paste
 │   └── CPU or a model that cannot stream -> Transcribe the whole clip after release
 ├── hex / hex app -> Window in the same process; closing it leaves Hex running
-├── Recording sounds -> Shortcut press / capture stop / active cancellation
+├── Recording sounds -> Shortcut press / capture stop
 ├── Shortcuts -> One state machine, three sources        // linux.shortcuts
 │   ├── X11 -> Root-window key grabs; General records the chord
 │   ├── Wayland + GlobalShortcuts portal -> Desktop grants the triggers
@@ -1283,23 +1281,21 @@ Linux beta                               // not macOS feature parity
 │   │   └── General hides shortcut rows and lists the commands
 │   └── Listener starting or stopped -> `hex status` reports Unregistered,
 │       never the X11 mode
-├── hex dictation start|stop|toggle|cancel, hex paste-last
+├── hex dictation start|stop|toggle, hex paste-last
 │   -> Same events as a shortcut                     // linux.commands
 │   ├── start|toggle --raw -> Dictate without processing's events
 │   ├── Idempotent: start while recording / stop while idle -> Nothing
 │   └── Hex missing or not listening -> One-line error, non-zero exit
 │       // as for hex quit|restart|status
-├── Escape -> Cancel active capture, not newest accepted job
-│   ├── X11 -> Grabbed only while recording; a grab conflict warns, dictation goes on
-│   └── Portal -> Never bound: "Cancel dictation" joins the one bind with no key;
-│       the user assigns one, idle presses do nothing (#482)
-│       ├── Desktop gave it a key anyway -> General shows a "Cancel dictation"
-│       │   row, "Your desktop granted <key>", and process.log warns (#624)
+├── Escape -> Ends nothing (#786); no Cancel dictation shortcut or command
+│   ├── X11 -> Grabbed only while Annotate draws (it stops drawing)
+│   └── Portal -> Never bound
 │       └── KDE startup -> before the bind, the pre-#579 `hex` set (with the
-│           pre-#492 `cancel` on Escape) and `cancel` under `anomaly.hex` are
-│           removed from kglobalaccel (`unregister`); other apps untouched
-│           // check: a_key_the_desktop_gave_cancel_dictation_is_shown (the row's
-│           // data only); the KDE removal is not run on a Plasma session
+│           pre-#492 `cancel` on Escape), and `cancel` and `cancel-dictation`
+│           under `anomaly.hex`, are removed from kglobalaccel (`unregister`);
+│           other apps untouched
+│           // check: only_requested_shortcuts_are_shown (a stale grant stays
+│           // out); the KDE removal is not run on a Plasma session
 ├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
@@ -1450,7 +1446,7 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   └── Update item · Enable / Disable Hex · Quit Hex
 ├── Single-modifier shortcut -> Left / Either / Right side picker, as macOS
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
-├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
+├── Escape -> Nothing (#786); a held modifier alone never ends or cancels a capture
 ├── One modifier alone (Right Alt, Right Ctrl) -> Shortcut; Alt/Win release masked (no menu, Start)
 ├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device
@@ -1512,7 +1508,7 @@ closing it leaves the same process answering.
 
 Shortcut rules are pure and tested once for every source in
 [linux/input.rs](../../src/linux/input.rs): hold, double-tap lock, toggle,
-double-tap only, Escape, Paste Last, and command idempotence,
+double-tap only, Escape ending nothing, Paste Last, and command idempotence,
 plus X11 auto-repeat filtering and a portal release that never arrives
 (Hyprland's Lua binds drop it when the modifier comes up first; see
 [dictation.md](dictation.md)). The X11 grab tests run on an isolated display in
@@ -1521,7 +1517,7 @@ through one listener. [scripts/test-linux-service.py](../../scripts/test-linux-s
 checks that commands fail without a listening Hex.
 On 2026-10-22 the portal path was observed on niri with xdg-desktop-portal-gnome
 using synthetic uinput keys against an isolated service: granted triggers,
-hold and Escape while held (since replaced by Cancel dictation), double-tap lock, Paste Last, and commands. A
+hold and Escape while held (Escape no longer cancels since #786), double-tap lock, Paste Last, and commands. A
 physical keyboard press has not been recorded.
 
 `linux.hud`: [linux/rune_hud.rs](../../src/linux/rune_hud.rs) keeps the
@@ -1657,8 +1653,7 @@ Capture                                  // hex app and hex dictate
 │   └── Clip turns out near-silent or speechless -> Stop sound already played,
 │       nothing pasted
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
-├── Dictation pasted -> Done sound; failures play the error sound
-└── Cancel active capture -> Cancel sound; idle Escape stays silent
+└── Dictation pasted -> Done sound; failures play the error sound
 ```
 
 The shared [feedback player](../../src/feedback.rs) uses Hex's bundled sounds

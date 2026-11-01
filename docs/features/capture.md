@@ -50,8 +50,8 @@ Draw                                     // capture.draw (capture_host::drawing)
 │       ending_a_stroke_while_the_input_target_is_locked_does_not_deadlock;
 │       not observed on a Windows PC
 ├── Esc while drawing -> stops drawing, never the recording (recognition.rs
-│   on macOS; Escape bound through the portal or grab on Linux; the keyboard
-│   hook on Windows, when no dictation takes it; and the overlay's own key
+│   on macOS; the Escape grab on X11 (Wayland binds no Escape); the keyboard
+│   hook on Windows, when no dictation records; and the overlay's own key
 │   handler where it gets the keyboard)
 ├── macOS and Windows -> Shift held alone still draws, as in Scrawl
 ├── While drawing -> the ink overlay takes the pointer with a pen cursor, so
@@ -213,7 +213,7 @@ First launch with Annotate on            // capture.import
 ├── Press while recording -> stop, as `hex capture stop` // ignored within 400 ms
 ├── Press while the capsule's picker is open -> the picker records what it is on
 ├── Esc while a capture records -> nothing: it reaches the app being recorded,
-│   and Hex's tap lets it through (only a dictation hold under it is cancelled)
+│   and Hex's tap lets it through; a dictation under it goes on too (#786)
 ├── The binding is swallowed, never chord evidence for dictation
 └── Hold the dictation shortcut mid-capture -> dictation pastes as usual
 

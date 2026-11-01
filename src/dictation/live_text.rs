@@ -3,8 +3,8 @@
 //! [`demand`]s it while it shows and reads it with [`current`].
 //!
 //! The capture loop publishes through its recording's [`Publisher`], which
-//! the recording owns: dropping the recording (release, Escape, a short tap,
-//! a lost microphone) clears the text, so no ending can leave it on screen.
+//! the recording owns: dropping the recording (release, a short tap, a lost
+//! microphone) clears the text, so no ending can leave it on screen.
 //! A HUD registers a [`watch`]er and is told each change from the capture
 //! loop's thread; it must hand the text to its own thread and never wait.
 //! The text is provisional: it is only ever shown, never pasted or kept.

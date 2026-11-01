@@ -46,13 +46,10 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 /// How often a pending request checks for cancellation.
 const STOP_POLL: Duration = Duration::from_millis(50);
-/// Cancel dictation, which the user assigns in the desktop. Not `cancel`:
-/// KDE still holds Escape under that id from builds that bound it.
-pub(crate) const CANCEL_ID: &str = "cancel-dictation";
-/// Cancel dictation's id before #492, when Hex suggested Escape for it.
-const LEGACY_CANCEL_ID: &str = "cancel";
-/// What Cancel dictation is called in the shortcuts the portal granted.
-pub(crate) const CANCEL_DESCRIPTION: &str = "Cancel dictation";
+/// The ids Cancel dictation had until it was removed (#786): `cancel`,
+/// which asked for Escape before #492, then `cancel-dictation`, which the
+/// user could put on any key. KDE keeps both, holding their keys.
+const STALE_KDE_ACTIONS: [&str; 2] = ["cancel", "cancel-dictation"];
 /// KDE's global shortcuts service, which keeps what portal apps bound.
 const KGLOBALACCEL: &str = "org.kde.kglobalaccel";
 const KGLOBALACCEL_PATH: &str = "/kglobalaccel";
@@ -65,19 +62,6 @@ pub(crate) struct Shortcut {
     /// XDG shortcuts format, such as `CTRL+ALT+space`; `None` leaves the
     /// shortcut for the user to assign.
     pub(crate) trigger: Option<String>,
-}
-
-impl Shortcut {
-    /// Cancel dictation, with no suggested key: a portal shortcut is held
-    /// for as long as Hex runs, so suggesting Escape would take it from
-    /// every other application.
-    pub(crate) fn cancel() -> Self {
-        Self {
-            id: CANCEL_ID.into(),
-            description: CANCEL_DESCRIPTION,
-            trigger: None,
-        }
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -733,8 +717,8 @@ impl Portal {
     /// shortcut a portal app bound under that app's id, so an upgraded Hex
     /// left `hex`'s set (Cancel dictation on Escape among it) grabbed with
     /// nothing able to rebind it, taking Escape from every app (#624).
-    /// Removes that set, and `cancel` under the current id, from KDE's
-    /// global shortcuts. Only on KDE, only those entries.
+    /// Removes that set, and the [`STALE_KDE_ACTIONS`] under the current id,
+    /// from KDE's global shortcuts. Only on KDE, only those entries.
     pub(crate) fn forget_legacy_kde_shortcuts(&self) -> Result<()> {
         if !desktop_is("KDE") {
             return Ok(());
@@ -754,7 +738,7 @@ impl Portal {
             .filter_map(|action| action.get(1))
             .map(|action| (LEGACY_APP_ID, action.as_str()))
             .collect::<Vec<_>>();
-        legacy.push((APP_ID, LEGACY_CANCEL_ID));
+        legacy.extend(STALE_KDE_ACTIONS.map(|action| (APP_ID, action)));
         for (component, action) in legacy {
             let removed: bool = self
                 .bus

@@ -32,14 +32,35 @@ pub const CONTROL_VERSION: u32 = 4;
 #[serde(rename_all = "kebab-case")]
 pub enum CaptureAction {
     /// Start recording, locked as after a double tap: the shortcut or
-    /// `stop` finishes it, Escape or `cancel` discards it.
+    /// `stop` finishes it.
     Start,
     /// Finish the recording and transcribe it.
     Stop,
-    /// Discard the recording, or the newest unfinished dictation.
-    Cancel,
     /// Start when idle, otherwise stop.
     Toggle,
+}
+
+/// The `action` of a `dictation` request: a [`CaptureAction`], or the
+/// `cancel` older clients still send. [`check_flags`] answers that with
+/// [`cancel_removed`].
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum RequestedCapture {
+    Action(CaptureAction),
+    Removed(RemovedCaptureAction),
+}
+
+/// Capture actions Hex no longer has (#786).
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemovedCaptureAction {
+    Cancel,
+}
+
+impl From<CaptureAction> for RequestedCapture {
+    fn from(action: CaptureAction) -> Self {
+        Self::Action(action)
+    }
 }
 
 /// What `hex capture` does (the `capture` experiment).
@@ -84,7 +105,7 @@ pub enum ControlCommand {
         force: bool,
     },
     Dictation {
-        action: CaptureAction,
+        action: RequestedCapture,
         /// `stop` only: answer with the transcript instead of pasting it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         print: bool,
@@ -468,8 +489,23 @@ pub fn await_printed(receiver: &Receiver<PrintedTranscript>, wait: Duration) -> 
     }
 }
 
-/// `print` applies only to `stop`.
-pub fn check_flags(action: CaptureAction, print: bool, raw: bool) -> Result<(), ControlError> {
+/// The reply to a `cancel` from an older client: dictations always finish.
+pub fn cancel_removed() -> ControlError {
+    ControlError::new(
+        "removed",
+        "cancel was removed: dictations always finish and paste; `hex dictation stop` finishes one",
+    )
+}
+
+/// The action a request asks for; `print` applies only to `stop`.
+pub fn check_flags(
+    action: RequestedCapture,
+    print: bool,
+    raw: bool,
+) -> Result<CaptureAction, ControlError> {
+    let RequestedCapture::Action(action) = action else {
+        return Err(cancel_removed());
+    };
     if print && action != CaptureAction::Stop {
         return Err(ControlError::new(
             "invalid-value",
@@ -482,7 +518,7 @@ pub fn check_flags(action: CaptureAction, print: bool, raw: bool) -> Result<(), 
             "--raw works only with `hex dictation start` and `hex dictation toggle`",
         ));
     }
-    Ok(())
+    Ok(action)
 }
 
 /// One request from a transport to the app's control host.
@@ -908,10 +944,10 @@ mod tests {
             ControlReply::Error { code, .. } if code == "failed"
         ));
         // Only `stop` prints, and older requests without the field still parse.
-        assert!(check_flags(CaptureAction::Start, true, false).is_err());
-        assert!(check_flags(CaptureAction::Stop, true, false).is_ok());
-        assert!(check_flags(CaptureAction::Toggle, false, true).is_ok());
-        assert!(check_flags(CaptureAction::Stop, false, true).is_err());
+        assert!(check_flags(CaptureAction::Start.into(), true, false).is_err());
+        assert!(check_flags(CaptureAction::Stop.into(), true, false).is_ok());
+        assert!(check_flags(CaptureAction::Toggle.into(), false, true).is_ok());
+        assert!(check_flags(CaptureAction::Stop.into(), false, true).is_err());
         assert_eq!(
             serde_json::from_str::<ControlRequest>(
                 r#"{"version":4,"command":"dictation","action":"stop"}"#
@@ -919,11 +955,24 @@ mod tests {
             .unwrap()
             .command,
             ControlCommand::Dictation {
-                action: CaptureAction::Stop,
+                action: CaptureAction::Stop.into(),
                 print: false,
                 raw: false,
             }
         );
+    }
+
+    /// #786: an older client's `cancel` parses and gets a clear answer.
+    #[test]
+    fn an_older_cancel_gets_removed() {
+        let cancel = serde_json::from_str::<ControlRequest>(
+            r#"{"version":4,"command":"dictation","action":"cancel"}"#,
+        )
+        .unwrap();
+        let ControlCommand::Dictation { action, .. } = cancel.command else {
+            panic!("a dictation command");
+        };
+        assert_eq!(check_flags(action, false, false).unwrap_err().code, "removed");
     }
 
     fn round_trip_request(command: ControlCommand) {
@@ -942,17 +991,17 @@ mod tests {
             ControlCommand::Quit { force: true },
             ControlCommand::Restart { force: false },
             ControlCommand::Dictation {
-                action: CaptureAction::Toggle,
+                action: CaptureAction::Toggle.into(),
                 print: false,
                 raw: false,
             },
             ControlCommand::Dictation {
-                action: CaptureAction::Stop,
+                action: CaptureAction::Stop.into(),
                 print: true,
                 raw: false,
             },
             ControlCommand::Dictation {
-                action: CaptureAction::Start,
+                action: CaptureAction::Start.into(),
                 print: false,
                 raw: true,
             },

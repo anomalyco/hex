@@ -273,8 +273,8 @@ unmanaged development Hex instead; without one it forwards to the installed Hex.
 ## Dictate
 
 Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
-recording, press the same chord again to finish, or press Escape to cancel the
-active recording (on Wayland, the Cancel dictation shortcut you assign; see below). **Double-tap only** waits for two complete taps before
+recording, and press the same chord again to finish. Escape never cancels:
+every dictation finishes and pastes. **Double-tap only** waits for two complete taps before
 recording, and **Toggle** mode starts and stops with single presses.
 **Ctrl-Alt-V** pastes the last dictation again. Settings shows listener state,
 Start/Stop, and operational errors. Changing a shortcut or a setting the
@@ -393,8 +393,7 @@ hl.bind("F9", hl.dsp.global("hex:paste-last"))
 ```
 
   Older Hyprland configs write `bind = , End, global, hex:dictation`.
-  Cancel the same way with `hex:cancel-dictation`, on a key you don't need
-  elsewhere (an Escape bind takes Escape from every application). Hyprland 0.56's Lua binds send no release when the modifier comes
+  Remove any `hex:cancel-dictation` bind: Hex no longer has it. Hyprland 0.56's Lua binds send no release when the modifier comes
   up before the key (Alt before Z); 0.57 fixes this. On 0.56, Toggle is
   unaffected: the next press still finishes. In Hold, recording continues
   until the next press and release, so lift the key first or use Toggle.
@@ -406,7 +405,6 @@ hl.bind("F9", hl.dsp.global("hex:paste-last"))
 hex dictation start     # bind to a key's press: start recording
 hex dictation stop      # bind to the same key's release: stop and transcribe
 hex dictation toggle    # one key: start, then stop and transcribe
-hex dictation cancel    # discard the recording
 hex paste-last          # paste the last dictation again
 hex dictation toggle --raw  # dictate without processing: paste the words as heard
 ```
@@ -440,29 +438,20 @@ See `docs/cli.md`.
 The commands are safe to bind anywhere, including X11 beside the grabs. They
 talk to the running Hex and never start it: without one, or while Hex is
 not listening, they print a one-line error and exit non-zero. Starting while recording,
-stopping while idle, and cancelling while idle do nothing, so key repeat is
+and stopping while idle do nothing, so key repeat is
 harmless. Start and stop bypass Hold, Toggle, and double-tap: start records,
 stop finishes. A shortcut press also finishes a recording a command started.
 
-Escape cancels only while something records, on X11. On Wayland, Escape stays
-with your applications: a portal shortcut is held for as long as Hex runs, and
-the desktop would keep Escape from every application. With the portal, Hex asks
-for a **Cancel dictation** shortcut with no key; assign one in your desktop's
-shortcut settings (Settings > Desktop shortcuts > Open), and it cancels the
-recording. Hex ignores it while nothing records, so pick a key you don't need
-elsewhere. Without the portal, bind `hex dictation cancel` instead. Either way,
-finishing with the dictation shortcut and deleting the text works too.
+Dictation has no cancel (#786): Escape always stays with your applications,
+and every dictation finishes and pastes. To drop one, finish it and delete the
+text. On KDE, Hex removes the Cancel dictation shortcut older builds asked for,
+so its key returns to your applications.
 
 Shortcuts need a non-modifier key. Modifier-only shortcuts, such as Super
 alone, are not supported on Linux.
 
-On X11, Hex first grabs Escape with any modifiers. If another application owns
-a modified Escape shortcut, Hex falls back to plain Escape with Caps/Num Lock
-variants; release other modifiers before cancelling. If plain Escape also
-conflicts, dictation continues and Settings and `hex status` show
-`Escape cancel unavailable: another application holds Escape`. Finish with the
-dictation shortcut instead. Hex logs once per conflict episode and retries on
-the next capture; a successful grab clears the warning.
+On X11, Hex grabs Escape only while Annotate draws, where it stops drawing. If
+another application holds it, drawing goes on and Hex logs it once.
 
 Recording sounds are enabled at 50% volume by default, including when upgrading
 older settings. A start sound is queued immediately when the shortcut starts capture,

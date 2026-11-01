@@ -40,7 +40,7 @@ pub enum RecognitionControl {
         reply: Option<SyncSender<ControlReply>>,
     },
     /// `hex dictation`: drives the shortcut machine as a press would, so the
-    /// shortcut and Escape still finish or cancel.
+    /// shortcut still finishes it.
     /// A dictation `stop` with `print` answers `reply` once recording stops
     /// and sends the transcript to `print` instead of pasting it.
     Capture {
@@ -933,21 +933,12 @@ pub fn listen(
                 }
                 host.shortcut(action, &input);
             }
-            // Escape ends a dictation hold first, then
-            // closes the capsule's picker or open list (never an Undo: that is a
-            // click), then cancels queued
-            // dictation. It never ends a recording capture: it may be meant
-            // for the app being recorded (the capsule's ✕ discards).
+            // Escape closes the capsule's picker or open list (never an
+            // Undo: that is a click). It never ends a dictation or a
+            // recording capture: it may be meant for the app in front (#786).
             #[cfg(hex_capture)]
-            if !hotkeys.any_recording()
-                && input_event.is_escape_down()
+            if input_event.is_escape_down()
                 && crate::capture_host::capsule_key(crate::capture_host::CapsuleKey::Escape)
-            {
-                continue;
-            }
-            if !hotkeys.any_recording()
-                && input_event.is_escape_down()
-                && cancel_latest_job(&dictation_worker, &mut events, indicator.as_ref())?
             {
                 continue;
             }
@@ -1075,12 +1066,7 @@ pub fn listen(
         let capture_escape = capture_host.is_some() && capture_shortcut.takes_escape();
         #[cfg(not(hex_capture))]
         let capture_escape = false;
-        input_monitor.set_escape_cancels(claims_escape(
-            programmatic.is_some(),
-            hotkeys.any_recording(),
-            capture_escape,
-            || dictation_worker.has_escape_cancellable_job(),
-        ));
+        input_monitor.set_takes_escape(claims_escape(programmatic.is_some(), capture_escape));
         if received_worker_event {
             emit_engine_state(
                 &mut events,
@@ -1489,35 +1475,12 @@ fn finish_hotkey_dictation(
     Ok(finished)
 }
 
-/// Whether Hex takes Escape from the app in front. Never while a programmatic
-/// dictation records: the listener ignores every key then, so Escape stays
-/// with its owner app rather than being swallowed.
-fn claims_escape(
-    programmatic: bool,
-    recording: bool,
-    capture_escape: bool,
-    cancellable_job: impl FnOnce() -> bool,
-) -> bool {
-    !programmatic && (recording || capture_escape || cancellable_job())
-}
-
-/// Cancels the newest unfinished dictation, as Escape does while idle.
-fn cancel_latest_job(
-    worker: &DictationWorker,
-    events: &mut EventLog,
-    indicator: Option<&DictationIndicatorSender>,
-) -> Result<bool> {
-    let Some(job_id) = worker.cancel_latest() else {
-        return Ok(false);
-    };
-    feedback::play(Tone::Cancel);
-    events.dictation(DictationPhase::Cancelled, "")?;
-    if let Some(indicator) = indicator {
-        indicator.send(DictationIndicatorEvent::JobCancelled {
-            job_id: job_id.value(),
-        });
-    }
-    Ok(true)
+/// Whether Hex takes Escape from the app in front: only for a capture
+/// (drawing, its press, the capsule's picker), never for dictation, and never
+/// while a programmatic dictation records: the listener ignores every key
+/// then, so Escape stays with its owner app rather than being swallowed.
+fn claims_escape(programmatic: bool, capture_escape: bool) -> bool {
+    !programmatic && capture_escape
 }
 
 /// Why a control can't start a capture now, if it can't.
@@ -1525,7 +1488,7 @@ fn capture_refusal(other_recording: bool, suspended: bool) -> Option<ControlRepl
     if other_recording {
         Some(ControlReply::error(
             "busy",
-            "another recording is in progress; finish or cancel it first",
+            "another recording is in progress; finish it first",
         ))
     } else if suspended {
         Some(ControlReply::error(
@@ -1535,18 +1498,6 @@ fn capture_refusal(other_recording: bool, suspended: bool) -> Option<ControlRepl
     } else {
         None
     }
-}
-
-/// A `cancel` with its own capture idle. Escape cancels the active capture
-/// before any unfinished job, so while another capture records this refuses
-/// rather than reach past it to a job.
-fn idle_cancel_refusal(other_recording: bool) -> Option<ControlReply> {
-    other_recording.then(|| {
-        ControlReply::error(
-            "busy",
-            "another recording is in progress; cancel it first (Escape cancels it)",
-        )
-    })
 }
 
 /// A control start has no press to judge, so its capture counts as
@@ -1581,7 +1532,7 @@ fn finish_reply(finished: Option<FinishResult>, submitted: &str) -> ControlReply
 }
 
 /// `hex dictation`: a start locks the shortcut machine as a double tap
-/// does, so the next press or `stop` finishes it and Escape cancels it.
+/// does, so the next press or `stop` finishes it.
 #[allow(clippy::too_many_arguments)]
 fn control_dictation(
     action: CaptureAction,
@@ -1599,16 +1550,16 @@ fn control_dictation(
 ) -> Result<ControlReply> {
     let recording = hotkeys.any_recording();
     let device = input.device_name();
-    let action = match action {
-        CaptureAction::Toggle if recording => CaptureAction::Stop,
-        CaptureAction::Toggle => CaptureAction::Start,
-        action => action,
+    let start = match action {
+        CaptureAction::Start => true,
+        CaptureAction::Stop => false,
+        CaptureAction::Toggle => !recording,
     };
-    Ok(match action {
-        CaptureAction::Start if recording => {
+    Ok(match start {
+        true if recording => {
             ControlReply::unchanged("Dictation is already recording")
         }
-        CaptureAction::Start => {
+        true => {
             if let Some(refusal) = capture_refusal(other_recording, suspended) {
                 return Ok(refusal);
             }
@@ -1634,20 +1585,18 @@ fn control_dictation(
             if accepted {
                 // A warm start already queued its provisional tone.
                 make_control_capture_intentional(input, release_while_idle)?;
-                ControlReply::done(
-                    "Recording; `hex dictation stop` or the shortcut finishes, Escape cancels",
-                )
+                ControlReply::done("Recording; `hex dictation stop` or the shortcut finishes")
             } else {
                 hotkeys.dictation.suspend();
                 ControlReply::error("busy", "the microphone is busy; try again")
             }
         }
-        CaptureAction::Stop if !recording && print.is_some() => ControlReply::error(
+        false if !recording && print.is_some() => ControlReply::error(
             "not-recording",
             "dictation isn't recording; nothing to print",
         ),
-        CaptureAction::Stop if !recording => ControlReply::unchanged("Dictation isn't recording"),
-        CaptureAction::Stop => {
+        false if !recording => ControlReply::unchanged("Dictation isn't recording"),
+        false => {
             hotkeys.suspend_recording();
             let printing = print.is_some();
             let finished = finish_hotkey_dictation(
@@ -1676,31 +1625,6 @@ fn control_dictation(
                 ),
             }
         }
-        CaptureAction::Cancel if recording => {
-            hotkeys.suspend_recording();
-            handle_hotkey_action(
-                HotkeyAction::Cancel,
-                false,
-                input.captured_through(),
-                input,
-                worker,
-                context,
-                &device,
-                events,
-                indicator,
-                release_while_idle,
-            )?;
-            ControlReply::done("Cancelled the recording")
-        }
-        CaptureAction::Cancel | CaptureAction::Toggle => {
-            if let Some(refusal) = idle_cancel_refusal(other_recording) {
-                refusal
-            } else if cancel_latest_job(worker, events, indicator)? {
-                ControlReply::done("Cancelled the newest unfinished dictation")
-            } else {
-                ControlReply::unchanged("Nothing to cancel")
-            }
-        }
     })
 }
 
@@ -1711,7 +1635,7 @@ fn paste_last_refusal(capture_active: bool) -> Option<ControlReply> {
     capture_active.then(|| {
         ControlReply::error(
             "busy",
-            "a recording or shortcut is in progress; finish or cancel it first",
+            "a recording or shortcut is in progress; finish it first",
         )
     })
 }
@@ -1763,7 +1687,8 @@ fn fail_capture(
 enum CaptureEnd {
     /// The capture never became a dictation; no feedback tone.
     Discarded(Option<DiscardCause>),
-    /// The user cancelled an intentional capture; plays the cancel tone.
+    /// Hex ended an intentional capture itself: its shortcuts were
+    /// suspended or the event tap was lost.
     Cancelled,
 }
 
@@ -1782,7 +1707,6 @@ fn end_capture(
             DictationIndicatorEvent::Discarded
         }
         CaptureEnd::Cancelled => {
-            feedback::play(Tone::Cancel);
             events.dictation(DictationPhase::Cancelled, "")?;
             DictationIndicatorEvent::Cancelled
         }
@@ -2098,12 +2022,8 @@ mod tests {
     }
 
     #[test]
-    fn idle_controls_never_reach_past_an_active_capture() {
+    fn paste_last_never_reaches_past_an_active_capture() {
         let busy = |reply: Option<ControlReply>| matches!(reply, Some(ControlReply::Error { code, .. }) if code == "busy");
-        // Escape cancels the recording before any job, so an idle cancel
-        // must not cancel a job while the other capture records.
-        assert!(busy(idle_cancel_refusal(true)));
-        assert!(idle_cancel_refusal(false).is_none());
         assert!(busy(paste_last_refusal(true)));
         assert!(paste_last_refusal(false).is_none());
     }
@@ -2137,14 +2057,13 @@ mod tests {
     }
 
     #[test]
-    fn a_programmatic_dictation_leaves_escape_with_its_owner() {
-        // A queued hotkey job or the capture picker would otherwise claim
-        // Escape that the listener then ignores.
-        assert!(!claims_escape(true, false, true, || true));
-        assert!(claims_escape(false, false, false, || true));
-        assert!(claims_escape(false, false, true, || false));
-        assert!(claims_escape(false, true, false, || false));
-        assert!(!claims_escape(false, false, false, || false));
+    fn only_a_capture_claims_escape() {
+        // The capture picker would otherwise claim Escape that the listener
+        // then ignores during a programmatic dictation.
+        assert!(!claims_escape(true, true));
+        assert!(claims_escape(false, true));
+        // Dictation never takes Escape from the app (#786).
+        assert!(!claims_escape(false, false));
     }
 
     #[test]

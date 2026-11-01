@@ -6,15 +6,15 @@
 
 Run: uv run scripts/sounds/synth.py   (rewrites resources/audio/sounds/)
 
-Each set is a folder of start, stop, done, cancel, error and success WAVs:
+Each set is a folder of start, stop, done, error and success WAVs:
 
 - signature: one voice, a kalimba-like FM tine, and one motif, D - B - A - D:
   up a major sixth, a step down, home ("hex" is six, so the sixth is Hex's
   interval). Start, stop and done play the motif in order across a
-  dictation; cancel collapses the sixth; error turns it minor; success plays
+  dictation; error turns it minor; success plays
   the whole motif and lands on a D sixth chord.
 - classic: the tones Hex played before the signature set, decoded from the
-  original MP3s in git (start, stop and cancel only; Hex plays no done tone,
+  original MP3s in git (start and stop only; Hex plays no done tone,
   macOS Basso for errors, and signature's success for this set).
 - click: mechanical key clicks.
 - soft: warm sine blips in A major.
@@ -34,8 +34,7 @@ the classic swish, error like macOS Basso. A mono sound plays in both
 speakers, so the stereo classic sounds are measured per channel, which puts
 their start 2.5 dB and stop 3 dB under the targets their summed loudness once
 set. They are raised to the targets like every other sound (the limiter
-touches 0.1% of the start's samples, the peaks of its clicks), and the
-classic cancel, about 15 dB louder than the rest, comes down to its target.
+touches 0.1% of the start's samples, the peaks of its clicks).
 """
 import subprocess
 from fractions import Fraction
@@ -59,7 +58,6 @@ TARGETS = {
     "start": -25.5,
     "stop": -27.0,
     "done": -27.0,
-    "cancel": -26.5,
     "error": -26.5,
     "success": -25.0,
 }
@@ -125,8 +123,6 @@ def signature():
     s["stop"] = mix([(0, 0.8 * tine(B5, 0.07, 0.026)), (0.06, tine(A5, 0.17, 0.05))], 0.23)
     s["done"] = mix([(0, tine(D6, 0.32, 0.08)),
                      (0.006, 0.45 * tine(A5, 0.32, 0.075, tick_amt=0))], 0.33)
-    s["cancel"] = mix([(0, 0.8 * tine(B5, 0.07, 0.025, index=1.4)),
-                       (0.055, tine(D5, 0.17, 0.045, index=1.2))], 0.225)
     s["error"] = mix([(0, 0.8 * tine(D4, 0.09, 0.03, index=1.0, tick_amt=0.15)),
                       (0.09, tine(D4, 0.19, 0.05, index=1.0, tick_amt=0.15)),
                       (0.09, 0.7 * tine(Bb4, 0.19, 0.05, index=1.0, tick_amt=0))], 0.28)
@@ -171,9 +167,6 @@ def click():
     # Done: two bright ticks, the second a touch higher.
     s["done"] = mix([(0, 0.85 * tick(body=2600, body_tau=0.004)),
                      (0.055, tick(body=3100, body_tau=0.0045))], 0.12)
-    # Cancel: two muffled clicks stepping down.
-    s["cancel"] = mix([(0, tick(body=1400, thock=200, thock_amt=0.3, dull=3500)),
-                       (0.065, 0.8 * tick(body=900, thock=160, thock_amt=0.35, dull=2500))], 0.14)
     # Error: three dull low taps, like a haptic "nope".
     dull_tap = lambda: tick(body=520, body_tau=0.008, thock=170, thock_amt=0.9,
                             thock_tau=0.014, noise_amt=0.5, dull=2000)
@@ -217,9 +210,6 @@ def soft():
     s["stop"] = mix([(0, 0.85 * warm(A5, 0.07, 0.025)), (0.055, warm(E5, 0.16, 0.045))], 0.215)
     # Done: a soft bell dyad, C#6 over A5.
     s["done"] = mix([(0, warm(Cs6, 0.3, 0.075, bell=0.10)), (0.008, 0.45 * warm(A5, 0.3, 0.07, bell=0.05))], 0.31)
-    # Cancel: lower and duller, E5 sinking to B4.
-    s["cancel"] = mix([(0, 0.8 * warm(E5, 0.07, 0.025, h2=0.04)),
-                       (0.06, warm(B4, 0.17, 0.045, h2=0.04, bend_cents=-35))], 0.23)
     # Error: a soft low semitone cluster, twice.
     cluster = lambda: warm(B4, 0.11, 0.035, h2=0.05) + warm(C5, 0.11, 0.035, h2=0.05)
     s["error"] = mix([(0, 0.8 * cluster()), (0.11, cluster())], 0.23)
@@ -272,9 +262,6 @@ def wood():
     s["stop"] = mix([(0, 0.8 * bar(D6, 0.07, 0.024)), (0.055, bar(B5, 0.17, 0.05))], 0.225)
     # Done: a ringing dyad, G6 over D6.
     s["done"] = mix([(0, bar(G6, 0.32, 0.075, hardness=0.6)), (0.007, 0.5 * bar(D6, 0.32, 0.08, hardness=0.3))], 0.33)
-    # Cancel: two muffled wood-block knocks stepping down.
-    s["cancel"] = mix([(0, 0.85 * block(720, 0.07, 0.016, dull=4000)),
-                       (0.06, block(480, 0.1, 0.02, dull=3000))], 0.16)
     # Error: two low hollow knocks, the second lower, like a log drum's
     # "uh-uh".
     s["error"] = mix([(0, 0.85 * block(260, 0.11, 0.032, dull=2500)),
@@ -344,8 +331,6 @@ def analog():
     # Done: a soft F major stab, A5 C6 F6.
     s["done"] = mix([(0, 0.6 * synth(f, 0.32, 0.08, open_=5, close=1.3, filter_tau=0.06))
                      for f in (A5, C6, F6)], 0.33)
-    # Cancel: C6 sagging a fifth to F5 as the filter shuts.
-    s["cancel"] = synth(C6, 0.22, 0.06, open_=5, close=1.0, filter_tau=0.05, bend_cents=-700, bend_tau=0.06)
     # Error: a low, buzzy semitone (F3 and Gb3), pulsed twice.
     buzz = lambda dur: (synth(F3, dur, 0.04, open_=9, close=3, filter_tau=0.04, detune=12, sub=0.2)
                         + synth(Gb3, dur, 0.04, open_=9, close=3, filter_tau=0.04, detune=12, sub=0.2))
@@ -376,7 +361,7 @@ def classic():
     sample (the files led with up to 25 ms of near-silence) and ending once
     they fall 60 dB below their peak."""
     s = {}
-    for key, name in (("start", "startRecording"), ("stop", "stopRecording"), ("cancel", "cancel")):
+    for key, name in (("start", "startRecording"), ("stop", "stopRecording")):
         x = decode_mp3(name)
         first = int(np.argmax(np.max(np.abs(x), axis=1) > 0.001))
         x = x[first:].copy()
@@ -445,7 +430,7 @@ def thock():
     "A single mechanical keyboard key press, deep creamy thock, tactile, dry,
     very short."). Start is its press, stop the same key's upstroke, both cut
     from the take; the rest is that press played as bigger and smaller keys:
-    cancel a lower, duller key, error two keys at once, twice, low, and
+    error two keys at once, twice, low, and
     success a run of keys up to a full press. It has no done sound: the stop
     already says it (Kit, 2026-10-30)."""
     take = decode_take("mech-key-thock.mp3")
@@ -455,7 +440,6 @@ def thock():
     return {
         "start": press,
         "stop": release,
-        "cancel": highpass(lowpass(faded(varispeed(press, -5), 120, 45), 1800), 70),
         "error": highpass(lowpass(keys([
             (0, 1.0, faded(varispeed(press, -6), 70, 30)),
             (14, 0.7, faded(varispeed(press, -9), 70, 30)),

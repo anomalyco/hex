@@ -242,7 +242,6 @@ struct CallbackState {
     side_down: SideDownTimes,
     trigger_down: bool,
     paste_trigger_down: bool,
-    escape_down: bool,
     double_tap_enabled: bool,
     double_tap_only: bool,
     /// Pass the dictation key on to other apps instead of consuming it.
@@ -472,7 +471,6 @@ impl WindowsHotkeyMonitor {
             side_down: SideDownTimes::default(),
             trigger_down: false,
             paste_trigger_down: false,
-            escape_down: false,
             double_tap_enabled,
             double_tap_only,
             share_trigger,
@@ -945,23 +943,8 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
                     }
                 }
             } else if vk == u32::from(VK_ESCAPE) {
-                if is_down && (state.capture.active || state.capture.locked) {
-                    state.dirty = true;
-                    state.escape_down = true;
-                    suppressed = true;
-                    if let Some(action) = state.capture.cancel() {
-                        send_event(state, action, time);
-                    }
-                } else if is_up && state.escape_down {
-                    state.escape_down = false;
-                    suppressed = true;
-                    // Escape is not a modifier, so the modifier path never
-                    // sees this release; without clearing here, the next
-                    // Ctrl+Space after a cancel was ignored.
-                    if !state.modifiers.any_required_down(&state.binding) {
-                        state.dirty = false;
-                    }
-                }
+                // Escape ends no dictation, not even as a chord: it reaches
+                // the app (#786).
             } else if !modifier_event {
                 // A key or button joining a held modifier-only shortcut makes
                 // a chord meant for another application, such as Alt+Tab.
@@ -1339,7 +1322,7 @@ fn unsupported_key_down() -> bool {
         match vk {
             // Modifiers (generic + left/right) and the Windows keys.
             0x10..=0x12 | 0xA0..=0xA5 | 0x5B | 0x5C => continue,
-            // Escape is the cancel key; lock and IME state keys are inert.
+            // Escape cancels the recorder; lock and IME state keys are inert.
             0x1B | 0x14 | 0x15..=0x1A | 0x90 | 0x91 => continue,
             _ => {}
         }
@@ -1732,7 +1715,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_cancels_a_locked_capture() {
+    fn inhibiting_shortcuts_cancels_a_locked_capture() {
         let mut state = CaptureState::default();
         state.press(true, false, 100);
         state.release(true, 120);
@@ -1799,7 +1782,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_cancels_a_toggled_capture() {
+    fn inhibiting_shortcuts_cancels_a_toggled_capture() {
         let mut state = CaptureState {
             toggle: true,
             ..CaptureState::default()
