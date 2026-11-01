@@ -77,7 +77,11 @@ pub(crate) enum DesktopUpdateStatus {
     /// Another release exists that this install cannot apply itself; the
     /// window links to its download.
     Available,
-    ReadyToRestart,
+    /// The update is staged; the dev channel says what changed in it.
+    ReadyToRestart {
+        #[serde(default)]
+        notes: Option<UpdateNotes>,
+    },
     /// The Update channel setting names another channel; its current
     /// release installs only once the user confirms ("Switch to Stable
     /// 2.3.1").
@@ -94,6 +98,14 @@ pub(crate) enum DesktopUpdateStatus {
     PackageUpdate {
         command: String,
     },
+}
+
+/// What changed between the running build and a staged dev build: the
+/// titles of the PRs merged in between, and the dev changelog's entry.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct UpdateNotes {
+    pub(crate) items: Vec<String>,
+    pub(crate) url: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

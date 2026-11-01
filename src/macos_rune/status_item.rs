@@ -513,7 +513,7 @@ fn menu_title(title: &str) -> String {
 fn update_title(status: &crate::desktop::host::DesktopUpdateStatus) -> String {
     use crate::desktop::host::DesktopUpdateStatus;
     match status {
-        DesktopUpdateStatus::ReadyToRestart => "Restart to Update".into(),
+        DesktopUpdateStatus::ReadyToRestart { .. } => "Restart to Update".into(),
         DesktopUpdateStatus::Available => "Download Update…".into(),
         DesktopUpdateStatus::SwitchAvailable { channel, version } => {
             format!("{}…", crate::updater::switch_label(channel, version))

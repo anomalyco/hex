@@ -1028,6 +1028,29 @@ fn an_update_is_a_secondary_button_with_a_dot_and_its_own_label() {
 }
 
 #[test]
+fn a_staged_dev_build_lists_its_first_changes_under_the_update() {
+    let mut rt = runtime("mac-update-ready", true, PANE_SIZE);
+    assert!(
+        rt.find("sidebar-update-notes").is_none(),
+        "no notes, no list"
+    );
+    if let Some(view) = &mut rt.state.view {
+        view.update_status = DesktopUpdateStatus::ReadyToRestart {
+            notes: Some(crate::desktop::host::UpdateNotes {
+                items: ["One", "Two", "Three", "Four"].map(String::from).to_vec(),
+                url: "https://anoma.ly/hex/dev#0.0.0-dev-2".into(),
+            }),
+        };
+    }
+    refresh(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "What's new"));
+    assert!(shown.iter().any(|text| text == "· Three"));
+    assert!(!shown.iter().any(|text| text == "· Four"), "three at most");
+    assert!(rt.find("sidebar-update-control/dot").is_some());
+}
+
+#[test]
 fn meetings_off_offers_the_opt_in_and_keeps_the_pane() {
     let mut rt = runtime("meetings-off", true, PANE_SIZE);
     assert!(rt.find("meetings-view").is_none());

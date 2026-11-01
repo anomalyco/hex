@@ -1543,7 +1543,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
     nav = nav.children(labs::playground_nav(ui, p));
     nav = nav.child(labs::nav(ui, p));
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
-        Some(DesktopUpdateStatus::ReadyToRestart) => Some((
+        Some(DesktopUpdateStatus::ReadyToRestart { .. }) => Some((
             tr("Restart to update").to_owned(),
             DesktopAction::RestartIntoUpdate,
         )),
@@ -1572,6 +1572,10 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
                 move |ui: &mut Ui, _| ui.send(Request::Desktop(action.clone())),
             ))
     });
+    let notes = match ui.view.as_ref().map(|view| &view.update_status) {
+        Some(DesktopUpdateStatus::ReadyToRestart { notes: Some(notes) }) => update_notes(p, notes),
+        _ => None,
+    };
     title_bar(col())
         .key("sidebar")
         .role("navigation")
@@ -1584,8 +1588,69 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         .child(nav)
         .child(el().key("spacer").grow(1.0))
         .children(update)
+        .children(notes)
         .children(host::QUIT_IN_WINDOW.then(|| quit_item(p)))
         .child(footer(ui, p))
+}
+
+/// Under Restart to update, the first few changes in the staged dev build
+/// and What's new, which opens its entry in the dev changelog.
+const UPDATE_NOTES_SHOWN: usize = 3;
+
+fn update_notes(p: Paint, notes: &crate::desktop::host::UpdateNotes) -> Option<El> {
+    if notes.items.is_empty() {
+        return None;
+    }
+    let c = &p.k.c;
+    let url = notes.url.clone();
+    let link = row()
+        .key("whats-new")
+        .h(FOOTER_LINE)
+        .px(6.0)
+        .center_y()
+        .self_start()
+        .radius(p.k.radius.sm)
+        .role("link")
+        .label(tr("What's new"))
+        .hover(c.hover)
+        .press(c.pressed)
+        .focusable(true)
+        .focus_ring(2.0, -2.0, c.border_focus)
+        .on_press(move |ui: &mut Ui| {
+            if ui.live()
+                && let Err(error) = crate::desktop::opencode_catalog::open_url(&url)
+            {
+                ui.error = Some(format!("{error:#}"));
+            }
+        })
+        .child(
+            text(tr("What's new"))
+                .key("label")
+                .font(p.k.ty.small)
+                .color(c.text_muted)
+                .truncate(),
+        );
+    let items = notes
+        .items
+        .iter()
+        .take(UPDATE_NOTES_SHOWN)
+        .enumerate()
+        .map(|(index, item)| {
+            text(format!("· {item}"))
+                .key(format!("item{index}"))
+                .font(p.k.ty.small)
+                .color(p.faint())
+                .truncate()
+                .px(6.0)
+        });
+    Some(
+        col()
+            .key("sidebar-update-notes")
+            .mt(6.0)
+            .gap(2.0)
+            .child(link)
+            .children(items),
+    )
 }
 
 /// The version and, under it, a manual check or what the updater is doing.
@@ -1617,7 +1682,7 @@ fn footer(ui: &Ui, p: Paint) -> El {
         | Some(
             DesktopUpdateStatus::Unavailable
             | DesktopUpdateStatus::Available
-            | DesktopUpdateStatus::ReadyToRestart
+            | DesktopUpdateStatus::ReadyToRestart { .. }
             | DesktopUpdateStatus::SwitchAvailable { .. },
         ) => None,
         Some(DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed) => Some(
@@ -2302,7 +2367,7 @@ const SCENES: &[Scene] = &[
     ("mac-update-ready", |ui| {
         *ui = mac_fixture();
         if let Some(view) = &mut ui.view {
-            view.update_status = DesktopUpdateStatus::ReadyToRestart;
+            view.update_status = DesktopUpdateStatus::ReadyToRestart { notes: None };
         }
     }),
     ("mac-update-checking", |ui| {

@@ -14,6 +14,7 @@
 //! manifest's SHA-256, and (macOS, Windows) the code signature are the
 //! integrity checks.
 
+mod notes;
 #[cfg_attr(target_os = "linux", path = "updater/linux.rs")]
 #[cfg_attr(target_os = "macos", path = "updater/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "updater/windows.rs")]
@@ -28,7 +29,7 @@ use std::time::Duration;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use crate::app_settings::{AppSettings, UpdateChannel};
-use crate::desktop::host::{DesktopAction, DesktopUpdateStatus};
+use crate::desktop::host::{DesktopAction, DesktopUpdateStatus, UpdateNotes};
 use protocol::{Decision, Install};
 
 use platform::Staged;
@@ -191,6 +192,8 @@ struct Shared {
     /// The newest staged update. Checks continue while one waits, and a
     /// different current release replaces it before the restart.
     staged: Mutex<Option<StagedUpdate>>,
+    /// What the staged dev build changed, when the dev notes said.
+    notes: Mutex<Option<UpdateNotes>>,
     restart: Mutex<Restart>,
 }
 
@@ -204,6 +207,7 @@ impl Shared {
             last: Mutex::new(None),
             confirmed: Mutex::new(None),
             staged: Mutex::new(None),
+            notes: Mutex::new(None),
             restart: Mutex::new(Restart::Idle),
         }
     }
@@ -340,7 +344,9 @@ impl Updater {
             State::Current => DesktopUpdateStatus::Current,
             State::Failed => DesktopUpdateStatus::Failed,
             State::Downloading => DesktopUpdateStatus::Downloading,
-            State::Ready | State::Applied => DesktopUpdateStatus::ReadyToRestart,
+            State::Ready | State::Applied => DesktopUpdateStatus::ReadyToRestart {
+                notes: lock(&self.shared.notes).clone(),
+            },
             State::Download { .. } => DesktopUpdateStatus::Available,
             State::Switch {
                 channel, version, ..
@@ -407,7 +413,7 @@ impl Updater {
     #[cfg(target_os = "macos")]
     pub fn menu_action(&self) -> DesktopAction {
         match self.status() {
-            DesktopUpdateStatus::ReadyToRestart => DesktopAction::RestartIntoUpdate,
+            DesktopUpdateStatus::ReadyToRestart { .. } => DesktopAction::RestartIntoUpdate,
             DesktopUpdateStatus::Available => DesktopAction::OpenUpdate,
             DesktopUpdateStatus::SwitchAvailable { .. } => DesktopAction::ConfirmUpdateSwitch,
             _ => DesktopAction::CheckForUpdates,
@@ -671,6 +677,16 @@ fn check(
                 staged,
                 sha256: target.sha256,
             });
+            *lock(&shared.notes) = (channel == UpdateChannel::Dev.name())
+                .then(|| {
+                    notes::fetch(
+                        &user_agent,
+                        &updates.join("notes"),
+                        crate::VERSION,
+                        &version,
+                    )
+                })
+                .flatten();
             Ok(State::Ready)
         }
     }
@@ -1052,7 +1068,7 @@ mod tests {
         updater.check_now();
         assert_eq!(
             updater.status(),
-            DesktopUpdateStatus::ReadyToRestart,
+            DesktopUpdateStatus::ReadyToRestart { notes: None },
             "a check keeps the staged update offered"
         );
         assert!(

@@ -44,7 +44,9 @@ Release (push to dev: dev channel; workflow_dispatch: ref + channel check | dev 
 │                           check: pushes and deletes a throwaway v0.0.0-test-<run> tag
 ├─ aur-stage → aur          stable: makepkg + install from the published files → push-aur.sh          [build → release]
 ├─ homebrew-stage → homebrew stable: render + brew style/audit → push-homebrew.sh                     [build → release]
-└─ record-aur, record-brew  OIDC: the package manager serves the version                              [release]
+├─ record-aur, record-brew  OIDC: the package manager serves the version                              [release]
+└─ dev-notes-stage → dev-notes  dev: PR titles since the last dev build (release-dev-notes.sh) →     [build → release]
+                            dev-notes.json in hex-production-files (publish-dev-notes.sh)
 ```
 
 Without a platform's signing values, dev and check runs go on without that
@@ -133,7 +135,13 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   links. Every push to `dev` runs it, except pushes that change only `docs/`,
   `site/`, or Markdown; a running dev release always finishes, and only the newest push that lands meanwhile waits to run next (GitHub drops the ones between), and
   `gh workflow run release.yml --ref dev -f channel=dev -f ref=dev`
-  runs it by hand. It runs in `release`, which needs no approval. The
+  runs it by hand. It runs in `release`, which needs no approval. Each dev
+  build's notes are the titles of the PRs merged since the previous dev
+  build, without CI fixes and changes outside the app
+  (`scripts/release-dev-notes.sh`); once the build is published they join
+  `https://anoma.ly/hex/files/dev-notes.json`, which the changelog at
+  `https://anoma.ly/hex/dev` (the dev release's `notes_url`) and the app's
+  Restart to update read. The
   version is `0.0.0-dev-<run number>`, as OpenCode numbers its dev builds.
   Versions are display text that nothing compares: each channel has one
   current release and installs follow it, so a dev build below 2.3.1 is fine,
@@ -222,6 +230,7 @@ cloudflare.config.ts (cf deploy --prebuilt --mode <mode>, from CI only)
 
 https://anoma.ly/hex/                      the site; downloads read the service's stable manifest at build time
 ├─ download/dev                            302 to the dev channel's macos-arm64-dmg, read per request
+├─ dev                                     the dev builds' changelog, rendered per request from files/dev-notes.json
 ├─ install-linux.sh, install-windows.ps1   the installers, copied from .github/release/ at build time
 └─ files/                                  the frozen 2.3.1 bucket for old clients (below)
 ```

@@ -714,3 +714,60 @@ jobs:
     steps:
       - *checkout-release
       - run: bash .github/release/release-service.sh distribution brew "$HEX_VERSION"
+
+  # ---- Dev notes: what each dev build changed ---------------------------------
+
+  # The PRs merged since the previous dev build, from their titles, without
+  # secrets (scripts/release-dev-notes.sh).
+  dev-notes-stage:
+    needs: plan
+    if: needs.plan.outputs.channel == 'dev'
+    runs-on: ubuntu-24.04
+    env:
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+      SHA: ${{ needs.plan.outputs.sha }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - name: Write the notes
+        run: |
+          mkdir -p "$RUNNER_TEMP/notes"
+          bash scripts/release-dev-notes.sh "$HEX_VERSION" "$SHA" "$RUNNER_TEMP/notes/dev-notes.json"
+          { echo '### Dev notes'; jq -r '.builds[0].items[] | "- \(.title) (\(.url))"' "$RUNNER_TEMP/notes/dev-notes.json"; } >> "$GITHUB_STEP_SUMMARY"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: build-dev-notes
+          path: ${{ runner.temp }}/notes
+
+  # Once the build is the dev channel's release, its notes join
+  # https://anoma.ly/hex/files/dev-notes.json, which https://anoma.ly/hex/dev
+  # and the app's update item read.
+  dev-notes:
+    needs: [plan, publish, dev-notes-stage]
+    if: >-
+      ${{ !cancelled() && needs.plan.outputs.channel == 'dev'
+      && needs.publish.result == 'success' && needs.dev-notes-stage.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      HEX_VERSION: ${{ needs.plan.outputs.release-version }}
+      SHA: ${{ needs.plan.outputs.sha }}
+      HEX_RELEASE_BUCKET: hex-production-files
+    steps:
+      - *checkout-release
+      - uses: ./.github/release/download
+        with:
+          pattern: build-dev-notes
+          digests: build-dev-notes=${{ needs.dev-notes-stage.outputs.digest }}
+      - name: Publish the notes
+        env:
+          R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: bash .github/release/publish-dev-notes.sh "$RUNNER_TEMP/in/build-dev-notes/dev-notes.json" "$HEX_VERSION" "$SHA"
