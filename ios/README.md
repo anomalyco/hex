@@ -67,11 +67,11 @@ it never accesses the microphone, speech model, or network.
 
 ## Build & Test
 
-Prerequisites: Xcode 26+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46.0+.
+Prerequisites: Xcode 26+ and Keel (`~/bin/keel`).
 
 ```sh
 cd ios
-xcodegen generate
+keel ensure
 xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=<SIM_UDID>"
 ```
 
