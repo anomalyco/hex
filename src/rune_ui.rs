@@ -51,6 +51,7 @@ mod practice;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
+mod sidebar_update;
 mod sound_sets;
 mod spark;
 #[cfg(target_os = "macos")]
@@ -1543,42 +1544,6 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
     }
     nav = nav.children(labs::playground_nav(ui, p));
     nav = nav.child(labs::nav(ui, p));
-    let action = match ui.view.as_ref().map(|view| &view.update_status) {
-        Some(DesktopUpdateStatus::ReadyToRestart) => Some((
-            tr("Restart to update").to_owned(),
-            DesktopAction::RestartIntoUpdate,
-        )),
-        Some(DesktopUpdateStatus::Available) => {
-            Some((tr("Download update").to_owned(), DesktopAction::OpenUpdate))
-        }
-        Some(DesktopUpdateStatus::SwitchAvailable { channel, version }) => Some((
-            crate::updater::switch_label(channel, version),
-            DesktopAction::ConfirmUpdateSwitch,
-        )),
-        _ => None,
-    };
-    // An available update is a state, not the screen's main action.
-    let update = action.map(|(label, action)| {
-        row()
-            .key("sidebar-update-control")
-            .gap(8.0)
-            .pl(6.0)
-            .center_y()
-            .child(controls::status_dot(p.accent()))
-            .child(controls::button(
-                p,
-                "sidebar-update",
-                &label,
-                controls::ButtonKind::Secondary,
-                move |ui: &mut Ui, _| ui.send(Request::Desktop(action.clone())),
-            ))
-    });
-    let notes = ui
-        .view
-        .as_ref()
-        .filter(|view| view.update_status == DesktopUpdateStatus::ReadyToRestart)
-        .and_then(|view| view.update_notes.as_ref())
-        .and_then(|notes| update_notes(p, notes));
     title_bar(col())
         .key("sidebar")
         .role("navigation")
@@ -1590,70 +1555,10 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         .pr(6.0)
         .child(nav)
         .child(el().key("spacer").grow(1.0))
-        .children(update)
-        .children(notes)
+        .children(sidebar_update::control(ui, p))
+        .children(sidebar_update::notes(ui, p))
         .children(host::QUIT_IN_WINDOW.then(|| quit_item(p)))
         .child(footer(ui, p))
-}
-
-/// Under Restart to update, the first few changes in the staged dev build
-/// and What's new, which opens its entry in the dev changelog.
-const UPDATE_NOTES_SHOWN: usize = 3;
-
-fn update_notes(p: Paint, notes: &crate::desktop::host::UpdateNotes) -> Option<El> {
-    if notes.items.is_empty() {
-        return None;
-    }
-    let c = &p.k.c;
-    let url = notes.url.clone();
-    let link = row()
-        .key("whats-new")
-        .h(FOOTER_LINE)
-        .px(6.0)
-        .center_y()
-        .self_start()
-        .radius(p.k.radius.sm)
-        .role("link")
-        .label(tr("What's new"))
-        .hover(c.hover)
-        .press(c.pressed)
-        .focusable(true)
-        .focus_ring(2.0, -2.0, c.border_focus)
-        .on_press(move |ui: &mut Ui| {
-            if ui.live()
-                && let Err(error) = crate::desktop::opencode_catalog::open_url(&url)
-            {
-                ui.error = Some(format!("{error:#}"));
-            }
-        })
-        .child(
-            text(tr("What's new"))
-                .key("label")
-                .font(p.k.ty.small)
-                .color(c.text_muted)
-                .truncate(),
-        );
-    let items = notes
-        .items
-        .iter()
-        .take(UPDATE_NOTES_SHOWN)
-        .enumerate()
-        .map(|(index, item)| {
-            text(format!("· {item}"))
-                .key(format!("item{index}"))
-                .font(p.k.ty.small)
-                .color(p.faint())
-                .truncate()
-                .px(6.0)
-        });
-    Some(
-        col()
-            .key("sidebar-update-notes")
-            .mt(6.0)
-            .gap(2.0)
-            .child(link)
-            .children(items),
-    )
 }
 
 /// The version and, under it, a manual check or what the updater is doing.
