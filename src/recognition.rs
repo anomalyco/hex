@@ -838,11 +838,14 @@ pub fn listen(
             if context != next_context {
                 input_monitor.activity.invalidate();
             }
+            let switched_app = context.application != next_context.application;
             context = next_context;
-            events.emit(&VoiceEvent::Context {
-                timestamp_ms: now_ms(),
-                application: context.application.clone(),
-            })?;
+            if switched_app {
+                events.emit(&VoiceEvent::Context {
+                    timestamp_ms: now_ms(),
+                    application: context.application.clone(),
+                })?;
+            }
         }
         let next_microphone_policy = crate::app_settings::microphone_policy();
         if next_microphone_policy.release_while_idle != microphone_policy.release_while_idle {

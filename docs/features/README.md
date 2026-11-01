@@ -949,8 +949,9 @@ Website context per OS: macOS reads no page at all until something uses it: a
 mode chosen by website, an OpenCode rewrite (its prompt names the site), or a
 script transformation (it receives the address)
 (`dictation::config::reads_browser`), so dictation's page reads never prompt
-without one (Meetings and media pause still ask browsers when on). Otherwise
-it asks the front tab of Safari, Orion, Chrome,
+without one (Meetings and media pause still ask browsers when on). The front
+window's title is read only by meeting detection and while a script
+transformation is set up (`reads_window_title`). Otherwise it asks the front tab of Safari, Orion, Chrome,
 Brave, Edge, Arc, Vivaldi, Opera, Helium, and Chromium over AppleScript (one
 Automation prompt per browser; a refusal keeps the application context) and
 reads any other app's focused AXWebArea `AXURL` (Firefox, Zen, web views).
