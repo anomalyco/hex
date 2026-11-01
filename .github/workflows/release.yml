@@ -671,7 +671,11 @@ jobs:
           # `brew trust` and no such check.
           if brew trust --help > /dev/null 2>&1; then brew trust anomalyco/tap; fi
           brew style --cask anomalyco/tap/hex
-          brew audit --cask --strict --online anomalyco/tap/hex
+          # Skipped audits: the DMG URL names its own SHA-256 rather than the
+          # version, so a pinned sha256 is right; and the token "hex" belongs to
+          # this tap's cask, not homebrew/core's unrelated hex formula.
+          brew audit --cask --strict --online \
+            --except=sha256_no_check_if_unversioned,token_conflicts anomalyco/tap/hex
       - id: upload
         uses: ./.github/release/upload
         with:
