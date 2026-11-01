@@ -11,8 +11,9 @@ use windows_sys::Win32::System::SystemInformation::GetTickCount;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-    KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VK_ESCAPE, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
-    VK_MENU, VK_RCONTROL, VK_RETURN, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB,
+    KEYEVENTF_KEYUP, MAPVK_VK_TO_CHAR, MapVirtualKeyW, SendInput, VK_CONTROL, VK_ESCAPE,
+    VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RETURN, VK_RMENU,
+    VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VkKeyScanW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT,
@@ -144,9 +145,14 @@ impl WindowsHotkey {
             .or_else(|| key.strip_prefix('F'))
             .and_then(|number| number.parse::<u8>().ok())
             .is_some_and(|number| (1..=24).contains(&number));
-        if !function_key && HotkeyKey::mouse_number(key).is_none() && modifier_count == 0 {
+        // Keys that type nothing may stand alone: function keys, mouse
+        // buttons, Pause, and Scroll Lock.
+        let types_nothing = function_key
+            || HotkeyKey::mouse_number(key).is_some()
+            || (HotkeyKey::special_name(key) && !key.trim().eq_ignore_ascii_case("menu"));
+        if !types_nothing && modifier_count == 0 {
             return Err(eyre!(
-                "Windows dictation shortcuts require a modifier or a function key"
+                "Windows dictation shortcuts require a modifier, a function key, Pause, or Scroll Lock"
             ));
         }
         Ok(())
@@ -620,7 +626,14 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     if event.dwExtraInfo == HEX_INJECTED {
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
-    match process_button(event.vkCode, is_down, event.time) {
+    // Numpad Enter is Enter with the extended flag: it gets its own code.
+    let vk = if event.vkCode == u32::from(VK_RETURN) && event.flags & LLKHF_EXTENDED != 0 {
+        NUMPAD_ENTER_DOWN.store(is_down, Ordering::Relaxed);
+        NUMPAD_ENTER
+    } else {
+        event.vkCode
+    };
+    match process_button(vk, is_down, event.time) {
         Disposition::Pass => unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) },
         Disposition::Suppress => 1,
         Disposition::Mask if replay_masked_release(event) => 1,
@@ -1201,10 +1214,20 @@ pub(crate) struct ChordCapture {
     seen: ModifierState,
 }
 
+/// Numpad Enter's code in a binding: Enter's virtual key with the extended
+/// flag, which no virtual key of its own names.
+const NUMPAD_ENTER: u32 = 0x100 | VK_RETURN as u32;
+
+/// Whether the keyboard hook last saw Numpad Enter go down, for the chord
+/// capture, which reads every other key's state from Windows. Without the
+/// hook (Hex disabled) a capture records Numpad Enter as Enter.
+static NUMPAD_ENTER_DOWN: AtomicBool = AtomicBool::new(false);
+
 /// Non-modifier keys the capture scans, paired with the names
-/// [`virtual_key`] accepts (letters, digits, and function keys are
-/// scanned separately).
-const CAPTURE_NAMED_KEYS: [(u16, &str); 14] = [
+/// [`virtual_key`] accepts (letters, digits, function keys, and the
+/// layout's punctuation are scanned separately). Numpad keys are named
+/// `num 1`, `num *`, ...: their own keys, not the top row's.
+const CAPTURE_NAMED_KEYS: [(u16, &str); 31] = [
     (VK_SPACE, "space"),
     (VK_RETURN, "enter"),
     (VK_TAB, "tab"),
@@ -1219,7 +1242,52 @@ const CAPTURE_NAMED_KEYS: [(u16, &str); 14] = [
     (0x26, "up"),
     (0x27, "right"),
     (0x28, "down"),
+    (0x13, "pause"),
+    (0x91, "scroll lock"),
+    (0x60, "num 0"),
+    (0x61, "num 1"),
+    (0x62, "num 2"),
+    (0x63, "num 3"),
+    (0x64, "num 4"),
+    (0x65, "num 5"),
+    (0x66, "num 6"),
+    (0x67, "num 7"),
+    (0x68, "num 8"),
+    (0x69, "num 9"),
+    (0x6A, "num *"),
+    (0x6B, "num +"),
+    (0x6D, "num -"),
+    (0x6E, "num ."),
+    (0x6F, "num /"),
 ];
+
+/// The punctuation (OEM) keys, named by the character they type on the
+/// active layout (`;`, `-`, `ß`, ...).
+const OEM_KEYS: [u16; 13] = [
+    0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF, 0xE2,
+];
+
+/// The character `vk` types on the active layout, without modifiers; a dead
+/// key's accent included.
+fn oem_name(vk: u16) -> Option<String> {
+    // SAFETY: a pure layout lookup.
+    let mapped = unsafe { MapVirtualKeyW(u32::from(vk), MAPVK_VK_TO_CHAR) };
+    char::from_u32(mapped & 0xFFFF)
+        .filter(|character| !character.is_control() && !character.is_whitespace())
+        .map(|character| character.to_lowercase().collect())
+}
+
+/// The OEM key that types `character` on the active layout.
+fn oem_key(character: char) -> Option<u32> {
+    let mut units = [0u16; 2];
+    let [unit] = character.encode_utf16(&mut units) else {
+        return None;
+    };
+    // SAFETY: a pure layout lookup.
+    let scanned = unsafe { VkKeyScanW(*unit) };
+    let vk = (scanned as u16 & 0xFF) as u16;
+    (scanned != -1 && OEM_KEYS.contains(&vk)).then_some(u32::from(vk))
+}
 
 impl ChordCapture {
     fn arm_mouse(&mut self, held: bool) -> bool {
@@ -1323,7 +1391,7 @@ fn unsupported_key_down() -> bool {
             // Modifiers (generic + left/right) and the Windows keys.
             0x10..=0x12 | 0xA0..=0xA5 | 0x5B | 0x5C => continue,
             // Escape cancels the recorder; lock and IME state keys are inert.
-            0x1B | 0x14 | 0x15..=0x1A | 0x90 | 0x91 => continue,
+            0x1B | 0x14 | 0x15..=0x1A | 0x90 => continue,
             _ => {}
         }
         if !key_down(vk) {
@@ -1332,7 +1400,8 @@ fn unsupported_key_down() -> bool {
         let mappable = CAPTURE_NAMED_KEYS.iter().any(|(named, _)| *named == vk)
             || (0x41..=0x5A).contains(&vk)
             || (0x30..=0x39).contains(&vk)
-            || (0x70..=0x87).contains(&vk);
+            || (0x70..=0x87).contains(&vk)
+            || (OEM_KEYS.contains(&vk) && oem_name(vk).is_some());
         if !mappable {
             return true;
         }
@@ -1352,8 +1421,18 @@ fn pressed_capture_key() -> Option<String> {
     if let Some((_, name)) = MOUSE_KEYS.into_iter().find(|&(vk, _)| key_down(vk)) {
         return Some(name.into());
     }
+    if key_down(VK_RETURN) && NUMPAD_ENTER_DOWN.load(Ordering::Relaxed) {
+        return Some("num enter".into());
+    }
     if let Some((_, name)) = CAPTURE_NAMED_KEYS.into_iter().find(|&(vk, _)| key_down(vk)) {
         return Some(name.to_string());
+    }
+    if let Some(name) = OEM_KEYS
+        .into_iter()
+        .filter(|&vk| key_down(vk))
+        .find_map(oem_name)
+    {
+        return Some(name);
     }
     for vk in 0x41..=0x5A_u16 {
         // A-Z
@@ -1392,6 +1471,10 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
     }
     let virtual_key = match normalized.as_str() {
         "return" => u32::from(VK_RETURN),
+        "num enter" => NUMPAD_ENTER,
+        name if crate::app_settings::HotkeyKey::special_name(name) && name != "menu" => {
+            u32::from(if name == "pause" { 0x13_u16 } else { 0x91 })
+        }
         "page_up" => 0x21,
         "page_down" => 0x22,
         _ => {
@@ -1401,12 +1484,15 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
                 .filter(|number| (1..=24).contains(number))
             {
                 0x70 + number - 1
-            } else if normalized.len() == 1 {
-                let character = normalized.as_bytes()[0];
+            } else if let Some(character) = single_character(&normalized) {
                 if character.is_ascii_alphanumeric() {
-                    u32::from(character.to_ascii_uppercase())
+                    u32::from(character.to_ascii_uppercase() as u8)
+                } else if let Some(vk) = oem_key(character) {
+                    vk
                 } else {
-                    return Err(eyre!("unsupported Windows shortcut key: {key}"));
+                    return Err(eyre!(
+                        "{key} isn't a key on the active Windows keyboard layout"
+                    ));
                 }
             } else {
                 return Err(eyre!("unsupported Windows shortcut key: {key}"));
@@ -1416,9 +1502,48 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
     Ok(virtual_key)
 }
 
+fn single_character(name: &str) -> Option<char> {
+    let mut characters = name.chars();
+    characters.next().filter(|_| characters.next().is_none())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numpad_pause_and_scroll_lock_round_trip_through_saved_settings() {
+        for (vk, name) in CAPTURE_NAMED_KEYS {
+            let saved = HotkeyKey::named(name);
+            assert_eq!(saved.name(), name);
+            assert_eq!(virtual_key(&saved.name()).unwrap(), u32::from(vk), "{name}");
+        }
+        let enter = HotkeyKey::named("num enter");
+        assert_eq!(enter.label, "Num Enter");
+        assert_eq!(virtual_key(&enter.name()).unwrap(), NUMPAD_ENTER);
+        assert_ne!(virtual_key("num 1").unwrap(), virtual_key("1").unwrap());
+        assert_eq!(HotkeyKey::named("num *").label, "Num *");
+        assert_eq!(HotkeyKey::named("scroll lock").label, "Scroll Lock");
+    }
+
+    #[test]
+    fn pause_and_scroll_lock_stand_alone_but_numpad_keys_need_a_modifier() {
+        let alone = |key: &str| WindowsHotkey {
+            control: None,
+            windows: None,
+            alt: None,
+            shift: None,
+            key: Some(key.into()),
+        };
+        assert!(alone("pause").validate().is_ok());
+        assert!(alone("scroll lock").validate().is_ok());
+        assert!(alone("num 5").validate().is_err());
+        let control = WindowsHotkey {
+            control: Some(ModifierSide::Either),
+            ..alone("num 5")
+        };
+        assert!(control.validate().is_ok());
+    }
 
     #[test]
     fn mouse_recorder_waits_for_the_opening_click_to_be_released() {

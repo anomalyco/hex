@@ -1445,6 +1445,10 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   ├── Speech model: downloaded models, ✓ on the selected one; none while one prepares
 │   └── Update item · Enable / Disable Hex · Quit Hex
 ├── Single-modifier shortcut -> Left / Either / Right side picker, as macOS
+├── Recordable keys -> letters, digits, F1–F24, named keys, the layout's
+│   punctuation (named by the character it types: `;`, `ß`), numpad keys
+│   (`Num 1`, `Num *`, `Num Enter`, apart from the top row), Pause and Scroll
+│   Lock (both may stand alone), mouse buttons (#794)
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Escape -> Nothing (#786); a held modifier alone never ends or cancels a capture
 ├── One modifier alone (Right Alt, Right Ctrl) -> Shortcut; Alt/Win release masked (no menu, Start)
