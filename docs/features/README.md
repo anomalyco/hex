@@ -45,7 +45,7 @@ The other capabilities stay here until they need their own verification recipe.
 ## Get Ready
 
 Install the signed macOS app with `brew install --cask anomalyco/tap/hex` or the
-[manual DMG](../../README.md#install-hex). The cask uses a versioned, checksum-pinned
+[manual DMG](../../README.md#downloads). The cask uses a versioned, checksum-pinned
 DMG, requires Apple silicon/macOS 15+, and leaves updates to Hex's own updater. It does
 not require OpenCode, launch the app automatically, migrate the legacy
 Swift app, or forcibly replace an existing app destination. Homebrew uninstall
@@ -619,8 +619,8 @@ Send is not an atomic target-app transaction. Chromium 155 and 156 get the text
 typed instead of pasted for a [Chrome paste bug](dictation.md#ongoing-jobs-and-output).
 
 **Easy to misread:** History Off does not stop diagnostic logging. Diagnostic
-logs are separate and currently unbounded on disk. See the
-[privacy guide](../../README.md#privacy-and-local-data).
+logs are separate and currently unbounded on disk.
+
 
 The shared `EventReader` streams a file-length snapshot in 16 KiB chunks rather
 than copying the entire log into memory. It retains up to 1,024 event rows and
