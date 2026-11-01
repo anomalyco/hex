@@ -7,6 +7,10 @@ struct HEXMobileApp: App {
     @State private var openedFromKeyboard = Self.initialOpenedFromKeyboard
     @State private var showSetup = false
 
+    init() {
+        FullKeyboardSettings().applyLaunchArguments()
+    }
+
     private static var initialOpenedFromKeyboard: Bool {
         let args = ProcessInfo.processInfo.arguments
         guard let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count else {
