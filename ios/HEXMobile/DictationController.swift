@@ -863,9 +863,16 @@ final class DictationController {
             while !Task.isCancelled {
                 guard let self,
                       let session = self.activeCapture,
-                      session.generation == generation,
-                      session.capture.isRecording else {
+                      session.generation == generation else {
                     break
+                }
+
+                // Recorder readiness is a sample, not the capture's lifetime. A transient
+                // false must not strand the app meter and keyboard heartbeat until Stop.
+                // Completion/interruption callbacks and explicit Stop own capture teardown.
+                guard session.capture.isRecording else {
+                    try? await Task.sleep(for: .milliseconds(33))
+                    continue
                 }
 
                 let db = session.capture.averagePowerDB()

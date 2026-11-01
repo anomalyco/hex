@@ -30,6 +30,7 @@ private final class FakeAudioManager: AudioManaging {
     var permissionGranted = true
     var keepaliveShouldThrow = false
     var nextCaptureDuration: TimeInterval = 1.4
+    var nextCaptureIsRecording = true
     var deactivateCount = 0
     var createdCaptures: [FakeAudioCapture] = []
 
@@ -64,6 +65,7 @@ private final class FakeAudioManager: AudioManaging {
     ) throws -> any ActiveAudioCapture {
         isKeepaliveRunning = false
         let capture = FakeAudioCapture(url: url, initialDuration: nextCaptureDuration)
+        capture.isRecording = nextCaptureIsRecording
         createdCaptures.append(capture)
         return capture
     }
@@ -366,6 +368,67 @@ final class DictationControllerTests: XCTestCase {
         controller.selectWarmDuration(.off)
         XCTAssertFalse(controller.keyboardSessionEnabled)
         XCTAssertFalse(audio.isKeepaliveRunning)
+    }
+
+    func testMeterRecoversAfterCaptureStartsTemporarilyNotRecording() async throws {
+        try await checkMeterRecovery(initiallyRecording: false)
+    }
+
+    func testMeterRecoversAfterRecordingTemporarilyStops() async throws {
+        try await checkMeterRecovery(initiallyRecording: true)
+    }
+
+    private func checkMeterRecovery(initiallyRecording: Bool) async throws {
+        var now = 20_000.0
+        let audio = FakeAudioManager()
+        audio.nextCaptureIsRecording = initiallyRecording
+        let transcriber = ControlledTranscriber()
+        let bridge = KeyboardBridge(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        controller.startRecording(keyboardJobID: "meter-recovery")
+        try await settle()
+        let capture = try XCTUnwrap(audio.createdCaptures.last)
+        defer { controller.cancelCurrentJob() }
+
+        // No completion/interruption callback: the same capture becomes available again.
+        capture.isRecording = false
+        try await settle()
+        capture.power = 0.9
+        capture.currentTime = 2.4
+        capture.isRecording = true
+        now += 1
+        try await settle()
+
+        let db = capture.averagePowerDB()
+        XCTAssertEqual(controller.phase, .recording)
+        XCTAssertEqual(controller.loudnessDB, db, accuracy: 0.001)
+        XCTAssertEqual(controller.audioLevel, (db + 48) / 48, accuracy: 0.001)
+        XCTAssertEqual(controller.recordingDuration, 2.4)
+        XCTAssertEqual(bridge.snapshot().state, .recording)
+        XCTAssertEqual(bridge.snapshot().effectiveLoudnessDB, db, accuracy: 0.001)
+        XCTAssertEqual(bridge.snapshot().heartbeat, now)
+
+        // A level-only change must still get through the keyboard publication throttle.
+        capture.power = 0.2
+        now += 1
+        try await settle()
+        XCTAssertEqual(controller.loudnessDB, capture.averagePowerDB(), accuracy: 0.001)
+        XCTAssertEqual(bridge.snapshot().effectiveLoudnessDB, capture.averagePowerDB(), accuracy: 0.001)
+
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "Ship the build.")
+        XCTAssertEqual(controller.audioLevel, 0)
+        XCTAssertEqual(bridge.snapshot().audioLevel, 0)
     }
 
     private func settle() async throws {
