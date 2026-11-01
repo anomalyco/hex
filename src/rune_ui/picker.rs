@@ -76,8 +76,8 @@ pub(super) struct Picker {
     /// Only models that support the saved language (or detect it, for Auto),
     /// while Labs › Sort and filter models is on.
     supported_only: bool,
-    /// The model whose Delete is armed.
-    deletion: Option<TranscriptionModelId>,
+    /// The model whose Delete (an import's Remove) is armed.
+    pub(super) deletion: Option<TranscriptionModelId>,
     deletion_error: Option<String>,
     /// Installed models for fixtures; live windows ask the filesystem.
     pub(super) installed: Option<Vec<TranscriptionModelId>>,

@@ -247,13 +247,27 @@ pub(super) fn actions(
         },
     )];
     if removable {
-        actions.push(button(
+        let confirming = ui.picker.deletion == Some(model.id);
+        let remove_button = button(
             p,
             "remove-model",
-            tr("Remove"),
-            ButtonKind::Secondary,
+            &if confirming {
+                crate::desktop::i18n::tr_fill("Remove {}?", &model.size_label())
+            } else {
+                tr("Remove").to_owned()
+            },
+            if confirming {
+                ButtonKind::Danger
+            } else {
+                ButtonKind::Secondary
+            },
             move |ui: &mut Ui, _| remove(ui, id),
-        ));
+        );
+        actions.push(if confirming {
+            remove_button.default_button()
+        } else {
+            remove_button
+        });
     }
     actions
 }
@@ -270,7 +284,14 @@ fn save_name(ui: &mut Ui) {
     }
 }
 
+/// The first press arms Remove, as Delete does; the second removes Hex's copy.
 fn remove(ui: &mut Ui, id: CustomModelId) {
+    let model = TranscriptionModelId::Custom(id);
+    if ui.picker.deletion != Some(model) {
+        ui.picker.deletion = Some(model);
+        return;
+    }
+    ui.picker.deletion = None;
     if !ui.live() {
         return;
     }
