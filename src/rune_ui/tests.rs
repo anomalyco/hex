@@ -1611,11 +1611,15 @@ fn the_wheel_scrolls_a_long_term_list() {
     rt.invalidate();
     settle(&mut rt);
     let first = |rt: &Runtime<Ui>| {
-        rt.elements()
+        let keys: Vec<_> = rt
+            .elements()
             .into_iter()
-            .find(|e| e.key.as_deref().is_some_and(|key| key.starts_with("term")) && e.path.contains("/terms/"))
-            .map(|e| e.rect[1])
-            .unwrap()
+            .filter(|e| e.path.contains("term-scroll"))
+            .take(6)
+            .map(|e| format!("{:?}={:?}@{}", e.key, e.path, e.rect[1]))
+            .collect();
+        eprintln!("{keys:?}");
+        element(rt, "term0").rect[1]
     };
     let list = element(&rt, "term-scroll").rect;
     for x in [list[0] + 1.0, list[0] + 40.0, list[0] + list[2] - 8.0] {
