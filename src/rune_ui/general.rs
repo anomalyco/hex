@@ -317,6 +317,32 @@ fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
         })
 }
 
+/// What the microphone mode means for speed and privacy (issue 61), in the
+/// words each OS uses for its microphone-in-use indicator.
+fn microphone_mode_note(os: super::platform::Os, release: bool) -> &'static str {
+    use super::platform::Os;
+    match (os, release) {
+        (Os::Macos, false) => tr(
+            "The microphone stays open, so dictation starts instantly. macOS shows the microphone dot in the menu bar the whole time.",
+        ),
+        (Os::Windows, false) => tr(
+            "The microphone stays open, so dictation starts instantly. Windows shows the microphone privacy icon the whole time.",
+        ),
+        (Os::Linux, false) => tr(
+            "The microphone stays open, so dictation starts instantly. Your desktop shows it in use the whole time, such as GNOME's microphone indicator.",
+        ),
+        (Os::Macos, true) => tr(
+            "The microphone opens only while you dictate, so the first moment of speech may be cut. The menu-bar dot shows only while recording.",
+        ),
+        (Os::Windows, true) => tr(
+            "The microphone opens only while you dictate, so the first moment of speech may be cut. The microphone privacy icon shows only while recording.",
+        ),
+        (Os::Linux, true) => tr(
+            "The microphone opens only while you dictate, so the first moment of speech may be cut. Your desktop's microphone indicator shows only while recording.",
+        ),
+    }
+}
+
 /// Labs › Also pause the browser's permission, under Pause media on macOS:
 /// Hex hears the browser through System Audio Recording, asked for here,
 /// never while you dictate.
@@ -804,9 +830,10 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             "microphone-mode",
             &ZAP,
             tr("Microphone mode"),
-            settings
-                .release_microphone_while_idle
-                .then(|| tr("Opens only while holding the shortcut. Disables pre-roll.")),
+            Some(microphone_mode_note(
+                ui.platform.caps.os,
+                settings.release_microphone_while_idle,
+            )),
             pick_select(
                 ui,
                 p,

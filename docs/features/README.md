@@ -707,9 +707,13 @@ General                                  // settings
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
 ├── Terminal paste (Advanced on Linux, Labs on Windows; off)
 │   └── On -> paste sends Ctrl+Shift+V instead of Ctrl+V; applies to the next paste
-├── Microphone mode (Advanced)
-│   ├── Keep ready (fast) -> Open while idle; pre-roll available
-│   └── Release when idle -> Confirm -> Open on press; no pre-roll; startup delay
+├── Microphone mode (Advanced; default Keep ready)
+│   ├── The row always says what the mode means, in each OS's words (issue 61):
+│   │   macOS the menu-bar dot, Windows the microphone privacy icon, Linux the
+│   │   desktop's indicator (GNOME's)
+│   ├── Keep ready (fast) -> Open while idle; pre-roll available; the OS shows the mic in use the whole time
+│   └── Release when idle -> Confirm -> Open on press; no pre-roll; startup delay;
+│       the first moment of speech may be cut; the indicator shows only while recording
 ├── While dictating -> Mute / Pause media / Lower audio / Do nothing
 │   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
 │   ├── Intentional capture only, not ordinary shortcut chords
