@@ -1303,7 +1303,7 @@ Linux beta                               // not macOS feature parity
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
 │   ├── Display -> picked at each capture start (#486)
 │   │   ├── X11 -> the monitor under the pointer (XRandR monitors); while shown,
-│   │   │   checked every 250 ms and moved at once to the pointer's (#807)
+│   │   │   checked every 250 ms; moves once two checks agree (#807)
 │   │   ├── Layer-shell (niri, Sway, Hyprland) -> no output pinned: the
 │   │   │   compositor's focused output
 │   │   └── GNOME, KDE (XDG_CURRENT_DESKTOP) -> the primary display
@@ -1439,7 +1439,7 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Hex app -> General, tray, HUD; Enabled = shortcut works in every app
 ├── HUD display -> the monitor under the pointer (GetCursorPos) at each capture
 │   start, inside that monitor's work area, at its own DPI (#486); while
-│   shown, checked every 250 ms and moved at once to the pointer's (#807)
+│   shown, checked every 250 ms; moves once two checks agree (#807)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
 │   └── Theme read when the tray is created; a later switch applies at the next launch

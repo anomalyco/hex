@@ -1206,8 +1206,10 @@ monitor's work area and draws it at that monitor's scale. A layer-shell
 surface pins no output, so niri, Sway and Hyprland put it on the focused
 output. GNOME and KDE keep the primary display. On Windows and X11, while
 the HUD shows it checks the pointer's display every 250 ms (`Hud::follow_pointer`,
-Rune's `refollow_pointer`), and the HUD and live text move there at once,
-without animating or taking focus, when it changed (#807). A position change
+Rune's `refollow_pointer`), and the HUD and live text move there, without
+animating or taking focus, once two checks in a row find the pointer on the
+same other display (250–500 ms), so a pointer on a display's edge doesn't
+flip it between them (#807). A position change
 or the next capture places it again (tested by reading the code only, not on
 multi-monitor hardware). On Windows the window is a topmost,
 click-through tool window with no redirection bitmap, drawn through
