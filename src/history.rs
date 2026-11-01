@@ -376,6 +376,13 @@ impl HistoryStore {
             .collect()
     }
 
+    /// The idle worker's expiry: reread whatever another process wrote first,
+    /// so pruning never writes a stale copy over its records or deletions.
+    fn expire_shared(&mut self, now_ms: u64) {
+        self.sync();
+        self.expire(now_ms);
+    }
+
     fn expire(&mut self, now_ms: u64) {
         self.prune(now_ms);
         if self.prune_pending
@@ -474,7 +481,7 @@ impl History {
                         Err(TryLockError::WouldBlock) => continue,
                         Err(TryLockError::Poisoned(error)) => error.into_inner(),
                     };
-                    store.expire(clock());
+                    store.expire_shared(clock());
                 }
             })
         {
@@ -589,6 +596,33 @@ mod tests {
         window.sync();
         assert!(window.entry(first).is_none(), "a deletion is never undone");
         assert!(window.entry(second).is_some());
+    }
+
+    #[test]
+    fn expiry_in_a_stale_process_keeps_the_other_processes_writes() {
+        let path = temp_path("stale-expiry");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut listener = HistoryStore::open(path.clone(), HistoryRetention::Day, 0);
+        listener.record(draft("old"), 1_000).unwrap();
+        listener.record(draft("kept"), 2_000).unwrap();
+        let mut window = HistoryStore::open(path.clone(), HistoryRetention::Day, 2_000);
+        let newer = listener.record(draft("newer"), 3_000).unwrap().unwrap();
+
+        window.expire_shared(day_ms + 1_001);
+        let saved = read_snapshot(&path).unwrap();
+        let texts: Vec<_> = saved
+            .iter()
+            .map(|entry| entry.final_text.as_str())
+            .collect();
+        assert_eq!(texts, ["kept", "newer"]);
+        assert!(window.entry(newer).is_some());
+
+        window.clear().unwrap();
+        listener.expire_shared(day_ms + 2_001);
+        assert!(
+            read_snapshot(&path).unwrap().is_empty(),
+            "a clear stays cleared"
+        );
     }
 
     #[test]
