@@ -2050,24 +2050,27 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         picker::parakeet_ultra_fixture(ui);
     }),
-    // The picker's Add model file….
+    // Every model, with the full list's Add model file….
     ("picker-custom-models", |ui| {
         *ui = portal_fixture();
-        picker::fixture(ui, None);
+        picker::all_fixture(ui);
     }),
     // Found on this computer: Parakeet v3's exact file and an untested Whisper.
     ("picker-found", |ui| {
         *ui = portal_fixture();
         ui.found.models = found::fixture();
-        picker::fixture(ui, None);
+        picker::all_fixture(ui);
     }),
-    // Japanese saved: the English-only models say they switch the language.
+    // Japanese saved: Japanese models compared, SenseVoice downloading.
     ("picker-japanese", |ui| {
         *ui = portal_fixture();
-        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
-        ui.settings.transcription.language = "ja".into();
-        ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
-        picker::fixture(ui, None);
+        picker::japanese_fixture(ui, Some(TranscriptionModelId::SenseVoiceSmall));
+    }),
+    // Every model: the English-only ones fold away and switch the language.
+    ("picker-japanese-all", |ui| {
+        *ui = portal_fixture();
+        picker::japanese_fixture(ui, None);
+        (ui.picker.view, ui.picker.others_open) = (picker::View::All, true);
     }),
     // Parakeet chosen over Japanese: Settings names the language change.
     ("language-fallback", |ui| {

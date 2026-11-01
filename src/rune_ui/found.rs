@@ -210,8 +210,9 @@ pub(super) fn section(ui: &Ui, p: super::controls::Paint) -> Option<rune::El> {
     let mut section = col().key("found-models").gap(8.0).child(
         text(crate::desktop::i18n::tr("Found on this computer"))
             .key("found-heading")
-            .font(p.k.ty.body_medium)
-            .color(p.text()),
+            .font(p.k.ty.small_medium)
+            .color(p.faint())
+            .pt(4.0),
     );
     for (index, model) in found {
         let detail = format!(

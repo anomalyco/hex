@@ -26,8 +26,8 @@ use sha2::{Digest, Sha256};
 
 use super::gguf_header::{self, GgufHeader};
 use super::models::{
-    GgufArtifact, LANGUAGES, ModelDefinition, ModelRuntime, TranscriptionModelId,
-    TranscriptionSelection, is_known_language, known_language, models_dir,
+    GgufArtifact, ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection,
+    is_known_language, known_language, models_dir,
 };
 
 const PREFIX: &str = "custom-";
@@ -326,13 +326,6 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         name: leak(&manifest.name),
         realtime: "Unknown",
         word_error_rate: None,
-        quality_context: "Not benchmarked",
-        coverage: leak(&coverage(languages)),
-        timestamps: match architecture {
-            "parakeet" => "Token timestamps",
-            "whisper" => "Segment timestamps",
-            _ => "No timestamps",
-        },
         streams: false,
         runtime: ModelRuntime::Gguf(artifact),
         languages,
@@ -341,16 +334,6 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         accepts_language_hint: architecture != "parakeet",
         supports_language_detection: manifest.detects_language && architecture != "parakeet",
     }))
-}
-
-fn coverage(languages: &[&str]) -> String {
-    match languages {
-        [only] => LANGUAGES
-            .iter()
-            .find(|(code, _)| code == only)
-            .map_or_else(|| (*only).to_owned(), |(_, name)| (*name).to_owned()),
-        languages => format!("{} languages", languages.len()),
-    }
 }
 
 /// The definition for `id`: its manifest's, or a placeholder that is never

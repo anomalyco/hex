@@ -174,17 +174,6 @@ pub enum Recommendation {
     Vocabulary,
 }
 
-impl Recommendation {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Recommended => "Recommended",
-            Self::Fastest => "Fastest",
-            Self::MostAccurate => "Most accurate",
-            Self::Vocabulary => "Uses vocabulary",
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct ModelChoice {
     pub model: &'static ModelDefinition,
@@ -195,12 +184,9 @@ pub struct ModelDefinition {
     pub id: TranscriptionModelId,
     pub name: &'static str,
     pub realtime: &'static str,
-    /// Word error rate on the `quality_context` benchmark, in percent;
+    /// Word error rate on the model's own benchmark, in percent;
     /// `None` when the system manages the model and publishes none.
     pub word_error_rate: Option<f64>,
-    pub quality_context: &'static str,
-    pub coverage: &'static str,
-    pub timestamps: &'static str,
     /// The pinned artifact advertises streaming, so dictation can transcribe
     /// while the shortcut is held. It still streams only on a GPU device and
     /// after its load probe succeeds; otherwise it transcribes the whole clip.
@@ -325,11 +311,6 @@ impl ModelDefinition {
             .collect()
     }
 
-    /// Benchmark accuracy, the inverse of its word error rate: `98.4%`.
-    pub fn accuracy_label(&self) -> Option<String> {
-        self.word_error_rate.map(accuracy_label)
-    }
-
     pub fn size_label(&self) -> String {
         match self.runtime {
             ModelRuntime::AppleSpeech => "Managed".into(),
@@ -369,10 +350,6 @@ impl ModelDefinition {
     }
 }
 
-fn accuracy_label(word_error_rate: f64) -> String {
-    format!("{:.1}%", (100.0 - word_error_rate).clamp(0.0, 100.0))
-}
-
 /// Silero VAD v6.2. Dictation and meetings skip audio it finds no speech in,
 /// because models hallucinate closing phrases such as "thank you" on silence
 /// and room noise. It downloads with every transcription model.
@@ -394,9 +371,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "Parakeet Unified English",
         realtime: "~163x",
         word_error_rate: Some(1.60),
-        quality_context: "English benchmark",
-        coverage: "English",
-        timestamps: "Token timestamps",
         streams: true,
         runtime: ModelRuntime::Gguf(&PARAKEET_UNIFIED_ENGLISH_ARTIFACT),
         languages: &["en"],
@@ -408,9 +382,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "Parakeet v2",
         realtime: "~55x",
         word_error_rate: Some(1.69),
-        quality_context: "English benchmark",
-        coverage: "English",
-        timestamps: "Token timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&PARAKEET_V2_ARTIFACT),
         languages: &["en"],
@@ -422,9 +393,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "Parakeet v3",
         realtime: "~33x",
         word_error_rate: Some(1.94),
-        quality_context: "English benchmark",
-        coverage: "25 languages",
-        timestamps: "Token timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&PARAKEET_V3_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
@@ -437,9 +405,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "Whisper large-v3-turbo",
         realtime: "~19x",
         word_error_rate: Some(2.01),
-        quality_context: "English benchmark",
-        coverage: "100 languages",
-        timestamps: "Segment timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&WHISPER_ARTIFACT),
         languages: &["*"],
@@ -451,9 +416,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "Qwen3-ASR 0.6B",
         realtime: "~16x",
         word_error_rate: Some(7.64),
-        quality_context: "Mandarin benchmark",
-        coverage: "30 languages",
-        timestamps: "No timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&QWEN_ARTIFACT),
         languages: QWEN_LANGUAGES,
@@ -467,9 +429,6 @@ pub const MODELS: &[ModelDefinition] = &[
         realtime: "~9x",
         // The author's own 3,699-utterance evaluation, not a public test set.
         word_error_rate: Some(19.85),
-        quality_context: "Author's Egyptian Arabic test",
-        coverage: "Egyptian Arabic, with English terms",
-        timestamps: "No timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&QWENCLEO_ARTIFACT),
         languages: &["ar"],
@@ -483,9 +442,6 @@ pub const MODELS: &[ModelDefinition] = &[
         // it ran a 9.8 s Hebrew clip as fast as the stock model (38x and 36x).
         realtime: "~19x",
         word_error_rate: Some(18.45),
-        quality_context: "Hebrew benchmark",
-        coverage: "Hebrew",
-        timestamps: "Segment timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&IVRIT_WHISPER_ARTIFACT),
         // ivrit.ai: the fine-tune lost language detection and translation, so
@@ -499,9 +455,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "SenseVoice Small",
         realtime: "~72x",
         word_error_rate: Some(10.11),
-        quality_context: "Mandarin benchmark",
-        coverage: "5 languages",
-        timestamps: "No timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&SENSEVOICE_ARTIFACT),
         languages: &["zh", "yue", "en", "ja", "ko"],
@@ -513,9 +466,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "Cohere Transcribe",
         realtime: "73x",
         word_error_rate: Some(1.27),
-        quality_context: "English benchmark",
-        coverage: "14 languages",
-        timestamps: "No timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&COHERE_ARTIFACT),
         languages: COHERE_LANGUAGES,
@@ -527,9 +477,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "Underdog Bark 3.0 Pro",
         realtime: "~33x",
         word_error_rate: Some(1.38),
-        quality_context: "English benchmark",
-        coverage: "English",
-        timestamps: "Token timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&UNDERDOG_BARK_3_PRO_ARTIFACT),
         languages: &["en"],
@@ -542,9 +489,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "Underdog Bark 3.0 Clean",
         realtime: "~33x",
         word_error_rate: Some(1.71),
-        quality_context: "English benchmark",
-        coverage: "English, without filler words",
-        timestamps: "Token timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&UNDERDOG_BARK_3_CLEAN_ARTIFACT),
         languages: &["en"],
@@ -560,9 +504,6 @@ pub const MODELS: &[ModelDefinition] = &[
         // LibriSpeech test-clean, transcribe.cpp's published conversion
         // benchmark (`model_benchmarks`); not measured in Hex.
         word_error_rate: Some(1.80),
-        quality_context: "English benchmark",
-        coverage: "25 languages",
-        timestamps: "Token timestamps",
         streams: false,
         runtime: ModelRuntime::Gguf(&PARAKEET_ULTRA_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
@@ -582,9 +523,6 @@ pub const MODELS: &[ModelDefinition] = &[
         // English and 5.17% German against 7.91% and 10.39% (8.77% and
         // 10.46% with Auto). It is here to stream with the language set.
         word_error_rate: Some(3.05),
-        quality_context: "English benchmark",
-        coverage: "27 languages",
-        timestamps: "Token timestamps",
         streams: true,
         runtime: ModelRuntime::Gguf(&NEMOTRON_3_5_ASR_ARTIFACT),
         languages: NEMOTRON_3_5_LANGUAGES,
@@ -598,9 +536,6 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "Apple Speech",
         realtime: "On device",
         word_error_rate: None,
-        quality_context: "Apple managed",
-        coverage: "System locales",
-        timestamps: "Segment timestamps",
         streams: false,
         runtime: ModelRuntime::AppleSpeech,
         languages: &["*"],
@@ -1507,28 +1442,6 @@ mod tests {
             language: "xx".into(),
         };
         assert!(validate(&unknown).is_err());
-    }
-
-    #[test]
-    fn accuracy_is_the_inverse_of_the_word_error_rate() {
-        assert_eq!(
-            definition(TranscriptionModelId::ParakeetUnifiedEnglish)
-                .accuracy_label()
-                .as_deref(),
-            Some("98.4%")
-        );
-        assert_eq!(
-            definition(TranscriptionModelId::SenseVoiceSmall)
-                .accuracy_label()
-                .as_deref(),
-            Some("89.9%")
-        );
-        assert_eq!(
-            definition(TranscriptionModelId::AppleSpeech).accuracy_label(),
-            None
-        );
-        assert_eq!(accuracy_label(0.0), "100.0%");
-        assert_eq!(accuracy_label(112.5), "0.0%");
     }
 
     #[test]
