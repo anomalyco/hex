@@ -557,8 +557,6 @@ struct ContentView: View {
         GeometryReader { geo in
             let bottomInset: CGFloat = Self.simulatesHomeButtonDevice ? 0 : geo.safeAreaInsets.bottom
             let hasHomeIndicator = bottomInset > 0
-            let homeBarWidth: CGFloat = round(min(max(geo.size.width * 0.355, 134), 156))
-            let swipeCueWidth: CGFloat = min(max(180, geo.size.width - 64), max(264, round(homeBarWidth * 1.95)))
 
             let mode = appStageMode
             let showScope = handoffScopePhase != .hidden
@@ -759,7 +757,7 @@ struct ContentView: View {
                     .hexScrollEdgeEffectHidden()
                     .hexHorizontalEdgeFade(leading: 16, trailing: 20)
                     .padding(.horizontal, -20)
-                    .padding(.bottom, hasHomeIndicator ? 18 : 12)
+                    .padding(.bottom, hasHomeIndicator ? 28 : 12)
                     .hexControlReveal(showReturnChips, reduceMotion: reduceMotion, scale: 0.97, blur: 2.5)
                 }
                 .frame(maxWidth: 500)
@@ -767,20 +765,21 @@ struct ContentView: View {
                 .padding(.top, 14)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // Anchored directly onto the physical iOS Home Indicator bar (center 10.5 pt above screen bottom),
-                // shown only on Face ID / Dynamic Island devices (`bottomInset > 0`) when swipe-back is needed.
+                // Full-bottom-width Home-Indicator return cue (21 pt flush with screen bottom => center 10.5 pt
+                // above bottom edge, aligned dead-on the iOS Home Indicator pill across the full screen width).
                 if hasHomeIndicator {
-                    VStack(spacing: 5) {
+                    VStack(spacing: 3) {
                         Text("Swipe bar to return")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(HexTheme.textMuted)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .tracking(0.1)
+                            .foregroundStyle(HexTheme.textFaint)
+                            .opacity(showHomeSwipeCue ? 1 : 0)
 
-                        DotSwipeCueView(isPaused: !showHomeSwipeCue)
-                            .frame(width: swipeCueWidth, height: 18)
+                        DotSwipeCueView(isActive: showHomeSwipeCue)
+                            .frame(width: geo.size.width, height: 21)
                     }
                     .allowsHitTesting(false)
-                    .hexControlReveal(showHomeSwipeCue, reduceMotion: reduceMotion, scale: 0.97, blur: 2.0, anchor: .bottom)
-                    .offset(y: max(CGFloat(0), bottomInset - 1.5))
+                    .offset(y: bottomInset)
                 }
             }
             .animation(HexMotion.stageAnimation(reduceMotion: reduceMotion), value: mode)

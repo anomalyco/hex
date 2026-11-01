@@ -35,6 +35,7 @@ targets:
         CFBundleDisplayName: Hex
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CADisableMinimumFrameDurationOnPhone: true
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
             CFBundleURLName: com.kitlangton.hex.mobile.keyboard-session
