@@ -13,11 +13,16 @@ use rodio::cpal::BufferSize;
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Source};
 use serde::{Deserialize, Serialize};
 
+mod imessage;
+
 /// Auditionable key-sound styles for the onboarding typing demo.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum KeySoundStyle {
-    /// Dry, crisp 13 ms Apple Taptic-style micro-pulse (default).
+    /// A real mechanical keyboard, presses cut from a CC0 recording of an IBM
+    /// Model M, each at one of three pitches (default).
     #[default]
+    Clack,
+    /// Dry, crisp 13 ms Apple Taptic-style micro-pulse.
     Taptic,
     /// Whisper-quiet 28 ms felt-damped Magic Keyboard tap.
     Felt,
@@ -28,10 +33,17 @@ pub enum KeySoundStyle {
 }
 
 impl KeySoundStyle {
-    pub const ALL: [Self; 4] = [Self::Taptic, Self::Felt, Self::Soft, Self::Silent];
+    pub const ALL: [Self; 5] = [
+        Self::Clack,
+        Self::Taptic,
+        Self::Felt,
+        Self::Soft,
+        Self::Silent,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
+            Self::Clack => "Mechanical clack",
             Self::Taptic => "Taptic tick",
             Self::Felt => "Muted felt",
             Self::Soft => "Soft warm",
@@ -41,18 +53,43 @@ impl KeySoundStyle {
 
     pub fn next(self) -> Self {
         match self {
+            Self::Clack => Self::Taptic,
             Self::Taptic => Self::Felt,
             Self::Felt => Self::Soft,
             Self::Soft => Self::Silent,
-            Self::Silent => Self::Taptic,
+            Self::Silent => Self::Clack,
         }
     }
+}
+
+/// A Messages tapback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Tapback {
+    Heart,
+    ThumbsUp,
+    ThumbsDown,
+    Haha,
+    Exclamation,
+    Question,
+}
+
+impl Tapback {
+    pub const ALL: [Self; 6] = [
+        Self::Heart,
+        Self::ThumbsUp,
+        Self::ThumbsDown,
+        Self::Haha,
+        Self::Exclamation,
+        Self::Question,
+    ];
 }
 
 /// Soft, varied tactile and motion cues for first-run onboarding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OnboardingTone {
-    /// One of six distinct key taps (`0..6`) in `style`.
+    /// One of `style`'s distinct key taps: six for most styles, and for
+    /// [`KeySoundStyle::Clack`] eight presses at three pitches
+    /// ([`CLACK_KEYS`]` * pitch + press`).
     Key(KeySoundStyle, u8),
     /// Deeper stabilized space / return bar tap in `style`.
     KeySpace(KeySoundStyle),
@@ -73,7 +110,40 @@ pub enum OnboardingTone {
     /// One of the Hex logo's three hexagons landing on `"Hex is ready"`,
     /// outside in (`0..3`), rising to resolve on the last.
     Build(u8),
+    /// A message arriving in the `"Without Hex"` conversation.
+    Incoming,
+    /// A reply leaving the field.
+    Sent,
+    /// The deadpan `"Read"` under a reply that should not have been sent.
+    Read,
+    /// The comedy winding back to before it went wrong.
+    Rewind,
+    /// A tapback landing on a message, each kind with its own sound.
+    Tapback(Tapback),
+    /// One low heartbeat under panicked typing.
+    Heartbeat,
+    /// The heartbeat stretched lower in slow motion.
+    HeartbeatSlow,
+    /// Time slowing hard: the clicks smear down.
+    SlowDown,
+    /// A comic title slamming onto the stage: a heavy bass hit.
+    Slam,
+    /// Confetti bursting over `"With Hex"`: a popper and falling paper.
+    Confetti,
+    /// Fireworks over `"With Hex"`: a whistle, a boom, and crackle.
+    Fireworks,
+    /// The triumphant sting as `"With Hex"` peaks: one of the candidates
+    /// (`0..TRIUMPHS`) still being chosen between.
+    Triumph(u8),
 }
+
+/// [`KeySoundStyle::Clack`]'s distinct presses, each also played a little
+/// higher and lower.
+pub const CLACK_KEYS: u8 = 8;
+/// The pitches each clack plays at, in cents.
+const CLACK_CENTS: [f64; 3] = [0.0, 45.0, -45.0];
+/// The triumph candidates, `triumph_1.wav` onwards.
+pub const TRIUMPHS: u8 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tone {
@@ -109,7 +179,8 @@ pub enum Tone {
 /// retracts it before or while it sounds.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Request {
-    Play(Tone),
+    /// A tone at a percentage of its level.
+    Play(Tone, u8),
     Audition(SoundSet, Audition),
     StopAudition,
     ProvisionalStart,
@@ -286,11 +357,11 @@ pub fn preload() -> Result<()> {
                 continue;
             }
             let tone = match request {
-                Some(Request::Play(tone)) => {
+                Some(Request::Play(tone, percent)) => {
                     if tone == Tone::DictationStart {
                         start_tone.cancel_pending();
                     }
-                    Some(tone)
+                    Some((tone, percent))
                 }
                 Some(Request::ProvisionalStart) => {
                     start_tone.request(received_at);
@@ -326,9 +397,9 @@ pub fn preload() -> Result<()> {
                 }
                 None => None,
             };
-            if let Some(tone) = tone {
+            if let Some((tone, percent)) = tone {
                 if let Some(sound) = sounds.get(sound_set(), tone) {
-                    output.play(sound.clone(), tone);
+                    output.play(sound.clone().amplify(f32::from(percent) / 100.0), tone);
                 }
             } else if timed_out && start_tone.is_due(Instant::now()) {
                 // Only an empty queue reaches here, so a retraction sent while
@@ -361,6 +432,12 @@ fn done_is_late(stopped: Option<Instant>, now: Instant) -> bool {
 }
 
 pub fn play(tone: Tone) {
+    play_at(tone, 100);
+}
+
+/// [`play`] at `percent` of the tone's own level, such as a keystroke typed
+/// softly.
+pub fn play_at(tone: Tone, percent: u8) {
     if !sounds_enabled() {
         return;
     }
@@ -379,7 +456,7 @@ pub fn play(tone: Tone) {
     match tone {
         #[cfg(target_os = "macos")]
         Tone::Error if !sound_set().has_own_error() => play_system_sound(tone),
-        _ => enqueue(DICTATION_PLAYER.get(), Request::Play(tone)),
+        _ => enqueue(DICTATION_PLAYER.get(), Request::Play(tone, percent)),
     }
 }
 
@@ -682,6 +759,9 @@ impl SetSounds {
 
 /// Decoded onboarding cues (`resources/audio/sounds/onboarding/`).
 struct OnboardingSounds {
+    clack_keys: Vec<SamplesBuffer>,
+    clack_space: SamplesBuffer,
+    clack_backspace: SamplesBuffer,
     felt_keys: [SamplesBuffer; 6],
     felt_space: SamplesBuffer,
     felt_backspace: SamplesBuffer,
@@ -696,11 +776,40 @@ struct OnboardingSounds {
     permission_tick: SamplesBuffer,
     almost_ready: SamplesBuffer,
     build: [SamplesBuffer; 3],
+    chat_incoming: SamplesBuffer,
+    chat_sent: SamplesBuffer,
+    chat_read: SamplesBuffer,
+    chat_rewind: SamplesBuffer,
+    chat_tapbacks: [SamplesBuffer; 6],
+    heartbeat: SamplesBuffer,
+    heartbeat_slow: SamplesBuffer,
+    slow_down: SamplesBuffer,
+    slam: SamplesBuffer,
+    confetti: SamplesBuffer,
+    fireworks: SamplesBuffer,
+    triumphs: [SamplesBuffer; TRIUMPHS as usize],
 }
 
 impl OnboardingSounds {
     fn load() -> Result<Self> {
+        let tapback = decode_wav(bundled_sound!("onboarding", "chat_tapback"))?;
+        let presses = [
+            decode_wav(bundled_sound!("onboarding", "clack_1"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_2"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_3"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_4"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_5"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_6"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_7"))?,
+            decode_wav(bundled_sound!("onboarding", "clack_8"))?,
+        ];
         Ok(Self {
+            clack_keys: CLACK_CENTS
+                .iter()
+                .flat_map(|&cents| presses.iter().map(move |press| detune(press, cents)))
+                .collect(),
+            clack_space: decode_wav(bundled_sound!("onboarding", "clack_space"))?,
+            clack_backspace: decode_wav(bundled_sound!("onboarding", "clack_backspace"))?,
             felt_keys: [
                 decode_wav(bundled_sound!("onboarding", "key_1"))?,
                 decode_wav(bundled_sound!("onboarding", "key_2"))?,
@@ -740,6 +849,29 @@ impl OnboardingSounds {
                 decode_wav(bundled_sound!("onboarding", "build_2"))?,
                 decode_wav(bundled_sound!("onboarding", "build_3"))?,
             ],
+            chat_incoming: imessage::or_bundled(
+                imessage::RECEIVED,
+                &decode_wav(bundled_sound!("onboarding", "chat_incoming"))?,
+            ),
+            chat_sent: imessage::or_bundled(
+                imessage::SENT,
+                &decode_wav(bundled_sound!("onboarding", "chat_sent"))?,
+            ),
+            chat_read: decode_wav(bundled_sound!("onboarding", "chat_read"))?,
+            chat_rewind: decode_wav(bundled_sound!("onboarding", "chat_rewind"))?,
+            chat_tapbacks: Tapback::ALL
+                .map(|kind| imessage::or_bundled(imessage::tapback(kind), &tapback)),
+            heartbeat: decode_wav(bundled_sound!("onboarding", "heartbeat"))?,
+            heartbeat_slow: decode_wav(bundled_sound!("onboarding", "heartbeat_slow"))?,
+            slow_down: decode_wav(bundled_sound!("onboarding", "slow_down"))?,
+            slam: decode_wav(bundled_sound!("onboarding", "slam"))?,
+            confetti: decode_wav(bundled_sound!("onboarding", "confetti"))?,
+            fireworks: decode_wav(bundled_sound!("onboarding", "fireworks"))?,
+            triumphs: [
+                decode_wav(bundled_sound!("onboarding", "triumph_1"))?,
+                decode_wav(bundled_sound!("onboarding", "triumph_2"))?,
+                decode_wav(bundled_sound!("onboarding", "triumph_3"))?,
+            ],
         })
     }
 
@@ -748,6 +880,11 @@ impl OnboardingSounds {
             OnboardingTone::Key(KeySoundStyle::Silent, _)
             | OnboardingTone::KeySpace(KeySoundStyle::Silent)
             | OnboardingTone::KeyBackspace(KeySoundStyle::Silent) => return None,
+            OnboardingTone::Key(KeySoundStyle::Clack, i) => {
+                &self.clack_keys[usize::from(i) % self.clack_keys.len()]
+            }
+            OnboardingTone::KeySpace(KeySoundStyle::Clack) => &self.clack_space,
+            OnboardingTone::KeyBackspace(KeySoundStyle::Clack) => &self.clack_backspace,
             OnboardingTone::Key(KeySoundStyle::Felt, i) => {
                 &self.felt_keys[usize::from(i) % self.felt_keys.len()]
             }
@@ -770,6 +907,18 @@ impl OnboardingSounds {
             OnboardingTone::PermissionTick => &self.permission_tick,
             OnboardingTone::AlmostReady => &self.almost_ready,
             OnboardingTone::Build(i) => &self.build[usize::from(i).min(2)],
+            OnboardingTone::Incoming => &self.chat_incoming,
+            OnboardingTone::Sent => &self.chat_sent,
+            OnboardingTone::Read => &self.chat_read,
+            OnboardingTone::Rewind => &self.chat_rewind,
+            OnboardingTone::Tapback(kind) => &self.chat_tapbacks[kind as usize],
+            OnboardingTone::Heartbeat => &self.heartbeat,
+            OnboardingTone::HeartbeatSlow => &self.heartbeat_slow,
+            OnboardingTone::SlowDown => &self.slow_down,
+            OnboardingTone::Slam => &self.slam,
+            OnboardingTone::Confetti => &self.confetti,
+            OnboardingTone::Fireworks => &self.fireworks,
+            OnboardingTone::Triumph(i) => &self.triumphs[usize::from(i) % self.triumphs.len()],
         })
     }
 }
@@ -1094,12 +1243,12 @@ fn spawn_system_sound(sound: &str) -> Option<std::process::Child> {
         .ok()
 }
 
-/// Mixes a timed `(at_secs, Tone)` timeline offline into a 48 kHz 16-bit mono
+/// Mixes a timed `(at_secs, Tone, percent)` timeline offline into a 48 kHz 16-bit mono
 /// WAV file at `path` using the exact bundled `Sounds` without opening any
 /// audio output device. Used by headless `--video` renders and tests.
 pub(crate) fn mix_offline_wav(
     path: &std::path::Path,
-    cues: &[(f64, Tone)],
+    cues: &[(f64, Tone, u8)],
     set: SoundSet,
     gain: f32,
     duration_secs: f64,
@@ -1110,10 +1259,11 @@ pub(crate) fn mix_offline_wav(
     let gain = gain.clamp(0.0, 1.0);
     if gain > 0.0 && !cues.is_empty() {
         let sounds = Sounds::load()?;
-        for &(at, tone) in cues {
+        for &(at, tone, percent) in cues {
             if at < 0.0 {
                 continue;
             }
+            let gain = gain * f32::from(percent) / 100.0;
             let Some(buf) = sounds.get(set, tone) else {
                 continue;
             };
@@ -1190,6 +1340,13 @@ pub(crate) fn mix_offline_wav(
 }
 
 /// Decodes one of Hex's bundled 16-bit PCM sounds.
+/// `sound` played `cents` higher: the same samples at a faster rate.
+fn detune(sound: &SamplesBuffer, cents: f64) -> SamplesBuffer {
+    let rate = f64::from(sound.sample_rate().get()) * 2f64.powf(cents / 1200.0);
+    let rate = std::num::NonZero::new(rate.round() as u32).unwrap_or(sound.sample_rate());
+    SamplesBuffer::new(sound.channels(), rate, sound.clone().collect::<Vec<_>>())
+}
+
 fn decode_wav(bytes: &'static [u8]) -> Result<SamplesBuffer> {
     let reader =
         hound::WavReader::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
@@ -1304,19 +1461,20 @@ mod tests {
     #[test]
     fn onboarding_cues_decode_stay_compact_and_respect_zero_volume_mix() {
         let sounds = Sounds::load().unwrap();
-        for style in [
-            KeySoundStyle::Taptic,
-            KeySoundStyle::Felt,
-            KeySoundStyle::Soft,
+        for (style, keys, longest) in [
+            (KeySoundStyle::Clack, CLACK_KEYS * 3, 100),
+            (KeySoundStyle::Taptic, 6, 60),
+            (KeySoundStyle::Felt, 6, 60),
+            (KeySoundStyle::Soft, 6, 60),
         ] {
-            for i in 0..6 {
+            for i in 0..keys {
                 let buf = sounds
                     .get(
                         SoundSet::Signature,
                         Tone::Onboarding(OnboardingTone::Key(style, i)),
                     )
                     .expect("key cue present");
-                assert!(buf.total_duration().unwrap() <= Duration::from_millis(60));
+                assert!(buf.total_duration().unwrap() <= Duration::from_millis(longest));
             }
             assert!(
                 sounds
@@ -1345,11 +1503,43 @@ mod tests {
             OnboardingTone::AlmostReady,
             OnboardingTone::Build(0),
             OnboardingTone::Build(1),
+            OnboardingTone::Read,
+            OnboardingTone::Rewind,
+            OnboardingTone::Heartbeat,
         ] {
             let buf = sounds
                 .get(SoundSet::Signature, Tone::Onboarding(cue))
                 .expect("onboarding cue present");
-            assert!(buf.total_duration().unwrap() <= Duration::from_millis(250));
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(400));
+        }
+        // The slow-motion and comic-hit cues, and the Messages sounds, ring
+        // longer, but not for long.
+        let tapbacks = Tapback::ALL.map(OnboardingTone::Tapback);
+        for cue in [
+            OnboardingTone::Incoming,
+            OnboardingTone::Sent,
+            OnboardingTone::HeartbeatSlow,
+            OnboardingTone::SlowDown,
+            OnboardingTone::Slam,
+        ]
+        .iter()
+        .chain(&tapbacks)
+        {
+            let buf = sounds
+                .get(SoundSet::Signature, Tone::Onboarding(*cue))
+                .expect("onboarding cue present");
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(1200));
+        }
+        // The celebration rings longest of all.
+        let triumphs = (0..TRIUMPHS).map(OnboardingTone::Triumph);
+        for cue in [OnboardingTone::Confetti, OnboardingTone::Fireworks]
+            .into_iter()
+            .chain(triumphs)
+        {
+            let buf = sounds
+                .get(SoundSet::Signature, Tone::Onboarding(cue))
+                .expect("onboarding cue present");
+            assert!(buf.total_duration().unwrap() <= Duration::from_millis(1600));
         }
         let land = sounds
             .get(
@@ -1379,8 +1569,9 @@ mod tests {
             (
                 0.05,
                 Tone::Onboarding(OnboardingTone::Key(KeySoundStyle::Taptic, 0)),
+                100,
             ),
-            (0.20, Tone::DictationStart),
+            (0.20, Tone::DictationStart, 100),
         ];
         mix_offline_wav(&silent, &timeline, SoundSet::Signature, 0.0, 0.5).unwrap();
         mix_offline_wav(&audible, &timeline, SoundSet::Signature, 0.5, 0.5).unwrap();
@@ -1495,10 +1686,10 @@ mod tests {
         assert!(admission_error(waiting.recv_timeout(Duration::ZERO)).is_err());
         drop(waiting);
         publish_player(&player, sender, ready, Ok(()));
-        enqueue(player.get(), Request::Play(Tone::DictationStart));
+        enqueue(player.get(), Request::Play(Tone::DictationStart, 100));
         assert_eq!(
             receiver.try_recv().unwrap(),
-            Request::Play(Tone::DictationStart)
+            Request::Play(Tone::DictationStart, 100)
         );
     }
 
@@ -1864,12 +2055,12 @@ mod tests {
         let (sender, receiver) = mpsc::sync_channel(2);
         enqueue(Some(&sender), Request::ProvisionalStart);
         enqueue(Some(&sender), Request::RetractStart);
-        enqueue(Some(&sender), Request::Play(Tone::Cancel));
+        enqueue(Some(&sender), Request::Play(Tone::Cancel, 100));
         assert_eq!(receiver.try_recv().unwrap(), Request::ProvisionalStart);
         assert_eq!(receiver.try_recv().unwrap(), Request::RetractStart);
         assert!(receiver.try_recv().is_err());
         drop(receiver);
-        enqueue(Some(&sender), Request::Play(Tone::Cancel));
+        enqueue(Some(&sender), Request::Play(Tone::Cancel, 100));
         enqueue(None, Request::ProvisionalStart);
     }
 

@@ -59,6 +59,7 @@ pub(crate) fn downloaded(total: u64, elapsed: f64, seconds: f64) -> u64 {
     (total as f64 * eased.clamp(0.0, 1.0)).round() as u64
 }
 
+#[derive(Debug)]
 pub(crate) struct Take {
     pub(crate) updates: &'static [(f64, &'static str)],
     pub(crate) release: f64,
@@ -93,23 +94,17 @@ impl Take {
     }
 }
 
-/// Confident 1.5 s spoken answer when the investors are in the room.
+/// Confident 1.5 s spoken answer when the investors are in the room: what
+/// `"Without Hex"` choked on, then the rest of the thought.
 pub(crate) const ANSWER_JAY: Take = Take {
     updates: &[
-        (0.14, "Every"),
-        (0.26, "Every test"),
-        (0.38, "Every test is"),
-        (0.52, "Every test is green"),
-        (0.66, "Every test is green and"),
-        (0.80, "Every test is green and prod"),
-        (0.94, "Every test is green and prod is"),
-        (1.08, "Every test is green and prod is warm."),
-        (1.22, "Every test is green and prod is warm. Ship it"),
-        (1.36, "Every test is green and prod is warm. Ship it right"),
-        (
-            1.46,
-            "Every test is green and prod is warm. Ship it right now.",
-        ),
+        (0.16, "Yes,"),
+        (0.34, "Yes, we're"),
+        (0.54, "Yes, we're ready."),
+        (0.80, "Yes, we're ready. Everything's"),
+        (1.04, "Yes, we're ready. Everything's tested,"),
+        (1.24, "Yes, we're ready. Everything's tested, go"),
+        (1.42, "Yes, we're ready. Everything's tested, go ahead."),
     ],
     release: 1.5,
 };
@@ -157,7 +152,7 @@ mod tests {
     #[test]
     fn a_take_reports_its_newest_partial_in_one_and_a_half_seconds() {
         assert_eq!(ANSWER_JAY.partial(0.0), "");
-        assert_eq!(ANSWER_JAY.partial(0.3), "Every test");
+        assert_eq!(ANSWER_JAY.partial(0.4), "Yes, we're");
         assert!(ANSWER_JAY.partial(2.0).ends_with('.'));
         assert!(ANSWER_JAY.finished(1.5));
     }

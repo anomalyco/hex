@@ -301,6 +301,10 @@ fn demo_page(p: Paint, s: &Onboard) -> El {
         .child(versus::stage(p, s))
         .child(action(if s.step == Step::Done {
             continue_button(p, s)
+        } else if versus::waiting_to_start(s) {
+            super::flows::watch_button(p, s)
+        } else if versus::skippable(s) {
+            super::flows::skip_button(p, s)
         } else {
             none()
         }))

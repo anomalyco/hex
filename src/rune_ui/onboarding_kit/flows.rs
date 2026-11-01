@@ -78,6 +78,60 @@ pub(super) fn continue_button(p: Paint, s: &Onboard) -> El {
     button.build_push(p.k).key("continue").transition(arrives())
 }
 
+/// Starts `"Without Hex"` once the user is watching.
+pub(super) fn watch_button(p: Paint, s: &Onboard) -> El {
+    let button = Button::new("Watch what happens")
+        .variant(ButtonVariant::Contrast)
+        .label_with(|font, ink| {
+            row()
+                .gap(7.0)
+                .center_y()
+                .child(icon(&glyphs::TRIANGLE_RIGHT, 13.0).key("play").color(ink))
+                .child(
+                    text("Watch what happens")
+                        .key("label")
+                        .font(font)
+                        .color(ink),
+                )
+        });
+    let button = if s.live.is_some() {
+        button.on_press(super::live::on_ui(Onboard::start_scene))
+    } else {
+        button.on_press(Onboard::start_scene)
+    };
+    button.build_push(p.k).key("watch").transition(arrives())
+}
+
+/// `Skip →`: a quiet way out once the comedy plays.
+pub(super) fn skip_button(p: Paint, s: &Onboard) -> El {
+    let font = p.k.ty.small;
+    let button = Button::new("Skip")
+        .variant(ButtonVariant::GhostFaint)
+        .label_with(move |_, ink| {
+            row()
+                .gap(4.0)
+                .center_y()
+                .child(text("Skip").key("label").font(font).color(ink))
+                .child(icon(&glyphs::ARROW_RIGHT, 12.0).key("arrow").color(ink))
+        });
+    let button = if s.live.is_some() {
+        button.on_press(super::live::on_ui(|s| {
+            s.skip_scene();
+        }))
+    } else {
+        button.on_press(|s: &mut Onboard| {
+            s.skip_scene();
+        })
+    };
+    button
+        .build_small_push(p.k)
+        .key("skip")
+        .transition(Transition::opacity().springs(rune::SpringPair::new(
+            rune::Spring::new(0.6, 0.0),
+            rune::Spring::new(0.2, 0.0),
+        )))
+}
+
 fn hold(p: Paint, s: &Onboard, rest: &str) -> El {
     row()
         .key("hold")

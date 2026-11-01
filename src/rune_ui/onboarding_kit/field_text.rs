@@ -5,7 +5,7 @@
 use rune::{El, TextStyle, el, text};
 
 use super::super::controls::Paint;
-use super::cards::{FIELD_FONT, FIELD_LINE, REPLY_W};
+use super::cards::{CHAT_REPLY_W, FIELD_FONT, FIELD_LINE, REPLY_W};
 
 /// A field's text: its font, line height, and how wide it may run.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -22,15 +22,12 @@ pub(crate) const CARD: Field = Field {
     width: REPLY_W,
 };
 
-/// [`Field::wrap`] in the card's field.
-pub(crate) fn wrap(reply: &str) -> Vec<(usize, usize)> {
-    CARD.wrap(reply)
-}
-
-/// [`Field::slots`] in the card's field.
-pub(crate) fn slots(reply: &str) -> Vec<Slot<'_>> {
-    CARD.slots(reply)
-}
+/// A group chat's reply field, as wide as the chat.
+pub(crate) const CHAT: Field = Field {
+    font: FIELD_FONT,
+    line: FIELD_LINE,
+    width: CHAT_REPLY_W,
+};
 
 /// [`Field::caret`] in the card's field.
 pub(crate) fn caret(p: Paint, key: &str, x: f32, line: usize) -> El {
@@ -132,40 +129,67 @@ pub(crate) struct Slot<'a> {
     pub(crate) centre: [f32; 2],
 }
 
-/// `reply` as typed so far, with the caret after byte `caret` while it's
-/// being typed, on `lines` lines kept however much there is.
-pub(crate) fn typed(p: Paint, key: &str, reply: &str, caret_at: Option<usize>, lines: usize) -> El {
-    let font = FIELD_FONT.lh(FIELD_LINE);
-    let mut out = el()
-        .key(key.to_string())
-        .w(REPLY_W)
-        .h(lines as f32 * FIELD_LINE)
-        .instant_changes();
-    for (i, (start, end)) in wrap(reply).into_iter().enumerate() {
-        out = out.child(
-            text(reply[start..end].to_string())
-                .key(format!("line{i}"))
-                .font(font)
-                .color(p.text())
-                .absolute(0.0, i as f32 * FIELD_LINE),
-        );
+impl Field {
+    /// `reply` as typed so far, with the caret after byte `caret` while it's
+    /// being typed, on `lines` lines kept however much there is, and
+    /// autocorrect's underline under the `mark` byte range. In an empty
+    /// field the caret sits just before the placeholder's first glyph.
+    pub(crate) fn typed(
+        self,
+        p: Paint,
+        key: &str,
+        reply: &str,
+        caret_at: Option<usize>,
+        lines: usize,
+        mark: Option<(usize, usize)>,
+    ) -> El {
+        let font = self.font.lh(self.line);
+        let mut out = el()
+            .key(key.to_string())
+            .w(self.width)
+            .h(lines as f32 * self.line)
+            .instant_changes();
+        for (i, (start, end)) in self.wrap(reply).into_iter().enumerate() {
+            out = out.child(
+                text(reply[start..end].to_string())
+                    .key(format!("line{i}"))
+                    .font(font)
+                    .color(p.text())
+                    .absolute(0.0, i as f32 * self.line),
+            );
+        }
+        if let Some((start, end)) = mark.filter(|&(s, e)| s < e && e <= reply.len()) {
+            let (left, line) = self.caret_point(reply, start);
+            let (right, _) = self.caret_point(reply, end);
+            out = out.child(
+                el().key("autocorrect")
+                    .absolute(left - 1.0, line as f32 * self.line + self.line - 2.0)
+                    .size((right - left + 2.0).max(4.0), 2.0)
+                    .radius(1.0)
+                    .fill(p.k.c.text_accent),
+            );
+        }
+        if let Some(at) = caret_at {
+            let (x, line) = self.caret_point(reply, at);
+            let x = if reply.is_empty() { -1.5 } else { x };
+            out = out.child(self.caret(p, "caret", x, line));
+        }
+        out
     }
-    if let Some(at) = caret_at {
-        let (x, line) = CARD.caret_point(reply, at);
-        out = out.child(caret(p, "caret", x, line));
-    }
-    out
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::fixture::ANSWER_JAY;
     use super::*;
+
+    /// Longer than one line of the card's field.
+    const REPLY: &str =
+        "Yes, we're ready. Everything's tested, the rollback is rehearsed, go ahead.";
 
     #[test]
     fn the_reply_wraps_at_spaces_within_the_field() {
-        let reply = ANSWER_JAY.text();
-        let lines = wrap(reply);
+        let reply = REPLY;
+        let lines = CARD.wrap(reply);
         assert!(lines.len() >= 2, "{lines:?}");
         for &(start, end) in &lines {
             assert!(rune::text::advance(reply[start..end].trim_end(), FIELD_FONT) <= REPLY_W);
@@ -175,8 +199,8 @@ mod tests {
 
     #[test]
     fn every_word_has_a_slot_in_order() {
-        let reply = ANSWER_JAY.text();
-        let slots = slots(reply);
+        let reply = REPLY;
+        let slots = CARD.slots(reply);
         assert_eq!(slots.len(), reply.split_whitespace().count());
         assert_eq!(slots[0].left, 0.0);
         assert!(
@@ -188,8 +212,8 @@ mod tests {
 
     #[test]
     fn a_caret_after_a_break_starts_the_next_line() {
-        let reply = ANSWER_JAY.text();
-        let (start, _) = wrap(reply)[1];
+        let reply = REPLY;
+        let (start, _) = CARD.wrap(reply)[1];
         assert_eq!(CARD.caret_point(reply, start), (0.0, 1));
         assert_eq!(CARD.caret_point(reply, 0), (0.0, 0));
     }
