@@ -738,14 +738,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   read-only: Hex never writes, moves, or deletes anything in the cache, keeps
   its receipts in its own models folder, hashes a file in full once when it is
   chosen (against the pin or the blob name), and removing one only forgets it.
-- Onboarding shows its model choice only when the scan found a compatible
-  model; otherwise the flow is unchanged. Its own download is held while the
-  scan runs and while the choice shows. The default button is the
-  recommended model's exact copy on this computer (same SHA-256) with
-  Download instead beside it, else downloading the recommended model; other
-  found models sit behind a secondary action, known catalog models first and
-  the rest marked unverified and not benchmarked. A found model is never
-  picked for the person.
+- Onboarding shows its model list only when the scan found a compatible
+  model; otherwise the flow is unchanged. The list is one card of radio rows
+  with no buttons or file details: Hex's recommended model first and
+  selected (its exact copy on this computer is that same row), then the found
+  files. Picking a row starts it, and Continue starts the selected row. The
+  tour's own download is held while the scan runs and until a pick, and only
+  through setup. A found model is never picked for the person.
 - The menu-bar model picker lists only downloaded, available models and remembers
   each model's last selected language. It works without a
   Settings window. Settings and the menu bar share one preparation owner; a newer

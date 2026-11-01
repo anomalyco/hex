@@ -85,20 +85,22 @@ API's `/models` and the SDK's `ModelInfo.source` carry the same field.
 ```ts
 Onboarding opens -> scan; the tour's own download waits until it answers  // setup.found-choice
 ├── Nothing compatible found -> today's flow, unchanged: the recommended model downloads
-└── Something found -> "Choose a speech model" on the setup step (no model row):
-    ├── Hex's recommended model [Recommended] -> name · size, then
-    │   ├── its exact file (same SHA-256) is in the cache -> "Already on this
-    │   │   computer: owner/name@rev"; primary (default) "Use the copy already on
-    │   │   this computer", secondary "Download instead" (found_models::decline:
-    │   │   Hex downloads its own copy until it quits; the found file stays)
-    │   └── otherwise -> "Tested by Hex for quality and reliability"; primary
-    │       (default) "Download recommended model"
-    ├── Any other found file -> secondary "Use a model already on this computer"
-    │   expands the list: exact catalog matches first [Known model] "Already
-    │   downloaded, no download needed", then the rest [Not tested by Hex] "Not
-    │   verified by Hex · Not benchmarked", each with Use, and the accuracy note
-    └── Nothing is picked for the person: the download stays held while the
-        choice shows (Flow::hold_download)
+└── Something found -> "Choose a speech model": one card of radio rows in place
+    of the model row (below the permission rows on macOS), no buttons inside
+    ├── Hex's recommended model first, selected, [Recommended] -> "731 MB
+    │   download", or "On this computer" when its exact file (same SHA-256) is
+    │   in the cache (one row, never two)
+    ├── Then each found file -> its name, "On this computer" (a catalog model)
+    │   or "On this computer · not tested by Hex"; no hashes, repositories,
+    │   revisions, or compression
+    ├── Picking a row starts it: ours downloads ("Downloading… 42%" on the row)
+    │   or, already here, is checked in place; a found file is used where it
+    │   is ("Checking…"). A later pick supersedes one still preparing
+    ├── Continue with no pick starts the selected row (the recommended one),
+    │   then works as today: it waits for the model where setup needs it
+    │   (Linux, Windows) and moves on while it downloads where it doesn't
+    └── The held download is released once the tour passes setup, so a tour
+        that skips the step still gets the recommended model
 ```
 
 Observed on apollo (Linux, Radeon 8060S over Vulkan, 2026-11-01) with an
@@ -119,5 +121,6 @@ in-place use and forgetting, the full check refusing a mismatched file),
 `desktop::onboarding::tests::a_held_download_waits_for_the_person`,
 `labs::tests::graduated_features_answer_by_name`, and the goldens
 `rune-picker-custom-models-light`, `rune-picker-found-light`, and
-`rune-onboarding-model-found-light` (list expanded), and
+`rune-onboarding-model-found-light`,
+`rune-onboarding-model-found-downloading-light`, and
 `rune-onboarding-model-found-recommended-light`.

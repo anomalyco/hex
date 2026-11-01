@@ -2124,14 +2124,10 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
     }),
-    // Onboarding's choice between the recommended model and found ones.
-    ("onboarding-model-found", |ui| {
-        found::onboarding_scene(ui, false)
-    }),
-    // The recommended model's exact file is on this computer: Use it first.
-    ("onboarding-model-found-recommended", |ui| {
-        found::onboarding_scene(ui, true)
-    }),
+    // Onboarding's model list with models found here (`found` scenes).
+    ("onboarding-model-found", found::listed),
+    ("onboarding-model-found-downloading", found::loading),
+    ("onboarding-model-found-recommended", found::present),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
     // The microphone row following a recorded voice (`--video`), and with
