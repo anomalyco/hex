@@ -24,7 +24,7 @@ use rune::compose::{Compositor, Frame};
 use rune::{Color, El, el};
 
 use super::Ui;
-use super::onboarding_kit::game_fx::{GameFx, is_game_mark};
+use super::onboarding_kit::game::fx::{GameFx, is_game_mark};
 use super::onboarding_kit::gpu_stage::{OnboardingGpu, is_onboard_mark};
 
 /// The stage's key, found by the compositor each frame.

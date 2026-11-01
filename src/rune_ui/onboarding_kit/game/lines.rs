@@ -3,8 +3,8 @@
 //! most unhinged. A run plays the themes in a random order; the story plays
 //! them as written, so its scripted answers land where they always do.
 
-use super::cards::{ADAM, App, DAX, Notice};
-use super::fixture::Take;
+use super::super::cards::{ADAM, App, DAX, Notice};
+use super::super::fixture::Take;
 
 /// One message, and the story's answer to it.
 #[derive(Clone, Copy)]
@@ -473,7 +473,7 @@ mod tests {
     #[test]
     fn every_message_fits_one_line_of_the_card() {
         let k = rune_theme_opencode::kit(true);
-        let width = super::super::cards::CARD_W - 2.0 * 14.0 - 32.0 - 10.0;
+        let width = super::super::super::cards::CARD_W - 2.0 * 14.0 - 32.0 - 10.0;
         let (_, one) = rune::text::measure("M", &[], k.ty.ui, Some(width));
         let mut keys = std::collections::HashSet::new();
         for line in THEMES.iter().flatten() {

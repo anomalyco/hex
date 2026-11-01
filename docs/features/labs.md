@@ -419,7 +419,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   lands in an unseen focused field), struck by lightning and burnt away,
   then a score card with Keep playing and Continue. Messages come in
   themes of three that escalate, mundane to absurd
-  (`onboarding_kit/game_lines.rs`); a real run plays the themes in a random
+  (`onboarding_kit/game/lines.rs`); a real run plays the themes in a random
   order, a story as written. Done shows the score card too once anything
   burnt (straight on otherwise). The score card lists every message cleared
   with the player's reply (scrolling past 150 pt) and this run's count
