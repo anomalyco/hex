@@ -44,6 +44,10 @@ const PATHS: &[(&str, &str)] = &[
         "Window/General/Permissions missing",
     ),
     (
+        "mac-settings-permissions-stale",
+        "Window/General/Permissions · stale entry",
+    ),
+    (
         "mac-microphone-missing",
         "Window/General/Microphone missing",
     ),
@@ -195,6 +199,10 @@ const PATHS: &[(&str, &str)] = &[
     (
         "mac-onboarding-progress",
         "Window/Onboarding tour/Setup · progress",
+    ),
+    (
+        "mac-onboarding-stale",
+        "Window/Onboarding tour/Setup · stale entry",
     ),
     (
         "mac-onboarding-denied",

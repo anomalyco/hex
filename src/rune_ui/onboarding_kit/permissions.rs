@@ -141,6 +141,7 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
     let k = p.k;
     let mic_ready = live.microphone == ItemStatus::Ready;
     let ax_desc = match live.accessibility {
+        ItemStatus::Stale => crate::desktop::i18n::tr("An older Hex entry can keep this off"),
         ItemStatus::Waiting => "Switch on Hex in System Settings",
         _ => "Notices the shortcut and pastes your words in any app",
     };
@@ -217,6 +218,7 @@ fn live_pill(p: Paint, key: &str, status: ItemStatus, primary: bool, item: Setup
         ItemStatus::Denied => allow("Open System Settings", primary),
         // Pressing again reopens macOS's prompt or System Settings.
         ItemStatus::Waiting => allow("Open", false),
+        ItemStatus::Stale => allow(crate::desktop::i18n::tr("Still grey? Fix it"), false),
         ItemStatus::Restart => row()
             .key(format!("{key}-restart"))
             .h(28.0)

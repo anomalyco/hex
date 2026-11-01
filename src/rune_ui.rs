@@ -1010,6 +1010,13 @@ impl Ui {
                 {
                     view.screen_recording = true;
                 }
+                self.platform.clear_stale(*kind);
+                self.platform.note_asked(*kind);
+            }
+            platform::PlatformRequest::Permission(
+                crate::desktop::onboarding::PermissionAction::ResetAndPrompt(kind),
+            ) => {
+                self.platform.clear_stale(*kind);
                 self.platform.note_asked(*kind);
             }
             platform::PlatformRequest::SystemAudio => {
@@ -1019,6 +1026,7 @@ impl Ui {
                 if self.host.is_fixture() && self.platform.asked(kind) {
                     self.platform.system_audio = true;
                 }
+                self.platform.clear_stale(kind);
                 self.platform.note_asked(kind);
             }
             #[cfg(hex_capture)]
@@ -1269,7 +1277,11 @@ fn setup(ui: &mut Ui, waker: Waker) {
         let connect = std::mem::take(connect);
         #[cfg(target_os = "macos")]
         {
-            ui.host = platform::PlatformHost::Native(host::native_host());
+            let host_wake: Arc<dyn Fn() + Send + Sync> = {
+                let waker = waker.clone();
+                Arc::new(move || waker())
+            };
+            ui.host = platform::PlatformHost::Native(host::native_host(host_wake));
         }
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || waker());
         ui.service = Service::Live(Box::new(Backend::connect(connect, wake)));
@@ -1324,6 +1336,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         settings::refresh_microphones(ui);
         ui.microphones_listed_at = clock;
     }
+    platform_settings::update_shown_permissions(ui);
     changed |= ui.host.poll(&mut ui.platform);
     #[cfg(not(target_os = "macos"))]
     {
@@ -2231,16 +2244,10 @@ const SCENES: &[Scene] = &[
         };
     }),
     ("mac-settings-permissions", |ui| {
-        *ui = mac_fixture();
-        use crate::desktop::onboarding::PermissionState;
-        ui.platform.permissions.microphone = PermissionState::NeedsSettings;
-        ui.platform.permissions.accessibility = PermissionState::NeedsSettings;
-        ui.platform
-            .permissions_asked
-            .push(crate::desktop::onboarding::PermissionKind::Accessibility);
-        ui.platform.login_item =
-            Some(crate::desktop::login_item::LoginItemStatus::RequiresApproval);
-        ui.platform.accessibility_renamed = true;
+        platform_settings::mac_permissions_fixture(ui, false)
+    }),
+    ("mac-settings-permissions-stale", |ui| {
+        platform_settings::mac_permissions_fixture(ui, true)
     }),
     ("mac-settings-pause-browser", |ui| {
         *ui = mac_fixture();
@@ -2478,6 +2485,9 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-onboarding-progress", |ui| {
         mac_tour(ui, onboarding::MacStep::SetupProgress)
+    }),
+    ("mac-onboarding-stale", |ui| {
+        mac_tour(ui, onboarding::MacStep::SetupStale)
     }),
     ("mac-onboarding-denied", |ui| {
         mac_tour(ui, onboarding::MacStep::SetupDenied)

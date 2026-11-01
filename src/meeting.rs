@@ -37,8 +37,9 @@ mod os;
 pub(crate) use os::reveal;
 #[cfg(target_os = "macos")]
 pub(crate) use os::{
-    SystemAudioAuthorization, create_tap_aggregate, request_system_audio_access,
-    screen_recording_permitted, system_audio_authorization, system_audio_ready,
+    SystemAudioAuthorization, create_tap_aggregate, request_screen_recording,
+    request_system_audio_access, reset_system_audio_request, screen_recording_permitted,
+    system_audio_authorization, system_audio_ready,
 };
 mod delta;
 mod echo;

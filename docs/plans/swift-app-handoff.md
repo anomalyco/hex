@@ -10,6 +10,11 @@ offer a download link; downloading and installing remains an explicit user actio
 - Do not automatically install, quit, delete, or replace the old app.
 - Do not adopt the Swift bundle identifier or publish a Rust payload to its feed.
 - Do not move or copy existing Rust settings, models, or history.
+- Narrow TCC exception: when `anomaly.hex` shows an untrusted Accessibility,
+  Screen Recording, or System Audio Recording permission row (or the user clicks
+  `"Still grey? Fix it"`), it may run `tccutil reset` against retired Hex bundle
+  identifiers (`com.kitlangton.hex2`, `com.kitlangton.Hex`, `com.kitlangton.Hex.debug`)
+  so System Settings does not list duplicate **Hex** rows that shadow the new grant.
 - New Rust users complete ordinary setup and download their selected local model.
 
 ## Separate Identities
