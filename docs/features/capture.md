@@ -93,8 +93,13 @@ On Linux                                 // capture.linux
 ├── Encoding -> VA-API (libva loaded at run time): each DMA-BUF imported, scaled
 │   to a 2560 px long edge (1920 for a window) and converted on the video
 │   engine, H.264 High at a constant QP with Hex-written headers, 30 fps;
-│   `ffmpeg -c copy` muxes recording.mp4. No VA-API -> frames copied and
-│   encoded with x264 through ffmpeg (slow on DMA-BUF-only compositors)
+│   `ffmpeg -c copy` muxes recording.mp4. Every /dev/dri render node is
+│   tried in order, so a hybrid laptop whose first node is a GPU the VA
+│   driver can't use encodes on the next (#853). No VA-API -> frames copied
+│   and encoded with x264 through ffmpeg (slow on DMA-BUF-only compositors);
+│   a first frame neither path can read (a DMA-BUF the CPU can't map) fails
+│   the capture with why, never a capture without a picture. Check: vaapi
+│   render_nodes_in_order; not observed on a hybrid laptop
 ├── Candidates -> a small copy from the video engine (at most 4× smaller per
 │   pass: radeonsi crashes past it)
 ├── Reading movies back (keyframes, probe, audio) -> `ffmpeg`/`ffprobe`

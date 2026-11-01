@@ -352,6 +352,30 @@ fn libraries() -> Result<(&'static Va, &'static VaDrm)> {
     .map_err(|e| anyhow!("{e}"))
 }
 
+/// The GPU render nodes (`/dev/dri/renderD128`, …), lowest number first.
+fn render_nodes() -> Vec<std::path::PathBuf> {
+    let names = std::fs::read_dir("/dev/dri")
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    sorted_render_nodes(names)
+        .into_iter()
+        .map(|name| std::path::Path::new("/dev/dri").join(name))
+        .collect()
+}
+
+fn sorted_render_nodes(names: Vec<String>) -> Vec<String> {
+    let mut nodes: Vec<(u32, String)> = names
+        .into_iter()
+        .filter_map(|name| Some((name.strip_prefix("renderD")?.parse().ok()?, name)))
+        .collect();
+    nodes.sort();
+    nodes.into_iter().map(|(_, name)| name).collect()
+}
+
 fn check(va: &Va, status: Status, what: &str) -> Result<()> {
     if status == 0 {
         return Ok(());
@@ -389,29 +413,66 @@ unsafe impl Send for Encoder {}
 
 impl Encoder {
     /// Opens the first render node that encodes H.264, scaling `source` frames to `width` ×
-    /// `height` (multiples of 16), with an optional small copy at `small`.
+    /// `height` (multiples of 16), with an optional small copy at `small`. Every render node is
+    /// tried in order: on a laptop with two GPUs the first may be one the VA driver can't use.
     pub fn new(
+        source: (u32, u32),
+        pixel: PixelFormat,
+        output: (u32, u32),
+        small: (u32, u32),
+    ) -> Result<Self> {
+        let (va, drm) = libraries()?;
+        let nodes = render_nodes();
+        if nodes.is_empty() {
+            bail!("no GPU render node in /dev/dri");
+        }
+        let mut failures = Vec::new();
+        for node in nodes {
+            match Self::open(va, drm, &node, source, pixel, output, small) {
+                Ok(encoder) => {
+                    if !failures.is_empty() {
+                        crate::log::scrawl_log(format!(
+                            "Hardware encoding on {} ({})",
+                            node.display(),
+                            failures.join("; ")
+                        ));
+                    }
+                    return Ok(encoder);
+                }
+                Err(error) => failures.push(format!("{}: {error:#}", node.display())),
+            }
+        }
+        bail!("{}", failures.join("; "))
+    }
+
+    fn open(
+        va: &'static Va,
+        drm: &VaDrm,
+        path: &std::path::Path,
         source: (u32, u32),
         pixel: PixelFormat,
         (width, height): (u32, u32),
         small: (u32, u32),
     ) -> Result<Self> {
-        let (va, drm) = libraries()?;
         let node = File::options()
             .read(true)
             .write(true)
-            .open("/dev/dri/renderD128")
-            .map_err(|e| anyhow!("no GPU render node: {e}"))?;
+            .open(path)
+            .map_err(|e| anyhow!("could not open the render node: {e}"))?;
         let display = unsafe { (drm.vaGetDisplayDRM)(node.as_raw_fd()) };
         if display.is_null() {
             bail!("VA-API has no display for the render node");
         }
         let (mut major, mut minor) = (0, 0);
-        check(
+        let initialized = check(
             va,
             unsafe { (va.vaInitialize)(display, &mut major, &mut minor) },
             "initialize",
-        )?;
+        );
+        if let Err(error) = initialized {
+            unsafe { (va.vaTerminate)(display) };
+            return Err(error);
+        }
         let mut encoder = Self {
             va,
             display,
@@ -1202,6 +1263,14 @@ mod tests {
         // 1 010 011 011
         assert_eq!(b.bits, 10);
         assert_eq!(b.bytes, [0b1010_0110, 0b1100_0000]);
+    }
+
+    #[test]
+    fn render_nodes_in_order() {
+        let names = ["renderD129", "card0", "renderD128", "renderDx", "card1"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(sorted_render_nodes(names), ["renderD128", "renderD129"]);
     }
 
     #[test]

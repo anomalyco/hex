@@ -546,14 +546,14 @@ pub struct Frame {
     pub stride: u32,
     /// The whole buffer object's size, for importing it.
     pub size: u32,
-    /// Where the CPU reads its first row.
-    rows: *const u8,
+    /// Where the CPU reads its first row, or why it can't (a DMA-BUF that won't map).
+    rows: std::result::Result<*const u8, String>,
 }
 
 impl Frame {
     /// Rows in memory, `stride` apart, starting at the frame's first pixel.
-    pub fn rows(&self) -> *const u8 {
-        self.rows
+    pub fn rows(&self) -> Result<*const u8> {
+        self.rows.clone().map_err(|why| anyhow!("{why}"))
     }
 }
 
@@ -716,10 +716,12 @@ impl Stream {
             .ok()
             .filter(|&s| s > 0)
             .unwrap_or(format.width * 4);
+        // The GPU encoder imports a DMA-BUF without reading it, so one the CPU can't map
+        // still records there; only the CPU path needs `rows`.
         let base = if data.data.is_null() {
-            self.map(data)?
+            self.map(data)
         } else {
-            data.data.cast::<u8>().cast_const()
+            Ok(data.data.cast::<u8>().cast_const())
         };
         Some(Frame {
             fd: data.fd,
@@ -727,15 +729,15 @@ impl Stream {
             offset: chunk.offset,
             stride,
             size: data.maxsize + data.mapoffset,
-            rows: unsafe { base.add(chunk.offset as usize) },
+            rows: base.map(|base| unsafe { base.add(chunk.offset as usize) }),
         })
     }
 
     /// A CPU view of a buffer PipeWire didn't map (a DMA-BUF), kept until it's removed.
-    fn map(&self, data: &SpaData) -> Option<*const u8> {
+    fn map(&self, data: &SpaData) -> std::result::Result<*const u8, String> {
         let mut maps = self.listener.maps.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(&(address, _)) = maps.get(&data.fd) {
-            return Some((address + data.mapoffset as usize) as *const u8);
+            return Ok((address + data.mapoffset as usize) as *const u8);
         }
         let length = (data.maxsize + data.mapoffset) as usize;
         let address = unsafe {
@@ -749,10 +751,13 @@ impl Stream {
             )
         };
         if address == libc::MAP_FAILED {
-            return None;
+            return Err(format!(
+                "the CPU can't read the screen's GPU buffers ({})",
+                std::io::Error::last_os_error()
+            ));
         }
         maps.insert(data.fd, (address as usize, length));
-        Some((address as usize + data.mapoffset as usize) as *const u8)
+        Ok((address as usize + data.mapoffset as usize) as *const u8)
     }
 }
 
