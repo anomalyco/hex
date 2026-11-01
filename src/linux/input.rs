@@ -1855,9 +1855,7 @@ mod tests {
         let requested = [Some((Shortcut::Dictation, &binding)), None, None, None];
         let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
         ids[Shortcut::Dictation.index()] = Some("dictation-ALT-space".into());
-        let granted = std::collections::HashMap::from([
-            ("dictation-ALT-space".to_string(), None),
-        ]);
+        let granted = std::collections::HashMap::from([("dictation-ALT-space".to_string(), None)]);
         let unconfirmed = |desktop_assigns| {
             project_grants(&granted, &requested, &ids, desktop_assigns)
                 .into_iter()

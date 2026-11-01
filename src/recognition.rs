@@ -1556,9 +1556,7 @@ fn control_dictation(
         CaptureAction::Toggle => !recording,
     };
     Ok(match start {
-        true if recording => {
-            ControlReply::unchanged("Dictation is already recording")
-        }
+        true if recording => ControlReply::unchanged("Dictation is already recording"),
         true => {
             if let Some(refusal) = capture_refusal(other_recording, suspended) {
                 return Ok(refusal);

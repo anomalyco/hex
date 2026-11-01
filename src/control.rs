@@ -972,7 +972,10 @@ mod tests {
         let ControlCommand::Dictation { action, .. } = cancel.command else {
             panic!("a dictation command");
         };
-        assert_eq!(check_flags(action, false, false).unwrap_err().code, "removed");
+        assert_eq!(
+            check_flags(action, false, false).unwrap_err().code,
+            "removed"
+        );
     }
 
     fn round_trip_request(command: ControlCommand) {

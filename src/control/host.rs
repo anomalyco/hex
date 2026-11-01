@@ -137,12 +137,12 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
             host.dictation(action, Some(print), false)?;
             Ok(super::await_printed(&printed, super::PRINT_WAIT))
         })),
-        ControlCommand::Dictation { action, raw, .. } => reply(
-            super::check_flags(action, false, raw).and_then(|action| {
+        ControlCommand::Dictation { action, raw, .. } => {
+            reply(super::check_flags(action, false, raw).and_then(|action| {
                 host.dictation(action, None, raw)
                     .map(|()| ControlReply::done(dictation_message(action)))
-            }),
-        ),
+            }))
+        }
         ControlCommand::PasteLast => reply(
             host.paste_last()
                 .map(|()| ControlReply::done("Pasting the last dictation")),

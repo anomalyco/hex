@@ -5767,10 +5767,7 @@ mod tests {
             assert!(hotkey.is_recording());
         }
         assert_eq!(
-            hotkey.process(
-                InputEvent::Flags(NO_FLAGS),
-                now + Duration::from_secs(301)
-            ),
+            hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_secs(301)),
             Some(HotkeyAction::Finish)
         );
     }
