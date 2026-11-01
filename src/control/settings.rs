@@ -1302,8 +1302,10 @@ mod tests {
     #[test]
     fn capture_routing_is_set_as_one_object_without_a_jev_key() {
         let settings = AppSettings::default();
-        let value = r#"{"smartRouting": true, "sites": {"https://example.com": "ses_a"},
-            "jevApiKey": "not-a-real-key"}"#;
+        let value = concat!(
+            r#"{"smartRouting": true, "sites": {"https://example.com": "ses_a"}, "#,
+            r#""jevApiKey": "not-a-real-key"}"#
+        );
         let change = apply(&settings, "capture.routing", value, &rules()).unwrap();
         let config = change.settings.capture.routing.config();
         assert!(config.smart_routing);
