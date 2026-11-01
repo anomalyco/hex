@@ -611,12 +611,13 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
             show_dock_icon,
             status_actions.is_some(),
         ));
+        let new_hex_notice_launch = crate::app_window::take_new_hex_notice_launch();
         let show_app_on_launch = should_open_app_on_launch(
             show_dock_icon,
             setup_ready,
             onboarding_completed,
             status_actions.is_some(),
-        );
+        ) || new_hex_notice_launch;
         let open_result = match shell_preview.clone() {
             Some(preview) => Some(crate::app_window::open_preview(
                 &app_window,

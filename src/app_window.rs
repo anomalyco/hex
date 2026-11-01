@@ -78,6 +78,7 @@ const TOUR_PERMISSION_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
 const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
 const ACTIVITY_LIMIT: usize = 100;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
+const NEW_HEX_URL: &str = "https://anoma.ly/hex";
 
 // Each OS supplies the same set of `platform` items: its window state, the
 // capabilities below, window chrome, and the actions only its runtime can
@@ -3443,6 +3444,43 @@ impl AppWindow {
                                 .min_w_0()
                                 .child(settings_copy(title, description)),
                         )
+                        .child(div().flex_shrink_0().child(action)),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// 2.3.2's only change: the top of every pane points macOS users at the
+    /// new Hex, which this build can't install itself.
+    fn render_new_hex_notice(&self) -> Option<AnyElement> {
+        if !cfg!(target_os = "macos") || self.setup_visible {
+            return None;
+        }
+        let action = button(ButtonKind::Primary, "Get the new Hex")
+            .id("get-new-hex")
+            .on_click(|_, _, _| open_new_hex());
+        Some(
+            div()
+                .id("new-hex-notice")
+                .w_full()
+                .flex()
+                .justify_center()
+                .flex_shrink_0()
+                .px(px(PANE_GUTTER))
+                .pt_6()
+                .child(
+                    panel()
+                        .max_w(px(PANE_CONTENT_WIDTH))
+                        .px_4()
+                        .py_3()
+                        .flex()
+                        .items_center()
+                        .gap_4()
+                        .child(div().flex_1().min_w_0().child(settings_copy(
+                            "The new Hex is here",
+                            "Rebuilt from the ground up, lighter, and it updates itself. \
+                             This version gets no more updates.",
+                        )))
                         .child(div().flex_shrink_0().child(action)),
                 )
                 .into_any_element(),
@@ -7382,6 +7420,7 @@ impl TranscriptionPickerDelegate for AppWindow {
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _frame_guard = crate::motion::begin_frame(self.pane.label());
+        let new_hex_notice = self.render_new_hex_notice();
         let model_notice = self.render_model_notice(cx);
         let content = match self.pane {
             Pane::HudLab | Pane::Meetings | Pane::Commands => {
@@ -7470,6 +7509,7 @@ impl Render for AppWindow {
                     .flex_col()
                     .overflow_hidden()
                     .children(platform::caption(window))
+                    .children(new_hex_notice)
                     .children(model_notice)
                     .when_some(self.settings_load_error.clone(), |column, error| {
                         column.child(
@@ -7758,6 +7798,34 @@ fn sound_volume_index(settings: &AppSettings) -> usize {
                 .total_cmp(&(settings.sound_effect_volume - *right).abs())
         })
         .map_or(0, |(index, _)| index + 1)
+}
+
+fn open_new_hex() {
+    if let Err(error) =
+        crate::commands::execute(crate::commands::Action::OpenUrl(NEW_HEX_URL.into()))
+    {
+        tracing::error!(%error, "could not open the new Hex's download page");
+    }
+}
+
+/// True once per install: the first launch of 2.3.2 opens the window so
+/// the new-Hex notice is seen even by people who never open Settings.
+pub(crate) fn take_new_hex_notice_launch() -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    let Ok(marker) = crate::app_paths::support_dir().map(|dir| dir.join("new-hex-notice-shown"))
+    else {
+        return false;
+    };
+    if marker.exists() {
+        return false;
+    }
+    if let Err(error) = std::fs::write(&marker, b"") {
+        tracing::warn!(%error, "could not record the new-Hex notice");
+        return false;
+    }
+    true
 }
 
 fn open_opencode_beta_docs() {
