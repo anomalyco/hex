@@ -145,21 +145,9 @@ a {
   border-radius: 1.125rem;
   background: radial-gradient(ellipse at 50% 85%, rgba(255, 164, 56, 0.52), rgba(255, 110, 32, 0.16) 58%, transparent 78%);
   filter: blur(8px);
-  opacity: 0.78;
-  transition: opacity 220ms ease;
-  animation: keycap-glow 2.8s ease-in-out infinite;
-}
-
-@keyframes keycap-glow {
-  0%,
-  100% {
-    opacity: 0.62;
-    transform: scale(0.98);
-  }
-  50% {
-    opacity: 0.96;
-    transform: scale(1.04);
-  }
+  /* The pulse: --glow-pulse (0 dim, 1 bright) is set at 30 fps by OptionKey. */
+  opacity: calc(0.62 + 0.34 * var(--glow-pulse, 0));
+  transform: scale(calc(0.98 + 0.06 * var(--glow-pulse, 0)));
 }
 
 .keycap__well {
@@ -263,10 +251,6 @@ a {
     --key-y: 1.5px;
   }
 
-  .keycap:hover .keycap__glow {
-    opacity: 1;
-  }
-
   .keycap:hover .keycap__hint {
     color: rgba(244, 244, 246, 0.82);
   }
@@ -282,7 +266,7 @@ a {
   opacity: 1;
   filter: blur(11px);
   transform: scale(1.22);
-  animation: none;
+  transition: opacity 220ms ease;
 }
 
 .keycap:active .keycap__cap,
@@ -326,11 +310,6 @@ a {
   opacity: 0;
   pointer-events: none;
   transition: none;
-}
-
-/* The key is hidden for good: stop its glow so the page stops restyling every frame. */
-.page[data-key-exploded] .keycap__glow {
-  animation: none;
 }
 
 .header__tools {
@@ -806,7 +785,8 @@ button.download:hover {
   }
 
   .keycap__glow {
-    animation: none;
+    opacity: 0.78;
+    transform: none;
   }
 
   .install__os[data-animate]::before {
