@@ -16,9 +16,10 @@ mod controls;
 #[cfg(target_os = "macos")]
 pub(crate) mod deep_link;
 mod explainer;
+mod found;
+mod found_choice;
 mod fun;
 mod general;
-mod hero;
 mod history;
 #[cfg_attr(target_os = "linux", path = "rune_ui/linux_host.rs")]
 #[cfg_attr(target_os = "windows", path = "rune_ui/windows_host.rs")]
@@ -43,8 +44,7 @@ mod modes;
 mod onboarding;
 mod onboarding_kit;
 mod output;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) mod paste_picker;
+mod paste_access;
 mod picker;
 mod platform;
 mod platform_settings;
@@ -76,6 +76,8 @@ use crate::desktop::i18n::{tr, tr_fill};
 use crate::transcription::models::TranscriptionModelId;
 use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
+use onboarding_kit::live::Page;
+use onboarding_kit::scenes::{FirstRun, first_run, mac_first_run};
 use settings::Capture;
 
 /// How long typing pauses before a text field's edit is saved.
@@ -192,6 +194,7 @@ pub(crate) fn run_app(
                         });
                     }
                     Control::Quit => {
+                        self::host::close_before_quit(&window);
                         quit.quit();
                         break;
                     }
@@ -274,30 +277,43 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
     app
 }
 
-/// The window's compositor: the UI, then the welcome hero over the tour's
-/// stage and the Sounds sheet's HUD over its stage.
+/// The window's compositor: the UI (through the first run's GPU stage or
+/// the practice game's strike and burn while they show), then the Sounds
+/// sheet's HUD over its stage.
 #[derive(Default)]
 pub(crate) struct WindowCompositor {
-    hero: hero::HeroCompositor,
+    onboarding: Option<onboarding_kit::gpu_stage::OnboardingGpu>,
+    game: Option<onboarding_kit::game::fx::GameFx>,
     sounds: sound_sets::Preview,
 }
 
 impl rune::compose::Compositor<Ui> for WindowCompositor {
     fn features(&self) -> wgpu::Features {
         // The Sounds sheet's HUD, and one device shared with the HUD overlay.
-        self.hero.features() | crate::rune_hud::Painter::FEATURES
-    }
-
-    fn animating(&self) -> bool {
-        self.hero.animating()
-    }
-
-    fn summary(&mut self, device: &wgpu::Device) -> Option<String> {
-        self.hero.summary(device)
+        crate::rune_hud::Painter::FEATURES
     }
 
     fn render(&mut self, f: &mut rune::compose::Frame<'_, Ui>) {
-        self.hero.render(f);
+        if f.rt
+            .marks
+            .iter()
+            .any(|&m| onboarding_kit::game::fx::is_game_mark(m))
+        {
+            // The game's HUD is onboarding's: its draw hook paints both.
+            let hud = onboarding_kit::gpu_stage::OnboardingGpu::for_frame(&mut self.onboarding, f);
+            self.game
+                .get_or_insert_with(|| onboarding_kit::game::fx::GameFx::new(f.device))
+                .render(f, hud);
+        } else if self.onboarding.is_some()
+            || f.rt
+                .marks
+                .iter()
+                .any(|&m| onboarding_kit::gpu_stage::is_onboard_mark(m))
+        {
+            onboarding_kit::gpu_stage::OnboardingGpu::for_frame(&mut self.onboarding, f).render(f);
+        } else {
+            f.draw_ui();
+        }
         self.sounds.render(f);
     }
 }
@@ -720,8 +736,6 @@ enum Menu {
     InputSourceModel(usize),
     /// An input source's language in keyboard model switching.
     InputSourceLanguage(usize),
-    /// The microphone under the tour's practice field.
-    TourMicrophone,
     /// How long History keeps dictations.
     HistoryRetention,
     /// The OpenCode thinking variant.
@@ -771,7 +785,6 @@ pub(crate) struct Ui {
     /// properties, which can block, so it runs off the UI thread.
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
-    confirm_release: bool,
     mic_level: general::MicLevel,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
@@ -781,8 +794,6 @@ pub(crate) struct Ui {
     lab_flash: Option<(crate::labs::Feature, Instant)>,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
-    /// A scene previewing the Paste picker overlay over a focused editor.
-    paste_picker_preview: Option<crate::paste_picker::PickerSnapshot>,
     capture: Capture,
     vocabulary: vocabulary::VocabularyEditor,
     /// The model the service was last seen preparing, and since when.
@@ -795,6 +806,8 @@ pub(crate) struct Ui {
     modes: modes::ModesPane,
     output: output::OutputPane,
     picker: picker::Picker,
+    /// Speech models already on this computer, and choosing one.
+    found: found::FoundState,
     explainer: explainer::Explainer,
     sound_sets: sound_sets::SoundSets,
     tour: Option<onboarding::Tour>,
@@ -837,8 +850,14 @@ impl Ui {
         };
         crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let store = host::history(&connect, settings.history_retention);
+        #[cfg(target_os = "linux")]
+        let paste = connect.is_some().then(paste_access::detect).flatten();
         let mut ui = Self::with(settings, Service::Pending(connect));
         ui.error = error;
+        #[cfg(target_os = "linux")]
+        {
+            ui.platform.paste = paste;
+        }
         // A mouse-button shortcut went back to its default: say so once.
         if ui.settings.mouse_shortcut_notice {
             ui.settings.mouse_shortcut_notice = false;
@@ -856,7 +875,7 @@ impl Ui {
             crate::dev_build::is_dev_build() && crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.hud.tuning = crate::rune_hud::dot_scope::lab();
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
-        onboarding_kit::live::open_on_launch(&mut ui, crate::app_paths::is_macos_test_build());
+        onboarding_kit::live::open(&mut ui);
         ui.platform.set_login_item(host::launch_at_login());
         ui
     }
@@ -878,13 +897,11 @@ impl Ui {
             microphones_listed_at: 0.0,
             input_sources_listed_at: f64::NEG_INFINITY,
             microphones_listing: None,
-            confirm_release: false,
             mic_level: general::MicLevel::default(),
             advanced: Vec::new(),
             labs_open: false,
             lab_flash: None,
             build_preview: None,
-            paste_picker_preview: None,
             capture: Capture::Idle,
             vocabulary,
             preparing: None,
@@ -895,6 +912,7 @@ impl Ui {
             modes,
             output: output::OutputPane::default(),
             picker: picker::Picker::default(),
+            found: found::FoundState::default(),
             explainer: explainer::Explainer::default(),
             sound_sets: sound_sets::SoundSets::default(),
             tour: None,
@@ -915,6 +933,11 @@ impl Ui {
 
     fn live(&self) -> bool {
         matches!(self.service, Service::Live(_))
+    }
+
+    /// A scene or test: nothing here runs on real time.
+    fn is_fixture(&self) -> bool {
+        matches!(self.service, Service::Fixture(_))
     }
 
     fn send(&mut self, request: Request) {
@@ -1216,6 +1239,13 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         tx.toggle_playground();
         return true;
     }
+    // Ctrl+Q quits Hex on Linux, as Quit Hex in the sidebar does (#808).
+    // macOS's menu bar owns ⌘Q; Windows quits from its tray.
+    #[cfg(target_os = "linux")]
+    if event.key == rune::Key::Command('q') && !event.mods.shift && !event.mods.alt {
+        ui.quit();
+        return true;
+    }
     if let rune::Key::Command(digit @ '1'..='9') = event.key
         && !event.mods.alt
         && !ui.picker.open
@@ -1318,6 +1348,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     }
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
+    changed |= paste_access::poll(ui);
     changed |= labs::poll_flash(ui, now);
     // The OpenCode catalog is read only while the pane that uses it shows.
     changed |= ui.models.poll(
@@ -1343,12 +1374,13 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
     changed |= model_import::poll(ui);
+    changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
     // General names the input in use; list again when the OS reports an
     // input change. Windows reports a default change only to an open
     // default stream, so there the list is also refreshed every few seconds.
-    if (ui.pane == Pane::General || onboarding::shows_microphone(ui))
+    if ui.pane == Pane::General
         && ui.live()
         && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
         && (ui.microphones_route != Some(crate::audio::input_route_generation())
@@ -1494,15 +1526,8 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     if let Some(modal) = vocabulary::modal(ui, p) {
         layer.extend(modal);
     }
-    if let Some(stage) = paste_picker::scene_overlay(ui, p) {
-        layer.push(stage);
-    }
-    let mut tour_layer = Vec::new();
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
-    } else if let Some(tour) = onboarding::overlay(ui, p, &mut tour_layer) {
-        layer.push(tour);
-        layer.extend(tour_layer);
     }
     rune_kit::root(window, layer).on_window_focus(window_focused)
 }
@@ -1876,6 +1901,8 @@ fn faded_body(key: &str, content: El, (top, bottom): (f32, f32)) -> El {
         .key(key)
         .grow(1.0)
         .shrink()
+        // Shrinks below its content in a fixed-height parent (#906).
+        .min_h(0.0)
         .clip_fade(0.0, top, 0.0, bottom)
         .scroll(ScrollSpec {
             stick_bottom: false,
@@ -1953,7 +1980,6 @@ const SCENES: &[Scene] = &[
             default_is_hex_microphone: false,
             ..Default::default()
         });
-        ui.confirm_release = true;
     }),
     ("history", |ui| {
         *ui = portal_fixture();
@@ -1976,6 +2002,10 @@ const SCENES: &[Scene] = &[
         ui.output.expanded = Some(0);
         ui.output.prompt_copied = true;
         ui.pane = Pane::Output;
+    }),
+    ("output-trust", |ui| {
+        *ui = portal_fixture();
+        output::trust_fixture(ui);
     }),
     ("output-empty", |ui| {
         *ui = portal_fixture();
@@ -2027,19 +2057,27 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         picker::parakeet_ultra_fixture(ui);
     }),
-    // Labs › Use your own speech model: the picker's Add model file….
+    // Every model, with the full list's Add model file….
     ("picker-custom-models", |ui| {
         *ui = portal_fixture();
-        ui.settings.labs.custom_models = true;
-        picker::fixture(ui, None);
+        picker::all_fixture(ui);
     }),
-    // Japanese saved: the English-only models say they switch the language.
+    // Found on this computer: Parakeet v3's exact file and an untested Whisper.
+    ("picker-found", |ui| {
+        *ui = portal_fixture();
+        ui.found.models = found::fixture();
+        picker::all_fixture(ui);
+    }),
+    // Japanese saved: Japanese models compared, SenseVoice downloading.
     ("picker-japanese", |ui| {
         *ui = portal_fixture();
-        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
-        ui.settings.transcription.language = "ja".into();
-        ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
-        picker::fixture(ui, None);
+        picker::japanese_fixture(ui, Some(TranscriptionModelId::SenseVoiceSmall));
+    }),
+    // Every model: the English-only ones fold away and switch the language.
+    ("picker-japanese-all", |ui| {
+        *ui = portal_fixture();
+        picker::japanese_fixture(ui, None);
+        (ui.picker.view, ui.picker.others_open) = (picker::View::All, true);
     }),
     // Parakeet chosen over Japanese: Settings names the language change.
     ("language-fallback", |ui| {
@@ -2111,13 +2149,44 @@ const SCENES: &[Scene] = &[
         ui.settings.double_tap_lock = true;
         explainer::fixture(ui, None);
     }),
+    // The first run on Linux (Windows is the same window): setting up Hex
+    // with nothing found, the model step with models found here, the demo,
+    // waiting for the model, the practice game, and Hex is ready.
     ("onboarding", |ui| {
-        *ui = portal_fixture();
-        onboarding::fixture(ui, crate::desktop::onboarding::Step::Welcome, false);
+        first_run(ui, FirstRun::Fresh, Page::Download)
     }),
-    ("onboarding-setup", |ui| {
-        *ui = portal_fixture();
+    ("onboarding-download-failed", |ui| {
+        first_run(ui, FirstRun::Failed, Page::Download)
+    }),
+    ("onboarding-model-found", found::listed),
+    ("onboarding-model-found-downloading", found::loading),
+    ("onboarding-model-found-recommended", found::present),
+    ("onboarding-model-found-back", found::chosen),
+    ("onboarding-demo", |ui| {
+        first_run(ui, FirstRun::Downloading, Page::Demo)
+    }),
+    ("onboarding-waiting", |ui| {
+        first_run(ui, FirstRun::Downloading, Page::Waiting)
+    }),
+    // GNOME and KDE on Wayland: why the desktop asks before the first paste.
+    ("onboarding-paste", |ui| {
+        first_run(ui, FirstRun::PasteAccess, Page::Permissions)
+    }),
+    ("onboarding-try", |ui| {
+        first_run(ui, FirstRun::Ready, Page::Try)
+    }),
+    ("onboarding-ready", |ui| {
+        first_run(ui, FirstRun::Ready, Page::Ready)
+    }),
+    // Windows with its microphone privacy switch off.
+    ("windows-onboarding-microphone", |ui| {
+        *ui = fixture(DesktopShortcuts::Registered);
+        ui.platform = platform::PlatformState::preview(platform::Capabilities::WINDOWS);
+        ui.host = platform::PlatformHost::Fixture(Vec::new());
+        ui.platform.permissions.microphone =
+            crate::desktop::onboarding::PermissionState::NeedsSettings;
         onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
+        onboarding_kit::live::fixture(ui, Page::Permissions);
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
@@ -2470,14 +2539,6 @@ const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         ui.settings.meetings.enabled = false;
     }),
-    ("paste-picker", |ui| {
-        *ui = mac_fixture();
-        paste_picker::fixture_single(ui);
-    }),
-    ("paste-picker-multiselect", |ui| {
-        *ui = mac_fixture();
-        paste_picker::fixture_multiselect(ui);
-    }),
     ("mac-activity", |ui| {
         *ui = mac_fixture();
         ui.platform.developer = true;
@@ -2495,66 +2556,33 @@ const SCENES: &[Scene] = &[
             key: None,
         };
     }),
+    // The first run on macOS: setting up Hex, each permission state, the
+    // practice game, and Hex is ready.
     ("mac-onboarding", |ui| {
-        mac_tour(ui, onboarding::MacStep::Welcome)
+        mac_first_run(ui, onboarding::MacStep::Setup, Page::Download)
     }),
-    ("mac-onboarding-setup", |ui| {
-        mac_tour(ui, onboarding::MacStep::Setup)
-    }),
-    ("mac-onboarding-progress", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupProgress)
-    }),
-    ("mac-onboarding-stale", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupStale)
+    ("mac-onboarding-permissions", |ui| {
+        mac_first_run(ui, onboarding::MacStep::Setup, Page::Permissions)
     }),
     ("mac-onboarding-denied", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupDenied)
+        mac_first_run(ui, onboarding::MacStep::SetupDenied, Page::Permissions)
+    }),
+    ("mac-onboarding-stale", |ui| {
+        mac_first_run(ui, onboarding::MacStep::SetupStale, Page::Permissions)
     }),
     ("mac-onboarding-restart", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupRestart)
-    }),
-    ("mac-onboarding-download-failed", |ui| {
-        mac_tour(ui, onboarding::MacStep::SetupDownloadFailed)
+        mac_first_run(ui, onboarding::MacStep::SetupRestart, Page::Permissions)
     }),
     ("mac-onboarding-try", |ui| {
-        mac_tour(ui, onboarding::MacStep::TryIt)
-    }),
-    ("mac-onboarding-listening", |ui| {
-        mac_tour(ui, onboarding::MacStep::TryItListening)
-    }),
-    ("mac-onboarding-landed", |ui| {
-        mac_tour(ui, onboarding::MacStep::TryItLanded)
+        mac_first_run(ui, onboarding::MacStep::TryIt, Page::Try)
     }),
     ("mac-onboarding-reopen", |ui| {
-        mac_tour(ui, onboarding::MacStep::TryItReopen)
+        mac_first_run(ui, onboarding::MacStep::TryItReopen, Page::Try)
     }),
-    ("mac-onboarding-done", |ui| {
-        mac_tour(ui, onboarding::MacStep::Done)
+    ("mac-onboarding-ready", |ui| {
+        mac_first_run(ui, onboarding::MacStep::Done, Page::Ready)
     }),
-    ("mac-onboarding-mic", |ui| {
-        onboarding::mic_tour(ui, onboarding::MicScene::Hearing)
-    }),
-    ("mac-onboarding-mic-open", |ui| {
-        onboarding::mic_tour(ui, onboarding::MicScene::Open)
-    }),
-    ("mac-onboarding-mic-silent", |ui| {
-        onboarding::mic_tour(ui, onboarding::MicScene::Silent)
-    }),
-    ("mac-onboarding-mic-lid", |ui| {
-        onboarding::mic_tour(ui, onboarding::MicScene::LidClosed)
-    }),
-    // The welcome hero animating (`--video`, or a live window), and settled as
-    // Reduce Motion shows it.
-    ("onboarding-hero", |ui| hero_tour(ui, false)),
-    ("onboarding-hero-still", |ui| hero_tour(ui, true)),
 ];
-
-fn hero_tour(ui: &mut Ui, still: bool) {
-    mac_tour(ui, onboarding::MacStep::Welcome);
-    if let Some(tour) = &mut ui.tour {
-        tour.hero_still = still;
-    }
-}
 
 /// The Annotate pane with captures `enabled`, a 3-day video retention, and
 /// `adjust` applied to what the host shows.
@@ -2623,12 +2651,6 @@ fn listening(message: Option<&'static str>, held: HotkeyModifiers) -> Capture {
     }
 }
 
-fn mac_tour(ui: &mut Ui, step: onboarding::MacStep) {
-    *ui = mac_fixture();
-    onboarding::mac_fixture(ui, step);
-}
-
-/// What the tour's practice microphone shows in a scene.
 fn portal_fixture() -> Ui {
     fixture(DesktopShortcuts::Portal(vec![
         DesktopGrantedShortcut {

@@ -224,7 +224,7 @@ pub(super) fn human_models(models: &[ModelInfo]) -> String {
                 model.languages.join(", ")
             };
             format!(
-                "{} {:width$}  {:name_width$}  {:>8}  {:13}  {languages}\n",
+                "{} {:width$}  {:name_width$}  {:>8}  {:13}  {languages}{}\n",
                 if model.selected { "*" } else { " " },
                 model.id,
                 model.name,
@@ -233,6 +233,11 @@ pub(super) fn human_models(models: &[ModelInfo]) -> String {
                     "installed"
                 } else {
                     "not installed"
+                },
+                if model.source.is_empty() {
+                    String::new()
+                } else {
+                    format!("  ({})", model.source)
                 },
             )
         })

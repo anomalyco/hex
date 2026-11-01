@@ -44,15 +44,16 @@ const MANAGED_MARK: &str = "X-Hex-Managed=true";
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 /// A request can wait for the user to approve a desktop dialog.
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+/// BindShortcuts waits as long as the desktop's approval dialog may
+/// reasonably stay open. Giving up closes Hex's session, and KDE then keeps
+/// every shortcut with no key and never asks again (#898).
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// How often a pending request checks for cancellation.
 const STOP_POLL: Duration = Duration::from_millis(50);
-/// Cancel dictation, which the user assigns in the desktop. Not `cancel`:
-/// KDE still holds Escape under that id from builds that bound it.
-pub(crate) const CANCEL_ID: &str = "cancel-dictation";
-/// Cancel dictation's id before #492, when Hex suggested Escape for it.
-const LEGACY_CANCEL_ID: &str = "cancel";
-/// What Cancel dictation is called in the shortcuts the portal granted.
-pub(crate) const CANCEL_DESCRIPTION: &str = "Cancel dictation";
+/// The ids Cancel dictation had until it was removed (#786): `cancel`,
+/// which asked for Escape before #492, then `cancel-dictation`, which the
+/// user could put on any key. KDE keeps both, holding their keys.
+const STALE_KDE_ACTIONS: [&str; 2] = ["cancel", "cancel-dictation"];
 /// KDE's global shortcuts service, which keeps what portal apps bound.
 const KGLOBALACCEL: &str = "org.kde.kglobalaccel";
 const KGLOBALACCEL_PATH: &str = "/kglobalaccel";
@@ -65,19 +66,6 @@ pub(crate) struct Shortcut {
     /// XDG shortcuts format, such as `CTRL+ALT+space`; `None` leaves the
     /// shortcut for the user to assign.
     pub(crate) trigger: Option<String>,
-}
-
-impl Shortcut {
-    /// Cancel dictation, with no suggested key: a portal shortcut is held
-    /// for as long as Hex runs, so suggesting Escape would take it from
-    /// every other application.
-    pub(crate) fn cancel() -> Self {
-        Self {
-            id: CANCEL_ID.into(),
-            description: CANCEL_DESCRIPTION,
-            trigger: None,
-        }
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -171,6 +159,9 @@ pub(crate) struct PortalBus {
     /// The portal interface this bus serves and its version.
     interface: &'static str,
     pub(crate) version: u32,
+    /// The portal knows Hex as `anomaly.hex` (xdg-desktop-portal 1.20 and
+    /// newer register host apps); older ones may not know Hex's app id.
+    pub(crate) registered: bool,
 }
 
 impl PortalBus {
@@ -226,6 +217,7 @@ impl PortalBus {
             next_token: 0,
             interface,
             version: 0,
+            registered: false,
         };
         match bus.call::<_, OwnedVariant>(
             DESKTOP_PATH,
@@ -247,20 +239,23 @@ impl PortalBus {
             "org.freedesktop.host.portal.Registry",
             "Register",
             &(APP_ID, HashMap::<&str, Variant<'_>>::new()),
-        ) && !unknown(&error)
-        {
-            // The portal finds the app id through anomaly.hex.desktop and the caller's
-            // /proc entry, which setgid wrappers such as newgrp make unreadable.
-            let fix = match written {
-                Some(entry) => format!(
-                    "Hex wrote {}; restart xdg-desktop-portal (systemctl --user restart xdg-desktop-portal) so it reads it",
-                    entry.display()
-                ),
-                None => "run Hex without setuid or setgid wrappers such as newgrp".into(),
-            };
-            return Err(eyre!(
-                "the desktop portal could not identify Hex ({error}); {fix}"
-            ));
+        ) {
+            if !unknown(&error) {
+                // The portal finds the app id through anomaly.hex.desktop and the caller's
+                // /proc entry, which setgid wrappers such as newgrp make unreadable.
+                let fix = match written {
+                    Some(entry) => format!(
+                        "Hex wrote {}; restart xdg-desktop-portal (systemctl --user restart xdg-desktop-portal) so it reads it",
+                        entry.display()
+                    ),
+                    None => "run Hex without setuid or setgid wrappers such as newgrp".into(),
+                };
+                return Err(eyre!(
+                    "the desktop portal could not identify Hex ({error}); {fix}"
+                ));
+            }
+        } else {
+            bus.registered = true;
         }
         if stop.load(Ordering::Acquire) {
             return Err(eyre!("portal registration canceled"));
@@ -331,12 +326,26 @@ impl PortalBus {
     where
         B: serde::Serialize + zbus::Type,
     {
+        self.request_within(method, body, stop, RESPONSE_TIMEOUT)
+    }
+
+    /// [`Self::request`], waiting up to `timeout` for the answer.
+    fn request_within<B>(
+        &mut self,
+        method: &str,
+        body: impl FnOnce(&str) -> B,
+        stop: &AtomicBool,
+        timeout: Duration,
+    ) -> Result<Results>
+    where
+        B: serde::Serialize + zbus::Type,
+    {
         let token = self.token();
         let path = format!("{DESKTOP_PATH}/request/{}/{token}", self.sender);
         let interface = self.interface;
         self.call::<_, OwnedObjectPath>(DESKTOP_PATH, interface, method, &body(&token))
             .wrap_err_with(|| format!("the {interface} portal refused {method}"))?;
-        let deadline = Instant::now() + RESPONSE_TIMEOUT;
+        let deadline = Instant::now() + timeout;
         loop {
             match self.signals.recv_timeout(STOP_POLL) {
                 Ok(Signal::Response(answered, code, results)) if answered == path => {
@@ -419,25 +428,40 @@ impl Drop for PortalBus {
     }
 }
 
+/// Portal threads and startup check and write the launcher entry one at a
+/// time, so none sees another's half-done write.
+static ENTRY_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Tidies Hex's launcher entry at startup: see [`DesktopEntries::tidy`].
 pub(crate) fn tidy_desktop_entries() -> Result<()> {
+    let _writing = ENTRY_WRITES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(entries) = DesktopEntries::current() {
         entries.tidy()?;
+        entries.repoint(&executable()?)?;
     }
     Ok(())
 }
 
 /// The portal identifies a host app by a desktop entry named for its id,
 /// `anomaly.hex.desktop`, which installs ship: see [`DesktopEntries::ensure`].
+/// What Hex's launcher entry starts: the same stable path as Launch at
+/// login, so a version manager's upgrade doesn't strand it (#810).
+fn executable() -> Result<String> {
+    let executable = crate::linux::login_item::launcher()?;
+    executable
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| eyre!("Hex's executable path is not UTF-8"))
+}
+
 fn ensure_desktop_entry() -> Result<Option<PathBuf>> {
+    let _writing = ENTRY_WRITES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     match DesktopEntries::current() {
-        Some(entries) => {
-            let executable = std::env::current_exe().wrap_err("could not find Hex's executable")?;
-            let executable = executable
-                .to_str()
-                .ok_or_else(|| eyre!("Hex's executable path is not UTF-8"))?;
-            entries.ensure(executable)
-        }
+        Some(entries) => entries.ensure(&executable()?),
         None => Ok(None),
     }
 }
@@ -547,13 +571,49 @@ impl DesktopEntries {
         Ok(None)
     }
 
+    /// Points Hex's own launcher entry at `executable` when the program it
+    /// starts is gone, as after a version manager (mise, asdf) removes the
+    /// version that wrote it. An entry whose program is still there is left
+    /// as it is, and so is any entry Hex didn't write.
+    fn repoint(&self, executable: &str) -> Result<()> {
+        let entry = self.entry();
+        let Entry::File(current) = read_entry(&entry)? else {
+            return Ok(());
+        };
+        let Some(program) = crate::linux::login_item::program(&current) else {
+            return Ok(());
+        };
+        if !managed(&current)
+            || !crate::linux::login_item::superseded(&program, Path::new(executable))
+        {
+            return Ok(());
+        }
+        // A package now ships Hex's entry: the stranded fallback only hid it.
+        if !program.is_file() && self.shipped(&format!("{APP_ID}.desktop")) {
+            std::fs::remove_file(&entry)
+                .wrap_err_with(|| format!("could not remove {}", entry.display()))?;
+            tracing::info!(entry = %entry.display(), "removed Hex's stranded desktop entry");
+            return Ok(());
+        }
+        let repointed = desktop_entry(executable, no_display(&current));
+        if repointed == current {
+            return Ok(());
+        }
+        write_entry(&self.applications, &entry, &repointed)
+            .wrap_err_with(|| format!("could not write {}", entry.display()))?;
+        tracing::info!(entry = %entry.display(), "pointed Hex's desktop entry at this Hex");
+        Ok(())
+    }
+
     /// After [`Self::tidy`], with no entry anywhere, writes a minimal one
     /// that runs `executable`, marked managed so an install may replace it,
     /// and hidden from launchers when an older package's or the user's own
     /// `hex.desktop` already shows Hex. Returns the entry it wrote.
     fn ensure(&self, executable: &str) -> Result<Option<PathBuf>> {
-        if let Some(moved) = self.tidy()? {
-            return Ok(Some(moved));
+        let moved = self.tidy()?;
+        self.repoint(executable)?;
+        if moved.is_some() {
+            return Ok(moved);
         }
         let entry = self.entry();
         if !matches!(read_entry(&entry)?, Entry::Missing)
@@ -648,7 +708,7 @@ fn desktop_entry(executable: &str, hidden: bool) -> String {
 
 /// One quoted Exec argument: quoting escapes, then string escapes, as the
 /// Desktop Entry spec reads them, with `%` doubled for field codes.
-fn exec_argument(argument: &str) -> String {
+pub(crate) fn exec_argument(argument: &str) -> String {
     let mut quoted = String::from("\"");
     for character in argument.chars() {
         match character {
@@ -705,7 +765,20 @@ impl Portal {
     ) -> Result<HashMap<String, Option<String>>> {
         let session = self.bus.create_session(stop)?;
         self.session = Some(session.clone());
-        self.bind_session(session, shortcuts, stop)
+        let bound = self.bind_session(session, shortcuts, stop);
+        if desktop_is("KDE") {
+            match &bound {
+                // Approved: whatever KDE keeps now, the person chose.
+                Ok(granted) if granted.values().any(Option::is_some) => {
+                    kde_unapproved::clear();
+                }
+                Ok(_) => {}
+                // Dismissed, canceled, or abandoned: KDE keeps these ids
+                // with no key and never asks for them again (#898).
+                Err(_) => kde_unapproved::remember(shortcuts),
+            }
+        }
+        bound
     }
 
     /// Clears the shortcuts GNOME keeps listed for Hex once its session
@@ -733,29 +806,29 @@ impl Portal {
     /// shortcut a portal app bound under that app's id, so an upgraded Hex
     /// left `hex`'s set (Cancel dictation on Escape among it) grabbed with
     /// nothing able to rebind it, taking Escape from every app (#624).
-    /// Removes that set, and `cancel` under the current id, from KDE's
-    /// global shortcuts. Only on KDE, only those entries.
-    pub(crate) fn forget_legacy_kde_shortcuts(&self) -> Result<()> {
+    /// Removes that set, the [`STALE_KDE_ACTIONS`], and every other action
+    /// under the current id that `keep` (the ids about to be bound) doesn't
+    /// name from KDE's global shortcuts. A shortcut changed in Hex gets a new
+    /// id, and KDE keeps the old one holding its key, so the new id could
+    /// never take that key back (#898). Only on KDE, only Hex's entries.
+    pub(crate) fn forget_legacy_kde_shortcuts(&self, keep: &[&str]) -> Result<()> {
         if !desktop_is("KDE") {
             return Ok(());
         }
-        let actions: Vec<Vec<String>> = self
-            .bus
-            .call_service(
-                KGLOBALACCEL,
-                KGLOBALACCEL_PATH,
-                KGLOBALACCEL_INTERFACE,
-                "allActionsForComponent",
-                &(vec![LEGACY_APP_ID],),
-            )
-            .wrap_err("could not list Hex's old KDE shortcuts")?;
-        let mut legacy = actions
-            .iter()
-            .filter_map(|action| action.get(1))
-            .map(|action| (LEGACY_APP_ID, action.as_str()))
-            .collect::<Vec<_>>();
-        legacy.push((APP_ID, LEGACY_CANCEL_ID));
-        for (component, action) in legacy {
+        let list = |component: &str| -> Result<Vec<Vec<String>>> {
+            self.bus
+                .call_service(
+                    KGLOBALACCEL,
+                    KGLOBALACCEL_PATH,
+                    KGLOBALACCEL_INTERFACE,
+                    "allActionsForComponent",
+                    &(vec![component],),
+                )
+                .wrap_err("could not list Hex's old KDE shortcuts")
+        };
+        let legacy = list(LEGACY_APP_ID)?;
+        let current = list(APP_ID)?;
+        for (component, action) in superseded_kde_actions(&legacy, &current, keep) {
             let removed: bool = self
                 .bus
                 .call_service(
@@ -770,6 +843,46 @@ impl Portal {
                 tracing::info!(component, action, "removed an old Hex shortcut from KDE");
             }
         }
+        // Shortcuts a bind left unapproved, which KDE keeps with no key: gone,
+        // KDE's dialog asks for them again. A key set since in System Settings
+        // stays (#898).
+        let unapproved = kde_unapproved::ids();
+        for action in current
+            .iter()
+            .filter_map(|action| action.get(1))
+            .filter(|action| unapproved.iter().any(|id| id == *action))
+        {
+            let keys: Vec<(Vec<i32>,)> = self
+                .bus
+                .call_service(
+                    KGLOBALACCEL,
+                    KGLOBALACCEL_PATH,
+                    KGLOBALACCEL_INTERFACE,
+                    "shortcutKeys",
+                    &(vec![APP_ID, action.as_str()],),
+                )
+                .wrap_err_with(|| format!("could not read Hex's KDE shortcut {action}"))?;
+            if keys.iter().any(|(keys,)| keys.iter().any(|key| *key != 0)) {
+                continue;
+            }
+            let removed: bool = self
+                .bus
+                .call_service(
+                    KGLOBALACCEL,
+                    KGLOBALACCEL_PATH,
+                    KGLOBALACCEL_INTERFACE,
+                    "unregister",
+                    &(APP_ID, action.as_str()),
+                )
+                .wrap_err_with(|| format!("could not remove Hex's KDE shortcut {action}"))?;
+            if removed {
+                tracing::info!(
+                    action,
+                    "removed a Hex shortcut KDE kept without a key after its dialog went unanswered; KDE asks again"
+                );
+            }
+        }
+        kde_unapproved::clear();
         Ok(())
     }
 
@@ -801,7 +914,7 @@ impl Portal {
             })
             .collect::<Vec<_>>();
         let handle = session.into_inner();
-        let results = self.bus.request(
+        let results = self.bus.request_within(
             "BindShortcuts",
             |token| {
                 (
@@ -812,6 +925,7 @@ impl Portal {
                 )
             },
             stop,
+            APPROVAL_TIMEOUT,
         )?;
         let bound = results
             .get("shortcuts")
@@ -822,6 +936,138 @@ impl Portal {
     }
 }
 
+/// The shortcut ids of a KDE bind whose approval dialog was dismissed,
+/// canceled, or abandoned (Hex stopped while it was open), kept in
+/// Application Support until the next bind on KDE (#898).
+mod kde_unapproved {
+    use std::path::PathBuf;
+
+    fn path() -> Option<PathBuf> {
+        crate::app_paths::support_dir()
+            .ok()
+            .map(|dir| dir.join("kde-unapproved-shortcuts"))
+    }
+
+    pub(super) fn remember(shortcuts: &[super::Shortcut]) {
+        let Some(path) = path() else { return };
+        let ids = shortcuts
+            .iter()
+            .map(|shortcut| format!("{}\n", shortcut.id))
+            .collect::<String>();
+        if let Err(error) = std::fs::write(&path, ids) {
+            tracing::warn!(%error, "could not note Hex's unapproved KDE shortcuts");
+        }
+    }
+
+    pub(super) fn ids() -> Vec<String> {
+        path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .map(|text| text.lines().map(str::to_owned).collect())
+            .unwrap_or_default()
+    }
+
+    pub(super) fn clear() {
+        if let Some(path) = path() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// The KDE actions to remove before binding: every action of the pre-#579
+/// `hex` component, then every action under `anomaly.hex` that `keep` doesn't
+/// name, the [`STALE_KDE_ACTIONS`] included. Each action is kglobalaccel's
+/// `[component, action, …]` id.
+fn superseded_kde_actions<'a>(
+    legacy: &'a [Vec<String>],
+    current: &'a [Vec<String>],
+    keep: &[&str],
+) -> Vec<(&'static str, &'a str)> {
+    let mut actions = legacy
+        .iter()
+        .filter_map(|action| action.get(1))
+        .map(|action| (LEGACY_APP_ID, action.as_str()))
+        .collect::<Vec<_>>();
+    let mut current = current
+        .iter()
+        .filter_map(|action| action.get(1))
+        .map(String::as_str)
+        .chain(STALE_KDE_ACTIONS)
+        .filter(|action| !keep.contains(action))
+        .collect::<Vec<_>>();
+    current.sort_unstable();
+    current.dedup();
+    actions.extend(current.into_iter().map(|action| (APP_ID, action)));
+    actions
+}
+
+/// What the log says when the session has no shortcuts portal at startup.
+pub(crate) const MISSING_SHORTCUTS_PORTAL: &str = "no GlobalShortcuts portal; dictation follows the hex commands. \
+If this desktop has one, xdg-desktop-portal may have started before the desktop session and picked the wrong \
+backend: restart it (systemctl --user restart xdg-desktop-portal) and Hex binds its shortcuts at its next check";
+
+/// Looks for the shortcuts portal again from time to time, after 15 s and
+/// then doubling up to every 2 minutes. A portal started before the
+/// desktop's session environment exists exposes none until it is restarted
+/// (#875). Each check runs on its own thread, so a slow bus never holds back
+/// the caller.
+pub(crate) struct PortalProbe {
+    stop: std::sync::Arc<AtomicBool>,
+    retry: Duration,
+    next: Instant,
+    running: Option<std::thread::JoinHandle<Result<Option<Portal>>>>,
+    warned: bool,
+}
+
+impl PortalProbe {
+    const FIRST: Duration = Duration::from_secs(15);
+    const MAX: Duration = Duration::from_secs(120);
+
+    pub(crate) fn new(stop: std::sync::Arc<AtomicBool>) -> Self {
+        Self {
+            stop,
+            retry: Self::FIRST,
+            next: Instant::now() + Self::FIRST,
+            running: None,
+            warned: false,
+        }
+    }
+
+    /// The portal, once a check found it.
+    pub(crate) fn poll(&mut self) -> Result<Option<Portal>> {
+        if self
+            .running
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
+            match self.running.take().map(std::thread::JoinHandle::join) {
+                Some(Ok(Ok(Some(portal)))) => {
+                    tracing::info!("the GlobalShortcuts portal appeared; binding Hex's shortcuts");
+                    return Ok(Some(portal));
+                }
+                Some(Ok(Err(error))) if !self.warned => {
+                    self.warned = true;
+                    tracing::warn!(
+                        error = format!("{error:#}"),
+                        "could not check for the GlobalShortcuts portal"
+                    );
+                }
+                _ => {}
+            }
+            self.retry = (self.retry * 2).min(Self::MAX);
+            self.next = Instant::now() + self.retry;
+        } else if self.running.is_none() && Instant::now() >= self.next {
+            let stop = self.stop.clone();
+            self.running = Some(
+                std::thread::Builder::new()
+                    .name("hex-portal-probe".into())
+                    .spawn(move || Portal::connect(&stop))
+                    .wrap_err("could not start the shortcuts portal check")?,
+            );
+        }
+        Ok(None)
+    }
+}
+
 const GNOME_SHORTCUTS: &str = "org.gnome.settings-daemon.global-shortcuts";
 
 /// Before #579 Hex registered with the portal as `hex`. GNOME Settings keeps
@@ -829,6 +1075,7 @@ const GNOME_SHORTCUTS: &str = "org.gnome.settings-daemon.global-shortcuts";
 /// through the portal again (GNOME 49 and later refuse the id), so Hex removes
 /// it from GNOME's own settings once (#575). Only on GNOME, only that entry.
 pub(crate) fn forget_legacy_gnome_shortcuts() -> Result<()> {
+    use crate::linux::gsettings::{gsettings, string_list, string_list_text};
     if !gnome() {
         return Ok(());
     }
@@ -862,52 +1109,16 @@ pub(crate) fn forget_legacy_gnome_shortcuts() -> Result<()> {
     Ok(())
 }
 
-fn gsettings(arguments: &[&str]) -> Result<String> {
-    let output = std::process::Command::new("gsettings")
-        .args(arguments)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .wrap_err("could not run gsettings")?;
-    if !output.status.success() {
-        return Err(eyre!(
-            "gsettings {} failed: {}",
-            arguments.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-}
-
-/// A GVariant `as` as gsettings prints it: `['a', 'b']` or `@as []`.
-fn string_list(text: &str) -> Vec<String> {
-    let text = text.trim().trim_start_matches("@as").trim();
-    text.trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(',')
-        .map(|item| {
-            item.trim()
-                .trim_matches(|c| c == '\'' || c == '"')
-                .to_owned()
-        })
-        .filter(|item| !item.is_empty())
-        .collect()
-}
-
-/// App ids never contain quotes or backslashes, so they need no escaping.
-fn string_list_text(items: &[&str]) -> String {
-    if items.is_empty() {
-        return "@as []".into();
-    }
-    let quoted = items
-        .iter()
-        .map(|item| format!("'{item}'"))
-        .collect::<Vec<_>>();
-    format!("[{}]", quoted.join(", "))
-}
-
 /// Whether the session's desktop is GNOME.
 pub(crate) fn gnome() -> bool {
     desktop_is("GNOME")
+}
+
+/// Whether the desktop keeps Alt+Space for itself: GNOME's window menu
+/// (#723) and KDE Plasma's KRunner (#898), which the KDE portal's approval
+/// dialog flags as a conflict and then leaves Hex without.
+pub(crate) fn desktop_takes_alt_space() -> bool {
+    gnome() || desktop_is("KDE")
 }
 
 /// Whether the desktop assigns portal shortcuts their keys in its own
@@ -1071,6 +1282,83 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// Hex's own entry whose program is gone points at this Hex; one whose
+    /// program is there, or the user's, stays (#810).
+    #[test]
+    fn a_stranded_fallback_follows_hex() {
+        let (root, entries) = entries("repoint");
+        let program = root.join("hex");
+        std::fs::write(&program, "").unwrap();
+        let program = program.to_str().unwrap();
+        let target = root.join("new-hex");
+        std::fs::write(&target, "").unwrap();
+        let target = target.to_str().unwrap();
+        entries.ensure(program).unwrap();
+        let written = std::fs::read_to_string(entries.entry()).unwrap();
+        entries.repoint(target).unwrap();
+        assert_eq!(std::fs::read_to_string(entries.entry()).unwrap(), written);
+        std::fs::remove_file(program).unwrap();
+        entries.repoint(target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(entries.entry()).unwrap(),
+            desktop_entry(target, false)
+        );
+        // Nothing to point at: left as it is.
+        std::fs::remove_file(target).unwrap();
+        std::fs::write(entries.entry(), desktop_entry(program, false)).unwrap();
+        entries.repoint(target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(entries.entry()).unwrap(),
+            desktop_entry(program, false)
+        );
+        // A package ships Hex's entry now: the stranded fallback goes.
+        std::fs::write(
+            entries.system[0].join("anomaly.hex.desktop"),
+            "[Desktop Entry]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("new-hex"), "").unwrap();
+        entries.repoint(target).unwrap();
+        assert!(!entries.entry().exists());
+        let users = "[Desktop Entry]\nExec=/gone/hex\n";
+        std::fs::write(entries.entry(), users).unwrap();
+        entries.repoint(target).unwrap();
+        assert_eq!(std::fs::read_to_string(entries.entry()).unwrap(), users);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A fallback already there is never written again (#810), and one that
+    /// a data directory provides is never written at all.
+    #[test]
+    fn the_fallback_is_written_once_and_only_when_nothing_provides_it() {
+        let (root, fallback) = entries("once");
+        assert_eq!(fallback.ensure("/opt/hex").unwrap(), Some(fallback.entry()));
+        let written = std::fs::metadata(fallback.entry())
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(fallback.ensure("/opt/hex").unwrap(), None);
+        assert_eq!(fallback.tidy().unwrap(), None);
+        assert_eq!(
+            std::fs::metadata(fallback.entry())
+                .unwrap()
+                .modified()
+                .unwrap(),
+            written
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        let (root, provided) = entries("provided");
+        std::fs::write(
+            provided.system[0].join("anomaly.hex.desktop"),
+            "[Desktop Entry]\n",
+        )
+        .unwrap();
+        assert_eq!(provided.ensure("/opt/hex").unwrap(), None);
+        assert!(!provided.entry().exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn a_fallback_hides_beside_the_users_old_entry_and_yields_to_a_package() {
         let (root, entries) = entries("fallback");
@@ -1099,17 +1387,6 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[test]
-    fn gsettings_string_lists_round_trip() {
-        assert_eq!(
-            string_list("['hex', 'anomaly.hex']"),
-            ["hex", "anomaly.hex"]
-        );
-        assert!(string_list("@as []").is_empty());
-        assert_eq!(string_list_text(&["anomaly.hex"]), "['anomaly.hex']");
-        assert_eq!(string_list_text(&[]), "@as []");
-    }
-
     /// GNOME before 51 refuses a portal app id that is not reverse-DNS (#579).
     #[test]
     fn the_portal_app_id_is_reverse_dns() {
@@ -1123,6 +1400,41 @@ mod tests {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         }));
+    }
+
+    /// A shortcut changed in Hex gets a new id; on KDE the old id keeps its
+    /// key until removed, so the new one could never take it (#898).
+    #[test]
+    fn kde_actions_hex_no_longer_binds_are_removed() {
+        let id = |component: &str, action: &str| {
+            vec![
+                component.to_string(),
+                action.to_string(),
+                "Hex".to_string(),
+                action.to_string(),
+            ]
+        };
+        let legacy = vec![id("hex", "dictation")];
+        let current = vec![
+            id(APP_ID, "dictation-ALT-space"),
+            id(APP_ID, "dictation-CTRL-ALT-space"),
+            id(APP_ID, "paste-last-ALT-SHIFT-v"),
+            id(APP_ID, "cancel"),
+        ];
+        let removed = superseded_kde_actions(
+            &legacy,
+            &current,
+            &["dictation-CTRL-ALT-space", "paste-last-ALT-SHIFT-v"],
+        );
+        assert_eq!(
+            removed,
+            vec![
+                ("hex", "dictation"),
+                (APP_ID, "cancel"),
+                (APP_ID, "cancel-dictation"),
+                (APP_ID, "dictation-ALT-space"),
+            ]
+        );
     }
 
     #[test]

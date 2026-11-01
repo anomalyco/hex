@@ -83,14 +83,15 @@ pub enum Feature {
     SidedChords,
     TapOrHold,
     BenchmarkDetails,
-    PastePicker,
-    CustomModels,
     ParakeetUltra,
     StandaloneSpecialKeys,
+    HistoryStats,
+    RecentDictations,
+    SkipPauses,
 }
 
 impl Feature {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -116,10 +117,11 @@ impl Feature {
         Self::SidedChords,
         Self::TapOrHold,
         Self::BenchmarkDetails,
-        Self::PastePicker,
-        Self::CustomModels,
         Self::ParakeetUltra,
         Self::StandaloneSpecialKeys,
+        Self::HistoryStats,
+        Self::RecentDictations,
+        Self::SkipPauses,
     ];
 
     /// The features this OS and build have.
@@ -168,10 +170,11 @@ impl Feature {
             | Self::SidedChords
             | Self::TapOrHold
             | Self::BenchmarkDetails
-            | Self::CustomModels
             | Self::ParakeetUltra
-            | Self::StandaloneSpecialKeys => Audience::Everyone,
-            Self::PastePicker => Audience::Dev,
+            | Self::StandaloneSpecialKeys
+            | Self::HistoryStats
+            | Self::RecentDictations
+            | Self::SkipPauses => Audience::Everyone,
         }
     }
 
@@ -204,7 +207,9 @@ impl Feature {
             }
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
-            Self::StandaloneSpecialKeys => cfg!(target_os = "linux"),
+            Self::StandaloneSpecialKeys | Self::SkipPauses => {
+                cfg!(any(target_os = "linux", target_os = "windows"))
+            }
             Self::MouseShortcuts
             | Self::PauseBrowser
             | Self::KeepOnClipboard
@@ -213,7 +218,7 @@ impl Feature {
             | Self::SmartSpacing
             | Self::SidedChords
             | Self::TapOrHold
-            | Self::PastePicker => cfg!(target_os = "macos"),
+            | Self::RecentDictations => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -224,8 +229,8 @@ impl Feature {
             | Self::SpokenSymbols
             | Self::PickerSortFilter
             | Self::BenchmarkDetails
-            | Self::CustomModels
             | Self::ParakeetUltra
+            | Self::HistoryStats
             | Self::FillerWords => true,
         }
     }
@@ -258,10 +263,11 @@ impl Feature {
             Self::SidedChords => "sided-modifier-chords",
             Self::TapOrHold => "tap-or-hold",
             Self::BenchmarkDetails => "benchmark-details",
-            Self::PastePicker => "paste-picker",
-            Self::CustomModels => "custom-models",
             Self::ParakeetUltra => "parakeet-ultra",
             Self::StandaloneSpecialKeys => "special-keys",
+            Self::HistoryStats => "history-stats",
+            Self::RecentDictations => "recent-dictations",
+            Self::SkipPauses => "skip-pauses",
         }
     }
 
@@ -293,10 +299,11 @@ impl Feature {
             Self::SidedChords => "labs.sided_modifier_chords",
             Self::TapOrHold => "labs.tap_or_hold",
             Self::BenchmarkDetails => "labs.benchmark_details",
-            Self::PastePicker => "labs.paste_picker",
-            Self::CustomModels => "labs.custom_models",
             Self::ParakeetUltra => "labs.parakeet_ultra",
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
+            Self::HistoryStats => "labs.history_stats",
+            Self::RecentDictations => "labs.recent_dictations",
+            Self::SkipPauses => "labs.skip_pauses",
         }
     }
 
@@ -359,15 +366,23 @@ impl Feature {
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
             }
-            Self::PastePicker => "Hold Paste last dictation to pick from recent dictations",
-            Self::CustomModels => {
-                "Add a speech model file of your own (GGUF) from the Local transcription picker"
-            }
             Self::ParakeetUltra => {
                 "Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker"
             }
+            Self::StandaloneSpecialKeys if cfg!(target_os = "windows") => {
+                "Use Insert, Home, End, Page Up, or Page Down alone as a shortcut"
+            }
             Self::StandaloneSpecialKeys => {
                 "Use Menu, Pause, or Scroll Lock alone as a shortcut, such as Caps Lock remapped to Menu"
+            }
+            Self::HistoryStats => {
+                "Show a summary of your retained dictations at the top of History, with hex history stats"
+            }
+            Self::RecentDictations => {
+                "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
+            }
+            Self::SkipPauses => {
+                "Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"
             }
         }
     }
@@ -404,10 +419,11 @@ impl Feature {
             Self::SidedChords => settings.labs.sided_modifier_chords,
             Self::TapOrHold => settings.labs.tap_or_hold,
             Self::BenchmarkDetails => settings.labs.benchmark_details,
-            Self::PastePicker => settings.labs.paste_picker,
-            Self::CustomModels => settings.labs.custom_models,
             Self::ParakeetUltra => settings.labs.parakeet_ultra,
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
+            Self::HistoryStats => settings.labs.history_stats,
+            Self::RecentDictations => settings.labs.recent_dictations,
+            Self::SkipPauses => settings.labs.skip_pauses,
         }
     }
 
@@ -438,9 +454,10 @@ impl Feature {
             Self::SidedChords => settings.labs.sided_modifier_chords = on,
             Self::TapOrHold => settings.labs.tap_or_hold = on,
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
-            Self::PastePicker => settings.labs.paste_picker = on,
-            Self::CustomModels => settings.labs.custom_models = on,
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
+            Self::HistoryStats => settings.labs.history_stats = on,
+            Self::RecentDictations => settings.labs.recent_dictations = on,
+            Self::SkipPauses => settings.labs.skip_pauses = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -467,11 +484,12 @@ const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
-const PASTE_PICKER: u32 = 1 << 16;
-const CUSTOM_MODELS: u32 = 1 << 17;
-const PARAKEET_ULTRA: u32 = 1 << 18;
+const SKIP_PAUSES: u32 = 1 << 16;
+const PARAKEET_ULTRA: u32 = 1 << 17;
+const HISTORY_STATS: u32 = 1 << 18;
+const RECENT_DICTATIONS: u32 = 1 << 19;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u32 = 19;
+const MINUTES_SHIFT: u32 = 20;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -577,23 +595,30 @@ pub fn tap_or_hold() -> bool {
     on(TAP_OR_HOLD)
 }
 
-/// Holding Paste last dictation opens the recent-dictations picker (macOS;
-/// read as Paste last is pressed).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn paste_picker() -> bool {
-    on(PASTE_PICKER)
-}
-
-/// Imported speech models join the catalog (read wherever a model is
-/// listed, chosen, or run).
-pub fn custom_models() -> bool {
-    on(CUSTOM_MODELS)
-}
-
 /// Parakeet Ultra joins the catalog (read wherever a model is listed,
 /// chosen, or run).
 pub fn parakeet_ultra() -> bool {
     on(PARAKEET_ULTRA)
+}
+
+/// History's summary of retained dictations and `hex history stats` (read
+/// when the History pane reloads and when the command starts).
+pub fn history_stats() -> bool {
+    on(HISTORY_STATS)
+}
+
+/// The menu bar's Copy Recent Dictation submenu (macOS; read each time the
+/// menu opens).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn recent_dictations() -> bool {
+    on(RECENT_DICTATIONS)
+}
+
+/// A whole-clip dictation transcription hears only the head and tail of
+/// each long pause (Linux and Windows; read as each whole-clip run starts).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn skip_pauses() -> bool {
+    on(SKIP_PAUSES) && Feature::SkipPauses.on_this_os()
 }
 
 /// How long the speech model may sit unused before the engine unloads it,
@@ -661,13 +686,18 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             SIDED_CHORDS,
         ),
         (Feature::TapOrHold, settings.tap_or_hold, TAP_OR_HOLD),
-        (Feature::PastePicker, settings.paste_picker, PASTE_PICKER),
-        (Feature::CustomModels, settings.custom_models, CUSTOM_MODELS),
         (
             Feature::ParakeetUltra,
             settings.parakeet_ultra,
             PARAKEET_ULTRA,
         ),
+        (Feature::HistoryStats, settings.history_stats, HISTORY_STATS),
+        (
+            Feature::RecentDictations,
+            settings.recent_dictations,
+            RECENT_DICTATIONS,
+        ),
+        (Feature::SkipPauses, settings.skip_pauses, SKIP_PAUSES),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -732,6 +762,10 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         Some(LabsCommand::On { feature }) => (feature, true),
         Some(LabsCommand::Off { feature }) => (feature, false),
     };
+    if let Some((_, note)) = GRADUATED.iter().find(|(graduated, _)| *graduated == name) {
+        println!("{note}");
+        return Ok(());
+    }
     let feature = resolve(name, Feature::shipped)?;
     if feature == Feature::VoiceFilter
         && !on
@@ -770,7 +804,16 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
 }
 
 /// The feature `name` names, if this OS has it and `reaches` admits it.
+/// Features that left Labs: `hex labs` still knows their names.
+const GRADUATED: [(&str, &str); 1] = [(
+    "custom-models",
+    "custom-models graduated: adding a model file and models found on this computer are always on now",
+)];
+
 fn resolve(name: &str, reaches: impl Fn(Feature) -> bool + Copy) -> Result<Feature> {
+    if let Some((_, note)) = GRADUATED.iter().find(|(graduated, _)| *graduated == name) {
+        return Err(eyre!("{note}"));
+    }
     Feature::from_name(name)
         .filter(|feature| feature.on_this_os() && reaches(*feature))
         .ok_or_else(|| {
@@ -815,6 +858,13 @@ pub fn run_retired_experiments() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn graduated_features_answer_by_name() {
+        let error = resolve("custom-models", |_| true).unwrap_err().to_string();
+        assert!(error.contains("graduated"), "{error}");
+        assert_eq!(Feature::from_name("custom-models"), None);
+    }
 
     #[test]
     fn every_feature_is_off_by_default_and_round_trips() {
@@ -975,24 +1025,40 @@ mod tests {
     }
 
     #[test]
-    fn paste_picker_is_a_dev_feature_with_its_own_bit_off_by_default() {
-        let dev = |feature: Feature| feature.audience().reaches(true);
-        let stable = |feature: Feature| feature.audience().reaches(false);
-        assert_eq!(Feature::PastePicker.audience(), Audience::Dev);
+    fn history_stats_is_its_own_bit_and_off_by_default() {
         let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, dev) & PASTE_PICKER, 0);
-        labs.paste_picker = true;
+        assert_eq!(encode_where(&labs, |_| true) & HISTORY_STATS, 0);
+        labs.history_stats = true;
         labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, dev);
-        assert_ne!(state & PASTE_PICKER, 0);
-        assert_eq!(state & TAP_OR_HOLD, 0);
-        assert_eq!(state & SIDED_CHORDS, 0);
-        assert_eq!(state & SPOKEN_SYMBOLS, 0);
-        assert_eq!(state & SMART_SPACING, 0);
-        assert_eq!(state & SUBTITLE_EXPORT, 0);
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & HISTORY_STATS, 0);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
-        assert_eq!(encode_where(&labs, stable) & PASTE_PICKER, 0);
-        assert!(resolve("paste-picker", stable).is_err());
+    }
+
+    #[test]
+    fn recent_dictations_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & RECENT_DICTATIONS, 0);
+        labs.recent_dictations = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & RECENT_DICTATIONS, 0);
+        assert_eq!(state & HISTORY_STATS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn skip_pauses_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & SKIP_PAUSES, 0);
+        labs.skip_pauses = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & SKIP_PAUSES, 0);
+        assert_eq!(state & TAP_OR_HOLD, 0);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
     #[test]

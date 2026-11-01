@@ -88,6 +88,7 @@ fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
                 | "com.apple.Safari"
                 | "org.mozilla.firefox"
                 | "com.microsoft.edgemac"
+                | "company.thebrowser.Browser"
         )
     )
 }
@@ -158,7 +159,13 @@ pub(crate) fn browser_process_objects(which: BrowserProcesses) -> Result<Vec<Aud
 
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
-const EXECUTABLES: [(&str, &str); 18] = [
+const EXECUTABLES: [(&str, &str); 22] = [
+    // Gather for Windows.
+    ("gather", "com.gather.GatherV2"),
+    ("gatherv2", "com.gather.GatherV2"),
+    // WhatsApp for Windows, before and after its WinUI rewrite.
+    ("whatsapp", "net.whatsapp.WhatsApp"),
+    ("whatsapp.root", "net.whatsapp.WhatsApp"),
     ("zoom", "us.zoom.xos"),
     ("ms-teams", "com.microsoft.teams2"),
     ("teams", "com.microsoft.teams2"),
@@ -203,12 +210,19 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         ("com.microsoft.teams", "com.microsoft.teams2"),
         ("com.tinyspeck.slackmacgap", "com.tinyspeck.slackmacgap"),
         ("com.apple.facetime", "com.apple.FaceTime"),
+        // The native (Catalyst) app, and the older Electron one.
+        ("net.whatsapp.whatsapp", "net.whatsapp.WhatsApp"),
+        ("desktop.whatsapp", "net.whatsapp.WhatsApp"),
+        // Gather V2 and its Electron helpers, and Gather V1.
+        ("com.gather.gatherv2", "com.gather.GatherV2"),
+        ("com.gather.gather", "com.gather.GatherV2"),
         ("com.google.chrome", "com.google.Chrome"),
         ("com.brave.browser", "com.brave.Browser"),
         ("com.apple.safari", "com.apple.Safari"),
         ("org.mozilla.firefox", "org.mozilla.firefox"),
         ("org.mozilla.plugincontainer", "org.mozilla.firefox"),
         ("com.microsoft.edgemac", "com.microsoft.edgemac"),
+        ("company.thebrowser.browser", "company.thebrowser.Browser"),
     ]
     .iter()
     .find_map(|(prefix, canonical)| {
@@ -225,11 +239,14 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "com.microsoft.teams2" => Some("Microsoft Teams"),
         "com.tinyspeck.slackmacgap" => Some("Slack"),
         "com.apple.FaceTime" => Some("FaceTime"),
+        "net.whatsapp.WhatsApp" => Some("WhatsApp"),
+        "com.gather.GatherV2" => Some("Gather"),
         "com.google.Chrome" => Some("Google Chrome"),
         "com.brave.Browser" => Some("Brave Browser"),
         "com.apple.Safari" => Some("Safari"),
         "org.mozilla.firefox" => Some("Firefox"),
         "com.microsoft.edgemac" => Some("Microsoft Edge"),
+        "company.thebrowser.Browser" => Some("Arc"),
         _ => None,
     }
 }
@@ -360,7 +377,7 @@ fn running_application_info(pid: i32) -> Option<(String, Option<String>)> {
 }
 
 #[cfg(target_os = "macos")]
-fn running_application_by_bundle_id(bundle_id: &str) -> Option<(i32, String)> {
+pub(crate) fn running_application_by_bundle_id(bundle_id: &str) -> Option<(i32, String)> {
     let candidates = NSRunningApplication::runningApplicationsWithBundleIdentifier(
         &NSString::from_str(bundle_id),
     );
@@ -821,6 +838,19 @@ mod tests {
                 Some("com.microsoft.edgemac"),
                 true,
             ),
+            (
+                "company.thebrowser.Browser",
+                "Arc",
+                Some("company.thebrowser.Browser"),
+                true,
+            ),
+            (
+                "company.thebrowser.browser.helper",
+                "Browser Helper",
+                Some("company.thebrowser.Browser"),
+                true,
+            ),
+            ("company.thebrowser.dia", "Dia", None, false),
             ("anomaly.hex", "Hex", None, false),
             ("zoom", "Zoom", Some("us.zoom.xos"), false),
             (

@@ -68,6 +68,8 @@ nonisolated enum HostAppCatalog {
         HostApp(id: "linear", name: "Linear", schemeURL: "linear://"),
         HostApp(id: "gmail", name: "Gmail", schemeURL: "googlegmail://"),
         HostApp(id: "reminders", name: "Reminders", schemeURL: "x-apple-reminderkit://"),
+        HostApp(id: "signal", name: "Signal", schemeURL: "sgnl://"),
+        HostApp(id: "t3code", name: "T3 Code", schemeURL: "t3code://"),
     ]
 
     static let quickChips: [HostApp] = Array(all.prefix(6))
@@ -309,6 +311,7 @@ struct KeyboardBridge {
         static let warmDuration = "settings.warmDuration"
         static let style = "settings.dictationStyle"
         static let returnAppID = "settings.returnAppID"
+        static let quickReturnAppIDs = "settings.quickReturnAppIDs"
         static let allowBluetoothMic = "settings.allowBluetoothMic"
         static let lastInsertedResultID = "keyboard.lastInsertedResultID"
         static let fullAccessSeenAt = "keyboard.fullAccessSeenAt"
@@ -393,6 +396,19 @@ struct KeyboardBridge {
 
     var returnApp: HostApp? {
         HostAppCatalog.app(for: returnAppID)
+    }
+
+    /// The apps the keyboard offers to jump back to, in the user's order.
+    var quickReturnApps: [HostApp] {
+        get {
+            guard let ids = defaults?.stringArray(forKey: Key.quickReturnAppIDs) else {
+                return HostAppCatalog.quickChips
+            }
+            return ids.compactMap(HostAppCatalog.app(for:))
+        }
+        nonmutating set {
+            defaults?.set(newValue.map(\.id), forKey: Key.quickReturnAppIDs)
+        }
     }
 
     var allowBluetoothMic: Bool {

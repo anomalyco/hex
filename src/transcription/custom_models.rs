@@ -26,8 +26,8 @@ use sha2::{Digest, Sha256};
 
 use super::gguf_header::{self, GgufHeader};
 use super::models::{
-    GgufArtifact, LANGUAGES, ModelDefinition, ModelRuntime, TranscriptionModelId,
-    TranscriptionSelection, is_known_language, known_language, models_dir,
+    GgufArtifact, ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection,
+    is_known_language, known_language, models_dir,
 };
 
 const PREFIX: &str = "custom-";
@@ -100,15 +100,46 @@ struct Manifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     repository: Option<String>,
     imported_at: u64,
+    /// A file found on this computer and used where it is (the Hugging Face
+    /// cache), never copied, written, or deleted; `None` for Hex's own copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    path: Option<PathBuf>,
+    /// Where a found file came from: `owner/name@abcdef1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin: Option<String>,
 }
 
 /// The receipt every model file has: the size and digest Hex checked, and
 /// the modification time that proves the file is still that one.
 #[derive(Deserialize, Serialize)]
-struct Receipt {
+pub(crate) struct Receipt {
     bytes: u64,
-    sha256: String,
+    pub(crate) sha256: String,
     modified_ns: u64,
+    /// The file's identity on its volume (`found_models::file_id`), where
+    /// the OS reports one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file_id: Option<u64>,
+}
+
+impl Receipt {
+    pub(crate) fn of(file: &Path, sha256: String) -> Result<Self> {
+        let metadata = fs::metadata(file)?;
+        Ok(Self {
+            bytes: metadata.len(),
+            sha256,
+            modified_ns: super::models::modified_ns(&metadata)
+                .ok_or_else(|| eyre!("the file's modification time is unavailable"))?,
+            file_id: super::found_models::file_id(&metadata),
+        })
+    }
+
+    /// Whether `metadata` is still the file this receipt describes.
+    pub(crate) fn holds(&self, metadata: &fs::Metadata) -> bool {
+        self.bytes == metadata.len()
+            && super::models::modified_ns(metadata) == Some(self.modified_ns)
+            && (self.file_id.is_none() || self.file_id == super::found_models::file_id(metadata))
+    }
 }
 
 /// Whether an imported model can run.
@@ -119,8 +150,6 @@ pub enum Status {
     Missing,
     /// Its file is not the one imported (size or modification time).
     Changed,
-    /// Labs › Use your own speech model is off.
-    Off,
 }
 
 /// One imported model, as the picker, `hex model list`, and the local API
@@ -132,13 +161,15 @@ pub struct Imported {
     pub sha256: String,
     pub source: String,
     pub license: Option<String>,
+    /// A found file used where it is: `owner/name@abcdef1`.
+    pub origin: Option<String>,
 }
 
 struct Entry {
     id: CustomModelId,
     manifest: Manifest,
     definition: &'static ModelDefinition,
-    receipt: Option<(u64, u64)>,
+    receipt: Option<Receipt>,
 }
 
 #[derive(Default)]
@@ -212,8 +243,7 @@ impl Registry {
                 let receipt = fs::read(receipt_path(&model_file(&directory, id)))
                     .ok()
                     .and_then(|data| serde_json::from_slice::<Receipt>(&data).ok())
-                    .filter(|receipt| receipt.sha256 == manifest.sha256)
-                    .map(|receipt| (receipt.bytes, receipt.modified_ns));
+                    .filter(|receipt| receipt.sha256 == manifest.sha256);
                 entries.push(Entry {
                     id,
                     manifest,
@@ -240,6 +270,14 @@ impl Registry {
 
 fn model_file(directory: &Path, id: CustomModelId) -> PathBuf {
     directory.join(format!("{}.gguf", id.digits()))
+}
+
+/// Where an import's file is: Hex's copy, or the found file it uses in place.
+fn located(directory: &Path, id: CustomModelId, manifest: &Manifest) -> PathBuf {
+    manifest
+        .path
+        .clone()
+        .unwrap_or_else(|| model_file(directory, id))
 }
 
 fn manifest_file(directory: &Path, id: CustomModelId) -> PathBuf {
@@ -270,7 +308,12 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         .find(|(name, _)| *name == manifest.architecture)
         .map_or_else(|| leak(&manifest.architecture), |(name, _)| *name);
     let artifact: &'static GgufArtifact = Box::leak(Box::new(GgufArtifact {
-        filename: leak(&format!("custom/{}.gguf", id.digits())),
+        // `models_dir().join` keeps an absolute path, so a found file loads
+        // where it is.
+        filename: leak(&manifest.path.as_ref().map_or_else(
+            || format!("custom/{}.gguf", id.digits()),
+            |path| path.to_string_lossy().into_owned(),
+        )),
         revision: "",
         repository: "",
         bytes: manifest.bytes,
@@ -283,13 +326,6 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         name: leak(&manifest.name),
         realtime: "Unknown",
         word_error_rate: None,
-        quality_context: "Not benchmarked",
-        coverage: leak(&coverage(languages)),
-        timestamps: match architecture {
-            "parakeet" => "Token timestamps",
-            "whisper" => "Segment timestamps",
-            _ => "No timestamps",
-        },
         streams: false,
         runtime: ModelRuntime::Gguf(artifact),
         languages,
@@ -298,16 +334,6 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         accepts_language_hint: architecture != "parakeet",
         supports_language_detection: manifest.detects_language && architecture != "parakeet",
     }))
-}
-
-fn coverage(languages: &[&str]) -> String {
-    match languages {
-        [only] => LANGUAGES
-            .iter()
-            .find(|(code, _)| code == only)
-            .map_or_else(|| (*only).to_owned(), |(_, name)| (*name).to_owned()),
-        languages => format!("{} languages", languages.len()),
-    }
 }
 
 /// The definition for `id`: its manifest's, or a placeholder that is never
@@ -334,9 +360,19 @@ pub fn definition(id: CustomModelId) -> &'static ModelDefinition {
                 license: None,
                 repository: None,
                 imported_at: 0,
+                path: None,
+                origin: None,
             },
         )
     })
+}
+
+/// Whether a found file is already in use as an import.
+pub fn uses_path(path: &Path) -> bool {
+    registry()
+        .entries
+        .iter()
+        .any(|entry| entry.manifest.path.as_deref() == Some(path))
 }
 
 /// Whether `id` names an import, available or not.
@@ -345,9 +381,6 @@ pub fn is_registered(id: CustomModelId) -> bool {
 }
 
 pub fn status(id: CustomModelId) -> Status {
-    if !crate::labs::custom_models() {
-        return Status::Off;
-    }
     let registry = registry();
     let Some(entry) = registry.entry(id) else {
         return Status::Missing;
@@ -355,16 +388,11 @@ pub fn status(id: CustomModelId) -> Status {
     let Ok(directory) = directory() else {
         return Status::Missing;
     };
-    let Ok(metadata) = fs::metadata(model_file(&directory, id)) else {
+    let Ok(metadata) = fs::metadata(located(&directory, id, &entry.manifest)) else {
         return Status::Missing;
     };
-    let modified = super::models::modified_ns(&metadata);
-    match entry.receipt {
-        Some((bytes, receipt_modified))
-            if bytes == metadata.len()
-                && bytes == entry.manifest.bytes
-                && modified == Some(receipt_modified) =>
-        {
+    match &entry.receipt {
+        Some(receipt) if receipt.holds(&metadata) && receipt.bytes == entry.manifest.bytes => {
             Status::Ready
         }
         _ => Status::Changed,
@@ -376,12 +404,8 @@ pub fn usable(id: CustomModelId) -> bool {
     status(id) == Status::Ready
 }
 
-/// Every import while Labs › Use your own speech model is on, ready or not,
-/// by name.
+/// Every import and found file in use, ready or not, by name.
 pub fn imported() -> Vec<Imported> {
-    if !crate::labs::custom_models() {
-        return Vec::new();
-    }
     registry()
         .entries
         .iter()
@@ -394,6 +418,7 @@ pub fn imported() -> Vec<Imported> {
             sha256: entry.manifest.sha256.clone(),
             source: entry.manifest.source.clone(),
             license: entry.manifest.license.clone(),
+            origin: entry.manifest.origin.clone(),
         })
         .collect()
 }
@@ -446,17 +471,22 @@ pub fn family(architecture: &str) -> &str {
 
 /// What an import declares, once its header passes every check.
 #[derive(Debug, PartialEq)]
-struct Profile {
-    name: String,
-    architecture: String,
-    variant: String,
-    languages: Vec<String>,
-    detects_language: bool,
-    license: Option<String>,
-    repository: Option<String>,
+pub(crate) struct Profile {
+    pub(crate) name: String,
+    pub(crate) architecture: String,
+    pub(crate) variant: String,
+    pub(crate) languages: Vec<String>,
+    pub(crate) detects_language: bool,
+    pub(crate) license: Option<String>,
+    pub(crate) repository: Option<String>,
 }
 
 /// Checks a header against what Hex can run, with the reason when it can't.
+/// What a header declares, or why Hex can't run it (also the hub-cache scan).
+pub(crate) fn profile_of(header: &GgufHeader, file_name: &str) -> Result<Profile> {
+    profile(header, file_name)
+}
+
 fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
     let Some(architecture) = header.string("general.architecture") else {
         bail!("it has no general.architecture, so Hex can't tell which model family it is");
@@ -551,15 +581,11 @@ fn file_stem(path: &Path) -> String {
     )
 }
 
-/// Why an import is refused while its Labs toggle is off.
-pub const OFF: &str = "Turn on Labs › Use your own speech model first: hex labs on custom-models";
-
 /// Imports the GGUF at `source`: checks its header, copies it into
 /// `models/custom/` while hashing it, checks the copy again, and records it.
 /// The original is never changed or removed. Importing the same file again
 /// keeps the first import (renamed to `name` when given). On failure or
-/// cancellation only this import's partial copy is removed. Callers check
-/// the Labs toggle ([`OFF`]).
+/// cancellation only this import's partial copy is removed.
 pub fn import(source: &Path, name: Option<&str>, canceled: &AtomicBool) -> Result<CustomModelId> {
     check(source)?;
     let directory = directory()?;
@@ -618,18 +644,9 @@ fn copy_and_record(
     crate::durable::sync_file(partial)?;
     fs::rename(partial, &file)?;
     crate::durable::sync_directory(directory)?;
-    let modified_ns = fs::metadata(&file)
-        .ok()
-        .as_ref()
-        .and_then(super::models::modified_ns)
-        .ok_or_else(|| eyre!("the copy's modification time is unavailable"))?;
     super::models::write_json_atomically(
         &receipt_path(&file),
-        &Receipt {
-            bytes,
-            sha256: sha256.clone(),
-            modified_ns,
-        },
+        &Receipt::of(&file, sha256.clone())?,
     )?;
     write_manifest(
         directory,
@@ -653,6 +670,8 @@ fn copy_and_record(
             imported_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_secs()),
+            path: None,
+            origin: None,
         },
     )?;
     tracing::info!(id = id.as_str(), bytes, "imported a speech model");
@@ -667,11 +686,7 @@ fn intact(file: &Path, sha256: &str) -> bool {
     fs::read(receipt_path(file))
         .ok()
         .and_then(|data| serde_json::from_slice::<Receipt>(&data).ok())
-        .is_some_and(|receipt| {
-            receipt.sha256 == sha256
-                && receipt.bytes == metadata.len()
-                && super::models::modified_ns(&metadata) == Some(receipt.modified_ns)
-        })
+        .is_some_and(|receipt| receipt.sha256 == sha256 && receipt.holds(&metadata))
 }
 
 fn copy_hashing(source: &Path, destination: &Path, canceled: &AtomicBool) -> Result<(u64, String)> {
@@ -725,7 +740,7 @@ pub fn repair(id: CustomModelId, canceled: &AtomicBool) -> Result<()> {
         .ok()
         .and_then(|data| serde_json::from_slice::<Manifest>(&data).ok())
         .ok_or_else(|| eyre!("no imported model is {}", id.as_str()))?;
-    let file = model_file(&directory, id);
+    let file = located(&directory, id, &manifest);
     if !file.is_file() {
         bail!(
             "{} is missing. Import it again, or remove it.",
@@ -738,18 +753,80 @@ pub fn repair(id: CustomModelId, canceled: &AtomicBool) -> Result<()> {
             manifest.name
         );
     }
-    let metadata = fs::metadata(&file)?;
     super::models::write_json_atomically(
-        &receipt_path(&file),
-        &Receipt {
-            bytes: metadata.len(),
-            sha256: manifest.sha256,
-            modified_ns: super::models::modified_ns(&metadata)
-                .ok_or_else(|| eyre!("the copy's modification time is unavailable"))?,
-        },
+        &receipt_path(&model_file(&directory, id)),
+        &Receipt::of(&file, manifest.sha256)?,
     )?;
     invalidate();
     Ok(())
+}
+
+/// Hex's verification for an import before it loads: its receipt still
+/// holds, or a full rehash matches the digest recorded when it was chosen.
+pub fn verify(id: CustomModelId, canceled: &AtomicBool) -> Result<PathBuf> {
+    let directory = directory()?;
+    let manifest = fs::read(manifest_file(&directory, id))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Manifest>(&data).ok())
+        .ok_or_else(|| eyre!("no imported model is {}", id.as_str()))?;
+    if status(id) != Status::Ready {
+        repair(id, canceled)?;
+    }
+    Ok(located(&directory, id, &manifest))
+}
+
+/// Starts using a found file where it is: checks its header, hashes it in
+/// full once (the digest must be the hub's blob name, when it has one), and
+/// records it beside Hex's imports. Nothing is copied or written near the
+/// file; forgetting it later removes only Hex's record.
+pub fn adopt_in_place(
+    path: &Path,
+    blob_sha256: Option<&str>,
+    origin: &str,
+    canceled: &AtomicBool,
+) -> Result<CustomModelId> {
+    let header = gguf_header::read(path)
+        .map_err(|error| eyre!("{} can't be used: {error}", display_name(path)))?;
+    let profile = profile(&header, &file_stem(path))
+        .map_err(|error| eyre!("{} can't be used: {error}", display_name(path)))?;
+    let sha256 = super::models::sha256_hex(path, Some(canceled))?;
+    if blob_sha256.is_some_and(|blob| blob != sha256) {
+        bail!(
+            "{} doesn't match the checksum the Hugging Face cache recorded for it",
+            display_name(path)
+        );
+    }
+    let id = CustomModelId::from_sha256(&sha256);
+    let directory = directory()?;
+    fs::create_dir_all(&directory)?;
+    super::models::write_json_atomically(
+        &receipt_path(&model_file(&directory, id)),
+        &Receipt::of(path, sha256.clone())?,
+    )?;
+    write_manifest(
+        &directory,
+        id,
+        &Manifest {
+            name: profile.name.clone(),
+            metadata_name: profile.name,
+            architecture: profile.architecture,
+            variant: profile.variant,
+            languages: profile.languages,
+            detects_language: profile.detects_language,
+            bytes: fs::metadata(path)?.len(),
+            sha256,
+            source: display_name(path),
+            license: profile.license,
+            repository: profile.repository,
+            imported_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs()),
+            path: Some(path.to_path_buf()),
+            origin: Some(origin.to_owned()),
+        },
+    )?;
+    tracing::info!(id = id.as_str(), path = %path.display(), "using a speech model found on this computer");
+    Ok(id)
 }
 
 /// Renames an import; only the picker's name changes.
@@ -773,7 +850,22 @@ pub fn rename(id: CustomModelId, name: &str) -> Result<()> {
 /// it was imported from is not touched.
 pub fn remove(id: CustomModelId) -> Result<()> {
     let directory = directory()?;
-    super::models::remove_installed_at(&model_file(&directory, id))?;
+    let in_place = fs::read(manifest_file(&directory, id))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Manifest>(&data).ok())
+        .is_some_and(|manifest| manifest.path.is_some());
+    if in_place {
+        // A found file is only forgotten: its receipt and record go, the
+        // file stays where it is.
+        match fs::remove_file(receipt_path(&model_file(&directory, id))) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(error.into());
+            }
+            _ => {}
+        }
+    } else {
+        super::models::remove_installed_at(&model_file(&directory, id))?;
+    }
     match fs::remove_file(manifest_file(&directory, id)) {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
         _ => {}

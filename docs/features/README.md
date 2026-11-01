@@ -33,9 +33,15 @@ Its Restore shortcut default toggle (off by default) puts a Restore default
 button beside Paste last dictation's shortcut (#613); its Sort and filter
 models toggle (off by default) adds a sort and a saved-language filter to the
 Local transcription picker (#645); its Benchmark details toggle (off by
-default) shows each card's raw WER or CER with its language, dataset, source,
+default) shows each model's raw WER or CER with its language, dataset, source,
 and conditions (#647).
+General › Advanced › Interface language offers Português (Brasil), and Hex
+uses it for any Portuguese system language (#867); it also offers Français,
+used for any French system language (#892). Neither has had a native
+speaker's review yet.
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
+[Your own speech models](own-models.md) covers adding a GGUF file and using
+models another app already downloaded.
 [Annotate](capture.md) (macOS, Linux,
 and Windows) records the screen while you draw and talk and sends it to an agent.
 The other capabilities stay here until they need their own verification recipe.
@@ -43,7 +49,7 @@ The other capabilities stay here until they need their own verification recipe.
 ## Get Ready
 
 Install the signed macOS app with `brew install --cask anomalyco/tap/hex` or the
-[manual DMG](../../README.md#install-hex). The cask uses a versioned, checksum-pinned
+[manual DMG](../../README.md#downloads). The cask uses a versioned, checksum-pinned
 DMG, requires Apple silicon/macOS 15+, and leaves updates to Hex's own updater. It does
 not require OpenCode, launch the app automatically, migrate the legacy
 Swift app, or forcibly replace an existing app destination. Homebrew uninstall
@@ -66,7 +72,7 @@ Install on Windows                        // setup.windows-installer
 ├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
 │   ├── x64 without vulkan-1.dll -> stop with driver guidance
 │   ├── another version installed (e.g. self-updated) -> install this one over it
-│   └── finish -> Open Hex -> first-run tour downloads a model
+│   └── finish -> Open Hex -> the first run downloads a model
 └── Settings › Apps -> uninstall every version, shortcut, Launch at login; keep data
 
 Install on Linux                          // setup.linux-installer
@@ -116,78 +122,95 @@ Executed hosting checks and deployment details are recorded in
 with 2.1.17; the initial 2.1.16 mirror preserves that release's original bytes.
 
 ```ts
-Launch Hex, setup incomplete              // setup.tour; full-window, own column
+Launch Hex, setup incomplete              // setup.tour; every build and OS, full window
+├── One onboarding: the first-run story (rune_ui/onboarding_kit/live.rs) over
+│   the tour state machine (desktop::onboarding::Flow); no flag, no other tour
+├── Skip (quiet, top-right, every page but Hex is ready)    // setup.skip
+│   ├── Ends onboarding at once and marks it done; Run setup again replays it
+│   └── A model not ready yet keeps downloading: the one picked, else the
+│       recommended one, also when the model step or the scan held it, so a
+│       blocked network (#894) never traps the person in onboarding
+├── GNOME/KDE Wayland (pastes through the RemoteDesktop portal, no wtype)
+│   and no saved grant -> before Your turn, "Let Hex paste for you"     // setup.paste-access
+│   ├── Says why: Hex only sends the paste keystroke, never sees the screen;
+│   │   the desktop asks once and may call it remote desktop (#932)
+│   ├── Allow -> opens the desktop's dialog; the grant's restore token is saved,
+│   │   so the first paste needs no dialog
+│   ├── Refused -> Try again, or Continue (the desktop asks at the first paste)
+│   ├── X11, wlroots with wtype, macOS, Windows -> no page
+│   └── Skipped or refused -> Settings › General shows it under "Permissions
+│       needed" until allowed. Check: golden `onboarding-paste`; the real
+│       portal dialog is not exercised
 ├── Upgrading from 2.3.1 or earlier (same `hex` folder)     // setup.upgrade; macOS
 │   ├── `anomaly.hex` is a new identity: macOS kept none of the old grants
 │   ├── Settings without `anomaly-hex-identity` in `migrations` -> checked once at launch
 │   │   ├── Permissions or the selected model not ready -> the old completion
-│   │   │   no longer counts -> the tour opens at Welcome
-│   │   └── Everything ready -> no tour; nothing but the ID changes
-│   └── Saved settings are kept; the ID is recorded either way
-├── Tour opens -> speech model download starts at once      // setup.background-download
+│   │   │   no longer counts -> onboarding opens from the start
+│   │   └── Everything ready -> no onboarding; nothing but the ID changes
+│   ├── Saved settings are kept; the ID is recorded either way
+│   └── Setup ready, listener starting -> a running 2.3.1 or Swift Hex   // setup.quit-legacy
+│       (retired bundle IDs) is asked to quit, so both never answer Option;
+│       it stays installed. No check; `macos_rune::quit_legacy_hex`
+├── Setting up Hex -> speech model download starts at once  // setup.background-download
 │   ├── Model -> the selection recommended for the system's first preferred
 │   │            language (English -> Parakeet Unified English; e.g. French ->
-│   │            Parakeet v3, Japanese -> Qwen3-ASR); no picker in the tour
-│   ├── Progress sits in the top corner on every step (under the practice
-│   │   field while Give it a try waits for it); failure -> Retry
+│   │            Parakeet v3, Japanese -> Qwen3-ASR); the language capsule
+│   │            switches between English and that language
+│   ├── The download is held while the Hugging Face scan runs (headers only)
+│   ├── Models found here -> the model step instead      // setup.found-choice
+│   │   ├── "Choose a speech model": one list, ours first and selected, then the
+│   │   │   found files; a pick starts at once (ours downloads, a found one is
+│   │   │   checked and used in place); Continue starts the selected row
+│   │   ├── A found pick moves on with no download page or pill
+│   │   └── Back on the pages after it returns to the list to change the pick
+│   ├── Nothing found -> this page as always, the recommended model downloading
+│   ├── Progress moves to the top pill once the story moves on; failure ->
+│   │   why, in one line (a proxy or certificate, #894), + Use a model
+│   │   file… + Try again
 │   └── Change or delete the model later in Settings      // setup.delete-model
-├── macOS: opens centred at one fixed size, so tiling managers float it
+├── The demo, while the model downloads: the Launch Room's inbox row opens
+│   "Without Hex" (typed, with typos) -> "With Hex" (the same reply, spoken),
+│   then moves on by itself; Skip → (or Escape) cuts to the end
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
 │   └── Permissions are read again at launch: a setup they now finish (macOS's
 │       Quit & Reopen after a grant) is passed; past setup, it waits until they do
-├── Welcome -> Get started                // setup.welcome-hero
-│   ├── The Hex glyph backlit by a cool corona, drawn live on the GPU
-│   │   (`rune_ui/hero.rs`); core, middle ring, outer ring light in turn,
-│   │   then the lamp breathes. Light theme: ink rings over a pale blue glow
-│   └── Reduce Motion -> the settled frame, lamp at rest
-├── Setup: one screen, every permission   // setup.checklist; skipped when granted
-│   ├── Each row leads with its glyph: mic, text cursor, sparkle (model)
-│   ├── No Input Monitoring row: Accessibility also lets the shortcut taps listen
-│   ├── Every row -> Allow; asked -> pulse + Allow; granted -> Allowed  // setup.permission-control
-│   │   └── Grant: the pill narrows into the green label, the dot shrinks into
-│   │       the check as it draws on (0.3 s, no bounce; Reduce Motion: no travel)
-│   ├── Microphone -> macOS prompt; refused -> Privacy pane + "switch Hex on" guide
-│   ├── Accessibility -> Privacy pane + drag guide
-│   │   ├── Retired Hex bundle IDs (`com.kitlangton.hex2`, `com.kitlangton.Hex`,
-│   │   │   `com.kitlangton.Hex.debug`) cleared once in the background (`tccutil reset`,
-│   │   │   ignoring `OSStatus -10814` when no bundle is on disk)
-│   │   ├── Returned from System Settings still untrusted (2 s, or 6 s side-by-side) ->
-│   │   │   "An older Hex entry can keep this off" + "Still grey? Fix it"
-│   │   │   -> resets the running bundle ID + retired IDs, prompts, and reopens the guide
-│   │   ├── The app tile lifts out of the row and flies, blurred, into the guide
-│   │   └── macOS 27 names the list "Device Control and Data Access"; row and guide follow
-│   ├── Rows re-read every 400 ms and flip to a check as macOS grants
-│   │   └── Accessibility flips live (`AXIsProcessTrusted`); its stale preflight never asks for a restart
-│   ├── On in System Settings, unusable until relaunch -> "Turns on when Hex restarts"
-│   │   └── Every permission on -> primary "Restart Hex" -> relaunch at setup  // setup.restart
-│   ├── The first unfinished row carries the screen's one accent
-│   └── Last grant -> 0.7 s beat -> Give it a try (Continue also works)
-├── Give it a try                         // setup.practice; every OS (rune_ui/practice.rs)
-│   ├── Model still downloading -> "Almost ready" + "Hex starts listening once…";
-│   │   progress (or Download stopped + Retry) under the field, not in the corner;
-│   │   model ready -> the normal Give it a try heading, body, and hint
-│   │   // check: try_it_waits_for_the_model_until_it_is_ready
-│   ├── Focused practice field; hold the shortcut, speak, release
-│   ├── Started -> "Listening…" ; Transcribing -> "Transcribing…"
-│   ├── Discarded before transcribing -> quick-tap hint
-│   ├── Discarded after transcribing -> nothing-heard hint (mic, distance)
-│   ├── Microphone line under the hint: input in use + live level while recording
-│   │   ├── Click -> General's microphone menu; a choice saves the same setting
-│   │   ├── 1.5 s of silence while recording -> "No sound. Pick another mic?"
-│   │   └── Lid closed, no other input -> "The lid is closed, so the built-in mic is off."
-│   ├── Pasted -> words land in the field + success -> Continue
-│   └── Skip -> Done                      // practice is never required
+├── Permissions, one page each           // setup.checklist; skipped when granted
+│   ├── macOS: "Let Hex hear you" (Microphone), then "Make it work everywhere"
+│   │   (Accessibility), both before Your turn: the shortcut needs Accessibility;
+│   │   each card floats off once allowed
+│   │   ├── No Input Monitoring row: Accessibility also lets the shortcut taps listen
+│   │   ├── Microphone -> macOS prompt; refused -> "Open System Settings" + guide
+│   │   ├── Accessibility -> Privacy pane + drag guide
+│   │   │   ├── Retired Hex bundle IDs (`com.kitlangton.hex2`, `com.kitlangton.Hex`,
+│   │   │   │   `com.kitlangton.Hex.debug`) cleared once in the background (`tccutil reset`,
+│   │   │   │   ignoring `OSStatus -10814` when no bundle is on disk)
+│   │   │   ├── Returned from System Settings still untrusted (2 s, or 6 s side-by-side) ->
+│   │   │   │   "An older Hex entry can keep this off" + "Still grey? Fix it"
+│   │   │   │   -> resets the running bundle ID + retired IDs, prompts, and reopens the guide
+│   │   │   └── macOS 27 names the list "Device Control and Data Access"; the row follows
+│   │   ├── On in System Settings, unusable until relaunch -> "Needs a restart"
+│   │   │   └── Every permission on -> "Restart Hex" -> relaunch at setup  // setup.restart
+│   │   └── Each grant -> a beat with its check -> the card floats off -> on
+│   ├── Windows: only while the microphone privacy switch is off: "Let Hex hear
+│   │   you", one Microphone row -> Open Settings (ms-settings:privacy-microphone)
+│   └── Linux: no page
+├── Almost ready: the model still downloads -> waits, then Your turn
+├── Your turn: the practice game          // setup.practice; every OS
+│   ├── "Clear your messages": hold the saved shortcut and answer the lit card;
+│   │   Hex's own dictation (macOS listener, Linux and Windows event log) holds
+│   │   the keys, flies the live words, and lightning burns the answered card
+│   ├── A short, silent, or failed try -> a hint under the field
+│   └── Done at any time -> Hex is ready  // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
-│   ├── First time -> Hex records a marker, reopens itself, resumes at Give it a try
-│   └── Within 2 min of that relaunch -> "Reopen Hex" button; dev binaries ask to reopen
-└── Done -> paste last, Modes tips
-    ├── Model ready -> green check, "You're all set", success sound -> Start using Hex
-    ├── Model still downloading (practice skipped, #676) -> neutral badge with the
-    │   download's percent in the ring, "Almost ready" + "Hex starts listening once…"
-    │   -> Continue; turns green with the success sound once the model is ready
-    │   // check: done_waits_for_the_model_after_a_skipped_practice
-    └── Download stopped -> "Download stopped" + Retry stay in the corner
-    // Windows and Linux: Welcome -> Setup (the model row only) -> Give it a try -> Done
+│   ├── First time -> Hex records a marker, reopens itself, resumes at the practice
+│   └── Within 2 min of that relaunch -> "Hex's shortcut didn't start." + Reopen Hex
+└── Hex is ready -> where Hex lives (menu bar, system tray, or app launcher)
+    ├── macOS: "Open Hex when your Mac starts?" + Launch at login
+    ├── Try again -> back to the practice game
+    └── Start using Hex -> records completion once setup is ready; closes onboarding
+Run setup again (Labs) or `hex onboarding reset` -> the same story from the start,
+on every build; settings, models, and permissions stay, so their pages pass
+```
 
 General > Speech model, selected model not downloaded     // settings.model-missing (#676)
 ├── Muted "Hex can't listen until the speech model has downloaded"
@@ -200,7 +223,7 @@ General > Speech model or Language
      └── Failure -> Preserve previous selection and show error
 
 Permissions revoked later
-  -> General > Permissions needed: the same rows and Allow control as the tour
+  -> General > Permissions needed: Allow rows like onboarding's
      ├── Returned from System Settings still untrusted -> "Still grey? Fix it"
      └── On, waiting for a relaunch -> "Restart Hex"
 ```
@@ -225,11 +248,13 @@ Apple Speech is currently excluded from the desktop picker.
 
 ```ts
 General > Dictation > Speech model, then Language below it   // setup.language-select; every desktop root
-├── Speech model -> Picker lists every available model; never changes the language
-│   ├── Saved language's recommendations first with their tags, then the
-│   │   models that support it, then those that do not
-│   ├── Model without the saved language -> Card: "Doesn't support Japanese;
-│   │   switches the language to English"
+├── Speech model -> Picker: Compare, then every model; never changes the language
+│   ├── Compare -> "Speech model for Japanese": three columns from the saved
+│   │   language's models, recommendations first; "{n} more models" -> every model
+│   ├── Every model -> the saved language's models, Your model files, then a fold
+│   │   "{n} more that don't speak Japanese"
+│   ├── Model without the saved language -> Row: "Choosing it switches the
+│   │   language to English"
 │   └── Choose it -> ChooseModel(model, model's default: English, else its first)
 │       └── Saved -> Language row: "<Model> doesn't support Japanese, so the
 │           language changed to English" until the next choice
@@ -250,7 +275,7 @@ Checks: `the_picker_lists_every_model_with_the_language_s_recommendations_first`
 `browsing_the_picker_never_changes_the_language`,
 `changing_only_the_language_prepares_the_same_model_again`, and
 `settings_opens_the_picker_and_names_the_model_and_language_apart`. Scenes:
-`picker-japanese`, `language-fallback`, `language-menu`. Fixture renders and
+`picker-japanese`, `picker-japanese-all`, `language-fallback`, `language-menu`. Fixture renders and
 recorded requests only; a live model switch with a fallback has not been
 observed. Apple Speech stays excluded, so its per-locale install through the
 Language row is unexercised.
@@ -285,36 +310,60 @@ Checks: `prompt_echo_is_dropped`, `speech_containing_the_hints_is_kept`,
 [transcription/gguf_session.rs](../../src/transcription/gguf_session.rs).
 
 ```ts
-Settings picker or setup > model card     // setup.model-card; shared by every desktop root
-├── Title row -> Name, recommendation tag, "Streams" tag    // at most two tags
-│   ├── Recommendation -> For the saved language from the catalog (English: Unified English first)
-│   └── Streams -> Catalog `streams` (pinned artifact advertises streaming)
-├── Detail line -> "Transcribes while you speak" (non-macOS: "… on a GPU"),
-│                  coverage, benchmark, timestamps, Installed
+Settings picker > Compare                 // setup.model-card; shared by every desktop root
+├── Column head -> Role (Recommended, Fewest wrong words, Fastest, Most languages,
+│   Reads your vocabulary; from the catalog for the saved language), name, one-line blurb
+├── Rows -> Wait when you stop (30 s ÷ realtime; "None" when it streams), Wrong
+│   words or characters "1 in N" (benchmark in the saved language, else "Not
+│   measured"; row hidden when none is measured), Languages, Reads your vocabulary,
+│   Download size; one strictly best value is medium weight, ties get none
+├── Action cell -> exactly one: In use dot, progress with Cancel, Use, or
+│   Download <size>; Primary only on the recommended column when it can be chosen
+├── The model in use or preparing replaces the last column when it would be left out
+└── "{n} more models" -> Every model
+
+Settings picker > Every model row          // fixed height; scrolls
+├── Name, role, blurb, then "No wait · 1 in 50 words wrong · 25 languages · 2.5 GB"
 ├── Saved language unsupported -> Warning line naming the language it switches to
-├── Trailing edge -> Active as dot + label; Cancel while preparing; else Use/Download
-├── Preparing -> Progress bar with its "Downloading 37%" / "Loading model" label
-├── Speed · Size · Accuracy -> 100% minus the benchmark word error rate
-├── Labs > Benchmark details (off) -> Speed · Size · Error rate "7.57% CER · lower is better",
-│   a wrapping line: language · dataset/split · source · conditions or "unknown" ·
+├── Trailing edge -> In use dot; progress with Cancel; else Use/Download; Delete when downloaded
+├── Labs > Benchmark details (off) -> raw error rate "7.57% CER", a wrapping line:
+│   language · dataset/split · source · conditions or "unknown" ·
 │   speed qualified; "Most accurate" only between comparable records (labs.md)
-├── Labs > Parakeet Ultra (off) -> its card with a Labs tag and Details: languages,  // setup.parakeet-ultra
+├── Labs > Parakeet Ultra (off) -> its row with a Labs tag and Details: languages,  // setup.parakeet-ultra
 │   measured memory, the CC BY 4.0 credit, notice, Source/License links, folded
 │   published benchmarks "not measured in Hex" (labs.md)
-└── Labs > Use your own speech model (off) -> "Add model file…" in the header;  // setup.custom-models
-    imported cards after the catalog: Imported · family · languages · Not
-    benchmarked · file · licence · SHA-256 prefix; Speed and Accuracy "Unknown";
-    Rename, Remove (not the active model); missing, changed, or off -> warning
-    line and no Use; changed -> Check again; missing or changed -> Import
-    again… (labs.md)
+├── "Add model file…" in the header -> imported cards after the catalog:  // setup.custom-models
+│   Imported · family · languages · Not benchmarked · file · licence · SHA-256
+│   prefix; Rename, Remove (not the active
+│   model); missing or changed -> warning line and no Use (own-models.md)
+└── Found on this computer -> a scan of the Hugging Face cache when the picker  // setup.found-models
+    opens: other compatible files at the top (Not tested by Hex, Use); a catalog
+    model already downloaded there says so and offers Use; a found file's
+    Delete is Forget (own-models.md)
 ```
 
-Only Parakeet Unified English is marked `streams`
-(`only_the_buffered_parakeet_artifact_is_marked_streaming`). The mark describes
+Parakeet Unified English (chunked attention) and Nemotron 3.5 ASR (cache-aware)
+are the models marked `streams`
+(`only_the_streaming_parakeet_artifacts_are_marked_streaming`). The mark describes
 the artifact; dictation still streams only after the load probe succeeds on a GPU
 device ([Streaming Finish](dictation.md#streaming-finish)). The menu bar lists
 names only and shows no tags. Scenes: `hex app -- --snap OUT --scene picker`
-(also `picker-downloading`, `picker-japanese`, `picker-custom-models`).
+(also `picker-downloading`, `picker-japanese`, `picker-japanese-all`,
+`picker-custom-models`, `picker-found`).
+
+Nemotron 3.5 ASR (#834; NVIDIA's `nemotron-3.5-asr-streaming-0.6b`, OpenMDW-1.1)
+streams in 27 of Hex's languages and detects the language with Auto: Hex sends
+its language as the locale its prompt takes (`de` -> `de-DE`,
+`runtime_language`), and Auto sends none. It is not anyone's recommendation:
+Hex's own runs of transcribe.cpp's WER harness on apollo (Vulkan, 7045d1c) put
+it behind Parakeet v3 on every set measured: LibriSpeech test-clean 3.05%
+against 1.95%, FLEURS English 7.91% against 4.88%, and FLEURS German 10.39%
+against 5.17% (8.77% and 10.46% with Auto). It is there to stream with the
+language set, or across English and German in one model. Hex converted the
+pinned `.nemo` itself; the shipped file is handy-computer's, whose 653 tensors
+match that conversion byte for byte (`NEMOTRON_3_5_ASR_ARTIFACT`). Checks:
+`nemotron_takes_its_languages_as_locales_and_detects_with_auto`. Not observed:
+macOS (Metal), Windows, and Japanese, Korean, Chinese, or Vietnamese audio.
 
 Parakeet v3 remains available for Portuguese and its other existing language
 choices. Its card explains the limitation and suggests Whisper for
@@ -353,57 +402,56 @@ Checks start in [desktop/onboarding.rs](../../src/desktop/onboarding.rs),
 [transcription/models.rs](../../src/transcription/models.rs). Setup/picker previews
 prove rendering, not clean-account permission grants or model preparation.
 
-The tour is the pure `desktop::onboarding::Flow` (steps, row states, background
-download, practice hints, one-relaunch guard) drawn by
-[rune_ui/onboarding.rs](../../src/rune_ui/onboarding.rs); `permission_control`
-in [rune_ui/lists.rs](../../src/rune_ui/lists.rs) is the one Allow / dot /
-Allowed control Settings and the tour share (`a_grant_gathers_then_releases_into_allowed`,
-`reduce_motion_swaps_allow_for_allowed_at_once`; scene `meetings-allow`). The
-welcome hero is a compositor pass after the UI, so goldens show its stage
-empty; `hex app -- --scene onboarding-hero` (`-still` for Reduce Motion) runs
-it live, and `--video` records it. Its springs passed motion-lint as level
-channels; native visual review is still by eye. The guide
+The model step's list and its rules are in
+[own-models.md](own-models.md#onboarding-choice) (scenes
+`onboarding-model-found`, `-downloading`, `-recommended`, `-back`).
+
+The tour state is the pure `desktop::onboarding::Flow` (steps, row states,
+background download, practice outcomes, one-relaunch guard), fed by
+[rune_ui/onboarding.rs](../../src/rune_ui/onboarding.rs); what the person sees
+is the story in [rune_ui/onboarding_kit](../../src/rune_ui/onboarding_kit.rs),
+opened at launch by `Ui::new` and replayed by Run setup again. The guide
 beside System Settings is [permission_guide.m](../../native/permission_guide.m).
-On Windows the setup step adds a Microphone row only while the microphone
-switch in Settings › Privacy & security is off (device, user, or desktop
-apps; `CapabilityAccessManager\ConsentStore\microphone` says `Deny`). Allow
-opens `ms-settings:privacy-microphone`, the row describes the "Let desktop apps
-access your microphone" switch, and setup finishes once it is on
-(`a_switched_off_windows_microphone_adds_its_row_until_setup_ends`; the
-registry read is cross-compiled only, not run on a Windows PC).
+On Windows the Microphone row shows only while the microphone switch in
+Settings › Privacy & security is off (device, user, or desktop apps;
+`CapabilityAccessManager\ConsentStore\microphone` says `Deny`); setup
+finishes once it is on (`a_switched_off_windows_microphone_adds_its_row_until_setup_ends`,
+`windows_onboarding_asks_only_for_the_microphone_switch`; the registry read is
+cross-compiled only, not run on a Windows PC).
 Unit tests (`desktop::onboarding::tests`) cover step order, the download starting on the
-welcome screen and retrying from any step, permissions-only setup with the
-model waiting for practice, the auto-advance beat, live row flips, a refused
-microphone, platforms without permissions or practice, practice hints, resume,
-the relaunch guard and resume marker, resuming past a setup the relaunch
-finished (`resuming_at_setup_after_a_relaunch_passes_grants_that_are_now_real`),
+welcome screen and retrying from any step, the auto-advance beat, live row
+flips, a refused microphone, practice outcomes, resume, the relaunch guard and
+resume marker, resuming past a setup the relaunch finished
+(`resuming_at_setup_after_a_relaunch_passes_grants_that_are_now_real`),
 grants waiting for a restart
 (`a_grant_the_process_cannot_use_yet_waits_for_a_restart`,
 `setup_offers_a_restart_once_every_permission_is_on`), an Accessibility grant
 advancing setup without one (`an_accessibility_grant_applies_without_a_restart`),
-and the saved step
-(`the_tour_step_is_saved_for_the_next_launch`), and the upgrade check
-(`a_fresh_install_onboards_without_the_identity_check`,
+the saved step (`the_tour_step_is_saved_for_the_next_launch`), and the upgrade
+check (`a_fresh_install_onboards_without_the_identity_check`,
 `an_upgrader_without_permissions_gets_the_tour_once`,
 `an_upgrader_whose_setup_is_ready_skips_the_tour`; a real 2.3.1 to
-`anomaly.hex` upgrade on a Mac is not yet observed). Rune tests drive the tour
-(`the_mac_tour_asks_each_permission_then_practices`,
+`anomaly.hex` upgrade on a Mac is not yet observed). Rune tests drive the
+first run (`a_new_install_opens_the_first_run`,
+`the_mac_first_run_asks_each_permission_then_practices`,
+`the_practice_game_follows_hex_s_own_dictation_on_every_os`,
 `a_listener_that_will_not_start_relaunches_once_then_asks_to_reopen`,
 `a_refused_microphone_points_to_system_settings`,
 `a_grant_waiting_for_a_restart_makes_setup_restart_hex`,
-`onboarding_downloads_the_model_through_the_service`), and every macOS step
-is a scene (`mac-onboarding`, `-setup`, `-progress`, `-denied`, `-restart`,
-`-download-failed`, `-try`, `-listening`, `-landed`, `-reopen`, `-done`).
-Reaching the last step in a live tour with dictation ready plays the
-onboarding success sound (Classic: its stop sound); a Done still waiting for
-the model plays it once the model is ready
-(`remember_step`, `poll`; fixtures stay silent), checked by reading the code.
+`onboarding_downloads_the_model_through_the_service`,
+`a_found_model_moves_on_without_a_download_and_back_returns_to_it`), and every
+page is a scene whose goldens `scripts/check-onboarding.sh` checks (its
+`SCENES` list in `rune_ui/tests/onboarding_check.rs`). Scenes are fixtures
+played on the story's own clock to one settled moment, not native proof.
 The default model comes from `desktop::i18n::preferred_language` (macOS:
 `NSLocale.preferredLanguages`) through `recommended_selection`; existing
 settings keep their saved model.
-Not yet observed: a clean-account run with real grants, a real practice paste
-into the field, or a real self-relaunch after an event-tap refusal. Windows and
-Linux show the model row only and skip the practice step.
+Observed on Linux (apollo, 2026-11-01): a clean first run in a nested
+session, from Setting up Hex through the real download to Hex is ready. Not
+yet observed: a clean-account Mac run with real grants, a real practice
+answer on macOS or Windows, or a real self-relaunch after an event-tap
+refusal. The story's demo cards and the game's messages stay in English in
+every interface language; its headings, buttons, and hints are translated.
 
 ```ts
 Menu bar > Transcription Model            // setup.quick-model-switch; macOS
@@ -516,9 +564,9 @@ desktop.
 ### Delete downloaded models
 
 ```ts
-Settings picker > Downloaded model card   // setup.delete-model; macOS
+Settings picker > Every model > Downloaded row   // setup.delete-model; macOS
 ├── Delete -> "Delete <size>?" -> Delete again
-│   ├── Success -> Model file, receipt, and partial download removed; card offers Download
+│   ├── Success -> Model file, receipt, and partial download removed; row offers Download
 │   └── Download in progress -> Nothing removed; "Model could not be deleted." with reason
 ├── Selected dictation model (any language) -> No Delete
 ├── Preparing or Apple Speech model -> No Delete
@@ -546,9 +594,7 @@ worker readiness; a later worker-load failure does not roll back saved selection
 Saved shortcut                           // dictation; Option by default; Windows and X11 accept mouse buttons, macOS with Labs > Mouse shortcuts
 ├── Hold -> Speak -> Release
 ├── Tap, tap -> Speak hands-free -> Press again   // Double-tap to lock enabled
-└── Escape
-    ├── Capture active -> Cancel that capture
-    └── Otherwise -> Cancel newest cancellable job
+└── Escape -> Nothing: no cancel, every dictation finishes and pastes (#786)
 
 General > Advanced > Double-tap only     // optional for key bindings
   -> Disable single-hold activation
@@ -556,7 +602,7 @@ General > Advanced > Double-tap only     // optional for key bindings
 
 Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)
-  -> it dictates like the shortcut: Hold/Toggle, double-tap lock, Escape, release
+  -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
 
 Labs > Unload model when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription/engine
@@ -575,11 +621,11 @@ Do not start it beside an existing listener.
 Completed output                         // output
 ├── Paste -> Current focus, in submission order
 │   ├── Previous clipboard restored 500 ms later, unless something newer replaced it
+│   ├── Windows -> the transcript is marked out of clipboard history (Win+V) and cloud sync (#851)
 │   ├── Labs > Keep dictation on clipboard (macOS, off) -> the dictation stays on the clipboard (labs.md)
 │   └── Labs > Copy dictation only (macOS, off) -> clipboard only: no paste, typing, or restore (labs.md)
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
-│   ├── Last completed dictation
-│   └── Labs > Paste picker (macOS, Dev builds, off) -> hold to pick one or more recent dictations at the caret (labs.md)
+│   └── Last completed dictation
 └── History
     ├── Inspect / search / copy (row hover or the card) / delete
     ├── Retention ("Keep: 7 days" menu) -> Seven days by default, always hard-capped
@@ -593,8 +639,8 @@ Send is not an atomic target-app transaction. Chromium 155 and 156 get the text
 typed instead of pasted for a [Chrome paste bug](dictation.md#ongoing-jobs-and-output).
 
 **Easy to misread:** History Off does not stop diagnostic logging. Diagnostic
-logs are separate and currently unbounded on disk. See the
-[privacy guide](../../README.md#privacy-and-local-data).
+logs are separate and currently unbounded on disk.
+
 
 The shared `EventReader` streams a file-length snapshot in 16 KiB chunks rather
 than copying the entire log into memory. It retains up to 1,024 event rows and
@@ -665,14 +711,13 @@ General                                  // settings
 ├── Advanced ▸ -> one fold per pane, closed by default, even while a setting in it is in use
 │   ├── Collapse -> drops a pending release confirmation
 │   ├── Dictation -> Shortcut side, Shortcut mode (How it works), Double-tap to lock,
-│   │   Double-tap only, Microphone mode, keyboard-language mappings (while its Labs toggle is on),
+│   │   Double-tap only, keyboard-language mappings (while its Labs toggle is on),
 │   │   Use the Mac's microphone instead of Bluetooth (Linux, Windows: "Use another
 │   │   microphone instead of Bluetooth")
 │   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
 │   │   (Dictate without processing sits in the Output pane; see dictation.md)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
-│       Interface language, Update channel (self-updating installs),
-│       Replay onboarding (see labs.md, New onboarding)
+│       Interface language, Update channel (self-updating installs)
 │       // Interface language System: macOS's first preferred language (zh-Hans -> 中文),
 │       // Linux LC_ALL/LC_MESSAGES/LANG, Windows the user locale; unknown -> English
 ├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
@@ -681,9 +726,12 @@ General                                  // settings
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
 ├── Terminal paste (Advanced on Linux, Labs on Windows; off)
 │   └── On -> paste sends Ctrl+Shift+V instead of Ctrl+V; applies to the next paste
-├── Microphone mode (Advanced)
-│   ├── Keep ready (fast) -> Open while idle; pre-roll available
-│   └── Release when idle -> Confirm -> Open on press; no pre-roll; startup delay
+├── Turn off the mic when not dictating (General, under Microphone; off)   // release_microphone_while_idle
+│   ├── One switch, no confirmation; its line says what the state means (issue 61), on every OS
+│   ├── Off (default) -> "The mic stays ready so dictation starts instantly; your system shows it in use"
+│   │   Open while idle; pre-roll available
+│   └── On -> "The mic opens only while you dictate; the first moment can be clipped"
+│       Open on press; no pre-roll; startup delay
 ├── While dictating -> Mute / Pause media / Lower audio / Do nothing
 │   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
 │   ├── Intentional capture only, not ordinary shortcut chords
@@ -876,7 +924,9 @@ the GPUI occlusion regression went with GPUI and has no Rune counterpart.
 
 ```ts
 Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes output*
-├── Edit with agent -> Copy a prompt naming the steps' keys and `hex settings`
+├── Trust prompt -> Allow a config that uses fetch or programs (only when one asks)
+├── Edit with agent -> Copy a prompt naming the steps' keys (the AI rewrite too), `hex settings`,
+│   `hex vocabulary` for names, and the transforms docs
 ├── Open file -> settings.json in the default editor
 ├── Every dictation -> Global's steps, numbered, read-only
 ├── Try -> Global's corrections and built-ins on a typed sentence
@@ -889,8 +939,9 @@ Foreground context -> Select processing
 ├── Otherwise matching application
 └── Otherwise Global
 
-Selected mode                            // replaces Global, does not layer over it
-  -> Corrections
+Selected mode                            // replaces Global's rewrite and transformations
+  -> Its vocabulary, then the shared one   // features/vocabulary.md (vocabulary.modes)
+  -> Global's corrections, then the mode's  // every OS
   -> OpenCode transformation             // optional provider-backed rewrite
   -> Transformations                     // ordered text chain
   -> Paste or Send
@@ -899,9 +950,35 @@ Stage fails -> Preserve its input        // failed chain discards partial result
 ```
 
 Built-in text transformations run natively. Custom transformations come from
-`~/.config/hex/hex.config.ts` and run in Hex's embedded script engine with a 1 s
-limit per call. OpenCode rewriting sends documented
+`~/.config/hex/hex.config.ts` and run in Hex's embedded script engine, each
+under its own `timeout` (1 s by default, 30 s when the config uses host APIs,
+60 s cap). OpenCode rewriting sends documented
 context to the configured provider; speech transcription stays local.
+
+```ts
+Transform host APIs                      // personal_commands/{io,fetch,process,trust}.rs
+├── fetch(url, { method, headers, body, signal }) -> Response (ureq, platform TLS)
+├── node:child_process execFile / exec (+ node:util promisify, input option)
+├── setTimeout, AbortController, AbortSignal.timeout
+└── First use -> Output pane trust prompt (hosts, programs, or capability)
+    ├── Allow -> hash of every loaded file pinned in transform-trust.json
+    ├── Any edit -> asks again
+    └── Not allowed -> call throws -> chain fails -> text pasted unchanged
+Timeout or settle -> requests abandoned, process group / job object killed
+```
+
+The API is documented for agents at
+[anoma.ly/hex/docs/transforms](../../site/public/docs/transforms.md), linked
+from `llms.txt`, the managed `AGENTS.md`, and Edit with agent's prompt. Checks:
+[tests/host_apis.rs](../../src/personal_commands/tests/host_apis.rs) runs
+`fetch` against a local server (approval, re-ask on edit, abort, network
+error) and `exec`/`execFile` (exit codes, stdin `input`, promisify, `timeout`,
+`maxBuffer`, process-tree kill on Linux, fallback through dictation's
+processing stage); [trust.rs](../../src/personal_commands/trust.rs) covers the
+scan and hash; `the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed`
+and the `output-trust` golden cover the prompt. Windows `cmd` quoting is a
+pure-function test only; the job object and macOS paths compile on CI but are
+not run against real programs there. No check reaches a remote TLS host.
 
 The built-ins are Lowercase, SpongeBob case, and No trailing punctuation. The
 last removes only the final contiguous run of sentence marks (including
@@ -1066,6 +1143,7 @@ Launch Hex                               // maintain.startup
 └── Show Dock icon off + usable menu-bar item -> No startup window
     ├── Dictation starts independently of the Settings window
     └── Menu-bar Settings / Finder or Spotlight reopen -> Open or focus the window
+        └── On the active Space, never switching back to where it last showed
 
 Menu-bar installation fails -> Show Dock icon and open the window // recovery access
 
@@ -1137,6 +1215,13 @@ when the preference changes. Any open Settings window keeps the Dock icon: macOS
 deactivates an app asynchronously when it becomes menu-bar only, which dropped
 the window behind other applications ([#103](https://github.com/anomalyco/hex/issues/103)).
 Turning the preference off therefore takes effect when Settings closes.
+
+Closing the window only orders it out, and AppKit keeps an ordered-out window
+on the Space it last showed on, so reopening it from the menu bar on another
+Space switched back to that one. `macos_rune` gives the window
+`NSWindowCollectionBehaviorMoveToActiveSpace`, so it opens on the active
+Space instead. No automated check covers Spaces; it needs a native check with
+two desktops.
 
 Checks in [meeting/watcher.rs](../../src/meeting/watcher.rs):
 `dockless_startup_stays_quiet_only_when_setup_and_menu_bar_are_ready` and
@@ -1251,9 +1336,24 @@ update from an older supported build.
 ```ts
 Linux beta                               // not macOS feature parity
 ├── hex start -> One per-user Hex -> Alt-Space capture -> Stream (Vulkan GPU) -> Paste
+├── Speech engine (General › Advanced › Dictation; transcription_device) -> Auto | GPU | CPU (#856)
+│   ├── Auto -> best GPU unless gpu-failures.json lists it under its current driver
+│   │   (kernel + Vulkan driver libraries), then another GPU, then the CPU;
+│   │   the row says which GPU stopped responding
+│   ├── A GPU load, prewarm or run that fails with a device error (hang,
+│   │   reset, lost device, out of memory) -> reloads on the CPU; once the CPU
+│   │   works, that GPU is recorded
+│   ├── An integrated GPU whose warm 1.5 s run takes over 300 ms -> Auto times
+│   │   the CPU too and keeps the faster; a slower GPU is recorded (slow), so
+│   │   later loads go straight to the CPU (#484: UHD 620, Iris Plus 655)
+│   ├── GPU -> tries the GPU anyway; working, it clears that GPU's record
+│   └── CPU -> CPU only
+│   // checked on apollo with a planted record (RADV); a real i915 hang not reproduced
 │   └── CPU or a model that cannot stream -> Transcribe the whole clip after release
 ├── hex / hex app -> Window in the same process; closing it leaves Hex running
-├── Recording sounds -> Shortcut press / capture stop / active cancellation
+│   └── Ctrl+Q in the window or Quit Hex in the sidebar -> quits Hex (#808)
+│       // check: ctrl_q_quits_hex (fixture; not run on a GNOME session)
+├── Recording sounds -> Shortcut press / capture stop
 ├── Shortcuts -> One state machine, three sources        // linux.shortcuts
 │   ├── X11 -> Root-window key grabs; General records the chord
 │   ├── Wayland + GlobalShortcuts portal -> Desktop grants the triggers
@@ -1282,31 +1382,50 @@ Linux beta                               // not macOS feature parity
 │   │       under that shortcut's own row (Dictation, Output);
 │   │       the rest keep working
 │   ├── Wayland without the portal -> Bind `hex` commands in the desktop
-│   │   └── General hides shortcut rows and lists the commands
+│   │   ├── General hides shortcut rows and lists the commands
+│   │   └── GNOME: Add GNOME keyboard shortcuts -> custom shortcuts running
+│   │       `hex dictation toggle` (#781); written only while the listener has no
+│   │       portal, and removed once the portal (or X11) binds the shortcuts, so a
+│   │       press never both starts a portal hold and toggles it off (#931)
+│   │       // check: entries_exist_only_without_the_portal (the rule only)
 │   └── Listener starting or stopped -> `hex status` reports Unregistered,
 │       never the X11 mode
-├── hex dictation start|stop|toggle|cancel, hex paste-last
+├── hex dictation start|stop|toggle, hex paste-last
 │   -> Same events as a shortcut                     // linux.commands
 │   ├── start|toggle --raw -> Dictate without processing's events
 │   ├── Idempotent: start while recording / stop while idle -> Nothing
 │   └── Hex missing or not listening -> One-line error, non-zero exit
 │       // as for hex quit|restart|status
-├── Escape -> Cancel active capture, not newest accepted job
-│   ├── X11 -> Grabbed only while recording; a grab conflict warns, dictation goes on
-│   └── Portal -> Never bound: "Cancel dictation" joins the one bind with no key;
-│       the user assigns one, idle presses do nothing (#482)
-│       ├── Desktop gave it a key anyway -> General shows a "Cancel dictation"
-│       │   row, "Your desktop granted <key>", and process.log warns (#624)
+├── Escape -> Ends nothing (#786); no Cancel dictation shortcut or command
+│   ├── X11 -> Grabbed only while Annotate draws (it stops drawing)
+│   └── Portal -> Never bound
 │       └── KDE startup -> before the bind, the pre-#579 `hex` set (with the
-│           pre-#492 `cancel` on Escape) and `cancel` under `anomaly.hex` are
-│           removed from kglobalaccel (`unregister`); other apps untouched
-│           // check: a_key_the_desktop_gave_cancel_dictation_is_shown (the row's
-│           // data only); the KDE removal is not run on a Plasma session
+│           pre-#492 `cancel` on Escape), and every action under `anomaly.hex`
+│           this bind doesn't ask for (`cancel`, `cancel-dictation`, and the ids
+│           of shortcuts changed since, which kept their keys so the new id could
+│           never take them, #898) are removed from kglobalaccel (`unregister`);
+│           other apps untouched
+│           // check: only_requested_shortcuts_are_shown (a stale grant stays
+│           // out), kde_actions_hex_no_longer_binds_are_removed (the list only);
+│           // the KDE removal is not run on a Plasma session
+│       └── KDE's approval dialog -> Hex waits for it up to 30 min, not 60 s:
+│           giving up closed the session, and KDE then kept every shortcut
+│           with no key and never asked again (#898). A bind left unapproved
+│           (dismissed, canceled, abandoned) is noted in
+│           `kde-unapproved-shortcuts`; the next bind removes those ids while
+│           they still have no key, so the dialog asks again; a key set in
+│           System Settings since stays
+│           // checked in a headless KWin 6.8 session (xdg-desktop-portal-kde
+│           // 6.8.2): the dialog stays up with Hex "Enabling…"; with the note,
+│           // keyless ids are removed and the dialog returns; without it they
+│           // stay; Hex is listed under Applications in System Settings ›
+│           // Shortcuts. Approving with OK was not exercised (no input there)
 ├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
-│   ├── Display -> picked at each capture start, kept until it hides (#486)
-│   │   ├── X11 -> the monitor under the pointer (XRandR monitors)
+│   ├── Display -> picked at each capture start (#486)
+│   │   ├── X11 -> the monitor under the pointer (XRandR monitors); while shown,
+│   │   │   checked every 250 ms; moves once two checks agree (#807)
 │   │   ├── Layer-shell (niri, Sway, Hyprland) -> no output pinned: the
 │   │   │   compositor's focused output
 │   │   └── GNOME, KDE (XDG_CURRENT_DESKTOP) -> the primary display
@@ -1330,6 +1449,8 @@ Linux beta                               // not macOS feature parity
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
 ├── General > Launch at login -> writes or removes ~/.config/autostart/anomaly.hex.desktop (X-Hex-Managed; linux/login_item)
+│   ├── Background portal (GNOME, KDE; xdg-desktop-portal 1.20+) -> the portal writes it (X-XDP-Autostart=anomaly.hex; linux/background)
+│   ├── Installed by mise or asdf -> starts the version manager's shim, if it runs Hex from home
 │   └── An entry without the mark -> error beside the row; Hex never replaces it
 ├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
 │   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
@@ -1350,6 +1471,7 @@ Linux beta                               // not macOS feature parity
 │       │   └── V sent on evdev KEY_V (placeholder releases first), so Hyprland's
 │       │       binds read Ctrl(+Shift)+V, not Ctrl(+Shift)+Escape (#444)
 │       ├── Otherwise -> RemoteDesktop portal: keyboard-only session, approved once
+│       │   (onboarding or Settings can ask first, `setup.paste-access`)
 │       │   (restore token, persist_mode 2) -> Ctrl+V as keysyms
 │       │   ├── 15 s after the last paste -> session closes when its grant restores, so
 │       │   │   GNOME's remote-control indicator shows only around pastes (#718); a grant
@@ -1372,11 +1494,15 @@ Linux beta                               // not macOS feature parity
     └── No anomaly.hex.desktop in XDG data dirs -> Hex writes
         ~/.local/share/applications/anomaly.hex.desktop (X-Hex-Managed),
         NoDisplay when an older package's hex.desktop already shows Hex,
-        removed once a package ships anomaly.hex.desktop
+        removed once a package ships anomaly.hex.desktop; never rewritten while
+        its program is there; pointed at this Hex (or a version manager's
+        shim) once its program is gone or superseded by that shim (#810)
         // KDE bindings and RemoteDesktop grants stored under `hex` are asked again once
         // checked by unit tests only, not on a GNOME 49 session
 GNOME portal shortcuts (#723)            // linux.gnome-shortcuts
-├── New GNOME setup -> dictation default Ctrl+Alt+Space (GNOME keeps Alt+Space)
+├── New GNOME or KDE Plasma setup -> dictation default Ctrl+Alt+Space (GNOME's
+│   window menu and Plasma's KRunner keep Alt+Space; #898)
+│   // checked in a headless KWin 6.8 session: the portal's dialog flags Alt+Space
 ├── Granted key GNOME keeps (Alt+Space, Super+Space, Alt+Tab, Print, …) -> red note under the row
 ├── Keys changed in GNOME Settings -> ShortcutsChanged -> pressing them dictates at once;
 │   the row note, the Status hint and `hex status --json` listener.shortcuts show them
@@ -1435,13 +1561,15 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   1 s, then rests: windowed G-SYNC/FreeSync sees one rate change per
 │   interaction, not a swing per hover (#689; Rune e2ea18e4; not run on Windows)
 ├── Transcription GPU -> ggml's Vulkan, discrete before integrated, CPU last;
-│   a failed GPU load retries on the CPU
+│   a failed GPU load retries on the CPU; the GPU record and Settings ›
+│   Speech engine work as on Linux (#856)
 │   └── A launch that crashed starting the GPU (gpu-start.pending left in the
 │       data folder, same version) -> CPU only, warned in process.log, until
 │       Hex updates or the file is deleted (#662; not run on Windows)
 ├── Hex app -> General, tray, HUD; Enabled = shortcut works in every app
 ├── HUD display -> the monitor under the pointer (GetCursorPos) at each capture
-│   start, inside that monitor's work area, at its own DPI (#486)
+│   start, inside that monitor's work area, at its own DPI (#486); while
+│   shown, checked every 250 ms; moves once two checks agree (#807)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
 │   └── Theme read when the tray is created; a later switch applies at the next launch
@@ -1451,8 +1579,20 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   ├── Speech model: downloaded models, ✓ on the selected one; none while one prepares
 │   └── Update item · Enable / Disable Hex · Quit Hex
 ├── Single-modifier shortcut -> Left / Either / Right side picker, as macOS
+├── Recordable keys -> letters, digits, F1–F24, named keys, mouse buttons (#794)
+│   ├── Punctuation -> saved by virtual key (`oem 1`…`oem 102`), so a layout
+│   │   switch keeps it; every keycap (Settings chips, recorder, tray) shows
+│   │   what it types on the layout now (`Ù`, `HotkeyKey::keycap`, #815)
+│   ├── Numpad -> `Num 1`, `Num *`, `Num Enter`, apart from the top row and
+│   │   matched by scan code + extended flag, so Num Lock off still matches;
+│   │   the recorder runs its own keyboard hook for them (`NumpadWatch`), so
+│   │   Num Lock off records Num 8, not Up (#815)
+│   ├── Menu, Pause, Scroll Lock -> may stand alone
+│   ├── Insert, Home, End, Page Up, Page Down alone -> Labs › Special keys
+│   │   alone; off, a saved one goes back to its default
+│   └── Any other key -> the recorder says "Unsupported key" and starts over
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
-├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
+├── Escape -> Nothing (#786); a held modifier alone never ends or cancels a capture
 ├── One modifier alone (Right Alt, Right Ctrl) -> Shortcut; Alt/Win release masked (no menu, Start)
 ├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device
@@ -1514,7 +1654,7 @@ closing it leaves the same process answering.
 
 Shortcut rules are pure and tested once for every source in
 [linux/input.rs](../../src/linux/input.rs): hold, double-tap lock, toggle,
-double-tap only, Escape, Paste Last, and command idempotence,
+double-tap only, Escape ending nothing, Paste Last, and command idempotence,
 plus X11 auto-repeat filtering and a portal release that never arrives
 (Hyprland's Lua binds drop it when the modifier comes up first; see
 [dictation.md](dictation.md)). The X11 grab tests run on an isolated display in
@@ -1523,7 +1663,7 @@ through one listener. [scripts/test-linux-service.py](../../scripts/test-linux-s
 checks that commands fail without a listening Hex.
 On 2026-10-22 the portal path was observed on niri with xdg-desktop-portal-gnome
 using synthetic uinput keys against an isolated service: granted triggers,
-hold and Escape while held (since replaced by Cancel dictation), double-tap lock, Paste Last, and commands. A
+hold and Escape while held (Escape no longer cancels since #786), double-tap lock, Paste Last, and commands. A
 physical keyboard press has not been recorded.
 
 `linux.hud`: [linux/rune_hud.rs](../../src/linux/rune_hud.rs) keeps the
@@ -1657,10 +1797,9 @@ Capture                                  // hex app and hex dictate
 ├── Finish retained recording -> Stop sound at the release, while the 200 ms
 │   tail is still captured; a muted output unmutes first   // dictate.stop-tone
 │   └── Clip turns out near-silent or speechless -> Stop sound already played,
-│       nothing pasted
+│       nothing pasted, no error sound or note; the log has its level
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
-├── Dictation pasted -> Done sound; failures play the error sound
-└── Cancel active capture -> Cancel sound; idle Escape stays silent
+└── Dictation pasted -> Done sound; failures play the error sound
 ```
 
 The shared [feedback player](../../src/feedback.rs) uses Hex's bundled sounds
@@ -1762,7 +1901,7 @@ Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
 ├── Calls the host directly: saves settings through it; woken on host changes
 ├── Sidebar: General, Modes, History
 ├── Transcription picker -> ChooseModel / CancelModel; progress from the snapshot
-├── First-run setup -> desktop::onboarding::Flow without permissions or practice
+├── First run -> the onboarding story; Microphone only while the privacy switch is off
 ├── Modes: "Choose a file…" through file_dialog (FileChooser portal); drag to reorder
 ├── Modes: app icons (hicolor theme or pixmaps, PNG or SVG) in the picker,
 │   chips, and mode rows; monogram while loading or without an icon
@@ -1771,7 +1910,7 @@ Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
 └── macOS/Windows surfaces as scenes too (Capabilities + preview data):
     Meetings (Recordings | Settings, opt-in card), Voice Filter,
     HUD Lab, Activity, permission rows, Launch at login, Dock icon, shortcut
-    sides, the full tour
+    sides, the permissions page
 macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 ├── rune::App on the main thread: accessory, windowless unless setup/onboarding/Dock icon open it
 ├── Same AppKit loop: status item, updater, Hex/File/Window menu, Dock reopen event, the HUD pump (16 ms timer; the HUD itself is a Rune overlay)
@@ -1782,7 +1921,7 @@ macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 ├── Meetings pane lists the store through meeting::query (1 s rescan, sent only when changed);
 │   a controller failure shows in the pane; rune::FileDialogs (file_dialog) chooses the
 │   meetings folder and Modes' "Choose a file…" .app
-├── Tour: practice dictations from the listener's event log; a listener that failed to start
+├── First run: practice dictations from the listener's event log; a listener that failed to start
 ├── Sidebar and pane header move the window (Rune El::window_drag; the title bar is transparent)
 ├── While the window shows, its poll re-checks timed state every 250 ms (Rune Tx::wake_after); close hides it (Dock policy restored)
 ├── ⌘Q / menu-bar Quit / Ctrl-C quit and join

@@ -295,7 +295,7 @@ pub fn run(
     })?;
     emit_state(&mut events, VoiceState::Listening, &device_label)?;
     println!(
-        "Hex is ready on {}. Hold {} to dictate, release to paste; Escape cancels; Ctrl-C stops.",
+        "Hex is ready on {}. Hold {} to dictate, release to paste; Ctrl-C stops.",
         device_label, hotkey_label
     );
 
@@ -592,9 +592,6 @@ pub fn run(
                 HotkeyAction::Cancel if recording => {
                     audio_suppressor.restore();
                     crate::feedback::retract_start();
-                    if recording_feedback_started {
-                        crate::feedback::play(crate::feedback::Tone::Cancel);
-                    }
                     recording = false;
                     recording_feedback_started = false;
                     capture.cancel();
@@ -737,9 +734,6 @@ pub fn run(
                 if recording {
                     audio_suppressor.restore();
                     crate::feedback::retract_start();
-                    if recording_feedback_started {
-                        crate::feedback::play(crate::feedback::Tone::Cancel);
-                    }
                     recording_feedback_started = false;
                     recording = false;
                     capture.cancel();
@@ -779,9 +773,6 @@ pub fn run(
     }
 
     if recording || finishing.is_some() {
-        if recording_feedback_started {
-            crate::feedback::play(crate::feedback::Tone::Cancel);
-        }
         capture.cancel();
         events.dictation(DictationPhase::Cancelled, "")?;
     }
@@ -1037,7 +1028,6 @@ fn next_action(
             match action {
                 CaptureAction::Start => HotkeyAction::Start,
                 CaptureAction::Stop => HotkeyAction::Finish,
-                CaptureAction::Cancel => HotkeyAction::Cancel,
                 CaptureAction::Toggle if recording => HotkeyAction::Finish,
                 CaptureAction::Toggle => HotkeyAction::Start,
             },

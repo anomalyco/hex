@@ -65,6 +65,8 @@ pub(super) struct PauseCap<'a, S> {
     /// The newest pause samples past the head, released if speech resumes.
     tail: VecDeque<f32>,
     pub(super) dropped: usize,
+    /// Whether any frame rose above the noise floor.
+    heard: bool,
     /// Silence fed after the clip, just before finalizing.
     trailing_silence: usize,
 }
@@ -78,6 +80,7 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
             pause: 0,
             tail: VecDeque::with_capacity(PAUSE_TAIL_SAMPLES),
             dropped: 0,
+            heard: false,
             trailing_silence,
         }
     }
@@ -87,6 +90,7 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
         // steady noise misses the meeting detector's speech margin, and
         // cutting it truncated the transcript (#458).
         if !self.speech.is_quiet(&self.frame) {
+            self.heard = true;
             out.extend(self.tail.drain(..));
             self.pause = 0;
             out.append(&mut self.frame);
@@ -134,6 +138,15 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         }
         self.dropped += self.tail.len();
         self.tail.clear();
+        // Everything after the first pause head was cut, yet the clip reached
+        // the transcriber: the cap misjudged the microphone's level, so the
+        // stream heard only the opening words (#841). The whole clip decides.
+        if !self.heard && self.dropped > 0 {
+            return Err(format!(
+                "the stream heard only quiet audio and {} ms was cut as a pause",
+                self.dropped / 16
+            ));
+        }
         if self.trailing_silence > 0 {
             self.stream.feed(&vec![0.0; self.trailing_silence])?;
         }
@@ -142,6 +155,61 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
 
     fn partial(&self) -> Partial {
         self.stream.partial()
+    }
+}
+
+/// Collects what a [`PauseCap`] lets through, for a whole clip.
+#[derive(Default)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+struct Kept(Vec<f32>);
+
+impl StreamFeed for Kept {
+    fn feed(&mut self, samples: &[f32]) -> Result<(), String> {
+        self.0.extend_from_slice(samples);
+        Ok(())
+    }
+
+    fn finalize(&mut self) -> Result<String, String> {
+        Ok(String::new())
+    }
+
+    fn partial(&self) -> Partial {
+        Partial::default()
+    }
+}
+
+/// A whole 16 kHz clip with each long pause cut to its head and tail, as a
+/// dictation stream hears it, and the samples dropped. `None` keeps the
+/// clip whole: nothing was long enough to cut, or no frame rose above the
+/// noise floor yet audio would have been cut (#841).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(super) fn skip_long_pauses(clip: &[f32]) -> Option<(Vec<f32>, usize)> {
+    let mut kept = Kept::default();
+    let mut capped = PauseCap::new(&mut kept, 0);
+    capped.feed(clip).ok()?;
+    capped.finalize().ok()?;
+    let dropped = capped.dropped;
+    (dropped > 0).then_some((kept.0, dropped))
+}
+
+/// The clip a whole-clip dictation run transcribes: with Labs › Skip long
+/// pauses (`skip_pauses`), its long pauses cut; otherwise exactly `clip`.
+/// Job deadlines, History, and the silence gate keep the full clip.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(super) fn whole_clip(clip: Vec<f32>, skip_pauses: bool) -> Vec<f32> {
+    if !skip_pauses {
+        return clip;
+    }
+    match skip_long_pauses(&clip) {
+        Some((kept, dropped)) => {
+            tracing::info!(
+                audio_ms = clip.len() / 16,
+                pauses_dropped_ms = dropped / 16,
+                "skipped long pauses before whole-clip transcription"
+            );
+            kept
+        }
+        None => clip,
     }
 }
 

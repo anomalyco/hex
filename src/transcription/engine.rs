@@ -666,7 +666,9 @@ impl TranscriptionEngine {
         self.finish_with(
             stream,
             clip,
-            Box::new(|model, mut clip| {
+            Box::new(|model, clip| {
+                // Labs › Skip long pauses, asked as the run starts.
+                let mut clip = whole_clip(clip, crate::labs::skip_pauses());
                 crate::dictation::pad_for_parakeet(&mut clip);
                 model
                     .transcribe(&clip)
@@ -948,7 +950,9 @@ impl Worker {
                     partials,
                 } => {
                     self.dictating.store(true, Ordering::Release);
-                    self.stream(stream, &cancel, partials.as_ref(), &commands, &mut next);
+                    crate::dictation::vocabulary::for_dictation(|| {
+                        self.stream(stream, &cancel, partials.as_ref(), &commands, &mut next);
+                    });
                     self.dictating.store(false, Ordering::Release);
                 }
                 Command::BeginYielding {
@@ -978,7 +982,9 @@ impl Worker {
                         None => Source::Offline,
                     };
                     self.dictating.store(true, Ordering::Release);
-                    self.run_offline(clip, offline, source, job);
+                    crate::dictation::vocabulary::for_dictation(|| {
+                        self.run_offline(clip, offline, source, job);
+                    });
                     self.dictating.store(false, Ordering::Release);
                 }
                 Command::Foreground { clip, offline, job } => {
@@ -1424,17 +1430,100 @@ mod tests {
 
     #[test]
     fn quiet_speech_over_steady_noise_is_never_cut_as_a_pause() {
+        // #458: -28 dBFS syllables over -35 dBFS noise, too close to the
+        // floor for the meeting detector's 12 dB speech margin.
+        assert_quiet_speech_is_kept(-28.0, -35.0, 0.0);
+        // #841: a quiet built-in microphone, whose speech sits under
+        // -55 dBFS throughout.
+        assert_quiet_speech_is_kept(-62.0, -72.0, 0.0);
+        // #841: a built-in digital microphone whose DC offset (-26 dBFS) is
+        // far louder than its speech; only the speech moves the level.
+        assert_quiet_speech_is_kept(-50.0, -58.0, 0.05);
+    }
+
+    #[test]
+    fn a_stream_that_heard_only_quiet_audio_falls_back_to_the_whole_clip() {
+        use crate::transcription::pause_segmenter::tests::noise;
+        // #841: the cap took a whole dictation for one pause and the stream
+        // kept only its first 2.5 s; that stream must not be used.
+        let mut seed = 3;
+        let clip = noise(6_000, -80.0, &mut seed);
+        let mut fake = FakeStream::default();
+        let mut capped = PauseCap::new(&mut fake, 0);
+        let result = finish_stream(&mut capped, &clip, 0);
+        assert!(capped.dropped > 0);
+        assert!(result.is_err(), "{result:?}");
+    }
+
+    #[test]
+    fn skipping_pauses_cuts_a_whole_clips_long_pauses_to_their_ends() {
+        // #899: quiet pre-roll, speech, a 1 s pause, speech, a 10 s pause,
+        // speech, and a 5 s trailing pause.
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 160_000]);
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 80_000]);
+        let (kept, dropped) = skip_long_pauses(&clip).expect("long pauses are cut");
+        let long = 160_000 - PAUSE_HEAD_SAMPLES - PAUSE_TAIL_SAMPLES;
+        let trailing = 80_000 - PAUSE_HEAD_SAMPLES;
+        assert_eq!(dropped, long + trailing);
+        assert_eq!(kept.len(), clip.len() - dropped);
+        // The short pause passes whole, and the speech after the long one
+        // follows its head and tail.
+        assert_eq!(kept[..56_000], clip[..56_000]);
+        let resumed = 56_000 + PAUSE_HEAD_SAMPLES + PAUSE_TAIL_SAMPLES;
+        assert_eq!(kept[resumed..resumed + 16_000], clip[216_000..232_000]);
+        // The trailing pause keeps its head.
+        assert_eq!(kept.len(), resumed + 16_000 + PAUSE_HEAD_SAMPLES);
+    }
+
+    #[test]
+    fn skipping_pauses_leaves_short_pauses_and_quiet_only_clips_whole() {
+        use crate::transcription::pause_segmenter::tests::noise;
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(16_000));
+        assert!(skip_long_pauses(&clip).is_none());
+        assert_eq!(whole_clip(clip.clone(), true), clip);
+        // #841: nothing above the floor, so nothing is taken for a pause.
+        let mut seed = 3;
+        let quiet = noise(6_000, -80.0, &mut seed);
+        assert!(skip_long_pauses(&quiet).is_none());
+        assert_eq!(whole_clip(quiet.clone(), true), quiet);
+    }
+
+    #[test]
+    fn with_skip_pauses_off_the_whole_clip_is_untouched() {
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 160_000]);
+        clip.extend(tone(16_000));
+        let untouched = whole_clip(clip.clone(), false);
+        assert_eq!(
+            untouched.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+            clip.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+        );
+        assert!(whole_clip(clip.clone(), true).len() < clip.len());
+    }
+
+    fn assert_quiet_speech_is_kept(speech_db: f32, noise_db: f32, dc_offset: f32) {
         use crate::transcription::pause_segmenter::{FRAME_SAMPLES, SpeechFrames, tests::noise};
-        // #458: 17 s of -28 dBFS syllables over -35 dBFS noise, too close
-        // to the floor for the meeting detector's 12 dB speech margin.
+        // 17 s of syllables over steady noise.
         let mut seed = 11;
-        let mut clip = noise(17_000, -35.0, &mut seed);
+        let mut clip = noise(17_000, noise_db, &mut seed);
         let mut voice_seed = 5;
         for start in (0..clip.len()).step_by(4_800) {
-            let burst = noise(240, -28.0, &mut voice_seed);
+            let burst = noise(240, speech_db, &mut voice_seed);
             for (sample, voice) in clip[start..].iter_mut().zip(burst) {
                 *sample += voice;
             }
+        }
+        for sample in &mut clip {
+            *sample += dc_offset;
         }
         let mut speech = SpeechFrames::default();
         assert!(

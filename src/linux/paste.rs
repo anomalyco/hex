@@ -114,7 +114,7 @@ fn close_when_idle(shared: Weak<Mutex<PortalSession>>) {
 
 impl WaylandKeys {
     fn choose() -> Self {
-        if offers_virtual_keyboard() && on_path("wtype") {
+        if wtype_pastes() {
             Self::Wtype
         } else {
             Self::Portal(Arc::new(Mutex::new(PortalSession {
@@ -178,6 +178,17 @@ impl WaylandKeys {
             }
         }
     }
+}
+
+/// Whether this session pastes through the desktop's RemoteDesktop portal,
+/// whose dialog asks once before the first paste: Wayland without `wtype`'s
+/// virtual keyboard (GNOME, KDE).
+pub(crate) fn pastes_through_portal() -> bool {
+    LinuxSession::detect().is_wayland() && !wtype_pastes()
+}
+
+fn wtype_pastes() -> bool {
+    offers_virtual_keyboard() && on_path("wtype")
 }
 
 /// Whether the compositor advertises `zwp_virtual_keyboard_manager_v1`.

@@ -1071,6 +1071,7 @@ fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> 
                 download_bytes: model.download_bytes(),
                 languages: model.presentation_languages(),
                 supports_language_detection: model.supports_language_detection,
+                source: crate::control::model_source(model, &language),
             }
         })
         .collect())
@@ -1347,6 +1348,9 @@ struct ModelInfo {
     download_bytes: Option<u64>,
     languages: Vec<&'static str>,
     supports_language_detection: bool,
+    /// `found: owner/name@abcdef1` (another app's download, used where it
+    /// is), `imported`, `hex`, or `download`.
+    source: String,
 }
 
 fn current_health() -> HealthResponse {

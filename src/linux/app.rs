@@ -125,6 +125,8 @@ struct LinuxDesktopHost {
     status: String,
     error: Option<String>,
     dismissed_failure_at: Option<u64>,
+    /// What Hex's GNOME custom shortcuts were last written for (#781).
+    gnome_shortcuts: Option<String>,
     settings_error: Option<String>,
     settings: AppSettings,
     // Dismissing a load error must not authorize recording with fallback defaults.
@@ -330,6 +332,10 @@ pub(crate) fn run(
     if let Err(error) = crate::linux::login_item::tidy() {
         tracing::warn!(%error, "could not tidy Hex's autostart entry");
     }
+    // Off the main thread: the portal may take a moment to answer.
+    let _ = std::thread::Builder::new()
+        .name("hex-background-portal".into())
+        .spawn(crate::linux::login_item::announce_background);
     crate::labs::log_launch();
     crate::audio::hex_microphone::host_service();
     let (settings, error) = AppSettings::load_for_launch();
@@ -534,6 +540,7 @@ impl LinuxDesktopHost {
             status: "Disabled".into(),
             error: None,
             dismissed_failure_at: None,
+            gnome_shortcuts: None,
             settings_valid: error.is_none(),
             settings_error: error,
             settings,
@@ -665,6 +672,49 @@ impl LinuxDesktopHost {
         }
     }
 
+    /// Keeps Hex's GNOME custom shortcuts (#781) in step: written while Hex
+    /// listens with them on, for its current shortcuts; removed when Hex is
+    /// disabled or they're turned off.
+    fn sync_gnome_shortcuts(&mut self) {
+        if !self.settings_valid || !crate::linux::portal::gnome() {
+            return;
+        }
+        let requested = self.settings.gnome_keyboard_shortcuts && self.listen_when_ready;
+        let shortcuts = self.listener.as_ref().map(|l| l.hotkey_status.shortcuts());
+        let Some(wanted) = crate::linux::gnome_shortcuts::wanted(requested, shortcuts) else {
+            return;
+        };
+        let key = format!(
+            "{wanted} {:?} {:?} {:?}",
+            self.settings.dictation_hotkey,
+            self.settings.paste_last_hotkey,
+            capture_shortcut(&self.settings)
+        );
+        if self.gnome_shortcuts.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        // Nothing to remove that this Hex wrote or was asked to keep.
+        if !wanted && self.gnome_shortcuts.is_none() && !self.settings.gnome_keyboard_shortcuts {
+            self.gnome_shortcuts = Some(key);
+            return;
+        }
+        let result = if wanted {
+            crate::linux::login_item::launcher()
+                .and_then(|hex| crate::linux::gnome_shortcuts::install(&self.settings, &hex))
+        } else {
+            crate::linux::gnome_shortcuts::remove()
+        };
+        match result {
+            Ok(()) => tracing::info!(written = wanted, "updated Hex's GNOME keyboard shortcuts"),
+            Err(error) => {
+                self.error = Some(format!(
+                    "Could not update GNOME keyboard shortcuts: {error:#}"
+                ));
+            }
+        }
+        self.gnome_shortcuts = Some(key);
+    }
+
     fn stop(&mut self) {
         self.listen_when_ready = false;
         if let Some(edit) = &self.shortcut_edit {
@@ -755,6 +805,7 @@ impl LinuxDesktopHost {
         }
 
         self.refresh_shortcut_edit();
+        self.sync_gnome_shortcuts();
 
         self.activity.refresh(&mut self.event_reader);
         if let Some(listener) = &mut self.listener {
@@ -1093,6 +1144,16 @@ impl LinuxDesktopHost {
 
 /// Saves one host-owned change on top of the current `settings.json`, so
 /// edits the window saved meanwhile survive.
+/// Annotate's shortcut, while Annotate is on.
+fn capture_shortcut(settings: &AppSettings) -> Option<&crate::app_settings::HotkeyBinding> {
+    #[cfg(hex_capture)]
+    if settings.capture.enabled {
+        return Some(&settings.capture.hotkey);
+    }
+    let _ = settings;
+    None
+}
+
 fn save_with(change: impl FnOnce(&mut AppSettings)) -> Result<AppSettings> {
     let mut settings = AppSettings::load()?;
     change(&mut settings);
@@ -1200,7 +1261,6 @@ impl crate::control::host::Host for LinuxControl {
             (CaptureAction::Toggle, false) => ShortcutCommand::DictationToggle,
             (CaptureAction::Toggle, true) => ShortcutCommand::DictationToggleRaw,
             (CaptureAction::Stop, _) => ShortcutCommand::DictationStop,
-            (CaptureAction::Cancel, _) => ShortcutCommand::DictationCancel,
         })
     }
 
@@ -1321,10 +1381,7 @@ impl LinuxDesktopHost {
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
-                warning: self
-                    .listener
-                    .as_ref()
-                    .and_then(|listener| listener.hotkey_status.warning()),
+                warning: None,
                 shortcuts: self
                     .listener
                     .as_ref()
@@ -1520,45 +1577,6 @@ mod tests {
             assert!(listener.stop.load(Ordering::Relaxed));
             listener.finish().unwrap();
         }
-    }
-
-    #[test]
-    fn listener_warning_is_nonfatal_and_round_trips_in_status() {
-        let mut host = host_for_edit(true);
-        host.status = "Enabled".into();
-        let status = host.listener.as_ref().unwrap().hotkey_status.clone();
-        status.update_escape_availability(false);
-        let serialized = serde_json::to_vec(&host.snapshot()).unwrap();
-        let received: DesktopSnapshot = serde_json::from_slice(&serialized).unwrap();
-        let listener = received.listener;
-        assert!(listener.running);
-        assert_eq!(listener.status, "Enabled");
-        assert_eq!(
-            listener.warning.as_deref(),
-            Some(crate::linux::input::ESCAPE_CANCEL_WARNING),
-        );
-        assert!(received.operation_error.is_none());
-
-        // Dismissing an unrelated failure must not hide an unresolved limitation.
-        host.error = Some("previous transcription failed".into());
-        assert_eq!(
-            host.snapshot().operation_error.as_deref(),
-            Some("previous transcription failed"),
-        );
-        host.dispatch(DesktopAction::ClearError).unwrap();
-        assert!(host.snapshot().listener.warning.is_some());
-        assert!(host.snapshot().operation_error.is_none());
-        status.update_escape_availability(true);
-        assert!(host.snapshot().listener.warning.is_none());
-        status.update_escape_availability(false);
-        host.stop();
-        while !host.listener.as_ref().unwrap().worker.is_finished() {
-            std::thread::yield_now();
-        }
-        host.refresh();
-        let listener = host.snapshot().listener;
-        assert!(!listener.running);
-        assert!(listener.warning.is_none());
     }
 
     #[test]

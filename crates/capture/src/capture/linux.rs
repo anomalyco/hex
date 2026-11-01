@@ -225,6 +225,8 @@ enum Encoding {
     Software {
         pixels: Vec<u8>,
         movie: Option<Writer>,
+        /// Why the GPU couldn't encode, when it was tried.
+        hardware: Option<String>,
     },
 }
 
@@ -348,6 +350,11 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
         if let Some(frame) = stream.newest() {
             match load(&mut encoding, &frame, &format) {
                 Ok(()) => have_frame = true,
+                // Nothing of the screen recorded yet: end the capture with why rather than
+                // write one with no picture.
+                Err(error) if !have_frame => {
+                    return Err(error.context("could not record the screen"));
+                }
                 Err(error) if !failed => {
                     scrawl_log(format!("Recording frame failed: {error:#}"));
                     failed = true;
@@ -400,6 +407,9 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
         }
         Encoding::Software { movie, .. } => movie,
     };
+    if first.is_none() && path.is_some() {
+        scrawl_log("The screen stream gave no frame to record");
+    }
     let (Some(movie), Some(path), Some((_, offset_ms))) = (movie, path, first) else {
         return Ok(None);
     };
@@ -453,6 +463,7 @@ fn record_x11(sampler: &Sampler) -> Result<Option<super::Movie>> {
     let mut encoding = Encoding::Software {
         pixels: Vec::new(),
         movie,
+        hardware: None,
     };
     crate::log::start_metric("sck_ready_ms", sampler.started_at);
     let tick = Duration::from_secs(1) / FPS;
@@ -510,6 +521,7 @@ fn start_encoding(
     small: (u32, u32),
     path: Option<&std::path::Path>,
 ) -> Encoding {
+    let mut unavailable = None;
     if format.dmabuf
         && let Some(path) = path
     {
@@ -522,7 +534,10 @@ fn start_encoding(
                     movie,
                 };
             }
-            Err(error) => scrawl_log(format!("Hardware encoding unavailable: {error:#}")),
+            Err(error) => {
+                scrawl_log(format!("Hardware encoding unavailable: {error:#}"));
+                unavailable = Some(format!("{error:#}"));
+            }
         }
     }
     let pixel = match format.pixel {
@@ -539,22 +554,31 @@ fn start_encoding(
     Encoding::Software {
         pixels: Vec::new(),
         movie,
+        hardware: unavailable,
     }
 }
 
 fn load(encoding: &mut Encoding, frame: &Frame, format: &VideoFormat) -> Result<()> {
     match encoding {
         Encoding::Hardware { encoder, .. } => encoder.load(frame),
-        Encoding::Software { pixels, .. } => {
+        Encoding::Software {
+            pixels, hardware, ..
+        } => {
             let row = format.width as usize * 4;
             pixels.resize(row * format.height as usize, 0);
+            let rows = match (frame.rows(), hardware.as_deref()) {
+                (Ok(rows), _) => rows,
+                (Err(error), None) => return Err(error),
+                (Err(error), Some(why)) => {
+                    return Err(error.context(format!("hardware encoding is unavailable: {why}")));
+                }
+            };
             if frame.dmabuf {
                 pipewire::sync_dmabuf(frame.fd, true);
             }
             for y in 0..format.height as usize {
-                let src = unsafe {
-                    std::slice::from_raw_parts(frame.rows().add(y * frame.stride as usize), row)
-                };
+                let src =
+                    unsafe { std::slice::from_raw_parts(rows.add(y * frame.stride as usize), row) };
                 pixels[y * row..(y + 1) * row].copy_from_slice(src);
             }
             if frame.dmabuf {
@@ -568,7 +592,7 @@ fn load(encoding: &mut Encoding, frame: &Frame, format: &VideoFormat) -> Result<
 fn encode(encoding: &mut Encoding) -> Result<()> {
     match encoding {
         Encoding::Hardware { encoder, movie } => encoder.encode(movie),
-        Encoding::Software { pixels, movie } => match movie {
+        Encoding::Software { pixels, movie, .. } => match movie {
             Some(movie) => Ok(std::io::Write::write_all(movie, pixels)?),
             None => Ok(()),
         },

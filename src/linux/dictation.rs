@@ -658,7 +658,6 @@ pub(crate) fn run(
                 HotkeyEvent::Cancel if capture.is_recording() => {
                     capture.cancel();
                     feedback::retract_start();
-                    feedback::play(Tone::Cancel);
                     suppressor.restore();
                     if release_while_idle && !timeline.wants_audio() {
                         input.close();
@@ -760,7 +759,6 @@ pub(crate) fn run(
                 if capture.is_recording() && finishing.is_none() {
                     capture.cancel();
                     feedback::retract_start();
-                    feedback::play(Tone::Cancel);
                     suppressor.restore();
                     events.dictation(DictationPhase::Cancelled, "")?;
                 }

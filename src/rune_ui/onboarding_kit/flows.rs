@@ -1,6 +1,7 @@
 //! The onboarding options, each composed from the kit's pieces on the
 //! full-window page.
 
+use crate::desktop::i18n::tr;
 use rune::{Beat, El, Sequence, Transition, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, glyphs};
 
@@ -61,13 +62,14 @@ fn download(s: &Onboard) -> Download {
 
 /// Primary onward button (`Continue →`), matching the tour's forward CTA.
 pub(super) fn continue_button(p: Paint, s: &Onboard) -> El {
-    let button = Button::new("Continue")
+    let label = tr("Continue");
+    let button = Button::new(label)
         .variant(ButtonVariant::Contrast)
-        .label_with(|font, ink| {
+        .label_with(move |font, ink| {
             row()
                 .gap(6.0)
                 .center_y()
-                .child(text("Continue").key("label").font(font).color(ink))
+                .child(text(label).key("label").font(font).color(ink))
                 .child(icon(&glyphs::ARROW_RIGHT, 15.0).key("arrow").color(ink))
         });
     let button = if s.live.is_some() {
@@ -155,6 +157,7 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 s.ready_age(),
                 s.reduced.get(),
                 s.motion,
+                s.home,
             )),
         ];
     }
@@ -252,6 +255,7 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 s.ready_age(),
                 s.reduced.get(),
                 s.motion,
+                s.home,
             )),
         ];
     }
@@ -362,7 +366,15 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
         _ => sentence(p, s, true),
     };
     let below = match s.step {
-        Step::Ready => ready(p, &s.caps, None, s.ready_age(), s.reduced.get(), s.motion),
+        Step::Ready => ready(
+            p,
+            &s.caps,
+            None,
+            s.ready_age(),
+            s.reduced.get(),
+            s.motion,
+            s.home,
+        ),
         Step::Pick | Step::Started => heading(
             p,
             "intro",

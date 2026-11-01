@@ -29,7 +29,7 @@ hex
 ├── start                          open Hex if it isn't running (macOS Hex.app, else `hex app --hidden`); wait until it answers
 ├── quit [--force]                 refused while a meeting or dictation is active, or unconfirmed
 ├── restart [--force]              quit and reopen (opens Hex when it isn't running)
-├── dictation start|stop|cancel|toggle
+├── dictation start|stop|toggle
 │   ├── stop --print               print the transcript instead of pasting it (below)
 │   └── start|toggle --raw         paste the transcript as heard, skipping the Output steps
 ├── paste-last                     paste the last dictation (Option-Shift-V); refused while recording
@@ -79,8 +79,8 @@ hex
 ```
 
 `dictation start` locks the recording, as a double tap would: `dictation stop`
-or the next shortcut press finishes it, and `dictation cancel` or Escape
-discards it. A CLI start has no press to judge, so its recording counts as
+or the next shortcut press finishes it. Dictation has no cancel (#786): every
+dictation finishes and pastes. A CLI start has no press to judge, so its recording counts as
 intentional at once: the start tone plays once the microphone is open, and the
 recording behavior (mute or pause media, idle-sleep prevention) and the live
 stream start as they do after a held shortcut. A `stop` replies `done` only
@@ -96,7 +96,7 @@ corrections, OpenCode rewriting, and transformations). History keeps it as
 `printed`, and Paste Last skips it. No speech (nothing recorded yet, a silent
 clip, or an empty transcript) exits 4 with code `no-speech` and prints
 nothing; with nothing recording it refuses with `not-recording`. A failure,
-a cancel (Escape), or the 60 s timeout prints nothing, exits 1, and never
+or the 60 s timeout prints nothing, exits 1, and never
 falls back to pasting. `--print` with any other action is a usage error
 (exit 2). The command is the same on Linux and Windows, where `hex dictation`
 and `hex paste-last` reach the listener's own queue as its shortcut would.
@@ -104,34 +104,35 @@ and `hex paste-last` reach the listener's own queue as its shortcut would.
 `dictation start --raw` and `toggle --raw` start a dictation that pastes the
 transcript as heard, skipping the Output pane's steps, as the Dictate without
 processing shortcut (`raw_dictation_hotkey`) does. History keeps it as `raw`,
-and Paste Last pastes it. `--raw` with `stop` or `cancel` is a usage error
+and Paste Last pastes it. `--raw` with `stop` is a usage error
 (exit 2); `stop --print` of a raw dictation prints the transcript as heard.
 
-`dictation cancel` with nothing recording cancels the newest unfinished
-dictation, like Escape. Escape cancels an active recording before any job, so
-while another capture records (an API dictation, say), an idle
-`cancel` is refused with `busy` rather than reach past it; cancel that
-recording first. `meetings cancel` doesn't exist
-because Hex has no way to discard a meeting recording.
+`dictation cancel` was removed (#786); an older `hex` that sends it gets
+`removed`. `meetings cancel` doesn't exist because Hex has no way to discard a
+meeting recording.
 
 `onboarding reset` (or `onboarding restart`) opens the window on the
 first-run onboarding at once, as on a new install, for trying it again, on
 macOS, Linux, and Windows. It removes only the onboarding markers (`onboarding-complete`, `onboarding-step`,
 `onboarding-relaunch`) from the data folder. Settings, history, models, and
 permissions are untouched, so the run finds them ready: the download passes at
-once and the permission step is skipped. General's Replay onboarding row
-(under Advanced) does the same.
+once and the permission step is skipped. Labs' Run setup again row does the
+same.
 
 `paste-last` needs a listening Hex (`not-ready` during setup) and is refused
 with `busy` while anything records or a shortcut gesture is in progress. The
 menu bar's Paste Last Dictation does nothing in that case.
 
-`model import`, `rename`, `repair`, and `remove` need Labs › Use your own speech model
-(`hex labs on custom-models`) and run in this process on every OS; `hex
-models` is an alias for `hex model`. An import's id is `custom-` and the first
-16 hex digits of its SHA-256, and every model command takes it. One that is
-missing, changed, or off answers `model-unavailable` with the reason
-([labs](features/labs.md)).
+`model import`, `rename`, `repair`, and `remove` run in this process on every
+OS; `hex models` is an alias for `hex model`. An import's id is `custom-` and
+the first 16 hex digits of its SHA-256, and every model command takes it. One
+that is missing or changed answers `model-unavailable` with the reason.
+`model list` also looks in the Hugging Face cache and says where each model
+comes from (`download`, `hex`, `imported`, or `found: owner/name@abcdef1`); a
+compatible file there that isn't a catalog model is listed as `custom-<first 16
+hex of its blob>` `(not tested by Hex)`, and `model use` with that id checks it
+in full and uses it where it is. `remove` on a found file only forgets it
+([own models](features/own-models.md)).
 
 `model use` switches only to a downloaded model and checks it on disk; it never
 downloads or repairs one (`model install` does). It keeps that model's own
@@ -148,6 +149,13 @@ listener doesn't answer whether it's recording; no listener, or one waiting for
 setup, counts as idle. On Linux a Hex its systemd unit runs restarts through
 the unit (after writing this desktop's `session.env`); elsewhere `restart`
 waits for the old Hex to drain and exit, then runs `hex start`.
+
+On Linux, an older Hex an update left running (from before `hex` commands
+moved to the local API) answers only on its `service.sock`. Every control
+command and `hex start` then answer `outdated` (exit 1) instead of
+`not-running`, and `hex restart` restarts its systemd unit into the installed
+build and waits for it to answer (#915); one not run by the unit has to be
+quit from its window or tray.
 
 `model install` with Hex running downloads in the background, as Settings
 does; on Linux and Windows with no Hex running it downloads in this process,
@@ -238,7 +246,7 @@ Requests are flat objects tagged by `command` (kebab-case):
 
 ```ts
 status | quit {force} | restart {force}
-dictation {action, print?}                       action: start | stop | cancel | toggle;
+dictation {action, print?}                       action: start | stop | toggle (`cancel` answers `removed`);
                                                  print (stop only) answers `transcript`
 paste-last
 meeting-record {title?} | meeting-stop | meeting-copy-last
@@ -263,7 +271,7 @@ Replies are tagged by `status`:
 {"version": 4, "status": "done", "message": "Recording “Design sync”; …", "changed": true}
 {"version": 4, "status": "error", "code": "feature-off", "message": "Meetings are off; …"}
 {"version": 4, "status": "settings", "settings": [{"key": "sound_effects", "value": true,
-  "kind": "bool", "writable": true, "about": "Play recording, cancellation, and error tones"}]}
+  "kind": "bool", "writable": true, "about": "Play recording and error tones"}]}
 {"version": 4, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
   "languages": ["en", "…"], "size": "…", "installed": true, "selected": true,
   "streams": true, "vocabulary": "bias", "supports_recognition_hints": false}]}
@@ -329,6 +337,7 @@ update              current | checking | available | unavailable
 
 ```ts
 not-running            Hex isn't running (CLI only; exit 3)
+outdated               Linux: an older Hex an update left running; run `hex restart` (CLI only)
 transport              the request couldn't reach Hex or its reply was unreadable (CLI only)
 version-mismatch       this hex speaks another control version; use the running app's hex
 unknown-setting        no such key (the message suggests a near match)
@@ -407,6 +416,8 @@ observe input-source changes or show these controls.
   second-dictation-shortcut`) and shares no key with another shortcut.
 - `json` settings (modes, meeting providers, excluded calendars) take the JSON
   value the file stores.
+- `ui_language` takes `en`, `pl`, `zh`, `ja`, `de`, `es`, `uk`, `pt`, `fr`,
+  or `none` (follow the system language), the same languages Settings offers.
 - `updates.channel` takes `stable`, `dev`, or `none` (follow the build: the
   channel it was published on), and checks for updates at once. Choosing
   another channel than the build's offers that channel's current release
@@ -441,7 +452,7 @@ Writable keys: `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
 `avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`, `raw_dictation_hotkey`,
-`second_dictation_hotkey`, `labs.second_dictation_shortcut`, `labs.paste_picker`, `labs.standalone_special_keys`, `show_dock_icon`, `vocabulary_boost`,
+`second_dictation_hotkey`, `labs.second_dictation_shortcut`, `labs.standalone_special_keys`, `show_dock_icon`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,
 `history_retention`, `meetings.enabled`,
 `meetings.output_folder`, `meetings.summarize_with_apple_intelligence`,

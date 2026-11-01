@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
+import { setGlow } from "./glow"
 
 // The hero show lives in ./shout (plain JS, WebGPU with a Canvas 2D fallback). The prerendered
 // page shows a still of the idle head; the engine loads when the browser is idle or the visitor
@@ -144,6 +145,42 @@ export function OptionKey({
   const ref = useRef<HTMLButtonElement>(null)
   const [pressed, setPressed] = useState(false)
   const gone = phase === "started"
+  // The glow pulses (./glow.ts) from here until the show's engine draws the head and takes it over. A timer waits
+  // out each 1/30 s and the value is set in the next frame callback, so it lands on that vsync's frame.
+  const pulsing = phase === "idle"
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !pulsing || matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    let timer = 0
+    let raf = 0
+    let onScreen = true
+    const frame = (now: number) => {
+      raf = 0
+      setGlow(el, now)
+      // A frame and a half early: asked for from idle, a frame's slot is already under way (see shout/main.js).
+      if (!document.hidden && onScreen) timer = window.setTimeout(next, 1000 / 30 - 10)
+    }
+    const next = () => {
+      timer = 0
+      raf = requestAnimationFrame(frame)
+    }
+    const resume = () => {
+      if (!timer && !raf && !document.hidden && onScreen) next()
+    }
+    const io = new IntersectionObserver(([e]) => {
+      onScreen = e.isIntersecting
+      resume()
+    })
+    io.observe(el)
+    document.addEventListener("visibilitychange", resume)
+    next()
+    return () => {
+      clearTimeout(timer)
+      cancelAnimationFrame(raf)
+      io.disconnect()
+      document.removeEventListener("visibilitychange", resume)
+    }
+  }, [pulsing])
 
   const setDown = (down: boolean) => {
     setPressed(down)

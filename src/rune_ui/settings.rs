@@ -352,6 +352,13 @@ pub(super) fn validate(
             tr("Unsupported key")
         });
     }
+    // A navigation key alone needs Labs › Special keys alone (Windows).
+    if cfg!(target_os = "windows")
+        && binding.is_lone_navigation_key()
+        && !settings.special_keys_allowed()
+    {
+        return Err(tr("Add a modifier"));
+    }
     host::validate_hotkey(target, binding)?;
     if conflicts(settings, target, binding) {
         return Err(tr("Already in use"));
@@ -462,7 +469,7 @@ pub(super) fn sound_volume_index(settings: &AppSettings) -> usize {
 
 pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
     ui.open = (ui.open != Some(menu)).then_some(menu);
-    if matches!(ui.open, Some(Menu::Microphone | Menu::TourMicrophone)) {
+    if matches!(ui.open, Some(Menu::Microphone)) {
         refresh_microphones(ui);
     }
 }
@@ -714,19 +721,6 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
     granted.iter().find(|shortcut| shortcut.name == name)
 }
 
-/// The key a shortcuts portal's desktop gave Cancel dictation. Hex suggests
-/// none, so a key here comes from the desktop (#624), and it takes that key
-/// from every app.
-pub(super) fn cancel_grant(ui: &Ui) -> Option<&str> {
-    let Some(DesktopShortcuts::Portal(granted)) = ui.shortcuts() else {
-        return None;
-    };
-    granted
-        .iter()
-        .find(|shortcut| shortcut.name == "Cancel dictation")
-        .and_then(|shortcut| shortcut.trigger.as_deref())
-}
-
 /// Keys GNOME keeps for itself by default (window menu, input sources, app
 /// switching, the overview, screenshots, …), normalized as [`chord`] writes
 /// them. A portal shortcut on one is listed in GNOME Settings but never
@@ -834,8 +828,8 @@ pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<
 
 /// Without a shortcuts portal the desktop's keybindings own every shortcut:
 /// the commands to bind there.
-pub(super) fn desktop_commands(p: Paint) -> El {
-    let rows = vec![
+pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
+    let mut rows = vec![
         note(
             "no-portal",
             tr(
@@ -859,13 +853,6 @@ pub(super) fn desktop_commands(p: Paint) -> El {
         ),
         command_row(
             p,
-            "cancel",
-            tr("Cancel dictation"),
-            tr("Discard the current recording"),
-            &["hex dictation cancel"],
-        ),
-        command_row(
-            p,
             "paste-last",
             tr("Paste last dictation"),
             tr("Re-paste the most recent dictation"),
@@ -879,7 +866,46 @@ pub(super) fn desktop_commands(p: Paint) -> El {
             &["hex dictation toggle --raw"],
         ),
     ];
+    // GNOME without a shortcuts portal (GNOME 46 and older, #781): Hex writes
+    // the commands into GNOME's own custom shortcuts.
+    if on_gnome() {
+        rows.insert(1, gnome_shortcuts_row(ui, p));
+    }
     section(p, "desktop-shortcuts", tr("Desktop shortcuts"), rows)
+}
+
+/// Adds or removes Hex's GNOME custom keyboard shortcuts.
+fn gnome_shortcuts_row(ui: &Ui, p: Paint) -> El {
+    let on = ui.settings.gnome_keyboard_shortcuts;
+    let description = if on {
+        tr(
+            "Added to GNOME Settings › Keyboard › Custom Shortcuts while Hex is enabled. GNOME runs them on the key press, so your dictation shortcut toggles dictation. Change the keys there.",
+        )
+    } else {
+        tr(
+            "Adds dictation, paste last and Annotate to GNOME Settings › Keyboard › Custom Shortcuts with your shortcuts. GNOME runs them on the key press, so dictation toggles.",
+        )
+    };
+    let action = button(
+        p,
+        "gnome-shortcuts-control",
+        if on {
+            tr("Remove")
+        } else {
+            tr("Add GNOME keyboard shortcuts")
+        },
+        ButtonKind::Secondary,
+        move |ui: &mut Ui, _| {
+            ui.update(|settings| settings.gnome_keyboard_shortcuts = !on);
+        },
+    );
+    setting_row(
+        p,
+        "gnome-shortcuts",
+        tr("GNOME keyboard shortcuts"),
+        Some(description),
+        action,
+    )
 }
 
 fn command_row(p: Paint, key: &str, title: &str, description: &str, commands: &[&str]) -> El {
@@ -1284,44 +1310,6 @@ pub(super) fn double_tap_only_applies(settings: &AppSettings) -> bool {
     settings.shortcut_mode == ShortcutMode::Hold
         && settings.double_tap_lock
         && settings.dictation_hotkey.key.is_some()
-}
-
-pub(super) fn release_confirmation(_ui: &Ui, p: Paint) -> El {
-    setting_row(
-        p,
-        "confirm-release",
-        tr("Release the microphone when idle?"),
-        Some(tr(
-            "Opens the microphone on shortcut press without pre-roll.",
-        )),
-        row()
-            .key("actions")
-            .gap(8.0)
-            .child(button(
-                p,
-                "cancel-release",
-                tr("Cancel"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| {
-                    ui.confirm_release = false;
-                },
-            ))
-            .child(
-                button(
-                    p,
-                    "confirm-release",
-                    tr("Release microphone"),
-                    ButtonKind::Primary,
-                    |ui: &mut Ui, _| {
-                        if ui.update(|settings| settings.release_microphone_while_idle = true) {
-                            ui.confirm_release = false;
-                        }
-                    },
-                )
-                .default_button(),
-            ),
-    )
-    .fill(p.k.c.hover)
 }
 
 /// Stable or Dev shows only while this install updates itself: test,

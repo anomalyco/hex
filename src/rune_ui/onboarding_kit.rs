@@ -44,6 +44,7 @@ mod mic_line;
 mod permissions;
 mod pill;
 mod scene_script;
+pub(super) mod scenes;
 mod sfx;
 mod sparks;
 mod stories;

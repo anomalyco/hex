@@ -44,12 +44,11 @@ mod macos_rune;
 mod meeting;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod microphone_activity;
+mod net;
 #[cfg(target_os = "macos")]
 mod parakeet;
 #[cfg(target_os = "macos")]
 mod paste;
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-mod paste_picker;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod personal_commands;
 #[cfg(target_os = "macos")]

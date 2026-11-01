@@ -9,7 +9,7 @@ platforms, and dependencies.
 
 ## Sub-features
 
-- [Cancel without losing other work](#cancel-without-losing-other-work).
+- [Finish without losing other work](#finish-without-losing-other-work).
 - [Rearm without a phantom capture](#rearm-without-a-phantom-capture).
 - [Reopen with fresh audio](#reopen-with-fresh-audio).
 - [Fence late capture notifications](#fence-late-capture-notifications).
@@ -19,12 +19,12 @@ platforms, and dependencies.
 
 ## How To Get To It
 
-Start with normal dictation in a foreground app. Escape cancels capture or
-cancellable pending output; after an interruption, try a fresh shortcut hold.
+Start with normal dictation in a foreground app. Dictation has no cancel
+(#786); after an interruption, try a fresh shortcut hold.
 On Linux, Settings also exposes Start/Stop and Retry/Dismiss.
 
 ```ts
-cancel / interruption / dependency failure
+interruption / dependency failure
   -> affected operation stops, falls back, or reports failure
   -> automatic recovery OR explicit retry              // depends on the failure
   -> fresh hold -> new audio -> release -> expected output // recovery endpoint
@@ -67,27 +67,19 @@ invalid enums, nested types, list entries, unknown keys, invalid JSON,
 exactly-once private backups, interrupted saves, and backup failure. These
 checks use temporary files; they do not exercise a real app launch.
 
-### Cancel Without Losing Other Work
+### Finish Without Losing Other Work
 
-`recover.cancel`: Escape targets the active capture first, not an older job
-whose output happens to be pending.
+`recover.finish`: nothing cancels a dictation (#786). Escape reaches the app,
+and every accepted job pastes in submission order.
 
 ```ts
-Escape
-  ├── active capture -> cancel that capture          // accepted jobs keep ownership
-  └── no active capture -> newest cancellable job
-
-paste preparation -> still cancellable
-first paste mutation -> committed                    // cancellation cannot undo output
-
-cancelled job -> no paste / History / last-result update
-older unaffected job + fresh capture -> can both complete
+Escape -> nothing: the capture and every accepted job go on
+older job + fresh capture -> both complete, in order
 ```
-Checks in [parakeet.rs](../../src/parakeet.rs):
-`cancellation_replaces_waiting_output_and_ignores_late_completion`,
-`output_stays_cancellable_through_preparation_but_not_after_mutation`.
-Proof limit: controlled ordered output, paste commitment, and retained text;
-not target-app clipboard consumption.
+Check in [parakeet.rs](../../src/parakeet.rs):
+`cancellation_replaces_waiting_output_and_ignores_late_completion` (ordered
+output). Proof limit: controlled ordered output; not target-app clipboard
+consumption.
 
 ### Rearm Without A Phantom Capture
 
@@ -137,7 +129,10 @@ Command-Tab -> Tab still tracked (IDLE, DIRTY, or LOCKED)
               └── older delayed release of the key -> ignored
   -> any check fails -> press ignored (logged with reason + key_codes)
                      -> 100 ms poll as before
-LOCKED + Escape -> Cancel, stale keys or not
+tracked key down in combined-session state but up in HID state  // #612
+  -> reads as up for both the press check and the poll   // a latched Tab or Q
+     no longer blocks every press until Hex restarts
+LOCKED + Escape -> Nothing, stale keys or not (#786)
 fenced edges, edges before a disabled tap, suspension -> no neutral evidence
 ```
 Checks in [suppression.rs](../../src/suppression.rs):
@@ -150,7 +145,9 @@ Checks in [suppression.rs](../../src/suppression.rs):
 `stale_press_waits_for_recovery_while_anything_else_is_held`,
 `stale_press_requires_a_neutral_keyboard_after_the_tracked_keys`,
 `stale_press_finishes_a_lock_and_leaves_escape_unchanged`,
-`toggle_mode_finishes_after_command_tab_while_recording`. Unit tests read a keyboard
+`toggle_mode_finishes_after_command_tab_while_recording`,
+`a_key_latched_only_in_session_state_reads_as_released` (the state rule only;
+no real latched key has been observed by a test). Unit tests read a keyboard
 that is all up unless a test sets one, so every shortcut test can take this
 path.
 A binding press ignored while stale or DIRTY logs `shortcut press ignored` to
@@ -441,87 +438,51 @@ behavior. Native compositor/device validation remains separate. The
 single-instance socket is same-user only; bounded I/O and queues keep client
 stalls off the audio loop.
 
-**Fixed after 2.1.24:** on X11 the Escape-cancel grab is best-effort.
+**Escape on Linux since #786:** dictation has no cancel, so Escape stays with
+applications on X11 and Wayland. Hex grabs it on X11 only while Annotate
+draws, where it stops drawing; a grab conflict is logged once and drawing goes
+on. The portal never binds Escape or any cancel shortcut, and the shortcut set
+is bound once in one session.
 
 ```ts
-capture starts -> grab Escape with AnyModifier        // recover.linux-escape
-  ├── success -> Escape cancels
-  └── BadAccess -> try bare Escape + Caps/Num Lock variants
-        ├── success -> plain Escape cancels; modified shortcuts stay with their owner
-        └── BadAccess -> keep dictating without Escape-cancel
-              -> Settings + hex status show a non-fatal listener warning
-              -> log once per conflict episode
-
-next capture -> retry grab
-  └── success -> clear warning and rearm episode logging
-other grab error -> stop listener and report failure
-```
-
-The warning persists while idle until a later successful grab, or until that
-listener stops. It does not become an `operation_error` or hide other failures.
-Release the hold shortcut, or press the locked shortcut, to finish when Escape
-is unavailable. With the bare-Escape fallback, release other modifiers before
-pressing Escape. A failed fallback releases any partial grabs.
-
-On Wayland, Escape stays with applications. A GlobalShortcuts binding is held
-for as long as it is bound and consumed before the focused app sees it (KDE's
-kglobalaccel, GNOME Shell's accelerator grabs, Hyprland's `global` binds), and
-desktops keep one shortcut set per app, so it can't be bound only while
-recording:
-
-```ts
-listener starts -> one session, one BindShortcuts: Hex's shortcuts + Cancel dictation
-  └── Cancel dictation has no suggested trigger -> the user assigns a key
-user's cancel key
-  ├── recording or Annotate drawing -> cancel, like Escape   // recover.linux-portal-cancel
-  └── idle -> nothing
-no key assigned / no portal -> `hex dictation cancel`, or finish with the shortcut
+listener starts -> one session, one BindShortcuts: Hex's shortcuts only
+  └── KDE -> remove the stale `cancel` and `cancel-dictation` entries first
 desktop closes the shortcuts session -> cancel active capture
   -> listener stops with an error -> Retry / hex start binds again
+X11, Annotate drawing -> grab Escape (AnyModifier, else bare + lock variants)
+  └── BadAccess -> warn once, keep drawing; other grab errors stop the listener
 ```
+
+`recover.linux-portal`: on Wayland, a missing GlobalShortcuts portal is
+looked for again instead of leaving shortcuts off for the session (#875).
+
+```ts
+listener starts -> no GlobalShortcuts portal
+  -> warn (desktop name, restart-the-portal hint) -> hex commands drive dictation
+  -> check again on its own thread: after 15 s, doubling up to every 2 min
+     └── portal appears (e.g. xdg-desktop-portal restarted) -> bind shortcuts as usual
+```
+
+**Fixed after dev-520** ([#875](https://github.com/anomalyco/hex/issues/875)):
+on KDE Plasma Wayland, xdg-desktop-portal started before Plasma exported its
+session environment picked the wrong backend and offered no shortcuts
+interface; Hex fell back to commands and never checked again. Source:
+`Backend::wait_for_portal` in [linux/input.rs](../../src/linux/input.rs);
+`commands_alone_drive_a_listener_without_shortcuts` covers the command loop,
+not the portal appearing. Not run on a live Plasma session.
 
 **Fixed after dev-249** ([#482](https://github.com/anomalyco/hex/issues/482),
 reported by ohlmann on KDE Plasma): Hex bound Escape in a second portal session
 when recording started. KDE keys shortcuts by app, so that session's
-BindShortcuts asked again for "Cancel dictation (Escape)" and, once approved,
-removed Hex's other shortcuts, so recording never started. Hex now binds every
-shortcut once in one session and never binds Escape there. The cancel id is new
-(`cancel-dictation`), so KDE drops the old `cancel` Escape binding instead of
-restoring it. Verified against xdg-desktop-portal-kde's `BindShortcuts` and
-`setActions` and xdg-desktop-portal-gnome's grab/ungrab source, not on a live
-Plasma session.
-
+BindShortcuts removed Hex's other shortcuts, so recording never started. Hex
+binds every shortcut once in one session and never binds Escape there.
 
 Checks in [linux/input.rs](../../src/linux/input.rs):
-`escape_is_wanted_only_while_something_records`,
-`escape_grab_conflict_is_not_fatal`, `non_conflict_grab_errors_stay_fatal`,
-and `escape_warning_is_logged_once_per_episode_and_clears_on_recovery`.
-`listener_warning_is_nonfatal_and_round_trips_in_status` in
-[linux/app.rs](../../src/linux/app.rs) checks status publication, warning
-recovery, and listener shutdown. The ignored X11 checks
-`conflicted_escape_still_dictates_without_cancel`,
-`modified_escape_conflict_keeps_plain_escape_cancel`, and
-`conflicted_escape_fallback_releases_partial_grabs` cover real server conflicts,
-fresh-capture recovery, fallback cancellation, and partial-grab cleanup on an
-isolated display. These checks do not prove microphone-to-target output or
-native Settings rendering.
-
-**Executed October 3, 2026:** on x86_64 Arch Linux with Rust 1.97.0, rebased onto
-`faa2192`, the working tree passed 157 Rust tests (ten opt-in tests ignored),
-formatting, strict all-target/all-feature Clippy, and whitespace checks. The
-macOS-only keyboard-layout harness skipped. All six ignored X11 input tests
-passed separately on Xvfb. The service IPC/lifecycle smoke passed. An ad hoc
-Escape-conflict-to-dictation probe also passed using a separate D-Bus session,
-virtual microphone, CPU Parakeet inference, software Vulkan for Settings, and
-an isolated GTK paste target. That probe is not retained as a repository test.
-No physical microphone, user's clipboard, installed-service restart, or visual
-warning check was exercised.
-
-Historical contributor probe before these additions: holding Escape/ANY from
-a second client on i3 reproduced server-side BadAccess (error 10, GrabKey opcode
-33); `hex status` still showed `Listening` without an `operation_error`. The
-151-test binary suite and `test-linux-service.py` passed on that host. That probe
-did not verify the new visible warning or bare-Escape fallback.
+`escape_never_ends_a_dictation`, `escape_grab_conflict_is_not_fatal`,
+`non_conflict_grab_errors_stay_fatal`, and the ignored X11 checks
+`commands_and_grabs_share_the_x11_listener` (Escape stays free while a capture
+records) and `conflicted_escape_fallback_releases_partial_grabs`. The KDE
+removal has not run on a live Plasma session.
 
 ### Keyboard Layout Resolution
 
@@ -667,14 +628,20 @@ failure causes; a current hold-to-result sequence is still needed.
 ### Runaway Script
 
 ```ts
-handler or transformation runs past 1 s -> interrupted -> that call fails
+transformation runs past its timeout -> interrupted -> that call fails
+  // 1 s, or 30 s when the config uses fetch or node:child_process; 60 s cap
+  -> its requests abandoned, its process trees killed
   -> transformation chain -> its input is kept           // ordered processing goes on
   -> later call on the same config -> succeeds
+fetch or exec before the person allows the config -> throws -> input kept
 config load past 2 s or past 64 MiB -> rejected -> previous config stays active
 ```
 Sources: [script.rs](../../src/personal_commands/script.rs),
 [personal_commands.rs](../../src/personal_commands.rs);
-check `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working`.
+check `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working`,
+`the_transformation_timeout_ends_the_whole_process_tree` (Linux), and
+`a_throwing_or_slow_transformation_pastes_the_text_unchanged` in
+[tests/host_apis.rs](../../src/personal_commands/tests/host_apis.rs).
 Handlers return actions instead of awaiting native results, so the old late
 native tool reply ([#20](https://github.com/anomalyco/hex/issues/20)) cannot
 occur.

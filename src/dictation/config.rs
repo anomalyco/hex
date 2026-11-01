@@ -3,6 +3,7 @@ use std::sync::{OnceLock, RwLock};
 
 use crate::app_settings::DictationProcessingSettings;
 use crate::dictation::processor::{Profile, Profiles};
+use crate::dictation::text_replacements::ReplacementSet;
 
 static DICTATION_PROFILES: OnceLock<RwLock<Profiles>> = OnceLock::new();
 static READS_BROWSER: AtomicBool = AtomicBool::new(false);
@@ -55,7 +56,17 @@ fn dictation_profiles_lock() -> &'static RwLock<Profiles> {
 }
 
 fn build_dictation_profiles(settings: &DictationProcessingSettings) -> Profiles {
-    let mut profiles = Profiles::new(Profile::from_mode(&settings.default_mode));
+    let global = &settings.default_mode;
+    let mut profiles = Profiles::new(
+        Profile::configured(
+            "Global",
+            ReplacementSet::default(),
+            global.transformations.clone(),
+            &global.post_processing,
+        )
+        .vocabulary(global.vocabulary.clone()),
+    )
+    .global_replacements(ReplacementSet::new(&global.replacements));
     for mode in &settings.modes {
         let profile = Profile::from_mode(mode);
         for application in &mode.applications {
@@ -89,6 +100,66 @@ mod tests {
         };
 
         assert!(build_dictation_profiles(&settings).processes(&context));
+    }
+
+    #[test]
+    fn global_corrections_run_before_an_app_modes_own() {
+        use crate::app_settings::DictationMode;
+        use crate::dictation::text_replacements::TextReplacement;
+        let pair = |phrase: &str, output: &str| TextReplacement {
+            matched_phrase: phrase.into(),
+            output: output.into(),
+        };
+        let mut settings = DictationProcessingSettings {
+            modes: vec![DictationMode {
+                applications: vec!["Slack".into()],
+                replacements: vec![pair("OpenCode", "OpenCode :rocket:")],
+                ..DictationMode::default()
+            }],
+            ..DictationProcessingSettings::default()
+        };
+        settings.default_mode.replacements = vec![pair("open code", "OpenCode")];
+        let profiles = build_dictation_profiles(&settings);
+        let process = |application: &str| {
+            let context = ContextSnapshot {
+                application: Some(application.into()),
+                ..ContextSnapshot::default()
+            };
+            profiles
+                .process_cancellable("I like open code", &context, &AtomicBool::new(false))
+                .text
+        };
+
+        assert_eq!(process("Slack"), "I like OpenCode :rocket:");
+        assert_eq!(process("Notes"), "I like OpenCode");
+    }
+
+    #[test]
+    fn an_app_mode_has_its_own_vocabulary() {
+        use crate::app_settings::DictationMode;
+        use crate::dictation::vocabulary::VocabularyEntry;
+        let term = |term: &str| VocabularyEntry {
+            term: term.into(),
+            sounds_like: Vec::new(),
+        };
+        let settings = DictationProcessingSettings {
+            modes: vec![DictationMode {
+                applications: vec!["Zed".into()],
+                vocabulary: vec![term("useEffect")],
+                ..DictationMode::default()
+            }],
+            ..DictationProcessingSettings::default()
+        };
+        let profiles = build_dictation_profiles(&settings);
+        let in_app = |application: &str| {
+            profiles.vocabulary_for(&ContextSnapshot {
+                application: Some(application.into()),
+                ..ContextSnapshot::default()
+            })
+        };
+
+        assert_eq!(in_app("Zed"), [term("useEffect")]);
+        assert!(in_app("Notes").is_empty());
     }
 
     #[test]

@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rune::{El, Tx, col, row, text};
+use rune::{Color, El, Tx, col, el, row, text};
 use rune_kit::{Placement, Select, SelectAppearance};
 
 use super::controls::{
@@ -39,7 +39,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         content = content.child(s::listener_card(ui, p));
     }
     if !ui.records_shortcuts() {
-        content = content.child(s::desktop_commands(p));
+        content = content.child(s::desktop_commands(ui, p));
     }
     content = content
         .child(basics(ui, p, layer))
@@ -108,7 +108,6 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             ));
         }
         rows.extend(configure_shortcuts_row(ui, p).map(CardRow::from));
-        rows.extend(cancel_shortcut_row(ui, p).map(CardRow::from));
     }
     let picker_button = value_button(
         p,
@@ -196,6 +195,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         .into(),
     );
     rows.extend(microphone_rows(ui, p, layer));
+    rows.push(microphone_release_row(ui, p));
     rows.extend(launch_at_login_rows(ui, p));
     card(p, "basics", rows)
 }
@@ -318,19 +318,28 @@ fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
         })
 }
 
-/// Cancel dictation, once the desktop gave it a key: Hex suggests none, so
-/// the key came from the desktop and is taken from every app (#624).
-/// Desktop shortcuts' Open changes it.
-fn cancel_shortcut_row(ui: &Ui, p: Paint) -> Option<El> {
-    let trigger = s::cancel_grant(ui)?;
-    Some(icon_described_row(
+/// Whether the microphone closes between dictations, beside the microphone
+/// picker: one switch, no confirmation, and a line saying what it means
+/// (issues 61 and #870's copy). The default keeps it ready.
+fn microphone_release_row(ui: &Ui, p: Paint) -> CardRow {
+    let release = ui.settings.release_microphone_while_idle;
+    icon_toggle_row(
         p,
-        "cancel-shortcut",
-        &KEYBOARD,
-        tr("Cancel dictation"),
-        Some((tr_fill("Your desktop granted {}", trigger), p.warning())),
-        row().key("cancel-shortcut-control"),
-    ))
+        "microphone-mode",
+        &ZAP,
+        tr("Turn off the mic when not dictating"),
+        if release {
+            tr("The mic opens only while you dictate; the first moment can be clipped")
+        } else {
+            tr("The mic stays ready so dictation starts instantly; your system shows it in use")
+        },
+        release,
+        |ui: &mut Ui| {
+            let release = !ui.settings.release_microphone_while_idle;
+            ui.update(|settings| settings.release_microphone_while_idle = release);
+        },
+    )
+    .into()
 }
 
 /// Labs › Also pause the browser's permission, under Pause media on macOS:
@@ -554,6 +563,42 @@ fn mic_value(ui: &Ui, p: Paint, microphone: &str, detail: Option<&str>, layer: &
 }
 
 /// How often the microphone row follows the level while audio arrives.
+const LEVEL_STEPS: f32 = 6.0;
+/// A meter's next level for the latest `peak`: it rises at once and falls
+/// over a few polls.
+fn follow_level(level: f32, peak: f32) -> f32 {
+    (peak * 3.0).clamp(0.0, 1.0).max(level - 0.12)
+}
+/// `level` in the steps a meter shows, so it redraws only when they change.
+fn level_step(level: f32) -> u8 {
+    (level * LEVEL_STEPS).round() as u8
+}
+/// `level` rounded to the step a meter shows.
+fn shown_level(level: f32) -> f32 {
+    f32::from(level_step(level)) / LEVEL_STEPS
+}
+const MIC_LEVEL: f32 = 14.0;
+/// Three short bars, as tall as Hex hears it.
+fn mic_bars(p: Paint, level: f32, tint: Color) -> El {
+    const WEIGHTS: [f32; 3] = [0.6, 1.0, 0.75];
+    let mut bars = row()
+        .key("level")
+        .size(MIC_LEVEL, MIC_LEVEL)
+        .gap(2.0)
+        .center();
+    for (index, weight) in WEIGHTS.into_iter().enumerate() {
+        // Uneven at rest too, so the bars never read as an ellipsis.
+        let height = (2.0 + weight * 4.0 + level * weight * 8.0).round();
+        bars = bars.child(
+            el().key(format!("bar{index}"))
+                .size(2.0, height)
+                .radius(1.0)
+                .fill(if level > 0.0 { p.text() } else { tint }),
+        );
+    }
+    bars
+}
+
 const LEVEL_FRAME: Duration = Duration::from_millis(33);
 
 /// What the microphone row's level shows: the audio Hex receives from the
@@ -606,7 +651,7 @@ impl MicLevel {
         match peak {
             Some(peak) => {
                 self.receiving = true;
-                self.level = super::onboarding::follow_level(self.level, peak);
+                self.level = follow_level(self.level, peak);
             }
             None => {
                 self.receiving = false;
@@ -617,12 +662,12 @@ impl MicLevel {
     }
 
     fn shown(&self) -> (bool, u8) {
-        (self.receiving, super::onboarding::level_step(self.level))
+        (self.receiving, level_step(self.level))
     }
 
     /// Whether the bars show a level, so the next frames can move them.
     pub(super) fn moving(&self) -> bool {
-        self.receiving && super::onboarding::level_step(self.level) > 0
+        self.receiving && level_step(self.level) > 0
     }
 
     /// The recording's peak over the frame before `clock`, or `None` once
@@ -644,7 +689,7 @@ impl MicLevel {
         } else {
             p.k.c.border_strong
         };
-        super::onboarding::mic_bars(p, super::onboarding::shown_level(self.level), tint)
+        mic_bars(p, shown_level(self.level), tint)
     }
 }
 
@@ -814,41 +859,6 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             )
         }),
     ));
-    rows.push(
-        icon_row(
-            p,
-            "microphone-mode",
-            &ZAP,
-            tr("Microphone mode"),
-            settings
-                .release_microphone_while_idle
-                .then(|| tr("Opens only while holding the shortcut. Disables pre-roll.")),
-            pick_select(
-                ui,
-                p,
-                "microphone-mode",
-                vec![tr("Keep ready (fast)"), tr("Release when idle")],
-                usize::from(settings.release_microphone_while_idle),
-                |ui, index| {
-                    let release = index == 1;
-                    if release && !ui.settings.release_microphone_while_idle {
-                        ui.confirm_release = true;
-                        return;
-                    }
-                    ui.confirm_release = false;
-                    if ui.settings.release_microphone_while_idle != release {
-                        ui.update(|settings| settings.release_microphone_while_idle = release);
-                    }
-                },
-                layer,
-            ),
-        )
-        .into(),
-    );
-    rows.push(folding(
-        "release-confirmation-fold",
-        ui.confirm_release.then(|| s::release_confirmation(ui, p)),
-    ));
     // Labs › Switch model with keyboard language: its mappings, while on.
     if ui.platform.caps.keyboard_model_switching {
         rows.push(folding(
@@ -879,6 +889,11 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         )
         .into(),
     );
+    // macOS runs its models on Metal or Apple's speech engine.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    if ui.platform.caps.os != super::platform::Os::Macos {
+        rows.push(speech_engine_row(ui, p, layer));
+    }
     rows
 }
 
@@ -1001,7 +1016,7 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
 }
 
 /// Enable on launch (Linux and Windows), the Dock icon, sounds, the
-/// interface language, the update channel, and Replay onboarding.
+/// interface language, and the update channel.
 fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     let settings = &ui.settings;
     let mut rows: Vec<CardRow> = Vec::new();
@@ -1140,32 +1155,7 @@ fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             layer,
         ));
     }
-    rows.push(replay_onboarding_row(p));
     rows
-}
-
-/// Plays the first run again (`onboarding_kit::live::restart`, as
-/// `hex onboarding reset` does).
-fn replay_onboarding_row(p: Paint) -> CardRow {
-    let replay = rune_kit::Button::new(tr("Replay"))
-        .variant(rune_kit::ButtonVariant::Ghost)
-        .control_size(rune_kit::ControlSize::Small)
-        .on_press_tx(|ui: &mut Ui, tx: &mut Tx| {
-            let _ = super::restart_onboarding(ui, tx);
-        })
-        .build(p.k)
-        .key("replay-onboarding");
-    icon_row(
-        p,
-        "replay-onboarding-row",
-        &SPARKLES,
-        tr("Replay onboarding"),
-        Some(tr(
-            "Play the first run again. Settings, models, and permissions stay",
-        )),
-        replay,
-    )
-    .into()
 }
 
 /// Left, Either, or Right for a modifier-only shortcut (macOS); sides that
@@ -1223,7 +1213,6 @@ pub(super) fn advanced_toggle(ui: &Ui, p: Paint, pane: Pane) -> El {
         .on_press(move |ui: &mut Ui| {
             if let Some(index) = ui.advanced.iter().position(|open| *open == pane) {
                 ui.advanced.remove(index);
-                ui.confirm_release = false;
             } else {
                 ui.advanced.push(pane);
             }
@@ -1246,6 +1235,59 @@ pub(super) fn advanced_toggle(ui: &Ui, p: Paint, pane: Pane) -> El {
             .key("arrow")
             .color(c.icon_weaker),
         )
+}
+
+/// Where the speech model runs (#856): Auto, GPU or CPU, and why Auto
+/// stays on the CPU after a GPU failed.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
+    use crate::app_settings::TranscriptionDevice;
+    let device = ui.settings.transcription_device;
+    let control = pick_select(
+        ui,
+        p,
+        "speech-engine",
+        vec![tr("Auto"), tr("GPU"), tr("CPU")],
+        match device {
+            TranscriptionDevice::Auto => 0,
+            TranscriptionDevice::Gpu => 1,
+            TranscriptionDevice::Cpu => 2,
+        },
+        |ui, index| {
+            let device = [
+                TranscriptionDevice::Auto,
+                TranscriptionDevice::Gpu,
+                TranscriptionDevice::Cpu,
+            ][index];
+            if ui.settings.transcription_device != device {
+                ui.update(|settings| settings.transcription_device = device);
+            }
+        },
+        layer,
+    );
+    // Fixtures never read this machine's GPU record.
+    let failed = (ui.live() && device == TranscriptionDevice::Auto)
+        .then(crate::transcription::gpu_health::current)
+        .flatten();
+    let note = failed.map(|failure| {
+        tr_named(
+            if failure.slow {
+                "Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway."
+            } else {
+                "Auto uses the CPU because {device} stopped responding. Choose GPU to try it again."
+            },
+            &[("device", failure.device.as_str())],
+        )
+    });
+    icon_row(
+        p,
+        "speech-engine",
+        &WAVE,
+        tr("Speech engine"),
+        note.as_deref(),
+        control,
+    )
+    .into()
 }
 
 /// An icon row choosing one of `labels` from a quiet select.

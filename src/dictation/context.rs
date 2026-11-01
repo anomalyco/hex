@@ -136,15 +136,56 @@ impl ContextSnapshot {
 
     #[cfg(target_os = "macos")]
     pub fn capture_for_meeting(canonical_bundle_id: &str) -> Result<Self> {
-        if let Some(browser) = ScriptableBrowser::from_bundle_id(canonical_bundle_id)
-            && let Some((browser_url, window_title)) = browser.meeting_tab()?
-        {
-            return Ok(Self {
-                application: Some(browser.name.into()),
-                browser_url: Some(browser_url),
-                window_title,
-                input_revision: None,
+        if let Some(browser) = ScriptableBrowser::from_bundle_id(canonical_bundle_id) {
+            match browser.meeting_tab() {
+                Ok(Some((browser_url, window_title))) => {
+                    return Ok(Self {
+                        application: Some(browser.name.into()),
+                        browser_url: Some(browser_url),
+                        window_title,
+                        input_revision: None,
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => browser.warn_once(&error),
+            }
+            // The dictionary didn't answer (Automation not allowed, a
+            // browser whose script fails): read the page from the browser's
+            // own web area through Accessibility, even behind another app.
+            let pid = autoreleasepool(|_| {
+                crate::microphone_activity::running_application_by_bundle_id(browser.bundle_id)
+                    .map(|(pid, _)| pid)
             });
+            // Chromium browsers behind another app expose no focused element,
+            // and Arc's chrome sits between its windows and the page, so every
+            // window's web areas and titles are read (`browser_page`), and a
+            // Meet tab's title still names the call when no address does
+            // (#827, #831). The browser's own window is reported rather than
+            // the app in front.
+            if let Some(pid) = pid {
+                let pages = crate::accessibility::browser_pages(pid);
+                let (url, title) = crate::dictation::browser_page::choose(
+                    &pages,
+                    |url| {
+                        web_url(url).is_some_and(|url| crate::meeting::detection::names_call(&url))
+                    },
+                    crate::meeting::detection::title_names_call,
+                );
+                // A call's tab title outranks another tab's address.
+                let title_names_call = title
+                    .as_deref()
+                    .is_some_and(crate::meeting::detection::title_names_call);
+                let url = url
+                    .as_deref()
+                    .and_then(web_url)
+                    .filter(|url| crate::meeting::detection::names_call(url) || !title_names_call);
+                return Ok(Self {
+                    application: Some(browser.name.into()),
+                    browser_url: url,
+                    window_title: title,
+                    input_revision: None,
+                });
+            }
         }
         capture_macos(true)
     }
@@ -210,11 +251,22 @@ fn browser_url(bundle_id: Option<&str>, pid: i32) -> Option<Url> {
     bundle_id
         .and_then(ScriptableBrowser::from_bundle_id)
         .and_then(ScriptableBrowser::active_url)
-        .or_else(|| {
-            crate::accessibility::focused_web_url(pid)
-                .and_then(|url| Url::parse(&url).ok())
-                .filter(|url| matches!(url.scheme(), "http" | "https"))
-        })
+        .or_else(|| accessibility_web_url(pid))
+}
+
+/// The page of the web area holding `pid`'s focused element, through
+/// Accessibility.
+#[cfg(target_os = "macos")]
+fn accessibility_web_url(pid: i32) -> Option<Url> {
+    crate::accessibility::focused_web_url(pid).and_then(|url| web_url(&url))
+}
+
+/// An http(s) page address.
+#[cfg(target_os = "macos")]
+fn web_url(url: &str) -> Option<Url> {
+    Url::parse(url)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https"))
 }
 
 #[cfg(target_os = "macos")]
@@ -330,17 +382,22 @@ impl ScriptableBrowser {
         match self.run(&script) {
             Ok(url) => Url::parse(url.trim()).ok(),
             Err(error) => {
-                static WARNED: std::sync::Mutex<Vec<&str>> = std::sync::Mutex::new(Vec::new());
-                let mut warned = WARNED.lock().unwrap_or_else(|error| error.into_inner());
-                if !warned.contains(&self.bundle_id) {
-                    warned.push(self.bundle_id);
-                    tracing::warn!(
-                        error = format!("{error:#}"),
-                        "could not read the browser tab"
-                    );
-                }
+                self.warn_once(&error);
                 None
             }
+        }
+    }
+
+    /// Logs a failed tab read once per browser.
+    fn warn_once(self, error: &color_eyre::Report) {
+        static WARNED: std::sync::Mutex<Vec<&str>> = std::sync::Mutex::new(Vec::new());
+        let mut warned = WARNED.lock().unwrap_or_else(|error| error.into_inner());
+        if !warned.contains(&self.bundle_id) {
+            warned.push(self.bundle_id);
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not read the browser tab"
+            );
         }
     }
 

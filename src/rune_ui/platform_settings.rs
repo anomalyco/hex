@@ -11,7 +11,8 @@ use super::controls::{
     ButtonKind, Choice, DESCRIPTION, Paint, button, card, icon_row, icon_toggle_row, note, section,
     select, setting_row,
 };
-use super::lists::{Tone, permission_control, tone_tag};
+use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
+use super::paste_access::PasteAccess;
 use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, Os, PlatformRequest};
 use super::settings::toggle_menu;
 use super::{Menu, Pane, ShortcutTarget, Ui, icons};
@@ -65,7 +66,18 @@ pub(super) fn accessibility_name(renamed: bool) -> &'static str {
 
 /// The missing permissions above everything else, while the tour is closed.
 pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
-    if !ui.platform.caps.permissions || ui.tour.is_some() {
+    if ui.tour.is_some() {
+        return None;
+    }
+    if let Some(paste) = paste_permission(ui, p) {
+        return Some(section(
+            p,
+            "permissions",
+            tr("Permissions needed"),
+            vec![paste],
+        ));
+    }
+    if !ui.platform.caps.permissions {
         return None;
     }
     let warnings = crate::desktop::onboarding::permission_warnings(ui.platform.permissions);
@@ -119,19 +131,47 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
     Some(section(p, "permissions", tr("Permissions needed"), rows))
 }
 
+/// The desktop's paste permission on GNOME and KDE Wayland until it is
+/// allowed, for people who skipped onboarding (#932).
+fn paste_permission(ui: &Ui, p: Paint) -> Option<El> {
+    let paste = ui
+        .platform
+        .paste
+        .filter(|paste| *paste != PasteAccess::Allowed)?;
+    let description = if paste == PasteAccess::Declined {
+        tr("Without it, Hex copies your words and you press Ctrl+V.")
+    } else {
+        tr("Hex only sends the paste keystroke. It never sees your screen.")
+    };
+    let control = permission_control(
+        p,
+        "permission-paste-allow",
+        if paste == PasteAccess::Asking {
+            PermissionControl::Waiting
+        } else {
+            PermissionControl::Allow
+        },
+        ButtonKind::Secondary,
+        super::paste_access::ask,
+    );
+    Some(setting_row(
+        p,
+        "permission-paste",
+        tr("Paste into apps"),
+        Some(description),
+        control,
+    ))
+}
+
 /// Records which untrusted permission rows are currently visible in the window
 /// so the macOS host clears retired Hex bundle IDs' stale TCC rows once in the
 /// background when a row appears.
 pub(super) fn update_shown_permissions(ui: &mut Ui) {
-    use crate::desktop::onboarding::{PermissionState, Step};
+    use crate::desktop::onboarding::PermissionState;
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     let mut shown = Vec::new();
     if visible && ui.platform.caps.permissions {
-        let setup_showing = ui
-            .tour
-            .as_ref()
-            .is_some_and(|tour| tour.flow.step() == Step::Setup)
-            || ui.first_run.is_some()
+        let setup_showing = ui.first_run.is_some()
             || (ui.tour.is_none() && !ui.labs_open && ui.pane == Pane::General);
         if setup_showing
             && matches!(

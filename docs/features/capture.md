@@ -50,8 +50,8 @@ Draw                                     // capture.draw (capture_host::drawing)
 │       ending_a_stroke_while_the_input_target_is_locked_does_not_deadlock;
 │       not observed on a Windows PC
 ├── Esc while drawing -> stops drawing, never the recording (recognition.rs
-│   on macOS; Escape bound through the portal or grab on Linux; the keyboard
-│   hook on Windows, when no dictation takes it; and the overlay's own key
+│   on macOS; the Escape grab on X11 (Wayland binds no Escape); the keyboard
+│   hook on Windows, when no dictation records; and the overlay's own key
 │   handler where it gets the keyboard)
 ├── macOS and Windows -> Shift held alone still draws, as in Scrawl
 ├── While drawing -> the ink overlay takes the pointer with a pen cursor, so
@@ -93,8 +93,13 @@ On Linux                                 // capture.linux
 ├── Encoding -> VA-API (libva loaded at run time): each DMA-BUF imported, scaled
 │   to a 2560 px long edge (1920 for a window) and converted on the video
 │   engine, H.264 High at a constant QP with Hex-written headers, 30 fps;
-│   `ffmpeg -c copy` muxes recording.mp4. No VA-API -> frames copied and
-│   encoded with x264 through ffmpeg (slow on DMA-BUF-only compositors)
+│   `ffmpeg -c copy` muxes recording.mp4. Every /dev/dri render node is
+│   tried in order, so a hybrid laptop whose first node is a GPU the VA
+│   driver can't use encodes on the next (#853). No VA-API -> frames copied
+│   and encoded with x264 through ffmpeg (slow on DMA-BUF-only compositors);
+│   a first frame neither path can read (a DMA-BUF the CPU can't map) fails
+│   the capture with why, never a capture without a picture. Check: vaapi
+│   render_nodes_in_order; not observed on a hybrid laptop
 ├── Candidates -> a small copy from the video engine (at most 4× smaller per
 │   pass: radeonsi crashes past it)
 ├── Reading movies back (keyframes, probe, audio) -> `ffmpeg`/`ffprobe`
@@ -213,7 +218,7 @@ First launch with Annotate on            // capture.import
 ├── Press while recording -> stop, as `hex capture stop` // ignored within 400 ms
 ├── Press while the capsule's picker is open -> the picker records what it is on
 ├── Esc while a capture records -> nothing: it reaches the app being recorded,
-│   and Hex's tap lets it through (only a dictation hold under it is cancelled)
+│   and Hex's tap lets it through; a dictation under it goes on too (#786)
 ├── The binding is swallowed, never chord evidence for dictation
 └── Hold the dictation shortcut mid-capture -> dictation pastes as usual
 

@@ -66,6 +66,15 @@ impl OnboardingGpu {
         self.format == format
     }
 
+    /// The window compositor's one onboarding stage for `f`'s format,
+    /// created again when the format changes.
+    pub(crate) fn for_frame<'a>(slot: &'a mut Option<Self>, f: &Frame<'_, Ui>) -> &'a mut Self {
+        if slot.as_ref().is_none_or(|g| !g.matches(f.format)) {
+            *slot = Some(Self::new(f.device, f.format));
+        }
+        slot.as_mut().expect("created above")
+    }
+
     pub(crate) fn render(&mut self, f: &mut Frame<'_, Ui>) {
         self.begin();
         let clear = f.rt.clear_color();

@@ -27,6 +27,8 @@ pub struct Profile {
     deadline: Duration,
     replacements: ReplacementSet,
     transformations: Vec<String>,
+    /// The mode's own vocabulary, heard and spelled ahead of the shared list.
+    vocabulary: Vec<VocabularyEntry>,
 }
 
 impl Profile {
@@ -39,7 +41,13 @@ impl Profile {
             deadline: Duration::from_secs(30),
             replacements: ReplacementSet::default(),
             transformations: Vec::new(),
+            vocabulary: Vec::new(),
         }
+    }
+
+    pub(crate) fn vocabulary(mut self, vocabulary: Vec<VocabularyEntry>) -> Self {
+        self.vocabulary = vocabulary;
+        self
     }
 
     pub fn ai_enabled(mut self, enabled: bool) -> Self {
@@ -91,6 +99,7 @@ impl Profile {
             mode.transformations.clone(),
             &mode.post_processing,
         )
+        .vocabulary(mode.vocabulary.clone())
     }
 
     /// Builds a runtime profile from persisted settings. A malformed model key
@@ -210,6 +219,9 @@ struct ContextualProfile {
 pub struct Profiles {
     default: Profile,
     contextual: Vec<ContextualProfile>,
+    /// Global's corrections, run before the selected mode's own on every
+    /// dictation, as the Windows and Linux listeners do.
+    global: ReplacementSet,
 }
 
 impl Profiles {
@@ -217,7 +229,13 @@ impl Profiles {
         Self {
             default,
             contextual: Vec::new(),
+            global: ReplacementSet::default(),
         }
+    }
+
+    pub(crate) fn global_replacements(mut self, replacements: ReplacementSet) -> Self {
+        self.global = replacements;
+        self
     }
 
     pub fn application(self, application: impl Into<String>, profile: Profile) -> Self {
@@ -257,6 +275,11 @@ impl Profiles {
         selected.map_or(&self.default, |selected| &selected.profile)
     }
 
+    /// The selected mode's own vocabulary.
+    pub(crate) fn vocabulary_for(&self, context: &ContextSnapshot) -> Vec<VocabularyEntry> {
+        self.select(context).vocabulary.clone()
+    }
+
     pub fn processes(&self, context: &ContextSnapshot) -> bool {
         let profile = self.select(context);
         profile.ai_enabled || !profile.transformations.is_empty()
@@ -294,7 +317,9 @@ impl Profiles {
         } else {
             transcript
         };
-        let corrected = profile.replacements.replace(transcript);
+        let corrected = profile
+            .replacements
+            .replace(&self.global.replace(transcript));
         if !profile.ai_enabled {
             return Processed {
                 text: corrected,
@@ -306,7 +331,10 @@ impl Profiles {
             profile,
             &corrected,
             context,
-            &crate::dictation::vocabulary::entries(),
+            &crate::dictation::vocabulary::merged(
+                &profile.vocabulary,
+                &crate::dictation::vocabulary::entries(),
+            ),
         );
         let (text, observation) = generate_observed(
             &prompt,

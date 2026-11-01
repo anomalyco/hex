@@ -42,8 +42,31 @@ function date(iso: string): string {
   return parsed.toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" }) + " ET"
 }
 
-export function renderDevNotes(notes: DevNotes, downloadPath: string): string {
-  const builds = notes.builds
+const REPOSITORY = "https://github.com/anomalyco/hex"
+const COMMIT = /^[0-9a-f]{40}$/
+
+// ?since=<version> (the app's What's new) shows only the builds after the
+// one an install runs, with every commit in between on GitHub.
+function since(notes: DevNotes, version: string | null): { builds: DevNotes["builds"]; summary: string } {
+  const all = { builds: notes.builds, summary: "" }
+  if (!version) return all
+  const index = notes.builds.findIndex((build) => build.version === version)
+  if (index <= 0) return all
+  const builds = notes.builds.slice(0, index)
+  const from = notes.builds[index].commit
+  const to = builds[0].commit
+  const compare = COMMIT.test(from) && COMMIT.test(to)
+    ? ` <a href="${REPOSITORY}/compare/${from}...${to}">Every commit since ${escape(version)}</a> ·`
+    : ""
+  return {
+    builds,
+    summary: `<p class="since">Changes since ${escape(version)}, the build you run.${compare} <a href="/hex/dev">Every dev build</a></p>`,
+  }
+}
+
+export function renderDevNotes(notes: DevNotes, downloadPath: string, sinceVersion: string | null = null): string {
+  const shown = since(notes, sinceVersion)
+  const builds = shown.builds
     .map((build) => {
       const items = build.items.length
         ? `<ul>${build.items
@@ -74,12 +97,14 @@ a:hover { text-decoration-color: #e8e8e8; }
 h2 a { text-decoration: none; }
 .quiet { color: #8a8a8a; margin: 2px 0 0; }
 .intro { margin: 0 0 28px; color: #b0b0b0; }
+.since { margin: 0 0 12px; }
 </style>
 </head>
 <body>
 <main>
 <h1>Hex dev builds</h1>
 <p class="intro">What changed in each dev build. Dev builds update often and can break; <a href="/hex/">stable</a> is the safe choice. <a href="${escape(downloadPath)}">Download the latest Mac dev build</a>, or switch Settings › Update channel to Dev.</p>
+${shown.summary}
 ${builds || `<p class="quiet">No dev build notes yet.</p>`}
 </main>
 </body>

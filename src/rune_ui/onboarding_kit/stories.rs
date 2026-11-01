@@ -126,7 +126,7 @@ pub(crate) struct Onboard {
     pub(crate) permissions_from: Option<f64>,
     ready_from: Option<f64>,
     manual_override: bool,
-    auto_due_at: Option<f64>,
+    pub(crate) auto_due_at: Option<f64>,
     pub(crate) practice: TextEdit,
     pub(crate) live_hold_from: Option<f64>,
     /// The `"Your turn"` plate, on the microphone's real level.
@@ -157,6 +157,8 @@ pub(crate) struct Onboard {
     pub(crate) autoplay: bool,
     /// The real download as the first run shows it.
     pub(crate) replay: replay::Replay,
+    /// Where Hex lives once onboarding closes, under `"Hex is ready"`.
+    pub(crate) home: super::landing::Home,
 }
 
 /// A story's dictation of [`ANSWER_TRY`] on the interactive `"Your turn"`,
@@ -276,6 +278,7 @@ impl Onboard {
             toggle: false,
             autoplay: false,
             replay: replay::Replay::default(),
+            home: super::landing::Home::MenuBar,
         }
     }
 
@@ -406,6 +409,24 @@ impl Onboard {
         } else {
             to_accessibility(self, now).map(|secs| now + secs)
         };
+    }
+
+    /// The real first run's next beat is due now.
+    pub(crate) fn move_on(&mut self) {
+        self.manual_override = true;
+        self.auto_due_at = Some(self.now);
+    }
+
+    /// Back to the download page, where the real first run shows its model
+    /// step.
+    pub(crate) fn back_to_download(&mut self) {
+        self.manual_override = true;
+        self.sfx.clear();
+        self.practice.focused = false;
+        self.live_hold_from = None;
+        self.game = None;
+        self.step = Step::Started;
+        self.auto_due_at = Some(self.now);
     }
 
     pub(crate) fn jump_to_download(&mut self) {
@@ -984,6 +1005,10 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             Some(WAIT)
         }
         Step::Accessibility if s.live.as_ref().is_some_and(|live| !live.granted_for(now)) => {
+            Some(WAIT)
+        }
+        // The real first run's model step holds the download page.
+        Step::Pick | Step::Started if s.live.as_ref().is_some_and(super::live::Live::holds) => {
             Some(WAIT)
         }
         Step::Pick | Step::Started => {

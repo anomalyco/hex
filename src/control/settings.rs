@@ -131,7 +131,7 @@ const KEYS: &[Key] = &[
     key(
         "sound_effects",
         Kind::Bool,
-        "Play recording, cancellation, and error tones",
+        "Play recording and error tones",
     ),
     key(
         "sound_effect_volume",
@@ -358,16 +358,6 @@ const KEYS: &[Key] = &[
         "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",
     ),
     key(
-        "labs.paste_picker",
-        Kind::Bool,
-        "Labs: hold Paste last dictation to pick from recent dictations (macOS)",
-    ),
-    key(
-        "labs.custom_models",
-        Kind::Bool,
-        "Labs: the Local transcription picker can add a GGUF speech model from disk (hex model import)",
-    ),
-    key(
         "labs.parakeet_ultra",
         Kind::Bool,
         "Labs: Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker; stays on while it is the dictation model",
@@ -376,6 +366,21 @@ const KEYS: &[Key] = &[
         "labs.standalone_special_keys",
         Kind::Bool,
         "Labs: shortcuts may use Menu, Pause, or Scroll Lock, alone or with modifiers (Linux); off puts such a shortcut back to its default",
+    ),
+    key(
+        "labs.history_stats",
+        Kind::Bool,
+        "Labs: a summary of retained dictations at the top of History, and hex history stats",
+    ),
+    key(
+        "labs.recent_dictations",
+        Kind::Bool,
+        "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
+    ),
+    key(
+        "labs.skip_pauses",
+        Kind::Bool,
+        "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",
     ),
     key(
         "meetings.enabled",
@@ -479,14 +484,24 @@ const KEYS: &[Key] = &[
         "Paste with Ctrl-Shift-V for terminals (Linux and Windows)",
     ),
     key(
+        "gnome_keyboard_shortcuts",
+        Kind::Bool,
+        "Hex's own GNOME custom keyboard shortcuts, for GNOME without a shortcuts portal (Linux)",
+    ),
+    key(
         "share_dictation_shortcut",
         Kind::Bool,
         "Labs: let other apps see the dictation shortcut too (Windows)",
     ),
     optional(
         "ui_language",
-        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es", "uk"]),
+        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es", "uk", "pt", "fr"]),
         "Interface language; none follows the system",
+    ),
+    key(
+        "transcription_device",
+        Kind::Choice(&["auto", "gpu", "cpu"]),
+        "Where the speech model runs: auto (a GPU unless it failed before), gpu, or cpu (Linux and Windows)",
     ),
     key(
         "indicator_position",
@@ -1125,12 +1140,14 @@ pub fn parse_hotkey(
         if binding.is_bare_primary_click() {
             return Err("mouse1 (left click) needs a modifier, such as option+mouse1".into());
         }
-        // Menu, Pause, and Scroll Lock alone are checked against their Labs
-        // toggle when set (`special_key_refusal`).
+        // Menu, Pause, and Scroll Lock alone, and on Windows the navigation
+        // keys alone, are checked against their Labs toggle when set
+        // (`special_key_refusal`).
         if modifiers.is_empty()
             && !is_function_key(&key.label)
             && !key.is_mouse()
             && !HotkeyKey::special_name(&key.label)
+            && !(cfg!(target_os = "windows") && HotkeyKey::navigation_name(&key.label))
         {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
@@ -1141,9 +1158,19 @@ pub fn parse_hotkey(
 }
 
 /// Why `binding` can't be saved for its Menu, Pause, or Scroll Lock key: on
-/// Linux they need Labs › Special keys alone; elsewhere one alone still
+/// Linux they need Labs › Special keys alone; Windows takes them alone, and
+/// a navigation key alone needs the toggle there; elsewhere one alone still
 /// needs a modifier.
 fn special_key_refusal(settings: &AppSettings, binding: &HotkeyBinding) -> Option<String> {
+    if cfg!(target_os = "windows") {
+        let key = binding.key.as_ref()?;
+        return (binding.is_lone_navigation_key() && !settings.special_keys_allowed()).then(|| {
+            format!(
+                "{} alone needs Labs › Special keys alone: hex labs on special-keys",
+                key.label.to_lowercase().replace(' ', "")
+            )
+        });
+    }
     let key = binding.key.as_ref().filter(|key| key.is_special())?;
     if settings.special_keys_allowed() {
         return None;
@@ -1472,18 +1499,20 @@ mod tests {
 
     /// Issue 767: Menu alone (Caps Lock remapped to it) is a Linux
     /// shortcut only with Labs › Special keys alone on, and turning the
-    /// toggle off puts it back to the default.
+    /// toggle off puts it back to the default. Windows takes it alone
+    /// without the toggle (#794).
     #[test]
     fn menu_alone_needs_its_labs_toggle() {
         assert!(parse_hotkey("menu", rules().key_named).is_ok());
         assert!(parse_hotkey("space", rules().key_named).is_err());
         let settings = AppSettings::default();
-        assert_eq!(
-            apply(&settings, "dictation_hotkey", "menu", &rules())
-                .unwrap_err()
-                .code,
-            "invalid-value"
-        );
+        let without_toggle = apply(&settings, "dictation_hotkey", "menu", &rules());
+        if cfg!(target_os = "windows") {
+            let change = without_toggle.unwrap();
+            assert_eq!(format_hotkey(&change.settings.dictation_hotkey), "menu");
+            return;
+        }
+        assert_eq!(without_toggle.unwrap_err().code, "invalid-value");
         let on = apply(&settings, "labs.standalone_special_keys", "on", &rules())
             .unwrap()
             .settings;
@@ -1502,6 +1531,21 @@ mod tests {
         } else {
             assert!(change.is_err(), "only Linux has the toggle");
         }
+    }
+
+    #[test]
+    fn interface_language_offers_every_translation() {
+        let key = keys().find(|key| key.key == "ui_language").unwrap();
+        let Kind::Choice(choices) = key.kind else {
+            panic!("ui_language is a choice");
+        };
+        let languages: Vec<&str> = crate::desktop::i18n::LANGUAGE_CHOICES
+            .iter()
+            .filter_map(|(code, _)| *code)
+            .collect();
+        assert_eq!(languages, choices);
+        let change = apply(&AppSettings::default(), "ui_language", "fr", &rules()).unwrap();
+        assert_eq!(change.settings.ui_language.as_deref(), Some("fr"));
     }
 
     #[test]

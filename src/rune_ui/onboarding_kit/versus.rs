@@ -16,6 +16,7 @@
 //! One thing has the eye at a time; the rest dims, deeply only when the
 //! story freezes.
 
+use crate::desktop::i18n::tr;
 use rune::{Anim, El, Spring, SpringPair, TextStyle, Transition, col, el, row, text};
 
 use super::super::controls::Paint;
@@ -274,6 +275,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
                 s.ready_age(),
                 s.reduced.get(),
                 s.motion,
+                s.home,
             )),
         ];
     }
@@ -286,7 +288,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     let act = match s.step {
         Step::Pick => language_pick(p, Onboard::pick),
         Step::Started => pill(p, download(s), s.closed),
-        Step::Heard if !s.downloaded() => text("Finishing the download…")
+        Step::Heard if !s.downloaded() => text(tr("Finishing the download…"))
             .key("finishing")
             .font(p.k.ty.small)
             .color(p.faint())
@@ -350,26 +352,28 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
     let (key, title, lead) = match s.step {
         Step::Pick | Step::Started => (
             "intro",
-            "Talk instead of typing".to_string(),
+            tr("Talk instead of typing").to_string(),
             line(
                 "lead-intro",
-                "Hold a key and talk. Hex types it wherever your cursor is.".into(),
+                tr("Hold a key and talk. Hex types it wherever your cursor is.").into(),
             ),
         ),
         Step::Parked if !scene_over(s) || s.demo_hears() => (
             "without",
-            "Without Hex".to_string(),
+            tr("Without Hex").to_string(),
             line("lead-usual", script().lead.to_string()),
         ),
         Step::Parked => (
             "with",
-            "With Hex".to_string(),
+            tr("With Hex").to_string(),
             line(
                 "lead-wait",
-                "Hex starts listening once the speech model has downloaded.".into(),
+                tr("Hex starts listening once the speech model has downloaded.").into(),
             ),
         ),
-        Step::YourTurn | Step::Hearing | Step::Heard => ("with", "With Hex".to_string(), hold()),
+        Step::YourTurn | Step::Hearing | Step::Heard => {
+            ("with", tr("With Hex").to_string(), hold())
+        }
         _ if s.flow == Flow::FirstRun || s.flow == Flow::Versus => {
             let with = &script().with;
             let filled = |template| {

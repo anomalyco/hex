@@ -8,6 +8,7 @@ on your PATH.
 hex history --since 3d --app 'OpenCode Beta' --grep problems --json
 hex history --since 2026-10-20 --until 2026-10-21 --raw --oldest-first --limit 500
 hex history --since 7d --search 'problems board' --json
+hex history stats --since 7d --json   # Labs › Dictation stats
 hex meetings list --since 7d --json
 hex meetings show latest --md
 hex meetings show 1790000500000-1002 --json
@@ -46,6 +47,21 @@ may have no app or mode; Hex does not infer missing metadata.
   cleanup. Missing settings use seven days. Invalid settings fail rather than
   silently widening the retention window. Off preserves existing entries and
   prevents new ones, matching the History pane.
+
+## History stats sum up what is retained
+
+`history stats` (Labs › Dictation stats, `hex labs on history-stats`, off by
+default) prints a summary of the retained entries: dictations, words (the
+inserted text split on whitespace), words per minute (words over recorded
+audio minutes, counting only entries with audio; unknown without any), how
+many entries Output changed (inserted text differs from the transcript, ignoring
+surrounding whitespace), the daily streak (consecutive local days with an entry,
+ending today or, with none yet today, yesterday), active days, and the five
+most used applications. With the toggle off it fails, naming the command that
+turns it on, before History is read. `--since` and `--until` narrow it with the
+same time syntax; the retention window always applies. It counts only what
+History still holds: nothing is kept after retention removes an entry, and
+which replacements fired is not tracked.
 
 ## Meetings use the same queries as MCP
 
@@ -160,6 +176,19 @@ type History = {
     score?: number // present only with --search; higher is more relevant
     snippet?: string // present only with --search; matches wrapped in **
   }[]
+}
+
+type HistoryStats = { // hex history stats --json
+  version: 1
+  retention: "off" | "day" | "week" | "month" | "forever"
+  dictations: number
+  words: number
+  audio_ms: number
+  words_per_minute: number | null // null without recorded audio
+  changed_by_output: number
+  streak_days: number
+  active_days: number
+  top_apps: { application: string; dictations: number }[] // at most 5, most first
 }
 
 type Meeting = {

@@ -5,7 +5,9 @@
 
 use rune::{El, Icon, Tx, row, text};
 
-use super::controls::{self, CardRow, Paint, card, icon_row_tagged, pressable_row, row_switch};
+use super::controls::{
+    self, CardRow, Paint, card, icon_row, icon_row_tagged, pressable_row, row_switch,
+};
 use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::lists::{Tone, tone_tag};
 use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
@@ -273,11 +275,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Tap or hold"),
                 tr("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"),
             ));
+            // macOS's menu-bar menu lists them.
             rows.push(row(
-                Feature::PastePicker,
-                &KEYBOARD,
-                tr("Paste picker"),
-                tr("Hold Paste last dictation to pick from recent dictations"),
+                Feature::RecentDictations,
+                &HINTS,
+                tr("Copy recent dictations"),
+                tr("Copy one of your last five dictations from the menu bar, under Paste Last Dictation"),
             ));
         }
     }
@@ -288,6 +291,15 @@ fn rows(ui: &Ui) -> Vec<Row> {
             &KEYBOARD,
             tr("Special keys alone"),
             tr("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"),
+        ));
+    }
+    // Linux's and Windows' engines transcribe a whole clip on the CPU.
+    if caps.os != super::platform::Os::Macos {
+        rows.push(row(
+            Feature::SkipPauses,
+            &TIMER,
+            tr("Skip long pauses"),
+            tr("Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"),
         ));
     }
     rows.push(row(
@@ -321,6 +333,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Remove filler words such as um and uh from dictations, without an AI model"),
     ));
     rows.push(row(
+        Feature::HistoryStats,
+        &HINTS,
+        tr("Dictation stats"),
+        tr("Show a summary of your retained dictations at the top of History, with hex history stats"),
+    ));
+    rows.push(row(
         Feature::PickerSortFilter,
         &HINTS,
         tr("Sort and filter models"),
@@ -331,12 +349,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         &HINTS,
         tr("Benchmark details"),
         tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
-    ));
-    rows.push(row(
-        Feature::CustomModels,
-        &HINTS,
-        tr("Use your own speech model"),
-        tr("Add a speech model file of your own (GGUF) from the Local transcription picker"),
     ));
     let ultra_locked = Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     rows.push(Row {
@@ -394,10 +406,11 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SidedChords => "lab-sided-modifier-chords",
         Feature::TapOrHold => "lab-tap-or-hold",
         Feature::BenchmarkDetails => "lab-benchmark-details",
-        Feature::PastePicker => "lab-paste-picker",
-        Feature::CustomModels => "lab-custom-models",
         Feature::ParakeetUltra => "lab-parakeet-ultra",
         Feature::StandaloneSpecialKeys => "lab-special-keys",
+        Feature::HistoryStats => "lab-history-stats",
+        Feature::RecentDictations => "lab-recent-dictations",
+        Feature::SkipPauses => "lab-skip-pauses",
     }
 }
 
@@ -421,7 +434,8 @@ fn flip(ui: &mut Ui, feature: Feature) {
     }
 }
 
-/// The Labs page: what Labs is with Send feedback, then every feature's row.
+/// The Labs page: what Labs is with Send feedback, every feature's row,
+/// then Run setup again.
 pub(super) fn page(ui: &Ui, p: Paint) -> El {
     let feedback = rune_kit::Button::new(tr("Send feedback"))
         .variant(rune_kit::ButtonVariant::Ghost)
@@ -464,7 +478,8 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
     let rows = cards;
     let content = controls::page("content")
         .child(lede)
-        .child(card(p, "labs", rows));
+        .child(card(p, "labs", rows))
+        .child(card(p, "labs-setup", vec![run_setup_row(p)]));
     super::scroll_body("scroll", content)
 }
 
@@ -523,6 +538,31 @@ fn unload_after_row(ui: &Ui, p: Paint) -> CardRow {
             let minutes = UNLOAD_IDLE_MINUTES[index];
             ui.update(|settings| settings.labs.unload_idle_minutes = minutes);
         }),
+    )
+    .into()
+}
+
+/// Runs the first run again (`onboarding_kit::live::restart`).
+fn run_setup_row(p: Paint) -> CardRow {
+    let run = rune_kit::Button::new(tr("Run"))
+        .variant(rune_kit::ButtonVariant::Ghost)
+        .control_size(rune_kit::ControlSize::Small)
+        .on_press_tx(|ui: &mut Ui, tx: &mut Tx| {
+            if let Err(error) = super::onboarding_kit::live::restart(ui, tx) {
+                ui.error = Some(error);
+            }
+        })
+        .build(p.k)
+        .key("restart-onboarding");
+    icon_row(
+        p,
+        "lab-restart-onboarding",
+        &SPARKLES,
+        tr("Run setup again"),
+        Some(tr(
+            "Play the first run again. Settings, models, and permissions stay",
+        )),
+        run,
     )
     .into()
 }

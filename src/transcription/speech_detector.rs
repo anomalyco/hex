@@ -23,7 +23,7 @@ const MIN_SPEECH_MS: i32 = 160;
 /// Speech probability that counts as speech. Silero's default of 0.5 misses
 /// a whisper at -43 dBFS, which the level gate deliberately keeps; 0.4 hears
 /// it and still rejects the silence in a recorded meeting.
-const THRESHOLD: f64 = 0.4;
+pub(crate) const THRESHOLD: f64 = 0.4;
 
 #[cfg_attr(test, allow(dead_code))]
 enum State {

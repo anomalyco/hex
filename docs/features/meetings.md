@@ -31,7 +31,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   with OpenCode (off by default; when Apple Intelligence is off or missing)
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
-│       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime (always listed)
+│       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
+│       │   Gather (always listed)
 │       └── then each website or app chosen for from an offer's "…"
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
            the pane leaves the sidebar
@@ -113,7 +114,12 @@ hardware.
 ### Detect And Offer
 
 ```ts
-Zoom / Teams / Slack huddle / FaceTime / browser call uses the microphone
+Zoom / Teams / Slack huddle / FaceTime / WhatsApp / browser call uses the microphone
+  (WhatsApp: net.whatsapp.WhatsApp, the older desktop.WhatsApp, WhatsApp.exe or
+  WhatsApp.Root.exe on Windows, web.whatsapp.com in a browser; 20 s, as voice
+  notes also hold the microphone; Gather: com.gather.GatherV2 and its helpers,
+  com.gather.Gather, Gather.exe, app.v2.gather.town and app.gather.town; 20 s,
+  as sitting in a space can hold it)
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
   -> On the microphone for 2 s by the monotonic clock // meetings.detect
      │   Google Meet and Banshee (banshee.app) in a browser count as known
@@ -153,7 +159,12 @@ The older `meetings.never_offer` list reads as Never offer entries and is
 rewritten as `providers` on the next load.
 ```
 
-Chromium and Electron apps (Brave, Chrome, Edge, Slack, Teams) capture microphone
+Call detection knows Brave, Chrome, Safari, Firefox, Edge, and Arc
+(`company.thebrowser.Browser`, foreground name `Arc`; its tab is read like
+Brave's). Arc was missing until #801, so its Meet calls were never detected.
+Check: `a_google_meet_call_in_arc_records_after_about_two_seconds`.
+
+Chromium and Electron apps (Brave, Chrome, Edge, Arc, Slack, Teams) capture microphone
 audio in sandboxed `audio.mojom.AudioService` utility processes (`*.helper`) that
 do not register with `NSRunningApplication`; Zoom uses `us.zoom.CptHost`, Firefox
 uses `org.mozilla.plugincontainer`, Safari uses `com.apple.WebKit.GPU` (`Safari
@@ -163,7 +174,19 @@ process to its canonical host app via parent PID lineage, CoreAudio's
 `kAudioProcessPropertyBundleID`, and `NSRunningApplication`. When Brave uses the
 microphone and is not snoozed, `ContextSnapshot::capture_for_meeting` in
 [dictation/context.rs](../../src/dictation/context.rs) reads the active tab of Brave's front window,
-even if Brave is behind another window. Background tabs are not searched: a
+even if Brave is behind another window. When that AppleScript read fails or
+answers nothing (Automation not allowed, a failing script; #827, Arc), the
+page comes from the browser process's focused web area through Accessibility
+(`AXURL`), still behind another window; the first failure per browser is
+logged as `could not read the browser tab`. Arc (and other Chromium browsers)
+behind another app often exposes no web area either, so without a page the
+browser's own focused window title is used: a tab titled `Meet - …` /
+`Meet – …` counts as a Google Meet call on `meet.google.com` (2 s, Always
+record applies); the landing page ("Google Meet") does not. Before this, a
+Meet call in a background Arc without Automation was an unnamed browser call
+(#827). Check:
+`a_google_meet_call_in_arc_without_its_address_is_known_by_its_title`; not yet
+observed against a live background Arc. Background tabs are not searched: a
 call open in one says nothing about which tab holds the microphone, and a
 voice note elsewhere would otherwise get a known service's 2 s threshold or
 trigger Always record. (A call in a background tab is therefore judged by the

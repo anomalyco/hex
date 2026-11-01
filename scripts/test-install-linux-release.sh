@@ -144,7 +144,15 @@ test "$(jq -c . "$support_dir/install.json")" = \
 mkdir -p "$home/.local/share/icons/hicolor/48x48/apps" "$home/.local/share/icons/hicolor/64x64/apps"
 printf 'png X-Hex-Managed=true' > "$home/.local/share/icons/hicolor/48x48/apps/anomaly.hex.png"
 printf 'mine' > "$home/.local/share/icons/hicolor/64x64/apps/anomaly.hex.png"
+# The Background portal's own autostart entry for Hex counts as Hex's.
+portal_entry() {
+  printf '[Desktop Entry]\nType=Application\nName=Hex\nX-XDP-Autostart=anomaly.hex\nExec=%s start\n' "$install_dir/hex" > "$home/.config/autostart/anomaly.hex.desktop"
+}
+portal_entry
+install > /dev/null
+portal_entry
 install uninstall
+test ! -e "$home/.config/autostart/anomaly.hex.desktop"
 test ! -e "$home/.local/share/icons/hicolor/48x48/apps/anomaly.hex.png"
 test -f "$home/.local/share/icons/hicolor/64x64/apps/anomaly.hex.png"
 test ! -e "$install_dir/hex"

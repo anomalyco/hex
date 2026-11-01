@@ -63,6 +63,33 @@ English artifact followed `huggingface.co` to `us.aws.cdn.hf.co` and returned
 HTTP 200. This is an observed delivery host, not a permanent exhaustive CDN list.
 No model body was downloaded for that check.
 
+Model downloads, update checks, and transformation scripts' `fetch` go through
+Hex's own HTTPS client (`src/net.rs`, #894), which behaves like a browser on a
+managed network:
+
+- Proxy: `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, and `NO_PROXY` on every OS
+  (upper or lower case), else the system's settings. Windows: the signed-in
+  user's proxy (Settings › Network › Proxy, Internet Options), its PAC file or
+  WPAD, then the machine's WinHTTP proxy (`netsh winhttp set proxy`). macOS:
+  the network's HTTP and HTTPS proxies and their exceptions; a PAC file isn't
+  evaluated, so set `HTTPS_PROXY`. Linux: the environment only. A proxy that
+  needs a sign-in (NTLM, Kerberos) fails with "the proxy needs a sign-in".
+- TLS: the platform's own (SChannel, Security.framework, OpenSSL) with the
+  system's trusted roots, so a TLS-inspecting firewall whose root certificate
+  IT installed is trusted. A missing root shows as "the certificate isn't
+  trusted".
+- Failures: one line naming the host, the proxy, and the cause ("Couldn't
+  reach huggingface.co through the proxy proxy.corp:8080: …"), then what to
+  try. Downloads go in 8 MB ranged pieces with a 5 minute bound each, so a
+  stalled connection fails instead of hanging, and resume where they stopped.
+
+Observed on apollo (Linux), November 2026: the speech detector, the update
+manifest, and a `fetch` worked directly, through mitmproxy with its root in
+the trust bundle, and with `NO_PROXY` past a dead proxy; with the root
+missing each failed naming the certificate, and with a dead proxy each named
+the refused proxy. Not observed: Windows' and macOS' system proxy settings on
+a real managed network (the Windows code is cross-compiled only).
+
 If the old update endpoint is blocked, install the new signed DMG manually.
 After restoring model-host access, retry preparation in Settings. Transfer failures preserve partial downloads. App download
 success does not establish model-host reachability, and our external checks do

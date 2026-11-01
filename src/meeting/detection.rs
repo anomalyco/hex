@@ -29,7 +29,12 @@ const BROWSER_PAGE_MEMORY: Duration = Duration::from_secs(60);
 
 /// Websites whose pages are calls whenever a browser holds the microphone on
 /// them. Google Meet is separate: only its meeting paths are calls.
-const CALL_SITES: [(&str, MeetingSource); 1] = [("banshee.app", MeetingSource::Banshee)];
+const CALL_SITES: [(&str, MeetingSource); 4] = [
+    ("banshee.app", MeetingSource::Banshee),
+    ("web.whatsapp.com", MeetingSource::WhatsApp),
+    ("app.v2.gather.town", MeetingSource::Gather),
+    ("app.gather.town", MeetingSource::Gather),
+];
 
 /// How long a condition has held across observations, by the monotonic
 /// clock, so a slow loop iteration cannot stretch a threshold.
@@ -217,7 +222,11 @@ impl MeetingCandidate {
 
     fn required_stability(&self) -> Duration {
         match self.source {
-            MeetingSource::BrowserCall => BROWSER_STABLE_FOR,
+            // WhatsApp also takes the microphone for voice notes (#835), and
+            // Gather can hold it while you sit in a space (#855).
+            MeetingSource::BrowserCall | MeetingSource::WhatsApp | MeetingSource::Gather => {
+                BROWSER_STABLE_FOR
+            }
             _ => STABLE_FOR,
         }
     }
@@ -262,6 +271,8 @@ pub enum MeetingSource {
     Teams,
     SlackHuddle,
     FaceTime,
+    WhatsApp,
+    Gather,
     BrowserCall,
 }
 
@@ -275,6 +286,8 @@ impl MeetingSource {
             Self::Teams => "Microsoft Teams",
             Self::SlackHuddle => "Slack Huddle",
             Self::FaceTime => "FaceTime",
+            Self::WhatsApp => "WhatsApp",
+            Self::Gather => "Gather",
             Self::BrowserCall => "Browser call",
         }
     }
@@ -483,6 +496,20 @@ pub fn candidate_from_context(context: &ContextSnapshot) -> Option<MeetingCandid
             &clean_google_meet_title(title),
         )));
     }
+    // No page address (Automation off, no web area behind another app): a
+    // Meet call's tab title still names it (#827).
+    if is_browser_application(&application_lower)
+        && context.browser_url.is_none()
+        && is_google_meet_call_title(title)
+    {
+        let mut meet = named(candidate(
+            MeetingSource::GoogleMeet,
+            &format!("{GOOGLE_MEET_SITE} {title}"),
+            &clean_google_meet_title(title),
+        ));
+        meet.site = Some(GOOGLE_MEET_SITE.into());
+        return Some(meet);
+    }
     if is_browser_application(&application_lower)
         && let Some(host) = context.browser_host()
         && let Some(source) = call_site_source(host)
@@ -530,7 +557,7 @@ pub fn candidate_from_microphone(
         if matches && let Some(mut candidate) = candidate_from_context(context) {
             candidate.application = Some(canonical_bundle.into());
             candidate.application_name = Some(application_name);
-            candidate.site = site;
+            candidate.site = site.or(candidate.site.take());
             return Some(candidate);
         }
         let mut candidate = candidate(MeetingSource::BrowserCall, canonical_bundle, "");
@@ -544,6 +571,8 @@ pub fn candidate_from_microphone(
         "com.microsoft.teams2" => (MeetingSource::Teams, "Microsoft Teams meeting"),
         "com.tinyspeck.slackmacgap" => (MeetingSource::SlackHuddle, "Slack huddle"),
         "com.apple.FaceTime" => (MeetingSource::FaceTime, "FaceTime call"),
+        "net.whatsapp.WhatsApp" => (MeetingSource::WhatsApp, "WhatsApp call"),
+        "com.gather.GatherV2" => (MeetingSource::Gather, "Gather call"),
         _ => return None,
     };
     let mut candidate = candidate(source, canonical_bundle, title);
@@ -618,9 +647,11 @@ impl BrowserPageMemory {
 }
 
 fn is_browser_application(application_lower: &str) -> bool {
-    ["brave", "chrome", "safari", "firefox", "edge"]
-        .iter()
-        .any(|browser| application_lower.contains(browser))
+    // Arc's name is too short to match as a substring.
+    application_lower == "arc"
+        || ["brave", "chrome", "safari", "firefox", "edge"]
+            .iter()
+            .any(|browser| application_lower.contains(browser))
 }
 
 fn context_matches_browser(
@@ -641,6 +672,7 @@ fn context_matches_browser(
         "com.apple.Safari" => lower.contains("safari"),
         "org.mozilla.firefox" => lower.contains("firefox"),
         "com.microsoft.edgemac" => lower.contains("edge"),
+        "company.thebrowser.Browser" => lower == "arc",
         _ => false,
     }
 }
@@ -668,6 +700,19 @@ fn opaque_key(source: MeetingSource, identity: &str) -> String {
     format!("meeting-{:016x}", hasher.finish())
 }
 
+/// Whether a page address is a call this detection knows: a Google Meet
+/// call or a known call site.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn names_call(url: &Url) -> bool {
+    is_google_meet_call(url) || url.host_str().and_then(call_site_source).is_some()
+}
+
+/// Whether a browser tab's title names a call (a Google Meet call's).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn title_names_call(title: &str) -> bool {
+    is_google_meet_call_title(title)
+}
+
 fn is_google_meet_call(url: &Url) -> bool {
     if url.host_str() != Some("meet.google.com") {
         return false;
@@ -676,21 +721,36 @@ fn is_google_meet_call(url: &Url) -> bool {
     !path.is_empty() && path != "landing" && path != "new"
 }
 
+const GOOGLE_MEET_SITE: &str = "meet.google.com";
+
+const BROWSER_TITLE_SUFFIXES: &[&str] = &[
+    " - Audio playing - Brave",
+    " - Brave",
+    " - Brave Browser",
+    " - Google Chrome",
+    " — Mozilla Firefox",
+    " - Microsoft Edge",
+    " - Safari",
+    " - Arc",
+];
+
+const GOOGLE_MEET_TITLE_PREFIXES: [&str; 3] = ["Meet - ", "Meet – ", "Meet — "];
+
+/// Whether a browser tab title is a Google Meet call's ("Meet - abc-defg-hij",
+/// "Meet – Design sync"); the landing page is just "Google Meet".
+fn is_google_meet_call_title(title: &str) -> bool {
+    let cleaned = clean_title(title, BROWSER_TITLE_SUFFIXES);
+    GOOGLE_MEET_TITLE_PREFIXES.into_iter().any(|prefix| {
+        cleaned
+            .strip_prefix(prefix)
+            .is_some_and(|rest| !rest.trim().is_empty())
+    })
+}
+
 fn clean_google_meet_title(title: &str) -> String {
-    let mut cleaned = clean_title(
-        title,
-        &[
-            " - Audio playing - Brave",
-            " - Brave",
-            " - Brave Browser",
-            " - Google Chrome",
-            " — Mozilla Firefox",
-            " - Microsoft Edge",
-            " - Safari",
-        ],
-    );
+    let mut cleaned = clean_title(title, BROWSER_TITLE_SUFFIXES);
     cleaned = clean_title(cleaned, &[" - Google Meet", " | Google Meet"]);
-    for prefix in ["Meet - ", "Meet – ", "Meet — "] {
+    for prefix in GOOGLE_MEET_TITLE_PREFIXES {
         if let Some(rest) = cleaned.strip_prefix(prefix) {
             cleaned = rest.trim();
             break;
@@ -866,6 +926,80 @@ mod tests {
                 "Not Banshee",
             ))
             .is_none()
+        );
+    }
+
+    #[test]
+    fn gather_calls_are_detected_in_its_app_and_browser() {
+        for bundle_id in [
+            "com.gather.GatherV2",
+            "com.gather.GatherV2.helper.Renderer",
+            "com.gather.Gather",
+            "Gather.exe",
+        ] {
+            let app = ActiveMicrophoneApplication {
+                pid: 7,
+                bundle_id: bundle_id.into(),
+                name: "Gather".into(),
+            };
+            let call = candidate_from_microphone(&app, &ContextSnapshot::default())
+                .unwrap_or_else(|| panic!("{bundle_id} is Gather"));
+            assert_eq!(call.source, MeetingSource::Gather);
+            assert_eq!(call.application.as_deref(), Some("com.gather.GatherV2"));
+            // Sitting in a space can hold the microphone, so about 20 s.
+            assert_eq!(call.required_stability(), BROWSER_STABLE_FOR);
+        }
+        for url in [
+            "https://app.v2.gather.town/space/abc",
+            "https://app.gather.town/app/x",
+        ] {
+            let web =
+                candidate_from_microphone(&brave(), &context("Brave Browser", Some(url), "Gather"))
+                    .unwrap();
+            assert_eq!(web.source, MeetingSource::Gather, "{url}");
+        }
+        assert_eq!(known_provider_label("com.gather.GatherV2"), Some("Gather"));
+    }
+
+    #[test]
+    fn whatsapp_calls_are_detected_after_a_voice_note_would_have_ended() {
+        let mut offers = Vec::new();
+        for (bundle_id, name) in [
+            ("net.whatsapp.WhatsApp", "WhatsApp"),
+            ("desktop.WhatsApp", "WhatsApp"),
+            ("WhatsApp.Root.exe", "WhatsApp"),
+            ("whatsapp.exe", "WhatsApp"),
+        ] {
+            let app = ActiveMicrophoneApplication {
+                pid: 7,
+                bundle_id: bundle_id.into(),
+                name: name.into(),
+            };
+            let call = candidate_from_microphone(&app, &ContextSnapshot::default())
+                .unwrap_or_else(|| panic!("{bundle_id} is WhatsApp"));
+            assert_eq!(call.source, MeetingSource::WhatsApp);
+            assert_eq!(call.application.as_deref(), Some("net.whatsapp.WhatsApp"));
+            offers.push(call);
+        }
+        // Voice notes hold the microphone too, so it takes about 20 s.
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&offers[0]), &[], 19_500).is_empty());
+        assert_eq!(watch.run(Some(&offers[0]), &[], 1_000).len(), 1);
+
+        let web = candidate_from_microphone(
+            &brave(),
+            &context(
+                "Brave Browser",
+                Some("https://web.whatsapp.com/"),
+                "WhatsApp",
+            ),
+        )
+        .unwrap();
+        assert_eq!(web.source, MeetingSource::WhatsApp);
+        assert_eq!(web.required_stability(), BROWSER_STABLE_FOR);
+        assert_eq!(
+            known_provider_label("net.whatsapp.WhatsApp"),
+            Some("WhatsApp")
         );
     }
 
@@ -1574,6 +1708,75 @@ mod tests {
             .snooze_calendar_call(vec!["meet.google.com".into()], 1_000);
         watch.wall_ms = 10;
         assert_eq!(watch.stable(&meet, &[]), None);
+    }
+
+    #[test]
+    fn a_google_meet_call_in_arc_records_after_about_two_seconds() {
+        let arc_helper = ActiveMicrophoneApplication {
+            pid: 5120,
+            bundle_id: "company.thebrowser.browser.helper".into(),
+            name: "Browser Helper".into(),
+        };
+        assert!(arc_helper.is_browser());
+        let meet = candidate_from_microphone(
+            &arc_helper,
+            &context(
+                "Arc",
+                Some("https://meet.google.com/abc-defg-hij"),
+                "Meet - Design sync",
+            ),
+        )
+        .unwrap();
+        assert_eq!(meet.source, MeetingSource::GoogleMeet);
+        assert_eq!(
+            meet.application.as_deref(),
+            Some("company.thebrowser.Browser")
+        );
+        assert_eq!(meet.application_name.as_deref(), Some("Arc"));
+        assert_eq!(meet.site.as_deref(), Some("meet.google.com"));
+        let always = [choice("meet.google.com", MeetingPolicy::AlwaysRecord)];
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&meet), &always, 2_000).is_empty());
+        assert_eq!(
+            watch.run(Some(&meet), &always, 500),
+            [(2_000, Detection::Record(meet))]
+        );
+    }
+
+    #[test]
+    fn a_google_meet_call_in_arc_without_its_address_is_known_by_its_title() {
+        let arc_helper = ActiveMicrophoneApplication {
+            pid: 5120,
+            bundle_id: "company.thebrowser.browser.helper".into(),
+            name: "Browser Helper".into(),
+        };
+        // Automation off and Arc behind another app: no page address, only
+        // the window's title.
+        let page = context("Arc", None, "Meet - Design sync");
+        let meet = candidate_from_microphone(&arc_helper, &page).unwrap();
+        assert_eq!(meet.source, MeetingSource::GoogleMeet);
+        assert_eq!(meet.title, "Design sync");
+        assert_eq!(meet.site.as_deref(), Some("meet.google.com"));
+        let always = [choice("meet.google.com", MeetingPolicy::AlwaysRecord)];
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&meet), &always, 2_000).is_empty());
+        assert_eq!(
+            watch.run(Some(&meet), &always, 500),
+            [(2_000, Detection::Record(meet))]
+        );
+
+        let page = context("Arc", None, "Meet – abc-defg-hij");
+        let code = candidate_from_microphone(&arc_helper, &page).unwrap();
+        assert_eq!(code.source, MeetingSource::GoogleMeet);
+        assert!(!code.named);
+
+        // The landing page and other pages stay unnamed browser calls.
+        for title in ["Google Meet", "Meet", "Problems"] {
+            let page = context("Arc", None, title);
+            let other = candidate_from_microphone(&arc_helper, &page).unwrap();
+            assert_eq!(other.source, MeetingSource::BrowserCall, "{title}");
+            assert!(other.site.is_none());
+        }
     }
 
     #[test]

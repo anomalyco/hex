@@ -146,6 +146,22 @@ const PARAKEET_ULTRA_RECORD: BenchmarkRecord = BenchmarkRecord {
     hardware: Some("CUDA"),
 };
 
+/// Hex's run of the same harness over LibriSpeech test-clean with the
+/// `en-US` prompt on apollo. Its FLEURS test runs scored 7.91% English and
+/// 10.39% German with the language set, 8.77% and 10.46% with Auto.
+const NEMOTRON_3_5_ASR_RECORD: BenchmarkRecord = BenchmarkRecord {
+    metric: ErrorMetric::Wer,
+    value: 3.05,
+    language: "en",
+    dataset: Some("LibriSpeech test-clean"),
+    source: Some("Hex's run of the transcribe.cpp WER harness"),
+    source_revision: Some("7045d1c"),
+    utterances: Some(2_620),
+    batch_size: Some(1),
+    timestamps: Some(false),
+    hardware: Some("Radeon 8060S (Vulkan)"),
+};
+
 /// `model`'s benchmark record, or `None` when the system manages the model
 /// and publishes no figure (Apple Speech).
 pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
@@ -155,6 +171,7 @@ pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
         TranscriptionModelId::QwenCleoAsr17B => Some(QWENCLEO_RECORD),
         TranscriptionModelId::IvritWhisperLargeV3Turbo => Some(IVRIT_WHISPER_RECORD),
         TranscriptionModelId::ParakeetUltra => Some(PARAKEET_ULTRA_RECORD),
+        TranscriptionModelId::Nemotron35Asr => Some(NEMOTRON_3_5_ASR_RECORD),
         // The catalog's English figures: their dataset, source, and
         // conditions were not recorded.
         _ => model

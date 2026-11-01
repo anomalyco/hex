@@ -38,6 +38,10 @@ Release (push to dev: dev channel; workflow_dispatch: ref + channel check | dev 
 ├─ sign-windows             Azure Artifact Signing of both hex.exe, Authenticode check                [release]
 ├─ installers               windows-installers.yml: Setup.exe around them, tested on x64 + ARM64      [build]
 ├─ sign-windows-installers  Azure Artifact Signing of both Setup.exe                                  [release]
+├─ check-linux, -macos,     stable, check: the full suites on the candidate (check-<os>.yml, called   [build]
+│  -windows                 here; pull requests only compile, dev pushes run no checks)
+├─ onboarding               stable, check: scripts/check-onboarding.sh (scene goldens + a first run   [build]
+│                           in a clean data folder, Linux). Stable publishes only once these four pass
 ├─ publish                  OIDC: every signed target, then the release (release-service.sh); Nix     [release]
 ├─ github                   last: tag v<version> on the released commit (tag-release.sh), then the    [contents: write]
 │                           GitHub release mirror (publish-github-release.sh); GITHUB_TOKEN only.
@@ -187,7 +191,9 @@ fast-forward from `dev`; nobody commits to it directly, and its ruleset
 refuses force pushes and deletion.
 
 1. Bump `version` in `Cargo.toml` (and `Cargo.lock`), add
-   `docs/releases/<version>.md`, push to `dev`.
+   `docs/releases/<version>.md`, push to `dev`. Run
+   `scripts/check-onboarding.sh` on that commit and give Dax its result and
+   scene images with the go/no-go; stable releases need his explicit go-ahead.
 2. Let the push to `dev` publish its dev-channel build
    (`https://anoma.ly/release/hex/desktop/dev.json`) and try it on an install
    set to the Dev update channel.

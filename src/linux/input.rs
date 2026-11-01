@@ -331,7 +331,19 @@ fn keysym_name(key: &str) -> Result<String> {
         {
             return Ok(key.to_ascii_uppercase());
         }
-        _ => return Err(eyre!("unsupported shortcut key: {key}")),
+        // A portal shortcut holds its key from every app, so the portal
+        // never binds Escape (#786).
+        "escape" => {
+            return Err(eyre!(
+                "the shortcuts portal can't bind Escape; it would take Escape from every app"
+            ));
+        }
+        // Navigation and editing keys, named as GNOME's accelerators name
+        // them, so both Linux paths accept the same keys (#846).
+        key => match crate::linux::gnome_shortcuts::named_keysym(key) {
+            Some(name) => name,
+            None => return Err(eyre!("unsupported shortcut key: {key}")),
+        },
     };
     Ok(name.into())
 }
@@ -392,7 +404,6 @@ pub(crate) enum ShortcutCommand {
     DictationStart,
     DictationStop,
     DictationToggle,
-    DictationCancel,
     PasteLast,
     /// `hex dictation start --raw` and `toggle --raw`.
     DictationStartRaw,
@@ -437,13 +448,9 @@ fn annotate_drawing() -> bool {
     false
 }
 
-pub(crate) const ESCAPE_CANCEL_WARNING: &str =
-    "Escape cancel unavailable: another application holds Escape";
-
 /// What the running listener reports about its shortcuts.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HotkeyStatus {
-    escape_unavailable: Arc<AtomicBool>,
     shortcuts: Arc<Mutex<DesktopShortcuts>>,
     /// Whether the shortcuts portal can show the desktop's dialog for them.
     configurable: Arc<AtomicBool>,
@@ -456,17 +463,6 @@ pub(crate) struct HotkeyStatus {
 }
 
 impl HotkeyStatus {
-    pub(crate) fn warning(&self) -> Option<String> {
-        self.escape_unavailable
-            .load(Ordering::Acquire)
-            .then(|| ESCAPE_CANCEL_WARNING.into())
-    }
-
-    pub(crate) fn update_escape_availability(&self, available: bool) -> bool {
-        let was_unavailable = self.escape_unavailable.swap(!available, Ordering::AcqRel);
-        !available && !was_unavailable
-    }
-
     pub(crate) fn shortcuts(&self) -> DesktopShortcuts {
         self.shortcuts
             .lock()
@@ -627,23 +623,14 @@ fn granted_trigger<'a>(
 }
 
 /// What the desktop granted, as Settings shows it: each shortcut Hex asked
-/// for, then Cancel dictation once the desktop gave it a key, which Hex
-/// never suggests (#624). With `desktop_assigns` (Hyprland), a shortcut
-/// without a trigger is unconfirmed rather than refused.
+/// for. With `desktop_assigns` (Hyprland), a shortcut without a trigger is
+/// unconfirmed rather than refused.
 fn project_grants(
     granted: &std::collections::HashMap<String, Option<String>>,
     requested: &[Option<(Shortcut, &LinuxHotkey)>],
     ids: &[Option<String>; Shortcut::ALL.len()],
     desktop_assigns: bool,
 ) -> Vec<DesktopGrantedShortcut> {
-    let cancel = granted
-        .get(crate::linux::portal::CANCEL_ID)
-        .and_then(Option::as_deref)
-        .map(|trigger| DesktopGrantedShortcut {
-            name: crate::linux::portal::CANCEL_DESCRIPTION.into(),
-            trigger: Some(crate::linux::portal::readable_trigger(trigger)),
-            unconfirmed: false,
-        });
     requested
         .iter()
         .flatten()
@@ -656,7 +643,6 @@ fn project_grants(
                 trigger,
             }
         })
-        .chain(cancel)
         .collect()
 }
 
@@ -696,6 +682,7 @@ impl Shortcut {
 enum Input {
     Pressed(Shortcut),
     Released(Shortcut),
+    /// Escape, which only stops Annotate's drawing (#786).
     Escape,
     /// The backend can no longer tell which keys are down.
     Lost,
@@ -714,7 +701,7 @@ enum Capture {
 }
 
 /// The shortcut rules every input shares: hold, double-tap lock, toggle,
-/// double-tap only, Escape, Paste Last, and commands.
+/// double-tap only, Paste Last, and commands.
 struct ShortcutState {
     double_tap: bool,
     double_tap_only: bool,
@@ -744,17 +731,13 @@ impl ShortcutState {
         }
     }
 
-    /// Escape cancels only while something records.
-    fn wants_escape(&self) -> bool {
-        matches!(self.capture, Capture::Held { .. } | Capture::Locked)
-    }
-
     fn idle(&self) -> bool {
         matches!(self.capture, Capture::Idle | Capture::Armed)
     }
 
+    /// The backend lost track of the keys: whatever recorded ends.
     fn cancel(&mut self) -> Option<HotkeyEvent> {
-        let active = self.wants_escape();
+        let active = matches!(self.capture, Capture::Held { .. } | Capture::Locked);
         self.capture = Capture::Idle;
         self.last_release = None;
         active.then_some(HotkeyEvent::Cancel)
@@ -800,10 +783,13 @@ impl ShortcutState {
 
     fn update(&mut self, input: Input, now: Instant) -> Option<HotkeyEvent> {
         match input {
-            // Escape while Annotate draws stops drawing, never the recording.
-            #[cfg(hex_capture)]
-            Input::Escape if !self.wants_escape() && crate::capture_host::exit_drawing() => None,
-            Input::Escape => self.cancel(),
+            // Escape while Annotate draws stops drawing, never the recording,
+            // and it ends no dictation (#786).
+            Input::Escape => {
+                #[cfg(hex_capture)]
+                crate::capture_host::exit_drawing();
+                None
+            }
             Input::Lost => {
                 self.down = false;
                 self.cancel()
@@ -894,7 +880,6 @@ impl ShortcutState {
                 ShortcutCommand::DictationToggleRaw => {
                     self.stop_dictation().or_else(|| self.start_dictation(true))
                 }
-                ShortcutCommand::DictationCancel => self.cancel(),
                 ShortcutCommand::PasteLast => unreachable!("handled above"),
             },
         }
@@ -913,8 +898,7 @@ impl From<Receiver<ListenerCommand>> for CommandQueue {
 }
 
 /// The monitor thread's side: the state machine and its outputs. Backends
-/// feed inputs, update their Escape registration, then [`Dispatcher::flush`],
-/// so Escape is registered before dictation hears that recording started.
+/// feed inputs, then [`Dispatcher::flush`].
 struct Dispatcher {
     state: ShortcutState,
     sender: SyncSender<HotkeyEvent>,
@@ -1081,30 +1065,48 @@ impl Backend {
 
     fn run_wayland(
         self,
-        dispatcher: Dispatcher,
+        mut dispatcher: Dispatcher,
         binding: LinuxHotkey,
         options: HotkeyOptions,
     ) -> Result<()> {
-        match crate::linux::portal::Portal::connect(&self.stop)? {
-            Some(portal) => self.run_portal(portal, dispatcher, binding, options),
+        let portal = match crate::linux::portal::Portal::connect(&self.stop)? {
+            Some(portal) => portal,
             None => {
-                tracing::info!("no GlobalShortcuts portal; dictation follows the hex commands");
-                self.run_commands(dispatcher)
+                tracing::warn!(
+                    desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
+                    "{}",
+                    crate::linux::portal::MISSING_SHORTCUTS_PORTAL
+                );
+                match self.wait_for_portal(&mut dispatcher)? {
+                    Some(portal) => portal,
+                    None => return Ok(()),
+                }
             }
-        }
+        };
+        self.run_portal(portal, dispatcher, binding, options)
     }
 
-    /// Only `hex` commands bound in the desktop drive dictation.
-    fn run_commands(self, mut dispatcher: Dispatcher) -> Result<()> {
+    /// Serves `hex` commands while looking for the shortcuts portal again
+    /// from time to time: a portal started before the desktop's session
+    /// environment exposes none until it is restarted (#875). Returns the
+    /// portal once it appears, or `None` when the listener stops.
+    fn wait_for_portal(
+        &self,
+        dispatcher: &mut Dispatcher,
+    ) -> Result<Option<crate::linux::portal::Portal>> {
         self.mark_ready(DesktopShortcuts::Commands);
+        let mut probe = crate::linux::portal::PortalProbe::new(self.stop.clone());
         while !self.stopping() {
             dispatcher.commands();
             if !dispatcher.flush()? {
-                break;
+                return Ok(None);
+            }
+            if let Some(portal) = probe.poll()? {
+                return Ok(Some(portal));
             }
             thread::sleep(POLL_INTERVAL);
         }
-        Ok(())
+        Ok(None)
     }
 
     fn run_portal(
@@ -1144,10 +1146,15 @@ impl Backend {
                 trigger: Some(trigger),
             });
         }
-        // Every shortcut, cancel included, goes in this one bind: a second
-        // bind would replace the set on KDE.
-        shortcuts.push(crate::linux::portal::Shortcut::cancel());
-        if let Err(error) = portal.forget_legacy_kde_shortcuts() {
+        // Every shortcut goes in this one bind: a second bind would replace
+        // the set on KDE. Escape is never among them (#786).
+        // On KDE, ids of shortcuts changed since keep holding their keys,
+        // which a new id could then never take; they go first (#898).
+        let keep = shortcuts
+            .iter()
+            .map(|shortcut| shortcut.id.as_str())
+            .collect::<Vec<_>>();
+        if let Err(error) = portal.forget_legacy_kde_shortcuts(&keep) {
             tracing::warn!(
                 error = format!("{error:#}"),
                 "could not remove Hex's old shortcuts from KDE"
@@ -1193,11 +1200,6 @@ impl Backend {
                         "the desktop did not grant a Hex shortcut"
                     );
                 }
-                // Hex suggests no key for Cancel dictation, so one the
-                // desktop kept takes that key from every app.
-                Some(trigger) if shortcut.name == crate::linux::portal::CANCEL_DESCRIPTION => {
-                    tracing::warn!(%trigger, "the desktop gave Cancel dictation a key");
-                }
                 Some(_) => {}
             }
         }
@@ -1214,11 +1216,6 @@ impl Backend {
         while !self.stopping() {
             for event in portal.events() {
                 let input = match event {
-                    crate::linux::portal::Event::Pressed(id)
-                        if id == crate::linux::portal::CANCEL_ID =>
-                    {
-                        Input::Escape
-                    }
                     crate::linux::portal::Event::Pressed(id) => match shortcut_for(&id) {
                         Some(shortcut) => {
                             if with_modifiers[shortcut.index()] {
@@ -1332,6 +1329,8 @@ impl Backend {
             ..X11Keys::default()
         };
         let mut escape_down = false;
+        // Another client held Escape at the last try; warn once per episode.
+        let mut escape_taken = false;
         while !self.stopping() {
             let mut inputs = keys.expire(Instant::now());
             if let Some(event) = connection.poll_for_event()? {
@@ -1407,13 +1406,15 @@ impl Backend {
                 dispatcher.input(input);
             }
             dispatcher.commands();
-            // Keep Escape until its release so the release never reaches the app.
-            let wants_escape = dispatcher.state.wants_escape() || annotate_drawing() || escape_down;
+            // Escape is Hex's only while Annotate draws, and until its
+            // release so the release never reaches the app.
+            let wants_escape = annotate_drawing() || escape_down;
             if wants_escape && grabs.escape_grabbed.is_empty() {
                 let available = grabs.grab_escape()?;
-                if self.status.update_escape_availability(available) {
-                    tracing::warn!("{ESCAPE_CANCEL_WARNING}; continuing without Escape-cancel");
+                if !available && !escape_taken {
+                    tracing::warn!("another application holds Escape; it can't stop drawing");
                 }
+                escape_taken = !available;
             } else if !wants_escape && !grabs.escape_grabbed.is_empty() {
                 grabs.release_escape()?;
             }
@@ -1655,10 +1656,10 @@ fn grab_escape(
             match grab_variants(connection, root, escape, bare_modifiers) {
                 Ok(()) => Ok(bare_modifiers.to_vec()),
                 Err(error) if is_grab_conflict(&error) => Ok(Vec::new()),
-                Err(error) => Err(error).wrap_err("could not grab the Escape key for cancel"),
+                Err(error) => Err(error).wrap_err("could not grab the Escape key"),
             }
         }
-        Err(error) => Err(error).wrap_err("could not grab the Escape key for cancel"),
+        Err(error) => Err(error).wrap_err("could not grab the Escape key"),
     }
 }
 
@@ -1856,41 +1857,28 @@ mod tests {
         assert_eq!(test.events, [RAW, Finish, START, Finish, RAW, Finish]);
     }
 
-    /// #624: a key the desktop kept for Cancel dictation shows beside the
-    /// shortcuts Hex asked for; without one, Cancel dictation stays out.
+    /// #786: only the shortcuts Hex asked for show; a key the desktop still
+    /// keeps for the removed Cancel dictation stays out.
     #[test]
-    fn a_key_the_desktop_gave_cancel_dictation_is_shown() {
+    fn only_requested_shortcuts_are_shown() {
         let binding = LinuxHotkey::default();
         let requested = [Some((Shortcut::Dictation, &binding)), None, None, None];
         let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
         ids[Shortcut::Dictation.index()] = Some("dictation-ALT-space".into());
-        let mut granted = std::collections::HashMap::from([
+        let granted = std::collections::HashMap::from([
             (
                 "dictation-ALT-space".to_string(),
                 Some("Alt+Space".to_string()),
             ),
-            (crate::linux::portal::CANCEL_ID.to_string(), None),
+            ("cancel-dictation".to_string(), Some("Esc".to_string())),
         ]);
-        let names = |grants: Vec<DesktopGrantedShortcut>| {
-            grants
-                .into_iter()
-                .map(|grant| (grant.name, grant.trigger))
-                .collect::<Vec<_>>()
-        };
+        let names = project_grants(&granted, &requested, &ids, false)
+            .into_iter()
+            .map(|grant| (grant.name, grant.trigger))
+            .collect::<Vec<_>>();
         assert_eq!(
-            names(project_grants(&granted, &requested, &ids, false)),
+            names,
             [("Dictation".to_string(), Some("Alt+Space".to_string()))]
-        );
-        granted.insert(
-            crate::linux::portal::CANCEL_ID.to_string(),
-            Some("Esc".to_string()),
-        );
-        assert_eq!(
-            names(project_grants(&granted, &requested, &ids, false)),
-            [
-                ("Dictation".to_string(), Some("Alt+Space".to_string())),
-                ("Cancel dictation".to_string(), Some("Esc".to_string())),
-            ]
         );
     }
 
@@ -1903,10 +1891,7 @@ mod tests {
         let requested = [Some((Shortcut::Dictation, &binding)), None, None, None];
         let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
         ids[Shortcut::Dictation.index()] = Some("dictation-ALT-space".into());
-        let granted = std::collections::HashMap::from([
-            ("dictation-ALT-space".to_string(), None),
-            (crate::linux::portal::CANCEL_ID.to_string(), None),
-        ]);
+        let granted = std::collections::HashMap::from([("dictation-ALT-space".to_string(), None)]);
         let unconfirmed = |desktop_assigns| {
             project_grants(&granted, &requested, &ids, desktop_assigns)
                 .into_iter()
@@ -2114,6 +2099,46 @@ mod tests {
         }
     }
 
+    /// #846: navigation and editing keys GNOME's accelerators accept reach
+    /// the portal under the same xkb names, alone or with modifiers.
+    #[test]
+    fn navigation_keys_have_portal_triggers() {
+        for (name, portal) in [
+            ("home", "Home"),
+            ("end", "End"),
+            ("pageup", "Page_Up"),
+            ("pagedown", "Page_Down"),
+            ("up", "Up"),
+            ("down", "Down"),
+            ("left", "Left"),
+            ("right", "Right"),
+            ("insert", "Insert"),
+            ("delete", "Delete"),
+            ("print", "Print"),
+        ] {
+            let saved = HotkeyBinding {
+                modifiers: HotkeyModifiers::default(),
+                key: Some(HotkeyKey::named(name)),
+            };
+            let hotkey = LinuxHotkey::from(&saved);
+            assert!(hotkey.validate().is_ok());
+            assert_eq!(hotkey.portal_trigger().unwrap(), portal);
+            assert_eq!(
+                crate::linux::gnome_shortcuts::named_keysym(name),
+                Some(portal)
+            );
+            assert_eq!(HotkeyBinding::from(&hotkey), saved);
+            let with_control = LinuxHotkey {
+                control: true,
+                ..hotkey
+            };
+            assert_eq!(
+                with_control.portal_trigger().unwrap(),
+                format!("CTRL+{portal}")
+            );
+        }
+    }
+
     #[test]
     fn hotkeys_round_trip_through_the_portable_binding() {
         let hotkey = LinuxHotkey {
@@ -2272,7 +2297,8 @@ mod tests {
             test.tap();
             assert_eq!(test.events, [START, Finish, START]);
             test.input(Input::Escape);
-            assert_eq!(test.events, [START, Finish, START, Cancel]);
+            assert_eq!(test.events, [START, Finish, START]);
+            assert_eq!(test.state.capture, Capture::Locked);
         }
     }
 
@@ -2369,41 +2395,23 @@ mod tests {
         assert_eq!(test.state.capture, Capture::Locked);
     }
 
+    /// #786: Escape ends no dictation, held, locked, or idle.
     #[test]
-    fn escape_during_hold_ignores_the_remaining_release() {
+    fn escape_never_ends_a_dictation() {
         let mut test = Test::new(true);
+        test.input(Input::Escape);
+        assert!(test.events.is_empty());
         test.press(Shortcut::Dictation);
         test.input(Input::Escape);
         test.release(Shortcut::Dictation);
-        test.tap();
-        assert_eq!(test.events, [START, Cancel, START, Finish]);
-    }
+        assert_eq!(test.events, [START, Finish]);
 
-    #[test]
-    fn escape_from_a_locked_capture_does_not_swallow_the_next_shortcut() {
         let mut test = Test::new(true);
         test.lock();
         test.input(Input::Escape);
+        assert_eq!(test.state.capture, Capture::Locked);
         test.tap();
-        assert_eq!(test.events, [Cancel, START, Finish]);
-    }
-
-    #[test]
-    fn escape_while_idle_does_nothing() {
-        let mut test = Test::new(false);
-        test.input(Input::Escape);
-        assert!(test.events.is_empty());
-        assert!(!test.state.wants_escape());
-    }
-
-    #[test]
-    fn escape_is_wanted_only_while_something_records() {
-        let mut test = Test::new(true);
-        assert!(!test.state.wants_escape());
-        test.press(Shortcut::Dictation);
-        assert!(test.state.wants_escape());
-        test.release(Shortcut::Dictation);
-        assert!(!test.state.wants_escape());
+        assert_eq!(test.events, [Finish]);
     }
 
     #[test]
@@ -2443,7 +2451,6 @@ mod tests {
     fn dictation_commands_are_idempotent() {
         let mut test = Test::new(true);
         test.command(Command::DictationStop);
-        test.command(Command::DictationCancel);
         assert!(test.events.is_empty(), "stopping while idle does nothing");
         test.command(Command::DictationStart);
         test.command(Command::DictationStart);
@@ -2461,14 +2468,12 @@ mod tests {
     }
 
     #[test]
-    fn dictation_toggle_and_cancel_commands() {
+    fn dictation_toggle_commands() {
         let mut test = Test::new(false);
         test.command(Command::DictationToggle);
         test.command(Command::DictationToggle);
         test.command(Command::DictationToggle);
-        test.command(Command::DictationCancel);
-        test.command(Command::DictationCancel);
-        assert_eq!(test.events, [START, Finish, START, Cancel]);
+        assert_eq!(test.events, [START, Finish, START]);
     }
 
     #[test]
@@ -2786,20 +2791,6 @@ mod tests {
     }
 
     #[test]
-    fn escape_warning_is_logged_once_per_episode_and_clears_on_recovery() {
-        let status = HotkeyStatus::default();
-        let observer = status.clone();
-        assert!(observer.warning().is_none());
-        assert!(status.update_escape_availability(false));
-        assert_eq!(observer.warning().as_deref(), Some(ESCAPE_CANCEL_WARNING));
-        assert!(!status.update_escape_availability(false));
-        assert!(!status.update_escape_availability(true));
-        assert!(observer.warning().is_none());
-        assert!(!status.update_escape_availability(true));
-        assert!(status.update_escape_availability(false));
-    }
-
-    #[test]
     fn dropping_a_monitor_stops_and_joins_its_worker() {
         let (_, events) = mpsc::sync_channel(1);
         let (_, errors) = mpsc::channel();
@@ -2838,12 +2829,15 @@ mod tests {
         // A starting listener claims no shortcut kind, not even X11's.
         assert_eq!(status.shortcuts(), DesktopShortcuts::Unregistered);
         let worker = thread::spawn(move || {
-            backend.run_commands(Dispatcher::new(
-                &HotkeyOptions::default(),
-                sender,
-                receiver.into(),
-                ShortcutKeys::default(),
-            ))
+            // Stopped well before its first portal check.
+            backend
+                .wait_for_portal(&mut Dispatcher::new(
+                    &HotkeyOptions::default(),
+                    sender,
+                    receiver.into(),
+                    ShortcutKeys::default(),
+                ))
+                .map(|portal| assert!(portal.is_none()))
         });
         readiness.recv().unwrap().unwrap();
         assert_eq!(status.shortcuts(), DesktopShortcuts::Commands);
@@ -2973,16 +2967,8 @@ mod tests {
         );
         commands.send(Command::DictationStart.into()).unwrap();
         assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
-        // Escape is grabbed while the command's capture records.
-        harness.send_key(KEY_PRESS, harness.escape);
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Cancel);
-        harness.send_key(KEY_RELEASE, harness.escape);
-    }
-
-    #[test]
-    #[ignore = "requires the active X11 desktop"]
-    fn conflicted_escape_still_dictates_without_cancel() {
-        let harness = X11TestHarness::new();
+        // Escape stays with applications while the capture records (#786).
+        thread::sleep(Duration::from_millis(50));
         grab_variants(
             &harness.connection,
             harness.root,
@@ -2990,82 +2976,12 @@ mod tests {
             &[ModMask::ANY],
         )
         .unwrap();
-        harness.connection.flush().unwrap();
-        let status = HotkeyStatus::default();
-        let (monitor, _commands) = x11_monitor(
-            LinuxHotkey::default(),
-            HotkeyOptions::default(),
-            status.clone(),
-        );
-        for _ in 0..2 {
-            harness.tap_alt_space();
-            assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
-            assert_eq!(status.warning().as_deref(), Some(ESCAPE_CANCEL_WARNING));
-            assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
-            assert!(
-                monitor
-                    .events
-                    .recv_timeout(Duration::from_millis(100))
-                    .is_err()
-            );
-            assert!(monitor.errors.try_recv().is_err());
-        }
         harness
             .connection
             .ungrab_key(harness.escape, harness.root, ModMask::ANY)
             .unwrap();
-        harness.connection.flush().unwrap();
-        harness.send_key(KEY_PRESS, harness.alt);
-        harness.send_key(KEY_PRESS, harness.space);
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Start { raw: false });
-        assert!(status.warning().is_none());
-        harness.send_key(KEY_PRESS, harness.escape);
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Cancel);
-        harness.send_key(KEY_RELEASE, harness.escape);
-        harness.send_key(KEY_RELEASE, harness.space);
-        harness.send_key(KEY_RELEASE, harness.alt);
-    }
-
-    #[test]
-    #[ignore = "requires an isolated X11 display"]
-    fn modified_escape_conflict_keeps_plain_escape_cancel() {
-        let harness = X11TestHarness::new();
-        grab_variants(
-            &harness.connection,
-            harness.root,
-            harness.escape,
-            &[ModMask::M4],
-        )
-        .unwrap();
-        let status = HotkeyStatus::default();
-        let (monitor, _commands) =
-            x11_monitor(LinuxHotkey::default(), double_tap(), status.clone());
-        for expected in [
-            HotkeyEvent::Start { raw: false },
-            HotkeyEvent::Finish,
-            HotkeyEvent::Start { raw: false },
-        ] {
-            if expected != HotkeyEvent::Finish {
-                harness.tap_alt_space();
-            }
-            assert_eq!(recv_event(&monitor), expected);
-        }
-        // The second tap locks recording and releases the shortcut modifiers.
-        assert!(
-            monitor
-                .events
-                .recv_timeout(Duration::from_millis(100))
-                .is_err()
-        );
-        assert!(status.warning().is_none());
-        harness.send_key(KEY_PRESS, harness.escape);
-        assert_eq!(recv_event(&monitor), HotkeyEvent::Cancel);
-        harness.send_key(KEY_RELEASE, harness.escape);
-        // Escape stays grabbed until its release, then returns to applications.
-        thread::sleep(Duration::from_millis(50));
-        drop(monitor);
-        let variants = lock_variants(ModMask::default(), ModMask::M2);
-        grab_variants(&harness.connection, harness.root, harness.escape, &variants).unwrap();
+        commands.send(Command::DictationStop.into()).unwrap();
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
     }
 
     #[test]

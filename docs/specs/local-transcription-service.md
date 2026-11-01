@@ -181,8 +181,9 @@ export type ModelId =
   | "underdog_bark_3_pro"
   | "underdog_bark_3_clean"
   | "parakeet_ultra"
+  | "nemotron_3_5_asr"
   | "apple_speech"
-  // Labs › Use your own speech model: an import, listed while it is ready.
+  // An imported or found model, listed while it is ready.
   | `custom-${string}`;
 
 export interface ModelInfo {
@@ -194,6 +195,9 @@ export interface ModelInfo {
   downloadBytes: number | null;
   languages: readonly string[];
   supportsLanguageDetection: boolean;
+  // download | hex | imported | found: owner/name@abcdef1 (another app's
+  // Hugging Face download, used where it is). Older hosts omit it.
+  source?: string;
 }
 
 export type ModelProgress =

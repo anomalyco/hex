@@ -26,8 +26,10 @@ pub(crate) fn sync_directory(directory: &Path) -> io::Result<()> {
 
 /// Replaces `path` with `contents` so a crash leaves either the old file or
 /// the complete new one. The staging file is unique to this write, so
-/// concurrent writers never share one.
+/// concurrent writers never share one. A symlinked `path` (settings kept in
+/// a dotfiles repository) stays a symlink: its final target is replaced.
 pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let path = &symlink_target(path)?;
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -43,6 +45,31 @@ pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
         return Err(error);
     }
     sync_directory(parent)
+}
+
+/// Follows `path`'s symlinks to the file they finally name, which need not
+/// exist yet. A rename onto the link itself would replace it with a plain file.
+fn symlink_target(path: &Path) -> io::Result<PathBuf> {
+    const MAX_LINKS: usize = 40;
+    let mut path = path.to_path_buf();
+    for _ in 0..MAX_LINKS {
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let link = fs::read_link(&path)?;
+                path = match path.parent() {
+                    Some(parent) => parent.join(link),
+                    None => link,
+                };
+            }
+            Ok(_) => return Ok(path),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(path),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::other(format!(
+        "more than {MAX_LINKS} symlinks lead to {}",
+        path.display()
+    )))
 }
 
 fn staging_path(path: &Path) -> PathBuf {
@@ -72,6 +99,64 @@ mod tests {
         sync_directory(&directory).unwrap();
         let names = fs::read_dir(&directory).unwrap().count();
         assert_eq!(names, 1, "only the file itself remains");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_a_symlink_replaces_its_target_and_keeps_the_link() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-durable-link-{}", std::process::id()));
+        let dotfiles = directory.join("dotfiles");
+        let data = directory.join("data");
+        fs::create_dir_all(&dotfiles).unwrap();
+        fs::create_dir_all(&data).unwrap();
+        let target = dotfiles.join("settings.json");
+        fs::write(&target, b"old").unwrap();
+        let link = data.join("settings.json");
+        std::os::unix::fs::symlink("../dotfiles/settings.json", &link).unwrap();
+
+        write(&link, b"new").unwrap();
+
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+        assert_eq!(
+            fs::read_dir(&data).unwrap().count(),
+            1,
+            "only the link remains"
+        );
+        assert_eq!(
+            fs::read_dir(&dotfiles).unwrap().count(),
+            1,
+            "no staging file remains"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_a_dangling_symlink_creates_its_target() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-durable-dangling-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let target = directory.join("target.json");
+        let link = directory.join("settings.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        write(&link, b"new").unwrap();
+
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"new");
         fs::remove_dir_all(directory).unwrap();
     }
 

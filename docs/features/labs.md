@@ -11,7 +11,7 @@ debug, local `HEX_LOCAL_BUILD`, test `HEX_TEST_BUILD`, and dev-channel
 drops it, its gate reads false even when `settings.json` says on, and the
 saved setting is kept untouched. In dev builds a Dev row carries a quiet
 "Dev" tag, and `hex labs` prints each feature's audience. Every feature
-below is `Everyone` except Paste picker, which is `Dev`. There is no master switch. **Labs** is always the last item in the
+below is `Everyone` today. There is no master switch. **Labs** is always the last item in the
 sidebar and lists every Labs feature as one flat row (name, one-line
 description, toggle), each **off by default**, plus Send feedback and Run
 setup again.
@@ -44,11 +44,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS)   in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711)
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
-├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
-├── Paste picker    no    labs.paste_picker            (macOS, Dev) hold Paste last dictation to pick one or more recent dictations at the caret
-├── Use your own speech model no labs.custom_models     the picker's "Add model file…" and `hex model import` copy in a GGUF checked from its header (#648, #743)
+├── Benchmark details no  labs.benchmark_details        picker rows show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
-├── Special keys alone no labs.standalone_special_keys (Linux) Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767)
+├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
+├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
+├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
+├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -58,12 +59,10 @@ Settings › Labs                          // labs.page
 │   feature on. An unknown or absent name -> the page opens and process.log notes it. hex://settings/<pane>
 │   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
 │   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
-└── One row per feature this OS has -> press flips it, saved at once
-    ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
-    └── Voice Filter while its driver is installed -> on, disabled, "Uninstall the driver in Voice Filter to turn it off."
-
-Settings › General › Advanced › Application
-└── Replay onboarding (quiet Ghost "Replay") -> replays the new onboarding (below), as hex onboarding reset
+├── One row per feature this OS has -> press flips it, saved at once
+│   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
+│   └── Voice Filter while its driver is installed -> on, disabled, "Uninstall the driver in Voice Filter to turn it off."
+└── Run setup again -> replays the onboarding (below)
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature this build has: name, on/off, audience, description, its hex settings key
@@ -336,8 +335,8 @@ works as both tap-to-toggle and push-to-talk. It acts only in Toggle mode
 released at least `MINIMUM_HOLD_DURATION` (300 ms, the hold threshold) after
 it started finishes the capture on release, as Hold does, with the usual
 200 ms tail. A shorter press locks the capture as plain Toggle does, and the
-next press finishes it. Chord discards, Escape, and the press that finishes
-a lock are unchanged. It applies to every `DictationHotkey` in Toggle mode.
+next press finishes it. Chord discards and the press that finishes a lock are
+unchanged. It applies to every `DictationHotkey` in Toggle mode.
 Off, or in Hold mode, nothing changes. Linux and Windows don't have it.
 Checks: `tap_or_hold_locks_a_short_tap_and_finishes_a_long_hold_on_release`
 and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
@@ -347,8 +346,8 @@ and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
 on. The row renders only in macOS builds, so no golden changes.
 
 Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
-on, the Local transcription picker shows one row between its header and the
-cards: a sort (By recommendation, the default and the catalog's order; By
+on, the speech model picker's Every model view shows one row between its
+header and the list: a sort (By recommendation, the default and the catalog's order; By
 size, smallest model file first with unknown sizes last; By name) and a
 switch, "Only models that support <saved language>" ("Only models that
 detect the language automatically" when the language is Auto), which keeps
@@ -370,11 +369,9 @@ in a real window; there is no `--snap` scene for the picker with the Lab on,
 and the Labs page goldens need regenerating on Linux with the new row.
 
 Benchmark details (`benchmark-details`, issue 647, every OS): while on,
-each Local transcription picker card that has a benchmark record
-(`transcription::models::benchmark`; Apple Speech has none and keeps
-"Accuracy: System") shows "Error rate" as the raw figure with its direction,
-such as "7.57% CER · lower is better", in place of the transformed accuracy
-percentage, and one wrapping line under the metrics: the measured language,
+each row in the speech model picker's Every model view that has a benchmark
+record (`transcription::models::benchmark`; Apple Speech has none) adds one
+wrapping line under its facts: the raw figure, such as "7.57% CER", then the measured language,
 the dataset and split, the source as plain text (with its source-record
 revision), the conditions (utterances, batch size, timestamps, hardware), and
 "Speed: upstream figure; hardware and method unknown". Anything the source
@@ -392,101 +389,29 @@ utterances, batch 1, no timestamps, Radeon 8060S over Vulkan, source revision
 unrecorded. A "Most accurate" badge stays only when its record is comparable
 (`BenchmarkRecord::comparable`: same metric, language, and a known, equal
 dataset) with every other recommended model's for the saved language, so
-today it drops everywhere. The gate is the picker's card (`benchmark_details_on`);
+today it drops everywhere. The gate is the picker (`benchmark_details_on`);
 the feature does no other work. Off, the picker is exactly as before.
 Checks: `benchmark_details_show_raw_rates_and_mark_unknowns`,
 `most_accurate_needs_comparable_figures_only_with_benchmark_details`, and
 `benchmark_details_are_off_by_default` in
 [picker.rs](../../src/rune_ui/picker.rs);
 `only_figures_on_the_same_metric_language_and_dataset_compare` in
-[models.rs](../../src/transcription/models.rs). Not yet observed: the cards
+[models.rs](../../src/transcription/models.rs). Not yet observed: the rows
 rendered with the toggle on; there is no `--snap` scene for it, and the Labs
 page goldens need regenerating on Linux with the new row.
 
-Paste picker (`paste-picker`, macOS, Dev builds only): a tap of Paste last dictation still
-pastes the latest dictation, on the key's release; holding it for 300 ms
-(`paste_picker::HOLD_THRESHOLD`) opens a list of the last eight pasted
-dictations from History (`History::recent_pasted_dictations`; no meeting
-turns) at the text caret (`accessibility::focused_caret_rect`, falling back
-to the pointer), flipping above the caret near the screen's bottom edge.
-While it shows, the session tap swallows every key (`suppression::paste_picker`): the shortcut's key or `V` cycles, `↑`/`↓` step, `⇧`
-with them (or `Space`, or ⇧-click) picks several in order, and `Delete`
-clears the picks. Releasing the shortcut's non-Shift modifiers, `Return`, or
-a click on a row pastes at the original focus, several joined as
-consecutive pastes would be (`paste::join_sequence`, `PasteKind::Picked`);
-`Escape` or a click outside closes it without pasting. The overlay
-(`rune_ui::paste_picker`) is non-activating, takes only its card's clicks,
-is left out of screen recordings, and isn't created until the first open.
-The gate is `labs::paste_picker()` where the press starts
-(`recognition::paste_picker`); off, Paste last pastes on the press as before. Checks: the
-`paste_picker` tests in [paste_picker.rs](../../src/paste_picker.rs) and
-[rune_ui/paste_picker.rs](../../src/rune_ui/paste_picker.rs),
-`recent_pasted_dictations_keeps_only_pasted_entries_newest_first` in
-[history.rs](../../src/history.rs), and the `paste-picker` and
-`paste-picker-multiselect` scenes (no golden). Not yet observed: a real Mac,
-caret bounds across apps (terminals and Electron editors expose none and get
-the pointer), or paste into the original app after the list closes.
-
-Use your own speech model (`custom-models`, issues 648 and 743, every OS):
-
-```ts
-Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // labs.custom-models
-├── Header check, before anything loads (transcription::gguf_header): GGUF v2/v3;
-│   general.architecture parakeet | whisper | qwen3_asr | cohere_asr | sensevoice;
-│   stt.variant; general.languages with a code Hex knows; only F32, F16, and
-│   Q8_0 tensors (the types every build runs on Metal and Vulkan); the tensor
-│   data fits the file. Anything else -> "<file> can't be imported: <reason>"
-├── Copy -> models/custom/<16 hex>.gguf while hashing; the copy is checked again;
-│   receipt <16 hex>.gguf.verified.json (size, SHA-256, mtime); manifest
-│   <16 hex>.json (name, general.name, family, variant, languages, detection,
-│   file name, licence, repo URL). The original is never touched; a failed or
-│   cancelled import removes only its partial copy; the same file again keeps
-│   the first import
-├── ID custom-<first 16 hex of the SHA-256> (TranscriptionModelId::Custom)
-├── Card -> name from general.name (Rename edits it), languages from the file,
-│   offline only (no streaming), Parakeet without language prompt or Auto,
-│   no benchmark; Use prepares it like a catalog model (verifies Hex's copy
-│   against its receipt instead of downloading)
-├── Remove -> Hex's copy, receipt, and manifest only; not the active model
-├── Changed -> "Check again" rehashes the copy: the recorded SHA-256 again ->
-│   new receipt, ready; else it stays changed. Missing or changed -> "Import
-│   again…": the same file replaces the copy and keeps the import's name
-└── Saved import missing, changed (size or mtime), or toggle off -> the choice
-    stays saved; the listener runs a downloaded fallback (the system language's
-    recommendation if downloaded, else the first downloaded catalog model;
-    custom_models::runnable); General's model row says so; the card warns
-```
-
-The local digest identifies the file Hex copied; it is not a publisher
-checksum and Hex vouches for nothing in it. The selection, recent models,
-and keyboard-language mappings keep an import while it can't run
-(`models::validate_saved`), and a build that doesn't know `custom-…` keeps its
-default for that field without rewriting `settings.json` (#744). `hex model
-import <path> [--name N]`, `hex model rename <id> <name>`, `hex model repair
-<id>`, and `hex model remove <id>` (also `hex models …`) run in the CLI process; a running Hex lists
-the change at once (the registry rereads `models/custom/` when its folder
-changes). `hex model list`, the local API's `/models`, and the Linux and
-Windows tray list ready imports; the macOS menu bar's model list is built at
-launch from the catalog and does not list them yet.
-
-Observed on apollo (Linux, Radeon 8060S over Vulkan, 2026-11-01): Parakeet
-primeLine Q8_0 (`handy-computer/parakeet-primeline-gguf`, not in the catalog)
-imported as `custom-dbd1ec2985aea64d`, verified, loaded, and transcribed the
-FLEURS German and English samples through `hex model transcribe` (the Linux
-dictation loader); a junk file and the toggle off were refused; touching or
-moving the copy made it "changed" or "missing" with the saved selection kept;
-rename and remove worked and the original stayed. Not observed: the picker
-flow in a real window, macOS (Metal) and Windows at all.
-Checks: `transcription::gguf_header::tests`,
-`transcription::custom_models::tests`, and the picker golden
-`rune-picker-custom-models-light`.
+Use your own speech model (`custom-models`) graduated: adding a model file
+and models found on this computer are always on now
+([own-models.md](own-models.md)). `hex labs on|off custom-models` still
+answers with that and exits 0 (`labs::GRADUATED`); the saved
+`labs.custom_models` key is ignored.
 
 Parakeet Ultra (`parakeet-ultra`, issue 648, every OS): a pinned catalog
 entry, `parakeet_ultra`, listed and runnable only while the toggle is on
 (`ModelDefinition::available` reads `labs::parakeet_ultra`).
 
 ```ts
-Picker card -> "Parakeet Ultra" + Labs tag; 25 languages, offline, Token     // labs.parakeet-ultra
+Picker row -> "Parakeet Ultra" + Labs tag; 25 languages, offline, Token     // labs.parakeet-ultra
 │   timestamps; v3's "Detects language from audio" note; never recommended
 ├── Download -> handy-computer/parakeet-ultra-gguf@a1539be1, parakeet-ultra-Q8_0.gguf,
 │   740,363,168 bytes, SHA-256 007a5976…0a59 (430 F32, 225 Q8_0, 48 F16 tensors)
@@ -531,7 +456,10 @@ hex settings set dictation_hotkey menu        // labs.special-keys
 │   ├── X11 -> grabs keysym Menu 0xff67, Pause 0xff13, Scroll_Lock 0xff14
 │   └── Wayland portal -> preferred trigger Menu, Pause, Scroll_Lock
 ├── Toggle off -> "menu needs Labs › Special keys alone: hex labs on special-keys"
-├── Other OSes -> no toggle; a bare one still needs a modifier, as before
+├── Windows -> Menu, Pause, Scroll Lock always allowed, alone too; the toggle
+│   instead lets Insert, Home, End, Page Up, Page Down stand alone ("home alone
+│   needs Labs › Special keys alone" while off), and off puts a saved one back
+├── macOS -> no toggle; a bare one still needs a modifier, as before
 ├── Window recorder -> refuses them while off ("Add a modifier"); Rune reports
 │   none of these keys yet, so the recorder can't record them either way
 └── Toggle turned off (row, hex labs off, hex settings), or settings load with
@@ -555,6 +483,76 @@ Not yet observed: a real GNOME Wayland session granting Menu through the
 portal, or an X11 grab of it; the Labs page goldens need regenerating on Linux
 with the new row.
 
+Dictation stats (`history-stats`, issue 790, every OS): while on, the History
+pane shows a "Dictation stats" block above the list once anything is retained:
+dictations, words, words per minute, how often Output changed the text, the
+daily streak, and the top five apps; `hex history stats [--since] [--until]
+[--json]` prints the same ([transcript-cli.md](../transcript-cli.md)). It sums
+every entry within retention (`History::stats`, `history/stats.rs`), not the
+pane's 200-entry search, so it ends with what retention removes; the rollup that
+outlives retention, streak notifications, and per-replacement counts are not
+built. The gates are `labs::history_stats()`, read when the pane reloads (off,
+it reads nothing for stats, and sums again only when the entries or the toggle
+change) and where `hex history stats` starts (off, it fails naming `hex labs on
+history-stats` before History is read), and the window's own setting for the
+block. Off, History is exactly as before. Checks: the tests in
+[history/stats.rs](../../src/history/stats.rs) (words, speed, changes, top
+apps, streak across a gap, expired entries skipped past the search cap);
+`history_stats_parse_sum_retained_entries_and_need_the_labs_toggle` in
+[control/transcript_cli_tests.rs](../../src/control/transcript_cli_tests.rs);
+`history_stats_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: the block in a real window;
+there is no `--snap` scene for it (the fixture has no store), and the Labs
+page goldens need regenerating on Linux with the new row.
+
+Copy recent dictations (`recent-dictations`, issue 877, macOS): while on,
+the menu-bar menu shows a Copy Recent Dictation submenu right under Paste
+Last Dictation. It lists the five newest History entries within retention,
+newest first, skipping printed (`hex dictation stop --print`) and empty ones
+as Paste Last does, each on one line (whitespace and line breaks collapsed,
+cut to 48 characters with "…"). Clicking one puts its full final text on the
+clipboard as an ordinary entry; nothing is pasted. The gate is the menu's
+delegate (`menuNeedsUpdate:` in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs)): History is
+read only as the menu opens and only with `labs::recent_dictations()` on;
+off, with History retention Off, or with nothing to list, the item stays
+hidden and the menu is exactly as before. The copy itself
+(`StatusItemAction::CopyRecentDictation`) looks the entry up by ID again and
+logs a warning if it has gone. Checks:
+`recent_lists_the_newest_reusable_entries_within_retention` in
+[history.rs](../../src/history.rs);
+`recent_dictations_show_on_one_short_line` in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs) (macOS
+only); `recent_dictations_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: the submenu on a real Mac;
+the row renders only in macOS builds, so no golden changes.
+
+Skip long pauses (`skip-pauses`, issue 899, Linux and Windows): for slow
+CPUs and older integrated GPUs, where a dictation is transcribed as a whole
+clip (no stream, or the fallback after a failed or late stream) and every
+second of silence goes through the model. While on, the engine's whole-clip
+run (`TranscriptionEngine::finish` in
+[transcription/engine.rs](../../src/transcription/engine.rs)) reads
+`labs::skip_pauses()` as it starts and transcribes the clip as a dictation
+stream hears it (`skip_long_pauses` in
+[engine/streaming.rs](../../src/transcription/engine/streaming.rs), the same
+`PauseCap`): each pause at the noise floor keeps its first 2.5 s and last
+0.3 s, a trailing pause only its first 2.5 s, and shorter pauses pass whole.
+A clip in which no frame rose above the noise floor is left whole, as the
+stream does for #841. The job deadline, History's duration, and the silence
+discard still use the full clip; process.log adds a `skipped long pauses
+before whole-clip transcription` line with `pauses_dropped_ms`. macOS,
+streams, meetings, captures, and the local API are unchanged, and off the
+clip is passed through untouched. Checks:
+`skipping_pauses_cuts_a_whole_clips_long_pauses_to_their_ends`,
+`skipping_pauses_leaves_short_pauses_and_quiet_only_clips_whole`, and
+`with_skip_pauses_off_the_whole_clip_is_untouched` in
+[transcription/engine.rs](../../src/transcription/engine.rs);
+`skip_pauses_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs).
+Not yet observed: a real dictation with the toggle on in Hex (the reporter
+measured their own branch on an i5-8259U); the Labs page goldens need
+regenerating on Linux with the new row.
+
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
 restore (Labs › Keep dictation on clipboard skips it on macOS), the
@@ -568,73 +566,23 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `labs.live_chapters` (off by default). The gate,
   `labs::live_chapters()`, is where the work starts: the recorder's chapter worker, recording
   chapters in the manifest, and the boundary pass after Stop.
-- New onboarding (no toggle; it runs only when invoked): the onboarding
-  story, replayed on every OS
-  (`rune_ui/onboarding_kit/live.rs`), in order: a parked Launch Room
-  conversation row (`onboarding_kit/inbox.rs`: two dings, a pulse, an
-  unread badge) that opens the chat when clicked; "Without Hex" (the comedy
-  scene, `scenes/default.scene`, Messages-style: a gray sender name over the
-  first bubble of a run, a small face beside the last, its heartbeat from
-  the first typo) and a
-  scripted "With Hex" payoff (⌥ held, the line said, the triumph; no input
-  asked, then a 1.5 s hold on its ending) while the real model downloads;
-  the Microphone alone (an allowed row floats up and away before the next
-  one comes in); the practice game as "With Hex" once the model is in
-  (a calm "Almost ready" until then; never Apple Speech); Accessibility
-  ("Make it work everywhere"); "Hex is ready". Steps already granted pass
-  at once (Linux and Windows ask for no permissions). Hex's shortcut needs
-  Accessibility (the event tap, and the listener starts only once setup is
-  ready), so a real run still missing it asks for it before the game. Short
-  presses coach holding, and after two the game offers "Use tap to start"
-  (`shortcut_mode` Toggle). Checks:
-  `the_first_run_asks_for_the_microphone_then_plays_then_asks_for_accessibility`.
-  The practice step is a mini game
-  (`onboarding_kit/game.rs`): one lit message card at a time, answered by a
-  real dictation (live words fly in while the shortcut is held, the paste
-  lands in an unseen focused field), struck by lightning and burnt away,
-  then a score card with Keep playing and Continue. Messages come in
-  themes of three that escalate, mundane to absurd
-  (`onboarding_kit/game/lines.rs`); a real run plays the themes in a random
-  order, a story as written. Done shows the score card too once anything
-  burnt (straight on otherwise). The score card lists every message cleared
-  with the player's reply (scrolling past 150 pt) and this run's count
-  against the best ever, calling out a new high score. The best lives in
-  `game-best` in the data folder (owner-only, replaced whole, not a
-  setting); only a real first run reads or writes it. Words fly out of the
-  real Dot scope HUD on the microphone's level; until ⌥ is first pressed
-  the HUD is an idle pill ("Not recording · Hold ⌥ to answer", or Tap in
-  Toggle mode) whose key dips every 2.6 s. "Hex is ready" builds the
-  Hex logo outside in (`onboarding_kit/hex_meter.rs` `hex_logo`): the
-  outline, the middle line, then the filled centre, 150 ms apart, each on a
-  0.36 s spring with 0.12 bounce and one rising note (A5, B5, then D6,
-  `OnboardingTone::Build`) at the feedback volume. With Reduce Motion the
-  logo shows built, with only the last note. Checks:
-  `the_logo_builds_outside_in_and_settles`,
-  `reduce_motion_finishes_the_logo_on_one_note`. Where the OS has a login
-  item (`caps.launch_at_login`), Ready also asks "Open Hex when your Mac
-  starts?" (`onboarding_kit/login.rs`): the button writes the real login
-  item (`SetLaunchAtLogin`, or Login Items settings while macOS wants
-  approval), and turning it on pops the button with a burst of confetti and
-  a tick (none with Reduce Motion). On macOS, the floating "Drag Hex into
-  the list" guide hides when System Settings closes and reopens the pane
-  (at most twice); when Settings' only window sits on another Space, it
-  quits and reopens Settings so it lands on this one
-  (`native/permission_guide.m`). Not yet observed live.
-  The window's tour stays
-  the state machine underneath. General's **Replay onboarding** and
+- Run setup again (not a feature toggle; every build): replays Hex's one
+  onboarding, the first-run story every new install gets
+  ([setup.tour](README.md)). Labs' **Run setup again** and
   `hex onboarding reset` (macOS control socket, the Linux service socket,
   and a named event on Windows) forget that onboarding finished
-  (`desktop::onboarding::reset_at`) and replay the first run without touching
-  settings, history, models, or permissions; ready steps pass at once. A new
-  install still gets the tour as its first run. Checks:
-  `replay_onboarding_opens_the_first_run_on_every_os` in
-  [panes.rs](../../src/rune_ui/tests/panes.rs). Every OS reads the practice
-  dictation from the listener's event log (`rune_ui/practice.rs`). The
-  game's checks are the `onboarding_kit::game` tests; not yet observed: a
-  real dictation playing it end to end.
+  (`desktop::onboarding::reset_at`) and open it from the start without
+  touching settings, history, models, or permissions; ready pages pass at
+  once. Checks: `labs_run_setup_again_opens_the_first_run` and
+  `run_setup_again_opens_the_first_run_on_linux_and_windows` in
+  [panes.rs](../../src/rune_ui/tests/panes.rs).
 - Live text: a streaming dictation shows what you have said so far while
   you dictate, as one click-through line just past the recording HUD (every
-  OS; see [Streaming Finish](dictation.md#streaming-finish)). Its toggle
+  OS; see [Streaming Finish](dictation.md#streaming-finish)). Off macOS the
+  line is placed with the HUD's own edge placement (`OverlayHandle::place`),
+  so with the HUD at the bottom it sits above the pill and the Windows
+  taskbar rather than under the pill (#797; not yet observed on Windows).
+  Its toggle
   is `labs.live_text` (off by default), asked as each dictation starts. The
   gate, `labs::live_text()`, is where the work starts: with it off, the engine gives a hotkey capture's
   live stream no partial slot and never reads the model's text between
@@ -675,7 +623,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   └── Capture capsule   (macOS) whole flow and each state × flow, notch, family
   Window            every macOS-window fixture scene by pane, under a readable name
   ├── General       Settings, Microphone missing, Shortcut/…, Updates/…
-  ├── Output, Modes … HUD Lab, Activity, Transcription model, Shortcut explainer, Onboarding tour
+  ├── Output, Modes … HUD Lab, Activity, Transcription model, Shortcut explainer, Onboarding
   Linux & Windows   the portal and Windows fixtures
   ```
 
@@ -768,7 +716,7 @@ Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 [panes.rs](../../src/rune_ui/tests/panes.rs);
 `every_feature_is_off_by_default_and_round_trips` and
 `the_old_master_switch_is_read_and_ignored` in [labs.rs](../../src/labs.rs);
-`a_dev_feature_in_a_stable_build_is_unlisted_refused_and_off` in [labs.rs](../../src/labs.rs) (a stand-in for a Dev feature), `paste_picker_is_a_dev_feature_with_its_own_bit_off_by_default`; `labs_parse_as_a_read_command` in [main.rs](../../src/main.rs);
+`a_dev_feature_in_a_stable_build_is_unlisted_refused_and_off` in [labs.rs](../../src/labs.rs) (a stand-in for a Dev feature, since none exists yet); `labs_parse_as_a_read_command` in [main.rs](../../src/main.rs);
 `status_reads_for_a_person` and
 `status_reports_labs_and_reads_older_replies_without_it` in
 [control/cli.rs](../../src/control/cli.rs);

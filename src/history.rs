@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+pub mod stats;
+
 const VERSION: u32 = 1;
 const MAX_ENTRIES: usize = 10_000;
 const MAX_TEXT_BYTES: usize = 16 * 1024;
@@ -374,22 +376,30 @@ impl HistoryStore {
             .collect()
     }
 
-    /// The newest pasted dictations (`Dictation` and `Raw`), bounded to `limit`
-    /// and filtered by the active retention window.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub fn recent_pasted_dictations(&self, limit: usize, now_ms: u64) -> Vec<&HistoryEntry> {
+    /// The newest `count` entries within retention that a paste could
+    /// reuse: never a printed one or one with no text, as Paste Last.
+    /// Nothing while retention is Off.
+    pub fn recent(&self, count: usize, now_ms: u64) -> Vec<&HistoryEntry> {
+        if self.retention.is_off() {
+            return Vec::new();
+        }
         let cutoff = self
             .retention
             .max_age_ms()
             .map(|max_age| now_ms.saturating_sub(max_age));
         self.entries()
             .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
-            .filter(|entry| {
-                matches!(entry.kind, HistoryKind::Dictation | HistoryKind::Raw)
-                    && !entry.final_text.trim().is_empty()
-            })
-            .take(limit)
+            .filter(|entry| entry.kind != HistoryKind::Printed)
+            .filter(|entry| !entry.final_text.trim().is_empty())
+            .take(count)
             .collect()
+    }
+
+    /// The idle worker's expiry: reread whatever another process wrote first,
+    /// so pruning never writes a stale copy over its records or deletions.
+    fn expire_shared(&mut self, now_ms: u64) {
+        self.sync();
+        self.expire(now_ms);
     }
 
     fn expire(&mut self, now_ms: u64) {
@@ -490,7 +500,7 @@ impl History {
                         Err(TryLockError::WouldBlock) => continue,
                         Err(TryLockError::Poisoned(error)) => error.into_inner(),
                     };
-                    store.expire(clock());
+                    store.expire_shared(clock());
                 }
             })
         {
@@ -533,14 +543,24 @@ impl History {
             .collect()
     }
 
-    /// Newest pasted dictations (`Dictation` and `Raw`), bounded to `limit`.
+    /// The newest `count` reusable entries, newest first
+    /// ([`HistoryStore::recent`]).
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub fn recent_pasted_dictations(&self, limit: usize) -> Vec<HistoryEntry> {
+    pub fn recent(&self, count: usize) -> Vec<HistoryEntry> {
         self.synced()
-            .recent_pasted_dictations(limit, now_ms())
+            .recent(count, now_ms())
             .into_iter()
             .cloned()
             .collect()
+    }
+
+    /// The text entry `id` inserted, if it is still retained.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn final_text(&self, id: u64) -> Option<String> {
+        self.synced()
+            .entries()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.final_text.clone())
     }
 
     fn synced(&self) -> std::sync::MutexGuard<'_, HistoryStore> {
@@ -615,6 +635,33 @@ mod tests {
         window.sync();
         assert!(window.entry(first).is_none(), "a deletion is never undone");
         assert!(window.entry(second).is_some());
+    }
+
+    #[test]
+    fn expiry_in_a_stale_process_keeps_the_other_processes_writes() {
+        let path = temp_path("stale-expiry");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut listener = HistoryStore::open(path.clone(), HistoryRetention::Day, 0);
+        listener.record(draft("old"), 1_000).unwrap();
+        listener.record(draft("kept"), 2_000).unwrap();
+        let mut window = HistoryStore::open(path.clone(), HistoryRetention::Day, 2_000);
+        let newer = listener.record(draft("newer"), 3_000).unwrap().unwrap();
+
+        window.expire_shared(day_ms + 1_001);
+        let saved = read_snapshot(&path).unwrap();
+        let texts: Vec<_> = saved
+            .iter()
+            .map(|entry| entry.final_text.as_str())
+            .collect();
+        assert_eq!(texts, ["kept", "newer"]);
+        assert!(window.entry(newer).is_some());
+
+        window.clear().unwrap();
+        listener.expire_shared(day_ms + 2_001);
+        assert!(
+            read_snapshot(&path).unwrap().is_empty(),
+            "a clear stays cleared"
+        );
     }
 
     #[test]
@@ -897,26 +944,38 @@ mod tests {
     }
 
     #[test]
-    fn recent_pasted_dictations_keeps_only_pasted_entries_newest_first() {
-        let path = temp_path("recent-pasted");
+    fn recent_lists_the_newest_reusable_entries_within_retention() {
+        let path = temp_path("recent");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
         let mut store = HistoryStore::open(path, HistoryRetention::Day, 0);
         store.record(draft("expired"), 1_000).unwrap();
-        let now = 25 * 60 * 60 * 1_000;
-        store.record(draft("first pasted"), now - 4_000).unwrap();
-        let mut printed = draft("printed only");
-        printed.kind = HistoryKind::Printed;
-        store.record(printed, now - 3_000).unwrap();
-        let mut raw = draft("raw pasted");
-        raw.kind = HistoryKind::Raw;
-        store.record(raw, now - 2_000).unwrap();
-        store.record(draft("latest pasted"), now - 1_000).unwrap();
+        for (index, text) in ["one", "two", "  ", "three"].into_iter().enumerate() {
+            store.record(draft(text), day_ms + index as u64).unwrap();
+        }
+        store
+            .record(
+                HistoryDraft {
+                    kind: HistoryKind::Printed,
+                    ..draft("printed")
+                },
+                day_ms + 10,
+            )
+            .unwrap();
+        store.record(draft("four"), day_ms + 20).unwrap();
 
-        let recent: Vec<&str> = store
-            .recent_pasted_dictations(2, now)
-            .into_iter()
-            .map(|entry| entry.final_text.as_str())
-            .collect();
-        assert_eq!(recent, ["latest pasted", "raw pasted"]);
+        let texts = |store: &HistoryStore, count| {
+            store
+                .recent(count, day_ms + 1_001)
+                .into_iter()
+                .map(|entry| entry.final_text.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(texts(&store, 5), ["four", "three", "two", "one"]);
+        assert_eq!(texts(&store, 2), ["four", "three"]);
+        store
+            .set_retention(HistoryRetention::Off, day_ms + 1_001)
+            .unwrap();
+        assert!(texts(&store, 5).is_empty(), "Off lists nothing");
     }
 
     #[test]

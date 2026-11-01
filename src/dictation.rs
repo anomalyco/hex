@@ -1,5 +1,7 @@
 #[cfg(target_os = "macos")]
 pub(crate) mod audio;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod browser_page;
 #[cfg(target_os = "macos")]
 pub(crate) mod config;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
@@ -72,7 +74,7 @@ pub enum ShortcutMode {
     /// Hold the shortcut while speaking; release to finish.
     #[default]
     Hold,
-    /// Press once to start and again to finish. Escape still cancels.
+    /// Press once to start and again to finish.
     Toggle,
 }
 
@@ -204,10 +206,12 @@ impl DictationClip {
         }
     }
 
-    /// Whether the capture holds no speech worth transcribing: its level stays
-    /// below the silence threshold or, once the speech detector is installed,
-    /// the detector finds no speech in it (a key click, the start tone, or a
-    /// noisy room).
+    /// Whether the capture holds no speech worth transcribing: its level
+    /// stays below the silence threshold or, once the speech detector is
+    /// installed, the detector finds no speech in it (a key click, the start
+    /// tone, a noisy room, or a microphone turned down too far). Such a
+    /// capture is discarded quietly, with no tone or note; the log has the
+    /// measured level and peak against the thresholds.
     pub fn is_near_silent(&self) -> bool {
         let level_dbfs = self.loudest_window_dbfs();
         let silent = level_dbfs < SILENCE_THRESHOLD_DBFS;
@@ -241,8 +245,14 @@ impl DictationClip {
         let started = std::time::Instant::now();
         match crate::transcription::speech_detector::contains_speech(&self.samples[..released]) {
             Some(false) => {
+                let peak = self.samples[..released]
+                    .iter()
+                    .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
                 tracing::info!(
                     level_dbfs,
+                    silence_threshold_dbfs = SILENCE_THRESHOLD_DBFS,
+                    peak_dbfs = 20.0 * peak.max(f32::MIN_POSITIVE).log10(),
+                    speech_threshold = crate::transcription::speech_detector::THRESHOLD,
                     audio_ms = self.duration_ms(),
                     vad_ms = started.elapsed().as_millis() as u64,
                     "discarded dictation without detected speech"
@@ -1501,7 +1511,7 @@ mod tests {
         second.publish(said("next"));
         assert_eq!(capture.take_partial(), Some(said("next")));
 
-        // Escape drops the text with the recording.
+        // A cancelled recording (a lost microphone) drops its text.
         second.publish(said("next one"));
         capture.cancel();
         assert_eq!(capture.take_partial(), None);
@@ -1537,7 +1547,7 @@ mod tests {
         cancelled.cancel();
         assert!(!cancelled.is_streaming());
         let (_, _, cancels) = stream_traffic(&commands);
-        assert_eq!(cancels, 1, "Escape cancels");
+        assert_eq!(cancels, 1, "a cancelled recording cancels its stream");
 
         let (offline, commands) = TranscriptionEngine::for_test_without_streaming();
         let mut capture = DictationCapture::new(16_000);

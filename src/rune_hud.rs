@@ -211,12 +211,38 @@ pub(crate) struct Hud {
     /// display; a capture's start or a hide picks the display again.
     #[cfg(not(target_os = "macos"))]
     edge_placed: Option<IndicatorPosition>,
+    /// When the HUD last checked which display the pointer is on.
+    #[cfg(not(target_os = "macos"))]
+    followed: Option<Instant>,
 }
 
+/// How often a shown HUD checks which display the pointer is on (#807).
+#[cfg(not(target_os = "macos"))]
+const FOLLOW_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+
 impl Hud {
+    /// While shown, every `FOLLOW_EVERY`: the HUD and the live text move to
+    /// the display under the pointer when it moved to another, at once and
+    /// without focus. Windows and X11; a layer-shell surface stays on the
+    /// compositor's focused output, and GNOME and KDE on the primary.
+    #[cfg(not(target_os = "macos"))]
+    fn follow_pointer(&mut self, now: Instant) {
+        if !self.shown || self.followed.is_some_and(|at| now < at + FOLLOW_EVERY) {
+            return;
+        }
+        self.followed = Some(now);
+        if let Some(overlay) = &self.this {
+            overlay.refollow_pointer();
+        }
+        crate::rune_ui::live_text::refollow_pointer();
+    }
+
     fn handle(&mut self, event: HudEvent) {
+        // A capture's start sends the display and placement to Rune again,
+        // so a placement Rune resolved wrong on another screen (#873)
+        // doesn't stick.
         #[cfg(target_os = "macos")]
-        if let HudEvent::ConfigureDotScope(_) = event {
+        if let HudEvent::ConfigureDotScope(_) | HudEvent::Started = event {
             self.placed = None;
         }
         #[cfg(not(target_os = "macos"))]
@@ -267,8 +293,9 @@ impl Hud {
                 IndicatorPosition::Bottom => (ScreenEdge::Bottom, BOTTOM_OFFSET),
                 _ => (ScreenEdge::Top, TOP_OFFSET),
             };
-            // Placing picks the display again (`display`), so the HUD
-            // never moves mid-capture when the pointer does.
+            // Placing picks the display again (`display`); while shown, the
+            // HUD follows the pointer to another display at its own pace
+            // (`follow_pointer`).
             if self.edge_placed != Some(self.position) {
                 overlay.place(edge, margin);
                 self.edge_placed = Some(self.position);
@@ -287,6 +314,10 @@ impl Hud {
         #[cfg(not(target_os = "macos"))]
         {
             self.edge_placed = None;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            self.placed = None;
         }
         if std::mem::take(&mut self.shown)
             && let Some(overlay) = &self.this
@@ -339,6 +370,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             placed: None,
             #[cfg(not(target_os = "macos"))]
             edge_placed: None,
+            #[cfg(not(target_os = "macos"))]
+            followed: None,
         },
     );
     let this = overlay.clone();
@@ -559,6 +592,10 @@ impl Compositor<Hud> for HudCompositor {
         }
         let active = hud.model.active();
         self.animating.store(active, Ordering::Release);
+        #[cfg(not(target_os = "macos"))]
+        if active {
+            hud.follow_pointer(Instant::now());
+        }
         if !active {
             hud.hide();
             drop(clear_pass(f.encoder, f.target));

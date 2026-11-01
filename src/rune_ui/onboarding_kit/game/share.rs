@@ -236,7 +236,7 @@ pub(super) fn share<S: 'static>(
                 )
                 .child(el().key("space").grow(1.0))
                 .child(
-                    text("Onboarding complete")
+                    text(tr("Onboarding complete"))
                         .key("when")
                         .font(k.ty.small)
                         .color(p.muted()),
@@ -259,7 +259,7 @@ pub(super) fn share<S: 'static>(
                         .pb(14.0)
                         .gap(2.0)
                         .child(
-                            text("messages destroyed")
+                            text(tr("messages destroyed"))
                                 .key("a")
                                 .font(LEAD)
                                 .color(p.text()),
@@ -292,7 +292,7 @@ pub(super) fn share<S: 'static>(
                 .gap(10.0)
                 .items_end()
                 .child(
-                    text("Signed")
+                    text(tr("Signed"))
                         .key("s")
                         .font(k.ty.small)
                         .color(p.muted())
@@ -323,14 +323,14 @@ pub(super) fn share<S: 'static>(
                 .center_y()
                 .child(el().key("space").grow(1.0))
                 .child(
-                    Button::new("Keep playing")
+                    Button::new(tr("Keep playing"))
                         .variant(ButtonVariant::Ghost)
                         .on_press(act(&look.keep))
                         .build_push(k)
                         .key("keep"),
                 )
                 .child(
-                    Button::new("Continue")
+                    Button::new(tr("Continue"))
                         .variant(ButtonVariant::Contrast)
                         .on_press(act(&look.done))
                         .build_push(k)

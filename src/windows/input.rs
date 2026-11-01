@@ -1,6 +1,6 @@
 use std::ptr;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -11,8 +11,9 @@ use windows_sys::Win32::System::SystemInformation::GetTickCount;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-    KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VK_ESCAPE, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
-    VK_MENU, VK_RCONTROL, VK_RETURN, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB,
+    KEYEVENTF_KEYUP, MAPVK_VK_TO_CHAR, MapVirtualKeyW, SendInput, VK_CONTROL, VK_ESCAPE,
+    VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RETURN, VK_RMENU,
+    VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VkKeyScanW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT,
@@ -144,9 +145,16 @@ impl WindowsHotkey {
             .or_else(|| key.strip_prefix('F'))
             .and_then(|number| number.parse::<u8>().ok())
             .is_some_and(|number| (1..=24).contains(&number));
-        if !function_key && HotkeyKey::mouse_number(key).is_none() && modifier_count == 0 {
+        // Keys that type nothing may stand alone: function keys, mouse
+        // buttons, Menu, Pause, and Scroll Lock, and the navigation keys,
+        // which Settings allow alone only with Labs › Special keys alone.
+        let types_nothing = function_key
+            || HotkeyKey::mouse_number(key).is_some()
+            || HotkeyKey::special_name(key)
+            || HotkeyKey::navigation_name(key);
+        if !types_nothing && modifier_count == 0 {
             return Err(eyre!(
-                "Windows dictation shortcuts require a modifier or a function key"
+                "Windows dictation shortcuts require a modifier, a function key, Menu, Pause, or Scroll Lock"
             ));
         }
         Ok(())
@@ -242,7 +250,6 @@ struct CallbackState {
     side_down: SideDownTimes,
     trigger_down: bool,
     paste_trigger_down: bool,
-    escape_down: bool,
     double_tap_enabled: bool,
     double_tap_only: bool,
     /// Pass the dictation key on to other apps instead of consuming it.
@@ -472,7 +479,6 @@ impl WindowsHotkeyMonitor {
             side_down: SideDownTimes::default(),
             trigger_down: false,
             paste_trigger_down: false,
-            escape_down: false,
             double_tap_enabled,
             double_tap_only,
             share_trigger,
@@ -622,7 +628,8 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     if event.dwExtraInfo == HEX_INJECTED {
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
-    match process_button(event.vkCode, is_down, event.time) {
+    let vk = track_numpad(event, is_down).unwrap_or(event.vkCode);
+    match process_button(vk, is_down, event.time) {
         Disposition::Pass => unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) },
         Disposition::Suppress => 1,
         Disposition::Mask if replay_masked_release(event) => 1,
@@ -945,23 +952,8 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
                     }
                 }
             } else if vk == u32::from(VK_ESCAPE) {
-                if is_down && (state.capture.active || state.capture.locked) {
-                    state.dirty = true;
-                    state.escape_down = true;
-                    suppressed = true;
-                    if let Some(action) = state.capture.cancel() {
-                        send_event(state, action, time);
-                    }
-                } else if is_up && state.escape_down {
-                    state.escape_down = false;
-                    suppressed = true;
-                    // Escape is not a modifier, so the modifier path never
-                    // sees this release; without clearing here, the next
-                    // Ctrl+Space after a cancel was ignored.
-                    if !state.modifiers.any_required_down(&state.binding) {
-                        state.dirty = false;
-                    }
-                }
+                // Escape ends no dictation, not even as a chord: it reaches
+                // the app (#786).
             } else if !modifier_event {
                 // A key or button joining a held modifier-only shortcut makes
                 // a chord meant for another application, such as Alt+Tab.
@@ -1196,32 +1188,76 @@ fn key_down(key: u16) -> bool {
     unsafe { GetAsyncKeyState(i32::from(key)) < 0 }
 }
 
-/// One step of the settings-pane chord capture. The UI polls this on a
-/// timer instead of listening to window keystrokes because dictation
-/// bindings can be modifier-only chords (for example Ctrl+Win), which
-/// never produce a keystroke event.
-pub(crate) enum ChordPoll {
-    Pending,
-    Cancelled,
-    Captured(WindowsHotkey),
+mod chord;
+
+pub(crate) use chord::{ChordCapture, ChordPoll, NumpadWatch};
+
+/// Numpad Enter's code in a binding: Enter's virtual key with the extended
+/// flag, which no virtual key of its own names.
+const NUMPAD_ENTER: u32 = 0x100 | VK_RETURN as u32;
+
+/// The numpad key a keyboard hook last saw go down and not yet up, by its
+/// `num` code, for the chord capture: polled key state can't tell Numpad 1
+/// with Num Lock off from End. Zero for none. The capture runs a hook of
+/// its own (`NumpadWatch`), so it doesn't depend on the listener's.
+static NUMPAD_DOWN: AtomicU32 = AtomicU32::new(0);
+
+/// The numpad digit and decimal keys by scan code. With Num Lock off they
+/// send the navigation keys' codes (Numpad 1 is End), but keep these scan
+/// codes without the extended flag, which the navigation cluster's keys
+/// carry.
+const NUMPAD_SCAN_CODES: [(u32, u32); 11] = [
+    (0x52, 0x60),
+    (0x4F, 0x61),
+    (0x50, 0x62),
+    (0x51, 0x63),
+    (0x4B, 0x64),
+    (0x4C, 0x65),
+    (0x4D, 0x66),
+    (0x47, 0x67),
+    (0x48, 0x68),
+    (0x49, 0x69),
+    (0x53, 0x6E),
+];
+
+/// Notes a numpad key going down or up for the chord capture
+/// (`NUMPAD_DOWN`), and returns its `num` code; `None` for any other key.
+/// Only a hook tells a numpad key from the key it stands for.
+fn track_numpad(event: &KBDLLHOOKSTRUCT, is_down: bool) -> Option<u32> {
+    let vk = numpad_key(event)?;
+    if is_down {
+        NUMPAD_DOWN.store(vk, Ordering::Relaxed);
+    } else {
+        let _ = NUMPAD_DOWN.compare_exchange(vk, 0, Ordering::Relaxed, Ordering::Relaxed);
+    }
+    Some(vk)
 }
 
-/// Records the next chord the user presses: modifiers plus a regular key
-/// complete immediately; a modifier-only chord completes when every
-/// accumulated modifier key is released, keeping the sides
-/// `HotkeyModifiers::recorded_sides` keeps (both Alts stay both); Escape
-/// cancels.
-#[derive(Default)]
-pub(crate) struct ChordCapture {
-    mouse_armed: bool,
-    /// Every sided modifier key seen down since the chord began.
-    seen: ModifierState,
+/// A numpad key's `num` code, whatever Num Lock says: the digits and the
+/// decimal by scan code, Numpad Enter by Enter's extended flag, and the
+/// operators by their own virtual keys.
+fn numpad_key(event: &KBDLLHOOKSTRUCT) -> Option<u32> {
+    let extended = event.flags & LLKHF_EXTENDED != 0;
+    if event.vkCode == u32::from(VK_RETURN) {
+        return extended.then_some(NUMPAD_ENTER);
+    }
+    if matches!(event.vkCode, 0x6A | 0x6B | 0x6D | 0x6F) {
+        return Some(event.vkCode);
+    }
+    if extended {
+        return None;
+    }
+    NUMPAD_SCAN_CODES
+        .into_iter()
+        .find(|&(scan, _)| scan == event.scanCode)
+        .map(|(_, vk)| vk)
 }
 
 /// Non-modifier keys the capture scans, paired with the names
-/// [`virtual_key`] accepts (letters, digits, and function keys are
-/// scanned separately).
-const CAPTURE_NAMED_KEYS: [(u16, &str); 14] = [
+/// [`virtual_key`] accepts (letters, digits, function keys, and the
+/// layout's punctuation are scanned separately). Numpad keys are named
+/// `num 1`, `num *`, ...: their own keys, not the top row's.
+const CAPTURE_NAMED_KEYS: [(u16, &str); 45] = [
     (VK_SPACE, "space"),
     (VK_RETURN, "enter"),
     (VK_TAB, "tab"),
@@ -1236,125 +1272,75 @@ const CAPTURE_NAMED_KEYS: [(u16, &str); 14] = [
     (0x26, "up"),
     (0x27, "right"),
     (0x28, "down"),
+    (0x13, "pause"),
+    (0x91, "scroll lock"),
+    (0x5D, "menu"),
+    // The punctuation keys, by their layout-independent virtual keys; the
+    // keycap shows what each types on the active layout (`keycap_label`).
+    (0xBA, "oem 1"),
+    (0xBF, "oem 2"),
+    (0xC0, "oem 3"),
+    (0xDB, "oem 4"),
+    (0xDC, "oem 5"),
+    (0xDD, "oem 6"),
+    (0xDE, "oem 7"),
+    (0xDF, "oem 8"),
+    (0xBB, "oem plus"),
+    (0xBC, "oem comma"),
+    (0xBD, "oem minus"),
+    (0xBE, "oem period"),
+    (0xE2, "oem 102"),
+    (0x60, "num 0"),
+    (0x61, "num 1"),
+    (0x62, "num 2"),
+    (0x63, "num 3"),
+    (0x64, "num 4"),
+    (0x65, "num 5"),
+    (0x66, "num 6"),
+    (0x67, "num 7"),
+    (0x68, "num 8"),
+    (0x69, "num 9"),
+    (0x6A, "num *"),
+    (0x6B, "num +"),
+    (0x6D, "num -"),
+    (0x6E, "num ."),
+    (0x6F, "num /"),
 ];
 
-impl ChordCapture {
-    fn arm_mouse(&mut self, held: bool) -> bool {
-        self.mouse_armed |= !held;
-        self.mouse_armed
-    }
-
-    pub fn poll(&mut self) -> ChordPoll {
-        if key_down(VK_ESCAPE) {
-            return ChordPoll::Cancelled;
-        }
-        if !self.mouse_armed {
-            // Do not bind the click that opened the recorder.
-            if !self.arm_mouse(MOUSE_KEYS.iter().any(|&(vk, _)| key_down(vk))) {
-                return ChordPoll::Pending;
-            }
-        }
-        let held = ModifierState::current();
-        if let Some(key) = pressed_capture_key() {
-            let any = |down: bool| down.then_some(ModifierSide::Either);
-            return ChordPoll::Captured(WindowsHotkey {
-                control: any(held.left_control || held.right_control),
-                windows: any(held.left_windows || held.right_windows),
-                alt: any(held.left_alt || held.right_alt),
-                shift: any(held.left_shift || held.right_shift),
-                key: Some(key),
-            });
-        }
-        if unsupported_key_down() {
-            // A key the bindings cannot express (OEM punctuation, media
-            // keys, ...) is being pressed: forget the chord in progress so
-            // releasing the modifiers cannot record a wrong modifier-only
-            // binding.
-            *self = Self::default();
-            return ChordPoll::Pending;
-        }
-        self.seen.add(&held);
-        if self.seen.any() && !held.any() {
-            return ChordPoll::Captured(self.held());
-        }
-        ChordPoll::Pending
-    }
-
-    /// The modifier keys a release would record so far.
-    pub fn held(&self) -> WindowsHotkey {
-        let seen = &self.seen;
-        let side = |left: bool, right: bool| match (left, right) {
-            (true, true) => Some(ModifierSide::Both),
-            (true, false) => Some(ModifierSide::Left),
-            (false, true) => Some(ModifierSide::Right),
-            (false, false) => None,
-        };
-        let modifiers = HotkeyModifiers {
-            control: side(seen.left_control, seen.right_control),
-            option: side(seen.left_alt, seen.right_alt),
-            shift: side(seen.left_shift, seen.right_shift),
-            command: side(seen.left_windows, seen.right_windows),
-            function: false,
-        }
-        .recorded_sides();
-        WindowsHotkey {
-            control: modifiers.control,
-            windows: modifiers.command,
-            alt: modifiers.option,
-            shift: modifiers.shift,
-            key: None,
-        }
-    }
+/// The keycap for a saved key label: a punctuation key shows the character
+/// it types on the active layout now (`;`, `ù`), else its name (`Oem 3`).
+pub(crate) fn keycap_label(label: &str) -> String {
+    let name = label.to_ascii_lowercase();
+    CAPTURE_NAMED_KEYS
+        .into_iter()
+        .find(|&(_, named)| named == name && named.starts_with("oem "))
+        .and_then(|(vk, _)| {
+            // SAFETY: a pure lookup in this thread's keyboard layout.
+            let mapped = unsafe { MapVirtualKeyW(u32::from(vk), MAPVK_VK_TO_CHAR) };
+            char::from_u32(mapped & 0xFFFF)
+                .filter(|character| !character.is_control() && !character.is_whitespace())
+        })
+        .map_or_else(
+            || label.to_string(),
+            |character| character.to_uppercase().collect(),
+        )
 }
 
-impl ModifierState {
-    fn add(&mut self, other: &Self) {
-        self.left_control |= other.left_control;
-        self.right_control |= other.right_control;
-        self.left_windows |= other.left_windows;
-        self.right_windows |= other.right_windows;
-        self.left_alt |= other.left_alt;
-        self.right_alt |= other.right_alt;
-        self.left_shift |= other.left_shift;
-        self.right_shift |= other.right_shift;
-    }
-
-    fn any(&self) -> bool {
-        self.left_control
-            || self.right_control
-            || self.left_windows
-            || self.right_windows
-            || self.left_alt
-            || self.right_alt
-            || self.left_shift
-            || self.right_shift
-    }
-}
-
-/// Whether any pressed key is one the capture cannot map to a binding
-/// name: everything except mouse buttons, modifiers, lock/IME keys, and
-/// the mappable set.
-fn unsupported_key_down() -> bool {
-    for vk in 0x08..=0xFE_u16 {
-        match vk {
-            // Modifiers (generic + left/right) and the Windows keys.
-            0x10..=0x12 | 0xA0..=0xA5 | 0x5B | 0x5C => continue,
-            // Escape is the cancel key; lock and IME state keys are inert.
-            0x1B | 0x14 | 0x15..=0x1A | 0x90 | 0x91 => continue,
-            _ => {}
-        }
-        if !key_down(vk) {
-            continue;
-        }
-        let mappable = CAPTURE_NAMED_KEYS.iter().any(|(named, _)| *named == vk)
-            || (0x41..=0x5A).contains(&vk)
-            || (0x30..=0x39).contains(&vk)
-            || (0x70..=0x87).contains(&vk);
-        if !mappable {
-            return true;
-        }
-    }
-    false
+/// The punctuation key that types `character` on the active layout, for a
+/// shortcut written with the character (`ctrl+;`).
+fn punctuation_key(character: char) -> Option<u32> {
+    let mut units = [0u16; 2];
+    let [unit] = character.encode_utf16(&mut units) else {
+        return None;
+    };
+    // SAFETY: a pure lookup in this thread's keyboard layout.
+    let scanned = unsafe { VkKeyScanW(*unit) };
+    let vk = scanned as u16 & 0xFF;
+    (scanned != -1
+        && CAPTURE_NAMED_KEYS
+            .iter()
+            .any(|&(named, name)| named == vk && name.starts_with("oem ")))
+    .then_some(u32::from(vk))
 }
 
 const MOUSE_KEYS: [(u16, &str); 5] = [
@@ -1364,34 +1350,6 @@ const MOUSE_KEYS: [(u16, &str); 5] = [
     (0x05, "mouse4"),
     (0x06, "mouse5"),
 ];
-
-fn pressed_capture_key() -> Option<String> {
-    if let Some((_, name)) = MOUSE_KEYS.into_iter().find(|&(vk, _)| key_down(vk)) {
-        return Some(name.into());
-    }
-    if let Some((_, name)) = CAPTURE_NAMED_KEYS.into_iter().find(|&(vk, _)| key_down(vk)) {
-        return Some(name.to_string());
-    }
-    for vk in 0x41..=0x5A_u16 {
-        // A-Z
-        if key_down(vk) {
-            return Some(char::from(vk as u8).to_ascii_lowercase().to_string());
-        }
-    }
-    for vk in 0x30..=0x39_u16 {
-        // 0-9
-        if key_down(vk) {
-            return Some(char::from(vk as u8).to_string());
-        }
-    }
-    for vk in 0x70..=0x87_u16 {
-        // F1-F24
-        if key_down(vk) {
-            return Some(format!("f{}", vk - 0x70 + 1));
-        }
-    }
-    None
-}
 
 pub(crate) fn virtual_key(key: &str) -> Result<u32> {
     let normalized = key.trim().to_ascii_lowercase();
@@ -1409,6 +1367,8 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
     }
     let virtual_key = match normalized.as_str() {
         "return" => u32::from(VK_RETURN),
+        "num enter" => NUMPAD_ENTER,
+        name if HotkeyKey::special_name(name) && name != "menu" && name != "pause" => 0x91,
         "page_up" => 0x21,
         "page_down" => 0x22,
         _ => {
@@ -1418,12 +1378,15 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
                 .filter(|number| (1..=24).contains(number))
             {
                 0x70 + number - 1
-            } else if normalized.len() == 1 {
-                let character = normalized.as_bytes()[0];
+            } else if let Some(character) = single_character(&normalized) {
                 if character.is_ascii_alphanumeric() {
-                    u32::from(character.to_ascii_uppercase())
+                    u32::from(character.to_ascii_uppercase() as u8)
+                } else if let Some(vk) = punctuation_key(character) {
+                    vk
                 } else {
-                    return Err(eyre!("unsupported Windows shortcut key: {key}"));
+                    return Err(eyre!(
+                        "{key} isn't a key on the active Windows keyboard layout"
+                    ));
                 }
             } else {
                 return Err(eyre!("unsupported Windows shortcut key: {key}"));
@@ -1433,9 +1396,75 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
     Ok(virtual_key)
 }
 
+fn single_character(name: &str) -> Option<char> {
+    let mut characters = name.chars();
+    characters.next().filter(|_| characters.next().is_none())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numpad_pause_and_scroll_lock_round_trip_through_saved_settings() {
+        for (vk, name) in CAPTURE_NAMED_KEYS {
+            let saved = HotkeyKey::named(name);
+            assert_eq!(saved.name(), name);
+            assert_eq!(virtual_key(&saved.name()).unwrap(), u32::from(vk), "{name}");
+        }
+        let enter = HotkeyKey::named("num enter");
+        assert_eq!(enter.label, "Num Enter");
+        assert_eq!(virtual_key(&enter.name()).unwrap(), NUMPAD_ENTER);
+        assert_ne!(virtual_key("num 1").unwrap(), virtual_key("1").unwrap());
+        assert_eq!(HotkeyKey::named("num *").label, "Num *");
+        assert_eq!(HotkeyKey::named("scroll lock").label, "Scroll Lock");
+    }
+
+    #[test]
+    fn numpad_keys_keep_their_code_whatever_num_lock_says() {
+        let event = |vk: u32, scan: u32, extended: bool| KBDLLHOOKSTRUCT {
+            vkCode: vk,
+            scanCode: scan,
+            flags: if extended { LLKHF_EXTENDED } else { 0 },
+            time: 0,
+            dwExtraInfo: 0,
+        };
+        // Numpad 1: VK_NUMPAD1 with Num Lock on, End with it off.
+        assert_eq!(numpad_key(&event(0x61, 0x4F, false)), Some(0x61));
+        assert_eq!(numpad_key(&event(0x23, 0x4F, false)), Some(0x61));
+        // The End key itself is extended.
+        assert_eq!(numpad_key(&event(0x23, 0x4F, true)), None);
+        // Numpad 5 with Num Lock off sends Clear.
+        assert_eq!(numpad_key(&event(0x0C, 0x4C, false)), Some(0x65));
+        assert_eq!(
+            numpad_key(&event(u32::from(VK_RETURN), 0x1C, true)),
+            Some(NUMPAD_ENTER)
+        );
+        assert_eq!(numpad_key(&event(u32::from(VK_RETURN), 0x1C, false)), None);
+        assert_eq!(numpad_key(&event(0x6F, 0x35, true)), Some(0x6F));
+    }
+
+    #[test]
+    fn pause_and_scroll_lock_stand_alone_but_numpad_keys_need_a_modifier() {
+        let alone = |key: &str| WindowsHotkey {
+            control: None,
+            windows: None,
+            alt: None,
+            shift: None,
+            key: Some(key.into()),
+        };
+        assert!(alone("pause").validate().is_ok());
+        assert!(alone("scroll lock").validate().is_ok());
+        assert!(alone("menu").validate().is_ok());
+        // Settings gate these behind Labs › Special keys alone.
+        assert!(alone("home").validate().is_ok());
+        assert!(alone("num 5").validate().is_err());
+        let control = WindowsHotkey {
+            control: Some(ModifierSide::Either),
+            ..alone("num 5")
+        };
+        assert!(control.validate().is_ok());
+    }
 
     #[test]
     fn mouse_recorder_waits_for_the_opening_click_to_be_released() {
@@ -1732,7 +1761,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_cancels_a_locked_capture() {
+    fn inhibiting_shortcuts_cancels_a_locked_capture() {
         let mut state = CaptureState::default();
         state.press(true, false, 100);
         state.release(true, 120);
@@ -1799,7 +1828,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_cancels_a_toggled_capture() {
+    fn inhibiting_shortcuts_cancels_a_toggled_capture() {
         let mut state = CaptureState {
             toggle: true,
             ..CaptureState::default()

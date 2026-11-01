@@ -266,6 +266,25 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
 }
 
+/// Asks a running 2.3.1 or Swift Hex to quit once this Hex is ready to
+/// listen, so the two never answer the same shortcut. The old app stays
+/// installed.
+fn quit_legacy_hex() {
+    objc2::rc::autoreleasepool(|_| {
+        for bundle_id in crate::desktop::onboarding::LEGACY_MAC_BUNDLE_IDS {
+            for app in objc2_app_kit::NSRunningApplication::runningApplicationsWithBundleIdentifier(
+                &NSString::from_str(bundle_id),
+            ) {
+                if app.terminate() {
+                    tracing::info!(bundle_id, "asked the old Hex to quit");
+                } else {
+                    tracing::warn!(bundle_id, "the old Hex did not agree to quit");
+                }
+            }
+        }
+    });
+}
+
 /// Samples footprint and CPU for the life of the app (every 10 s in release, 2 s in debug
 /// builds) and logs a warning on a large footprint, steady growth, or a busy core.
 fn watch_process() {
@@ -370,6 +389,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                     }
                 }
             }
+            quit_legacy_hex();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 crate::recognition::listen(
                     event_log,
@@ -425,9 +445,15 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
                 listener_failure,
             )
         })?;
+    // A closed window is only ordered out, and AppKit keeps it on the Space
+    // it was last shown on: reopening it from the menu bar would switch back
+    // to that Space. Bring it to the active Space instead.
+    let native = rune::MacWindowOptions::default()
+        .collection_behavior(objc2_app_kit::NSWindowCollectionBehavior::MoveToActiveSpace.0);
     let mut app = crate::rune_ui::app(Default::default())
         .args(Vec::new())
-        .accessory();
+        .accessory()
+        .macos_window(native);
     // The first-run tour opens centred at one size; a tiling window manager
     // would otherwise stretch it to half the screen.
     if !onboarding_completed {
@@ -472,7 +498,6 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     };
     let hud = crate::rune_hud::install(&mut app);
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
-    crate::rune_ui::paste_picker::install(&mut app);
     // The capture capsule, picker, and ink.
     #[cfg(hex_capture)]
     let capture_overlays =
@@ -959,29 +984,9 @@ fn bring_forward(window: &rune::AppHandle<Ui>) {
     crate::app_settings::set_dock_icon_visible(true);
     if let Some(mtm) = MainThreadMarker::new() {
         let app = NSApplication::sharedApplication(mtm);
-        follow_active_space(&app);
         app.activate();
     }
     window.open();
-}
-
-/// Lets Hex's main window open on the Space the user is on, instead of
-/// activating Hex switching back to the Space it was first shown on (#596).
-/// Overlays and panels (which can't become main, or already join every
-/// Space) are left alone: AppKit refuses `MoveToActiveSpace` beside
-/// `CanJoinAllSpaces`.
-fn follow_active_space(app: &NSApplication) {
-    use objc2_app_kit::NSWindowCollectionBehavior;
-    for window in app.windows().iter() {
-        let behavior = window.collectionBehavior();
-        if !window.canBecomeMainWindow()
-            || behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces)
-            || behavior.contains(NSWindowCollectionBehavior::MoveToActiveSpace)
-        {
-            continue;
-        }
-        window.setCollectionBehavior(behavior | NSWindowCollectionBehavior::MoveToActiveSpace);
-    }
 }
 
 impl Pump {
@@ -1078,6 +1083,24 @@ impl Pump {
                 let _ = self
                     .runtime
                     .recognition(RecognitionControl::PasteLast { reply: None });
+            }
+            // Labs › Copy recent dictations: copied, never pasted.
+            StatusItemAction::CopyRecentDictation(id) => {
+                if !crate::labs::recent_dictations() {
+                    return;
+                }
+                let copied = self
+                    .runtime
+                    .history()
+                    .and_then(|history| history.final_text(id))
+                    .ok_or_else(|| eyre!("that dictation is no longer in History"))
+                    .and_then(|text| {
+                        arboard::Clipboard::new()?.set_text(text)?;
+                        Ok(())
+                    });
+                if let Err(error) = copied {
+                    tracing::warn!(%error, "could not copy a recent dictation");
+                }
             }
             StatusItemAction::Update => {
                 if let Some(updater) = UPDATER.get()

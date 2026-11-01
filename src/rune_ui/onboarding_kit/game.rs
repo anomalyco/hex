@@ -15,6 +15,7 @@ pub(crate) mod fx;
 mod lines;
 mod share;
 
+use crate::desktop::i18n::tr;
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -680,9 +681,11 @@ pub(crate) struct Session {
 impl Session {
     fn new(s: &Onboard, now: f64) -> Self {
         let saved = s.live.is_some().then(high_score::load);
-        let seed = match s.rehearsal {
-            Some(_) => 0,
-            None => lines::fresh_seed(),
+        let fixture = s.live.as_ref().is_some_and(|live| live.fixture);
+        let seed = if s.rehearsal.is_some() || fixture {
+            0
+        } else {
+            lines::fresh_seed()
         };
         Self {
             play: Play::new(now, seed, saved.unwrap_or(0)),
@@ -896,9 +899,9 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
         s.live.as_ref().and_then(live::hint_copy)
     };
     let title = if s.flow == super::stories::Flow::FirstRun {
-        "With Hex"
+        tr("With Hex")
     } else {
-        "Clear your messages"
+        tr("Clear your messages")
     };
     let (stage, field) = if s.live.is_some() {
         let look = Look::<Ui> {
@@ -1235,7 +1238,7 @@ fn header<S: 'static>(
         .border(p.hair, k.c.border_weak)
         .child(number)
         .child(
-            text("destroyed")
+            text(tr("destroyed"))
                 .key("label")
                 .font(k.ty.small)
                 .color(p.muted()),
@@ -1268,7 +1271,7 @@ fn header<S: 'static>(
                 )
                 .child(keys(p, "keys", look.caps, g.holding))
                 .child(
-                    text("and answer the one that's lit")
+                    text(tr("and answer the one that's lit"))
                         .key("rest")
                         .font(LEAD)
                         .color(p.muted()),
@@ -1285,7 +1288,7 @@ fn header<S: 'static>(
             .opacity(chrome)
             .opacity_motion(Anim::INSTANT)
             .child(
-                Button::new("Done")
+                Button::new(tr("Done"))
                     .variant(ButtonVariant::Neutral)
                     .on_press(act(&look.finish))
                     .build_push(k)
@@ -1646,7 +1649,7 @@ fn certificate(p: Paint, targeted: bool, signed: bool) -> El {
             k.c.border_base
         });
     let hint = (!signed).then(|| {
-        text("Sign by saying your name")
+        text(tr("Sign by saying your name"))
             .key("hint")
             .font(k.ty.ui)
             .color(p.faint())
@@ -1671,13 +1674,13 @@ fn certificate(p: Paint, targeted: bool, signed: bool) -> El {
                 .gap(2.0)
                 .child(text("Hex").key("app").font(k.ty.small).color(p.muted()))
                 .child(
-                    text("Certificate of completion")
+                    text(tr("Certificate of completion"))
                         .key("title")
                         .font(k.ty.ui_medium)
                         .color(p.text()),
                 )
                 .child(
-                    text("I hereby have completed Hex onboarding.")
+                    text(tr("I hereby have completed Hex onboarding."))
                         .key("body")
                         .font(k.ty.ui)
                         .color(p.text()),

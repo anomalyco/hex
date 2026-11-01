@@ -36,7 +36,7 @@ engine. There is no package to install and no build step.
    If `hex` reports `commands check` as an unrecognized subcommand, stop: the
    user is on an older Hex (such as 2.3.1). Tell them to install the matching
    skill with `npx skills add anomalyco/hex#app-v2.3.1 --skill hex-personal-commands`,
-   or to switch to the dev build (https://github.com/anomalyco/hex#install-hex).
+   or to switch to the dev build (https://github.com/anomalyco/hex#downloads).
 
 Completion criterion: the requested behavior is represented in the config,
 `hex commands check` succeeds (or, without the CLI, the reload succeeded in

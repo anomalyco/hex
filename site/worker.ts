@@ -37,7 +37,9 @@ export default {
     const path = stripBase(url.pathname)
     if (path === undefined) return new Response("Not found", { status: 404 })
     const assetUrl = new URL(url)
-    assetUrl.pathname = path
+    // Docs are Markdown files served at clean paths, for agents to fetch.
+    const doc = DOCS.get(path)
+    assetUrl.pathname = doc ?? path
     const assetRequest = new Request(assetUrl, request)
     const response = await env.ASSETS.fetch(assetRequest)
     const headers = new Headers(response.headers)
@@ -47,6 +49,7 @@ export default {
     if (path.startsWith("/assets/")) {
       headers.set("Cache-Control", "public, max-age=31536000, immutable")
     }
+    if (doc) headers.set("Content-Type", "text/markdown; charset=utf-8")
     secure(headers)
     if (path.endsWith(".mp4")) return ranged(request, request.method === "HEAD" ? await env.ASSETS.fetch(new Request(assetUrl, { headers: request.headers })) : response, headers)
     return new Response(response.body, {
@@ -56,6 +59,8 @@ export default {
     })
   },
 }
+
+const DOCS = new Map([["/docs/transforms", "/docs/transforms.md"]])
 
 function secure(headers: Headers) {
   headers.set("Strict-Transport-Security", "max-age=31536000")
@@ -182,7 +187,7 @@ async function devNotes(request: Request, env: Env): Promise<Response> {
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'",
   })
   secure(headers)
-  const body = request.method === "HEAD" ? null : renderDevNotes(parseDevNotes(value), DEV_DOWNLOAD_PATH)
+  const body = request.method === "HEAD" ? null : renderDevNotes(parseDevNotes(value), DEV_DOWNLOAD_PATH, new URL(request.url).searchParams.get("since"))
   return new Response(body, { headers })
 }
 

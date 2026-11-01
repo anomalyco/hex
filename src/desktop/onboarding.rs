@@ -190,7 +190,6 @@ pub enum Practice {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Input {
     Continue,
-    Back,
     /// "Skip" on the practice step.
     Skip,
     Grant(SetupItem),
@@ -237,9 +236,6 @@ pub struct Row {
 #[derive(Clone, Debug, PartialEq)]
 pub struct View {
     pub step: Step,
-    /// Position among the dotted steps (every step but `Done`).
-    pub index: usize,
-    pub count: usize,
     pub rows: Vec<Row>,
     /// Every setup row is ready.
     pub ready: bool,
@@ -250,7 +246,6 @@ pub struct View {
     /// outside the setup rows.
     pub show_download: bool,
     pub practice: Practice,
-    pub can_go_back: bool,
     /// The listener needs a restart Hex will not do by itself again.
     pub reopen: bool,
     /// Every permission is on, and at least one applies only after Hex
@@ -274,9 +269,10 @@ pub struct Flow {
     /// A refused microphone's System Settings guide is up.
     microphone_guide: bool,
     practice: Practice,
-    /// The setup screen keeps its page dot once it has been needed.
-    setup_needed: bool,
     download_requested: bool,
+    /// The recommended model waits for the person: a scan for models already
+    /// on this computer is running, or found one and they choose.
+    download_held: bool,
     advance_due: bool,
     reopen: bool,
     relaunching: bool,
@@ -300,14 +296,12 @@ impl Flow {
             accessibility_stale: false,
             microphone_guide: false,
             practice: Practice::Waiting,
-            setup_needed: false,
             download_requested: false,
+            download_held: false,
             advance_due: false,
             reopen: false,
             relaunching: false,
         };
-        // A tour resumed at setup keeps its page dot: the person was there.
-        flow.setup_needed = !flow.setup_ready() || start == Step::Setup;
         // `status` is read fresh at launch, so a tour resumed after macOS's
         // Quit & Reopen passes a setup whose grants are now real, and one
         // resumed past setup waits there until they are.
@@ -317,6 +311,12 @@ impl Flow {
             flow.forward_from(start)
         };
         flow
+    }
+
+    /// Holds (or releases) the download the tour starts by itself, while the
+    /// person can choose a model already on this computer instead.
+    pub fn hold_download(&mut self, held: bool) {
+        self.download_held = held;
     }
 
     pub fn step(&self) -> Step {
@@ -332,10 +332,6 @@ impl Flow {
     pub fn on(&mut self, input: Input) -> Effect {
         match input {
             Input::Continue => self.primary(),
-            Input::Back => {
-                self.step = self.back_from(self.step);
-                Effect::None
-            }
             Input::Skip if self.step == Step::TryIt => self.advance(),
             Input::Skip => Effect::None,
             Input::Grant(item) => self.grant(item),
@@ -365,27 +361,14 @@ impl Flow {
     }
 
     pub fn view(&self) -> View {
-        let dotted: Vec<Step> = Step::TOUR
-            .into_iter()
-            .filter(|step| *step != Step::Done && self.shows(*step))
-            .collect();
-        let rows = self.rows();
         View {
             step: self.step,
-            index: dotted
-                .iter()
-                .position(|step| *step == self.step)
-                .unwrap_or(dotted.len()),
-            count: dotted.len(),
-            rows,
+            rows: self.rows(),
             ready: self.setup_ready(),
             dictation_ready: self.status.ready(),
             model: self.model_status(),
             show_download: self.download_requested && !self.model_in_setup(),
             practice: self.practice,
-            can_go_back: self.step != Step::Welcome
-                && self.step != Step::Done
-                && self.back_from(self.step) != self.step,
             reopen: self.reopen,
             restart: self.restart_needed(),
         }
@@ -449,6 +432,7 @@ impl Flow {
             && model.downloading.is_none()
             && !model.failed
             && !self.download_requested
+            && !self.download_held
         {
             self.download_requested = true;
             return Effect::DownloadModel;
@@ -510,14 +494,6 @@ impl Flow {
         rows
     }
 
-    fn shows(&self, step: Step) -> bool {
-        match step {
-            Step::TryIt => self.practice_step,
-            Step::Setup => self.setup_needed || self.step == Step::Setup,
-            _ => true,
-        }
-    }
-
     fn passes(&self, step: Step) -> bool {
         match step {
             Step::Setup => self.setup_ready(),
@@ -529,17 +505,6 @@ impl Flow {
     fn forward_from(&self, mut step: Step) -> Step {
         while self.passes(step) && step != Step::Done {
             step = Step::TOUR[step.position() + 1];
-        }
-        step
-    }
-
-    fn back_from(&self, step: Step) -> Step {
-        let mut index = step.position();
-        while index > 0 {
-            index -= 1;
-            if !self.passes(Step::TOUR[index]) {
-                return Step::TOUR[index];
-            }
         }
         step
     }
@@ -1514,8 +1479,6 @@ mod tests {
     #[test]
     fn tour_walks_welcome_setup_try_done() {
         let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
-        assert_eq!(flow.view().count, 3);
-        assert!(!flow.view().can_go_back);
         assert_eq!(flow.on(Input::Continue), Effect::None);
         assert_eq!(flow.step(), Step::Setup);
         assert_eq!(flow.on(Input::Continue), Effect::None, "setup is not ready");
@@ -1531,7 +1494,6 @@ mod tests {
         assert_eq!(flow.view().practice, Practice::Landed);
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::Done);
-        assert!(!flow.view().can_go_back);
         assert_eq!(flow.on(Input::Continue), Effect::Finish);
     }
 
@@ -1568,6 +1530,32 @@ mod tests {
             flow
         };
         assert!(!installed_flow.view().show_download);
+    }
+
+    #[test]
+    fn a_held_download_waits_for_the_person() {
+        let mut flow = Flow::new(Step::Welcome, fresh_status(), true, true);
+        flow.hold_download(true);
+        assert_eq!(
+            flow.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::None,
+            "found models are offered first"
+        );
+        assert_eq!(flow.view().model, ItemStatus::Todo);
+        assert_eq!(
+            flow.on(Input::Grant(SetupItem::Model)),
+            Effect::DownloadModel,
+            "choosing still starts it"
+        );
+        let mut released = Flow::new(Step::Welcome, fresh_status(), true, true);
+        released.hold_download(true);
+        released.on(Input::Status(fresh_status(), ModelProgress::default()));
+        released.hold_download(false);
+        assert_eq!(
+            released.on(Input::Status(fresh_status(), ModelProgress::default())),
+            Effect::DownloadModel,
+            "nothing found: the tour downloads as before"
+        );
     }
 
     #[test]
@@ -1690,7 +1678,6 @@ mod tests {
             statuses(&flow),
             [(SetupItem::Model, ItemStatus::Todo, true)]
         );
-        assert_eq!(flow.view().count, 2, "no practice step");
         assert_eq!(
             flow.on(Input::Status(status, ModelProgress::default())),
             Effect::DownloadModel
@@ -1752,13 +1739,11 @@ mod tests {
         flow.on(Input::Status(ready_status(), installed()));
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::Done);
-        assert!(!flow.view().can_go_back);
     }
 
     #[test]
     fn granted_permissions_skip_setup() {
         let mut flow = Flow::new(Step::Welcome, permissions_only(), true, true);
-        assert_eq!(flow.view().count, 2);
         flow.on(Input::Continue);
         assert_eq!(flow.step(), Step::TryIt);
     }
@@ -1795,10 +1780,8 @@ mod tests {
     fn resuming_past_setup_waits_on_setup_until_ready() {
         let flow = Flow::new(Step::TryIt, fresh_status(), true, true);
         assert_eq!(flow.step(), Step::Setup);
-        let mut flow = Flow::new(Step::TryIt, ready_status(), true, true);
-        assert_eq!(flow.step(), Step::TryIt);
-        flow.on(Input::Back);
-        assert_eq!(flow.step(), Step::Welcome, "a ready setup is passed");
+        let flow = Flow::new(Step::TryIt, ready_status(), true, true);
+        assert_eq!(flow.step(), Step::TryIt, "a ready setup is passed");
     }
 
     #[test]
@@ -1806,8 +1789,6 @@ mod tests {
         // macOS's Quit & Reopen after the last grant: setup is finished.
         let flow = Flow::new(Step::Setup, permissions_only(), true, true);
         assert_eq!(flow.step(), Step::TryIt, "the model can finish in practice");
-        assert_eq!(flow.view().count, 3, "setup keeps its page dot");
-        assert_eq!(flow.view().index, 2);
         let flow = Flow::new(Step::Setup, ready_status(), false, false);
         assert_eq!(flow.step(), Step::Done);
 

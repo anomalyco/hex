@@ -172,7 +172,7 @@ bindsym F9 exec hex dictation start
 bindsym --release F9 exec hex dictation stop
 ```
 
-`hex dictation toggle`, `hex dictation cancel`, and `hex paste-last`
+`hex dictation toggle` and `hex paste-last`
 are also available; see the
 [Linux guide](linux.md#shortcuts). The paste helper is `wtype`; no privileged
 input-injection fallback is installed.

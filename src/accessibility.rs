@@ -7,30 +7,21 @@ type AxUiElementRef = *const c_void;
 
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const MESSAGING_TIMEOUT_SECS: f32 = 0.25;
-const CARET_TIMEOUT_SECS: f32 = 0.10;
-/// Taller than two ordinary lines: collapse multi-line selections to their
-/// active end so the picker sits beside the line in view.
-const MULTI_LINE_SELECTION_HEIGHT: f64 = 48.0;
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct CgRect {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-}
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXUIElementCreateApplication(pid: i32) -> AxUiElementRef;
-    fn AXUIElementCreateSystemWide() -> AxUiElementRef;
     fn AXUIElementCopyAttributeValue(
         element: AxUiElementRef,
         attribute: CfStringRef,
         value: *mut CfTypeRef,
     ) -> i32;
     fn AXUIElementSetMessagingTimeout(element: AxUiElementRef, timeout_in_seconds: f32) -> i32;
+    fn AXUIElementSetAttributeValue(
+        element: AxUiElementRef,
+        attribute: CfStringRef,
+        value: CfTypeRef,
+    ) -> i32;
     fn AXUIElementCopyParameterizedAttributeValue(
         element: AxUiElementRef,
         parameterized_attribute: CfStringRef,
@@ -44,12 +35,10 @@ unsafe extern "C" {
 
 /// `kAXValueTypeCFRange`.
 const AX_VALUE_CF_RANGE: u32 = 4;
-/// `kAXValueTypeCGRect`.
-const AX_VALUE_CGRECT: u32 = 3;
 
 /// Core Foundation's `CFRange`, in UTF-16 code units.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default)]
 struct CfRange {
     location: isize,
     length: isize,
@@ -75,27 +64,12 @@ unsafe extern "C" {
     fn CFURLGetTypeID() -> usize;
     fn CFURLGetString(url: CfTypeRef) -> CfStringRef;
     fn CFRelease(value: CfTypeRef);
-}
-
-/// Bounds of the focused text caret or selection in Quartz global coordinates
-/// (points from the primary display's top-left, y down).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CaretRect {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-}
-
-/// Reads the focused text caret's global bounds via Accessibility, bounded by
-/// [`CARET_TIMEOUT_SECS`] so a hung foreground app never stalls Paste Last.
-/// Returns `None` when focus has no text caret or reports an unpopulated rect,
-/// letting the caller fall back to the pointer location.
-pub fn focused_caret_rect(pid: Option<i32>) -> Option<CaretRect> {
-    let element = pid
-        .and_then(focused_element_for_pid)
-        .or_else(system_focused_element)?;
-    caret_rect_from_range(&element).or_else(|| caret_rect_from_marker_range(&element))
+    fn CFRetain(value: CfTypeRef) -> CfTypeRef;
+    fn CFEqual(left: CfTypeRef, right: CfTypeRef) -> u8;
+    fn CFArrayGetTypeID() -> usize;
+    fn CFArrayGetCount(array: CfTypeRef) -> isize;
+    fn CFArrayGetValueAtIndex(array: CfTypeRef, index: isize) -> CfTypeRef;
+    static kCFBooleanTrue: CfTypeRef;
 }
 
 pub fn focused_window_title(pid: i32) -> Option<String> {
@@ -125,6 +99,117 @@ pub fn focused_web_url(pid: i32) -> Option<String> {
         }
     }
     url
+}
+
+/// Every page a browser's windows show, for a call's address or tab title
+/// when its scripting dictionary can't be asked (#831). Chromium (Arc,
+/// Chrome, Brave, Edge) builds its web accessibility tree only for an
+/// assistive app that asks, which `AXManualAccessibility` does, once per
+/// process; without it a browser behind another app shows windows but no
+/// web areas.
+pub fn browser_pages(pid: i32) -> crate::dictation::browser_page::BrowserPages {
+    // SAFETY: AXUIElementCreateApplication returns a retained Core Foundation object.
+    let Some(application) = bounded_element(unsafe { AXUIElementCreateApplication(pid) }) else {
+        return Default::default();
+    };
+    request_web_accessibility(pid, &application);
+    let mut windows: Vec<CfObject> = Vec::new();
+    let candidates = [
+        copy_element(&application, c"AXFocusedWindow"),
+        copy_element(&application, c"AXMainWindow"),
+    ]
+    .into_iter()
+    .flatten()
+    .chain(copy_elements(&application, c"AXWindows"));
+    for window in candidates {
+        // SAFETY: Both are live AXUIElements.
+        if !windows
+            .iter()
+            .any(|known| unsafe { CFEqual(known.0, window.0) } != 0)
+        {
+            windows.push(window);
+        }
+    }
+    let mut pages = crate::dictation::browser_page::pages(windows.into_iter().map(Element));
+    // The focused web area, when there is one, is the likeliest page.
+    if let Some(url) = focused_web_url(pid) {
+        pages.urls.retain(|known| known != &url);
+        pages.urls.insert(0, url);
+    }
+    pages
+}
+
+/// Asks a Chromium browser for its web accessibility tree, once per
+/// process. Other apps ignore the attribute.
+fn request_web_accessibility(pid: i32, application: &CfObject) {
+    static ASKED: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
+    let mut asked = ASKED.lock().unwrap_or_else(|error| error.into_inner());
+    if asked.contains(&pid) {
+        return;
+    }
+    asked.push(pid);
+    let Some(attribute) = cf_string_literal(c"AXManualAccessibility").map(CfObject) else {
+        return;
+    };
+    // SAFETY: A live application element, a CFString name, and the shared
+    // kCFBooleanTrue constant.
+    let status =
+        unsafe { AXUIElementSetAttributeValue(application.0, attribute.0, kCFBooleanTrue) };
+    if status != 0 {
+        tracing::debug!(
+            status,
+            pid,
+            "the browser has no manual accessibility switch"
+        );
+    }
+}
+
+/// An element as `browser_page` walks it.
+struct Element(CfObject);
+
+impl crate::dictation::browser_page::AxNode for Element {
+    fn role(&self) -> Option<String> {
+        copy_string(&self.0, c"AXRole")
+    }
+
+    fn title(&self) -> Option<String> {
+        copy_string(&self.0, c"AXTitle")
+    }
+
+    fn url(&self) -> Option<String> {
+        copy_url(&self.0, c"AXURL")
+    }
+
+    fn children(&self) -> Vec<Self> {
+        copy_elements(&self.0, c"AXChildren")
+            .into_iter()
+            .map(Element)
+            .collect()
+    }
+}
+
+/// An attribute holding elements (`AXWindows`, `AXChildren`), each bounded.
+fn copy_elements(element: &CfObject, name: &CStr) -> Vec<CfObject> {
+    let Some(array) = copy_attribute(element, name) else {
+        return Vec::new();
+    };
+    if unsafe { CFGetTypeID(array.0) } != unsafe { CFArrayGetTypeID() } {
+        return Vec::new();
+    }
+    let count = unsafe { CFArrayGetCount(array.0) };
+    (0..count)
+        .filter_map(|index| {
+            // SAFETY: Get rule: the array owns the item, so it is retained
+            // before the array goes.
+            let item = unsafe { CFArrayGetValueAtIndex(array.0, index) };
+            if item.is_null() {
+                return None;
+            }
+            let item = CfObject(unsafe { CFRetain(item) });
+            (unsafe { AXUIElementSetMessagingTimeout(item.0, MESSAGING_TIMEOUT_SECS) } == 0)
+                .then_some(item)
+        })
+        .collect()
 }
 
 /// The character just before the insertion point of the application's
@@ -193,108 +278,12 @@ impl Drop for CfObject {
 }
 
 fn bounded_element(element: AxUiElementRef) -> Option<CfObject> {
-    bounded_element_with_timeout(element, MESSAGING_TIMEOUT_SECS)
-}
-
-fn bounded_element_with_timeout(element: AxUiElementRef, timeout_secs: f32) -> Option<CfObject> {
     if element.is_null() {
         return None;
     }
     let element = CfObject(element);
-    (unsafe { AXUIElementSetMessagingTimeout(element.0, timeout_secs) } == 0).then_some(element)
-}
-
-fn focused_element_for_pid(pid: i32) -> Option<CfObject> {
-    // SAFETY: AXUIElementCreateApplication returns a retained Core Foundation object.
-    let app = bounded_element_with_timeout(
-        unsafe { AXUIElementCreateApplication(pid) },
-        CARET_TIMEOUT_SECS,
-    )?;
-    copy_element_with_timeout(&app, c"AXFocusedUIElement", CARET_TIMEOUT_SECS)
-}
-
-fn system_focused_element() -> Option<CfObject> {
-    // SAFETY: AXUIElementCreateSystemWide returns a retained Core Foundation object.
-    let system =
-        bounded_element_with_timeout(unsafe { AXUIElementCreateSystemWide() }, CARET_TIMEOUT_SECS)?;
-    copy_element_with_timeout(&system, c"AXFocusedUIElement", CARET_TIMEOUT_SECS)
-}
-
-fn caret_rect_from_range(element: &CfObject) -> Option<CaretRect> {
-    let range = copy_range(element, c"AXSelectedTextRange")?;
-    let rect = bounds_for_cf_range(element, range)?;
-    if range.length > 0 && rect.height > MULTI_LINE_SELECTION_HEIGHT {
-        let collapsed = CfRange {
-            location: range.location.saturating_add(range.length),
-            length: 0,
-        };
-        if let Some(end_rect) = bounds_for_cf_range(element, collapsed) {
-            return Some(end_rect);
-        }
-    }
-    Some(rect)
-}
-
-fn bounds_for_cf_range(element: &CfObject, range: CfRange) -> Option<CaretRect> {
-    // SAFETY: `range` is a valid `CFRange`-layout value for the duration of the call.
-    let param = unsafe { AXValueCreate(AX_VALUE_CF_RANGE, (&raw const range).cast()) };
-    if param.is_null() {
-        return None;
-    }
-    let param = CfObject(param);
-    let bounds = copy_parameterized_attribute(element, c"AXBoundsForRange", param.0)?;
-    ax_cg_rect(bounds.0).and_then(valid_caret_rect)
-}
-
-fn caret_rect_from_marker_range(element: &CfObject) -> Option<CaretRect> {
-    let marker_range = copy_attribute(element, c"AXSelectedTextMarkerRange")?;
-    let bounds =
-        copy_parameterized_attribute(element, c"AXBoundsForTextMarkerRange", marker_range.0)?;
-    ax_cg_rect(bounds.0).and_then(valid_caret_rect)
-}
-
-fn copy_parameterized_attribute(
-    element: &CfObject,
-    name: &CStr,
-    parameter: CfTypeRef,
-) -> Option<CfObject> {
-    let attribute = CfObject(cf_string_literal(name)?);
-    let mut value = ptr::null();
-    let status = unsafe {
-        AXUIElementCopyParameterizedAttributeValue(element.0, attribute.0, parameter, &mut value)
-    };
-    (status == 0 && !value.is_null()).then(|| CfObject(value))
-}
-
-fn ax_cg_rect(value: CfTypeRef) -> Option<CgRect> {
-    if unsafe { CFGetTypeID(value) } != unsafe { AXValueGetTypeID() } {
-        return None;
-    }
-    let mut rect = CgRect::default();
-    unsafe { AXValueGetValue(value, AX_VALUE_CGRECT, (&raw mut rect).cast()) }.then_some(rect)
-}
-
-fn valid_caret_rect(rect: CgRect) -> Option<CaretRect> {
-    if !rect.x.is_finite()
-        || !rect.y.is_finite()
-        || !rect.width.is_finite()
-        || !rect.height.is_finite()
-        || rect.width < 0.0
-        || rect.height < 0.0
-    {
-        return None;
-    }
-    // Apps without layout bounds often answer (0, 0, 0, 0); macOS's menu bar
-    // occupies y = 0, so an all-zero rect is never a live text caret.
-    if rect.x == 0.0 && rect.y == 0.0 && rect.width == 0.0 && rect.height == 0.0 {
-        return None;
-    }
-    Some(CaretRect {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height.max(16.0),
-    })
+    (unsafe { AXUIElementSetMessagingTimeout(element.0, MESSAGING_TIMEOUT_SECS) } == 0)
+        .then_some(element)
 }
 
 fn copy_attribute(element: &CfObject, name: &CStr) -> Option<CfObject> {
@@ -306,16 +295,9 @@ fn copy_attribute(element: &CfObject, name: &CStr) -> Option<CfObject> {
 }
 
 fn copy_element(element: &CfObject, name: &CStr) -> Option<CfObject> {
-    copy_element_with_timeout(element, name, MESSAGING_TIMEOUT_SECS)
-}
-
-fn copy_element_with_timeout(
-    element: &CfObject,
-    name: &CStr,
-    timeout_secs: f32,
-) -> Option<CfObject> {
     let child = copy_attribute(element, name)?;
-    (unsafe { AXUIElementSetMessagingTimeout(child.0, timeout_secs) } == 0).then_some(child)
+    (unsafe { AXUIElementSetMessagingTimeout(child.0, MESSAGING_TIMEOUT_SECS) } == 0)
+        .then_some(child)
 }
 
 fn copy_string(element: &CfObject, name: &CStr) -> Option<String> {
@@ -375,62 +357,5 @@ mod tests {
         assert_eq!(focused_window_title(i32::MAX), None);
         assert_eq!(focused_web_url(i32::MAX), None);
         assert_eq!(char_before_caret(i32::MAX), None);
-    }
-
-    #[test]
-    fn ax_value_reads_rects_and_rejects_ranges() {
-        let range = CfRange {
-            location: 42,
-            length: 7,
-        };
-        let boxed =
-            CfObject(unsafe { AXValueCreate(AX_VALUE_CF_RANGE, (&raw const range).cast()) });
-        assert_eq!(ax_cg_rect(boxed.0), None);
-
-        let rect = CgRect {
-            x: 312.0,
-            y: 480.0,
-            width: 1.0,
-            height: 18.0,
-        };
-        let boxed = CfObject(unsafe { AXValueCreate(AX_VALUE_CGRECT, (&raw const rect).cast()) });
-        assert_eq!(ax_cg_rect(boxed.0), Some(rect));
-    }
-
-    #[test]
-    fn valid_caret_rect_rejects_unpopulated_or_non_finite_bounds() {
-        assert_eq!(valid_caret_rect(CgRect::default()), None);
-        assert_eq!(
-            valid_caret_rect(CgRect {
-                x: f64::NAN,
-                y: 120.0,
-                width: 1.0,
-                height: 18.0,
-            }),
-            None
-        );
-        assert_eq!(
-            valid_caret_rect(CgRect {
-                x: 100.0,
-                y: 200.0,
-                width: -1.0,
-                height: 18.0,
-            }),
-            None
-        );
-        assert_eq!(
-            valid_caret_rect(CgRect {
-                x: 240.0,
-                y: 512.0,
-                width: 0.0,
-                height: 0.0,
-            }),
-            Some(CaretRect {
-                x: 240.0,
-                y: 512.0,
-                width: 0.0,
-                height: 16.0,
-            })
-        );
     }
 }
