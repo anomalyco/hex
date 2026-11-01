@@ -349,14 +349,17 @@ fn onboarding_scene(ui: &mut Ui, recommended_found: bool, downloading: bool) {
     }
 }
 
-pub(super) fn list_scene(ui: &mut Ui) {
+/// The list as it opens.
+pub(super) fn listed(ui: &mut Ui) {
     onboarding_scene(ui, false, false);
 }
 
-pub(super) fn downloading_scene(ui: &mut Ui) {
+/// The recommended model picked and downloading.
+pub(super) fn loading(ui: &mut Ui) {
     onboarding_scene(ui, false, true);
 }
 
-pub(super) fn recommended_scene(ui: &mut Ui) {
+/// The recommended model's exact file found too.
+pub(super) fn present(ui: &mut Ui) {
     onboarding_scene(ui, true, false);
 }
