@@ -648,17 +648,31 @@ fn agent_prompt() -> String {
         "I use Hex for dictation. Change what it does to my words before it pastes them.\n\
          \n\
          The steps live in {path} under `dictation_processing`:\n\
-         - `default_mode` runs on every dictation: `replacements` (a list of \
-         {{\"matched_phrase\", \"output\"}}), then `transformations` (ids, in order).\n\
+         - `default_mode` runs on every dictation, in this order: `replacements` (a \
+         list of {{\"matched_phrase\", \"output\"}}), then `post_processing` (an \
+         optional AI rewrite), then `transformations` (ids, in order).\n\
          - `modes` are rules for some apps: each names `applications` (app names) or \
-         `browser_hosts` (sites), and its own `replacements` and `transformations` run \
-         there instead.\n\
+         `browser_hosts` (sites). There, `default_mode`'s replacements run first, then \
+         the mode's own `replacements`, `post_processing`, and `transformations` \
+         instead of `default_mode`'s.\n\
+         \n\
+         `post_processing` rewrites the text with a model through OpenCode: \
+         {{\"enabled\": true, \"prompt\": \"<how to rewrite>\", \"model\": \
+         \"<provider/model>\", \"deadline_seconds\": 30}}. Leave `model` out and Hex \
+         picks a fast one you have connected; set it only if I ask for a particular \
+         model (`opencode2 models` lists them). \
+         If the rewrite fails or runs past the deadline, Hex pastes the text without it.\n\
          \n\
          Built-in transformations: \"lowercase\", \"no-trailing-punctuation\", \
          \"spongebob-case\". Others are functions in ~/.config/hex/hex.config.ts \
          (run `hex commands init` for its typings; the API, including fetch and \
-         node:child_process, is documented at {TRANSFORMS_DOCS}). Leave \
-         `post_processing.enabled` false.\n\
+         node:child_process, is documented at {TRANSFORMS_DOCS}).\n\
+         \n\
+         Names Hex should know (people, products, projects) go in the shared vocabulary, \
+         not in replacements: `hex vocabulary add <term> --sounds-like a,b` (and `list`, \
+         `remove`). Every app uses it, and the AI rewrite spells its terms right. Use \
+         replacements for fixed swaps and deletions, such as a word to an emoji or \
+         dropping \"um\".\n\
          \n\
          Read the current value with `hex settings get dictation_processing`, then \
          change it with `hex settings set dictation_processing.default_mode '<json>'` \

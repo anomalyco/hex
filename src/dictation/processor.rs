@@ -210,6 +210,9 @@ struct ContextualProfile {
 pub struct Profiles {
     default: Profile,
     contextual: Vec<ContextualProfile>,
+    /// Global's corrections, run before the selected mode's own on every
+    /// dictation, as the Windows and Linux listeners do.
+    global: ReplacementSet,
 }
 
 impl Profiles {
@@ -217,7 +220,13 @@ impl Profiles {
         Self {
             default,
             contextual: Vec::new(),
+            global: ReplacementSet::default(),
         }
+    }
+
+    pub(crate) fn global_replacements(mut self, replacements: ReplacementSet) -> Self {
+        self.global = replacements;
+        self
     }
 
     pub fn application(self, application: impl Into<String>, profile: Profile) -> Self {
@@ -294,7 +303,9 @@ impl Profiles {
         } else {
             transcript
         };
-        let corrected = profile.replacements.replace(transcript);
+        let corrected = profile
+            .replacements
+            .replace(&self.global.replace(transcript));
         if !profile.ai_enabled {
             return Processed {
                 text: corrected,
