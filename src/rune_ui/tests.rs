@@ -18,6 +18,10 @@ fn runtime(scene: &str, dark: bool, size: (f32, f32)) -> Runtime<Ui> {
         .find(|(name, _)| *name == scene)
         .unwrap_or_else(|| panic!("no scene {scene}"));
     apply(&mut state);
+    runtime_for(state, dark, size)
+}
+
+fn runtime_for(state: Ui, dark: bool, size: (f32, f32)) -> Runtime<Ui> {
     let env = Env {
         system_dark: dark,
         scale: GOLDEN_SCALE,
@@ -1965,7 +1969,9 @@ fn annotate_pane_snapshots() {
 
 // ---------------------------------------------------------------------------
 // Goldens: offscreen GPU renders compared with checked-in PNGs. Set
-// HEX_UPDATE_GOLDENS=1 to rewrite them. Without a GPU adapter they skip.
+// HEX_UPDATE_GOLDENS=1 to rewrite them. Without a GPU adapter they skip,
+// unless HEX_REQUIRE_GPU is set (scripts/check-onboarding.sh).
+// HEX_GOLDEN_RENDERS=<folder> also writes every render there.
 
 /// One device for every golden, used one render at a time: creating Vulkan
 /// devices from parallel test threads crashed Mesa's RADV on Linux.
@@ -2038,9 +2044,19 @@ fn read_png(path: &std::path::Path) -> (u32, u32, Vec<u8>) {
 fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
     let name = format!("{scene}-{}", if dark { "dark" } else { "light" });
     let Some((width, height, pixels)) = render(scene, dark, size) else {
+        assert!(
+            std::env::var_os("HEX_REQUIRE_GPU").is_none(),
+            "golden {name}: no GPU adapter, and HEX_REQUIRE_GPU is set"
+        );
         eprintln!("skipping golden {name}: no GPU adapter");
         return;
     };
+    if let Some(folder) = std::env::var_os("HEX_GOLDEN_RENDERS") {
+        let folder = std::path::PathBuf::from(folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        rune::render::write_png(&folder.join(format!("{name}.png")), width, height, &pixels)
+            .unwrap();
+    }
     let path = golden_path(&name);
     if std::env::var_os("HEX_UPDATE_GOLDENS").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2139,7 +2155,6 @@ fn goldens() {
             "modes",
             "modes-picker",
             "picker-downloading",
-            "onboarding-setup",
         ] {
             check_golden(scene, dark, PANE_SIZE);
         }
@@ -2149,14 +2164,11 @@ fn goldens() {
     // A list longer than the window fades at its scrolling edge (#840).
     check_golden("language-menu", false, GOLDEN_SIZE);
     check_golden("modes-opencode-not-running", false, PANE_SIZE);
-    check_golden("onboarding", true, PANE_SIZE);
     check_golden("picker-custom-models", false, PANE_SIZE);
     check_golden("picker-found", false, PANE_SIZE);
-    check_golden("onboarding-model-found", false, PANE_SIZE);
-    check_golden("onboarding-model-found-downloading", false, PANE_SIZE);
-    check_golden("onboarding-model-found-recommended", false, PANE_SIZE);
 }
 
+mod onboarding_check;
 mod panes;
 
 /// Rune hands focus back to a menu's trigger when it closes. A key the

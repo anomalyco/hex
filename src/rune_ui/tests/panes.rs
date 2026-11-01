@@ -1502,9 +1502,6 @@ fn platform_goldens() {
             "meetings-settings",
             "meetings-off",
             "meetings-recording",
-            "mac-onboarding-setup",
-            "mac-onboarding-stale",
-            "mac-onboarding-landed",
             "mac-settings-permissions-stale",
             "shortcut-explainer",
             "shortcut-explainer-toggle",
@@ -1524,15 +1521,6 @@ fn platform_goldens() {
     check_golden("meetings-delete", false, PANE_SIZE);
     check_golden("meetings-rename", true, PANE_SIZE);
     check_golden("meetings-empty", false, PANE_SIZE);
-    check_golden("mac-onboarding", true, PANE_SIZE);
-    check_golden("mac-onboarding-progress", false, PANE_SIZE);
-    check_golden("mac-onboarding-denied", true, PANE_SIZE);
-    check_golden("mac-onboarding-download-failed", false, PANE_SIZE);
-    check_golden("mac-onboarding-listening", true, PANE_SIZE);
-    check_golden("mac-onboarding-reopen", false, PANE_SIZE);
-    check_golden("mac-onboarding-done", true, PANE_SIZE);
-    check_golden("mac-onboarding-mic-open", true, PANE_SIZE);
-    check_golden("mac-onboarding-mic-silent", false, PANE_SIZE);
 }
 
 #[test]
