@@ -12,10 +12,16 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use serde::{Deserialize, Serialize};
 
+use crate::dictation::vocabulary::{VocabularyEntry, serialize_saved};
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 
+mod dictation_processing;
 mod persistence;
 mod shortcut_repair;
+
+pub use dictation_processing::{
+    DictationMode, DictationPostProcessing, DictationProcessingSettings,
+};
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
@@ -1540,60 +1546,6 @@ pub enum RecordingAudioBehavior {
     DoNothing,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(default)]
-pub struct DictationProcessingSettings {
-    pub default_mode: DictationMode,
-    pub modes: Vec<DictationMode>,
-}
-
-impl Default for DictationProcessingSettings {
-    fn default() -> Self {
-        Self {
-            default_mode: DictationMode {
-                name: "Global".into(),
-                ..Default::default()
-            },
-            modes: Vec::new(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-#[serde(default)]
-pub struct DictationMode {
-    pub name: String,
-    pub applications: Vec<String>,
-    pub browser_hosts: Vec<String>,
-    pub replacements: Vec<TextReplacement>,
-    pub transformations: Vec<String>,
-    pub post_processing: DictationPostProcessing,
-}
-
-/// Persisted OpenCode rewrite settings for one mode.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(default)]
-pub struct DictationPostProcessing {
-    pub enabled: bool,
-    pub prompt: String,
-    /// Optional `provider/model` key from the OpenCode catalog.
-    pub model: Option<String>,
-    pub variant: Option<String>,
-    pub deadline_seconds: u64,
-}
-
-impl Default for DictationPostProcessing {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            prompt: "Rewrite the transcript into clear, natural text while preserving the speaker's intended meaning.".into(),
-            model: None,
-            variant: None,
-            deadline_seconds: 30,
-        }
-    }
-}
-
 /// Annotate: Scrawl's captures inside Hex, on macOS, Linux, and Windows
 /// (`capture_host`). On by default; off means no capture work at all.
 #[cfg(hex_capture)]
@@ -1876,8 +1828,11 @@ pub struct AppSettings {
     pub updates: UpdateSettings,
     /// The shared vocabulary (`crate::dictation::vocabulary`). Left out of the file
     /// while empty, so settings without one stay as they were.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub vocabulary: Vec<crate::dictation::vocabulary::VocabularyEntry>,
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "serialize_saved"
+    )]
+    pub vocabulary: Vec<VocabularyEntry>,
     /// How readily transcription swaps heard words for a vocabulary term.
     pub vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost,
     /// One-time settings changes already applied. A file that predates a
@@ -3076,7 +3031,6 @@ mod tests {
 
     #[test]
     fn loading_folds_saved_recognition_hints_into_the_vocabulary_once() {
-        use crate::dictation::vocabulary::VocabularyEntry;
         let dir = TestSettingsDir::new("folded-hints");
         let mut file = serde_json::to_value(AppSettings {
             transcription: TranscriptionSelection {
@@ -3495,7 +3449,6 @@ mod tests {
 
     #[test]
     fn vocabulary_round_trips_and_stays_out_of_files_without_one() {
-        use crate::dictation::vocabulary::VocabularyEntry;
         // A file from before the vocabulary loads with an empty one and is
         // not rewritten to gain the field.
         let dir = TestSettingsDir::new("vocabulary");
@@ -3533,7 +3486,7 @@ mod tests {
             json["vocabulary"],
             serde_json::json!([
                 {"term": "Cappuccino", "sounds_like": ["capuchin", "cap a chino"]},
-                {"term": "Rune"},
+                "Rune",
             ])
         );
         assert_eq!(json["vocabulary_boost"], "normal");

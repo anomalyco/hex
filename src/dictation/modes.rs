@@ -19,6 +19,7 @@ pub struct ModeRuntime {
     replacements: ReplacementSet,
     default: PostProcessingSettings,
     default_transformations: Vec<String>,
+    default_vocabulary: Vec<crate::dictation::vocabulary::VocabularyEntry>,
     modes: Vec<DictationMode>,
 }
 
@@ -29,6 +30,7 @@ impl ModeRuntime {
             replacements: ReplacementSet::new(&processing.default_mode.replacements),
             default: processing.default_mode.post_processing.clone(),
             default_transformations: processing.default_mode.transformations.clone(),
+            default_vocabulary: processing.default_mode.vocabulary.clone(),
             modes: processing.modes.clone(),
         }
     }
@@ -55,6 +57,7 @@ impl ModeRuntime {
                     self.default_transformations.clone(),
                     &self.default,
                 )
+                .vocabulary(self.default_vocabulary.clone())
             },
             Profile::from_mode,
         );

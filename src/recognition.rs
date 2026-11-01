@@ -839,6 +839,7 @@ pub fn listen(
                 input_monitor.activity.invalidate();
             }
             context = next_context;
+            crate::dictation::vocabulary::focus(&context);
             events.emit(&VoiceEvent::Context {
                 timestamp_ms: now_ms(),
                 application: context.application.clone(),

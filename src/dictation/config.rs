@@ -57,12 +57,15 @@ fn dictation_profiles_lock() -> &'static RwLock<Profiles> {
 
 fn build_dictation_profiles(settings: &DictationProcessingSettings) -> Profiles {
     let global = &settings.default_mode;
-    let mut profiles = Profiles::new(Profile::configured(
-        "Global",
-        ReplacementSet::default(),
-        global.transformations.clone(),
-        &global.post_processing,
-    ))
+    let mut profiles = Profiles::new(
+        Profile::configured(
+            "Global",
+            ReplacementSet::default(),
+            global.transformations.clone(),
+            &global.post_processing,
+        )
+        .vocabulary(global.vocabulary.clone()),
+    )
     .global_replacements(ReplacementSet::new(&global.replacements));
     for mode in &settings.modes {
         let profile = Profile::from_mode(mode);
@@ -129,6 +132,34 @@ mod tests {
 
         assert_eq!(process("Slack"), "I like OpenCode :rocket:");
         assert_eq!(process("Notes"), "I like OpenCode");
+    }
+
+    #[test]
+    fn an_app_mode_has_its_own_vocabulary() {
+        use crate::app_settings::DictationMode;
+        use crate::dictation::vocabulary::VocabularyEntry;
+        let term = |term: &str| VocabularyEntry {
+            term: term.into(),
+            sounds_like: Vec::new(),
+        };
+        let settings = DictationProcessingSettings {
+            modes: vec![DictationMode {
+                applications: vec!["Zed".into()],
+                vocabulary: vec![term("useEffect")],
+                ..DictationMode::default()
+            }],
+            ..DictationProcessingSettings::default()
+        };
+        let profiles = build_dictation_profiles(&settings);
+        let in_app = |application: &str| {
+            profiles.vocabulary_for(&ContextSnapshot {
+                application: Some(application.into()),
+                ..ContextSnapshot::default()
+            })
+        };
+
+        assert_eq!(in_app("Zed"), [term("useEffect")]);
+        assert!(in_app("Notes").is_empty());
     }
 
     #[test]

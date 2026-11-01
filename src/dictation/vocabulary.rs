@@ -5,12 +5,15 @@
 //! toward it through [`transcription_bias`], and Whisper and Qwen3-ASR read
 //! it as their context prompt through [`transcription_prompt`].
 
+use std::cell::Cell;
 use std::io::Read as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
+
+use crate::dictation::context::ContextSnapshot;
 
 /// Longest term or "sounds like" entry, in characters.
 const MAX_TERM_CHARS: usize = 64;
@@ -25,10 +28,54 @@ const MAX_BIASED_TERMS: usize = 64;
 const SETTINGS_READ_LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(from = "SavedEntry")]
 pub struct VocabularyEntry {
     pub term: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sounds_like: Vec<String>,
+}
+
+/// An entry as `settings.json` holds it: a plain term, or the term with its
+/// "sounds like" spellings.
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum SavedEntry {
+    Term(String),
+    Entry {
+        term: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sounds_like: Vec<String>,
+    },
+}
+
+impl From<SavedEntry> for VocabularyEntry {
+    fn from(saved: SavedEntry) -> Self {
+        match saved {
+            SavedEntry::Term(term) => Self {
+                term,
+                sounds_like: Vec::new(),
+            },
+            SavedEntry::Entry { term, sounds_like } => Self { term, sounds_like },
+        }
+    }
+}
+
+/// Writes a list for `settings.json`: a term with no "sounds like"
+/// spellings as a plain string. Either form loads.
+pub(crate) fn serialize_saved<S: serde::Serializer>(
+    entries: &[VocabularyEntry],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(entries.iter().map(|entry| {
+        if entry.sounds_like.is_empty() {
+            SavedEntry::Term(entry.term.clone())
+        } else {
+            SavedEntry::Entry {
+                term: entry.term.clone(),
+                sounds_like: entry.sounds_like.clone(),
+            }
+        }
+    }))
 }
 
 /// How readily transcription swaps heard words for a vocabulary term that
@@ -69,6 +116,72 @@ impl VocabularyBoost {
 
 static SAVED: OnceLock<RwLock<Vec<VocabularyEntry>>> = OnceLock::new();
 static BOOST: AtomicU8 = AtomicU8::new(VocabularyBoost::Normal as u8);
+/// The focused app and page as last seen (macOS), whose mode's own terms a
+/// dictation hears with ahead of the shared list.
+static FOCUS: OnceLock<RwLock<Option<ContextSnapshot>>> = OnceLock::new();
+
+thread_local! {
+    static DICTATING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Records the focused app and page, so the next dictation's transcription
+/// hears with its mode's vocabulary.
+pub(crate) fn focus(context: &ContextSnapshot) {
+    *FOCUS
+        .get_or_init(Default::default)
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = Some(context.clone());
+}
+
+/// Runs `work` as a dictation's transcription on this thread: its runs hear
+/// with the focused mode's terms too. Meetings, captures, and other hosts'
+/// audio hear with the shared list alone.
+pub(crate) fn for_dictation<R>(work: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            DICTATING.with(|flag| flag.set(self.0));
+        }
+    }
+    let _restore = Restore(DICTATING.with(|flag| flag.replace(true)));
+    work()
+}
+
+/// The focused mode's own terms first, so the bias cap keeps them, then the
+/// shared list, each term once.
+fn transcription_entries() -> Vec<VocabularyEntry> {
+    let shared = entries();
+    if !DICTATING.with(Cell::get) {
+        return shared;
+    }
+    let focused = FOCUS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    #[cfg(target_os = "macos")]
+    if let Some(context) = focused {
+        let own = crate::dictation::config::dictation_profiles().vocabulary_for(&context);
+        return merged(&own, &shared);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = focused;
+    shared
+}
+
+/// `first`, then the entries of `then` whose term `first` lacks, in any case.
+pub(crate) fn merged(first: &[VocabularyEntry], then: &[VocabularyEntry]) -> Vec<VocabularyEntry> {
+    if first.is_empty() {
+        return then.to_vec();
+    }
+    let mut list = first.to_vec();
+    for entry in then {
+        if !contains(&list, &entry.term) {
+            list.push(entry.clone());
+        }
+    }
+    list
+}
 
 /// The saved terms, as last applied from settings.
 pub fn terms() -> Vec<String> {
@@ -97,7 +210,7 @@ pub(crate) fn transcription_bias()
     if boost == VocabularyBoost::Off {
         return None;
     }
-    bias_for(&entries(), boost)
+    bias_for(&transcription_entries(), boost)
 }
 
 fn bias_for(
@@ -132,7 +245,7 @@ fn bias_for(
 /// recognise the list, and only as many as fit `max_chars`. `None` while the
 /// list is empty. Read at the start of each run, like the bias.
 pub(crate) fn transcription_prompt(max_chars: usize) -> Option<String> {
-    prompt_for(&entries(), max_chars)
+    prompt_for(&transcription_entries(), max_chars)
 }
 
 fn prompt_for(entries: &[VocabularyEntry], max_chars: usize) -> Option<String> {
@@ -327,6 +440,64 @@ mod tests {
             term: term.into(),
             sounds_like: sounds_like.iter().map(|&text| text.into()).collect(),
         }
+    }
+
+    #[test]
+    fn plain_terms_load_and_save_as_strings() {
+        #[derive(Deserialize, Serialize)]
+        struct File {
+            #[serde(serialize_with = "serialize_saved")]
+            vocabulary: Vec<VocabularyEntry>,
+        }
+        let file: File = serde_json::from_str(
+            r#"{"vocabulary": ["Rune", {"term": "OpenCode", "sounds_like": ["open code"]},
+                {"term": "Kaffar"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            file.vocabulary,
+            [
+                entry("Rune", &[]),
+                entry("OpenCode", &["open code"]),
+                entry("Kaffar", &[])
+            ]
+        );
+        assert_eq!(
+            serde_json::to_string(&file).unwrap(),
+            r#"{"vocabulary":["Rune",{"term":"OpenCode","sounds_like":["open code"]},"Kaffar"]}"#
+        );
+        // Replies to `hex vocabulary` keep the object form.
+        assert_eq!(
+            serde_json::to_string(&entry("Rune", &[])).unwrap(),
+            r#"{"term":"Rune"}"#
+        );
+    }
+
+    #[test]
+    fn a_modes_terms_come_first_and_each_term_once() {
+        let own = [entry("useEffect", &[]), entry("Rune", &["rooney"])];
+        let shared = [entry("rune", &[]), entry("OpenCode", &[])];
+        assert_eq!(
+            merged(&own, &shared),
+            [
+                entry("useEffect", &[]),
+                entry("Rune", &["rooney"]),
+                entry("OpenCode", &[])
+            ]
+        );
+        assert_eq!(merged(&[], &shared), shared);
+    }
+
+    #[test]
+    fn only_dictation_hears_with_the_focused_modes_terms() {
+        apply(&[entry("OpenCode", &[])], VocabularyBoost::Normal);
+        assert_eq!(transcription_entries(), [entry("OpenCode", &[])]);
+        let inside = for_dictation(|| {
+            assert!(DICTATING.with(Cell::get));
+            transcription_entries()
+        });
+        assert!(inside.iter().any(|entry| entry.term == "OpenCode"));
+        assert!(!DICTATING.with(Cell::get));
     }
 
     #[test]

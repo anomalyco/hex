@@ -916,6 +916,7 @@ Foreground context -> Select processing
 └── Otherwise Global
 
 Selected mode                            // replaces Global's rewrite and transformations
+  -> Its vocabulary, then the shared one   // features/vocabulary.md (vocabulary.modes)
   -> Global's corrections, then the mode's  // every OS
   -> OpenCode transformation             // optional provider-backed rewrite
   -> Transformations                     // ordered text chain
