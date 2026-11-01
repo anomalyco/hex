@@ -140,6 +140,7 @@ const PATHS: &[(&str, &str)] = &[
     ("sound-sets-playing", "Window/Sounds/Playing"),
     ("output", "Window/Output/Steps"),
     ("output-open", "Window/Output/App rule open"),
+    ("output-trust", "Window/Output/Trust prompt"),
     ("output-empty", "Window/Output/Empty"),
     ("modes", "Window/Modes/Modes"),
     ("modes-global", "Window/Modes/Global mode"),
