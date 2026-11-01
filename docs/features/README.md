@@ -1369,11 +1369,14 @@ Linux beta                               // not macOS feature parity
 │   ├── X11 -> Grabbed only while Annotate draws (it stops drawing)
 │   └── Portal -> Never bound
 │       └── KDE startup -> before the bind, the pre-#579 `hex` set (with the
-│           pre-#492 `cancel` on Escape), and `cancel` and `cancel-dictation`
-│           under `anomaly.hex`, are removed from kglobalaccel (`unregister`);
+│           pre-#492 `cancel` on Escape), and every action under `anomaly.hex`
+│           this bind doesn't ask for (`cancel`, `cancel-dictation`, and the ids
+│           of shortcuts changed since, which kept their keys so the new id could
+│           never take them, #898) are removed from kglobalaccel (`unregister`);
 │           other apps untouched
 │           // check: only_requested_shortcuts_are_shown (a stale grant stays
-│           // out); the KDE removal is not run on a Plasma session
+│           // out), kde_actions_hex_no_longer_binds_are_removed (the list only);
+│           // the KDE removal is not run on a Plasma session
 ├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud

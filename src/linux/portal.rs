@@ -775,29 +775,29 @@ impl Portal {
     /// shortcut a portal app bound under that app's id, so an upgraded Hex
     /// left `hex`'s set (Cancel dictation on Escape among it) grabbed with
     /// nothing able to rebind it, taking Escape from every app (#624).
-    /// Removes that set, and the [`STALE_KDE_ACTIONS`] under the current id,
-    /// from KDE's global shortcuts. Only on KDE, only those entries.
-    pub(crate) fn forget_legacy_kde_shortcuts(&self) -> Result<()> {
+    /// Removes that set, the [`STALE_KDE_ACTIONS`], and every other action
+    /// under the current id that `keep` (the ids about to be bound) doesn't
+    /// name from KDE's global shortcuts. A shortcut changed in Hex gets a new
+    /// id, and KDE keeps the old one holding its key, so the new id could
+    /// never take that key back (#898). Only on KDE, only Hex's entries.
+    pub(crate) fn forget_legacy_kde_shortcuts(&self, keep: &[&str]) -> Result<()> {
         if !desktop_is("KDE") {
             return Ok(());
         }
-        let actions: Vec<Vec<String>> = self
-            .bus
-            .call_service(
-                KGLOBALACCEL,
-                KGLOBALACCEL_PATH,
-                KGLOBALACCEL_INTERFACE,
-                "allActionsForComponent",
-                &(vec![LEGACY_APP_ID],),
-            )
-            .wrap_err("could not list Hex's old KDE shortcuts")?;
-        let mut legacy = actions
-            .iter()
-            .filter_map(|action| action.get(1))
-            .map(|action| (LEGACY_APP_ID, action.as_str()))
-            .collect::<Vec<_>>();
-        legacy.extend(STALE_KDE_ACTIONS.map(|action| (APP_ID, action)));
-        for (component, action) in legacy {
+        let list = |component: &str| -> Result<Vec<Vec<String>>> {
+            self.bus
+                .call_service(
+                    KGLOBALACCEL,
+                    KGLOBALACCEL_PATH,
+                    KGLOBALACCEL_INTERFACE,
+                    "allActionsForComponent",
+                    &(vec![component],),
+                )
+                .wrap_err("could not list Hex's old KDE shortcuts")
+        };
+        let legacy = list(LEGACY_APP_ID)?;
+        let current = list(APP_ID)?;
+        for (component, action) in superseded_kde_actions(&legacy, &current, keep) {
             let removed: bool = self
                 .bus
                 .call_service(
@@ -862,6 +862,33 @@ impl Portal {
             .unwrap_or_default();
         Ok(triggers(bound))
     }
+}
+
+/// The KDE actions to remove before binding: every action of the pre-#579
+/// `hex` component, then every action under `anomaly.hex` that `keep` doesn't
+/// name, the [`STALE_KDE_ACTIONS`] included. Each action is kglobalaccel's
+/// `[component, action, …]` id.
+fn superseded_kde_actions<'a>(
+    legacy: &'a [Vec<String>],
+    current: &'a [Vec<String>],
+    keep: &[&str],
+) -> Vec<(&'static str, &'a str)> {
+    let mut actions = legacy
+        .iter()
+        .filter_map(|action| action.get(1))
+        .map(|action| (LEGACY_APP_ID, action.as_str()))
+        .collect::<Vec<_>>();
+    let mut current = current
+        .iter()
+        .filter_map(|action| action.get(1))
+        .map(String::as_str)
+        .chain(STALE_KDE_ACTIONS)
+        .filter(|action| !keep.contains(action))
+        .collect::<Vec<_>>();
+    current.sort_unstable();
+    current.dedup();
+    actions.extend(current.into_iter().map(|action| (APP_ID, action)));
+    actions
 }
 
 /// What the log says when the session has no shortcuts portal at startup.
@@ -1257,6 +1284,41 @@ mod tests {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         }));
+    }
+
+    /// A shortcut changed in Hex gets a new id; on KDE the old id keeps its
+    /// key until removed, so the new one could never take it (#898).
+    #[test]
+    fn kde_actions_hex_no_longer_binds_are_removed() {
+        let id = |component: &str, action: &str| {
+            vec![
+                component.to_string(),
+                action.to_string(),
+                "Hex".to_string(),
+                action.to_string(),
+            ]
+        };
+        let legacy = vec![id("hex", "dictation")];
+        let current = vec![
+            id(APP_ID, "dictation-ALT-space"),
+            id(APP_ID, "dictation-CTRL-ALT-space"),
+            id(APP_ID, "paste-last-ALT-SHIFT-v"),
+            id(APP_ID, "cancel"),
+        ];
+        let removed = superseded_kde_actions(
+            &legacy,
+            &current,
+            &["dictation-CTRL-ALT-space", "paste-last-ALT-SHIFT-v"],
+        );
+        assert_eq!(
+            removed,
+            vec![
+                ("hex", "dictation"),
+                (APP_ID, "cancel"),
+                (APP_ID, "cancel-dictation"),
+                (APP_ID, "dictation-ALT-space"),
+            ]
+        );
     }
 
     #[test]
