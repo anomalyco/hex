@@ -88,6 +88,7 @@ fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
                 | "com.apple.Safari"
                 | "org.mozilla.firefox"
                 | "com.microsoft.edgemac"
+                | "company.thebrowser.Browser"
         )
     )
 }
@@ -209,6 +210,7 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         ("org.mozilla.firefox", "org.mozilla.firefox"),
         ("org.mozilla.plugincontainer", "org.mozilla.firefox"),
         ("com.microsoft.edgemac", "com.microsoft.edgemac"),
+        ("company.thebrowser.browser", "company.thebrowser.Browser"),
     ]
     .iter()
     .find_map(|(prefix, canonical)| {
@@ -230,6 +232,7 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "com.apple.Safari" => Some("Safari"),
         "org.mozilla.firefox" => Some("Firefox"),
         "com.microsoft.edgemac" => Some("Microsoft Edge"),
+        "company.thebrowser.Browser" => Some("Arc"),
         _ => None,
     }
 }
@@ -821,6 +824,19 @@ mod tests {
                 Some("com.microsoft.edgemac"),
                 true,
             ),
+            (
+                "company.thebrowser.Browser",
+                "Arc",
+                Some("company.thebrowser.Browser"),
+                true,
+            ),
+            (
+                "company.thebrowser.browser.helper",
+                "Browser Helper",
+                Some("company.thebrowser.Browser"),
+                true,
+            ),
+            ("company.thebrowser.dia", "Dia", None, false),
             ("anomaly.hex", "Hex", None, false),
             ("zoom", "Zoom", Some("us.zoom.xos"), false),
             (

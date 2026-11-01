@@ -153,7 +153,12 @@ The older `meetings.never_offer` list reads as Never offer entries and is
 rewritten as `providers` on the next load.
 ```
 
-Chromium and Electron apps (Brave, Chrome, Edge, Slack, Teams) capture microphone
+Call detection knows Brave, Chrome, Safari, Firefox, Edge, and Arc
+(`company.thebrowser.Browser`, foreground name `Arc`; its tab is read like
+Brave's). Arc was missing until #801, so its Meet calls were never detected.
+Check: `a_google_meet_call_in_arc_records_after_about_two_seconds`.
+
+Chromium and Electron apps (Brave, Chrome, Edge, Arc, Slack, Teams) capture microphone
 audio in sandboxed `audio.mojom.AudioService` utility processes (`*.helper`) that
 do not register with `NSRunningApplication`; Zoom uses `us.zoom.CptHost`, Firefox
 uses `org.mozilla.plugincontainer`, Safari uses `com.apple.WebKit.GPU` (`Safari
