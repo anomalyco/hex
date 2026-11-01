@@ -1,7 +1,8 @@
 //! The onboarding check (`scripts/check-onboarding.sh`, run before every
 //! stable release): every onboarding scene against its approved golden in
 //! both appearances, and a first run walked through the real tour in a
-//! clean data folder.
+//! clean data folder. Like every golden, these render on Linux only: the
+//! macOS and Windows scenes are the same window drawn from fixtures.
 
 use super::*;
 use crate::desktop::onboarding::Step;
@@ -30,6 +31,8 @@ pub(super) const SCENES: &[&str] = &[
     "mac-onboarding-try",
     "mac-onboarding-listening",
     "mac-onboarding-landed",
+    "mac-onboarding-mic",
+    "mac-onboarding-mic-lid",
     "mac-onboarding-mic-open",
     "mac-onboarding-mic-silent",
     "mac-onboarding-reopen",
@@ -117,9 +120,10 @@ fn onboarding_walkthrough() {
         path.display()
     );
     rt.state.settings.transcription = TranscriptionSelection { model, language };
+    assert!(installed(&rt.state), "{} is installed", definition.name);
     assert!(
-        installed(&rt.state),
-        "{} is installed and verified",
+        crate::transcription::models::is_verified(definition),
+        "{} is verified against its pin",
         definition.name
     );
     rt.state.picker.installed = Some(vec![model]);

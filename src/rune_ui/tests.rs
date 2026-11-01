@@ -2007,20 +2007,23 @@ fn render(scene: &str, dark: bool, size: (f32, f32)) -> Option<(u32, u32, Vec<u8
     );
     renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
-    renderer.draw(&mut encoder, &target.view, rt.clear_color());
-    // The window compositor's own pass: the Sounds sheet's HUD.
-    super::sound_sets::Preview::default().render(&mut rune::compose::Frame {
-        device: &gpu.device,
-        queue: &gpu.queue,
-        encoder: &mut encoder,
-        target: &target.view,
-        format: crate::rune_ui::offscreen::format(),
-        size: (width, height),
-        dt: 0.0,
-        update_ms: 0.0,
-        rt: &mut rt,
-        ui: &mut renderer,
-    });
+    // The window's own compositor: the UI, the welcome hero over its stage,
+    // and the Sounds sheet's HUD.
+    rune::compose::Compositor::render(
+        &mut super::WindowCompositor::default(),
+        &mut rune::compose::Frame {
+            device: &gpu.device,
+            queue: &gpu.queue,
+            encoder: &mut encoder,
+            target: &target.view,
+            format: crate::rune_ui::offscreen::format(),
+            size: (width, height),
+            dt: 0.0,
+            update_ms: 0.0,
+            rt: &mut rt,
+            ui: &mut renderer,
+        },
+    );
     target.copy(&mut encoder);
     renderer.submit(&gpu.queue, encoder);
     Some((width, height, target.read(&gpu.device)))

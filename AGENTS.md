@@ -1463,10 +1463,13 @@ download in progress, practice, done) in both appearances against the approved
 goldens, and walks a first run through the real tour in a clean temporary data
 folder until a model is downloaded and the tour reaches Done. Any unexpected
 visual or flow change blocks the release; an intentional change refreshes the
-goldens in its own PR. Release's `onboarding` job runs the same script on
-Linux, and requires the candidate's Check Linux, Check macOS, and Check
-Windows, which render the same goldens on each OS, to have passed; a stable
-run publishes nothing until it passes.
+goldens in its own PR. It runs on Linux, like every golden; the macOS and
+Windows scenes are fixtures of the same window and render there too, but
+nothing renders on a real Mac or Windows GPU. Release's `onboarding` job runs
+the same script and requires the candidate's Check Linux, Check macOS, and
+Check Windows to have passed (`gh workflow run <check> --ref production`
+for a commit their paths skip); a stable run publishes nothing until it
+passes.
 
 Every platform is built, signed, and published by one run of
 `.github/workflows/release.yml` ("Release"; see `docs/releasing.md`).

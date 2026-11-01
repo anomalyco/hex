@@ -117,11 +117,13 @@ jobs:
 
   # Onboarding gates every stable release (AGENTS.md): every onboarding scene
   # against its approved golden, and a first run through the real tour in a
-  # clean data folder (scripts/check-onboarding.sh), from repository code
-  # with no secrets. A stable run also needs the candidate's Check Linux,
-  # Check macOS, and Check Windows, which render the same goldens on each OS,
-  # to have passed. Publishing waits for this job; its scene images go into
-  # the go/no-go given to Dax.
+  # clean data folder (scripts/check-onboarding.sh, Linux; the macOS and
+  # Windows scenes are fixtures of the same window, rendered here), from
+  # repository code with no secrets. A stable run also needs the candidate's
+  # Check Linux, Check macOS, and Check Windows to have passed (a commit
+  # their paths skip gets one with `gh workflow run <check> --ref
+  # production`). Publishing waits for this job; its scene images go into the
+  # go/no-go given to Dax.
   onboarding:
     needs: plan
     if: needs.plan.outputs.channel == 'stable' || needs.plan.outputs.channel == 'check'
@@ -146,7 +148,8 @@ jobs:
           for workflow in check-linux.yml check-macos.yml check-windows.yml; do
             conclusion=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$workflow" --commit "$SHA" \
               --json status,conclusion --jq '[.[] | select(.status == "completed")][0].conclusion // "missing"')
-            [ "$conclusion" = success ] || { echo "::error::$workflow is $conclusion on $SHA."; exit 1; }
+            [ "$conclusion" = success ] ||
+              { echo "::error::$workflow is $conclusion on $SHA; run it with gh workflow run $workflow --ref production."; exit 1; }
           done
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
