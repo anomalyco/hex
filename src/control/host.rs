@@ -551,6 +551,16 @@ fn status(host: &dyn Host) -> Result<ControlReply, ControlError> {
                 Some(warning) => format!("{} ({warning})", state.listener.status),
                 None => state.listener.status.clone(),
             },
+            shortcuts: match &state.listener.shortcuts {
+                crate::desktop::host::DesktopShortcuts::Portal(granted) => granted
+                    .iter()
+                    .map(|shortcut| super::GrantedShortcutReport {
+                        name: shortcut.name.clone(),
+                        trigger: shortcut.trigger.clone(),
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
         },
         capture,
         meeting: meeting_report(),

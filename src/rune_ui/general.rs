@@ -93,6 +93,20 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 Some(tr("Dictates like the shortcut above")),
             ));
         }
+        // Annotate's shortcut beside dictation's on Linux, where the desktop
+        // lists both and a lone F9 is otherwise easy to miss (#723).
+        #[cfg(all(target_os = "linux", hex_capture))]
+        if ui.platform.scrawl.is_some() && ui.settings.capture.enabled {
+            rows.extend(shortcut_rows(
+                ui,
+                p,
+                "annotate-shortcut",
+                &super::SCRAWL_ICON,
+                tr("Annotate"),
+                ShortcutTarget::Capture,
+                None,
+            ));
+        }
         rows.extend(configure_shortcuts_row(ui, p).map(CardRow::from));
         rows.extend(cancel_shortcut_row(ui, p).map(CardRow::from));
     }
@@ -276,6 +290,7 @@ pub(super) fn shortcut_rows(
         .into(),
     ];
     rows.extend(s::refused_note(ui, p, target).map(CardRow::from));
+    rows.extend(s::gnome_clash_note(ui, p, target).map(CardRow::from));
     rows
 }
 

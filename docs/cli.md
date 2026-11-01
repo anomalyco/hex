@@ -301,6 +301,8 @@ recording", "The window isn't open"). Setting `kind` is one of `bool`,
 
 ```ts
 listener.status     Enabled | Waiting for setup | No microphone | Stopped (running false)
+listener.shortcuts  Wayland portal only: [{"name": "Dictation", "trigger": "Super+D"}], the keys the desktop
+                    granted (changed in its settings or not); trigger null when it refused one
 capture.state       idle | recording | transcribing | unknown (the listener didn't answer or stopped)
 capture.recording   dictation | service | null
 meeting.state       idle | starting | recording | transcribing
