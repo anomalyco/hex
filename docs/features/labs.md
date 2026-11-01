@@ -47,7 +47,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Use your own speech model no labs.custom_models     the picker's "Add model file…" and `hex model import` copy in a GGUF checked from its header (#648, #743)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
-├── Special keys alone no labs.standalone_special_keys (Linux) Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767)
+├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -504,7 +504,10 @@ hex settings set dictation_hotkey menu        // labs.special-keys
 │   ├── X11 -> grabs keysym Menu 0xff67, Pause 0xff13, Scroll_Lock 0xff14
 │   └── Wayland portal -> preferred trigger Menu, Pause, Scroll_Lock
 ├── Toggle off -> "menu needs Labs › Special keys alone: hex labs on special-keys"
-├── Other OSes -> no toggle; a bare one still needs a modifier, as before
+├── Windows -> Menu, Pause, Scroll Lock always allowed, alone too; the toggle
+│   instead lets Insert, Home, End, Page Up, Page Down stand alone ("home alone
+│   needs Labs › Special keys alone" while off), and off puts a saved one back
+├── macOS -> no toggle; a bare one still needs a modifier, as before
 ├── Window recorder -> refuses them while off ("Add a modifier"); Rune reports
 │   none of these keys yet, so the recorder can't record them either way
 └── Toggle turned off (row, hex labs off, hex settings), or settings load with

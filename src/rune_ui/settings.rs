@@ -352,6 +352,13 @@ pub(super) fn validate(
             tr("Unsupported key")
         });
     }
+    // A navigation key alone needs Labs › Special keys alone (Windows).
+    if cfg!(target_os = "windows")
+        && binding.is_lone_navigation_key()
+        && !settings.special_keys_allowed()
+    {
+        return Err(tr("Add a modifier"));
+    }
     host::validate_hotkey(target, binding)?;
     if conflicts(settings, target, binding) {
         return Err(tr("Already in use"));
