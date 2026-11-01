@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -29,6 +29,10 @@ const PORTAL_FOCUS_SETTLE: Duration = Duration::from_millis(250);
 /// How long an existing portal session waits after setting the clipboard
 /// before its paste shortcut, so the target has the new selection (#578).
 const PORTAL_CLIPBOARD_SETTLE: Duration = Duration::from_millis(150);
+/// How long a RemoteDesktop session stays open after a paste. GNOME shows its
+/// remote-control indicator while one is open (#718), and a restored grant
+/// reopens it at the next paste without a dialog.
+const PORTAL_IDLE: Duration = Duration::from_secs(15);
 /// How long after the paste shortcut the previous clipboard comes back, as
 /// on macOS. Nothing acknowledges that the target read the paste.
 const RESTORE_DELAY: Duration = Duration::from_millis(500);
@@ -69,8 +73,41 @@ enum WaylandKeys {
     /// for the shortcut to let go first.
     Wtype,
     /// The desktop's RemoteDesktop portal everywhere else (KWin, Mutter).
-    /// Its session starts at the first paste and lives with the paster.
-    Portal(Option<Box<RemoteDesktop>>),
+    Portal(Arc<Mutex<PortalSession>>),
+}
+
+/// The RemoteDesktop session: opened at a paste and, when its grant
+/// restores without a dialog, closed [`PORTAL_IDLE`] after the last one.
+/// A grant that cannot restore keeps its session for the paster's lifetime,
+/// so pastes never ask again.
+struct PortalSession {
+    session: Option<Box<RemoteDesktop>>,
+    last_paste: Instant,
+}
+
+/// Closes the session once it has been idle for [`PORTAL_IDLE`]; ends when the
+/// session closes or the paster goes away.
+fn close_when_idle(shared: Weak<Mutex<PortalSession>>) {
+    loop {
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
+        let wait = {
+            let mut state = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            if state.session.is_none() {
+                return;
+            }
+            let idle = state.last_paste.elapsed();
+            if idle >= PORTAL_IDLE {
+                state.session = None;
+                tracing::debug!("closed the idle RemoteDesktop session");
+                return;
+            }
+            PORTAL_IDLE - idle
+        };
+        drop(shared);
+        thread::sleep(wait);
+    }
 }
 
 impl WaylandKeys {
@@ -78,7 +115,10 @@ impl WaylandKeys {
         if offers_virtual_keyboard() && on_path("wtype") {
             Self::Wtype
         } else {
-            Self::Portal(None)
+            Self::Portal(Arc::new(Mutex::new(PortalSession {
+                session: None,
+                last_paste: Instant::now(),
+            })))
         }
     }
 
@@ -94,27 +134,43 @@ impl WaylandKeys {
                 run_helper(keys, &[], stop, HELPER_TIMEOUT)
                     .wrap_err("wtype could not send the paste shortcut")
             }
-            Self::Portal(session) => {
-                if session.as_mut().is_some_and(|session| session.closed()) {
-                    *session = None;
+            Self::Portal(shared) => {
+                let mut state = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                if state
+                    .session
+                    .as_mut()
+                    .is_some_and(|session| session.closed())
+                {
+                    state.session = None;
                 }
-                let started = session.is_none();
-                if started {
-                    *session = Some(Box::new(RemoteDesktop::start(stop)?));
-                    // The approval dialog hands focus back to the target.
-                    thread::sleep(PORTAL_FOCUS_SETTLE);
-                } else {
-                    // Without data-control, Mutter hands the new selection to
-                    // the focused app only after wl-copy returns; a Ctrl+V sent
-                    // at once pastes nothing or the previous clipboard.
-                    thread::sleep(PORTAL_CLIPBOARD_SETTLE);
+                // Without data-control, Mutter hands the new selection to the
+                // focused app only after wl-copy returns; a Ctrl+V sent at once
+                // pastes nothing or the previous clipboard (#578).
+                let mut settle = PORTAL_CLIPBOARD_SETTLE;
+                if state.session.is_none() {
+                    let began = Instant::now();
+                    let started = RemoteDesktop::start(stop)?;
+                    settle = if started.prompted() {
+                        // The approval dialog hands focus back to the target.
+                        PORTAL_FOCUS_SETTLE
+                    } else {
+                        // Reopening already took part of the wait.
+                        PORTAL_CLIPBOARD_SETTLE.saturating_sub(began.elapsed())
+                    };
+                    if started.restorable() {
+                        let idle = Arc::downgrade(shared);
+                        thread::spawn(move || close_when_idle(idle));
+                    }
+                    state.session = Some(Box::new(started));
                 }
-                let result = session
-                    .as_ref()
-                    .expect("started above")
-                    .paste(paste_with_shift);
+                thread::sleep(settle);
+                let Some(session) = state.session.as_ref() else {
+                    unreachable!("started above")
+                };
+                let result = session.paste(paste_with_shift);
+                state.last_paste = Instant::now();
                 if result.is_err() {
-                    *session = None;
+                    state.session = None;
                 }
                 result
             }

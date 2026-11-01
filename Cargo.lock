@@ -1981,6 +1981,7 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "wayland-client",
+ "wayland-protocols",
  "wayland-protocols-wlr",
  "wgpu",
  "windows 0.62.2",

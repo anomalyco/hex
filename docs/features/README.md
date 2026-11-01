@@ -1286,7 +1286,7 @@ Linux beta                               // not macOS feature parity
 │   ├── Later paste, copy, or another client replaced the transcript -> left alone
 │   ├── Over the cap or unreadable -> transcript stays; the log says why
 │   ├── Paste only reached the clipboard -> transcript stays for Ctrl+V
-│   └── Wayland without wlr-data-control -> transcript stays
+│   └── Wayland without ext- or wlr-data-control -> transcript stays (KWin offers ext, #719)
 │   └── Wayland: wl-copy, then the shortcut, chosen at the first paste  // linux.wayland-paste
 │       ├── Asked by a modifier shortcut -> wait for its portal release + 250 ms
 │       │   (2 s cap without a release); after a hex command -> 250 ms
@@ -1295,9 +1295,12 @@ Linux beta                               // not macOS feature parity
 │       │   └── V sent on evdev KEY_V (placeholder releases first), so Hyprland's
 │       │       binds read Ctrl(+Shift)+V, not Ctrl(+Shift)+Escape (#444)
 │       ├── Otherwise -> RemoteDesktop portal: keyboard-only session, approved once
-│       │   (restore token, persist_mode 2) -> Ctrl+V as keysyms; session lives with Hex
-│       │   ├── New session -> 250 ms for the approval dialog to hand focus back
-│       │   └── Existing session -> 150 ms after wl-copy, so the target holds the new
+│       │   (restore token, persist_mode 2) -> Ctrl+V as keysyms
+│       │   ├── 15 s after the last paste -> session closes when its grant restores, so
+│       │   │   GNOME's remote-control indicator shows only around pastes (#718); a grant
+│       │   │   that can't restore keeps its session
+│       │   ├── Session showed the dialog -> 250 ms for it to hand focus back
+│       │   └── Restored or open session -> 150 ms after wl-copy (minus the reopen), so the target holds the new
 │       │       selection before Ctrl+V (GNOME pasted nothing or the old clipboard, #578)
 │       │       // fixed delay, no acknowledgement; not observed on a real GNOME session
 │       └── Neither works -> Failed: "Copied to the clipboard; press Ctrl+V…" naming
