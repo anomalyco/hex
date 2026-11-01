@@ -61,7 +61,7 @@ fn refresh_in(directory: &Path, launcher: &Path) -> Result<()> {
 
 /// The program a managed entry's `Exec=` starts: its first argument, quoted
 /// as [`exec_argument`] writes it.
-fn program(entry: &str) -> Option<PathBuf> {
+pub(crate) fn program(entry: &str) -> Option<PathBuf> {
     let exec = entry
         .lines()
         .find_map(|line| line.trim().strip_prefix("Exec="))?;
@@ -215,7 +215,21 @@ pub(crate) fn launcher() -> Result<PathBuf> {
         .and_then(Path::parent)
         .is_some_and(|versions| versions.ends_with("versions"))
         && fs::canonicalize(&current).is_ok_and(|target| target == executable);
-    Ok(if managed { current } else { executable })
+    if managed {
+        return Ok(current);
+    }
+    Ok(shim(&executable).unwrap_or(executable))
+}
+
+/// A version manager's shim for `executable` (mise, asdf: `<root>/shims/hex`
+/// beside `<root>/installs/…/hex`), which outlives the version it runs.
+fn shim(executable: &Path) -> Option<PathBuf> {
+    let name = executable.file_name()?;
+    let installs = executable
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == "installs"))?;
+    let shim = installs.parent()?.join("shims").join(name);
+    shim.is_file().then_some(shim)
 }
 
 /// Whether an autostart entry starts its program: the spec's `Hidden` and
@@ -284,6 +298,20 @@ mod tests {
         assert!(entry.contains("Exec=\"/home/a b/100%%/hex\\$\" start\n"));
         assert!(entry.contains("X-Hex-Managed=true\n"));
         assert!(starts(&entry));
+    }
+
+    #[test]
+    fn a_version_managers_shim_outlives_the_version() {
+        let root = std::env::temp_dir().join(format!("hex-login-shim-{}", std::process::id()));
+        let executable = root.join("mise/installs/hex/3.1.1/hex");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(&executable, "").unwrap();
+        assert_eq!(shim(&executable), None);
+        fs::create_dir_all(root.join("mise/shims")).unwrap();
+        fs::write(root.join("mise/shims/hex"), "").unwrap();
+        assert_eq!(shim(&executable), Some(root.join("mise/shims/hex")));
+        assert_eq!(shim(Path::new("/usr/bin/hex")), None);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
