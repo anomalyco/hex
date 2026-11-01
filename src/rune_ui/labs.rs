@@ -293,6 +293,15 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"),
         ));
     }
+    // Linux's and Windows' engines transcribe a whole clip on the CPU.
+    if caps.os != super::platform::Os::Macos {
+        rows.push(row(
+            Feature::SkipPauses,
+            &TIMER,
+            tr("Skip long pauses"),
+            tr("Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"),
+        ));
+    }
     rows.push(row(
         Feature::UnloadIdle,
         &TIMER,
@@ -401,6 +410,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::StandaloneSpecialKeys => "lab-special-keys",
         Feature::HistoryStats => "lab-history-stats",
         Feature::RecentDictations => "lab-recent-dictations",
+        Feature::SkipPauses => "lab-skip-pauses",
     }
 }
 
