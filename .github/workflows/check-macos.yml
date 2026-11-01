@@ -35,6 +35,9 @@ on:
       - "scripts/test-app-identity.sh"
       - ".config/nextest.toml"
       - ".github/workflows/check-macos.yml"
+  # Release's onboarding gate needs a passing run on the candidate; a commit
+  # the paths above skip gets one with `gh workflow run check-macos.yml --ref production`.
+  workflow_dispatch:
 
 permissions:
   contents: read

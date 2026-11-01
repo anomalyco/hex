@@ -1454,6 +1454,23 @@ Verify both registration and unregistration with `sfltool dumpbtm`, and restore
 the user's original login-item state after the test. Do not add release test
 hooks or persist a second launch-at-login flag.
 
+Onboarding gates every stable release. Before any stable release, run
+`scripts/check-onboarding.sh` on the release candidate commit and include its
+result, with the scene images it writes, in the go/no-go given to Dax. It
+renders every onboarding scene (fresh install, permissions, the model step with
+nothing found, with found models, with the recommended model already present,
+download in progress, practice, done) in both appearances against the approved
+goldens, and walks a first run through the real tour in a clean temporary data
+folder until a model is downloaded and the tour reaches Done. Any unexpected
+visual or flow change blocks the release; an intentional change refreshes the
+goldens in its own PR. It runs on Linux, like every golden; the macOS and
+Windows scenes are fixtures of the same window and render there too, but
+nothing renders on a real Mac or Windows GPU. Release's `onboarding` job runs
+the same script and requires the candidate's Check Linux, Check macOS, and
+Check Windows to have passed (`gh workflow run <check> --ref production`
+for a commit their paths skip); a stable run publishes nothing until it
+passes.
+
 Every platform is built, signed, and published by one run of
 `.github/workflows/release.yml` ("Release"; see `docs/releasing.md`).
 Run it with `workflow_dispatch` (`ref`, `channel`: `check` builds and
