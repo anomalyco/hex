@@ -1599,7 +1599,7 @@ fn add_term_scrolls_the_new_row_into_view() {
 /// pointer is over it: on a row's field or between rows (#906).
 #[test]
 fn the_wheel_scrolls_a_long_term_list() {
-    let mut rt = runtime("portal", true, PANE_SIZE);
+    let mut rt = runtime("portal", true, (900.0, 480.0));
     rt.state.settings.vocabulary = (0..75)
         .map(|index| crate::dictation::vocabulary::VocabularyEntry {
             term: format!("term {index}"),
