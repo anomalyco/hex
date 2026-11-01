@@ -79,6 +79,18 @@ impl Spot {
     }
 }
 
+/// The plate's overlay, once installed.
+static LIVE: std::sync::OnceLock<rune::OverlayHandle<Plate>> = std::sync::OnceLock::new();
+
+/// Moves a shown plate to the display under the pointer when it changed
+/// (`rune_hud`'s follow, #807).
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn refollow_pointer() {
+    if let Some(overlay) = LIVE.get() {
+        overlay.refollow_pointer();
+    }
+}
+
 /// Where the plate goes. Called on the app's thread each time the plate
 /// appears, so it may read the screen.
 pub(crate) type Place = fn() -> Spot;
@@ -105,6 +117,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
         ..Default::default()
     });
     let overlay = app.overlay(spec, Plate::default());
+    let _ = LIVE.set(overlay.clone());
     let shown = Arc::new(AtomicBool::new(false));
     crate::dictation::live_text::watch(move |partial| {
         let partial = partial.filter(|partial| !is_blank(partial));
