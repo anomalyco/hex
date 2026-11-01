@@ -185,6 +185,11 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-labs-link", "Window/General/Labs link"),
     ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),
+    ("paste-picker", "Window/Paste picker/Single"),
+    (
+        "paste-picker-multiselect",
+        "Window/Paste picker/Multi-select",
+    ),
     ("mac-onboarding", "Window/Onboarding tour/Welcome"),
     ("onboarding-hero", "Window/Onboarding tour/Welcome · hero"),
     (

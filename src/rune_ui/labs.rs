@@ -273,6 +273,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Tap or hold"),
                 tr("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"),
             ));
+            rows.push(row(
+                Feature::PastePicker,
+                &KEYBOARD,
+                tr("Paste picker"),
+                tr("Hold Paste last dictation to pick from recent dictations"),
+            ));
         }
     }
     rows.push(row(
@@ -363,6 +369,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SidedChords => "lab-sided-modifier-chords",
         Feature::TapOrHold => "lab-tap-or-hold",
         Feature::BenchmarkDetails => "lab-benchmark-details",
+        Feature::PastePicker => "lab-paste-picker",
     }
 }
 
