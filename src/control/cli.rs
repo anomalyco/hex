@@ -718,6 +718,12 @@ pub enum CaptureCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Stop the capture that records, else start one (for a key that fires
+    /// on the press only).
+    Toggle {
+        #[command(flatten)]
+        output: Output,
+    },
     /// What records, what is being written, and the last capture.
     Status {
         #[command(flatten)]
@@ -810,6 +816,7 @@ pub fn capture(command: CaptureCommand) -> u8 {
         CaptureCommand::Start { output, .. } => (C::ScrawlCapture { action: A::Start }, output),
         CaptureCommand::Stop { output } => (C::ScrawlCapture { action: A::Stop }, output),
         CaptureCommand::Cancel { output } => (C::ScrawlCapture { action: A::Cancel }, output),
+        CaptureCommand::Toggle { output } => (C::ScrawlCapture { action: A::Toggle }, output),
         CaptureCommand::Status { output } => (C::ScrawlCapture { action: A::Status }, output),
         CaptureCommand::List { limit, output } => (C::ScrawlCaptureList { limit }, output),
         CaptureCommand::Show { capture, output } => (C::ScrawlCaptureShow { capture }, output),

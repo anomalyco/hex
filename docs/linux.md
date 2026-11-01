@@ -420,6 +420,15 @@ bindsym --release F9 exec hex dictation stop
 bindsym Ctrl+Alt+d exec hex dictation toggle
 ```
 
+GNOME 46 and older (Ubuntu 24.04) have no shortcuts portal. There, Settings ›
+Desktop shortcuts › **Add GNOME keyboard shortcuts** writes Hex's own entries
+into GNOME Settings › Keyboard › Custom Shortcuts with your shortcuts:
+`hex dictation toggle` (GNOME runs custom shortcuts on the key press only, so
+dictation toggles), `hex paste-last`, and `hex annotate toggle` while Annotate
+is on. Hex removes them while it's disabled and puts them back when you enable
+it; **Remove** takes them out for good. Keys you change in GNOME Settings stay.
+Hex never touches your other custom shortcuts.
+
 `hex dictation stop --print` stops the same way, then waits up to 60 s and
 writes the transcript to stdout instead of pasting it, after the same
 processing a paste gets. Only that command waits; the listener stops

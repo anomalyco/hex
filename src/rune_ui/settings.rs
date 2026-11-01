@@ -840,8 +840,8 @@ pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<
 
 /// Without a shortcuts portal the desktop's keybindings own every shortcut:
 /// the commands to bind there.
-pub(super) fn desktop_commands(p: Paint) -> El {
-    let rows = vec![
+pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
+    let mut rows = vec![
         note(
             "no-portal",
             tr(
@@ -885,7 +885,46 @@ pub(super) fn desktop_commands(p: Paint) -> El {
             &["hex dictation toggle --raw"],
         ),
     ];
+    // GNOME without a shortcuts portal (GNOME 46 and older, #781): Hex writes
+    // the commands into GNOME's own custom shortcuts.
+    if on_gnome() {
+        rows.insert(1, gnome_shortcuts_row(ui, p));
+    }
     section(p, "desktop-shortcuts", tr("Desktop shortcuts"), rows)
+}
+
+/// Adds or removes Hex's GNOME custom keyboard shortcuts.
+fn gnome_shortcuts_row(ui: &Ui, p: Paint) -> El {
+    let on = ui.settings.gnome_keyboard_shortcuts;
+    let description = if on {
+        tr(
+            "Added to GNOME Settings › Keyboard › Custom Shortcuts while Hex is enabled. GNOME runs them on the key press, so your dictation shortcut toggles dictation. Change the keys there.",
+        )
+    } else {
+        tr(
+            "Adds dictation, paste last and Annotate to GNOME Settings › Keyboard › Custom Shortcuts with your shortcuts. GNOME runs them on the key press, so dictation toggles.",
+        )
+    };
+    let action = button(
+        p,
+        "gnome-shortcuts-control",
+        if on {
+            tr("Remove")
+        } else {
+            tr("Add GNOME keyboard shortcuts")
+        },
+        ButtonKind::Secondary,
+        move |ui: &mut Ui, _| {
+            ui.update(|settings| settings.gnome_keyboard_shortcuts = !on);
+        },
+    );
+    setting_row(
+        p,
+        "gnome-shortcuts",
+        tr("GNOME keyboard shortcuts"),
+        Some(description),
+        action,
+    )
 }
 
 fn command_row(p: Paint, key: &str, title: &str, description: &str, commands: &[&str]) -> El {

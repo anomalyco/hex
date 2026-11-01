@@ -52,6 +52,9 @@ pub enum ScrawlCaptureAction {
     Stop,
     /// End the capture and discard its bundle.
     Cancel,
+    /// Stop the capture that records, else start one: for keybindings that
+    /// fire on the press only (GNOME's custom shortcuts, #781).
+    Toggle,
     Status,
 }
 
