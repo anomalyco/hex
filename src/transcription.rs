@@ -15,6 +15,7 @@ pub(crate) mod keyboard_model_switching;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod local_transcriber;
 pub(crate) mod model_benchmarks;
+pub(crate) mod model_details;
 pub(crate) mod models;
 pub(crate) mod pause_segmenter;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]

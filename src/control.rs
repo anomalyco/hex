@@ -738,6 +738,14 @@ pub fn model_selection(
             ));
         }
     }
+    if parsed == Some(TranscriptionModelId::ParakeetUltra) && !crate::labs::parakeet_ultra() {
+        return Err(ControlError::new(
+            "model-unavailable",
+            format!(
+                "`{model}` can't be used: turn on Labs › Parakeet Ultra: hex labs on parakeet-ultra"
+            ),
+        ));
+    }
     let id = parsed
         .filter(|id| crate::transcription::models::definition(*id).available())
         .ok_or_else(|| {

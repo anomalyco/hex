@@ -1,7 +1,29 @@
 # Third-Party Notices
 
 Hex's own source is covered by the root `LICENSE`. The following notices cover
-vendored icon assets. Dependencies retain their respective upstream licenses.
+vendored icon assets and the speech models Hex downloads under their own
+licences. Dependencies retain their respective upstream licenses.
+
+## Parakeet Ultra
+
+Parakeet Ultra by Moondream, based on NVIDIA Parakeet TDT 0.6B v3. GGUF
+conversion and quantization by handy-computer. Creative Commons Attribution
+4.0 International (CC BY 4.0). Hex downloads `parakeet-ultra-Q8_0.gguf` from
+https://huggingface.co/handy-computer/parakeet-ultra-gguf/tree/a1539be1b849ea7463b88343e5277b373d0c4ea9
+only while Labs › Parakeet Ultra is on; it does not ship the weights.
+
+License: https://creativecommons.org/licenses/by/4.0/legalcode.en
+
+Notice supplied with the files:
+
+> Modifications: handy-computer converted
+> https://huggingface.co/moondream/parakeet-ultra at commit 73175eb to GGUF for
+> transcribe.cpp (https://github.com/handy-computer/transcribe.cpp). Conversion
+> repackages the weights, renaming and re-laying-out tensors; the quantized
+> files (Q8_0, Q6_K, Q5_K_M, Q4_K_M) also store them at reduced numeric
+> precision. The weights were not retrained or fine-tuned.
+
+The weights are provided as-is, without warranties, as the licence states.
 
 ## Lucide And Feather
 

@@ -298,6 +298,9 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
 ├── Labs > Benchmark details (off) -> Speed · Size · Error rate "7.57% CER · lower is better",
 │   a wrapping line: language · dataset/split · source · conditions or "unknown" ·
 │   speed qualified; "Most accurate" only between comparable records (labs.md)
+├── Labs > Parakeet Ultra (off) -> its card with a Labs tag and Details: languages,  // setup.parakeet-ultra
+│   measured memory, the CC BY 4.0 credit, notice, Source/License links, folded
+│   published benchmarks "not measured in Hex" (labs.md)
 └── Labs > Use your own speech model (off) -> "Add model file…" in the header;  // setup.custom-models
     imported cards after the catalog: Imported · family · languages · Not
     benchmarked · file · licence · SHA-256 prefix; Speed and Accuracy "Unknown";

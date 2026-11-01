@@ -363,6 +363,11 @@ const KEYS: &[Key] = &[
         "Labs: the Local transcription picker can add a GGUF speech model from disk (hex model import)",
     ),
     key(
+        "labs.parakeet_ultra",
+        Kind::Bool,
+        "Labs: Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker; stays on while it is the dictation model",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -847,6 +852,11 @@ pub fn apply(
                 "The capture shortcut is already in use; set capture.hotkey to another \
                  shortcut first",
             ));
+        }
+        "labs.parakeet_ultra" if !candidate.labs.parakeet_ultra => {
+            if let Some(why) = crate::labs::Feature::ParakeetUltra.off_refusal(settings) {
+                return Err(invalid(name, why));
+            }
         }
         "history_retention" => effects.push(Effect::HistoryRetention(candidate.history_retention)),
         "show_dock_icon" => effects.push(Effect::DockIcon),

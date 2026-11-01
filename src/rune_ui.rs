@@ -36,6 +36,7 @@ pub(crate) mod live_text;
 pub(crate) mod meeting_capsules;
 mod meetings;
 mod meetings_host;
+mod model_details;
 mod model_import;
 mod models;
 mod modes;
@@ -2032,6 +2033,12 @@ const SCENES: &[Scene] = &[
     ("picker-downloading", |ui| {
         *ui = portal_fixture();
         picker::fixture(ui, Some(TranscriptionModelId::CohereTranscribe));
+    }),
+    // Labs › Parakeet Ultra: its card's details, credit, and published
+    // benchmarks (lists Ultra only where the saved settings turn it on).
+    ("picker-parakeet-ultra", |ui| {
+        *ui = portal_fixture();
+        picker::parakeet_ultra_fixture(ui);
     }),
     // Labs › Use your own speech model: the picker's Add model file….
     ("picker-custom-models", |ui| {

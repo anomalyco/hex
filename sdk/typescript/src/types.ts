@@ -10,6 +10,7 @@ export const MODEL_IDS = [
   "cohere_transcribe",
   "underdog_bark_3_pro",
   "underdog_bark_3_clean",
+  "parakeet_ultra",
   "apple_speech",
 ] as const
 
