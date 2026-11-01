@@ -128,7 +128,7 @@ pub(crate) fn refresh_x_authority() {
 /// connection. Returns the display it adopted. Called on the main thread
 /// before Hex starts any other thread.
 pub(crate) fn adopt_wayland_display() -> Option<String> {
-    if !user_manager_allowed() || graphical_session() {
+    if custom_root() || graphical_session() {
         return None;
     }
     let uid = unsafe { libc::getuid() };
@@ -178,7 +178,7 @@ fn wayland_socket(path: &Path, uid: u32) -> bool {
 /// A variable in the systemd user manager's environment, which the desktop
 /// session imports at each login.
 fn manager_environment(key: &str) -> Option<String> {
-    if !user_manager_allowed() {
+    if custom_root() {
         return None;
     }
     let output = std::process::Command::new("systemctl")
@@ -785,19 +785,11 @@ fn unit() -> String {
         .unwrap_or_else(|| UNIT.into())
 }
 
-/// A custom data root uses only its supplied desktop environment, not the
-/// user's manager or discovered display sockets. `HEX_SYSTEMD_UNIT` opts an
-/// isolated test into a managed unit explicitly.
-fn user_manager_allowed() -> bool {
-    std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_none()
-        || std::env::var_os("HEX_SYSTEMD_UNIT").is_some()
-}
-
 /// Whether launches start Hex through its systemd user unit: the unit is
 /// installed (by the installer or Home Manager) and this process uses the
 /// default data root, or explicitly names an isolated test unit.
 pub(crate) fn supervised() -> bool {
-    if !user_manager_allowed() {
+    if custom_root() {
         return false;
     }
     Command::new("systemctl")
@@ -808,6 +800,14 @@ pub(crate) fn supervised() -> bool {
         .is_ok_and(|output| {
             output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "loaded"
         })
+}
+
+/// A custom data root uses only its supplied desktop environment, not the
+/// user's manager or discovered display sockets. `HEX_SYSTEMD_UNIT` opts an
+/// isolated test into a managed unit explicitly.
+fn custom_root() -> bool {
+    std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some()
+        && std::env::var_os("HEX_SYSTEMD_UNIT").is_none()
 }
 
 fn systemctl(arguments: &[&str]) -> Result<()> {
