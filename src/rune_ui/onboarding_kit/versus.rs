@@ -233,10 +233,11 @@ pub(super) fn skippable(s: &Onboard) -> bool {
     let Some(from) = s.typing_from else {
         return false;
     };
-    // Once the answer is out there's nothing left to skip.
-    matches!(s.step, Step::Parked | Step::YourTurn | Step::Hearing)
-        && !hex_sent(s)
-        && (s.had_model && s.granted || s.now - from >= SKIP_AFTER)
+    // Once the answer is out there's nothing left to skip, but for the
+    // first run's celebration on the way to the microphone.
+    let playing = matches!(s.step, Step::Parked | Step::YourTurn | Step::Hearing) && !hex_sent(s)
+        || s.flow == Flow::FirstRun && s.step == Step::Heard;
+    playing && (s.had_model && s.granted || s.now - from >= SKIP_AFTER)
 }
 
 /// `"With Hex"`'s answer has left the field.

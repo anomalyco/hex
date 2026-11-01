@@ -209,9 +209,32 @@ pub(crate) struct Scene {
     marks: Vec<Mark>,
     /// The autocorrect hit: the swap, and the send that ends it.
     slams: Vec<(f64, f64)>,
+    /// The first moment the typing goes wrong: a typo that goes out, the
+    /// autocorrect hit, or an elbow on the keys.
+    trouble: Option<f64>,
     typos: usize,
     typing: f64,
     end: f64,
+}
+
+/// When `sent`'s first wrong letter against `meant` was typed, among one
+/// reply's `strokes`: the stroke after the last draft that didn't yet start
+/// with `sent` through that letter. `None` when `sent` only falls short.
+fn first_wrong(strokes: &[Stroke], sent: &str, meant: &str) -> Option<f64> {
+    let same = sent
+        .chars()
+        .zip(meant.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
+    if same >= sent.chars().count() {
+        return None;
+    }
+    let through: String = sent.chars().take(same + 1).collect();
+    let typed = strokes
+        .iter()
+        .rposition(|s| !s.text.starts_with(&through))
+        .map_or(0, |i| i + 1);
+    strokes.get(typed).map(|s| s.at)
 }
 
 fn key_for(c: char, caps: bool) -> (&'static str, bool) {
@@ -284,6 +307,7 @@ impl Scene {
             slows: Vec::new(),
             marks: Vec::new(),
             slams: Vec::new(),
+            trouble: None,
             typos: 0,
             typing: 0.0,
             end: 0.0,
@@ -302,6 +326,11 @@ impl Scene {
         let mut caps = false;
         let mut slow: Option<f64> = None;
         let mut swapped: Option<f64> = None;
+        // The strokes of the reply being typed start here.
+        let mut reply_from = 0;
+        let trouble = |s: &mut Scene, at: f64| {
+            s.trouble = Some(s.trouble.map_or(at, |t: f64| t.min(at)));
+        };
         // Lines that land while what follows goes on, waiting their turn,
         // with the name a tapback finds them by.
         let mut pending: Vec<(Line, Option<&str>)> = Vec::new();
@@ -502,6 +531,12 @@ impl Scene {
                     let gap = if slip { 0.11 } else { 0.16 };
                     at += gap;
                     let sent = std::mem::take(&mut text);
+                    if let Some(meant) = meant
+                        && sent != meant
+                    {
+                        let wrong = first_wrong(&s.strokes[reply_from..], &sent, meant);
+                        trouble(&mut s, wrong.unwrap_or(at));
+                    }
                     caret = 0;
                     stroke(&mut s, at, gap, "return", None, "", 0, panic.max(HARD));
                     s.typos += meant.map_or(usize::from(swapped.is_some()), |meant| {
@@ -536,6 +571,7 @@ impl Scene {
                         mark.until = at;
                     }
                     s.typing += at - began.take().unwrap_or(at);
+                    reply_from = s.strokes.len();
                     at += 0.35;
                 }
                 Op::Read => {
@@ -557,6 +593,7 @@ impl Scene {
                     n += 1;
                     caps = !caps;
                     s.caps.push(at);
+                    trouble(&mut s, at);
                     for key in ELBOW {
                         stroke(&mut s, at, 0.2, key, None, &text, caret, 1.0);
                     }
@@ -585,6 +622,7 @@ impl Scene {
                             end: start + to.len(),
                         });
                         swapped = Some(at);
+                        trouble(&mut s, at);
                     }
                     at += SLOW_AFTER;
                 }
@@ -880,16 +918,20 @@ impl Scene {
             .fold(0.0, f64::max)
     }
 
-    /// The heartbeat under the typing: from the first key, quicker and
-    /// louder with panic, one long low beat in slow motion, and never a
-    /// beat still ringing when you're removed.
+    /// The first moment the typing goes wrong, else the first key.
+    pub(crate) fn trouble(&self) -> Option<f64> {
+        self.trouble.or_else(|| self.strokes.first().map(|s| s.at))
+    }
+
+    /// The heartbeat under the typing: from the first moment it goes wrong
+    /// ([`Self::trouble`]), quicker and louder with panic, one long low beat
+    /// in slow motion, and never a beat still ringing when you're removed.
     pub(crate) fn heartbeats(&self) -> Vec<Beat> {
         let mut beats = Vec::new();
-        let Some(first) = self.strokes.first() else {
+        let Some(mut at) = self.trouble() else {
             return beats;
         };
         let stop = self.removal().unwrap_or(self.end);
-        let mut at = first.at;
         while at < stop {
             if let Some(&(a, b)) = self.slows.iter().find(|(a, b)| (*a..*b).contains(&at)) {
                 if a + 0.05 + SLOW_BEAT_LEN <= stop {
@@ -1293,7 +1335,13 @@ mod tests {
     fn the_heartbeat_quickens_and_stops_dead_at_the_removal() {
         let scene = Scene::default();
         let beats = scene.heartbeats();
-        assert!(beats.len() >= 20, "{}", beats.len());
+        assert!(beats.len() >= 16, "{}", beats.len());
+        // Not from the first key: from the first typo, `"Ys"` of `"Yse"`.
+        let trouble = scene.trouble().unwrap();
+        let wrong = scene.strokes().iter().find(|s| s.at == trouble).unwrap();
+        assert_eq!(wrong.text, "Ys");
+        assert!(trouble > scene.strokes()[0].at + 0.5);
+        assert_eq!(beats[0].at, trouble);
         let removal = scene.removal().unwrap();
         assert!(
             beats

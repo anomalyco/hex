@@ -518,7 +518,12 @@ mod tests {
             .iter()
             .filter(|&&(_, t, _)| t == Tone::Onboarding(OnboardingTone::Heartbeat))
             .collect();
-        assert!(hearts.len() >= 20);
+        assert!(hearts.len() >= 16);
+        let trouble = scene.trouble().unwrap();
+        assert!(
+            hearts.iter().all(|&&(at, ..)| at >= trouble),
+            "silent until the typing goes wrong"
+        );
         assert!(
             hearts
                 .iter()

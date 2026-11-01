@@ -437,8 +437,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 - New onboarding (no toggle; it runs only when invoked): the onboarding
   story, replayed on every OS
   (`rune_ui/onboarding_kit/live.rs`), in order: "Without Hex" (the comedy
-  scene, `scenes/default.scene`) while the real model downloads; the
-  Microphone alone; the practice game as "With Hex" once the model is in
+  scene, `scenes/default.scene`, its heartbeat from the first typo) and a
+  scripted "With Hex" payoff (⌥ held, the line said, the triumph; no input
+  asked) while the real model downloads; the Microphone alone; the practice game as "With Hex" once the model is in
   (a calm "Almost ready" until then; never Apple Speech); Accessibility
   ("Make it work everywhere"); "Hex is ready". Steps already granted pass
   at once (Linux and Windows ask for no permissions). Hex's shortcut needs

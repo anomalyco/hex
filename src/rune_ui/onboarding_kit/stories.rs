@@ -943,9 +943,10 @@ fn hear(s: &mut Onboard, now: f64) {
     s.sfx.on_hex_reply(now, &beats);
 }
 
-/// The first run: `"Without Hex"` plays while the model downloads, then the
-/// microphone, the practice game as `"With Hex"` once the model is in,
-/// Accessibility, and `"Hex is ready"`.
+/// The first run: `"Without Hex"` and a scripted `"With Hex"` play while
+/// the model downloads, then the microphone, the practice game as the
+/// user's own `"With Hex"` once the model is in, Accessibility, and
+/// `"Hex is ready"`.
 pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
     const WAIT: f64 = 0.25;
     match s.step {
@@ -973,16 +974,30 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             Some(s.scene.duration() + COMEDY_HOLD)
         }
         // `"Without Hex"` waits for `"Watch what happens"`, plays out, and
-        // its last line holds a beat.
+        // its last line holds a beat; then `"With Hex"` shows how it goes,
+        // with nothing asked of the user yet.
         Step::Parked => {
             let from = s.typing_from?;
             let left = from + s.scene.duration() + COMEDY_HOLD - now;
             if left > 1e-3 {
-                Some(left)
-            } else {
-                leave_comedy(s, now)
+                return Some(left);
             }
+            s.step = Step::YourTurn;
+            s.voice_from = Some(now);
+            s.hud_from = Some(now);
+            s.sfx.on_rewind(now);
+            Some(versus::BEFORE_KEY)
         }
+        Step::YourTurn => {
+            s.step = Step::Hearing;
+            hear(s, now);
+            Some(Script::chosen().take().release + 0.1)
+        }
+        Step::Hearing => {
+            s.step = Step::Heard;
+            Some(versus::reply_secs(s))
+        }
+        Step::Heard => leave_comedy(s, now),
         Step::Microphone | Step::Waiting => to_practice(s, now),
         Step::Try => {
             if s.interactive_try() {
@@ -1015,8 +1030,8 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             s.jump_to_ready();
             None
         }
-        // `"With Hex"`'s scripted reply belongs to the Versus story.
-        Step::YourTurn | Step::Hearing | Step::Heard | Step::Done | Step::Ready => None,
+        // The first run has no score: `"With Hex"` goes on to the microphone.
+        Step::Done | Step::Ready => None,
     }
 }
 
@@ -1029,7 +1044,7 @@ const WATCH_AFTER: f64 = 1.8;
 /// How long `"Without Hex"`'s last line holds before the first run moves on.
 const COMEDY_HOLD: f64 = 1.6;
 
-/// Out of `"Without Hex"`, by its end or `Skip →`.
+/// Out of the comedy, by `"With Hex"`'s end or `Skip →`.
 fn leave_comedy(s: &mut Onboard, now: f64) -> Option<f64> {
     if s.mic_granted || s.granted {
         to_practice(s, now)
@@ -1374,7 +1389,56 @@ mod tests {
         poll(&mut s, end + 0.01, &mut tx);
         assert_eq!(s.step, Step::Parked);
         poll(&mut s, end + COMEDY_HOLD + 0.01, &mut tx);
-        assert_eq!(s.step, Step::Microphone);
+        assert_eq!(s.step, Step::YourTurn);
+    }
+
+    #[test]
+    fn with_hex_plays_itself_after_without_hex_then_asks_for_the_microphone() {
+        use crate::feedback::{OnboardingTone, Tone};
+        let mut s = Onboard::new(Flow::FirstRun);
+        s.had_model = true;
+        s.begin_live(0.0);
+        let mut tx = Tx::default();
+        poll(&mut s, 30.0, &mut tx);
+        s.start_scene();
+        let mut now = 30.0;
+        let mut shortcut = None;
+        let mut steps = vec![s.step];
+        while now < 120.0 && s.step != Step::Microphone {
+            poll(&mut s, now, &mut tx);
+            if s.step == Step::Hearing {
+                shortcut.get_or_insert(now);
+            }
+            if steps.last() != Some(&s.step) {
+                steps.push(s.step);
+            }
+            now += 0.05;
+        }
+        assert_eq!(
+            steps,
+            [
+                Step::Parked,
+                Step::YourTurn,
+                Step::Hearing,
+                Step::Heard,
+                Step::Microphone
+            ],
+            "nothing asked of the user on the way"
+        );
+        // From `⌥` going down to the microphone, polled every 0.05 s.
+        let with_hex = now - shortcut.unwrap();
+        assert!(
+            with_hex <= super::super::triumph::MAX_SECS + 0.1,
+            "{with_hex:.1} s"
+        );
+        let fired = |tone: Tone| s.sfx.fired_cues().iter().any(|&(_, t, _)| t == tone);
+        assert!(fired(Tone::Onboarding(OnboardingTone::ShortcutDown)));
+        assert!(
+            s.sfx
+                .fired_cues()
+                .iter()
+                .any(|(_, t, _)| matches!(t, Tone::Onboarding(OnboardingTone::Triumph(_))))
+        );
     }
 
     #[test]
@@ -1398,6 +1462,7 @@ mod tests {
         }
         let order: Vec<Step> = [
             Step::Parked,
+            Step::Heard,
             Step::Microphone,
             Step::Try,
             Step::Accessibility,
@@ -1406,10 +1471,9 @@ mod tests {
         .into_iter()
         .filter(|step| steps.contains(step))
         .collect();
-        assert_eq!(order.len(), 5, "{steps:?}");
+        assert_eq!(order.len(), 6, "{steps:?}");
         let at = |step| steps.iter().position(|s| *s == step).unwrap();
         assert!(order.windows(2).all(|w| at(w[0]) < at(w[1])), "{steps:?}");
-        assert!(!steps.contains(&Step::YourTurn), "{steps:?}");
     }
 
     #[test]
@@ -1442,7 +1506,10 @@ mod tests {
                 )
             })
             .count();
-        assert_eq!(triumphs, 1, "the first score card sounds the triumph once");
+        assert_eq!(
+            triumphs, 2,
+            "`With Hex`'s payoff and the game's first score card"
+        );
     }
 
     #[test]
@@ -1463,6 +1530,24 @@ mod tests {
             s.step,
             Step::Microphone | Step::Accessibility | Step::Waiting | Step::Try
         ));
+    }
+
+    #[test]
+    fn skip_leaves_with_hex_too() {
+        let mut s = Onboard::new(Flow::FirstRun);
+        s.had_model = true;
+        s.begin_live(0.0);
+        let mut tx = Tx::default();
+        poll(&mut s, 30.0, &mut tx);
+        s.start_scene();
+        let mut now = 30.0;
+        while now < 120.0 && s.step != Step::Heard {
+            poll(&mut s, now, &mut tx);
+            now += 0.05;
+        }
+        assert!(versus::skippable(&s));
+        assert!(s.skip_scene());
+        assert_eq!(s.step, Step::Microphone);
     }
 
     #[test]
