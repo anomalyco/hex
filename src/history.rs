@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+pub mod stats;
+
 const VERSION: u32 = 1;
 const MAX_ENTRIES: usize = 10_000;
 const MAX_TEXT_BYTES: usize = 16 * 1024;

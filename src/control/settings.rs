@@ -373,6 +373,11 @@ const KEYS: &[Key] = &[
         "Labs: shortcuts may use Menu, Pause, or Scroll Lock, alone or with modifiers (Linux); off puts such a shortcut back to its default",
     ),
     key(
+        "labs.history_stats",
+        Kind::Bool,
+        "Labs: a summary of retained dictations at the top of History, and hex history stats",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

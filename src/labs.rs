@@ -86,10 +86,11 @@ pub enum Feature {
     CustomModels,
     ParakeetUltra,
     StandaloneSpecialKeys,
+    HistoryStats,
 }
 
 impl Feature {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -118,6 +119,7 @@ impl Feature {
         Self::CustomModels,
         Self::ParakeetUltra,
         Self::StandaloneSpecialKeys,
+        Self::HistoryStats,
     ];
 
     /// The features this OS and build have.
@@ -168,7 +170,8 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::CustomModels
             | Self::ParakeetUltra
-            | Self::StandaloneSpecialKeys => Audience::Everyone,
+            | Self::StandaloneSpecialKeys
+            | Self::HistoryStats => Audience::Everyone,
         }
     }
 
@@ -222,6 +225,7 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::CustomModels
             | Self::ParakeetUltra
+            | Self::HistoryStats
             | Self::FillerWords => true,
         }
     }
@@ -257,6 +261,7 @@ impl Feature {
             Self::CustomModels => "custom-models",
             Self::ParakeetUltra => "parakeet-ultra",
             Self::StandaloneSpecialKeys => "special-keys",
+            Self::HistoryStats => "history-stats",
         }
     }
 
@@ -291,6 +296,7 @@ impl Feature {
             Self::CustomModels => "labs.custom_models",
             Self::ParakeetUltra => "labs.parakeet_ultra",
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
+            Self::HistoryStats => "labs.history_stats",
         }
     }
 
@@ -365,6 +371,9 @@ impl Feature {
             Self::StandaloneSpecialKeys => {
                 "Use Menu, Pause, or Scroll Lock alone as a shortcut, such as Caps Lock remapped to Menu"
             }
+            Self::HistoryStats => {
+                "Show a summary of your retained dictations at the top of History, with hex history stats"
+            }
         }
     }
 
@@ -403,6 +412,7 @@ impl Feature {
             Self::CustomModels => settings.labs.custom_models,
             Self::ParakeetUltra => settings.labs.parakeet_ultra,
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
+            Self::HistoryStats => settings.labs.history_stats,
         }
     }
 
@@ -435,6 +445,7 @@ impl Feature {
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
             Self::CustomModels => settings.labs.custom_models = on,
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
+            Self::HistoryStats => settings.labs.history_stats = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -463,8 +474,9 @@ const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
 const CUSTOM_MODELS: u32 = 1 << 16;
 const PARAKEET_ULTRA: u32 = 1 << 17;
+const HISTORY_STATS: u32 = 1 << 18;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u32 = 18;
+const MINUTES_SHIFT: u32 = 19;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -582,6 +594,12 @@ pub fn parakeet_ultra() -> bool {
     on(PARAKEET_ULTRA)
 }
 
+/// History's summary of retained dictations and `hex history stats` (read
+/// when the History pane reloads and when the command starts).
+pub fn history_stats() -> bool {
+    on(HISTORY_STATS)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -653,6 +671,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             settings.parakeet_ultra,
             PARAKEET_ULTRA,
         ),
+        (Feature::HistoryStats, settings.history_stats, HISTORY_STATS),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -956,6 +975,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & TAP_OR_HOLD, 0);
         assert_eq!(state & SIDED_CHORDS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn history_stats_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & HISTORY_STATS, 0);
+        labs.history_stats = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & HISTORY_STATS, 0);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
