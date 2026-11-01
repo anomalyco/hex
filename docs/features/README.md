@@ -1341,7 +1341,7 @@ Linux beta                               // not macOS feature parity
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
 ├── General > Launch at login -> writes or removes ~/.config/autostart/anomaly.hex.desktop (X-Hex-Managed; linux/login_item)
 │   ├── Background portal (GNOME, KDE; xdg-desktop-portal 1.20+) -> the portal writes it (X-XDP-Autostart=anomaly.hex; linux/background)
-│   └── Installed by mise or asdf -> starts the version manager's shim, if it runs Hex from home
+│   ├── Installed by mise or asdf -> starts the version manager's shim, if it runs Hex from home
 │   └── An entry without the mark -> error beside the row; Hex never replaces it
 ├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
 │   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff

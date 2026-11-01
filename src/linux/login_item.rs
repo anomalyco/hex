@@ -254,11 +254,14 @@ pub(crate) fn launcher() -> Result<PathBuf> {
 
 /// A version manager's shim for `executable` (mise, asdf: `<root>/shims/hex`
 /// beside `<root>/installs/…/hex`), which outlives the version it runs: only
-/// one inside the home directory, executable, the user's own and writable by
-/// no one else, that runs Hex from the home directory (a shim whose tool has
-/// no version set there fails).
+/// one inside the home directory, the user's own and writable by no one else,
+/// that runs Hex from the home directory (a shim whose tool has no version set
+/// there fails).
 fn shim(executable: &Path) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
+    // `/home` is a link to `/var/home` on image-based desktops (GNOME OS,
+    // Silverblue), and the executable's path is the resolved one.
+    let home = fs::canonicalize(&home).unwrap_or(home);
     let shim = shim_path(executable, &home)?;
     static CHECKED: std::sync::Mutex<Option<(PathBuf, bool)>> = std::sync::Mutex::new(None);
     let mut checked = CHECKED
@@ -269,7 +272,7 @@ fn shim(executable: &Path) -> Option<PathBuf> {
     {
         return runs.then_some(shim);
     }
-    let runs = owned(&shim) && owned(shim.parent()?) && runs_hex(&shim, &home);
+    let runs = trusted(&shim) && runs_hex(&shim, &home);
     *checked = Some((shim.clone(), runs));
     runs.then_some(shim)
 }
@@ -286,22 +289,32 @@ fn shim_path(executable: &Path, home: &Path) -> Option<PathBuf> {
     shim.is_file().then_some(shim)
 }
 
-/// Executable or searchable, the user's, and writable by no one else.
-fn owned(path: &Path) -> bool {
+/// The shim and its directory are the user's and writable by no one else;
+/// the shim may link to a version manager the system installed (root's).
+fn trusted(shim: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
-    fs::metadata(path).is_ok_and(|metadata| {
-        // SAFETY: geteuid has no preconditions.
-        metadata.uid() == unsafe { libc::geteuid() }
-            && metadata.mode() & 0o022 == 0
-            && metadata.mode() & 0o111 != 0
-    })
+    // SAFETY: geteuid has no preconditions.
+    let user = unsafe { libc::geteuid() };
+    let private = |metadata: &fs::Metadata| metadata.mode() & 0o022 == 0;
+    let Some(directory) = shim.parent() else {
+        return false;
+    };
+    fs::symlink_metadata(directory)
+        .is_ok_and(|metadata| metadata.is_dir() && metadata.uid() == user && private(&metadata))
+        && fs::symlink_metadata(shim).is_ok_and(|metadata| metadata.uid() == user)
+        && fs::metadata(shim).is_ok_and(|metadata| {
+            (metadata.uid() == user || metadata.uid() == 0)
+                && private(&metadata)
+                && metadata.mode() & 0o111 != 0
+        })
 }
 
-/// Whether `shim --version`, run from `home`, says it's Hex.
+/// Whether `shim --help`, run from `home`, says it's Hex (other tools are
+/// called `hex` too).
 fn runs_hex(shim: &Path, home: &Path) -> bool {
     use std::process::{Command, Stdio};
     let Ok(mut child) = Command::new(shim)
-        .arg("--version")
+        .arg("--help")
         .current_dir(home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -328,7 +341,7 @@ fn runs_hex(shim: &Path, home: &Path) -> bool {
         .stdout
         .take()
         .is_some_and(|mut stdout| std::io::Read::read_to_string(&mut stdout, &mut output).is_ok())
-        && output.trim_start().starts_with("hex ")
+        && output.contains("Local, observable voice")
 }
 
 /// Whether an entry that starts `program` should start `launcher` instead:
