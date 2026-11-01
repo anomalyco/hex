@@ -671,6 +671,8 @@ General                                  // settings
 │   │   (Dictate without processing sits in the Output pane; see dictation.md)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
 │       Interface language, Update channel (self-updating installs)
+│       // Interface language System: macOS's first preferred language (zh-Hans -> 中文),
+│       // Linux LC_ALL/LC_MESSAGES/LANG, Windows the user locale; unknown -> English
 ├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Labs > Share dictation shortcut with other apps (Windows, off)
