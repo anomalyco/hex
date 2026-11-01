@@ -1611,37 +1611,66 @@ fn the_wheel_scrolls_a_long_term_list() {
     settle(&mut rt);
     tap(&mut rt, "vocabulary-control");
     settle(&mut rt);
-    let first = |rt: &Runtime<Ui>| {
-        let keys: Vec<_> = rt
-            .elements()
-            .into_iter()
-            .filter(|e| e.path.contains("term-scroll"))
-            .take(6)
-            .map(|e| format!("{:?}={:?}@{}", e.key, e.path, e.rect[1]))
-            .collect();
-        eprintln!("{keys:?}");
-        element(rt, "term0").rect[1]
-    };
+    let first = |rt: &Runtime<Ui>| element(rt, "term0").rect[1];
     let list = element(&rt, "term-scroll").rect;
-    for (x, precise) in [(list[0] + 1.0, false), (list[0] + 40.0, true), (list[0] + list[2] - 8.0, true)] {
+    // Beside the fields, on a term field, and on a "sounds like" field; a
+    // mouse wheel's line steps, then a touchpad's precise gesture.
+    for (x, precise) in [
+        (list[0] + 1.0, false),
+        (list[0] + 40.0, true),
+        (list[0] + list[2] - 8.0, false),
+    ] {
         let before = first(&rt);
-        let y = list[1] + list[3] / 2.0;
-        rt.pointer_move(x, y);
-        rt.frame(1.0 / 60.0);
-        let (px, py) = rt.pointer().unwrap();
-        for step in 0..10 {
-            let phase = match step {
-                0 => rune::GesturePhase::Began,
-                9 => rune::GesturePhase::Ended,
-                _ => rune::GesturePhase::Moved,
-            };
-            rt.wheel_event(rune::WheelEvent::new(0.0, -30.0).at(px, py).phase(phase).precise(precise));
-            rt.frame(1.0 / 60.0);
-        }
-        settle(&mut rt);
-        eprintln!("x {x}: {before} -> {} list {list:?}", first(&rt));
+        wheel_down(&mut rt, x, list[1] + list[3] / 2.0, precise);
+        assert!(
+            first(&rt) < before - 100.0,
+            "the list didn't scroll at x {x}"
+        );
     }
-    panic!("debug");
+}
+
+/// The model picker sheet's list scrolls with the wheel too.
+#[test]
+fn the_wheel_scrolls_the_model_picker() {
+    let mut rt = runtime("picker-downloading", true, (900.0, 480.0));
+    let list = element(&rt, "model-scroll").rect;
+    let first = |rt: &Runtime<Ui>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.path.contains("model-scroll/inset/"))
+            .map(|e| e.rect[1])
+            .unwrap()
+    };
+    let before = first(&rt);
+    wheel_down(
+        &mut rt,
+        list[0] + list[2] / 2.0,
+        list[1] + list[3] / 2.0,
+        true,
+    );
+    assert!(first(&rt) < before - 50.0, "the picker didn't scroll");
+}
+
+/// Ten wheel steps down at (x, y), as the window's platform sends them: the
+/// pointer moves there first, and a gesture begins, moves, and ends.
+fn wheel_down(rt: &mut Runtime<Ui>, x: f32, y: f32, precise: bool) {
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 60.0);
+    for step in 0..10 {
+        let phase = match step {
+            0 => rune::GesturePhase::Began,
+            9 => rune::GesturePhase::Ended,
+            _ => rune::GesturePhase::Moved,
+        };
+        rt.wheel_event(
+            rune::WheelEvent::new(0.0, -30.0)
+                .at(x, y)
+                .phase(phase)
+                .precise(precise),
+        );
+        rt.frame(1.0 / 60.0);
+    }
+    settle(rt);
 }
 
 /// A model whose transcription takes no vocabulary says so on the Vocabulary
