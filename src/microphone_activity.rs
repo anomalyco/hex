@@ -159,7 +159,10 @@ pub(crate) fn browser_process_objects(which: BrowserProcesses) -> Result<Vec<Aud
 
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
-const EXECUTABLES: [(&str, &str); 18] = [
+const EXECUTABLES: [(&str, &str); 20] = [
+    // WhatsApp for Windows, before and after its WinUI rewrite.
+    ("whatsapp", "net.whatsapp.WhatsApp"),
+    ("whatsapp.root", "net.whatsapp.WhatsApp"),
     ("zoom", "us.zoom.xos"),
     ("ms-teams", "com.microsoft.teams2"),
     ("teams", "com.microsoft.teams2"),
@@ -204,6 +207,9 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         ("com.microsoft.teams", "com.microsoft.teams2"),
         ("com.tinyspeck.slackmacgap", "com.tinyspeck.slackmacgap"),
         ("com.apple.facetime", "com.apple.FaceTime"),
+        // The native (Catalyst) app, and the older Electron one.
+        ("net.whatsapp.whatsapp", "net.whatsapp.WhatsApp"),
+        ("desktop.whatsapp", "net.whatsapp.WhatsApp"),
         ("com.google.chrome", "com.google.Chrome"),
         ("com.brave.browser", "com.brave.Browser"),
         ("com.apple.safari", "com.apple.Safari"),
@@ -227,6 +233,7 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "com.microsoft.teams2" => Some("Microsoft Teams"),
         "com.tinyspeck.slackmacgap" => Some("Slack"),
         "com.apple.FaceTime" => Some("FaceTime"),
+        "net.whatsapp.WhatsApp" => Some("WhatsApp"),
         "com.google.Chrome" => Some("Google Chrome"),
         "com.brave.Browser" => Some("Brave Browser"),
         "com.apple.Safari" => Some("Safari"),

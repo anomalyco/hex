@@ -31,7 +31,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   with OpenCode (off by default; when Apple Intelligence is off or missing)
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
-│       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime (always listed)
+│       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp
+│       │   (always listed)
 │       └── then each website or app chosen for from an offer's "…"
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
            the pane leaves the sidebar
@@ -113,7 +114,10 @@ hardware.
 ### Detect And Offer
 
 ```ts
-Zoom / Teams / Slack huddle / FaceTime / browser call uses the microphone
+Zoom / Teams / Slack huddle / FaceTime / WhatsApp / browser call uses the microphone
+  (WhatsApp: net.whatsapp.WhatsApp, the older desktop.WhatsApp, WhatsApp.exe or
+  WhatsApp.Root.exe on Windows, web.whatsapp.com in a browser; 20 s, as voice
+  notes also hold the microphone)
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
   -> On the microphone for 2 s by the monotonic clock // meetings.detect
      │   Google Meet and Banshee (banshee.app) in a browser count as known

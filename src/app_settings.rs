@@ -1266,12 +1266,13 @@ impl CalendarSettings {
 /// The call services Settings always lists, by provider key (the app's
 /// canonical bundle ID, or the website host for browser services) and
 /// English name.
-pub const KNOWN_MEETING_PROVIDERS: [(&str, &str); 5] = [
+pub const KNOWN_MEETING_PROVIDERS: [(&str, &str); 6] = [
     ("com.tinyspeck.slackmacgap", "Slack huddles"),
     ("us.zoom.xos", "Zoom"),
     ("meet.google.com", "Google Meet"),
     ("com.microsoft.teams2", "Microsoft Teams"),
     ("com.apple.FaceTime", "FaceTime"),
+    ("net.whatsapp.WhatsApp", "WhatsApp"),
 ];
 
 /// What Hex does when it detects a call from a provider.
