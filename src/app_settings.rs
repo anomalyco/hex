@@ -1374,6 +1374,9 @@ pub struct LabsSettings {
     /// The shortcut recorder keeps the side of each modifier in a
     /// modifier-only chord, such as Right ⌘ + Right ⌥ (macOS, issue 710).
     pub sided_modifier_chords: bool,
+    /// In Toggle mode, a press held past the hold threshold dictates until
+    /// it lifts; a short tap still starts and stops (macOS, issue 711).
+    pub tap_or_hold: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1400,6 +1403,7 @@ impl Default for LabsSettings {
             spoken_symbols: false,
             picker_sort_filter: false,
             sided_modifier_chords: false,
+            tap_or_hold: false,
         }
     }
 }

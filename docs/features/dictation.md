@@ -362,6 +362,9 @@ General > Shortcut mode = Toggle
   -> Escape -> Cancel
   // Double-tap to lock and Double-tap only are hidden and ignored
   // Shortcut chords during the first 300 ms still discard
+  macOS, Labs › Tap or hold on (labs.tap_or_hold, off by default, #711):
+  ├── Release 300 ms or more after the press -> Finish (with the release tail)
+  └── Sooner -> Keeps recording, as above
   Linux: release never arrives (Hyprland Lua bind, Alt up before Z)
   ├── Press 1 s or more after the last press -> Finish
   └── Sooner -> Ignored as a key repeat (KWin repeats held shortcuts)

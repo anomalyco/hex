@@ -7,7 +7,7 @@
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard or only copying it (macOS), a second dictation shortcut
-//! (macOS), and Terminal paste
+//! (macOS), Toggle's tap or hold (macOS), and Terminal paste
 //! and shortcut sharing on Windows) is just its toggle.
 //!
 //! Each feature has an audience (`Feature::audience`): `Everyone` ships in
@@ -81,10 +81,11 @@ pub enum Feature {
     SpokenSymbols,
     PickerSortFilter,
     SidedChords,
+    TapOrHold,
 }
 
 impl Feature {
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -108,6 +109,7 @@ impl Feature {
         Self::SpokenSymbols,
         Self::PickerSortFilter,
         Self::SidedChords,
+        Self::TapOrHold,
     ];
 
     /// The features this OS and build have.
@@ -153,7 +155,8 @@ impl Feature {
             | Self::SmartSpacing
             | Self::SpokenSymbols
             | Self::PickerSortFilter
-            | Self::SidedChords => Audience::Everyone,
+            | Self::SidedChords
+            | Self::TapOrHold => Audience::Everyone,
         }
     }
 
@@ -181,7 +184,8 @@ impl Feature {
             | Self::CopyOnly
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
-            | Self::SidedChords => cfg!(target_os = "macos"),
+            | Self::SidedChords
+            | Self::TapOrHold => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -221,6 +225,7 @@ impl Feature {
             Self::SpokenSymbols => "spoken-symbols",
             Self::PickerSortFilter => "picker-sort-filter",
             Self::SidedChords => "sided-modifier-chords",
+            Self::TapOrHold => "tap-or-hold",
         }
     }
 
@@ -250,6 +255,7 @@ impl Feature {
             Self::SpokenSymbols => "labs.spoken_symbols",
             Self::PickerSortFilter => "labs.picker_sort_filter",
             Self::SidedChords => "labs.sided_modifier_chords",
+            Self::TapOrHold => "labs.tap_or_hold",
         }
     }
 
@@ -306,6 +312,9 @@ impl Feature {
             Self::SidedChords => {
                 "Record which side each modifier of a shortcut is on, such as Right Command + Right Option"
             }
+            Self::TapOrHold => {
+                "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
+            }
         }
     }
 
@@ -339,6 +348,7 @@ impl Feature {
             Self::SpokenSymbols => settings.labs.spoken_symbols,
             Self::PickerSortFilter => settings.labs.picker_sort_filter,
             Self::SidedChords => settings.labs.sided_modifier_chords,
+            Self::TapOrHold => settings.labs.tap_or_hold,
         }
     }
 
@@ -367,6 +377,7 @@ impl Feature {
             Self::SpokenSymbols => settings.labs.spoken_symbols = on,
             Self::PickerSortFilter => settings.labs.picker_sort_filter = on,
             Self::SidedChords => settings.labs.sided_modifier_chords = on,
+            Self::TapOrHold => settings.labs.tap_or_hold = on,
         }
     }
 }
@@ -387,8 +398,9 @@ const SUBTITLE_EXPORT: u32 = 1 << 11;
 const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
+const TAP_OR_HOLD: u32 = 1 << 15;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 15;
+const MINUTES_SHIFT: u32 = 16;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -487,6 +499,13 @@ pub fn sided_modifier_chords() -> bool {
     on(SIDED_CHORDS)
 }
 
+/// In Toggle mode, a press held past the hold threshold finishes its capture
+/// when it lifts instead of locking it (macOS; read at each release).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn tap_or_hold() -> bool {
+    on(TAP_OR_HOLD)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -551,6 +570,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             settings.sided_modifier_chords,
             SIDED_CHORDS,
         ),
+        (Feature::TapOrHold, settings.tap_or_hold, TAP_OR_HOLD),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -837,6 +857,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & SIDED_CHORDS, 0);
         assert_eq!(state & SPOKEN_SYMBOLS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn tap_or_hold_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & TAP_OR_HOLD, 0);
+        labs.tap_or_hold = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & TAP_OR_HOLD, 0);
+        assert_eq!(state & SIDED_CHORDS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

@@ -42,6 +42,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
+├── Tap or hold      no    labs.tap_or_hold             (macOS)   in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711)
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
@@ -319,6 +320,24 @@ before. Checks: `with_sided_chords_each_modifier_keeps_its_side` and
 `sided_modifier_chords_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real recording on a Mac;
 the row renders only in macOS builds, so no golden changes.
+
+Tap or hold (`tap-or-hold`, issue 711, macOS): one dictation shortcut
+works as both tap-to-toggle and push-to-talk. It acts only in Toggle mode
+(`shortcut_mode: toggle`). The gate is the macOS shortcut machine
+(`DictationHotkey` in [suppression.rs](../../src/suppression.rs)), which reads
+`labs::tap_or_hold()` at each release of a Toggle press. With it on, a press
+released at least `MINIMUM_HOLD_DURATION` (300 ms, the hold threshold) after
+it started finishes the capture on release, as Hold does, with the usual
+200 ms tail. A shorter press locks the capture as plain Toggle does, and the
+next press finishes it. Chord discards, Escape, and the press that finishes
+a lock are unchanged. It applies to every `DictationHotkey` in Toggle mode.
+Off, or in Hold mode, nothing changes. Linux and Windows don't have it.
+Checks: `tap_or_hold_locks_a_short_tap_and_finishes_a_long_hold_on_release`
+and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
+[suppression.rs](../../src/suppression.rs) (macOS only);
+`tap_or_hold_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real Mac with the toggle
+on. The row renders only in macOS builds, so no golden changes.
 
 Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
 on, the Local transcription picker shows one row between its header and the

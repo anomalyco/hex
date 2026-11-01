@@ -1556,6 +1556,14 @@ impl PhysicalKeyboard {
     };
 }
 
+/// Labs › Tap or hold. Unit tests never read the saved Labs switches; they
+/// turn it on per machine.
+const TAP_OR_HOLD: fn() -> bool = if cfg!(test) {
+    || false
+} else {
+    crate::labs::tap_or_hold
+};
+
 pub struct DictationHotkey {
     state: State,
     pressed_keys: HashSet<u16>,
@@ -1563,6 +1571,9 @@ pub struct DictationHotkey {
     double_tap_only: bool,
     /// Press to start, press again to finish: releasing locks the capture.
     toggle: bool,
+    /// Labs › Tap or hold, read at each Toggle release: a press held past
+    /// the hold threshold finishes on release instead of locking.
+    tap_or_hold: fn() -> bool,
     binding: RuntimeHotkey,
     ignore_before: Option<CaptureInstant>,
     stale_keys_neutral_since: Option<CaptureInstant>,
@@ -1613,6 +1624,7 @@ impl DictationHotkey {
             double_tap_enabled,
             double_tap_only: false,
             toggle: false,
+            tap_or_hold: TAP_OR_HOLD,
             binding,
             ignore_before: None,
             stale_keys_neutral_since: None,
@@ -2166,7 +2178,14 @@ impl DictationHotkey {
                 };
                 Some(HotkeyAction::Start)
             }
-            State::Recording { .. } if trigger_released && self.toggle => {
+            // With Labs › Tap or hold, a Toggle press held past the hold
+            // threshold is push-to-talk: it falls through to finish below.
+            State::Recording { started_at, .. }
+                if trigger_released
+                    && self.toggle
+                    && (now.duration_since(started_at) < MINIMUM_HOLD_DURATION
+                        || !(self.tap_or_hold)()) =>
+            {
                 self.state = State::Locked;
                 None
             }
@@ -3198,6 +3217,74 @@ mod tests {
 
     fn test_hotkey(trigger_down: bool, now: CaptureInstant) -> DictationHotkey {
         DictationHotkey::with_binding(trigger_down, now, true, option_binding())
+    }
+
+    fn toggle_hotkey(now: CaptureInstant, tap_or_hold: bool) -> DictationHotkey {
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.set_toggle(true);
+        hotkey.tap_or_hold = if tap_or_hold { || true } else { || false };
+        hotkey
+    }
+
+    #[test]
+    fn tap_or_hold_locks_a_short_tap_and_finishes_a_long_hold_on_release() {
+        let now = capture_time();
+        let ms = |millis| now + Duration::from_millis(millis);
+        let press = InputEvent::Flags(OPTION_KEY_MASK);
+        let release = InputEvent::Flags(NO_FLAGS);
+        // A short tap locks, and the next press finishes, as plain Toggle.
+        let mut hotkey = toggle_hotkey(now, true);
+        assert_eq!(hotkey.process(press, ms(0)), Some(HotkeyAction::Start));
+        assert_eq!(hotkey.process(release, ms(299)), None);
+        assert!(hotkey.is_locked());
+        assert_eq!(hotkey.process(press, ms(2_000)), Some(HotkeyAction::Finish));
+        assert_eq!(hotkey.process(release, ms(2_080)), None);
+        assert!(!hotkey.is_recording());
+        // A hold past the threshold finishes on release.
+        let mut hotkey = toggle_hotkey(now, true);
+        assert_eq!(hotkey.process(press, ms(0)), Some(HotkeyAction::Start));
+        assert_eq!(hotkey.process(release, ms(300)), Some(HotkeyAction::Finish));
+        assert!(!hotkey.is_recording());
+        // The next press starts afresh.
+        assert_eq!(hotkey.process(press, ms(2_000)), Some(HotkeyAction::Start));
+        assert_eq!(
+            hotkey.process(release, ms(4_000)),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle() {
+        let now = capture_time();
+        let ms = |millis| now + Duration::from_millis(millis);
+        let press = InputEvent::Flags(OPTION_KEY_MASK);
+        let mut hotkey = toggle_hotkey(now, true);
+        assert_eq!(hotkey.process(press, ms(0)), Some(HotkeyAction::Start));
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Key {
+                    code: 0,
+                    down: true,
+                    flags: OPTION_KEY_MASK,
+                },
+                ms(100)
+            ),
+            Some(HotkeyAction::Discard(DiscardCause::Key))
+        );
+        assert!(!hotkey.is_recording());
+        // Off, a long hold still locks.
+        let mut hotkey = toggle_hotkey(now, false);
+        assert_eq!(hotkey.process(press, ms(0)), Some(HotkeyAction::Start));
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(2_000)), None);
+        assert!(hotkey.is_locked());
+        // Hold mode ignores it: a long hold finishes either way.
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.tap_or_hold = || true;
+        assert_eq!(hotkey.process(press, ms(0)), Some(HotkeyAction::Start));
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), ms(2_000)),
+            Some(HotkeyAction::Finish)
+        );
     }
 
     fn key_binding(code: u16) -> RuntimeHotkey {
