@@ -102,8 +102,8 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         .then(crate::linux::service::adopt_wayland_display)
         .flatten();
     let log_dir = crate::app_paths::init_process_logging(shutdown)?;
-    if let Some(display) = adopted {
-        tracing::info!(%display, "adopted the session's Wayland display");
+    if let Some(wayland_display) = adopted {
+        tracing::info!(%wayland_display, "adopted the session's Wayland display");
     }
 
     let event_path = log_dir.join("live.ndjson");
