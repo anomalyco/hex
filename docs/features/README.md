@@ -313,13 +313,28 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
     Delete is Forget (own-models.md)
 ```
 
-Only Parakeet Unified English is marked `streams`
-(`only_the_buffered_parakeet_artifact_is_marked_streaming`). The mark describes
+Parakeet Unified English (chunked attention) and Nemotron 3.5 ASR (cache-aware)
+are the models marked `streams`
+(`only_the_streaming_parakeet_artifacts_are_marked_streaming`). The mark describes
 the artifact; dictation still streams only after the load probe succeeds on a GPU
 device ([Streaming Finish](dictation.md#streaming-finish)). The menu bar lists
 names only and shows no tags. Scenes: `hex app -- --snap OUT --scene picker`
 (also `picker-downloading`, `picker-japanese`, `picker-custom-models`,
 `picker-found`).
+
+Nemotron 3.5 ASR (#834; NVIDIA's `nemotron-3.5-asr-streaming-0.6b`, OpenMDW-1.1)
+streams in 27 of Hex's languages and detects the language with Auto: Hex sends
+its language as the locale its prompt takes (`de` -> `de-DE`,
+`runtime_language`), and Auto sends none. It is not anyone's recommendation:
+Hex's own runs of transcribe.cpp's WER harness on apollo (Vulkan, 7045d1c) put
+it behind Parakeet v3 on every set measured: LibriSpeech test-clean 3.05%
+against 1.95%, FLEURS English 7.91% against 4.88%, and FLEURS German 10.39%
+against 5.17% (8.77% and 10.46% with Auto). It is there to stream with the
+language set, or across English and German in one model. Hex converted the
+pinned `.nemo` itself; the shipped file is handy-computer's, whose 653 tensors
+match that conversion byte for byte (`NEMOTRON_3_5_ASR_ARTIFACT`). Checks:
+`nemotron_takes_its_languages_as_locales_and_detects_with_auto`. Not observed:
+macOS (Metal), Windows, and Japanese, Korean, Chinese, or Vietnamese audio.
 
 Parakeet v3 remains available for Portuguese and its other existing language
 choices. Its card explains the limitation and suggests Whisper for

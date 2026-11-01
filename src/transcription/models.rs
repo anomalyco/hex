@@ -13,6 +13,13 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::artifacts::{
+    COHERE_ARTIFACT, COHERE_LANGUAGES, IVRIT_WHISPER_ARTIFACT, NEMOTRON_3_5_ASR_ARTIFACT,
+    NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES, PARAKEET_ULTRA_ARTIFACT,
+    PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT, PARAKEET_V3_ARTIFACT,
+    PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT, SENSEVOICE_ARTIFACT,
+    UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT, WHISPER_ARTIFACT,
+};
 pub use super::custom_models::CustomModelId;
 pub use super::languages::{LANGUAGES, language_name};
 pub(crate) use super::model_benchmarks::most_accurate_is_comparable;
@@ -37,6 +44,7 @@ pub enum TranscriptionModelId {
     UnderdogBark3Pro,
     UnderdogBark3Clean,
     ParakeetUltra,
+    Nemotron35Asr,
     AppleSpeech,
     Custom(CustomModelId),
 }
@@ -69,6 +77,7 @@ impl TranscriptionModelId {
             Self::UnderdogBark3Pro => "underdog_bark_3_pro",
             Self::UnderdogBark3Clean => "underdog_bark_3_clean",
             Self::ParakeetUltra => "parakeet_ultra",
+            Self::Nemotron35Asr => "nemotron_3_5_asr",
             Self::AppleSpeech => "apple_speech",
             Self::Custom(id) => id.as_str(),
         }
@@ -103,6 +112,7 @@ impl FromStr for TranscriptionModelId {
             "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
             "underdog_bark_3_clean" => Ok(Self::UnderdogBark3Clean),
             "parakeet_ultra" => Ok(Self::ParakeetUltra),
+            "nemotron_3_5_asr" => Ok(Self::Nemotron35Asr),
             "apple_speech" => Ok(Self::AppleSpeech),
             _ => CustomModelId::parse(value)
                 .map(Self::Custom)
@@ -262,10 +272,14 @@ impl ModelDefinition {
     }
 
     pub fn runtime_language<'a>(&self, language: &'a str) -> &'a str {
-        if self.id == TranscriptionModelId::WhisperLargeV3Turbo && language == "fil" {
-            "tl"
-        } else {
-            language
+        match self.id {
+            TranscriptionModelId::WhisperLargeV3Turbo if language == "fil" => "tl",
+            // Its prompt and advertised languages are locales: `de-DE`.
+            TranscriptionModelId::Nemotron35Asr => NEMOTRON_3_5_LOCALES
+                .iter()
+                .find_map(|(code, locale)| (*code == language).then_some(*locale))
+                .unwrap_or(language),
+            _ => language,
         }
     }
 
@@ -360,143 +374,6 @@ fn accuracy_label(word_error_rate: f64) -> String {
     format!("{:.1}%", (100.0 - word_error_rate).clamp(0.0, 100.0))
 }
 
-const PARAKEET_V3_LANGUAGES: &[&str] = &[
-    "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt",
-    "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv", "uk",
-];
-const QWEN_LANGUAGES: &[&str] = &[
-    "zh", "en", "yue", "ar", "de", "fr", "es", "pt", "id", "it", "ko", "ru", "th", "vi", "ja",
-    "tr", "hi", "ms", "nl", "sv", "da", "fi", "pl", "cs", "fil", "fa", "el", "ro", "hu", "mk",
-];
-const COHERE_LANGUAGES: &[&str] = &[
-    "en", "fr", "de", "es", "it", "pt", "nl", "pl", "el", "ar", "ja", "zh", "vi", "ko",
-];
-
-const PARAKEET_V2_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
-    revision: "07cee0616125a08ef619729bb47f40ef747e4bc4",
-    repository: "handy-computer/parakeet-tdt-0.6b-v2-gguf",
-    bytes: 729_574_912,
-    sha256: "f0d0e99cebb6d3b83f1f7069b82b5d3c2e39a54545b0da039cb4bafd9c4e5caa",
-    architecture: "parakeet",
-    variant: "tdt-0.6b-v2",
-};
-const PARAKEET_UNIFIED_ENGLISH_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "parakeet-unified-en-0.6b-Q8_0.gguf",
-    revision: "7e948f21b7bdbac698d3318db9d350f1096f3b6c",
-    repository: "handy-computer/parakeet-unified-en-0.6b-gguf",
-    bytes: 731_357_568,
-    sha256: "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795",
-    architecture: "parakeet",
-    variant: "unified-en-0.6b",
-};
-const PARAKEET_V3_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
-    revision: "85ac09ea12fc4b1112fa76810059364bc6adc9de",
-    repository: "handy-computer/parakeet-tdt-0.6b-v3-gguf",
-    bytes: 739_508_576,
-    sha256: "5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7",
-    architecture: "parakeet",
-    variant: "tdt-0.6b-v3",
-};
-const WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "whisper-large-v3-turbo-Q8_0.gguf",
-    revision: "d222c9f621c1128299248f2ded4d8a1820519780",
-    repository: "handy-computer/whisper-large-v3-turbo-gguf",
-    bytes: 886_381_824,
-    sha256: "d5e65f2b0828802ae2c231673d31982cebe3a778c95d9494a9f3efee6bd17448",
-    architecture: "whisper",
-    variant: "whisper-large-v3-turbo",
-};
-const QWEN_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "Qwen3-ASR-0.6B-Q8_0.gguf",
-    revision: "e4e16599b900eb0cb36e524514756bb92eb092b7",
-    repository: "handy-computer/Qwen3-ASR-0.6B-gguf",
-    bytes: 850_423_456,
-    sha256: "f081b2d5e23bd669d92cc331d722a8a0681943b8e6f34b48996fd5c319b5acd8",
-    architecture: "qwen3_asr",
-    variant: "qwen3-asr-0.6b",
-};
-// Mohammed Aly's Qwen3-ASR 1.7B fine-tune for Egyptian Arabic and
-// Arabic/English code-switching (Apache-2.0), from mohammedaly22/QwenCleo-ASR
-// at 50f6b901. Converted with transcribe.cpp 7045d1c's Qwen3-ASR converter,
-// with the fine-tune's attribution in `general.*`, and quantized to Q8_0;
-// rebuilding it that way reproduces this file byte for byte.
-const QWENCLEO_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "QwenCleo-ASR-1.7B-Q8_0.gguf",
-    revision: "08c66976a0496e1e3f1a88965eea123631e634fa",
-    repository: "reomar15/QwenCleo-ASR-transcribe-cpp-GGUF",
-    bytes: 2_185_030_816,
-    sha256: "43bae9d5d7a26684b4a0faf1abc6e872b5825cc9147dbb7200da9ff4c5d12f87",
-    architecture: "qwen3_asr",
-    variant: "qwen3-asr-1.7b",
-};
-// ivrit.ai's Hebrew fine-tune of Whisper large-v3-turbo (Apache-2.0), from
-// ivrit-ai/whisper-large-v3-turbo at f33172a8. Converted with transcribe.cpp
-// 7045d1c's Whisper converter, with the variant's display name added
-// (`ivrit.ai Whisper Large v3 Turbo`; author and repository come from the
-// source), and quantized to Q8_0; rebuilding it that way reproduces this
-// file byte for byte.
-const IVRIT_WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "ivrit-whisper-large-v3-turbo-Q8_0.gguf",
-    revision: "a12befaff80add995ac6a8fe10cbb7f38438c7b5",
-    repository: "adolan/ivrit-whisper-large-v3-turbo-gguf",
-    bytes: 886_381_536,
-    sha256: "23756afa3d3c52cd3cb55e259c8373373eba6d19c3858a67531ba2772b7f272f",
-    architecture: "whisper",
-    variant: "ivrit-whisper-large-v3-turbo",
-};
-const SENSEVOICE_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "SenseVoiceSmall-Q8_0.gguf",
-    revision: "4a08b8e900b38a977e32eb08d5d0697d6e72ba04",
-    repository: "handy-computer/SenseVoiceSmall-gguf",
-    bytes: 252_684_608,
-    sha256: "6c759ee4c9748c9b3f7a5a60ca74f0f7e685fb9d45d1378fce7cfd62f59adf29",
-    architecture: "sensevoice",
-    variant: "sensevoice-small",
-};
-const COHERE_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "cohere-transcribe-03-2026-Q8_0.gguf",
-    revision: "dfa4adebb64f3076b7b6b90b721275cc069cb421",
-    repository: "handy-computer/cohere-transcribe-03-2026-gguf",
-    bytes: 2_410_655_232,
-    sha256: "931916663432fd895423a4291a8400221802b288967ca2d435fc5e3141c9e71e",
-    architecture: "cohere_asr",
-    variant: "cohere-transcribe-03-2026",
-};
-// Conway Research's Parakeet TDT v3 fine-tunes (CC-BY-4.0), converted to
-// Q8_0 with transcribe.cpp's Parakeet converter; each repository holds the
-// recipe.
-const UNDERDOG_BARK_3_PRO_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "underdog-bark-3.0-pro-Q8_0.gguf",
-    revision: "5c10586263806666c0a8b4905a3346a7c679803e",
-    repository: "joshthomasdev/underdog-bark-3.0-pro-gguf",
-    bytes: 739_508_480,
-    sha256: "472d151cc1546bd30629c4c25df3a8e555e8990845843ddafe76800c640e9865",
-    architecture: "parakeet",
-    variant: "tdt-0.6b-bark-3.0-pro",
-};
-const UNDERDOG_BARK_3_CLEAN_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "underdog-bark-3.0-clean-Q8_0.gguf",
-    revision: "868701fd53d62c59d759ed1d79e095118f3fa7b9",
-    repository: "joshthomasdev/underdog-bark-3.0-clean-gguf",
-    bytes: 739_508_480,
-    sha256: "42ec2f70a3d14842e322391baf5186b2829f271cc7e396aed25580135ae46fae",
-    architecture: "parakeet",
-    variant: "tdt-0.6b-bark-3.0-clean",
-};
-// Moondream's Parakeet Ultra, a post-trained Parakeet TDT 0.6B v3
-// (CC-BY-4.0), converted to GGUF and quantized to Q8_0 by handy-computer
-// (430 F32, 225 Q8_0, and 48 F16 tensors). Behind Labs › Parakeet Ultra.
-const PARAKEET_ULTRA_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "parakeet-ultra-Q8_0.gguf",
-    revision: "a1539be1b849ea7463b88343e5277b373d0c4ea9",
-    repository: "handy-computer/parakeet-ultra-gguf",
-    bytes: 740_363_168,
-    sha256: "007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59",
-    architecture: "parakeet",
-    variant: "tdt-0.6b-ultra",
-};
 /// Silero VAD v6.2. Dictation and meetings skip audio it finds no speech in,
 /// because models hallucinate closing phrases such as "thank you" on silence
 /// and room noise. It downloads with every transcription model.
@@ -694,6 +571,28 @@ pub const MODELS: &[ModelDefinition] = &[
         // no language input.
         accepts_language_hint: false,
         supports_language_detection: false,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::Nemotron35Asr,
+        name: "Nemotron 3.5 ASR",
+        // On apollo's Vulkan GPU it ran 0.55 to 0.97 times as fast as
+        // Parakeet v3 (17.9 s and 54.6 s German clips), against v3's ~33x.
+        realtime: "~25x",
+        // LibriSpeech test-clean, Hex's run (`model_benchmarks`). On the same
+        // runs Parakeet v3 made fewer errors: 1.95% here, and on FLEURS 4.88%
+        // English and 5.17% German against 7.91% and 10.39% (8.77% and
+        // 10.46% with Auto). It is here to stream with the language set.
+        word_error_rate: Some(3.05),
+        quality_context: "English benchmark",
+        coverage: "27 languages",
+        timestamps: "Token timestamps",
+        streams: true,
+        runtime: ModelRuntime::Gguf(&NEMOTRON_3_5_ASR_ARTIFACT),
+        languages: NEMOTRON_3_5_LANGUAGES,
+        // Its prompt takes the language (`runtime_language`), and Auto leaves
+        // it to the model.
+        accepts_language_hint: true,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
@@ -1716,20 +1615,46 @@ mod tests {
     }
 
     #[test]
-    fn only_the_buffered_parakeet_artifact_is_marked_streaming() {
+    fn only_the_streaming_parakeet_artifacts_are_marked_streaming() {
         // transcribe.cpp advertises streaming for Parakeet's chunked-attention
-        // variants; Whisper, Qwen3-ASR, SenseVoice, Cohere, and the offline
-        // TDT checkpoints transcribe whole clips.
+        // (Unified English) and cache-aware (Nemotron 3.5) variants; Whisper,
+        // Qwen3-ASR, SenseVoice, Cohere, and the offline TDT checkpoints
+        // transcribe whole clips.
         let streaming = MODELS
             .iter()
             .filter(|model| model.streams)
-            .map(|model| model.id)
+            .map(|model| match model.runtime {
+                ModelRuntime::Gguf(artifact) => artifact.variant,
+                ModelRuntime::AppleSpeech => panic!("a streaming model has a GGUF artifact"),
+            })
             .collect::<Vec<_>>();
-        assert_eq!(streaming, [TranscriptionModelId::ParakeetUnifiedEnglish]);
-        let ModelRuntime::Gguf(artifact) = definition(streaming[0]).runtime else {
-            panic!("a streaming model has a GGUF artifact");
-        };
-        assert_eq!(artifact.variant, "unified-en-0.6b");
+        assert_eq!(
+            streaming,
+            ["unified-en-0.6b", "nemotron-3.5-asr-streaming-0.6b"]
+        );
+    }
+
+    #[test]
+    fn nemotron_takes_its_languages_as_locales_and_detects_with_auto() {
+        let nemotron = definition(TranscriptionModelId::Nemotron35Asr);
+        assert_eq!(nemotron.runtime_language_hint("de"), Some("de-DE"));
+        assert_eq!(nemotron.runtime_language_hint("zh"), Some("zh-CN"));
+        assert_eq!(nemotron.runtime_language_hint(AUTO_LANGUAGE), None);
+        assert!(nemotron.supports_language(AUTO_LANGUAGE));
+        // Every language it offers has its locale.
+        for language in nemotron.languages {
+            assert!(
+                NEMOTRON_3_5_LOCALES
+                    .iter()
+                    .any(|(code, _)| code == language),
+                "{language}"
+            );
+        }
+        assert!(nemotron.languages.iter().all(|code| {
+            super::super::languages::LANGUAGES
+                .iter()
+                .any(|(known, _)| known == code)
+        }));
     }
 
     #[test]
@@ -1762,6 +1687,7 @@ mod tests {
                 "underdog_bark_3_clean",
             ),
             (TranscriptionModelId::ParakeetUltra, "parakeet_ultra"),
+            (TranscriptionModelId::Nemotron35Asr, "nemotron_3_5_asr"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
         ] {
             assert_eq!(id.as_str(), name);
@@ -2102,6 +2028,7 @@ mod tests {
                 UnderdogBark3Pro,
                 UnderdogBark3Clean,
                 ParakeetUltra,
+                Nemotron35Asr,
             ]
         );
     }

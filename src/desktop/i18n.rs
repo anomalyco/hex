@@ -926,6 +926,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Delete {}?", ["Usunąć {}?", "删除 {}？", "{} を削除しますか？", "{} löschen?", "¿Eliminar {}?", "Видалити {}?"]),
     ("100 languages", ["100 języków", "100 种语言", "100 言語", "100 Sprachen", "100 idiomas", "100 мов"]),
     ("14 languages", ["14 języków", "14 种语言", "14 言語", "14 Sprachen", "14 idiomas", "14 мов"]),
+    ("27 languages", ["27 języków", "27 种语言", "27 言語", "27 Sprachen", "27 idiomas", "27 мов"]),
     ("25 languages", ["25 języków", "25 种语言", "25 言語", "25 Sprachen", "25 idiomas", "25 мов"]),
     ("30 languages", ["30 języków", "30 种语言", "30 言語", "30 Sprachen", "30 idiomas", "30 мов"]),
     ("5 languages", ["5 języków", "5 种语言", "5 言語", "5 Sprachen", "5 idiomas", "5 мов"]),
