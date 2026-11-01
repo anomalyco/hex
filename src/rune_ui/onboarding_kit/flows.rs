@@ -118,9 +118,15 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
             top_bar()
                 .justify_center()
                 .child(pill(p, download(s), s.closed)),
-            middle()
-                .pb(TOP_BAR)
-                .child(ready(p, &s.caps, None, s.now, s.reduced.get(), s.motion)),
+            middle().pb(TOP_BAR).child(ready(
+                p,
+                &s.caps,
+                None,
+                s.ready_age(),
+                s.now,
+                s.reduced.get(),
+                s.motion,
+            )),
         ];
     }
     let parked = s.step >= Step::Parked;
@@ -214,6 +220,7 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 p,
                 &s.caps,
                 Some(PILL),
+                s.ready_age(),
                 s.now,
                 s.reduced.get(),
                 s.motion,
@@ -327,7 +334,15 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
         _ => sentence(p, s, true),
     };
     let below = match s.step {
-        Step::Ready => ready(p, &s.caps, None, s.now, s.reduced.get(), s.motion),
+        Step::Ready => ready(
+            p,
+            &s.caps,
+            None,
+            s.ready_age(),
+            s.now,
+            s.reduced.get(),
+            s.motion,
+        ),
         Step::Pick | Step::Started => heading(
             p,
             "intro",

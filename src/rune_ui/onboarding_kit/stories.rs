@@ -14,6 +14,7 @@ use super::dictated::Dictated;
 use super::fixture::{
     ANSWER_JAY, ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded,
 };
+use super::hex_meter::BUILD_SECS;
 use super::hud_stage::{FlowHud, LiveHud};
 use super::live::Live;
 use super::sfx::SfxTrack;
@@ -462,7 +463,14 @@ impl Onboard {
         self.ensure_download(true);
         self.step = Step::Ready;
         self.ready_from = Some(self.now);
-        self.sfx.on_ready(self.now);
+        self.sfx.on_ready(self.now, self.reduced.get());
+    }
+
+    /// Seconds since `"Hex is ready"` appeared; a scene opened on it shows
+    /// it settled.
+    pub(crate) fn ready_age(&self) -> f64 {
+        self.ready_from
+            .map_or(f64::INFINITY, |from| self.now - from)
     }
 
     pub(crate) fn downloaded(&self) -> bool {
@@ -717,7 +725,7 @@ fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
         Step::Done => {
             s.step = Step::Ready;
             s.ready_from = Some(play.now());
-            s.sfx.on_ready(play.now());
+            s.sfx.on_ready(play.now(), s.reduced.get());
             None
         }
         _ => None,
@@ -811,7 +819,7 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             }
             s.step = Step::Ready;
             s.ready_from = Some(now);
-            s.sfx.on_ready(now);
+            s.sfx.on_ready(now, s.reduced.get());
             None
         }
         Step::Ready => None,
@@ -935,14 +943,15 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     }
 
     s.sfx.advance_to(now);
-    if s.ready_from.is_some_and(|from| now - from >= 0.25) {
+    if s.ready_from.is_some_and(|from| now - from >= BUILD_SECS) {
         s.sfx.flush_offline_if_requested(now + 1.5);
     }
     let mut moving = s.sfx.has_pending(now)
         || s.auto_due_at.is_some()
         || s.live_hold_from.is_some()
         || (s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard))
-        || (s.examples_from.is_some() && (s.step < Step::Ready || !s.reduced.get()));
+        || (s.examples_from.is_some() && (s.step < Step::Ready || !s.reduced.get()))
+        || (s.step == Step::Ready && !s.reduced.get() && s.ready_age() < BUILD_SECS);
     moving |= s.dictated.moving();
 
     // The real first run's download comes from Hex (`live::poll`).
@@ -1302,7 +1311,31 @@ mod tests {
         };
         let full = simulate(false);
         let reduced = simulate(true);
-        assert_eq!(full, reduced);
+        // The one exception: Reduced Motion shows the ready logo already
+        // built, so only its last note sounds.
+        let build = |t: &crate::feedback::Tone| {
+            matches!(
+                t,
+                crate::feedback::Tone::Onboarding(crate::feedback::OnboardingTone::Build(_))
+            )
+        };
+        let before = |cues: &[(f64, crate::feedback::Tone)]| -> Vec<_> {
+            cues.iter().filter(|(_, t)| !build(t)).copied().collect()
+        };
+        assert_eq!(before(&full), before(&reduced));
+        let notes = |cues: &[(f64, crate::feedback::Tone)]| -> Vec<_> {
+            cues.iter()
+                .filter(|(_, t)| build(t))
+                .map(|&(_, t)| t)
+                .collect()
+        };
+        assert_eq!(notes(&full).len(), 3);
+        assert_eq!(
+            notes(&reduced),
+            [crate::feedback::Tone::Onboarding(
+                crate::feedback::OnboardingTone::Build(2)
+            )]
+        );
         assert!(
             full.len() >= 35,
             "expected full sound track, got {}",

@@ -9,6 +9,8 @@ use rune::{Env, Key, KeyEvent, Mods, Runtime};
 const GOLDEN_SIZE: (f32, f32) = (980.0, 1720.0);
 /// The window's own size, for the other panes.
 const PANE_SIZE: (f32, f32) = (980.0, 760.0);
+/// General with Advanced open, down to Replay onboarding at its end.
+const ADVANCED_SIZE: (f32, f32) = (980.0, 1240.0);
 const GOLDEN_SCALE: f32 = 2.0;
 
 fn runtime(scene: &str, dark: bool, size: (f32, f32)) -> Runtime<Ui> {
@@ -1997,11 +1999,14 @@ fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
         );
     }
     let (golden_width, golden_height, golden) = read_png(&path);
-    assert_eq!(
-        (golden_width, golden_height),
-        (width, height),
-        "{name} size changed"
-    );
+    if (golden_width, golden_height) != (width, height) {
+        let actual = std::env::temp_dir().join(format!("rune-settings-{name}-actual.png"));
+        rune::render::write_png(&actual, width, height, &pixels).unwrap();
+        panic!(
+            "{name} size changed from {golden_width}x{golden_height} to {width}x{height}; actual render at {}",
+            actual.display()
+        );
+    }
     // GPU drivers differ in the last bit of blending and glyph coverage;
     // a layout or colour change moves far more than this.
     let differing = pixels

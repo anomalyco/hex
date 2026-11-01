@@ -5,9 +5,7 @@
 
 use rune::{El, Icon, Tx, row, text};
 
-use super::controls::{
-    self, CardRow, Paint, card, icon_row, icon_row_tagged, pressable_row, row_switch,
-};
+use super::controls::{self, CardRow, Paint, card, icon_row_tagged, pressable_row, row_switch};
 use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::lists::{Tone, tone_tag};
 use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
@@ -384,8 +382,7 @@ fn flip(ui: &mut Ui, feature: Feature) {
     }
 }
 
-/// The Labs page: what Labs is with Send feedback, every feature's row,
-/// then Run setup again.
+/// The Labs page: what Labs is with Send feedback, then every feature's row.
 pub(super) fn page(ui: &Ui, p: Paint) -> El {
     let feedback = rune_kit::Button::new(tr("Send feedback"))
         .variant(rune_kit::ButtonVariant::Ghost)
@@ -428,8 +425,7 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
     let rows = cards;
     let content = controls::page("content")
         .child(lede)
-        .child(card(p, "labs", rows))
-        .child(card(p, "labs-setup", vec![run_setup_row(p)]));
+        .child(card(p, "labs", rows));
     super::scroll_body("scroll", content)
 }
 
@@ -488,31 +484,6 @@ fn unload_after_row(ui: &Ui, p: Paint) -> CardRow {
             let minutes = UNLOAD_IDLE_MINUTES[index];
             ui.update(|settings| settings.labs.unload_idle_minutes = minutes);
         }),
-    )
-    .into()
-}
-
-/// Runs the first run again (`onboarding_kit::live::restart`).
-fn run_setup_row(p: Paint) -> CardRow {
-    let run = rune_kit::Button::new(tr("Run"))
-        .variant(rune_kit::ButtonVariant::Ghost)
-        .control_size(rune_kit::ControlSize::Small)
-        .on_press_tx(|ui: &mut Ui, tx: &mut Tx| {
-            if let Err(error) = super::onboarding_kit::live::restart(ui, tx) {
-                ui.error = Some(error);
-            }
-        })
-        .build(p.k)
-        .key("restart-onboarding");
-    icon_row(
-        p,
-        "lab-restart-onboarding",
-        &SPARKLES,
-        tr("Run setup again"),
-        Some(tr(
-            "Play the first run again. Settings, models, and permissions stay",
-        )),
-        run,
     )
     .into()
 }

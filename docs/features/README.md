@@ -637,7 +637,8 @@ General                                  // settings
 │   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
 │   │   (Dictate without processing sits in the Output pane; see dictation.md)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
-│       Interface language, Update channel (self-updating installs)
+│       Interface language, Update channel (self-updating installs),
+│       Replay onboarding (see labs.md, New onboarding)
 ├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Labs > Share dictation shortcut with other apps (Windows, off)

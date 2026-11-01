@@ -24,7 +24,7 @@ use rune::compose::{Compositor, Frame};
 use rune::{Color, El, el};
 
 use super::Ui;
-use super::onboarding_kit::game_fx::{GameFx, is_game_mark};
+use super::onboarding_kit::game::fx::{GameFx, is_game_mark};
 use super::onboarding_kit::gpu_stage::{OnboardingGpu, is_onboard_mark};
 
 /// The stage's key, found by the compositor each frame.
@@ -131,9 +131,18 @@ impl Compositor<Ui> for HeroCompositor {
 
     fn render(&mut self, f: &mut Frame<'_, Ui>) {
         if f.rt.marks.iter().any(|&m| is_game_mark(m)) {
+            // The game's HUD is onboarding's: its draw hook paints both.
+            if self
+                .onboarding
+                .as_ref()
+                .is_none_or(|g| !g.matches(f.format))
+            {
+                self.onboarding = Some(OnboardingGpu::new(f.device, f.format));
+            }
+            let hud = self.onboarding.as_mut().expect("created above");
             self.game
                 .get_or_insert_with(|| GameFx::new(f.device))
-                .render(f);
+                .render(f, hud);
         } else if self.onboarding.is_some() || f.rt.marks.iter().any(|&m| is_onboard_mark(m)) {
             if self
                 .onboarding

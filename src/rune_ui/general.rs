@@ -1001,7 +1001,7 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
 }
 
 /// Enable on launch (Linux and Windows), the Dock icon, sounds, the
-/// interface language, and the update channel.
+/// interface language, the update channel, and Replay onboarding.
 fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     let settings = &ui.settings;
     let mut rows: Vec<CardRow> = Vec::new();
@@ -1140,7 +1140,32 @@ fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             layer,
         ));
     }
+    rows.push(replay_onboarding_row(p));
     rows
+}
+
+/// Plays the first run again (`onboarding_kit::live::restart`, as
+/// `hex onboarding reset` does).
+fn replay_onboarding_row(p: Paint) -> CardRow {
+    let replay = rune_kit::Button::new(tr("Replay"))
+        .variant(rune_kit::ButtonVariant::Ghost)
+        .control_size(rune_kit::ControlSize::Small)
+        .on_press_tx(|ui: &mut Ui, tx: &mut Tx| {
+            let _ = super::restart_onboarding(ui, tx);
+        })
+        .build(p.k)
+        .key("replay-onboarding");
+    icon_row(
+        p,
+        "replay-onboarding-row",
+        &SPARKLES,
+        tr("Replay onboarding"),
+        Some(tr(
+            "Play the first run again. Settings, models, and permissions stay",
+        )),
+        replay,
+    )
+    .into()
 }
 
 /// Left, Either, or Right for a modifier-only shortcut (macOS); sides that
