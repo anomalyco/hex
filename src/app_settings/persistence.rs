@@ -68,6 +68,8 @@ impl AppSettings {
         settings.repair_bare_primary_clicks();
         #[cfg(target_os = "macos")]
         settings.repair_mouse_shortcuts();
+        #[cfg(target_os = "linux")]
+        settings.repair_special_keys();
         settings.normalize_double_tap_settings();
         settings.migrate_legacy_replacements();
         settings.normalize_mode_application_names();
