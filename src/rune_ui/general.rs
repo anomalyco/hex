@@ -964,6 +964,8 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         },
         layer,
     ));
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    rows.push(speech_engine_row(ui, p, layer));
     if ui.platform.caps.terminal_paste {
         rows.push(
             icon_toggle_row(
@@ -1209,6 +1211,55 @@ pub(super) fn advanced_toggle(ui: &Ui, p: Paint, pane: Pane) -> El {
 
 /// An icon row choosing one of `labels` from a quiet select.
 #[allow(clippy::too_many_arguments)]
+/// Where the speech model runs (#856): Auto, GPU or CPU, and why Auto
+/// stays on the CPU after a GPU failed.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
+    use crate::app_settings::TranscriptionDevice;
+    let device = ui.settings.transcription_device;
+    let control = pick_select(
+        ui,
+        p,
+        "speech-engine",
+        vec![tr("Auto"), tr("GPU"), tr("CPU")],
+        match device {
+            TranscriptionDevice::Auto => 0,
+            TranscriptionDevice::Gpu => 1,
+            TranscriptionDevice::Cpu => 2,
+        },
+        |ui, index| {
+            let device = [
+                TranscriptionDevice::Auto,
+                TranscriptionDevice::Gpu,
+                TranscriptionDevice::Cpu,
+            ][index];
+            if ui.settings.transcription_device != device {
+                ui.update(|settings| settings.transcription_device = device);
+            }
+        },
+        layer,
+    );
+    // Fixtures never read this machine's GPU record.
+    let failed = (ui.live() && device == TranscriptionDevice::Auto)
+        .then(crate::transcription::gpu_health::current)
+        .flatten();
+    let note = failed.map(|failure| {
+        tr_named(
+            "Auto uses the CPU because {device} stopped responding. Choose GPU to try it again.",
+            &[("device", failure.device.as_str())],
+        )
+    });
+    icon_row(
+        p,
+        "speech-engine",
+        &WAVE,
+        tr("Speech engine"),
+        note.as_deref(),
+        control,
+    )
+    .into()
+}
+
 pub(super) fn pick_row(
     ui: &Ui,
     p: Paint,

@@ -1,11 +1,13 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::time::Instant;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
+use crate::app_settings::TranscriptionDevice;
 use crate::transcription::gguf_session::OfflineGgufSession;
+use crate::transcription::gpu_health;
 use crate::transcription::models::{
     TranscriptionSelection, download_with_progress, model_path, validate,
 };
@@ -23,6 +25,25 @@ pub struct LocalTranscriber {
     /// The finest timestamps the model gives, for a capture's or a
     /// meeting's word times.
     finest_timestamps: TimestampKind,
+    /// The GPU it runs on; `None` on the CPU.
+    gpu: Option<transcribe_cpp::Device>,
+    /// The device setting it loaded for.
+    preference: TranscriptionDevice,
+}
+
+/// Settings › Speech engine (`transcription_device`), for every later load.
+static DEVICE: AtomicU8 = AtomicU8::new(0);
+
+pub(crate) fn set_device(device: TranscriptionDevice) {
+    DEVICE.store(device as u8, Ordering::Relaxed);
+}
+
+pub(crate) fn device() -> TranscriptionDevice {
+    match DEVICE.load(Ordering::Relaxed) {
+        1 => TranscriptionDevice::Gpu,
+        2 => TranscriptionDevice::Cpu,
+        _ => TranscriptionDevice::Auto,
+    }
 }
 
 pub fn install(selection: &TranscriptionSelection, canceled: &AtomicBool) -> Result<()> {
@@ -188,29 +209,71 @@ pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
 }
 
 impl LocalTranscriber {
-    /// Loads and prewarms `selection` on the GPU when one starts, else on the
-    /// CPU: a GPU load or prewarm that fails retries on the CPU.
+    /// Loads and prewarms `selection` where Settings › Speech engine says:
+    /// on Auto a GPU unless it failed before under its current driver
+    /// ([`gpu_health`], #856), on GPU the best GPU, on CPU the CPU. A GPU load
+    /// or prewarm that fails retries on the CPU, and when the CPU works the
+    /// GPU is remembered as failed.
     pub fn load(selection: &TranscriptionSelection) -> Result<Self> {
         let backend = init_backends()?;
-        let on_gpu = || Self::load_on(selection, backend);
-        #[cfg(target_os = "windows")]
-        let on_gpu = || {
-            if backend == Backend::Auto {
-                gpu_guard::guarded(on_gpu)
-            } else {
-                on_gpu()
+        let preference = device();
+        if backend == Backend::Cpu || preference == TranscriptionDevice::Cpu {
+            return Self::load_on(selection, Backend::Cpu, None, preference);
+        }
+        let gpus = gpu_health::gpus();
+        let (backend, target) = if preference == TranscriptionDevice::Gpu
+            || !gpus.iter().any(gpu_health::failed)
+        {
+            (Backend::Auto, None)
+        } else {
+            let healthy = gpus
+                .iter()
+                .find(|gpu| !gpu_health::failed(gpu) && gpu_health::backend(gpu).is_some());
+            match healthy.and_then(|gpu| Some((gpu_health::backend(gpu)?, gpu.clone()))) {
+                Some((backend, gpu)) => (backend, Some(gpu)),
+                None => {
+                    tracing::info!(
+                        "this GPU failed before under its current driver; transcribing on the CPU (Settings › Speech engine › GPU tries it again)"
+                    );
+                    return Self::load_on(selection, Backend::Cpu, None, preference);
+                }
             }
         };
+        // The GPU this load runs on: the one chosen, else the one Auto picks.
+        let expected = target.clone().or_else(|| gpus.into_iter().next());
+        let on_gpu = || Self::load_on(selection, backend, target, preference);
+        #[cfg(target_os = "windows")]
+        let on_gpu = || gpu_guard::guarded(on_gpu);
         match on_gpu() {
-            Err(error) if backend != Backend::Cpu => {
-                tracing::warn!(%error, "could not load the transcription model on the GPU; loading it on the CPU");
-                Self::load_on(selection, Backend::Cpu)
+            Ok(loaded) => {
+                if preference == TranscriptionDevice::Gpu
+                    && let Some(gpu) = &loaded.gpu
+                {
+                    gpu_health::forget(gpu);
+                }
+                Ok(loaded)
             }
-            loaded => loaded,
+            Err(error) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    "could not load the transcription model on the GPU; loading it on the CPU"
+                );
+                let loaded = Self::load_on(selection, Backend::Cpu, None, preference)?;
+                // The CPU loads the same model, so the GPU failed.
+                if let Some(gpu) = &expected {
+                    gpu_health::record(gpu, &format!("{error:#}"));
+                }
+                Ok(loaded)
+            }
         }
     }
 
-    fn load_on(selection: &TranscriptionSelection, backend: Backend) -> Result<Self> {
+    fn load_on(
+        selection: &TranscriptionSelection,
+        backend: Backend,
+        target: Option<transcribe_cpp::Device>,
+        preference: TranscriptionDevice,
+    ) -> Result<Self> {
         let definition = validate(selection)?;
         if !crate::transcription::models::is_installed(definition, &selection.language) {
             return Err(eyre!(
@@ -223,6 +286,7 @@ impl LocalTranscriber {
             &path,
             &ModelOptions {
                 backend,
+                device: target,
                 ..Default::default()
             },
         )
@@ -270,6 +334,12 @@ impl LocalTranscriber {
                 TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
                 kind => kind,
             },
+            gpu: matches!(
+                device.device_type,
+                transcribe_cpp::DeviceType::Gpu | transcribe_cpp::DeviceType::Igpu
+            )
+            .then(|| device.clone()),
+            preference,
         };
         let started = Instant::now();
         transcriber.transcribe(&vec![0.0; 24_000])?;
@@ -357,6 +427,41 @@ impl LocalTranscriber {
 
     /// Text, segments, and words, in chunks the model takes whole.
     fn timed(&mut self, samples: &[f32]) -> Result<crate::transcription::transcript::Transcript> {
+        match self.timed_here(samples) {
+            Err(error) if self.gpu_failed(&error) => {
+                self.recover_on_cpu(&error)?;
+                self.timed_here(samples)
+            }
+            result => result,
+        }
+    }
+
+    /// Whether `error` came from the GPU this model runs on failing.
+    fn gpu_failed(&self, error: &color_eyre::eyre::Report) -> bool {
+        self.gpu.is_some() && gpu_health::device_error(error)
+    }
+
+    /// Reloads this model on the CPU after its GPU failed mid-run (a hang
+    /// or reset comes back as an error, #856), remembering the GPU once the
+    /// CPU works.
+    fn recover_on_cpu(&mut self, error: &color_eyre::eyre::Report) -> Result<()> {
+        tracing::warn!(
+            error = format!("{error:#}"),
+            "the GPU failed while transcribing; reloading the model on the CPU"
+        );
+        let gpu = self.gpu.take();
+        let cpu = Self::load_on(&self.selection, Backend::Cpu, None, self.preference)?;
+        if let Some(gpu) = &gpu {
+            gpu_health::record(gpu, &format!("{error:#}"));
+        }
+        *self = cpu;
+        Ok(())
+    }
+
+    fn timed_here(
+        &mut self,
+        samples: &[f32],
+    ) -> Result<crate::transcription::transcript::Transcript> {
         use crate::transcription::transcript::TranscriptSegment;
         const CHUNK: usize = 30 * 16_000;
         let chunk = self.max_audio_samples.map_or(CHUNK, |max| max.min(CHUNK));
@@ -402,8 +507,17 @@ impl LocalTranscriber {
     }
 
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
-        self.session
-            .transcribe_chunked(samples, &self.options, self.max_audio_samples)
+        let run = |this: &mut Self| {
+            this.session
+                .transcribe_chunked(samples, &this.options, this.max_audio_samples)
+        };
+        match run(self) {
+            Err(error) if self.gpu_failed(&error) => {
+                self.recover_on_cpu(&error)?;
+                run(self)
+            }
+            result => result,
+        }
     }
 }
 
@@ -445,8 +559,11 @@ impl WarmLocal {
 /// waits on the old one. A model the host already prepared skips the load.
 pub(crate) struct ModelSwap {
     loaded: TranscriptionSelection,
+    /// The device setting the running model loaded for.
+    device: TranscriptionDevice,
     loading: Option<(
         TranscriptionSelection,
+        TranscriptionDevice,
         std::sync::mpsc::Receiver<std::result::Result<LocalTranscriber, String>>,
     )>,
     ready: Option<(TranscriptionSelection, LocalTranscriber)>,
@@ -456,18 +573,23 @@ impl ModelSwap {
     pub(crate) fn new(loaded: &TranscriptionSelection) -> Self {
         Self {
             loaded: super::custom_models::runnable(loaded),
+            device: device(),
             loading: None,
             ready: None,
         }
     }
 
-    /// The selection the listener will transcribe with once swaps settle.
-    fn target(&self) -> &TranscriptionSelection {
+    /// The selection and device setting the listener will transcribe with
+    /// once swaps settle.
+    fn target(&self) -> (&TranscriptionSelection, TranscriptionDevice) {
         self.ready
             .as_ref()
-            .map(|(selection, _)| selection)
-            .or(self.loading.as_ref().map(|(selection, _)| selection))
-            .unwrap_or(&self.loaded)
+            .map(|(selection, model)| (selection, model.preference))
+            .or(self
+                .loading
+                .as_ref()
+                .map(|(selection, device, _)| (selection, *device)))
+            .unwrap_or((&self.loaded, self.device))
     }
 
     /// A model the host loaded for `selection` (Linux prepares models
@@ -488,11 +610,12 @@ impl ModelSwap {
         // An import that can't run stays saved; the listener runs the
         // default model meanwhile.
         let selection = super::custom_models::runnable(selection);
-        if &selection == self.target() {
+        let device = device();
+        if (&selection, device) == self.target() {
             return;
         }
         self.ready = None;
-        if selection == self.loaded {
+        if selection == self.loaded && device == self.device {
             self.loading = None;
             return;
         }
@@ -505,14 +628,14 @@ impl ModelSwap {
                     .send(LocalTranscriber::load(&load).map_err(|error| format!("{error:#}")));
             });
         match spawned {
-            Ok(_) => self.loading = Some((selection, receiver)),
+            Ok(_) => self.loading = Some((selection, device, receiver)),
             Err(error) => tracing::warn!(%error, "could not load the new transcription model"),
         }
     }
 
     /// Collects a finished load; a failure keeps the current model.
     pub(crate) fn poll(&mut self) -> Option<SwapFailed> {
-        let (_, receiver) = self.loading.as_ref()?;
+        let (_, _, receiver) = self.loading.as_ref()?;
         let result = match receiver.try_recv() {
             Ok(result) => result,
             Err(std::sync::mpsc::TryRecvError::Empty) => return None,
@@ -520,7 +643,7 @@ impl ModelSwap {
                 Err("the model loader stopped unexpectedly".into())
             }
         };
-        let (selection, _) = self.loading.take()?;
+        let (selection, _, _) = self.loading.take()?;
         match result {
             Ok(transcriber) => {
                 self.ready = Some((selection, transcriber));
@@ -538,6 +661,7 @@ impl ModelSwap {
     pub(crate) fn take_ready(&mut self) -> Option<LocalTranscriber> {
         let (selection, transcriber) = self.ready.take()?;
         self.loaded = selection;
+        self.device = transcriber.preference;
         Some(transcriber)
     }
 }
