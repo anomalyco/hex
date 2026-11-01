@@ -17,6 +17,19 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindow
 
 const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(500);
 
+/// Remote desktop clients (#866) forward a clipboard change to the remote
+/// session asynchronously, and the remote fetches the text only when it
+/// pastes. Ctrl+V sent at once can reach the remote before the new
+/// clipboard does, and a restore after 500 ms can replace the text before
+/// the remote asked for it, so both wait longer there.
+const REMOTE_DESKTOP_STEMS: &[&str] = &["mstsc", "msrdc"];
+const REMOTE_DESKTOP_PASTE_DELAY: Duration = Duration::from_millis(400);
+const REMOTE_DESKTOP_RESTORE_DELAY: Duration = Duration::from_secs(3);
+
+fn is_remote_desktop(stem: Option<&str>) -> bool {
+    stem.is_some_and(|stem| REMOTE_DESKTOP_STEMS.contains(&stem))
+}
+
 enum ClipboardSnapshot {
     Empty,
     Files(Vec<PathBuf>),
@@ -133,13 +146,23 @@ impl WindowsPaster {
         let generation = restore.register(snapshot, original_sequence, transcript_sequence);
         drop(restore);
 
+        let remote_desktop =
+            is_remote_desktop(crate::windows::input::foreground_process_stem().as_deref());
+        if remote_desktop {
+            thread::sleep(REMOTE_DESKTOP_PASTE_DELAY);
+        }
         if let Err(error) = send_paste_shortcut(self.paste_with_shift.load(Ordering::Relaxed)) {
             restore_clipboard_generation(&self.clipboard_restore, generation);
             return Err(error);
         }
         let clipboard_restore = self.clipboard_restore.clone();
+        let restore_delay = if remote_desktop {
+            REMOTE_DESKTOP_RESTORE_DELAY
+        } else {
+            CLIPBOARD_RESTORE_DELAY
+        };
         thread::spawn(move || {
-            thread::sleep(CLIPBOARD_RESTORE_DELAY);
+            thread::sleep(restore_delay);
             restore_clipboard_generation(&clipboard_restore, generation);
         });
         Ok(())
@@ -295,6 +318,14 @@ mod tests {
             restore.original.as_ref(),
             Some(ClipboardSnapshot::Text(text)) if text == "original"
         ));
+    }
+
+    #[test]
+    fn remote_desktop_clients_get_the_slower_paste() {
+        assert!(is_remote_desktop(Some("mstsc")));
+        assert!(is_remote_desktop(Some("msrdc")));
+        assert!(!is_remote_desktop(Some("notepad")));
+        assert!(!is_remote_desktop(None));
     }
 
     /// US-layout scan codes for the chord's keys.
