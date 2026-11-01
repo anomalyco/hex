@@ -758,8 +758,14 @@ pub const MODELS: &[ModelDefinition] = &[
     ModelDefinition {
         id: TranscriptionModelId::Nemotron35Asr,
         name: "Nemotron 3.5 ASR",
-        realtime: "REALTIME",
-        word_error_rate: Some(0.0),
+        // On apollo's Vulkan GPU it ran 0.55 to 0.97 times as fast as
+        // Parakeet v3 (17.9 s and 54.6 s German clips), against v3's ~33x.
+        realtime: "~25x",
+        // LibriSpeech test-clean, Hex's run (`model_benchmarks`). On the same
+        // runs Parakeet v3 made fewer errors: 1.95% here, and on FLEURS 4.88%
+        // English and 5.17% German against 7.91% and 10.39% (8.77% and
+        // 10.46% with Auto). It is here to stream with the language set.
+        word_error_rate: Some(3.05),
         quality_context: "English benchmark",
         coverage: "27 languages",
         timestamps: "Token timestamps",
@@ -1792,20 +1798,46 @@ mod tests {
     }
 
     #[test]
-    fn only_the_buffered_parakeet_artifact_is_marked_streaming() {
+    fn only_the_streaming_parakeet_artifacts_are_marked_streaming() {
         // transcribe.cpp advertises streaming for Parakeet's chunked-attention
-        // variants; Whisper, Qwen3-ASR, SenseVoice, Cohere, and the offline
-        // TDT checkpoints transcribe whole clips.
+        // (Unified English) and cache-aware (Nemotron 3.5) variants; Whisper,
+        // Qwen3-ASR, SenseVoice, Cohere, and the offline TDT checkpoints
+        // transcribe whole clips.
         let streaming = MODELS
             .iter()
             .filter(|model| model.streams)
-            .map(|model| model.id)
+            .map(|model| match model.runtime {
+                ModelRuntime::Gguf(artifact) => artifact.variant,
+                ModelRuntime::AppleSpeech => panic!("a streaming model has a GGUF artifact"),
+            })
             .collect::<Vec<_>>();
-        assert_eq!(streaming, [TranscriptionModelId::ParakeetUnifiedEnglish]);
-        let ModelRuntime::Gguf(artifact) = definition(streaming[0]).runtime else {
-            panic!("a streaming model has a GGUF artifact");
-        };
-        assert_eq!(artifact.variant, "unified-en-0.6b");
+        assert_eq!(
+            streaming,
+            ["unified-en-0.6b", "nemotron-3.5-asr-streaming-0.6b"]
+        );
+    }
+
+    #[test]
+    fn nemotron_takes_its_languages_as_locales_and_detects_with_auto() {
+        let nemotron = definition(TranscriptionModelId::Nemotron35Asr);
+        assert_eq!(nemotron.runtime_language_hint("de"), Some("de-DE"));
+        assert_eq!(nemotron.runtime_language_hint("zh"), Some("zh-CN"));
+        assert_eq!(nemotron.runtime_language_hint(AUTO_LANGUAGE), None);
+        assert!(nemotron.supports_language(AUTO_LANGUAGE));
+        // Every language it offers has its locale.
+        for language in nemotron.languages {
+            assert!(
+                NEMOTRON_3_5_LOCALES
+                    .iter()
+                    .any(|(code, _)| code == language),
+                "{language}"
+            );
+        }
+        assert!(nemotron.languages.iter().all(|code| {
+            super::super::languages::LANGUAGES
+                .iter()
+                .any(|(known, _)| known == code)
+        }));
     }
 
     #[test]
@@ -1838,6 +1870,7 @@ mod tests {
                 "underdog_bark_3_clean",
             ),
             (TranscriptionModelId::ParakeetUltra, "parakeet_ultra"),
+            (TranscriptionModelId::Nemotron35Asr, "nemotron_3_5_asr"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
         ] {
             assert_eq!(id.as_str(), name);
