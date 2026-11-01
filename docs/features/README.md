@@ -689,7 +689,12 @@ Intentional recording                    // recording.environment, idle_sleep
     // no caffeinate child process or executable-policy dialog
 ```
 
-Feedback tones keep their output open for five idle minutes. On macOS the
+Feedback tones keep their output open for five idle minutes (macOS, Windows).
+On Linux, where an open output stays listed in the desktop's sound controls,
+it closes about a second after the last tone ends
+([#720](https://github.com/anomalyco/hex/issues/720)); the existing
+`output_opens_for_a_tone_and_releases_after_the_idle_grace` check covers the
+grace logic, not a real PipeWire stream list. On macOS the
 CoreAudio listeners on the default output, the device list, and an audio service
 restart advance an output route generation; the next tone drops an output opened
 under an older one and opens the current default at once, so unplugging a USB

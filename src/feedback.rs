@@ -140,7 +140,14 @@ fn sounds_enabled() -> bool {
 /// release it. A tone implies recent user activity, so a grace shorter than any
 /// idle-sleep timer costs nothing while sparing bursts of dictation the cold
 /// device reopen.
+///
+/// On Linux an open output is a listed stream in the desktop's sound controls
+/// (PipeWire, PulseAudio), so it closes about a second after the last tone
+/// (#720); the start tone still opens the device during its chord grace.
+#[cfg(not(target_os = "linux"))]
 const IDLE_RELEASE_GRACE: Duration = Duration::from_secs(5 * 60);
+#[cfg(target_os = "linux")]
+const IDLE_RELEASE_GRACE: Duration = Duration::from_secs(1);
 const OPEN_RETRY_BACKOFF: Duration = Duration::from_secs(2);
 
 // Only the playback worker owns a device. It opens lazily for a tone, stays
