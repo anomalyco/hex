@@ -15,24 +15,23 @@ Agent or terminal                                  // control.cli; every OS
 │   ├── Listener didn't answer, no --force -> busy (it might be recording)
 │   └── restart -> reopens with the running Hex's HEX_* variables (macOS);
 │       Linux unit -> systemctl restart; else waits for the drain, then start
-├── hex dictation start|stop|cancel|toggle
+├── hex dictation start|stop|toggle
 │   ├── Same shortcut state machine as the hotkey; start locks the capture
 │   ├── start -> intentional at once: tone once the mic is open, recording
 │   │   behavior, live stream
 │   ├── stop -> done only when the clip went to transcription;
 │   │   no audio yet or silent -> discarded, nothing transcribing
-│   ├── Idle cancel while another capture records -> busy (Escape's order:
-│   │   the recording before any job)
+│   ├── cancel (an older `hex`) -> removed, exit 1: dictation has no cancel (#786)
 │   ├── Repeat a command -> unchanged, exit 0
 │   └── dictation stop --print -> stops at once, then waits ≤ 60 s and prints
 │       the transcript (processed as a paste) instead of pasting it
 │       ├── No speech -> no-speech, exit 4, prints nothing
 │       ├── Not recording -> not-recording, exit 1
-│       ├── Failure, cancel, or timeout -> exit 1, prints nothing, never pastes
+│       ├── Failure or timeout -> exit 1, prints nothing, never pastes
 │       └── History keeps it as Printed; Paste Last skips it (also on Linux)
 │   └── dictation start|toggle --raw -> the dictation it starts pastes the
 │       transcript as heard (Dictate without processing); History keeps it as Raw;
-│       --raw with stop or cancel -> usage error, exit 2
+│       --raw with stop -> usage error, exit 2
 ├── hex paste-last -> pastes the last dictation
 │   ├── Setup gates the listener -> not-ready
 │   └── Recording or shortcut gesture in progress -> busy (menu bar: nothing)
@@ -107,7 +106,8 @@ pins restart's; `macos_rune::control::tests` check that `model use` prepares
 its exact selection installed-only;
 `dictation::audio::tests::marked_captures_are_intentional_without_a_hold`
 covers the immediate stream and `ReadyIntentional`; `recognition::tests`
-cover the stop replies and the idle-cancel and paste-last refusals; local API's
+cover the stop replies and the paste-last refusal; `control::tests::an_older_cancel_gets_removed`
+covers the `removed` reply; local API's
 `control_requests_are_authenticated_versioned_and_typed` covers authentication,
 bounds, and error codes; `tests::control_commands_parse_beside_the_read_commands`
 covers parsing next to `history` and `meetings`; `control::host::tests` cover

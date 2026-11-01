@@ -29,7 +29,7 @@ hex
 ├── start                          open Hex if it isn't running (macOS Hex.app, else `hex app --hidden`); wait until it answers
 ├── quit [--force]                 refused while a meeting or dictation is active, or unconfirmed
 ├── restart [--force]              quit and reopen (opens Hex when it isn't running)
-├── dictation start|stop|cancel|toggle
+├── dictation start|stop|toggle
 │   ├── stop --print               print the transcript instead of pasting it (below)
 │   └── start|toggle --raw         paste the transcript as heard, skipping the Output steps
 ├── paste-last                     paste the last dictation (Option-Shift-V); refused while recording
@@ -79,8 +79,8 @@ hex
 ```
 
 `dictation start` locks the recording, as a double tap would: `dictation stop`
-or the next shortcut press finishes it, and `dictation cancel` or Escape
-discards it. A CLI start has no press to judge, so its recording counts as
+or the next shortcut press finishes it. Dictation has no cancel (#786): every
+dictation finishes and pastes. A CLI start has no press to judge, so its recording counts as
 intentional at once: the start tone plays once the microphone is open, and the
 recording behavior (mute or pause media, idle-sleep prevention) and the live
 stream start as they do after a held shortcut. A `stop` replies `done` only
@@ -96,7 +96,7 @@ corrections, OpenCode rewriting, and transformations). History keeps it as
 `printed`, and Paste Last skips it. No speech (nothing recorded yet, a silent
 clip, or an empty transcript) exits 4 with code `no-speech` and prints
 nothing; with nothing recording it refuses with `not-recording`. A failure,
-a cancel (Escape), or the 60 s timeout prints nothing, exits 1, and never
+or the 60 s timeout prints nothing, exits 1, and never
 falls back to pasting. `--print` with any other action is a usage error
 (exit 2). The command is the same on Linux and Windows, where `hex dictation`
 and `hex paste-last` reach the listener's own queue as its shortcut would.
@@ -104,15 +104,12 @@ and `hex paste-last` reach the listener's own queue as its shortcut would.
 `dictation start --raw` and `toggle --raw` start a dictation that pastes the
 transcript as heard, skipping the Output pane's steps, as the Dictate without
 processing shortcut (`raw_dictation_hotkey`) does. History keeps it as `raw`,
-and Paste Last pastes it. `--raw` with `stop` or `cancel` is a usage error
+and Paste Last pastes it. `--raw` with `stop` is a usage error
 (exit 2); `stop --print` of a raw dictation prints the transcript as heard.
 
-`dictation cancel` with nothing recording cancels the newest unfinished
-dictation, like Escape. Escape cancels an active recording before any job, so
-while another capture records (an API dictation, say), an idle
-`cancel` is refused with `busy` rather than reach past it; cancel that
-recording first. `meetings cancel` doesn't exist
-because Hex has no way to discard a meeting recording.
+`dictation cancel` was removed (#786); an older `hex` that sends it gets
+`removed`. `meetings cancel` doesn't exist because Hex has no way to discard a
+meeting recording.
 
 `onboarding reset` (or `onboarding restart`) opens the window on the
 first-run onboarding at once, as on a new install, for trying it again, on
@@ -238,7 +235,7 @@ Requests are flat objects tagged by `command` (kebab-case):
 
 ```ts
 status | quit {force} | restart {force}
-dictation {action, print?}                       action: start | stop | cancel | toggle;
+dictation {action, print?}                       action: start | stop | toggle (`cancel` answers `removed`);
                                                  print (stop only) answers `transcript`
 paste-last
 meeting-record {title?} | meeting-stop | meeting-copy-last
@@ -263,7 +260,7 @@ Replies are tagged by `status`:
 {"version": 4, "status": "done", "message": "Recording “Design sync”; …", "changed": true}
 {"version": 4, "status": "error", "code": "feature-off", "message": "Meetings are off; …"}
 {"version": 4, "status": "settings", "settings": [{"key": "sound_effects", "value": true,
-  "kind": "bool", "writable": true, "about": "Play recording, cancellation, and error tones"}]}
+  "kind": "bool", "writable": true, "about": "Play recording and error tones"}]}
 {"version": 4, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
   "languages": ["en", "…"], "size": "…", "installed": true, "selected": true,
   "streams": true, "vocabulary": "bias", "supports_recognition_hints": false}]}

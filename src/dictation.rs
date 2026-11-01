@@ -73,7 +73,7 @@ pub enum ShortcutMode {
     /// Hold the shortcut while speaking; release to finish.
     #[default]
     Hold,
-    /// Press once to start and again to finish. Escape still cancels.
+    /// Press once to start and again to finish.
     Toggle,
 }
 
@@ -1515,7 +1515,7 @@ mod tests {
         second.publish(said("next"));
         assert_eq!(capture.take_partial(), Some(said("next")));
 
-        // Escape drops the text with the recording.
+        // A cancelled recording (a lost microphone) drops its text.
         second.publish(said("next one"));
         capture.cancel();
         assert_eq!(capture.take_partial(), None);
@@ -1551,7 +1551,7 @@ mod tests {
         cancelled.cancel();
         assert!(!cancelled.is_streaming());
         let (_, _, cancels) = stream_traffic(&commands);
-        assert_eq!(cancels, 1, "Escape cancels");
+        assert_eq!(cancels, 1, "a cancelled recording cancels its stream");
 
         let (offline, commands) = TranscriptionEngine::for_test_without_streaming();
         let mut capture = DictationCapture::new(16_000);

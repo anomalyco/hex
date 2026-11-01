@@ -4,8 +4,7 @@
 //!
 //! It is `rune_hud`'s HUD, Dot scope: `dictation_indicator`'s model, drawn
 //! by the window's compositor through [`rune_hud::Painter`] over an empty
-//! element the view lays out ([`Preview`]). A cancel has no look of its own:
-//! the HUD leaves.
+//! element the view lays out ([`Preview`]).
 
 use std::time::{Duration, Instant};
 
@@ -32,9 +31,8 @@ enum Beat {
     Start,
     Stop,
     Done,
-    Cancel,
     Fail,
-    /// The end of a lone start or stop: the HUD leaves, as after a cancel.
+    /// The end of a lone start or stop: the HUD leaves.
     Leave,
 }
 
@@ -44,7 +42,7 @@ enum Beat {
 fn beats(what: Audition) -> Vec<(f32, Beat)> {
     let lead: &[(f32, Beat)] = match what {
         Audition::Dictation | Audition::Cue(Cue::Start) => &[],
-        Audition::Cue(Cue::Stop | Cue::Cancel) => &[(-0.8, Beat::Start)],
+        Audition::Cue(Cue::Stop) => &[(-0.8, Beat::Start)],
         Audition::Cue(Cue::Done | Cue::Error) => &[(-1.2, Beat::Start), (-0.6, Beat::Stop)],
     };
     let mut beats = lead.to_vec();
@@ -53,7 +51,6 @@ fn beats(what: Audition) -> Vec<(f32, Beat)> {
             Cue::Start => Beat::Start,
             Cue::Stop => Beat::Stop,
             Cue::Done => Beat::Done,
-            Cue::Cancel => Beat::Cancel,
             Cue::Error => Beat::Fail,
         };
         (at.as_secs_f32(), beat)
@@ -132,7 +129,6 @@ impl Hud {
             ],
             Beat::Done => &[Event::JobCompleted { job_id: JOB }],
             Beat::Fail => &[Event::JobFailed { job_id: JOB }],
-            Beat::Cancel => &[Event::Cancelled],
             Beat::Leave => &[Event::Cancelled, Event::JobCancelled { job_id: JOB }],
         };
         for &event in events {

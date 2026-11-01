@@ -131,7 +131,7 @@ const KEYS: &[Key] = &[
     key(
         "sound_effects",
         Kind::Bool,
-        "Play recording, cancellation, and error tones",
+        "Play recording and error tones",
     ),
     key(
         "sound_effect_volume",

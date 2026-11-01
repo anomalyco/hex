@@ -720,19 +720,6 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
     granted.iter().find(|shortcut| shortcut.name == name)
 }
 
-/// The key a shortcuts portal's desktop gave Cancel dictation. Hex suggests
-/// none, so a key here comes from the desktop (#624), and it takes that key
-/// from every app.
-pub(super) fn cancel_grant(ui: &Ui) -> Option<&str> {
-    let Some(DesktopShortcuts::Portal(granted)) = ui.shortcuts() else {
-        return None;
-    };
-    granted
-        .iter()
-        .find(|shortcut| shortcut.name == "Cancel dictation")
-        .and_then(|shortcut| shortcut.trigger.as_deref())
-}
-
 /// Keys GNOME keeps for itself by default (window menu, input sources, app
 /// switching, the overview, screenshots, …), normalized as [`chord`] writes
 /// them. A portal shortcut on one is listed in GNOME Settings but never
@@ -862,13 +849,6 @@ pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
             tr("Toggle dictation"),
             tr("Press to start dictating, press again to transcribe"),
             &["hex dictation toggle"],
-        ),
-        command_row(
-            p,
-            "cancel",
-            tr("Cancel dictation"),
-            tr("Discard the current recording"),
-            &["hex dictation cancel"],
         ),
         command_row(
             p,

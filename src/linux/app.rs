@@ -1253,7 +1253,6 @@ impl crate::control::host::Host for LinuxControl {
             (CaptureAction::Toggle, false) => ShortcutCommand::DictationToggle,
             (CaptureAction::Toggle, true) => ShortcutCommand::DictationToggleRaw,
             (CaptureAction::Stop, _) => ShortcutCommand::DictationStop,
-            (CaptureAction::Cancel, _) => ShortcutCommand::DictationCancel,
         })
     }
 
@@ -1374,10 +1373,7 @@ impl LinuxDesktopHost {
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
-                warning: self
-                    .listener
-                    .as_ref()
-                    .and_then(|listener| listener.hotkey_status.warning()),
+                warning: None,
                 shortcuts: self
                     .listener
                     .as_ref()
@@ -1573,45 +1569,6 @@ mod tests {
             assert!(listener.stop.load(Ordering::Relaxed));
             listener.finish().unwrap();
         }
-    }
-
-    #[test]
-    fn listener_warning_is_nonfatal_and_round_trips_in_status() {
-        let mut host = host_for_edit(true);
-        host.status = "Enabled".into();
-        let status = host.listener.as_ref().unwrap().hotkey_status.clone();
-        status.update_escape_availability(false);
-        let serialized = serde_json::to_vec(&host.snapshot()).unwrap();
-        let received: DesktopSnapshot = serde_json::from_slice(&serialized).unwrap();
-        let listener = received.listener;
-        assert!(listener.running);
-        assert_eq!(listener.status, "Enabled");
-        assert_eq!(
-            listener.warning.as_deref(),
-            Some(crate::linux::input::ESCAPE_CANCEL_WARNING),
-        );
-        assert!(received.operation_error.is_none());
-
-        // Dismissing an unrelated failure must not hide an unresolved limitation.
-        host.error = Some("previous transcription failed".into());
-        assert_eq!(
-            host.snapshot().operation_error.as_deref(),
-            Some("previous transcription failed"),
-        );
-        host.dispatch(DesktopAction::ClearError).unwrap();
-        assert!(host.snapshot().listener.warning.is_some());
-        assert!(host.snapshot().operation_error.is_none());
-        status.update_escape_availability(true);
-        assert!(host.snapshot().listener.warning.is_none());
-        status.update_escape_availability(false);
-        host.stop();
-        while !host.listener.as_ref().unwrap().worker.is_finished() {
-            std::thread::yield_now();
-        }
-        host.refresh();
-        let listener = host.snapshot().listener;
-        assert!(!listener.running);
-        assert!(listener.warning.is_none());
     }
 
     #[test]

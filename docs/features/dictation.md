@@ -2,7 +2,8 @@
 
 Hold the configured shortcut, speak, and release. Hex transcribes locally and
 inserts the result at the current focus. New captures do not cancel accepted
-work; cancellation prevents insertion only before output commits.
+work, and dictation has no cancel: every intentional dictation finishes and
+pastes (#786).
 
 This map covers the macOS release path. Linux shares the basic journey, not
 every timing, input, or recovery guarantee; see the
@@ -65,7 +66,7 @@ Checks: `mouse_buttons_record_with_or_without_modifiers`,
 `mouse_bindings_persist_and_conflict_only_with_the_same_trigger`,
 `mouse_hold_and_release_use_the_dictation_state_machine`,
 `mouse_double_tap_locks_and_a_fresh_press_finishes`,
-`mouse_toggle_and_escape_use_the_same_capture_controls`,
+`mouse_toggle_uses_the_same_capture_controls`,
 `mouse_held_during_stale_keyboard_recovery_is_not_forgotten`,
 `mouse_release_stays_balanced_after_its_binding_is_removed`, and
 `mouse_suppression_balances_release_and_drag_even_after_modifiers_change`.
@@ -157,6 +158,7 @@ as well as both Alts:
 Windows modifier-only shortcut                           // dictate.windows-lone-modifier
   ├── Press alone -> Down; release -> Up (hold, lock, Toggle as above)
   ├── Any key or click joins while held -> Chord: Cancel if recording, else nothing
+  │   (Escape never: it reaches the app and the capture goes on, #786)
   │   (the key reaches the app; locked and toggle captures keep recording)
   ├── Alt or Windows released -> Swallowed, VK 0xE8 tapped, release replayed
   │   -> No menu bar or Start menu; Share shortcut skips the mask
@@ -207,7 +209,7 @@ Output > Without processing > Dictate without processing   // raw.shortcut
 │       ├── Windows: a key chord (the hook's raw trigger)
 │       └── Linux: an X11 grab, or a portal entry "Dictate without processing",
 │           only while bound
-├── Hold / double-tap lock / toggle / Escape -> as the dictation shortcut
+├── Hold / double-tap lock / toggle -> as the dictation shortcut
 │   ├── The shortcut that started a capture owns it: the other one neither
 │   │   finishes it nor counts toward its double tap
 │   └── Queueing and ordered output -> shared with dictation
@@ -383,7 +385,7 @@ General > Shortcut mode = Hold (default)             // dictate.shortcut-mode
 General > Shortcut mode = Toggle
   Press -> Start (pre-roll as usual) -> Release keeps recording
   -> Fresh shortcut press -> Finish (with the release tail)
-  -> Escape -> Cancel
+  -> Escape -> Nothing: it reaches the app (#786)
   // Double-tap to lock and Double-tap only are hidden and ignored
   // Shortcut chords during the first 300 ms still discard
   macOS, Labs › Tap or hold on (labs.tap_or_hold, off by default, #711):
@@ -398,7 +400,7 @@ Toggle reuses the lock state on every platform: each press behaves as the
 second tap of a double-tap. Persisted as `shortcut_mode` (`hold`/`toggle`) in
 each platform's settings; files without it load as Hold. Checks:
 `toggle_mode_starts_on_a_press_and_finishes_on_the_next` and
-`toggle_mode_escape_cancels_a_locked_capture` in
+`toggle_mode_escape_leaves_a_locked_capture_recording` in
 [suppression.rs](../../src/suppression.rs) (macOS reducer), the same names in
 [windows/input.rs](../../src/windows/input.rs), and
 `toggle_mode_starts_on_a_tap_and_finishes_on_the_next`,
@@ -481,7 +483,7 @@ General > Advanced > Double-tap only                  // dictate.double-tap-only
   Same two qualifying complete taps -> LOCKED         // same lock, not a third mode
 
 LOCKED -> Speak hands-free -> Fresh shortcut press -> Finish
-       -> Escape -> Cancel
+       -> Escape -> Nothing: it reaches the app (#786)
        -> Missed key release -> Neutral keyboard repairs tracking -> Still LOCKED
 ```
 
@@ -506,7 +508,7 @@ Release or locked finishing press                     // dictate.release-tail
   -> Wait for audio through release + 200 ms (POST_RELEASE_TAIL)
      ├── Arrives -> Clip ends exactly at release + 200 ms
      └── Stream stalls/fails -> Finish within tail + 100 ms with what arrived
-  -> Not Escape, short taps, voice controls, programmatic stop, or meetings
+  -> Not short taps, voice controls, programmatic stop, or meetings
   -> Linux and Windows wait the same tail; Linux ends at the release it observes
      (an X11 key release, a portal Deactivated, or `hex dictation stop`)
   -> A press inside the tail starts after the old clip finishes, with its own pre-roll
@@ -517,7 +519,7 @@ Release that will transcribe                          // dictate.stop-tone
      ├── Short tap or chord -> No stop tone; the start tone is retracted
      ├── Clip later near-silent or without speech -> Tone already played;
      │   discard, nothing pasted
-     └── Escape after the release -> Not bound; the clip still transcribes
+     └── Escape after the release -> Nothing; the clip still transcribes
   -> macOS: the audio owner announces it before draining the tail; HUD
      Transcribing and submission still follow the tail
   -> Paused media resumes without delaying the tone
@@ -608,7 +610,7 @@ Model advertises streaming, GPU device             // dictate.streaming
        │   -> Transcribe the whole clip offline (source=fallback)
        ├── No final text within 1.5 s -> Abort the stream -> Whole clip
        └── Model switched during the capture -> Stream closed -> Whole clip
-  Short tap, Escape, chord discard, microphone failure -> Drop the stream
+  Short tap, chord discard, microphone failure -> Drop the stream
   Voice-delimited and programmatic captures (macOS) -> Whole clip after release
   Nothing is pasted or reaches the focused app until the final text exists
   Labs + labs.live_text -> After each feed the stream publishes its text   // dictate.live-text
@@ -622,7 +624,7 @@ Model advertises streaming, GPU device             // dictate.streaming
   │   │   reveals the last dictation's words for a frame (Linux, Windows: unverified)
   │   ├── Grows with the words to 552 pt; the newest stay in view, "…" cutting the start
   │   └── Tentative words, when the model has any, are dimmed after the stable ones
-  ├── Release, Escape, short tap, or a lost microphone -> The recording ends -> Hidden
+  ├── Release, short tap, or a lost microphone -> The recording ends -> Hidden
   ├── Provisional: never pasted, copied, or kept (the final text replaces it)
   ├── A failed or interrupted stream clears the text while the capture goes on
   └── process.log: `partials` on "finished live stream"; per change at debug (no words)
@@ -949,8 +951,7 @@ covered), Hex types the text as synthesized Unicode key events: at most 20
 UTF-16 units per event, never splitting a surrogate pair, and every line break
 as Shift-Return so chat boxes don't submit. Typing leaves the clipboard
 untouched, so there is nothing to restore; ordering, continuation joins, Send's
-trailing Return, Paste Last, and cancellation before commitment behave as for a
-paste. Chromium 157 and later, older versions, Electron apps (`Versions/A`),
+trailing Return, and Paste Last behave as for a paste. Chromium 157 and later, older versions, Electron apps (`Versions/A`),
 and every other app keep clipboard paste.
 Limits: the framework version is Chromium's for Chrome, Helium, Brave, Edge,
 and Chromium; a fork that names that folder after its own version (Opera,
@@ -970,28 +971,29 @@ Source: `control_chord` in [windows/paste.rs](../../src/windows/paste.rs).
 Check: `paste_chords_press_shift_inside_control_and_leave_a_held_control_alone`
 (the synthesized key sequence only; no paste into a real Windows app).
 
-### Cancellation Before Commit
+### No Cancel
 
 ```ts
-Escape                                               // dictate.cancel
-  ├── Active capture -> Cancel that capture first
-  └── No active capture -> Cancel newest cancellable accepted job
-     -> Repeat Escape -> Walk back through unfinished jobs
-  └── Programmatic dictation (local API) -> Not claimed; the key reaches the app
-     -> Even with other jobs queued; its owner cancels through /cancel
+Escape                                               // dictate.no-cancel
+  ├── Recording (held, locked, toggled) -> Nothing; the key reaches the app
+  │   -> Not a chord either, even beside a held modifier-only shortcut
+  ├── Accepted jobs -> Nothing; they finish and paste in order
+  ├── Annotate drawing -> Stops drawing only (Annotate's own Escape)
+  └── Programmatic dictation (local API) -> Its owner cancels through /cancel
      -> The lease ends an abandoned one
-
-Cancelled before output commit -> No insertion
-Already committed clipboard insertion -> Not undone   // not target-app undo
+hex dictation cancel -> Removed; an older `hex` gets `removed`
+Linux portal -> No Cancel dictation shortcut; Escape never bound
 ```
 
-Checks in [parakeet.rs](../../src/parakeet.rs):
-`output_stays_cancellable_through_preparation_but_not_after_mutation`,
-`repeated_cancellation_walks_back_through_pending_jobs`,
-`escape_skips_programmatic_dictation_jobs`; [recognition.rs](../../src/recognition.rs):
-`a_programmatic_dictation_leaves_escape_with_its_owner`.
-These use a controlled paste boundary and temporary history store;
-no foreground application consumes the clipboard.
+Until #786, Escape cancelled the active capture, then the newest unfinished
+job, and an accidental Escape wiped a 5-minute dictation. Short taps, chords,
+and silent captures still discard; Hex itself ends a capture only when its
+input or microphone is lost. Checks: `escape_never_ends_a_held_capture` and
+`toggle_mode_escape_leaves_a_locked_capture_recording` in
+[suppression.rs](../../src/suppression.rs) (macOS, not compiled on Linux),
+`escape_never_ends_a_dictation` in [linux/input.rs](../../src/linux/input.rs),
+`only_a_capture_claims_escape` in [recognition.rs](../../src/recognition.rs),
+and `an_older_cancel_gets_removed` in [control.rs](../../src/control.rs).
 
 ### Feedback
 
@@ -1010,7 +1012,7 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
   Failure -> Error tone; wake/sleep keep macOS Pop/Tink      // dictate.error-tone
      -> Classic has none: macOS Basso, Signature's error on Windows and Linux
-     -> Linux/Windows microphone interruption -> Cancel tone only
+     -> A lost microphone or input -> No tone; the capture ends
   Tone requested -> Playback worker opens the default output, then plays
      -> Output stays open five minutes past the last tone, then releases
      -> Released output holds no macOS idle-sleep assertion
@@ -1031,9 +1033,8 @@ Settings > Sounds (next to Sound volume)                    // dictate.sound-set
 │   │   ├── Start (0 s) -> Recording, with a demo voice's level
 │   │   ├── Stop (1.4 s) -> Transcribing
 │   │   └── Done (2.1 s) -> Done look, then it leaves
-│   ├── Lone Cancel -> The HUD just leaves: no cancel look on any OS
 │   ├── Lone Error (macOS) -> Failed look 0.6 s (Dot scope coral), then leaves
-│   ├── Chips -> Start / Stop / Done / Cancel / Error (macOS) play one sound
+│   ├── Chips -> Start / Stop / Done / Error (macOS) play one sound
 │   │   └── Set has no such sound (Classic's or Thock's done) -> Chip faint and inert
 │   ├── Each set -> Name, what it sounds like, play button
 │   │   ├── Play -> Plays its dictation without choosing it; again stops it
@@ -1063,19 +1064,19 @@ demo, not the microphone, and it ignores Reduce Motion.
 
 Hex signature (2026-10-27) is one kalimba-like FM voice playing one motif,
 D-B-A-D (a sixth, since "hex" is six): start D5 to B5 (116 ms), stop B5 to A5
-(230 ms), done D6 over A5 (330 ms), cancel B5 down to D5 (225 ms), error D4
+(230 ms), done D6 over A5 (330 ms), error D4
 then a minor D4+Bb4 (280 ms), and onboarding success, the whole motif landing
 on a D sixth chord (1.1 s), played when the first-run tour reaches its last
 step. Click is mechanical key clicks, Soft tone warm sine blips in A major,
-Wood a soft-mallet marimba with hollow wood blocks for cancel and error, and
+Wood a soft-mallet marimba with hollow wood blocks for error, and
 Warm synth two detuned saws through a closing low-pass filter, and Thock one
 mechanical keyboard key, from the team's vote on the start sound (its winner,
 an ElevenLabs take kept in `scripts/sounds/thock/`): start is the press, stop
-the same key's upstroke, cancel a lower, duller key, error two keys at once,
+the same key's upstroke, error two keys at once,
 twice, and success a run of keys up to a full press; it has no done sound
 because the stop already says it. Classic is the
-sounds Hex played before the signature set (start clicks, stop swish, cancel
-thud), restored from git; it has no done tone, errors play macOS Basso as they
+sounds Hex played before the signature set (start clicks, stop swish),
+restored from git; it has no done tone, errors play macOS Basso as they
 did, and onboarding success plays its stop sound (the other sets have their own).
 The done sound of every set plays only when the paste lands at least
 `DONE_MIN_AFTER_STOP` (2 s) after the stop sound, as after a slow rewrite; the
@@ -1087,10 +1088,10 @@ Each set is a folder in `resources/audio/sounds/` made by
 byte-identical). Synthesized sounds are 48 kHz mono WAVs starting on their
 first sample; Classic keeps its 44.1 kHz stereo, trimmed to start at its first
 audible sample. Every sound is normalized to one loudness per kind (start
--25.5 LUFS max momentary, stop and done -27, cancel and error -26.5, success
+-25.5 LUFS max momentary, stop and done -27, error -26.5, success
 -25), so a volume sounds the same in every set. Classic's start and stop come
-up 2.5 and 3 dB (a soft limiter touches 0.1% of the start's samples) and its
-cancel, once 15 dB louder than the rest, comes down. Every OS plays the
+up 2.5 and 3 dB (a soft limiter touches 0.1% of the start's samples). There
+is no cancel sound since #786. Every OS plays the
 error sound for a failed dictation or paste (`fail` in `linux/dictation.rs`
 and `windows/dictation.rs`), including an empty transcript, which macOS
 treats as nothing pasted. Checks:
@@ -1361,7 +1362,7 @@ TextEdit process were stopped afterward.
   fixture does not cover every binding. See [shortcut recovery](recovery.md).
 - **Full user path:** source connections and individual checks do not prove the
   complete path on a user's Mac. Retain action-to-result evidence for hold,
-  lock, Escape, and a second capture during older processing in a controlled
+  lock, Escape passing through, and a second capture during older processing in a controlled
   target app. Observe insertion and input responsiveness, not just the HUD.
 - **Microphone modes:** verify onset and idle closure separately for Keep ready
   and Release when idle on an identified device. The macOS microphone indicator

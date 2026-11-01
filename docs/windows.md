@@ -13,8 +13,8 @@ or user-defined TypeScript transformations.
 
 The default shortcut is `Ctrl+Space`. In **Hold** mode, hold both keys while
 speaking and release Space to transcribe and paste. In **Toggle** mode, press
-`Ctrl+Space` to start and again to finish. Only Escape cancels; holding a
-modifier on its own does nothing. Hex consumes the chord while it matches, so
+`Ctrl+Space` to start and again to finish. Escape never cancels (every
+dictation finishes and pastes), and holding a modifier on its own does nothing. Hex consumes the chord while it matches, so
 applications and input methods no longer see `Ctrl+Space`; rebind it in Settings
 if you rely on that chord elsewhere. To let another app use the same key, such as
 a Discord push-to-talk key, turn on **Share dictation shortcut with other apps**
@@ -297,7 +297,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 
 | Area | Windows status |
 | --- | --- |
-| Local hold-to-dictate, Toggle mode, timestamped boundaries, Escape, paste | Implemented |
+| Local hold-to-dictate, Toggle mode, timestamped boundaries, paste | Implemented |
 | Live model, shortcut, and microphone selection | Implemented |
 | Double-tap lock and Paste Last Dictation | Implemented |
 | Clipboard preservation and generation-safe restoration | Implemented |

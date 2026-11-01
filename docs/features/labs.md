@@ -333,8 +333,8 @@ works as both tap-to-toggle and push-to-talk. It acts only in Toggle mode
 released at least `MINIMUM_HOLD_DURATION` (300 ms, the hold threshold) after
 it started finishes the capture on release, as Hold does, with the usual
 200 ms tail. A shorter press locks the capture as plain Toggle does, and the
-next press finishes it. Chord discards, Escape, and the press that finishes
-a lock are unchanged. It applies to every `DictationHotkey` in Toggle mode.
+next press finishes it. Chord discards and the press that finishes a lock are
+unchanged. It applies to every `DictationHotkey` in Toggle mode.
 Off, or in Hold mode, nothing changes. Linux and Windows don't have it.
 Checks: `tap_or_hold_locks_a_short_tap_and_finishes_a_long_hold_on_release`
 and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
