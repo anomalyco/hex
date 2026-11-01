@@ -266,6 +266,13 @@ substitute for source inspection or a second roadmap.
   `$XDG_RUNTIME_DIR/wayland-*` socket the user owns. `linux/rune_hud`'s
   `limitation()` names the HUD's failure: no display, no layer-shell, or
   Rune's overlay error.
+- `linux/gnome_shortcuts`: on GNOME without a GlobalShortcuts portal
+  (GNOME 46, #781), Hex's own custom keybindings under
+  `…/media-keys/custom-keybindings/hex-*/` via `gsettings`
+  (`linux/gsettings`): `hex dictation toggle`, `hex paste-last`,
+  `hex annotate toggle`. Opt-in (`gnome_keyboard_shortcuts`), written while Hex
+  listens and removed when it's disabled; an existing entry keeps the key the
+  user set in GNOME, and other custom shortcuts are never touched.
 - `linux/clipboard`: the clipboard a Linux paste restores: every format of the
   CLIPBOARD selection read within a size cap and deadline, then served again
   from Hex (ext-data-control, else wlr-data-control on Wayland, its own selection owner with INCR on
