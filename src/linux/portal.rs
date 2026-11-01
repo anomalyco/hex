@@ -864,6 +864,74 @@ impl Portal {
     }
 }
 
+/// What the log says when the session has no shortcuts portal at startup.
+pub(crate) const MISSING_SHORTCUTS_PORTAL: &str = "no GlobalShortcuts portal; dictation follows the hex commands. \
+If this desktop has one, xdg-desktop-portal may have started before the desktop session and picked the wrong \
+backend: restart it (systemctl --user restart xdg-desktop-portal) and Hex binds its shortcuts at its next check";
+
+/// Looks for the shortcuts portal again from time to time, after 15 s and
+/// then doubling up to every 2 minutes. A portal started before the
+/// desktop's session environment exists exposes none until it is restarted
+/// (#875). Each check runs on its own thread, so a slow bus never holds back
+/// the caller.
+pub(crate) struct PortalProbe {
+    stop: std::sync::Arc<AtomicBool>,
+    retry: Duration,
+    next: Instant,
+    running: Option<std::thread::JoinHandle<Result<Option<Portal>>>>,
+    warned: bool,
+}
+
+impl PortalProbe {
+    const FIRST: Duration = Duration::from_secs(15);
+    const MAX: Duration = Duration::from_secs(120);
+
+    pub(crate) fn new(stop: std::sync::Arc<AtomicBool>) -> Self {
+        Self {
+            stop,
+            retry: Self::FIRST,
+            next: Instant::now() + Self::FIRST,
+            running: None,
+            warned: false,
+        }
+    }
+
+    /// The portal, once a check found it.
+    pub(crate) fn poll(&mut self) -> Result<Option<Portal>> {
+        if self
+            .running
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
+            match self.running.take().map(std::thread::JoinHandle::join) {
+                Some(Ok(Ok(Some(portal)))) => {
+                    tracing::info!("the GlobalShortcuts portal appeared; binding Hex's shortcuts");
+                    return Ok(Some(portal));
+                }
+                Some(Ok(Err(error))) if !self.warned => {
+                    self.warned = true;
+                    tracing::warn!(
+                        error = format!("{error:#}"),
+                        "could not check for the GlobalShortcuts portal"
+                    );
+                }
+                _ => {}
+            }
+            self.retry = (self.retry * 2).min(Self::MAX);
+            self.next = Instant::now() + self.retry;
+        } else if self.running.is_none() && Instant::now() >= self.next {
+            let stop = self.stop.clone();
+            self.running = Some(
+                std::thread::Builder::new()
+                    .name("hex-portal-probe".into())
+                    .spawn(move || Portal::connect(&stop))
+                    .wrap_err("could not start the shortcuts portal check")?,
+            );
+        }
+        Ok(None)
+    }
+}
+
 const GNOME_SHORTCUTS: &str = "org.gnome.settings-daemon.global-shortcuts";
 
 /// Before #579 Hex registered with the portal as `hex`. GNOME Settings keeps
