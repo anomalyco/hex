@@ -460,14 +460,21 @@ mod tests {
         }]);
         assert_eq!(editor.rows[0].sounds_like.text, "capuchin, cap a chino");
         editor.push(TextEdit::default(), TextEdit::new("ignored"));
-        editor.push(TextEdit::new(" Cappuccino "), TextEdit::new("cap you chino,"));
+        editor.push(
+            TextEdit::new(" Cappuccino "),
+            TextEdit::new("cap you chino,"),
+        );
         editor.push(TextEdit::new("Rune"), TextEdit::new(" roon "));
         assert_eq!(
             editor.project(),
             [
                 VocabularyEntry {
                     term: "cappuccino".into(),
-                    sounds_like: vec!["capuchin".into(), "cap a chino".into(), "cap you chino".into()],
+                    sounds_like: vec![
+                        "capuchin".into(),
+                        "cap a chino".into(),
+                        "cap you chino".into()
+                    ],
                 },
                 VocabularyEntry {
                     term: "Rune".into(),
