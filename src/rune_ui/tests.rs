@@ -1840,8 +1840,12 @@ fn a_found_model_moves_on_from_the_list_and_back_returns_to_it() {
     };
     rt.state.picker.installed = Some(vec![TranscriptionModelId::ParakeetV3]);
     settle(&mut rt);
+    // The list may already be leaving for the next step (the advance beat).
     let shown = texts(&rt);
-    assert!(rt.find("model-list").is_some(), "{shown:?}");
+    assert!(
+        shown.contains(&"Choose a speech model".to_owned()),
+        "{shown:?}"
+    );
     assert!(
         !shown.contains(&"Download a speech model".to_owned()),
         "{shown:?}"
