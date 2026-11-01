@@ -957,7 +957,10 @@ mod tests {
         .unwrap();
         assert_eq!(web.source, MeetingSource::WhatsApp);
         assert_eq!(web.required_stability(), BROWSER_STABLE_FOR);
-        assert_eq!(known_provider_label("net.whatsapp.WhatsApp"), Some("WhatsApp"));
+        assert_eq!(
+            known_provider_label("net.whatsapp.WhatsApp"),
+            Some("WhatsApp")
+        );
     }
 
     #[test]
