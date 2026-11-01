@@ -24,6 +24,25 @@ pub(super) const TERMINAL_PASTE: bool = true;
 /// Linux has no tray, so the window offers Quit Hex.
 pub(super) const QUIT_IN_WINDOW: bool = true;
 
+/// Closes an open window and gives the event loop a moment to tear its
+/// surface down before Hex quits. Quitting with the window still open
+/// destroyed it during the loop's exit, which crashed NVIDIA's driver on
+/// Wayland (#821); closing it first, as the window's own close does, exits
+/// cleanly. Bounded, so a loop that never answers still quits.
+pub(super) fn close_before_quit(window: &rune::AppHandle<super::Ui>) {
+    use std::time::{Duration, Instant};
+    if !window.is_visible() {
+        return;
+    }
+    window.close();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while window.is_visible() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // The surface goes with the loop's next turns, after the close itself.
+    std::thread::sleep(Duration::from_millis(100));
+}
+
 /// The host the window's app runs beside; none for a headless `--snap` of
 /// another process's `hex status`.
 pub(crate) type Connect = Option<HostHandle>;
