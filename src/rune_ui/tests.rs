@@ -1829,6 +1829,33 @@ fn onboarding_downloads_the_model_through_the_service() {
 }
 
 #[test]
+fn with_no_model_found_onboarding_downloads_the_recommended_model_with_no_list() {
+    for scene in ["onboarding", "mac-onboarding"] {
+        let mut rt = runtime(scene, false, PANE_SIZE);
+        assert!(rt.state.found.models.is_empty());
+        // The download starts on its own, before any step or pick.
+        assert!(
+            matches!(
+                sent(&rt),
+                [Request::ChooseModel {
+                    model: TranscriptionModelId::ParakeetUnifiedEnglish,
+                    ..
+                }]
+            ),
+            "{scene}: {:?}",
+            sent(&rt)
+        );
+        tap(&mut rt, "tour-continue");
+        let shown = texts(&rt);
+        assert!(rt.find("model-list").is_none(), "{scene}: no model list");
+        assert!(
+            !shown.contains(&"Choose a speech model".to_owned()),
+            "{scene}: {shown:?}"
+        );
+    }
+}
+
+#[test]
 fn the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one() {
     // Continue with no pick starts the selected, recommended model.
     let mut rt = runtime("onboarding-model-found", false, PANE_SIZE);
