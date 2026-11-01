@@ -86,10 +86,11 @@ pub enum Feature {
     ParakeetUltra,
     StandaloneSpecialKeys,
     HistoryStats,
+    SpokenCommands,
 }
 
 impl Feature {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -118,6 +119,7 @@ impl Feature {
         Self::ParakeetUltra,
         Self::StandaloneSpecialKeys,
         Self::HistoryStats,
+        Self::SpokenCommands,
     ];
 
     /// The features this OS and build have.
@@ -168,7 +170,8 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::StandaloneSpecialKeys
-            | Self::HistoryStats => Audience::Everyone,
+            | Self::HistoryStats
+            | Self::SpokenCommands => Audience::Everyone,
         }
     }
 
@@ -209,7 +212,8 @@ impl Feature {
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SidedChords
-            | Self::TapOrHold => cfg!(target_os = "macos"),
+            | Self::TapOrHold
+            | Self::SpokenCommands => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -257,6 +261,7 @@ impl Feature {
             Self::ParakeetUltra => "parakeet-ultra",
             Self::StandaloneSpecialKeys => "special-keys",
             Self::HistoryStats => "history-stats",
+            Self::SpokenCommands => "spoken-commands",
         }
     }
 
@@ -291,6 +296,7 @@ impl Feature {
             Self::ParakeetUltra => "labs.parakeet_ultra",
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
             Self::HistoryStats => "labs.history_stats",
+            Self::SpokenCommands => "labs.spoken_commands",
         }
     }
 
@@ -365,6 +371,9 @@ impl Feature {
             Self::HistoryStats => {
                 "Show a summary of your retained dictations at the top of History, with hex history stats"
             }
+            Self::SpokenCommands => {
+                "A dictation that is only \"press return\", \"press tab\", \"press space\", \"next space\", or \"previous space\" presses that key instead of pasting"
+            }
         }
     }
 
@@ -403,6 +412,7 @@ impl Feature {
             Self::ParakeetUltra => settings.labs.parakeet_ultra,
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
             Self::HistoryStats => settings.labs.history_stats,
+            Self::SpokenCommands => settings.labs.spoken_commands,
         }
     }
 
@@ -435,6 +445,7 @@ impl Feature {
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
             Self::HistoryStats => settings.labs.history_stats = on,
+            Self::SpokenCommands => settings.labs.spoken_commands = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -461,6 +472,7 @@ const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
+const SPOKEN_COMMANDS: u32 = 1 << 16;
 const PARAKEET_ULTRA: u32 = 1 << 17;
 const HISTORY_STATS: u32 = 1 << 18;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
@@ -570,6 +582,13 @@ pub fn tap_or_hold() -> bool {
     on(TAP_OR_HOLD)
 }
 
+/// A hotkey dictation that is only a spoken command phrase presses its key
+/// instead of pasting (macOS; read as each dictation's output starts).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn spoken_commands() -> bool {
+    on(SPOKEN_COMMANDS)
+}
+
 /// Parakeet Ultra joins the catalog (read wherever a model is listed,
 /// chosen, or run).
 pub fn parakeet_ultra() -> bool {
@@ -653,6 +672,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             PARAKEET_ULTRA,
         ),
         (Feature::HistoryStats, settings.history_stats, HISTORY_STATS),
+        (
+            Feature::SpokenCommands,
+            settings.spoken_commands,
+            SPOKEN_COMMANDS,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -987,6 +1011,19 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & HISTORY_STATS, 0);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn spoken_commands_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & SPOKEN_COMMANDS, 0);
+        labs.spoken_commands = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & SPOKEN_COMMANDS, 0);
+        assert_eq!(state & TAP_OR_HOLD, 0);
         assert_eq!(state & PARAKEET_ULTRA, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }

@@ -43,6 +43,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS)   in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711)
+├── Spoken commands  no    labs.spoken_commands         (macOS)   a dictation that is only "press return/enter/tab/space" or "next/previous space" presses that key instead of pasting (#650)
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker cards show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
@@ -342,6 +343,37 @@ and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
 `tap_or_hold_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real Mac with the toggle
 on. The row renders only in macOS builds, so no golden changes.
+
+Spoken commands (`spoken-commands`, issue 650, macOS): a small fixed set
+instead of 2.3.1's Commands pane. A hotkey dictation (the dictation shortcut,
+second shortcut, or `hex dictation` without `--print`) whose whole transcript
+is one command phrase presses a key instead of pasting:
+
+```ts
+transcript (case, surrounding punctuation, extra spaces ignored)   // labs.spoken-commands
+├── "press return" | "press enter" -> Return
+├── "press tab"                    -> Tab
+├── "press space"                  -> Space
+├── "next space" | "previous space" -> Control-Right / Control-Left (Mission Control's Spaces)
+└── anything else, "press return now", or a sentence containing a phrase -> pasted as text
+```
+
+The gate is the dictation worker (`parakeet::spoken_command`), which reads
+`labs::spoken_commands()` where a Paste job's transcript is ready, before
+Output processing (a match skips modes, OpenCode, and transformations), and
+again as the output commits in order, where `keyboard::post_spoken_key` posts
+the marked key events instead of pasting. process.log records `spoken command`
+with its name, never the transcript; nothing goes to History or Paste last
+dictation. Dictate without processing, `hex dictation stop --print`, the local
+API, meetings, and live text are unchanged; there is no always-listening mode,
+and only English phrases are recognized. Off, Hex is unchanged. Linux and
+Windows don't have it. Checks: the tests in
+[dictation/spoken_commands.rs](../../src/dictation/spoken_commands.rs) (exact
+phrases, case and punctuation, near misses);
+`spoken_commands_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real dictation on a Mac with
+the toggle on, or whether Mission Control takes the posted Control-arrow; the
+row renders only in macOS builds, so no golden changes.
 
 Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
 on, the Local transcription picker shows one row between its header and the

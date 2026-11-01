@@ -275,6 +275,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Tap or hold"),
                 tr("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"),
             ));
+            // macOS's dictation worker posts the key.
+            rows.push(row(
+                Feature::SpokenCommands,
+                &KEYBOARD,
+                tr("Spoken commands"),
+                tr("A dictation that is only \"press return\", \"press tab\", \"press space\", \"next space\", or \"previous space\" presses that key instead of pasting"),
+            ));
         }
     }
     // Linux's X11 grabs and shortcuts portal take these keys alone.
@@ -393,6 +400,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::ParakeetUltra => "lab-parakeet-ultra",
         Feature::StandaloneSpecialKeys => "lab-special-keys",
         Feature::HistoryStats => "lab-history-stats",
+        Feature::SpokenCommands => "lab-spoken-commands",
     }
 }
 

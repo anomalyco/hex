@@ -373,6 +373,11 @@ const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, and hex history stats",
     ),
     key(
+        "labs.spoken_commands",
+        Kind::Bool,
+        "Labs: a dictation that is only \"press return\", \"press tab\", \"press space\", \"next space\", or \"previous space\" presses that key instead of pasting (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

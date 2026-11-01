@@ -225,6 +225,51 @@ fn collect_key_codes(entries: impl IntoIterator<Item = (char, u16)>) -> HashMap<
         })
 }
 
+const TAB_KEY_CODE: u16 = 48;
+const SPACE_KEY_CODE: u16 = 49;
+const LEFT_ARROW_KEY_CODE: u16 = 123;
+const RIGHT_ARROW_KEY_CODE: u16 = 124;
+const CONTROL_KEY_CODE: u16 = 59;
+const CONTROL_FLAG: u64 = 1 << 18;
+/// The arrows' own flags on a real keyboard: NumericPad and SecondaryFn.
+const ARROW_FLAGS: u64 = (1 << 21) | (1 << 23);
+
+/// Presses the key a spoken command names (Labs › Spoken commands), marked
+/// like every key Hex posts.
+pub fn post_spoken_key(key: crate::dictation::spoken_commands::SpokenKey) -> Result<()> {
+    let events = spoken_key_event_specs(key)
+        .into_iter()
+        .map(KeyboardEvent::new)
+        .collect::<Result<Vec<_>>>()?;
+    for event in events {
+        event.post();
+    }
+    Ok(())
+}
+
+fn spoken_key_event_specs(
+    key: crate::dictation::spoken_commands::SpokenKey,
+) -> Vec<(u16, bool, u64)> {
+    use crate::dictation::spoken_commands::SpokenKey;
+    let plain = |code: u16| vec![(code, true, 0), (code, false, 0)];
+    let control_arrow = |code: u16| {
+        let flags = CONTROL_FLAG | ARROW_FLAGS;
+        vec![
+            (CONTROL_KEY_CODE, true, CONTROL_FLAG),
+            (code, true, flags),
+            (code, false, flags),
+            (CONTROL_KEY_CODE, false, 0),
+        ]
+    };
+    match key {
+        SpokenKey::Return => plain(RETURN_KEY_CODE),
+        SpokenKey::Tab => plain(TAB_KEY_CODE),
+        SpokenKey::Space => plain(SPACE_KEY_CODE),
+        SpokenKey::NextSpace => control_arrow(RIGHT_ARROW_KEY_CODE),
+        SpokenKey::PreviousSpace => control_arrow(LEFT_ARROW_KEY_CODE),
+    }
+}
+
 pub fn post_command(character: char) -> Result<()> {
     let key_code = resolve_key_code(character, true)?;
     post_key_code(key_code, &[(COMMAND_FLAG, COMMAND_KEY_CODE)], 1)

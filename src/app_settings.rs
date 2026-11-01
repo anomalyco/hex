@@ -1420,6 +1420,9 @@ pub struct LabsSettings {
     /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
     pub standalone_special_keys: bool,
     pub history_stats: bool,
+    /// A hotkey dictation that is only a fixed command phrase, such as
+    /// "press return", presses its key instead of pasting (macOS, issue 650).
+    pub spoken_commands: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1451,6 +1454,7 @@ impl Default for LabsSettings {
             parakeet_ultra: false,
             standalone_special_keys: false,
             history_stats: false,
+            spoken_commands: false,
         }
     }
 }

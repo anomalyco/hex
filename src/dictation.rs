@@ -16,6 +16,8 @@ pub(crate) mod modes;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod processor;
 pub(crate) mod silence;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod spoken_commands;
 pub(crate) mod spoken_formatting;
 pub(crate) mod spoken_symbols;
 pub(crate) mod text_replacements;

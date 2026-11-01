@@ -782,7 +782,9 @@ fn run_inference_worker(
                 if matches!(
                     target,
                     TranscriptionTarget::Paste | TranscriptionTarget::Print
-                ) && !text.trim().is_empty() =>
+                ) && !text.trim().is_empty()
+                    // A spoken command skips Output processing.
+                    && spoken_command(target, &text).is_none() =>
             {
                 if processor_jobs
                     .send(ProcessorJob {
@@ -929,6 +931,19 @@ fn queue_error(error: TrySendError<impl Sized>) -> &'static str {
     }
 }
 
+/// The key a hotkey dictation presses instead of pasting, while Labs ›
+/// Spoken commands is on and the whole transcript is one command phrase.
+/// Printing stops, raw dictations, and the local API never get one.
+fn spoken_command(
+    target: TranscriptionTarget,
+    transcript: &str,
+) -> Option<crate::dictation::spoken_commands::SpokenKey> {
+    if !matches!(target, TranscriptionTarget::Paste) || !crate::labs::spoken_commands() {
+        return None;
+    }
+    crate::dictation::spoken_commands::command(transcript)
+}
+
 fn finish_output(
     job: OutputJob,
     paste: &mut impl FnMut(&str, PasteMode, &dyn Fn() -> bool) -> Result<()>,
@@ -953,10 +968,21 @@ fn finish_output(
                     return Err("dictation was cancelled".into());
                 }
                 let paste_started = Instant::now();
+                let command = spoken_command(target, &completed.raw);
                 if !completed.text.trim().is_empty() {
                     let commit = || control.begin_output();
-                    match target {
-                        TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
+                    match (target, command) {
+                        // Labs › Spoken commands: the key instead of the
+                        // text, kept out of History and Paste last.
+                        (_, Some(key)) => {
+                            if commit() {
+                                tracing::info!(command = key.name(), "spoken command");
+                                crate::keyboard::post_spoken_key(key)
+                            } else {
+                                Err(eyre!("dictation was cancelled"))
+                            }
+                        }
+                        (TranscriptionTarget::Paste | TranscriptionTarget::RawPaste, None) => {
                             // Labs › Copy dictation only, read as the output
                             // commits: dictations go to the clipboard
                             // unpasted; Paste last dictation still pastes.
@@ -967,21 +993,26 @@ fn finish_output(
                             };
                             paste(&completed.text, mode, &commit)
                         }
-                        TranscriptionTarget::Service
-                        | TranscriptionTarget::Print
-                        | TranscriptionTarget::RawPrint => commit()
+                        (
+                            TranscriptionTarget::Service
+                            | TranscriptionTarget::Print
+                            | TranscriptionTarget::RawPrint,
+                            None,
+                        ) => commit()
                             .then_some(())
                             .ok_or_else(|| eyre!("dictation was cancelled")),
                     }
                     .map_err(|error| error.to_string())?;
-                    if matches!(
-                        target,
-                        TranscriptionTarget::Paste | TranscriptionTarget::RawPaste
-                    ) {
-                        *last_transcript = Some(completed.text.clone());
-                    }
-                    if let Some(history) = history {
-                        record_history(history, target, &completed);
+                    if command.is_none() {
+                        if matches!(
+                            target,
+                            TranscriptionTarget::Paste | TranscriptionTarget::RawPaste
+                        ) {
+                            *last_transcript = Some(completed.text.clone());
+                        }
+                        if let Some(history) = history {
+                            record_history(history, target, &completed);
+                        }
                     }
                 }
                 tracing::info!(
