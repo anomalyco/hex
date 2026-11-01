@@ -84,10 +84,12 @@ pub enum Feature {
     TapOrHold,
     BenchmarkDetails,
     CustomModels,
+    ParakeetUltra,
+    StandaloneSpecialKeys,
 }
 
 impl Feature {
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 28] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -114,6 +116,8 @@ impl Feature {
         Self::TapOrHold,
         Self::BenchmarkDetails,
         Self::CustomModels,
+        Self::ParakeetUltra,
+        Self::StandaloneSpecialKeys,
     ];
 
     /// The features this OS and build have.
@@ -162,8 +166,21 @@ impl Feature {
             | Self::SidedChords
             | Self::TapOrHold
             | Self::BenchmarkDetails
-            | Self::CustomModels => Audience::Everyone,
+            | Self::CustomModels
+            | Self::ParakeetUltra
+            | Self::StandaloneSpecialKeys => Audience::Everyone,
         }
+    }
+
+    /// Why turning this feature off is refused now: Parakeet Ultra stays on
+    /// while it is the dictation model, until a switch to another succeeds.
+    pub fn off_refusal(self, settings: &AppSettings) -> Option<&'static str> {
+        (self == Self::ParakeetUltra
+            && settings.transcription.model
+                == crate::transcription::models::TranscriptionModelId::ParakeetUltra)
+            .then_some(
+                "Parakeet Ultra is the dictation model; choose another model before turning it off",
+            )
     }
 
     /// The feature `hex settings` key `key` switches (its toggle, or
@@ -184,6 +201,7 @@ impl Feature {
             }
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
+            Self::StandaloneSpecialKeys => cfg!(target_os = "linux"),
             Self::MouseShortcuts
             | Self::PauseBrowser
             | Self::KeepOnClipboard
@@ -203,6 +221,7 @@ impl Feature {
             | Self::PickerSortFilter
             | Self::BenchmarkDetails
             | Self::CustomModels
+            | Self::ParakeetUltra
             | Self::FillerWords => true,
         }
     }
@@ -236,6 +255,8 @@ impl Feature {
             Self::TapOrHold => "tap-or-hold",
             Self::BenchmarkDetails => "benchmark-details",
             Self::CustomModels => "custom-models",
+            Self::ParakeetUltra => "parakeet-ultra",
+            Self::StandaloneSpecialKeys => "special-keys",
         }
     }
 
@@ -268,6 +289,8 @@ impl Feature {
             Self::TapOrHold => "labs.tap_or_hold",
             Self::BenchmarkDetails => "labs.benchmark_details",
             Self::CustomModels => "labs.custom_models",
+            Self::ParakeetUltra => "labs.parakeet_ultra",
+            Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
         }
     }
 
@@ -333,6 +356,12 @@ impl Feature {
             Self::CustomModels => {
                 "Add a speech model file of your own (GGUF) from the Local transcription picker"
             }
+            Self::ParakeetUltra => {
+                "Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker"
+            }
+            Self::StandaloneSpecialKeys => {
+                "Use Menu, Pause, or Scroll Lock alone as a shortcut, such as Caps Lock remapped to Menu"
+            }
         }
     }
 
@@ -369,6 +398,8 @@ impl Feature {
             Self::TapOrHold => settings.labs.tap_or_hold,
             Self::BenchmarkDetails => settings.labs.benchmark_details,
             Self::CustomModels => settings.labs.custom_models,
+            Self::ParakeetUltra => settings.labs.parakeet_ultra,
+            Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
         }
     }
 
@@ -400,6 +431,12 @@ impl Feature {
             Self::TapOrHold => settings.labs.tap_or_hold = on,
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
             Self::CustomModels => settings.labs.custom_models = on,
+            Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
+            // Off, no shortcut keeps a key only the feature allows.
+            Self::StandaloneSpecialKeys => {
+                settings.labs.standalone_special_keys = on;
+                settings.repair_special_keys();
+            }
         }
     }
 }
@@ -422,8 +459,9 @@ const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
 const CUSTOM_MODELS: u32 = 1 << 16;
+const PARAKEET_ULTRA: u32 = 1 << 17;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u32 = 17;
+const MINUTES_SHIFT: u32 = 18;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -535,6 +573,12 @@ pub fn custom_models() -> bool {
     on(CUSTOM_MODELS)
 }
 
+/// Parakeet Ultra joins the catalog (read wherever a model is listed,
+/// chosen, or run).
+pub fn parakeet_ultra() -> bool {
+    on(PARAKEET_ULTRA)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -601,6 +645,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
         ),
         (Feature::TapOrHold, settings.tap_or_hold, TAP_OR_HOLD),
         (Feature::CustomModels, settings.custom_models, CUSTOM_MODELS),
+        (
+            Feature::ParakeetUltra,
+            settings.parakeet_ultra,
+            PARAKEET_ULTRA,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -673,6 +722,9 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         return Err(eyre!(
             "voice-filter stays on while the Hex Microphone driver is installed; uninstall the driver in its pane to turn it off"
         ));
+    }
+    if !on && let Some(why) = feature.off_refusal(&settings) {
+        return Err(eyre!(why));
     }
     let state = if on { "on" } else { "off" };
     // A running Hex saves and applies it at once, as its Labs row would.

@@ -399,12 +399,15 @@ pub fn imported() -> Vec<Imported> {
 }
 
 /// The selection the listener runs for `selection`: the same one, unless it
-/// names an import that can't run, when it is the default model. The saved
+/// names an import that can't run or Parakeet Ultra with its toggle off,
+/// when it is a downloaded fallback. The saved
 /// choice stays as it is until the person fixes it or picks another.
 pub fn runnable(selection: &TranscriptionSelection) -> TranscriptionSelection {
-    match selection.model {
-        TranscriptionModelId::Custom(id) if !usable(id) => fallback(),
-        _ => selection.clone(),
+    let gated = selection.model.is_labs_gated();
+    if gated && !super::models::definition(selection.model).available() {
+        fallback()
+    } else {
+        selection.clone()
     }
 }
 

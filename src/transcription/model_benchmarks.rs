@@ -128,6 +128,24 @@ const IVRIT_WHISPER_RECORD: BenchmarkRecord = BenchmarkRecord {
     hardware: Some("Radeon 8060S (Vulkan)"),
 };
 
+/// transcribe.cpp's published conversion benchmark for the Q8_0 file
+/// (handy-computer/parakeet-ultra-gguf's card): LibriSpeech test-clean in
+/// full, batch 8, no timestamps, the `en` hint, decoded on CUDA at
+/// transcribe.cpp 021aa17d. The benchmark artifact's digest and the scorer
+/// versions are unrecorded; not measured in Hex.
+const PARAKEET_ULTRA_RECORD: BenchmarkRecord = BenchmarkRecord {
+    metric: ErrorMetric::Wer,
+    value: 1.80,
+    language: "en",
+    dataset: Some("LibriSpeech test-clean"),
+    source: Some("transcribe.cpp's published conversion benchmark"),
+    source_revision: Some("021aa17d"),
+    utterances: Some(2_620),
+    batch_size: Some(8),
+    timestamps: Some(false),
+    hardware: Some("CUDA"),
+};
+
 /// `model`'s benchmark record, or `None` when the system manages the model
 /// and publishes no figure (Apple Speech).
 pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
@@ -136,6 +154,7 @@ pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
         TranscriptionModelId::SenseVoiceSmall => Some(SENSEVOICE_RECORD),
         TranscriptionModelId::QwenCleoAsr17B => Some(QWENCLEO_RECORD),
         TranscriptionModelId::IvritWhisperLargeV3Turbo => Some(IVRIT_WHISPER_RECORD),
+        TranscriptionModelId::ParakeetUltra => Some(PARAKEET_ULTRA_RECORD),
         // The catalog's English figures: their dataset, source, and
         // conditions were not recorded.
         _ => model

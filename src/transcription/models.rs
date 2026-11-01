@@ -35,6 +35,7 @@ pub enum TranscriptionModelId {
     CohereTranscribe,
     UnderdogBark3Pro,
     UnderdogBark3Clean,
+    ParakeetUltra,
     AppleSpeech,
     Custom(CustomModelId),
 }
@@ -66,6 +67,7 @@ impl TranscriptionModelId {
             Self::CohereTranscribe => "cohere_transcribe",
             Self::UnderdogBark3Pro => "underdog_bark_3_pro",
             Self::UnderdogBark3Clean => "underdog_bark_3_clean",
+            Self::ParakeetUltra => "parakeet_ultra",
             Self::AppleSpeech => "apple_speech",
             Self::Custom(id) => id.as_str(),
         }
@@ -73,6 +75,13 @@ impl TranscriptionModelId {
 
     pub const fn is_custom(self) -> bool {
         matches!(self, Self::Custom(_))
+    }
+
+    /// A model behind its own Labs toggle: an import, or Parakeet Ultra. A
+    /// saved choice of one stays saved while it can't run, and the listener
+    /// runs a fallback (`custom_models::runnable`).
+    pub const fn is_labs_gated(self) -> bool {
+        matches!(self, Self::Custom(_) | Self::ParakeetUltra)
     }
 }
 
@@ -92,6 +101,7 @@ impl FromStr for TranscriptionModelId {
             "cohere_transcribe" => Ok(Self::CohereTranscribe),
             "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
             "underdog_bark_3_clean" => Ok(Self::UnderdogBark3Clean),
+            "parakeet_ultra" => Ok(Self::ParakeetUltra),
             "apple_speech" => Ok(Self::AppleSpeech),
             _ => CustomModelId::parse(value)
                 .map(Self::Custom)
@@ -234,6 +244,9 @@ impl ModelDefinition {
             (ModelRuntime::AppleSpeech, _) => false,
             (ModelRuntime::Gguf(_), TranscriptionModelId::Custom(id)) => {
                 super::custom_models::usable(id)
+            }
+            (ModelRuntime::Gguf(_), TranscriptionModelId::ParakeetUltra) => {
+                crate::labs::parakeet_ultra()
             }
             (ModelRuntime::Gguf(_), _) => true,
         }
@@ -471,6 +484,18 @@ const UNDERDOG_BARK_3_CLEAN_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "parakeet",
     variant: "tdt-0.6b-bark-3.0-clean",
 };
+// Moondream's Parakeet Ultra, a post-trained Parakeet TDT 0.6B v3
+// (CC-BY-4.0), converted to GGUF and quantized to Q8_0 by handy-computer
+// (430 F32, 225 Q8_0, and 48 F16 tensors). Behind Labs › Parakeet Ultra.
+const PARAKEET_ULTRA_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "parakeet-ultra-Q8_0.gguf",
+    revision: "a1539be1b849ea7463b88343e5277b373d0c4ea9",
+    repository: "handy-computer/parakeet-ultra-gguf",
+    bytes: 740_363_168,
+    sha256: "007a59761e9258779f189df396b50d12b83bb5b79e66df4b955c230d2f2a0a59",
+    architecture: "parakeet",
+    variant: "tdt-0.6b-ultra",
+};
 /// Silero VAD v6.2. Dictation and meetings skip audio it finds no speech in,
 /// because models hallucinate closing phrases such as "thank you" on silence
 /// and room noise. It downloads with every transcription model.
@@ -646,6 +671,26 @@ pub const MODELS: &[ModelDefinition] = &[
         streams: false,
         runtime: ModelRuntime::Gguf(&UNDERDOG_BARK_3_CLEAN_ARTIFACT),
         languages: &["en"],
+        accepts_language_hint: false,
+        supports_language_detection: false,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::ParakeetUltra,
+        name: "Parakeet Ultra",
+        // As fast as Parakeet v3 on apollo's Vulkan GPU (191x against 211x
+        // on a FLEURS English clip), so it keeps v3's figure.
+        realtime: "~33x",
+        // LibriSpeech test-clean, transcribe.cpp's published conversion
+        // benchmark (`model_benchmarks`); not measured in Hex.
+        word_error_rate: Some(1.80),
+        quality_context: "English benchmark",
+        coverage: "25 languages",
+        timestamps: "Token timestamps",
+        streams: false,
+        runtime: ModelRuntime::Gguf(&PARAKEET_ULTRA_ARTIFACT),
+        languages: PARAKEET_V3_LANGUAGES,
+        // Like v3, its base: it detects the language from the audio and has
+        // no language input.
         accepts_language_hint: false,
         supports_language_detection: false,
     },
@@ -867,7 +912,7 @@ pub(crate) fn known_language(language: &str) -> Option<&'static str> {
 /// import with a known language, kept while it is missing, changed, or off
 /// so the choice survives until it is fixed ([`super::custom_models::runnable`]).
 pub fn validate_saved(selection: &TranscriptionSelection) -> Result<()> {
-    if selection.model.is_custom() {
+    if selection.model.is_labs_gated() {
         if !is_known_language(&selection.language) {
             bail!("unsupported transcription language: {}", selection.language);
         }
@@ -1489,6 +1534,51 @@ mod tests {
     }
 
     #[test]
+    fn parakeet_ultra_is_offered_only_with_its_lab_and_a_saved_choice_survives() {
+        let ultra = definition(TranscriptionModelId::ParakeetUltra);
+        assert_eq!(ultra.available(), crate::labs::parakeet_ultra());
+        assert!(!ultra.streams && !ultra.accepts_language_hint);
+        assert_eq!(ultra.languages, PARAKEET_V3_LANGUAGES);
+        for language in [AUTO_LANGUAGE, "en", "de"] {
+            assert!(
+                choices_for_runtime(language)
+                    .iter()
+                    .all(|choice| choice.model.id != ultra.id),
+                "Ultra is never recommended ({language})"
+            );
+        }
+        let saved = TranscriptionSelection {
+            model: ultra.id,
+            language: "de".into(),
+        };
+        assert!(validate_saved(&saved).is_ok());
+        if !crate::labs::parakeet_ultra() {
+            assert!(validate(&saved).is_err());
+            assert_eq!(
+                super::super::custom_models::runnable(&saved),
+                super::super::custom_models::fallback()
+            );
+        }
+        let mut settings = crate::app_settings::AppSettings::default();
+        assert!(
+            crate::labs::Feature::ParakeetUltra
+                .off_refusal(&settings)
+                .is_none()
+        );
+        settings.transcription = saved;
+        assert!(
+            crate::labs::Feature::ParakeetUltra
+                .off_refusal(&settings)
+                .is_some()
+        );
+        assert!(
+            crate::labs::Feature::CustomModels
+                .off_refusal(&settings)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn hebrew_recommends_the_ivrit_fine_tune_with_its_hint() {
         use Recommendation::{Recommended, Vocabulary};
         use TranscriptionModelId::{IvritWhisperLargeV3Turbo, WhisperLargeV3Turbo};
@@ -1683,6 +1773,7 @@ mod tests {
                 TranscriptionModelId::UnderdogBark3Clean,
                 "underdog_bark_3_clean",
             ),
+            (TranscriptionModelId::ParakeetUltra, "parakeet_ultra"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
         ] {
             assert_eq!(id.as_str(), name);
@@ -2022,6 +2113,7 @@ mod tests {
                 ParakeetV3,
                 UnderdogBark3Pro,
                 UnderdogBark3Clean,
+                ParakeetUltra,
             ]
         );
     }

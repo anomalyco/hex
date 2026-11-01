@@ -151,10 +151,16 @@ pub(super) fn status_note(model: &ModelDefinition) -> Option<String> {
 /// keeps the choice and runs the default model until it is fixed.
 pub(super) fn selection_notice(ui: &Ui) -> Option<String> {
     let model = crate::transcription::models::definition(ui.settings.transcription.model);
+    let fallback = crate::transcription::models::definition(custom_models::fallback().model).name;
+    if model.id == TranscriptionModelId::ParakeetUltra && !model.available() {
+        return Some(tr_named(
+            "{model} needs Labs › Parakeet Ultra, so Hex uses {fallback} until you turn it on or choose another model",
+            &[("model", model.name), ("fallback", fallback)],
+        ));
+    }
     let TranscriptionModelId::Custom(id) = model.id else {
         return None;
     };
-    let fallback = crate::transcription::models::definition(custom_models::fallback().model).name;
     let name = if custom_models::is_registered(id) {
         model.name
     } else {

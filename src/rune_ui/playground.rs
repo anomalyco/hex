@@ -103,6 +103,10 @@ const PATHS: &[(&str, &str)] = &[
         "Window/Transcription model/Downloading",
     ),
     (
+        "picker-parakeet-ultra",
+        "Window/Transcription model/Parakeet Ultra details (Labs)",
+    ),
+    (
         "picker-custom-models",
         "Window/Transcription model/Add your own model (Labs)",
     ),

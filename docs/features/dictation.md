@@ -49,6 +49,18 @@ bindings from X11 appear ungranted on Wayland; they do not prevent keyboard
 shortcuts from registering. Hex does not use raw input devices or XWayland to
 bypass the compositor. See the [XDG shortcut specification](https://specifications.freedesktop.org/shortcuts/latest/).
 
+Linux with Labs › Special keys alone on (`labs.standalone_special_keys`, off
+by default; issue 767): Menu, Pause, and Scroll Lock may be any shortcut's
+key, alone like a function key or with modifiers, for example Caps Lock
+remapped to Menu with GNOME's keyboard options and
+`hex settings set dictation_hotkey menu` (also `pause`, `scrolllock`). They
+reach X11 grabs as keysyms 0xff67/0xff13/0xff14 and the portal as `Menu`,
+`Pause`, `Scroll_Lock`. Off, `hex settings` refuses them, the window's
+recorder refuses them, and a saved shortcut on one goes back to its default
+when settings load or the toggle turns off. Limit: Rune doesn't report these
+keys to the window's recorder, so set them with `hex settings`. Details and
+checks in [labs.md](labs.md).
+
 Checks: `mouse_buttons_record_with_or_without_modifiers`,
 `mouse_bindings_persist_and_conflict_only_with_the_same_trigger`,
 `mouse_hold_and_release_use_the_dictation_state_machine`,

@@ -159,6 +159,9 @@ substitute for source inspection or a second roadmap.
   installed-only path that never downloads a model.
 - `transcription/models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
+- `transcription/model_details`: what a catalog model's details view adds:
+  licence credit, source and licence links, the publisher's notice, measured
+  memory, and benchmarks the publisher (never Hex) measured (Parakeet Ultra).
 - `transcription/custom_models`, `transcription/gguf_header`: Labs › Use your
   own speech model: GGUF imports checked from their header alone (family,
   variant, languages, F32/F16/Q8_0 tensors), copied into `models/custom/` under
