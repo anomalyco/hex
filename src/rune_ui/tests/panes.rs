@@ -402,10 +402,15 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     tap(&mut rt, "lab-copy-only");
     assert!(rt.state.settings.labs.copy_only);
 
-    let mut rt = runtime("windows-settings", true, (980.0, 1600.0));
+    assert!(rt.find("lab-shorten-pauses").is_none(), "Linux and Windows");
+
+    let mut rt = runtime("windows-settings", true, (980.0, 2000.0));
     open_advanced(&mut rt, Pane::General);
     assert!(rt.find("share-dictation-shortcut").is_none());
     tap(&mut rt, "nav-labs");
+    assert!(!rt.state.settings.labs.shorten_pauses);
+    tap(&mut rt, "lab-shorten-pauses");
+    assert!(rt.state.settings.labs.shorten_pauses);
     assert!(rt.find("lab-mouse-shortcuts").is_none(), "macOS only");
     assert!(rt.find("lab-keep-on-clipboard").is_none(), "macOS only");
     assert!(rt.find("lab-copy-only").is_none(), "macOS only");

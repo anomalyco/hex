@@ -378,6 +378,11 @@ const KEYS: &[Key] = &[
         "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",
     ),
     key(
+        "labs.shorten_pauses",
+        Kind::Bool,
+        "Labs: long pauses keep only their first 400 ms and last 300 ms before a dictation is transcribed whole, so the wait after release follows what you said (Linux and Windows)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

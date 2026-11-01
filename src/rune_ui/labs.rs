@@ -293,6 +293,18 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"),
         ));
     }
+    // Only the GGUF engine's whole-clip runs on Linux and Windows shorten them.
+    if matches!(
+        caps.os,
+        super::platform::Os::Linux | super::platform::Os::Windows
+    ) {
+        rows.push(row(
+            Feature::ShortenPauses,
+            &TIMER,
+            tr("Shorten pauses"),
+            tr("Long pauses are shortened before a dictation is transcribed whole, so the wait after release follows what you said"),
+        ));
+    }
     rows.push(row(
         Feature::UnloadIdle,
         &TIMER,
@@ -401,6 +413,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::StandaloneSpecialKeys => "lab-special-keys",
         Feature::HistoryStats => "lab-history-stats",
         Feature::RecentDictations => "lab-recent-dictations",
+        Feature::ShortenPauses => "lab-shorten-pauses",
     }
 }
 

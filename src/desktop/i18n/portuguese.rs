@@ -30,6 +30,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops", "No modo alternar, segure o atalho para ditar até soltar; um toque curto continua iniciando e parando"),
     ("Copy recent dictations", "Copiar ditados recentes"),
     ("Copy one of your last five dictations from the menu bar, under Paste Last Dictation", "Copie um dos seus últimos cinco ditados pela barra de menus, abaixo de Colar último ditado"),
+    ("Shorten pauses", "Encurtar pausas"),
+    ("Long pauses are shortened before a dictation is transcribed whole, so the wait after release follows what you said", "Pausas longas são encurtadas antes de o ditado ser transcrito inteiro, então a espera depois de soltar depende do que você disse"),
     ("Record your screen, draw on it, and talk over it", "Grave a tela, desenhe sobre ela e fale enquanto isso"),
     ("Hex Microphone virtual input and real-time voice filters", "Entrada virtual Hex Microphone e filtros de voz em tempo real"),
     ("Live text", "Texto ao vivo"),

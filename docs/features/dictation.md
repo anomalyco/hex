@@ -252,6 +252,23 @@ Menu bar > Copy Recent Dictation (under Paste Last Dictation)  // dictate.copy-r
 
 Details and checks in [labs.md](labs.md).
 
+### Shorten Pauses (Labs, Linux and Windows)
+
+A dictation transcribed whole (no live stream, or one that fell back) runs
+every second of pause through the model, so on a slow CPU the wait after
+release grows with the pauses. With Labs › Shorten pauses on
+(`labs.shorten_pauses`, off by default, issue 899):
+
+```ts
+Release -> whole-clip finish on the engine thread       // dictate.shorten-pauses
+├── Pause over 700 ms at the noise floor -> keeps its first 400 ms and last 300 ms
+├── Shorter pauses, and speech a few dB over steady noise -> kept whole
+├── No frame above the noise floor -> clip unchanged
+└── Live streams, macOS, meetings, Annotate, /streams -> unchanged
+```
+
+Details and checks in [labs.md](labs.md).
+
 ### Vocabulary Quality Checks
 
 `hex benchmark-transcription` accepts a scoring vocabulary and expected terms,

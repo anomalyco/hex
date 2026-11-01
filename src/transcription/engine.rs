@@ -836,6 +836,26 @@ fn reload(selection: &crate::transcription::models::TranscriptionSelection) -> R
     Model::load(selection)
 }
 
+/// A dictation clip about to be transcribed whole: with Labs › Shorten
+/// pauses on (Linux and Windows), each long pause keeps only its ends, so the
+/// wait after release follows what was said. Live streams, foreground work
+/// (Annotate, `/streams`), and background work (meetings) never come here,
+/// and the job's deadline was already set from the whole clip.
+fn shorten_dictation_pauses(clip: Vec<f32>) -> Vec<f32> {
+    #[cfg(not(target_os = "macos"))]
+    if crate::labs::shorten_pauses()
+        && let Some(shortened) = crate::transcription::pause_segmenter::shorten_pauses(&clip)
+    {
+        tracing::info!(
+            audio_ms = clip.len() / 16,
+            pauses_cut_ms = (clip.len() - shortened.len()) / 16,
+            "shortened pauses before transcribing the whole clip"
+        );
+        return shortened;
+    }
+    clip
+}
+
 static SHARED: std::sync::Mutex<std::sync::Weak<TranscriptionEngine>> =
     std::sync::Mutex::new(std::sync::Weak::new());
 
@@ -978,7 +998,7 @@ impl Worker {
                         None => Source::Offline,
                     };
                     self.dictating.store(true, Ordering::Release);
-                    self.run_offline(clip, offline, source, job);
+                    self.run_offline(shorten_dictation_pauses(clip), offline, source, job);
                     self.dictating.store(false, Ordering::Release);
                 }
                 Command::Foreground { clip, offline, job } => {
@@ -1185,6 +1205,7 @@ impl Worker {
                     }
                     Err(reason) => {
                         tracing::warn!(%reason, "live stream unusable; transcribing the full clip");
+                        let clip = shorten_dictation_pauses(clip);
                         self.offline(clip, offline, Source::Fallback(reason), started, job);
                     }
                 }

@@ -87,10 +87,11 @@ pub enum Feature {
     StandaloneSpecialKeys,
     HistoryStats,
     RecentDictations,
+    ShortenPauses,
 }
 
 impl Feature {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -120,6 +121,7 @@ impl Feature {
         Self::StandaloneSpecialKeys,
         Self::HistoryStats,
         Self::RecentDictations,
+        Self::ShortenPauses,
     ];
 
     /// The features this OS and build have.
@@ -171,7 +173,8 @@ impl Feature {
             | Self::ParakeetUltra
             | Self::StandaloneSpecialKeys
             | Self::HistoryStats
-            | Self::RecentDictations => Audience::Everyone,
+            | Self::RecentDictations
+            | Self::ShortenPauses => Audience::Everyone,
         }
     }
 
@@ -204,7 +207,9 @@ impl Feature {
             }
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
-            Self::StandaloneSpecialKeys => cfg!(any(target_os = "linux", target_os = "windows")),
+            Self::StandaloneSpecialKeys | Self::ShortenPauses => {
+                cfg!(any(target_os = "linux", target_os = "windows"))
+            }
             Self::MouseShortcuts
             | Self::PauseBrowser
             | Self::KeepOnClipboard
@@ -262,6 +267,7 @@ impl Feature {
             Self::StandaloneSpecialKeys => "special-keys",
             Self::HistoryStats => "history-stats",
             Self::RecentDictations => "recent-dictations",
+            Self::ShortenPauses => "shorten-pauses",
         }
     }
 
@@ -297,6 +303,7 @@ impl Feature {
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
             Self::HistoryStats => "labs.history_stats",
             Self::RecentDictations => "labs.recent_dictations",
+            Self::ShortenPauses => "labs.shorten_pauses",
         }
     }
 
@@ -374,6 +381,9 @@ impl Feature {
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
             }
+            Self::ShortenPauses => {
+                "Shorten long pauses before a dictation is transcribed whole, so the wait after release follows what you said"
+            }
         }
     }
 
@@ -413,6 +423,7 @@ impl Feature {
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
             Self::HistoryStats => settings.labs.history_stats,
             Self::RecentDictations => settings.labs.recent_dictations,
+            Self::ShortenPauses => settings.labs.shorten_pauses,
         }
     }
 
@@ -446,6 +457,7 @@ impl Feature {
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
             Self::HistoryStats => settings.labs.history_stats = on,
             Self::RecentDictations => settings.labs.recent_dictations = on,
+            Self::ShortenPauses => settings.labs.shorten_pauses = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -472,6 +484,7 @@ const SMART_SPACING: u32 = 1 << 12;
 const SPOKEN_SYMBOLS: u32 = 1 << 13;
 const SIDED_CHORDS: u32 = 1 << 14;
 const TAP_OR_HOLD: u32 = 1 << 15;
+const SHORTEN_PAUSES: u32 = 1 << 16;
 const PARAKEET_ULTRA: u32 = 1 << 17;
 const HISTORY_STATS: u32 = 1 << 18;
 const RECENT_DICTATIONS: u32 = 1 << 19;
@@ -601,6 +614,13 @@ pub fn recent_dictations() -> bool {
     on(RECENT_DICTATIONS)
 }
 
+/// Long pauses are shortened before a dictation clip is transcribed whole
+/// (Linux and Windows; read as each whole-clip finish starts).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn shorten_pauses() -> bool {
+    on(SHORTEN_PAUSES)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -676,6 +696,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::RecentDictations,
             settings.recent_dictations,
             RECENT_DICTATIONS,
+        ),
+        (
+            Feature::ShortenPauses,
+            settings.shorten_pauses,
+            SHORTEN_PAUSES,
         ),
     ]
     .into_iter()
@@ -1024,6 +1049,19 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & RECENT_DICTATIONS, 0);
         assert_eq!(state & HISTORY_STATS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn shorten_pauses_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & SHORTEN_PAUSES, 0);
+        labs.shorten_pauses = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & SHORTEN_PAUSES, 0);
+        assert_eq!(state & TAP_OR_HOLD, 0);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

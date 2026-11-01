@@ -137,6 +137,55 @@ const fn samples(duration: Duration) -> usize {
     duration.as_millis() as usize * SAMPLE_RATE / 1_000
 }
 
+/// A pause longer than this is shortened before a whole-clip run.
+const SHORTEN_PAUSE_ABOVE: usize = samples(Duration::from_millis(700));
+/// What a shortened pause keeps: its start, so the words before it end
+/// naturally, and its end, so the words after it start cleanly.
+const SHORTENED_PAUSE_HEAD: usize = samples(Duration::from_millis(400));
+const SHORTENED_PAUSE_TAIL: usize = samples(Duration::from_millis(300));
+
+/// The 16 kHz `clip` with each pause longer than 700 ms cut to its first
+/// 400 ms and last 300 ms, for Labs › Shorten pauses. A pause is a run of
+/// 20 ms frames at the noise floor ([`SpeechFrames::is_quiet`], the test the
+/// live stream's pause cap uses), so speech a few dB above steady noise is
+/// never cut. `None` leaves the clip as it is: nothing was cut, or no frame
+/// rose above the floor, which says the level was misjudged rather than
+/// that the clip is all pause.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn shorten_pauses(clip: &[f32]) -> Option<Vec<f32>> {
+    let mut speech = SpeechFrames::default();
+    let mut out = Vec::with_capacity(clip.len());
+    let mut heard = false;
+    let mut pause_start: Option<usize> = None;
+    for (index, frame) in clip.chunks_exact(FRAME_SAMPLES).enumerate() {
+        let at = index * FRAME_SAMPLES;
+        if speech.is_quiet(frame) {
+            pause_start.get_or_insert(at);
+            continue;
+        }
+        heard = true;
+        if let Some(start) = pause_start.take() {
+            keep_pause(&mut out, &clip[start..at]);
+        }
+        out.extend_from_slice(frame);
+    }
+    let whole = clip.len() / FRAME_SAMPLES * FRAME_SAMPLES;
+    if let Some(start) = pause_start {
+        keep_pause(&mut out, &clip[start..whole]);
+    }
+    out.extend_from_slice(&clip[whole..]);
+    (heard && out.len() < clip.len()).then_some(out)
+}
+
+fn keep_pause(out: &mut Vec<f32>, pause: &[f32]) {
+    if pause.len() <= SHORTEN_PAUSE_ABOVE {
+        out.extend_from_slice(pause);
+        return;
+    }
+    out.extend_from_slice(&pause[..SHORTENED_PAUSE_HEAD]);
+    out.extend_from_slice(&pause[pause.len() - SHORTENED_PAUSE_TAIL..]);
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -239,6 +288,41 @@ pub(crate) mod tests {
         assert_eq!(found.len(), 3, "{found:?}");
         assert_eq!(ms(found[0]), 4_300);
         assert_eq!(ms(found[1]), 9_300);
+    }
+
+    #[test]
+    fn short_pauses_are_kept_whole() {
+        let audio = utterance(&[(1_000, 600), (1_000, 300), (1_000, 0)], -70.0);
+        assert_eq!(shorten_pauses(&audio), None);
+    }
+
+    #[test]
+    fn a_long_pause_keeps_only_its_head_and_tail() {
+        let audio = utterance(&[(1_000, 3_000), (1_000, 0)], -70.0);
+        let shortened = shorten_pauses(&audio).expect("the long pause is cut");
+        let at = |ms: usize| ms * SAMPLE_RATE / 1_000;
+        assert_eq!(shortened.len(), audio.len() - at(2_300));
+        // The speech and the pause's first 400 ms, then its last 300 ms and
+        // the speech after it.
+        assert_eq!(shortened[..at(1_400)], audio[..at(1_400)]);
+        assert_eq!(shortened[at(1_400)..], audio[at(3_700)..]);
+    }
+
+    #[test]
+    fn a_clip_with_nothing_above_the_floor_is_left_alone() {
+        assert_eq!(shorten_pauses(&vec![0.0; SAMPLE_RATE * 5]), None);
+    }
+
+    #[test]
+    fn quiet_speech_over_steady_noise_is_never_cut() {
+        // #458: syllables only 7 dB above the room, under the speech margin.
+        let mut seed = 11;
+        let mut audio = noise(500, -35.0, &mut seed);
+        for _ in 0..20 {
+            audio.extend(noise(240, -28.0, &mut seed));
+            audio.extend(noise(60, -35.0, &mut seed));
+        }
+        assert_eq!(shorten_pauses(&audio), None);
     }
 
     #[test]

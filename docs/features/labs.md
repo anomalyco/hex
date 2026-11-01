@@ -49,6 +49,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
+├── Shorten pauses  no    labs.shorten_pauses          (Linux, Windows) a dictation transcribed whole keeps only the first 400 ms and last 300 ms of each pause over 700 ms (#899)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -527,6 +528,33 @@ logs a warning if it has gone. Checks:
 only); `recent_dictations_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: the submenu on a real Mac;
 the row renders only in macOS builds, so no golden changes.
+
+Shorten pauses (`shorten-pauses`, issue 899, Linux and Windows): for slow
+CPUs and older integrated GPUs, where a whole-clip run takes longer with every
+second of pause in it. While on, a dictation clip transcribed whole (a model
+or device that can't stream, or a live stream that fell back) has each pause
+longer than 700 ms cut to its first 400 ms and last 300 ms before it reaches
+the model (`transcription::pause_segmenter::shorten_pauses`). A pause is a run
+of 20 ms frames at the noise floor (`SpeechFrames::is_quiet`, the same test
+the live stream's pause cap uses), so speech a few dB above steady noise is
+never cut, and a clip with no frame above the floor is left unchanged. The
+gate, `labs::shorten_pauses()`, is read in `transcription/engine`'s worker as
+each dictation finish runs its whole clip; the job's deadline still follows
+the full clip, and process.log's `shortened pauses before transcribing the
+whole clip` line gives the audio and the pause time cut (`pauses_cut_ms`),
+never audio or text. Live streams, macOS, meetings, Annotate's words, and
+`/streams` are unchanged, and with the toggle off the clip is exactly as
+before. Checks: `short_pauses_are_kept_whole`,
+`a_long_pause_keeps_only_its_head_and_tail`,
+`a_clip_with_nothing_above_the_floor_is_left_alone`, and
+`quiet_speech_over_steady_noise_is_never_cut` in
+[pause_segmenter.rs](../../src/transcription/pause_segmenter.rs);
+`shorten_pauses_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs);
+`contributed_options_are_labs_toggles_off_by_default` in
+[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
+dictation on a slow CPU with the toggle on; the Labs page goldens need
+regenerating on Linux with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
