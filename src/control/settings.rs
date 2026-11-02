@@ -388,6 +388,11 @@ const KEYS: &[Key] = &[
         "Labs: a meeting recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet, unless you keep recording (macOS)",
     ),
     key(
+        "labs.output_fixes",
+        Kind::Bool,
+        "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

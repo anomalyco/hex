@@ -15,6 +15,9 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Fix results in Output", "Corriger les résultats dans Sortie"),
+    ("Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result", "Propose Vocabulaire et Corriger ceci à côté du résultat d'essai de Sortie, pour corriger un résultat erroné"),
+    ("Fix this", "Corriger ceci"),
     ("Turn off the mic when not dictating", "Couper le micro hors dictée"),
     ("The mic opens only while you dictate; the first moment can be clipped", "Le micro ne s'ouvre que pendant la dictée ; le tout début peut être coupé"),
     ("The mic stays ready so dictation starts instantly; your system shows it in use", "Le micro reste prêt pour que la dictée démarre aussitôt ; votre système l'indique comme utilisé"),

@@ -1418,6 +1418,8 @@ pub struct LabsSettings {
     pub skip_pauses: bool,
     /// An automatic meeting recording stops after its call ends (macOS, issue 835).
     pub stop_when_call_ends: bool,
+    /// Output's Try card offers Vocabulary and Fix this beside its result (issue 989).
+    pub output_fixes: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1452,6 +1454,7 @@ impl Default for LabsSettings {
             recent_dictations: false,
             skip_pauses: false,
             stop_when_call_ends: false,
+            output_fixes: false,
         }
     }
 }

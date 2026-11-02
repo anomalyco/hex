@@ -15,6 +15,9 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Fix results in Output", "Corrigir resultados em Saída"),
+    ("Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result", "Oferece Vocabulário e Corrigir isto ao lado do resultado de Testar em Saída, para corrigir um resultado errado"),
+    ("Fix this", "Corrigir isto"),
     ("Stop when the call ends", "Parar quando a chamada terminar"),
     ("Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet", "Para uma gravação que o Hex iniciou sozinho 30 s depois que o app de chamada solta o microfone e fica em silêncio"),
     ("Hex stops recording in 30 s unless you keep recording.", "O Hex para de gravar em 30 s, a menos que você continue gravando."),
