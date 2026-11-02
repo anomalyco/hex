@@ -568,8 +568,9 @@ impl Target {
 
 struct HudCompositor {
     /// The painter and the device its buffers live on: an overlay shown
-    /// again can draw on another device (#982).
-    gpu: Option<(wgpu::Device, Painter)>,
+    /// again can draw on another device (#982). Keyed by Rune's device key,
+    /// since wgpu compares a new Rune GPU's device equal to the old one.
+    gpu: Option<(rune::compose::DeviceKey, Painter)>,
     animating: Arc<AtomicBool>,
 }
 
@@ -610,9 +611,9 @@ impl Compositor<Hud> for HudCompositor {
         if self
             .gpu
             .as_ref()
-            .is_none_or(|(device, gpu)| device != f.device || gpu.format != f.format)
+            .is_none_or(|(device, gpu)| *device != f.device_key() || gpu.format != f.format)
         {
-            self.gpu = Some((f.device.clone(), Painter::new(f.device, f.format)));
+            self.gpu = Some((f.device_key(), Painter::new(f.device, f.format)));
         }
         let (_, gpu) = self.gpu.as_ref().expect("created above");
         let uniforms = gpu.write(&drawn, layout, target, |buffer, data| {
