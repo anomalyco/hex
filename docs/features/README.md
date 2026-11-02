@@ -947,6 +947,17 @@ Selected mode                            // replaces Global's rewrite and transf
 Stage fails -> Preserve its input        // failed chain discards partial results
 ```
 
+**Fixed November 1, 2026 (issue 949):** every OpenCode rewrite's fixed
+instructions (`PROTOCOL_PROMPT`) now say to keep every number as said (no
+dropped, merged, or reformatted numbers, no added thousands separators) and,
+unless the mode's prompt says otherwise, to write a spoken enumeration
+("point one … point two …") as a numbered list, one item per line. A
+transcript of numbers alone (digits or English number words) skips the
+rewrite and pastes after corrections as heard; transformations still run.
+Check: `numbers_only_transcripts_skip_the_rewrite` in
+[dictation/processor.rs](../../src/dictation/processor.rs). The prompt rules
+were not run against a live model.
+
 Built-in text transformations run natively. Custom transformations come from
 `~/.config/hex/hex.config.ts` and run in Hex's embedded script engine, each
 under its own `timeout` (1 s by default, 30 s when the config uses host APIs,
