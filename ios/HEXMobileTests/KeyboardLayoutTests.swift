@@ -21,27 +21,29 @@ final class KeyboardLayoutTests: XCTestCase {
         return layouts
     }
 
-    func testPortraitIs267PointsOnEveryWidth() {
+    func testPortraitIs253PointsAndLandscapeIs176Points() {
         for width in portraitWidths {
-            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 267, "width \(width)")
+            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 253, "width \(width)")
         }
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 267)
-        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 190)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 253)
+        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 176)
     }
 
-    func testLetterWidthMatchesPlan() {
-        XCTAssertEqual(KeyboardLayout(width: 393).letterWidth, (393 - 6 - 54) / 10, accuracy: 0.001)
-        let q = KeyboardLayout(width: 393).key(.character("q"))!
-        XCTAssertEqual(q.frame.minX, 3, accuracy: 0.001)
-        XCTAssertEqual(q.frame.minY, 54 + 8, accuracy: 0.001)
-        XCTAssertEqual(q.frame.height, 42)
+    func testPortraitMetricsMatchAppleIOS26() {
+        let proMax = KeyboardLayout(width: 440)
+        XCTAssertEqual(proMax.letterWidth, (440 - 13 - 54) / 10, accuracy: 0.001)
+        let q = proMax.key(.character("q"))!
+        XCTAssertEqual(q.frame.minX, 6.5, accuracy: 0.001)
+        XCTAssertEqual(q.frame.minY, 35, accuracy: 0.001)
+        XCTAssertEqual(q.frame.height, 45)
+        let shift = proMax.key(.shift)!
+        XCTAssertEqual(shift.frame.width, proMax.letterWidth * 1.34, accuracy: 0.001)
     }
 
     func testHitTargetsTileTheKeyAreaWithNoDeadZonesOrOverlaps() {
         var generator = SystemRandomNumberGenerator()
         for layout in everyPortraitLayout() + landscapeLayouts() {
             let area = layout.keysAreaFrame
-            // Rows stack edge to edge from the top of the key area to the bottom.
             var rowTop = area.minY
             for row in 0..<4 {
                 let targets = layout.keys.filter { $0.row == row }.map(\.hitFrame).sorted { $0.minX < $1.minX }
@@ -57,7 +59,6 @@ final class KeyboardLayoutTests: XCTestCase {
             }
             XCTAssertEqual(rowTop, area.maxY, accuracy: 0.0001, describe(layout))
 
-            // And every sampled point lands on exactly one key.
             for _ in 0..<400 {
                 let point = CGPoint(
                     x: CGFloat.random(in: 0..<layout.width, using: &generator),
@@ -86,7 +87,7 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    func testBalloonsStayInsideThe267PointKeyboard() {
+    func testBalloonsStayInsideThe253PointKeyboard() {
         for layout in everyPortraitLayout() {
             let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight)
             for key in layout.keys where key.character != nil {
@@ -102,8 +103,25 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    func testAccentMenusClampInwardAcrossEveryWidth() {
+        for width in portraitWidths {
+            let layout = KeyboardLayout(width: width)
+            let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight)
+            for ch in ["e", "a", "i", "o", "u", "n", "c", "s", "z"] {
+                let key = layout.key(.character(ch))!
+                let options = AccentCatalog.options(for: ch, uppercase: false)!
+                let menu = AccentMenu.build(for: key.frame, rawOptions: options, in: layout.width)
+                XCTAssertTrue(
+                    bounds.insetBy(dx: -0.01, dy: -0.01).contains(menu.bubbleFrame),
+                    "width \(width) key \(ch): \(menu.bubbleFrame)"
+                )
+                XCTAssertEqual(menu.selectedOption, ch)
+            }
+        }
+    }
+
     func testEdgeBalloonsArePushedInward() {
-        let layout = KeyboardLayout(width: 393)
+        let layout = KeyboardLayout(width: 375)
         let q = layout.balloon(for: layout.key(.character("q"))!)!
         let p = layout.balloon(for: layout.key(.character("p"))!)!
         let g = layout.balloon(for: layout.key(.character("g"))!)!
@@ -121,7 +139,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(landscape.balloon(for: landscape.key(.character("a"))!))
     }
 
-    func testBottomRowPutsHexRightOfSpace() {
+    func testBottomRowMatchesIOS26EmailAndURLRightOfSpace() {
         XCTAssertEqual(bottomRow(KeyboardLayout(width: 393)), [.layerSwitch(.numbers), .space, .hex, .returnKey])
         XCTAssertEqual(
             bottomRow(KeyboardLayout(width: 375, showsGlobe: true)),
@@ -129,11 +147,11 @@ final class KeyboardLayoutTests: XCTestCase {
         )
         XCTAssertEqual(
             bottomRow(KeyboardLayout(width: 393, layer: .numbers, field: .email)),
-            [.layerSwitch(.letters), .character("@"), .space, .character("."), .hex, .returnKey]
+            [.layerSwitch(.letters), .space, .character("@"), .character("."), .hex, .returnKey]
         )
         XCTAssertEqual(
             bottomRow(KeyboardLayout(width: 393, field: .url)),
-            [.layerSwitch(.numbers), .character("/"), .space, .character("."), .hex, .returnKey]
+            [.layerSwitch(.numbers), .space, .character("."), .character("/"), .hex, .returnKey]
         )
     }
 
@@ -156,8 +174,8 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testLandscapeKeepsInsetsAndHeight() {
         let layout = KeyboardLayout(width: 932, orientation: .landscape, horizontalInset: 60)
-        XCTAssertEqual(layout.totalHeight, 190)
-        XCTAssertEqual(layout.key(.character("q"))!.frame.minX, 63, accuracy: 0.001)
+        XCTAssertEqual(layout.totalHeight, 176)
+        XCTAssertEqual(layout.key(.character("q"))!.frame.minX, 64, accuracy: 0.001)
         XCTAssertEqual(layout.key(.character("q"))!.hitFrame.minX, 0)
     }
 
