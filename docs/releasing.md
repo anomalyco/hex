@@ -174,8 +174,8 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   and refuses a version already tagged `v<version>` or `app-v<version>`.
   Tags trigger nothing. Only last, once every platform and the release
   service published, the `github` job tags `v<version>` on the released
-  commit with `GITHUB_TOKEN` and the GitHub release `v<version>` (kept off
-  "Latest", which the SDK uses) mirrors the files. A failed run leaves no tag. Releases through
+  commit with `GITHUB_TOKEN` and the GitHub release `v<version>` (GitHub's
+  "Latest"; SDK releases never take it) mirrors the files. A failed run leaves no tag. Releases through
   2.3.1 used `app-v<version>` tags, which stay as history. Deploy the
   production site afterwards with Site.
 
