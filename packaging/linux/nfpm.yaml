@@ -73,14 +73,16 @@ scripts:
   postremove: refresh-desktop.sh
 overrides:
   # Linked, then loaded at runtime: the X11, Wayland, and xkbcommon client
-  # libraries. Ubuntu 24.04 renamed alsa for its 64-bit time_t
-  # transition, so it takes either name.
+  # libraries. The floor is Debian 12's glibc 2.36 and GCC 12 libstdc++
+  # (packaging/linux/build.Dockerfile). Ubuntu 24.04 renamed alsa and
+  # OpenSSL for its 64-bit time_t transition, so each takes either name.
   deb:
     depends:
-      - libc6 (>= 2.39)
+      - libc6 (>= 2.36)
       - libgcc-s1
-      - libstdc++6
+      - libstdc++6 (>= 12)
       - libasound2t64 | libasound2
+      - libssl3t64 | libssl3
       - libvulkan1
       - libxkbcommon0
       - libxkbcommon-x11-0
@@ -99,6 +101,7 @@ overrides:
   rpm:
     depends:
       - libasound.so.2()(64bit)
+      - libssl.so.3()(64bit)
       - libvulkan.so.1()(64bit)
       - libxkbcommon.so.0()(64bit)
       - libxkbcommon-x11.so.0()(64bit)
