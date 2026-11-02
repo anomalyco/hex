@@ -56,12 +56,12 @@ pub(super) fn start_stream_with_fallback(
     // tried with explicit buffers too.
     let mut candidates = fixed_buffer_sizes(supported.sample_rate(), supported.buffer_size())
         .into_iter()
-        .map(|buffer| (supported.clone(), buffer))
+        .map(|buffer| (supported, buffer))
         .collect::<Vec<_>>();
     for candidate in alternative_input_configs(device, &supported) {
-        candidates.push((candidate.clone(), BufferSize::Default));
+        candidates.push((candidate, BufferSize::Default));
         for fixed in fixed_buffer_sizes(candidate.sample_rate(), candidate.buffer_size()) {
-            candidates.push((candidate.clone(), fixed));
+            candidates.push((candidate, fixed));
         }
     }
     for (candidate, buffer_size) in candidates {
@@ -172,7 +172,7 @@ fn start_stream(
     default_name: Option<String>,
 ) -> Result<StartedStream> {
     let sample_format = supported.sample_format();
-    let mut config: StreamConfig = supported.clone().into();
+    let mut config: StreamConfig = (*supported).into();
     config.buffer_size = buffer_size;
     let sample_rate = config.sample_rate;
     let channels = usize::from(config.channels);
