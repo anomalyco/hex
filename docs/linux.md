@@ -409,6 +409,12 @@ dictation rules:
   records is not used. Hex can't tell whether your config binds it. Prefer
   keys without modifiers, because Hyprland adds every modifier you still hold
   to Hex's paste (see [Native Wayland Requirements](#native-wayland-requirements)).
+  Avoid Alt in the bind too: Hyprland takes the key (Space) but lets Alt
+  through to the focused window, so Electron apps with a hidden menu bar
+  (Slack, Discord, VS Code) see Alt pressed and released alone, move focus to
+  their menu, and the paste lands there instead of the message box
+  (#1023). Hex still logs the
+  paste as sent. Ctrl+Space or a key without modifiers works.
   Hyprland names each shortcut `anomaly.hex:<shortcut>-<trigger>`: Hex's app
   id, the shortcut, and the key Settings records with `+` written as `-`.
   With the default keys these are `anomaly.hex:dictation-ALT-space` and
@@ -582,7 +588,10 @@ approved, so you're asked only once.
   250 ms. A modifier still held past that changes the paste, so bind keys
   without modifiers (End, F-keys) or let go of the modifiers before the
   transcript arrives. Hex logs a dictation as pasted once it sent the paste
-  shortcut; it can't confirm the application accepted it.
+  shortcut; it can't confirm the application accepted it. A compositor that
+  passes a shortcut's Alt through to the app (Hyprland) can also open an
+  Electron app's menu when Alt comes up, which takes the paste (see
+  [Shortcuts](#shortcuts)).
 
 ## Updates And Validation
 
