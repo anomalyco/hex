@@ -385,6 +385,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Benchmark details"),
         tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
     ));
+    rows.push(row(
+        Feature::PickerActiveFirst,
+        &HINTS,
+        tr("Model in use first"),
+        tr("The speech model picker lists the model you're using first"),
+    ));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
         && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     let ultra = row(Feature::ParakeetUltra, &HINTS, tr("Parakeet Ultra"), "");
@@ -455,6 +461,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SkipPauses => "lab-skip-pauses",
         Feature::StopWhenCallEnds => "lab-stop-when-call-ends",
         Feature::OutputFixes => "lab-output-fixes",
+        Feature::PickerActiveFirst => "lab-picker-active-first",
     }
 }
 

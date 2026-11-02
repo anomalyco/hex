@@ -52,6 +52,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Stop when the call ends no labs.stop_when_call_ends (macOS) a recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet (#835)
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
+├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -599,6 +600,30 @@ in [rune_ui/tests.rs](../../src/rune_ui/tests.rs) and
 [rune_ui/output.rs](../../src/rune_ui/output.rs). Not yet observed: the row
 in a real window; the Labs page goldens need regenerating on Linux with the
 new row (the Output goldens keep the toggle off and are unchanged).
+
+Model in use first (`picker-active-first`, issue 1019, every OS): while on,
+the speech model picker remembers the saved model when it opens, only if it
+is installed (`Picker::in_use_first`, set in `picker::open`, cleared in
+`close`), so the order never moves while the picker is open, even if another
+model is chosen or prepared. Compare puts it in the first column and fills
+the rest with the first models that speak the language, without it; a model
+being prepared that the three leave out still takes the last column. Every
+model moves it to the top of its group, and an import in use puts "Your
+model files" above the language's group; with Labs › Sort and filter models
+sorting By size or By name the list keeps that exact order, and By
+recommendation leads with it. The gate is the ordering itself
+(`picker::pinned` and `list_first` read the toggle; `compare::columns` and
+`list::groups` take what they return); off, both views are exactly as
+before. Checks: `the_model_in_use_is_fixed_while_the_picker_is_open` and
+`without_model_in_use_first_nothing_is_pinned` in
+[picker.rs](../../src/rune_ui/picker.rs),
+`the_model_in_use_takes_the_first_column_only_when_pinned` in
+[picker/compare.rs](../../src/rune_ui/picker/compare.rs), and
+`the_model_in_use_leads_its_group_only_when_pinned` in
+[picker/list.rs](../../src/rune_ui/picker/list.rs). Not yet observed: the
+picker in a real window with the toggle on, or an import's group moving
+(no automated check builds an import entry); the Labs page goldens need
+regenerating on Linux with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

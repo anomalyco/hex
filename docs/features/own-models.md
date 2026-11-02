@@ -37,6 +37,10 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // set
     custom_models::runnable); General's model row says so; the card warns
 ```
 
+With Labs › Model in use first on, an import in use when the picker opens
+leads Every model, and "Your model files" shows above the language's group
+([labs.md](labs.md)).
+
 The local digest identifies the file Hex copied; it is not a publisher
 checksum. The selection, recent models, and keyboard-language mappings keep an
 import while it can't run (`models::validate_saved`), and a build that doesn't
