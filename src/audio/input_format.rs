@@ -53,12 +53,16 @@ pub(super) fn start_stream_with_fallback(
     // Some drivers refuse every format with the backend's default buffer
     // (Intel Smart Sound answered E_INVALIDARG for each, #988) yet accept
     // the same format with an explicit buffer duration, so each format is
-    // tried both ways.
-    let mut candidates = vec![(supported.clone(), fixed_buffer_size(&supported))];
+    // tried with explicit buffers too.
+    let mut candidates = fixed_buffer_sizes(supported.sample_rate(), supported.buffer_size())
+        .into_iter()
+        .map(|buffer| (supported.clone(), buffer))
+        .collect::<Vec<_>>();
     for candidate in alternative_input_configs(device, &supported) {
         candidates.push((candidate.clone(), BufferSize::Default));
-        let fixed = fixed_buffer_size(&candidate);
-        candidates.push((candidate, fixed));
+        for fixed in fixed_buffer_sizes(candidate.sample_rate(), candidate.buffer_size()) {
+            candidates.push((candidate.clone(), fixed));
+        }
     }
     for (candidate, buffer_size) in candidates {
         match start_stream(device, &candidate, buffer_size, default_name.clone()) {
@@ -82,15 +86,24 @@ pub(super) fn start_stream_with_fallback(
     Err(error)
 }
 
-/// An explicit buffer of about 20 ms at `config`'s rate, within the range
-/// the device reports.
-fn fixed_buffer_size(config: &SupportedStreamConfig) -> BufferSize {
-    let frames = (config.sample_rate() / 50).max(1);
-    let frames = match *config.buffer_size() {
-        SupportedBufferSize::Range { min, max } if min <= max => frames.clamp(min, max),
-        _ => frames,
+/// Explicit buffers to try at `rate`: about 20 ms within the range the
+/// device reports, then 20 ms and 100 ms as they are. The reported range
+/// can top out at the device's short default period, which the Intel Smart
+/// Sound driver refuses in shared mode while it takes 20 ms or more (#988).
+fn fixed_buffer_sizes(rate: u32, reported: &SupportedBufferSize) -> Vec<BufferSize> {
+    let twenty_ms = (rate / 50).max(1);
+    let clamped = match *reported {
+        SupportedBufferSize::Range { min, max } if min <= max => twenty_ms.clamp(min, max),
+        _ => twenty_ms,
     };
-    BufferSize::Fixed(frames)
+    let mut sizes = Vec::with_capacity(3);
+    for frames in [clamped, twenty_ms, (rate / 10).max(1)] {
+        let size = BufferSize::Fixed(frames);
+        if !sizes.contains(&size) {
+            sizes.push(size);
+        }
+    }
+    sizes
 }
 
 fn is_supported_sample_format(format: SampleFormat) -> bool {
@@ -230,4 +243,27 @@ fn start_stream(
         hex_microphone,
         sample_rate,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_buffers_go_past_a_short_reported_range() {
+        // A range that tops out at a 10 ms period still gets 20 ms and 100 ms.
+        let reported = SupportedBufferSize::Range { min: 144, max: 480 };
+        assert_eq!(
+            fixed_buffer_sizes(48_000, &reported),
+            vec![
+                BufferSize::Fixed(480),
+                BufferSize::Fixed(960),
+                BufferSize::Fixed(4_800),
+            ]
+        );
+        assert_eq!(
+            fixed_buffer_sizes(48_000, &SupportedBufferSize::Unknown),
+            vec![BufferSize::Fixed(960), BufferSize::Fixed(4_800)]
+        );
+    }
 }
