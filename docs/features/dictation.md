@@ -356,6 +356,15 @@ read as held, and pastes. Checks:
 [linux/paste.rs](../../src/linux/paste.rs) (constructed state; not run on a
 desktop).
 
+**Fixed November 2, 2026 (issue 978):** a Windows paste refused to run when
+the clipboard held only a format Hex can't snapshot (an app's private
+format), failing every dictation with "the current clipboard format cannot be
+preserved safely". The transcript now pastes anyway; that clipboard just isn't
+restored afterwards, and `process.log` says why. Check:
+`an_unreadable_clipboard_still_pastes_and_restores_nothing` in
+[windows/paste.rs](../../src/windows/paste.rs) (constructed state; not run on
+a Windows PC).
+
 **Changed October 22, 2026:** Kit holds Option a little past 300 ms before
 pressing the digit, which 2.3.0 and the Swift app both ignored after the
 threshold. Any non-modifier key pressed while a modifier-only shortcut is still

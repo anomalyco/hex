@@ -95,13 +95,13 @@ struct ClipboardRestore {
 impl ClipboardRestore {
     fn register(
         &mut self,
-        previous: ClipboardSnapshot,
+        previous: Option<ClipboardSnapshot>,
         previous_sequence: u32,
         inserted_sequence: u32,
     ) -> u64 {
         self.generation = self.generation.wrapping_add(1);
         if self.last_sequence != Some(previous_sequence) {
-            self.original = Some(previous);
+            self.original = previous;
         }
         self.last_sequence = Some(inserted_sequence);
         self.generation
@@ -127,7 +127,16 @@ impl WindowsPaster {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let original_sequence = clipboard_sequence();
-        let snapshot = ClipboardSnapshot::read(&mut self.clipboard)?;
+        // A clipboard Hex can't snapshot (an app's private format) never
+        // blocks the paste: the transcript still goes in, and that
+        // clipboard just isn't restored afterwards.
+        let snapshot = match ClipboardSnapshot::read(&mut self.clipboard) {
+            Ok(snapshot) => Some(snapshot),
+            Err(error) => {
+                tracing::warn!(%error, "pasting without restoring the previous Windows clipboard");
+                None
+            }
+        };
         wait_for_conflicting_modifiers();
         if clipboard_sequence() != original_sequence {
             return Err(eyre!(
@@ -309,8 +318,8 @@ mod tests {
     fn rapid_pastes_keep_the_original_clipboard_for_the_latest_restore() {
         let mut restore = ClipboardRestore::default();
 
-        let first = restore.register(ClipboardSnapshot::Text("original".into()), 10, 11);
-        let second = restore.register(ClipboardSnapshot::Text("first paste".into()), 11, 12);
+        let first = restore.register(Some(ClipboardSnapshot::Text("original".into())), 10, 11);
+        let second = restore.register(Some(ClipboardSnapshot::Text("first paste".into())), 11, 12);
 
         assert_ne!(first, second);
         assert_eq!(restore.last_sequence, Some(12));
@@ -318,6 +327,17 @@ mod tests {
             restore.original.as_ref(),
             Some(ClipboardSnapshot::Text(text)) if text == "original"
         ));
+    }
+
+    #[test]
+    fn an_unreadable_clipboard_still_pastes_and_restores_nothing() {
+        let mut restore = ClipboardRestore::default();
+        restore.register(Some(ClipboardSnapshot::Text("old".into())), 1, 2);
+
+        restore.register(None, 10, 11);
+
+        assert_eq!(restore.last_sequence, Some(11));
+        assert!(restore.original.is_none());
     }
 
     #[test]
