@@ -636,6 +636,11 @@ hex capture stop                         // capture.stop
     ├── Keyframes decoded from recording.mp4 by scrawl-helper (beside `hex`: in
     │   Hex.app's Contents/MacOS or target/<profile>; or $SCRAWL_HELPER); helper
     │   missing -> the 480 px sampled frames
+    ├── Spoken cues (look, now, here, this…) pick the keyframe the screen
+    │   changes to; they also count in Spanish (mira, ahora, aquí, esto…),
+    │   French, German, Portuguese, and Italian, whatever the dictation
+    │   language. Check: scrawl-capture keyframes
+    │   spoken_cues_count_in_other_languages
     ├── Transcription fails -> logged; the bundle has no words, and the outcome says why
     ├── Written -> image and text copied to the clipboard (Scrawl's handoff)
     └── Sent -> the capture-route thread (capture.route)
