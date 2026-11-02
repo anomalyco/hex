@@ -281,7 +281,7 @@ explain_unrunnable() {
   have=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $2 }')
   if [ -n "$needed" ] && [ -n "$have" ] &&
     [ "$(printf '%s\n%s\n' "$needed" "$have" | sort -V | head -1)" != "$needed" ]; then
-    fail "Hex $version needs glibc $needed or newer, and this system has glibc $have. The Linux beta needs Ubuntu 24.04, Debian 13, Fedora 40, or a newer or rolling distribution."
+    fail "Hex $version needs glibc $needed or newer, and this system has glibc $have. The Linux beta needs Debian 12, Ubuntu 23.04, Fedora 37, or a newer or rolling distribution."
   fi
   packages=
   if command -v ldd >/dev/null 2>&1; then

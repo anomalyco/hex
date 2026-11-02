@@ -424,9 +424,13 @@ never self-updates; Settings says
 source checkout".
 
 Both Linux architectures build natively on Ubuntu 24.04 runners
-(`ubuntu-24.04`, `ubuntu-24.04-arm`), so every Linux file needs glibc 2.39
-(Ubuntu 24.04, Debian 13, Fedora 40, current Arch) instead of the newest
-glibc of an Arch build. ARM64 keeps the Vulkan backend like x64; ggml's CPU
+(`ubuntu-24.04`, `ubuntu-24.04-arm`) inside a Debian 12 image
+(`scripts/build-linux-release.sh`, `packaging/linux/build.Dockerfile`, with
+Vulkan headers and glslc from Vulkan SDK 1.4.309), so every Linux file needs
+only glibc 2.36 and GCC 12's libstdc++ (Debian 12, Ubuntu 23.04, Fedora 37,
+current Arch). `.github/release/check-glibc-floor.sh` fails the build if the
+executable needs a newer symbol, and the build installs the `.deb` and runs
+the executables on Debian 12. ARM64 keeps the Vulkan backend like x64; ggml's CPU
 kernels stay portable (`GGML_NATIVE=OFF`, baseline ARMv8-A). There is no
 AppImage: the bare executable already runs without installing, and Hex's
 systemd user unit and updater want a stable executable path that an AppImage

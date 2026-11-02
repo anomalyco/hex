@@ -133,8 +133,8 @@ mark it urgent), and closing it keeps the window's state for the next open.
 ## Install A Published Build
 
 Published builds exist for x86_64 and ARM64, as a bare executable, a `.deb`,
-and an `.rpm`. They are built on Ubuntu 24.04 and need glibc 2.39 or later:
-Ubuntu 24.04, Debian 13, Fedora 40, current Arch, or newer. ARM64 builds use
+and an `.rpm`. They are built on Debian 12 and need glibc 2.36 or later:
+Debian 12, Ubuntu 23.04, Fedora 37, current Arch, or newer. ARM64 builds use
 Vulkan like x64 and fall back to the CPU.
 
 ### Install script

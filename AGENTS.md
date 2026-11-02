@@ -1412,8 +1412,8 @@ render on lavapipe with `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
 A scene is a fixture, not native end-to-end proof; the meeting capsules and
 HUDs have no scene.
 
-The supported Linux beta host is x86_64 Arch Linux; releases build on Ubuntu
-24.04 (x64 and ARM64) for a glibc 2.39 floor. Install its
+The supported Linux beta host is x86_64 Arch Linux; releases build in a Debian 12
+image (x64 and ARM64, `scripts/build-linux-release.sh`) for a glibc 2.36 floor. Install its
 native build dependencies with:
 
 ```sh
@@ -1599,7 +1599,8 @@ are built around the signed bytes, and `sign-windows-installers` signs them
 builds never hold signing credentials; until the Azure values exist in
 `release`, dev and check runs have no Windows targets. See `docs/windows-signing.md`.
 
-Run `scripts/build-linux.sh` on x86_64 or aarch64 Linux (then
+Run `scripts/build-linux-release.sh` (Docker; `scripts/build-linux.sh` for a
+build against the host's glibc) on x86_64 or aarch64 Linux (then
 `scripts/package-linux.sh` for the `.deb` and `.rpm`) and `scripts/build-windows.sh`
 from Git Bash once per architecture with `HEX_WINDOWS_ARCH=x86_64` (the
 default; Vulkan SDK required) or `aarch64` (clang-cl and Ninja; best on an
