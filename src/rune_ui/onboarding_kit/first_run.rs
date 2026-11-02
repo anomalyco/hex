@@ -76,7 +76,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         .children(skip(p, s));
     // The real window has no title bar: the top of the page moves it.
     let top = if s.live.is_some() {
-        super::super::title_bar(top)
+        super::super::sidebar::title_bar(top)
     } else {
         top
     };
