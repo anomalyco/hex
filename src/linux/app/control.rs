@@ -90,6 +90,7 @@ impl crate::control::host::Host for LinuxControl {
             (CaptureAction::Toggle, false) => ShortcutCommand::DictationToggle,
             (CaptureAction::Toggle, true) => ShortcutCommand::DictationToggleRaw,
             (CaptureAction::Stop, _) => ShortcutCommand::DictationStop,
+            (CaptureAction::Cancel, _) => ShortcutCommand::DictationCancel,
         })
     }
 

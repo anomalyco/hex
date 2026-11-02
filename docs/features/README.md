@@ -605,7 +605,9 @@ worker readiness; a later worker-load failure does not roll back saved selection
 Saved shortcut                           // dictation; Option by default; Windows and X11 accept mouse buttons, macOS with Labs > Mouse shortcuts
 ├── Hold -> Speak -> Release
 ├── Tap, tap -> Speak hands-free -> Press again   // Shortcut mode: Hold or double-tap
-└── Escape -> Nothing: no cancel, every dictation finishes and pastes (#786)
+├── Tap mode (Toggle) -> Cancel shortcut, Escape by default, while recording
+│   -> Discarded: nothing pasted or saved; transcribing jobs finish (#1022)
+└── Hold modes -> no cancel: Escape reaches the app, every dictation pastes (#786)
 
 General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
   -> Modal: each choice with its keys and a looping key/recording timeline
@@ -1463,9 +1465,10 @@ Linux beta                               // not macOS feature parity
 │   ├── Idempotent: start while recording / stop while idle -> Nothing
 │   └── Hex missing or not listening -> One-line error, non-zero exit
 │       // as for hex quit|restart|status
-├── Escape -> Ends nothing (#786); no Cancel dictation shortcut or command
-│   ├── X11 -> Grabbed only while Annotate draws (it stops drawing)
-│   └── Portal -> Never bound
+├── hex dictation cancel -> Discards whatever records, any mode
+├── Toggle's cancel shortcut (Escape by default), only while recording
+│   ├── X11 -> Grabbed only for the recording, and Escape while Annotate draws
+│   └── Portal -> Never bound: bind `hex dictation cancel` in the desktop
 │       └── KDE startup -> before the bind, the pre-#579 `hex` set (with the
 │           pre-#492 `cancel` on Escape), and every action under `anomaly.hex`
 │           this bind doesn't ask for (`cancel`, `cancel-dictation`, and the ids
@@ -1668,7 +1671,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   │   alone; off, a saved one goes back to its default
 │   └── Any other key -> the recorder says "Unsupported key" and starts over
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
-├── Escape -> Nothing (#786); a held modifier alone never ends or cancels a capture
+├── Toggle's cancel shortcut (Escape by default) -> Discards a toggled recording;
+│   the hook takes it only while one records. Otherwise Escape -> Nothing (#786)
 ├── One modifier alone (Right Alt, Right Ctrl) -> Shortcut; Alt/Win release masked (no menu, Start)
 ├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device

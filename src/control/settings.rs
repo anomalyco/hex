@@ -201,6 +201,12 @@ const KEYS: &[Key] = &[
         Kind::Shortcut(HotkeySlot::PasteLast),
         "The paste-last-dictation shortcut; none turns it off",
     ),
+    key(
+        "cancel_hotkey",
+        Kind::Shortcut(HotkeySlot::Cancel),
+        "Toggle mode's cancel shortcut, Escape by default: discards the recording, \
+         nothing pasted or saved. Hex takes the key only while a toggled recording runs",
+    ),
     optional(
         "raw_dictation_hotkey",
         Kind::Shortcut(HotkeySlot::RawDictation),
@@ -856,6 +862,7 @@ pub fn apply(
         | "paste_last_hotkey"
         | "raw_dictation_hotkey"
         | "second_dictation_hotkey"
+        | "cancel_hotkey"
         | "capture.hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
@@ -865,6 +872,7 @@ pub fn apply(
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
+                HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
             };

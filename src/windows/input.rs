@@ -251,6 +251,11 @@ struct CallbackState {
     annotate_trigger_down: bool,
     /// Escape went down to stop Annotate's drawing; its release is ours too.
     drawing_escape_down: bool,
+    /// Toggle mode's cancel shortcut, Hex's only while a recording runs.
+    cancel: Option<WindowsHotkey>,
+    cancel_vk: Option<u32>,
+    /// The cancel key went down while Hex held it; its release is ours too.
+    cancel_down: bool,
     modifiers: ModifierState,
     side_down: SideDownTimes,
     trigger_down: bool,
@@ -362,6 +367,12 @@ impl CaptureState {
         recording.then_some(HotkeyAction::Cancel)
     }
 
+    /// Whether Toggle's cancel shortcut is Hex's now: only while a toggled
+    /// capture records, so the key stays with every app otherwise.
+    fn wants_cancel(&self) -> bool {
+        self.toggle && (self.active || self.locked)
+    }
+
     fn cancel(&mut self) -> Option<HotkeyAction> {
         if !self.active && !self.locked {
             return None;
@@ -452,12 +463,18 @@ impl WindowsHotkeyMonitor {
         paste_last: Option<WindowsHotkey>,
         raw: Option<WindowsHotkey>,
         annotate: Option<WindowsHotkey>,
+        cancel: Option<WindowsHotkey>,
         double_tap_enabled: bool,
         double_tap_only: bool,
         shortcut_mode: ShortcutMode,
         share_trigger: bool,
     ) -> Result<Self> {
         binding.validate()?;
+        let cancel_vk = cancel
+            .as_ref()
+            .and_then(|cancel| cancel.key.as_deref())
+            .map(virtual_key)
+            .transpose()?;
         let trigger_vk = binding.key.as_deref().map(virtual_key).transpose()?;
         let paste_trigger_vk = chord_virtual_key(paste_last.as_ref(), "Paste Last")?;
         let raw_trigger_vk = chord_virtual_key(raw.as_ref(), "Dictate without processing")?;
@@ -480,6 +497,9 @@ impl WindowsHotkeyMonitor {
             annotate_trigger_vk,
             annotate_trigger_down: false,
             drawing_escape_down: false,
+            cancel,
+            cancel_vk,
+            cancel_down: false,
             modifiers: ModifierState::default(),
             side_down: SideDownTimes::default(),
             trigger_down: false,
@@ -857,6 +877,28 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
                 } else if is_up && state.annotate_trigger_down {
                     state.annotate_trigger_down = false;
                     send_event(state, HotkeyAction::CaptureUp, time);
+                }
+                return Disposition::Suppress;
+            }
+            // Toggle's cancel key discards the recording. Hex takes it only
+            // while a toggled capture records, and keeps its repeats and
+            // release, so the app in front never acts on it.
+            let cancel_event = state.cancel_vk == Some(vk)
+                && (state.cancel_down
+                    || (is_down
+                        && state.capture.wants_cancel()
+                        && state
+                            .cancel
+                            .as_ref()
+                            .is_some_and(|binding| state.modifiers.matches(binding))));
+            if cancel_event {
+                if is_down && !state.cancel_down {
+                    state.cancel_down = true;
+                    if let Some(action) = state.capture.cancel() {
+                        send_event(state, action, time);
+                    }
+                } else if is_up {
+                    state.cancel_down = false;
                 }
                 return Disposition::Suppress;
             }
@@ -1379,6 +1421,7 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
     }
     let virtual_key = match normalized.as_str() {
         "return" => u32::from(VK_RETURN),
+        "escape" => u32::from(VK_ESCAPE),
         "num enter" => NUMPAD_ENTER,
         name if HotkeyKey::special_name(name) && name != "menu" && name != "pause" => 0x91,
         "page_up" => 0x21,
@@ -1867,6 +1910,33 @@ mod tests {
         state.release(true, 120);
         assert_eq!(state.cancel(), Some(HotkeyAction::Cancel));
         assert!(!state.active && !state.locked);
+    }
+
+    /// Toggle's cancel key is Hex's only while a toggled capture records:
+    /// held or locked, never idle, and never in Hold mode.
+    #[test]
+    fn cancel_is_wanted_only_while_a_toggled_capture_records() {
+        let mut state = CaptureState {
+            toggle: true,
+            ..CaptureState::default()
+        };
+        assert!(!state.wants_cancel());
+        assert_eq!(state.press(true, false, 100), Some(HotkeyAction::Start));
+        assert!(state.wants_cancel());
+        state.release(true, 120);
+        assert!(state.locked && state.wants_cancel());
+        assert_eq!(state.cancel(), Some(HotkeyAction::Cancel));
+        assert!(!state.wants_cancel());
+        // The next press starts a fresh recording.
+        assert_eq!(state.press(true, false, 1_000), Some(HotkeyAction::Start));
+
+        let mut hold = CaptureState::default();
+        hold.press(true, false, 100);
+        assert!(!hold.wants_cancel());
+        hold.release(true, 120);
+        hold.press(true, false, 200);
+        hold.release(true, 220);
+        assert!(hold.locked && !hold.wants_cancel());
     }
 
     #[test]

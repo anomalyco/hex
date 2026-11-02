@@ -764,6 +764,22 @@ impl HotkeyBinding {
         binding
     }
 
+    /// Escape, with no modifier.
+    pub fn cancel_default() -> Self {
+        #[cfg(target_os = "macos")]
+        let binding = Self {
+            modifiers: HotkeyModifiers::default(),
+            // Escape's virtual key code, the same on every layout.
+            key: Some(HotkeyKey {
+                code: 53,
+                label: "Esc".into(),
+            }),
+        };
+        #[cfg(not(target_os = "macos"))]
+        let binding = Self::chord(HotkeyModifiers::default(), "escape");
+        binding
+    }
+
     pub fn paste_meeting_default() -> Self {
         Self {
             modifiers: HotkeyModifiers {
@@ -1062,6 +1078,9 @@ pub struct RuntimeHotkeys {
     pub raw_dictation: Option<RuntimeHotkey>,
     /// Labs › Second dictation shortcut (macOS), while it is on and bound.
     pub second_dictation: Option<RuntimeHotkey>,
+    /// Toggle mode's cancel shortcut. Not among [`RuntimeHotkeys::all`]:
+    /// Hex takes it only while a toggled recording runs.
+    pub cancel: Option<RuntimeHotkey>,
 }
 
 impl RuntimeHotkeys {
@@ -1088,6 +1107,7 @@ impl Default for RuntimeHotkeys {
             capture: None,
             raw_dictation: None,
             second_dictation: None,
+            cancel: None,
         }
     }
 }
@@ -1793,6 +1813,9 @@ pub struct AppSettings {
     )]
     pub retired_edit_hotkey: Option<serde_json::Value>,
     pub paste_last_hotkey: Option<HotkeyBinding>,
+    /// Toggle mode's cancel shortcut: discards the recording. Hex takes it
+    /// only while a toggled recording runs; Hold mode has no cancel.
+    pub cancel_hotkey: HotkeyBinding,
     /// Dictate without processing: records like the dictation shortcut and
     /// pastes the transcript as heard. Unbound by default.
     pub raw_dictation_hotkey: Option<HotkeyBinding>,
@@ -1928,6 +1951,7 @@ impl Default for AppSettings {
             dictation_hotkey: HotkeyBinding::default(),
             retired_edit_hotkey: None,
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
+            cancel_hotkey: HotkeyBinding::cancel_default(),
             raw_dictation_hotkey: None,
             second_dictation_hotkey: None,
             show_dock_icon: true,
@@ -2498,7 +2522,14 @@ impl AppSettings {
             second_dictation: self
                 .active_second_dictation_hotkey()
                 .map(HotkeyBinding::runtime),
+            cancel: self.active_cancel_hotkey().map(HotkeyBinding::runtime),
         }
+    }
+
+    /// The cancel shortcut while it takes effect: in Toggle mode only.
+    pub fn active_cancel_hotkey(&self) -> Option<&HotkeyBinding> {
+        (self.shortcut_mode == crate::dictation::ShortcutMode::Toggle)
+            .then_some(&self.cancel_hotkey)
     }
 
     /// Labs › Second dictation shortcut's binding while it takes effect:
@@ -2535,6 +2566,10 @@ impl AppSettings {
         {
             tracing::warn!("replaced a left-click paste-last shortcut with the default");
             self.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
+        }
+        if self.cancel_hotkey.is_bare_primary_click() {
+            tracing::warn!("replaced a left-click cancel shortcut with the default");
+            self.cancel_hotkey = HotkeyBinding::cancel_default();
         }
         if self
             .raw_dictation_hotkey
@@ -2579,6 +2614,8 @@ pub enum HotkeySlot {
     Capture,
     /// Labs › Second dictation shortcut (macOS).
     SecondDictation,
+    /// Toggle mode's cancel shortcut.
+    Cancel,
 }
 
 impl AppSettings {
@@ -2600,6 +2637,9 @@ impl AppSettings {
             && let Some(raw) = &self.raw_dictation_hotkey
         {
             others.push(raw.clone());
+        }
+        if slot != HotkeySlot::Cancel {
+            others.push(self.cancel_hotkey.clone());
         }
         if slot != HotkeySlot::SecondDictation
             && cfg!(target_os = "macos")

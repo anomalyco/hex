@@ -219,6 +219,16 @@ pub(super) fn validate_hotkey(
     if target != ShortcutTarget::Dictation && binding.key.is_none() {
         return Err(tr("Add a key"));
     }
+    // Hex takes the cancel key only while a recording runs, so a key alone,
+    // such as Escape, never keeps it from other apps.
+    if target == ShortcutTarget::Cancel {
+        return WindowsHotkey::from(binding)
+            .key
+            .as_deref()
+            .map_or(Ok(0), crate::windows::input::virtual_key)
+            .map(|_| ())
+            .map_err(|_| tr("Unsupported key"));
+    }
     WindowsHotkey::from(binding)
         .validate()
         .map_err(|_| tr("Add a modifier"))

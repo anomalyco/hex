@@ -80,6 +80,8 @@ pub enum Tone {
     /// A dictation pasted at least [`DONE_MIN_AFTER_STOP`] after its stop
     /// sound, such as after a slow rewrite.
     DictationDone,
+    /// Toggle's cancel shortcut discarded a recording.
+    Cancel,
     /// The first-run tour reached its last step.
     OnboardingSuccess,
     /// A first-run onboarding cue (typing clacks, shortcut keycap, motion landings).
@@ -379,8 +381,8 @@ pub fn play(tone: Tone) {
     }
 }
 
-/// A set of feedback sounds, chosen in Settings. Every set has its own start
-/// and stop, and all are level-matched, so a volume sounds the same in
+/// A set of feedback sounds, chosen in Settings. Every set has its own start,
+/// stop and cancel, and all are level-matched, so a volume sounds the same in
 /// each. `scripts/sounds/synth.py` makes their files.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -577,6 +579,7 @@ impl Auditioning {
 struct BundledSet {
     start: &'static [u8],
     stop: &'static [u8],
+    cancel: &'static [u8],
     done: Option<&'static [u8]>,
     error: Option<&'static [u8]>,
     success: Option<&'static [u8]>,
@@ -602,6 +605,7 @@ macro_rules! synthesized_set {
         BundledSet {
             start: bundled_sound!($set, "start"),
             stop: bundled_sound!($set, "stop"),
+            cancel: bundled_sound!($set, "cancel"),
             done: Some(bundled_sound!($set, "done")),
             error: Some(bundled_sound!($set, "error")),
             success: Some(bundled_sound!($set, "success")),
@@ -615,6 +619,7 @@ const BUNDLED_SETS: [BundledSet; 7] = [
     BundledSet {
         start: bundled_sound!("classic", "start"),
         stop: bundled_sound!("classic", "stop"),
+        cancel: bundled_sound!("classic", "cancel"),
         done: None,
         // macOS plays Basso; elsewhere Classic borrows Signature's error.
         error: if cfg!(target_os = "macos") {
@@ -632,6 +637,7 @@ const BUNDLED_SETS: [BundledSet; 7] = [
     BundledSet {
         start: bundled_sound!("thock", "start"),
         stop: bundled_sound!("thock", "stop"),
+        cancel: bundled_sound!("thock", "cancel"),
         done: None,
         error: Some(bundled_sound!("thock", "error")),
         success: Some(bundled_sound!("thock", "success")),
@@ -642,6 +648,7 @@ const BUNDLED_SETS: [BundledSet; 7] = [
 struct SetSounds {
     start: SamplesBuffer,
     stop: SamplesBuffer,
+    cancel: SamplesBuffer,
     done: Option<SamplesBuffer>,
     /// Played for failures; `None` plays macOS Basso.
     error: Option<SamplesBuffer>,
@@ -654,6 +661,7 @@ impl SetSounds {
         Ok(Self {
             start: decode_wav(bundled.start)?,
             stop: decode_wav(bundled.stop)?,
+            cancel: decode_wav(bundled.cancel)?,
             done: optional(bundled.done)?,
             error: optional(bundled.error)?,
             success: optional(bundled.success)?,
@@ -799,6 +807,7 @@ impl Sounds {
         Some(match tone {
             Tone::DictationStart => &sounds.start,
             Tone::DictationStop => &sounds.stop,
+            Tone::Cancel => &sounds.cancel,
             Tone::DictationDone => return sounds.done.as_ref(),
             Tone::OnboardingSuccess => {
                 return sounds.success.as_ref().or(Some(&sounds.stop));
@@ -1212,6 +1221,7 @@ mod tests {
         let mut sounds = vec![
             ("start", bundled.start, budget(130, 300)),
             ("stop", bundled.stop, budget(250, 450)),
+            ("cancel", bundled.cancel, budget(250, 2_100)),
         ];
         let optional = [
             ("done", bundled.done, budget(350, 0)),

@@ -118,6 +118,8 @@ pub(crate) enum ShortcutTarget {
     RawDictation,
     /// Labs › Second dictation shortcut.
     SecondDictation,
+    /// Toggle mode's cancel shortcut.
+    Cancel,
 }
 
 /// What the runtime last published for the window and the menu bar.

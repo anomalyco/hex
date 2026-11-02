@@ -273,6 +273,7 @@ pub struct InputMonitor {
     pub activity: InputActivity,
     pending: PendingInputEvents,
     takes_escape: Arc<AtomicBool>,
+    takes_cancel: Arc<AtomicBool>,
     run_loop: Arc<AtomicPtr<c_void>>,
     worker: Option<JoinHandle<()>>,
 }
@@ -322,6 +323,8 @@ impl InputMonitor {
         let tap_run_loop = run_loop.clone();
         let takes_escape = Arc::new(AtomicBool::new(false));
         let tap_takes_escape = takes_escape.clone();
+        let takes_cancel = Arc::new(AtomicBool::new(false));
+        let tap_takes_cancel = takes_cancel.clone();
         let pending = PendingInputEvents::default();
         let tap_pending = pending.clone();
         let worker = thread::spawn(move || {
@@ -329,6 +332,7 @@ impl InputMonitor {
                 sender,
                 tap_activity,
                 tap_takes_escape,
+                tap_takes_cancel,
                 tap_pending,
                 tap_run_loop,
                 ready_sender,
@@ -342,6 +346,7 @@ impl InputMonitor {
             activity,
             pending,
             takes_escape,
+            takes_cancel,
             run_loop,
             worker: Some(worker),
         })
@@ -349,6 +354,12 @@ impl InputMonitor {
 
     pub fn set_takes_escape(&self, enabled: bool) {
         self.takes_escape.store(enabled, Ordering::Release);
+    }
+
+    /// Whether the tap keeps Toggle's cancel shortcut from the app in front:
+    /// only while a toggled recording runs.
+    pub fn set_takes_cancel(&self, enabled: bool) {
+        self.takes_cancel.store(enabled, Ordering::Release);
     }
 
     pub fn pending_events(&self) -> PendingInputEvents {
@@ -380,6 +391,7 @@ struct EventTapContext {
     sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
     takes_escape: Arc<AtomicBool>,
+    takes_cancel: Arc<AtomicBool>,
     key_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
     physical_tap: AtomicPtr<c_void>,
@@ -527,6 +539,7 @@ fn run_event_tap(
     sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
     takes_escape: Arc<AtomicBool>,
+    takes_cancel: Arc<AtomicBool>,
     pending: PendingInputEvents,
     run_loop: Arc<AtomicPtr<c_void>>,
     ready: SyncSender<Result<()>>,
@@ -535,6 +548,7 @@ fn run_event_tap(
         sender,
         activity,
         takes_escape,
+        takes_cancel,
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
@@ -1097,9 +1111,13 @@ unsafe extern "C" fn event_callback(
         .shortcut_suppression
         .lock()
         .unwrap_or_else(|error| error.into_inner());
+    let mut hotkeys = crate::app_settings::runtime_hotkeys();
+    if !context.takes_cancel.load(Ordering::Acquire) {
+        hotkeys.cancel = None;
+    }
     let suppress = suppression.process_all(
         input,
-        crate::app_settings::runtime_hotkeys(),
+        hotkeys,
         delivered,
         context.takes_escape.load(Ordering::Acquire),
     );
@@ -1379,6 +1397,9 @@ impl ShortcutSuppression {
         self.key_presses.clear();
     }
 
+    /// Whether the tap keeps `input` from the app in front: Hex's shortcuts,
+    /// Escape while Hex takes it, and `hotkeys.cancel`, which the caller
+    /// leaves set only while a toggled recording runs.
     fn process_all(
         &mut self,
         input: InputEvent,
@@ -1398,6 +1419,7 @@ impl ShortcutSuppression {
                         || bindings
                             .iter()
                             .flatten()
+                            .chain(hotkeys.cancel.iter())
                             .any(|hotkey| hotkey.matches_key_press(code, flags)))
             }),
             InputEvent::Key {
@@ -1428,6 +1450,7 @@ impl ShortcutSuppression {
                 capture: None,
                 raw_dictation: None,
                 second_dictation: None,
+                cancel: None,
             },
             delivered,
             false,
@@ -1479,7 +1502,10 @@ pub enum HotkeyAction {
     Start,
     Finish,
     Discard(DiscardCause),
+    /// Hex ended the recording: its input was lost or suspended.
     Cancel,
+    /// Toggle's cancel shortcut discarded the recording.
+    CancelShortcut,
     PasteLast,
     PasteMeeting,
 }
@@ -1594,6 +1620,8 @@ pub struct DictationHotkey {
     /// the hold threshold finishes on release instead of locking.
     tap_or_hold: fn() -> bool,
     binding: RuntimeHotkey,
+    /// Toggle's cancel shortcut; `None` in Hold mode.
+    cancel: Option<RuntimeHotkey>,
     ignore_before: Option<CaptureInstant>,
     stale_keys_neutral_since: Option<CaptureInstant>,
     recovery_ignore_through: Option<CaptureInstant>,
@@ -1645,6 +1673,7 @@ impl DictationHotkey {
             toggle: false,
             tap_or_hold: TAP_OR_HOLD,
             binding,
+            cancel: None,
             ignore_before: None,
             stale_keys_neutral_since: None,
             recovery_ignore_through: None,
@@ -1699,6 +1728,11 @@ impl DictationHotkey {
     /// Takes effect from the next press; an active capture keeps its gesture.
     pub fn set_toggle(&mut self, enabled: bool) {
         self.toggle = enabled;
+    }
+
+    /// Toggle's cancel shortcut, or `None` for no cancel.
+    pub fn set_cancel(&mut self, cancel: Option<RuntimeHotkey>) {
+        self.cancel = cancel;
     }
 
     pub fn set_binding(&mut self, binding: RuntimeHotkey) {
@@ -2070,6 +2104,23 @@ impl DictationHotkey {
         {
             self.state = State::Dirty;
             return Some(action);
+        }
+        // Toggle's cancel shortcut discards the recording; the tap kept the
+        // key from the app in front. Hold mode has no cancel.
+        if fresh_key_down
+            && self.toggle
+            && self.is_recording()
+            && let InputEvent::Key {
+                code,
+                down: true,
+                flags,
+            } = event
+            && self
+                .cancel
+                .is_some_and(|cancel| cancel.matches_key_press(code, flags))
+        {
+            self.state = State::Dirty;
+            return Some(HotkeyAction::CancelShortcut);
         }
 
         let ignored_because = binding_press
@@ -2528,6 +2579,7 @@ mod tests {
             sender,
             activity: InputActivity::default(),
             takes_escape: Arc::new(AtomicBool::new(takes_escape)),
+            takes_cancel: Arc::new(AtomicBool::new(false)),
             key_tap: AtomicPtr::new(ptr::null_mut()),
             observation_tap: AtomicPtr::new(ptr::null_mut()),
             physical_tap: AtomicPtr::new(ptr::null_mut()),
@@ -2957,6 +3009,7 @@ mod tests {
             capture: None,
             raw_dictation: None,
             second_dictation: None,
+            cancel: None,
         }
     }
 
@@ -4809,6 +4862,85 @@ mod tests {
             None
         );
         assert!(hotkey.is_recording());
+    }
+
+    /// Toggle's cancel shortcut discards a toggled recording, held or
+    /// locked; Hold mode has none, and idle it does nothing.
+    #[test]
+    fn the_cancel_shortcut_discards_only_a_toggled_recording() {
+        let now = capture_time();
+        let escape = |down| InputEvent::Key {
+            code: ESCAPE_KEY_CODE,
+            down,
+            flags: 0,
+        };
+        let cancel = Some(HotkeyBinding::cancel_default().runtime());
+        let ms = |ms| now + Duration::from_millis(ms);
+        let toggled = || {
+            let mut hotkey = DictationHotkey::with_binding(false, now, true, shift_space_binding());
+            hotkey.set_toggle(true);
+            hotkey.set_cancel(cancel);
+            hotkey
+        };
+
+        // Idle: the key is the app's.
+        let mut hotkey = toggled();
+        assert_eq!(hotkey.process(escape(true), now), None);
+        assert_eq!(hotkey.process(escape(false), ms(20)), None);
+
+        // Locked after the toggle press: cancelled, and the next press starts.
+        assert_eq!(
+            hotkey.process(shift_space_event(true), ms(100)),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(hotkey.process(shift_space_event(false), ms(160)), None);
+        assert!(hotkey.is_locked());
+        assert_eq!(
+            hotkey.process(escape(true), ms(1_000)),
+            Some(HotkeyAction::CancelShortcut)
+        );
+        assert!(!hotkey.is_recording());
+        assert_eq!(hotkey.process(escape(false), ms(1_050)), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(1_060)), None);
+        assert_eq!(
+            hotkey.process(shift_space_event(true), ms(2_000)),
+            Some(HotkeyAction::Start)
+        );
+
+        // Held, before the release locks it.
+        let mut hotkey = toggled();
+        hotkey.process(shift_space_event(true), now);
+        assert_eq!(
+            hotkey.process(escape(true), ms(500)),
+            Some(HotkeyAction::CancelShortcut)
+        );
+
+        // Hold mode: no cancel, even with a binding.
+        let mut hotkey = test_hotkey(true, now);
+        hotkey.set_cancel(cancel);
+        assert_eq!(hotkey.process(escape(true), ms(500)), None);
+        assert!(hotkey.is_recording());
+    }
+
+    /// The tap keeps the cancel key from the app only while the listener
+    /// arms it (a toggled recording runs).
+    #[test]
+    fn the_cancel_key_is_suppressed_only_while_armed() {
+        let mut suppression = ShortcutSuppression::default();
+        let escape = |down| InputEvent::Key {
+            code: ESCAPE_KEY_CODE,
+            down,
+            flags: NO_FLAGS,
+        };
+        let idle = RuntimeHotkeys::default();
+        assert!(!suppression.process_all(escape(true), idle, true, false));
+        assert!(!suppression.process_all(escape(false), idle, true, false));
+        let armed = RuntimeHotkeys {
+            cancel: Some(HotkeyBinding::cancel_default().runtime()),
+            ..RuntimeHotkeys::default()
+        };
+        assert!(suppression.process_all(escape(true), armed, true, false));
+        assert!(suppression.process_all(escape(false), armed, true, false));
     }
 
     #[test]

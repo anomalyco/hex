@@ -614,7 +614,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   modifiers are pressed alone.
 - Windows accepts one modifier alone (Right Alt, Right Ctrl) as a dictation
   shortcut. Any key or mouse button joining a held modifier-only shortcut
-  ends it as a chord (Cancel only while it records); Escape never does. Releasing Alt or Windows
+  ends it as a chord (Cancel only while it records); Escape never does, except
+  as Toggle's cancel shortcut. Releasing Alt or Windows
   after a modifier-only shortcut held them is swallowed and replayed after a
   tap of unassigned VK 0xE8, so the menu bar and Start stay closed (not with
   Share shortcut). Hex marks every event it injects with `HEX_INJECTED` and its
@@ -673,12 +674,22 @@ CoreAudio formats, AppleScript details, or event serialization.
   300 ms discard. A 450 ms hotkey pre-roll
   protects speech onset. Capture has no automatic duration limit; release or
   an explicit stop ends it.
-- Dictation has no cancel (#786): Escape ends no capture and no job on any
-  OS, not even as a chord with a held modifier-only shortcut, and Hex never
-  takes Escape from the app for dictation. Every intentional dictation
-  finishes and pastes. Only short taps, chords, and silent captures discard;
-  Hex itself ends a capture only when its input or microphone is lost.
-  `hex dictation cancel` from an older client gets a `removed` reply.
+- Only Toggle mode has a cancel (#786, #1022): its cancel shortcut
+  (`cancel_hotkey`, Escape by default, rebindable in General under Shortcut
+  mode) discards the active recording with the cancel tone: nothing is
+  transcribed, pasted, or saved to History, and jobs already transcribing
+  always finish. Hex takes the key only while a toggled recording runs, and
+  then keeps it (repeats and release included) from the app in front; idle,
+  and always in Hold mode, it stays with every app. macOS suppresses it in
+  the session tap only while the listener arms it (`set_takes_cancel`),
+  Windows' hook only while its capture records, and X11 grabs it only for
+  the recording. A shortcuts portal holds a key for as long as Hex runs, so
+  on Wayland Hex binds nothing for it and Settings says to bind
+  `hex dictation cancel` in the desktop. `hex dictation cancel` discards
+  whatever records, in any mode. Hold mode has no cancel: Escape ends no
+  capture there, not even as a chord. Every other intentional dictation
+  finishes and pastes; only short taps, chords, and silent captures discard,
+  and Hex itself ends a capture only when its input or microphone is lost.
 - A dictation discarded for silence (level under the silence threshold, or no
   speech the detector hears) is discarded quietly on every OS: no error tone,
   no note, nothing in Settings. The log keeps the measured level and peak

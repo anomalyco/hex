@@ -2,8 +2,9 @@
 
 Hold the configured shortcut, speak, and release. Hex transcribes locally and
 inserts the result at the current focus. New captures do not cancel accepted
-work, and dictation has no cancel: every intentional dictation finishes and
-pastes (#786).
+work. Only Toggle mode has a cancel: its cancel shortcut, Escape by default,
+discards the recording (#786, #1022); every other intentional dictation
+finishes and pastes.
 
 This map covers the macOS release path. Linux shares the basic journey, not
 every timing, input, or recovery guarantee; see the
@@ -442,7 +443,7 @@ General > Shortcut mode (under Shortcut)               // dictate.shortcut-mode
 Tap
   Press -> Start (pre-roll as usual) -> Release keeps recording
   -> Fresh shortcut press -> Finish (with the release tail)
-  -> Escape -> Nothing: it reaches the app (#786)
+  -> Cancel shortcut (Escape by default) -> Cancelled, see Toggle Cancel below
   // Shortcut chords during the first 300 ms still discard
   macOS, Labs › Tap or hold on (labs.tap_or_hold, off by default, #711):
   ├── Release 300 ms or more after the press -> Finish (with the release tail)
@@ -1072,29 +1073,45 @@ Source: `control_chord` in [windows/paste.rs](../../src/windows/paste.rs).
 Check: `paste_chords_press_shift_inside_control_and_leave_a_held_control_alone`
 (the synthesized key sequence only; no paste into a real Windows app).
 
-### No Cancel
+### Toggle Cancel
 
 ```ts
-Escape                                               // dictate.no-cancel
-  ├── Recording (held, locked, toggled) -> Nothing; the key reaches the app
-  │   -> Not a chord either, even beside a held modifier-only shortcut
-  ├── Accepted jobs -> Nothing; they finish and paste in order
-  ├── Annotate drawing -> Stops drawing only (Annotate's own Escape)
-  └── Programmatic dictation (local API) -> Its owner cancels through /cancel
-     -> The lease ends an abandoned one
-hex dictation cancel -> Removed; an older `hex` gets `removed`
-Linux portal -> No Cancel dictation shortcut; Escape never bound
+Settings › General, Shortcut mode = Tap (Toggle)     // dictate.toggle-cancel
+  -> Cancel row: the shortcut (`cancel_hotkey`), Escape by default
+     ├── Recorder -> any chord the OS's rules allow (Escape ends the recorder)
+     ├── Restore -> back to Escape
+     └── Wayland -> no recorder: bind `hex dictation cancel` in the desktop
+  Hold modes -> no row, no cancel
+Toggled recording (held or locked) -> Cancel shortcut
+  -> Recording discarded: nothing transcribed, pasted, or kept in History
+  -> Cancel tone; the HUD shows it cancelled
+  -> The key is kept from the app (press, repeats, release)
+  -> Jobs already transcribing -> finish and paste in order
+Idle, or any Hold mode -> Cancel shortcut -> Nothing: it reaches the app
+hex dictation cancel -> Discards whatever records, any mode; idle -> unchanged
+Annotate drawing -> Escape stops drawing first
+Programmatic dictation (local API) -> Its owner cancels through /cancel
 ```
 
-Until #786, Escape cancelled the active capture, then the newest unfinished
-job, and an accidental Escape wiped a 5-minute dictation. Short taps, chords,
-and silent captures still discard; Hex itself ends a capture only when its
-input or microphone is lost. Checks: `escape_never_ends_a_held_capture` and
-`toggle_mode_escape_leaves_a_locked_capture_recording` in
+Until #786, Escape cancelled the active capture in every mode, then the newest
+unfinished job, and an accidental Escape wiped a 5-minute dictation. #795
+removed cancel; the people who asked for it back use Toggle, so it returned
+there only, and never reaches past the recording. Hex takes the key only while
+a toggled recording runs: macOS's session tap suppresses it only while the
+listener arms it, Windows' hook only while its capture records, and X11
+grabs it only for the recording. A shortcuts portal would hold the key from
+every app for as long as Hex runs, so Wayland binds nothing for it. Checks:
+`the_cancel_shortcut_discards_only_a_toggled_recording` and
+`the_cancel_key_is_suppressed_only_while_armed` in
 [suppression.rs](../../src/suppression.rs) (macOS, not compiled on Linux),
-`escape_never_ends_a_dictation` in [linux/input.rs](../../src/linux/input.rs),
-`only_a_capture_claims_escape` in [recognition.rs](../../src/recognition.rs),
-and `an_older_cancel_gets_removed` in [control.rs](../../src/control.rs).
+`cancel_discards_a_toggled_recording`, `cancel_is_ignored_in_hold_mode`, and
+`cancel_is_not_taken_while_idle` in [linux/input.rs](../../src/linux/input.rs),
+`cancel_is_wanted_only_while_a_toggled_capture_records` in
+[windows/input.rs](../../src/windows/input.rs),
+`the_cancel_shortcut_shows_in_toggle_and_restores_escape` and the
+`toggle-cancel` goldens in [tests/panes.rs](../../src/rune_ui/tests/panes.rs),
+and `cancel_parses_and_takes_no_flags` in [control.rs](../../src/control.rs).
+The X11 grab and the hooks' suppression have no automated end-to-end check.
 
 ### Feedback
 
@@ -1199,7 +1216,7 @@ audible sample. Every sound is normalized to one loudness per kind (start
 -25.5 LUFS max momentary, stop and done -27, error -26.5, success
 -25), so a volume sounds the same in every set. Classic's start and stop come
 up 2.5 and 3 dB (a soft limiter touches 0.1% of the start's samples). There
-is no cancel sound since #786. Every OS plays the
+is a cancel sound for Toggle's cancel shortcut. Every OS plays the
 error sound for a failed dictation or paste (`fail` in `linux/dictation.rs`
 and `windows/dictation.rs`), including an empty transcript, which macOS
 treats as nothing pasted. Checks:

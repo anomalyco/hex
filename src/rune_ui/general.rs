@@ -79,6 +79,10 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             None,
         ));
         rows.push(super::shortcut_mode::row(ui, p).into());
+        // Toggle has a cancel shortcut; Hold has none.
+        if ui.settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle {
+            rows.extend(cancel_rows(ui, p));
+        }
         // Labs › Second dictation shortcut (macOS): another key that
         // dictates like the one above, such as on an external keyboard.
         #[cfg(target_os = "macos")]
@@ -266,12 +270,20 @@ pub(super) fn shortcut_rows(
         ));
     }
     // Labs › Restore shortcut default: Paste last dictation's default,
-    // offered while the shortcut is something else or off.
+    // offered while the shortcut is something else or off. Cancel's
+    // default, Escape, can't be recorded (Escape ends the recorder), so its
+    // restore is always offered.
     let mut default_note = None;
-    if target == ShortcutTarget::PasteLast
-        && crate::labs::Feature::RestoreShortcutDefault.on(&ui.settings)
-    {
-        let default = crate::app_settings::HotkeyBinding::paste_last_default();
+    let default = match target {
+        ShortcutTarget::PasteLast
+            if crate::labs::Feature::RestoreShortcutDefault.on(&ui.settings) =>
+        {
+            Some(crate::app_settings::HotkeyBinding::paste_last_default())
+        }
+        ShortcutTarget::Cancel => Some(crate::app_settings::HotkeyBinding::cancel_default()),
+        _ => None,
+    };
+    if let Some(default) = default {
         let current = s::binding(&ui.settings, target);
         if current.is_none() {
             default_note = Some((
@@ -305,6 +317,39 @@ pub(super) fn shortcut_rows(
     rows.extend(s::refused_note(ui, p, target).map(CardRow::from));
     rows.extend(s::gnome_clash_note(ui, p, target).map(CardRow::from));
     rows
+}
+
+/// Toggle's cancel shortcut. A shortcuts portal would hold its key from
+/// every app for as long as Hex runs, so on Wayland it says to bind
+/// `hex dictation cancel` in the desktop instead.
+fn cancel_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
+    if matches!(
+        ui.shortcuts(),
+        Some(crate::desktop::host::DesktopShortcuts::Portal(_))
+    ) {
+        return vec![
+            icon_row(
+                p,
+                "cancel-shortcut",
+                &CIRCLE_X,
+                tr("Cancel"),
+                Some(tr(
+                    "Bind hex dictation cancel to a key in your desktop's keyboard shortcuts",
+                )),
+                row().key("cancel-shortcut-control"),
+            )
+            .into(),
+        ];
+    }
+    shortcut_rows(
+        ui,
+        p,
+        "cancel-shortcut",
+        &CIRCLE_X,
+        tr("Cancel"),
+        ShortcutTarget::Cancel,
+        Some(tr("Discards the recording")),
+    )
 }
 
 /// The desktop's own dialog for the shortcuts its portal bound, where the

@@ -51,6 +51,8 @@ pub(crate) enum ShortcutTarget {
     PasteLast,
     Capture,
     RawDictation,
+    /// Toggle mode's cancel shortcut.
+    Cancel,
 }
 
 struct PreparedTranscription {
@@ -1037,17 +1039,23 @@ impl LinuxDesktopHost {
             let canceled = edit.canceled.clone();
             edit.worker = Some(std::thread::spawn(move || {
                 binding.validate()?;
-                if crate::linux::session::LinuxSession::detect().is_wayland() {
-                    // The listener asks the desktop again and reports what it granted.
-                    binding.portal_trigger()?;
-                } else {
-                    // Fail before saving when another X11 client holds the chord.
-                    crate::linux::input::LinuxHotkeyMonitor::start(
-                        binding.clone(),
-                        Default::default(),
-                        Default::default(),
-                        mpsc::channel().1.into(),
-                    )?;
+                match target {
+                    // The cancel key is grabbed only while a recording runs,
+                    // and never through the portal: nothing to try now.
+                    ShortcutTarget::Cancel => {}
+                    _ if crate::linux::session::LinuxSession::detect().is_wayland() => {
+                        // The listener asks the desktop again and reports what it granted.
+                        binding.portal_trigger()?;
+                    }
+                    _ => {
+                        // Fail before saving when another X11 client holds the chord.
+                        crate::linux::input::LinuxHotkeyMonitor::start(
+                            binding.clone(),
+                            Default::default(),
+                            Default::default(),
+                            mpsc::channel().1.into(),
+                        )?;
+                    }
                 }
                 if canceled.load(Ordering::Acquire) {
                     return Err(color_eyre::eyre::eyre!("Shortcut edit canceled"));
@@ -1061,6 +1069,7 @@ impl LinuxDesktopHost {
                         ShortcutTarget::RawDictation => {
                             settings.raw_dictation_hotkey = Some(binding)
                         }
+                        ShortcutTarget::Cancel => settings.cancel_hotkey = binding,
                     }
                 })
             }));
