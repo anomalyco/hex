@@ -578,7 +578,10 @@ Settings picker > Every model > Downloaded row   // setup.delete-model; macOS
 │   └── Download in progress -> Nothing removed; "Model could not be deleted." with reason
 ├── Selected dictation model (any language) -> No Delete
 ├── Preparing or Apple Speech model -> No Delete
-└── Model choice or closing the picker -> Confirmation cleared
+├── Model choice or closing the picker -> Confirmation cleared
+└── Labs > Downloaded models only (off) -> "Downloaded models take <size>" (Hex's own   // labs.picker-downloaded
+    files) + "Only downloaded models", which leaves just the downloaded rows, each
+    with its Delete; reset when the picker opens (labs.md, #1018)
 ```
 
 Deletion takes the shared model-directory download lock without waiting, so it

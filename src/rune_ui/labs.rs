@@ -397,6 +397,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Use model files where they are"),
         tr("Add a speech model file without copying it, so several accounts can share one file"),
     ));
+    rows.push(row(
+        Feature::PickerDownloaded,
+        &HINTS,
+        tr("Downloaded models only"),
+        tr("Show only downloaded speech models in the picker, with the space they take"),
+    ));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
         && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     let ultra = row(Feature::ParakeetUltra, &HINTS, tr("Parakeet Ultra"), "");
@@ -469,6 +475,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::OutputFixes => "lab-output-fixes",
         Feature::PickerActiveFirst => "lab-picker-active-first",
         Feature::ModelInPlace => "lab-model-in-place",
+        Feature::PickerDownloaded => "lab-picker-downloaded",
     }
 }
 

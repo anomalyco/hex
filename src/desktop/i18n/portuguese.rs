@@ -15,6 +15,11 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Downloaded models only", "Só modelos baixados"),
+    ("Show only downloaded speech models in the picker, with the space they take", "Mostra no seletor só os modelos de voz baixados, com o espaço que ocupam"),
+    ("Only downloaded models", "Só modelos baixados"),
+    ("Downloaded models take {}", "Os modelos baixados ocupam {}"),
+    ("{model} is hidden by the downloaded filter: {state}", "{model} está oculto pelo filtro de baixados: {state}"),
     ("Fix results in Output", "Corrigir resultados em Saída"),
     ("Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result", "Oferece Vocabulário e Corrigir isto ao lado do resultado de Testar em Saída, para corrigir um resultado errado"),
     ("Fix this", "Corrigir isto"),

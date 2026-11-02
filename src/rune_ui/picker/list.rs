@@ -20,8 +20,10 @@ const PROGRESS_WIDTH: f32 = 196.0;
 pub(super) fn body(ui: &Ui, p: Paint, entries: &[Entry], language: &str) -> El {
     let mut body = col().key("all-view").px(16.0).pb(16.0);
     // Files other apps downloaded that aren't catalog models; a catalog
-    // one shows on its own row.
-    if let Some(found) = crate::rune_ui::found::section(ui, p) {
+    // one shows on its own row. Labs › Downloaded models only leaves them out.
+    if !picker::downloaded_filter(ui)
+        && let Some(found) = crate::rune_ui::found::section(ui, p)
+    {
         body = body.child(found.pb(16.0));
     }
     let Groups { leading, others } = groups(entries, picker::list_first(ui));
