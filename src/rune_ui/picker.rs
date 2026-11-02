@@ -474,8 +474,12 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                         .font(p.k.ty.body_medium)
                         .color(p.text())
                         .grow(1.0),
-                )
-                .child(super::model_import::add_button(ui, p));
+                );
+            // Labs › Use model files where they are.
+            if let Some(in_place) = super::model_import::in_place_button(ui, p) {
+                header = header.child(in_place);
+            }
+            header = header.child(super::model_import::add_button(ui, p));
             let mut all = col().key("all");
             if sort_filter_on(ui) {
                 all = all.child(sort_filter_row(ui, p, &language));

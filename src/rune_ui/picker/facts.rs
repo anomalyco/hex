@@ -80,6 +80,8 @@ fn state(ui: &Ui, def: &'static ModelDefinition, language: &str) -> State {
     if let Some((label, fraction)) = picker::preparation(ui, def) {
         State::Preparing { label, fraction }
     } else if picker::transcription_selection_is_active(&ui.settings.transcription, def, installed)
+        // A selected import that is missing or changed isn't what Hex runs.
+        && (!def.id.is_custom() || def.available())
     {
         State::InUse
     } else if installed {

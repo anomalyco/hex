@@ -398,6 +398,11 @@ const KEYS: &[Key] = &[
         "Labs: the speech model picker lists the model in use first",
     ),
     key(
+        "labs.model_in_place",
+        Kind::Bool,
+        "Labs: the speech model picker's Use model file where it is… adds a GGUF file without copying it, so several accounts can share one file",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

@@ -92,10 +92,11 @@ pub enum Feature {
     StopWhenCallEnds,
     OutputFixes,
     PickerActiveFirst,
+    ModelInPlace,
 }
 
 impl Feature {
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 34] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -129,6 +130,7 @@ impl Feature {
         Self::StopWhenCallEnds,
         Self::OutputFixes,
         Self::PickerActiveFirst,
+        Self::ModelInPlace,
     ];
 
     /// The features this OS and build have.
@@ -184,7 +186,8 @@ impl Feature {
             | Self::SkipPauses
             | Self::StopWhenCallEnds
             | Self::OutputFixes
-            | Self::PickerActiveFirst => Audience::Everyone,
+            | Self::PickerActiveFirst
+            | Self::ModelInPlace => Audience::Everyone,
         }
     }
 
@@ -243,6 +246,7 @@ impl Feature {
             | Self::HistoryStats
             | Self::OutputFixes
             | Self::PickerActiveFirst
+            | Self::ModelInPlace
             | Self::FillerWords => true,
         }
     }
@@ -283,6 +287,7 @@ impl Feature {
             Self::StopWhenCallEnds => "stop-when-call-ends",
             Self::OutputFixes => "output-fixes",
             Self::PickerActiveFirst => "picker-active-first",
+            Self::ModelInPlace => "model-in-place",
         }
     }
 
@@ -322,6 +327,7 @@ impl Feature {
             Self::StopWhenCallEnds => "labs.stop_when_call_ends",
             Self::OutputFixes => "labs.output_fixes",
             Self::PickerActiveFirst => "labs.picker_active_first",
+            Self::ModelInPlace => "labs.model_in_place",
         }
     }
 
@@ -409,6 +415,9 @@ impl Feature {
                 "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
             }
             Self::PickerActiveFirst => "The speech model picker lists the model you're using first",
+            Self::ModelInPlace => {
+                "Add a speech model file and use it where it is, without copying it, so several accounts can share one file"
+            }
         }
     }
 
@@ -452,6 +461,7 @@ impl Feature {
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends,
             Self::OutputFixes => settings.labs.output_fixes,
             Self::PickerActiveFirst => settings.labs.picker_active_first,
+            Self::ModelInPlace => settings.labs.model_in_place,
         }
     }
 
@@ -493,6 +503,7 @@ impl Feature {
             &mut labs.stop_when_call_ends,
             &mut labs.output_fixes,
             &mut labs.picker_active_first,
+            &mut labs.model_in_place,
         ]
     }
 
@@ -535,6 +546,7 @@ impl Feature {
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends = on,
             Self::OutputFixes => settings.labs.output_fixes = on,
             Self::PickerActiveFirst => settings.labs.picker_active_first = on,
+            Self::ModelInPlace => settings.labs.model_in_place = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
