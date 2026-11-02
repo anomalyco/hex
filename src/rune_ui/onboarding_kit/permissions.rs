@@ -12,7 +12,9 @@
 //!   Settings. Then the Hex row lifts cleanly out of that guide into an
 //!   expanding slot in System Settings' Accessibility list.
 
-use rune::{Anim, Color, El, Spring, TextStyle, Transition, col, el, icon, row, text};
+use rune::{
+    Anim, Color, El, MotionIntent, Spring, TextStyle, Transition, col, el, icon, row, text,
+};
 use rune_kit::{Button, ButtonVariant, glyphs};
 
 use super::super::controls::{Paint, PushSize};
@@ -228,6 +230,7 @@ fn microphone_stage(p: Paint, e: f64, mic: PermState, reduced: bool) -> El {
     let k = p.k;
     let card = col()
         .key("setup-card")
+        .motion_intent(MotionIntent::BOUNCE)
         .absolute(0.0, 0.0)
         .w(COL_W)
         .radius(k.radius.lg)

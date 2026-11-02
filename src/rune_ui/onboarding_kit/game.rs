@@ -22,8 +22,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use rune::{
-    Anim, Color, Cx, El, Playground, ScrollSpec, Spring, Story, TextEdit, TextStyle, Transition,
-    Tx, col, effect, el, row, text,
+    Anim, Color, Cx, El, MotionIntent, Playground, ScrollSpec, Spring, Story, TextEdit, TextStyle,
+    Transition, Tx, col, effect, el, row, text,
 };
 use rune_kit::{Button, ButtonVariant, TextInput};
 
@@ -1115,6 +1115,7 @@ fn render<S: 'static>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<'_,
     let mut world = el()
         .key("world")
         .size(STAGE_W, STAGE_H)
+        .motion_intent(MotionIntent::JIGGLE)
         .offset(shake[0], shake[1])
         .rotate(tilt)
         .offset_motion(Anim::INSTANT)

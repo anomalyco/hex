@@ -2,7 +2,7 @@
 //! so a caret can sit mid-line while someone fixes a typo, and words flying
 //! in know the slot they land in.
 
-use rune::{El, TextStyle, el, text};
+use rune::{El, MotionIntent, TextStyle, el, text};
 
 use super::super::controls::Paint;
 use super::cards::{CHAT_REPLY_W, FIELD_FONT, FIELD_LINE, REPLY_W};
@@ -148,7 +148,8 @@ impl Field {
             .key(key.to_string())
             .w(self.width)
             .h(lines as f32 * self.line)
-            .instant_changes();
+            .instant_changes()
+            .motion_intent(MotionIntent::TYPING);
         for (i, (start, end)) in self.wrap(reply).into_iter().enumerate() {
             out = out.child(
                 text(reply[start..end].to_string())

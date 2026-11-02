@@ -6,8 +6,8 @@
 //! click of the user's own opens it sooner.
 
 use rune::{
-    Anim, Cursor, El, LineCap, Path, Shape, Spring, SpringPair, TextStyle, Transition, canvas, col,
-    el, row, text,
+    Anim, Cursor, El, LineCap, MotionIntent, Path, Shape, Spring, SpringPair, TextStyle,
+    Transition, canvas, col, el, row, text,
 };
 
 use super::super::controls::Paint;
@@ -99,6 +99,7 @@ pub(crate) fn launch_row(p: Paint, s: &Onboard, since: f64) -> El {
     };
     let badge = el()
         .key("badge")
+        .motion_intent(MotionIntent::BOUNCE)
         .h(18.0)
         .min_w(18.0)
         .px(5.0)

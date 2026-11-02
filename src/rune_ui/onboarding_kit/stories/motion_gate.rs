@@ -5,7 +5,7 @@
 //! the same variables: `MOTION_GATE=<cell part>`, `MOTION_GATE_OUT`,
 //! `MOTION_GATE_DUMP` and `MOTION_GATE_SHEET`.
 
-use rune::motion_gate::{self, Allow, Job, Recording, Run};
+use rune::motion_gate::{self, AllowRow, Job, Recording, Run};
 use rune::render::{Gpu, Offscreen, Renderer};
 use rune::text::TextSystem;
 use rune::{Env, Runtime};
@@ -14,9 +14,12 @@ use super::*;
 
 const HZ: f64 = 60.0;
 
-/// Findings that are the design, each with its reason.
-const ALLOW: &[Allow] = &[
-    (
+/// Findings that are the design, each with its reason, scoped to the cells
+/// they happen in and capped at how many they cover. Authored bounces,
+/// kicks, shakes and typing are marked where they're written
+/// (`El::motion_intent`), so only shared-element hand-offs stay here.
+const ALLOW: &[AllowRow] = &[
+    AllowRow::new(
         "never-settles",
         "",
         "",
@@ -24,172 +27,90 @@ const ALLOW: &[Allow] = &[
     ),
     // Shared-element hand-offs: the element taking over sits in the one
     // leaving's place on the same frame.
-    (
+    AllowRow::new(
         "pop-out",
         "download-progress-pill",
-        "",
+        "entrance|parks",
         "flies up as the top bar's pill",
-    ),
-    (
-        "pop-out",
-        "download-pill-shell",
-        "almost-ready",
-        "flies down as the bar",
-    ),
-    (
+    )
+    .max(6),
+    AllowRow::new(
         "pop-out",
         "download-bar",
         "sketch",
         "flies up as the top bar's pill",
-    ),
-    (
+    )
+    .max(3),
+    AllowRow::new(
+        "pop-out",
+        "download-pill-shell",
+        "almost-ready",
+        "flies down as the bar",
+    )
+    .max(3),
+    AllowRow::new(
         "overshoot",
         "track/fill",
         "almost-ready",
         "fills while the bar it rides lands",
-    ),
-    (
+    )
+    .max(3),
+    AllowRow::new(
         "pop-out",
         "card/faces",
         "island",
         "fly into the conversation's header",
-    ),
-    (
+    )
+    .max(6),
+    AllowRow::new(
         "pop-out",
         "top/title",
         "island",
         "flies into the conversation's header",
-    ),
-    (
+    )
+    .max(6),
+    AllowRow::new(
         "pop-out",
         "bottom/preview",
         "island",
         "flies into the thread as Jay's question",
-    ),
-    (
+    )
+    .max(6),
+    AllowRow::new(
         "pop-in",
         "stage/card",
         "island",
         "its parts fly in and a plate grows under them",
-    ),
-    (
+    )
+    .max(6),
+    AllowRow::new(
         "pop-out",
         "bubble/surface",
         "island",
         "the question lands on its own bubble",
-    ),
-    (
+    )
+    .max(6),
+    AllowRow::new(
         "overshoot",
         "bubble/msg",
         "island",
         "hidden while its preview flies over",
-    ),
-    (
-        "reversal",
-        "stage/plate",
-        "island",
-        "grows into the card, then empties",
-    ),
-    (
-        "jerk",
-        "stage/plate",
-        "island",
-        "its width leads, then its height",
-    ),
-    // Pops by design.
-    (
-        "overshoot",
-        "badge",
-        "",
-        "the badge pops as each message lands",
-    ),
-    (
-        "reversal",
-        "badge",
-        "",
-        "the badge pops as each message lands",
-    ),
-    (
-        "jiggle",
-        "badge/count",
-        "",
-        "the badge pops as each message lands",
-    ),
-    ("reversal", "bubble/tap", "words", "tapbacks bounce on"),
-    ("jiggle", "bubble/tap", "words", "tapbacks bounce on"),
-    (
-        "reversal",
-        "setup-card",
-        "almost-ready",
-        "the granted card bumps, then lifts away",
-    ),
-    (
-        "jiggle",
-        "setup-card",
-        "almost-ready",
-        "the granted card bumps, then lifts away",
-    ),
-    (
-        "jiggle",
-        "stage/world",
-        "",
-        "the game shakes when a card burns",
-    ),
-    // The words shooting out of the field and bursting on the cards.
-    (
-        "overshoot",
-        "words/",
-        "",
-        "the words fly and land with a kick",
-    ),
-    (
-        "reversal",
-        "words/",
-        "",
-        "the words fly and land with a kick",
-    ),
-    ("jerk", "words/", "", "the words launch"),
-    ("cut-exit", "words/", "", "the words burst on the cards"),
-    ("pop-out", "words/", "", "the words burst on the cards"),
-    // Typing, which moves in steps.
-    ("jump", "keyboard/cap-", "", "a key goes down"),
-    ("jump", "typed/", "", "a letter is typed"),
-    (
-        "pop-out",
-        "typed/caret",
-        "",
-        "the caret leaves with the field",
-    ),
-    (
-        "pop-in",
-        "typed/placeholder",
-        "",
-        "an empty field shows its placeholder",
-    ),
-    (
-        "pop-out",
-        "typed/placeholder",
-        "",
-        "the first letter replaces the placeholder",
-    ),
-    (
-        "pop-in",
-        "field/typed",
-        "with-hex",
-        "the first word replaces the placeholder",
-    ),
-    (
-        "pop-out",
-        "field/locked",
-        "with-hex",
-        "the first word replaces the placeholder",
-    ),
-    (
+    )
+    .max(6),
+    AllowRow::new(
         "appear-then-jump",
-        "bubble",
-        "",
+        "thread/hex-bubble",
+        "words",
         "a sent line arrives whole and the thread makes room",
-    ),
+    )
+    .max(3),
+    AllowRow::new(
+        "appear-then-jump",
+        "thread/sent-bubble",
+        "handoff",
+        "a sent line arrives whole and the thread makes room",
+    )
+    .max(3),
 ];
 
 /// The story as the playground opens it, before Play.
@@ -369,7 +290,7 @@ fn cells() -> Vec<(String, Job)> {
 
 #[test]
 fn the_first_run_moves_cleanly() {
-    motion_gate::gate(cells(), ALLOW);
+    motion_gate::gate_rows(cells(), ALLOW);
 }
 
 /// The window drawn as it shows now, 1× sRGB RGBA.

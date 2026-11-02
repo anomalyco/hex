@@ -17,7 +17,7 @@
 //! story freezes.
 
 use crate::desktop::i18n::tr;
-use rune::{Anim, El, Spring, SpringPair, TextStyle, Transition, col, el, row, text};
+use rune::{Anim, El, MotionIntent, Spring, SpringPair, TextStyle, Transition, col, el, row, text};
 
 use super::super::controls::Paint;
 use super::cards::{
@@ -490,8 +490,14 @@ fn settled(t: f64, response: f64) -> f32 {
 /// straight line. It lands exactly on the conversation's own surface.
 /// Otherwise it is there but empty: taking it out remounts the card.
 fn plate(p: Paint, age: Option<f64>) -> El {
+    // It grows out and empties again, its width leading.
+    let intent = MotionIntent::RECOIL | MotionIntent::IMPULSE;
     let Some(age) = age else {
-        return el().key("plate").absolute(0.0, 0.0).instant_changes();
+        return el()
+            .key("plate")
+            .absolute(0.0, 0.0)
+            .instant_changes()
+            .motion_intent(intent);
     };
     let wide = settled(age, WIDTH_SPRING);
     let tall = settled(age, OPEN_SPRING.response() as f64);
@@ -508,6 +514,7 @@ fn plate(p: Paint, age: Option<f64>) -> El {
             .absolute(CENTRE_X - w * 0.5, y - h * 0.5)
             .size(w, h)
             .instant_changes()
+            .motion_intent(intent)
             .transition(Transition::identity()),
     )
 }
@@ -612,7 +619,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .offset(shudder[0], kb_shift + shudder[1])
         .size(kw, kh)
         .offset_motion(Anim::INSTANT)
-        .child(kb_el);
+        .child(kb_el.motion_intent(MotionIntent::STEP));
 
     // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
     // unfolds as it rises into the space the keys melted out of, above `⌥`.
@@ -1275,7 +1282,9 @@ fn words(p: Paint, s: &Onboard, nudge: [f32; 2]) -> El {
         .key("words")
         .absolute(0.0, 0.0)
         .size(STAGE_W, STAGE_H)
-        .instant_changes();
+        .instant_changes()
+        // They fly out of the field, land with a kick and burst on the cards.
+        .motion_intent(MotionIntent::KICK | MotionIntent::CUT);
     let reduced = s.reduced.get();
     let origin = field_origin();
     let font = FIELD_FONT.lh(super::cards::FIELD_LINE);

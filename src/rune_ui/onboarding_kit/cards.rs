@@ -3,8 +3,8 @@
 //! theme tokens.
 
 use rune::{
-    Anim, Color, El, LineCap, Path, Shape, Spring, SpringPair, TextStyle, Transition, canvas, col,
-    el, row, text,
+    Anim, Color, El, LineCap, MotionIntent, Path, Shape, Spring, SpringPair, TextStyle, Transition,
+    canvas, col, el, row, text,
 };
 
 use super::super::controls::{KeySize, Paint, key_tray, keycap};
@@ -433,7 +433,11 @@ fn face_slot(p: Paint, sender: Sender<'_>) -> El {
         sender if sender.last => {
             super::inbox::face(p, sender.name, sender.colour, FACE).key("face")
         }
-        _ => el().key("face").size(FACE, FACE),
+        _ => el()
+            .key("face")
+            .size(FACE, FACE)
+            .radius(FACE * 0.5)
+            .border(p.hair, Color::TRANSPARENT),
     }
 }
 
@@ -710,7 +714,8 @@ fn tapbacks(p: Paint, side: Side, taps: &[Glyph], reduced: bool) -> Vec<El> {
             let top = -TAP_UP - TAP_MID;
             let badge = canvas(tapback(p, glyph, side, false, i == newest))
                 .key(format!("tap{i}"))
-                .size(TAP_BOX, TAP_BOX);
+                .size(TAP_BOX, TAP_BOX)
+                .motion_intent(MotionIntent::BOUNCE);
             let badge = match side {
                 Side::You => badge.pin(Some(out), Some(top), None, None),
                 Side::Them => badge.pin(None, Some(top), Some(out), None),
@@ -1100,7 +1105,11 @@ fn field(
                 body
             }
         }
-        Reply::Locked(why) => text(why).key("locked").font(k.ty.small).color(p.faint()),
+        Reply::Locked(why) => text(why)
+            .key("locked")
+            .font(k.ty.small)
+            .color(p.faint())
+            .motion_intent(MotionIntent::CUT),
     };
     let trailing = match reply {
         Reply::Hearing { meter, .. } => Some(mic_level(p, "mic", 16.0, meter.0, meter.1, true)),
@@ -1152,6 +1161,7 @@ const PLACEHOLDER_X: f32 = 2.5;
 fn placeholder(p: Paint, copy: &str) -> El {
     text(copy)
         .key("placeholder")
+        .motion_intent(MotionIntent::CUT)
         .font(FIELD_FONT.lh(FIELD_LINE))
         .color(p.faint())
         .grow(1.0)
