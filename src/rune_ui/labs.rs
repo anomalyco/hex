@@ -374,6 +374,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Show a summary of your retained dictations at the top of History, with hex history stats"),
     ));
     rows.push(row(
+        Feature::KeepRecordings,
+        &HINTS,
+        tr("Keep recordings"),
+        tr("Keep the audio of dictations saved to History, so you can transcribe them again with another model"),
+    ));
+    rows.push(row(
         Feature::OutputFixes,
         &BOOK,
         tr("Fix results in Output"),
@@ -483,6 +489,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::ModelInPlace => "lab-model-in-place",
         Feature::PickerDownloaded => "lab-picker-downloaded",
         Feature::SectionKeyAlone => "lab-section-key",
+        Feature::KeepRecordings => "lab-keep-recordings",
     }
 }
 

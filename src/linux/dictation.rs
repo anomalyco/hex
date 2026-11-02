@@ -32,6 +32,8 @@ const TAIL_STALL_GRACE: Duration = Duration::from_millis(100);
 struct Job {
     transcript: PendingTranscript,
     audio_ms: u64,
+    /// The clip, kept for History while Labs › Keep recordings is on.
+    recording: Option<crate::history::Recording>,
     /// `hex dictation stop --print`: the text goes here, never pasted.
     print: Option<PrintReply>,
     /// Dictate without processing: paste the transcript as heard.
@@ -178,6 +180,7 @@ impl DictationOutput {
     /// Processes (unless `raw`) and pastes one transcript, or only
     /// processes it when there is no paster (a printing stop), then records
     /// it.
+    #[allow(clippy::too_many_arguments)]
     fn deliver(
         &self,
         raw_text: String,
@@ -186,6 +189,7 @@ impl DictationOutput {
         audio_ms: u64,
         inference_ms: u64,
         started: Instant,
+        recording: Option<crate::history::Recording>,
     ) -> Result<String> {
         let context = crate::linux::context::capture();
         let processed = if raw {
@@ -213,6 +217,7 @@ impl DictationOutput {
                 audio_ms,
                 inference_ms,
                 started.elapsed().as_millis() as u64,
+                recording,
             );
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
@@ -340,6 +345,7 @@ pub(crate) fn run(
                         job.audio_ms,
                         inference_ms,
                         started,
+                        job.recording.take(),
                     );
                 }
                 let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
@@ -350,6 +356,7 @@ pub(crate) fn run(
                     job.audio_ms,
                     inference_ms,
                     started,
+                    job.recording.take(),
                 )
             })()
             .map_err(|error| format!("{error:#}"));
@@ -1063,9 +1070,13 @@ fn submit_capture(
         }
         Finish::Transcribe(mut clip) => {
             let audio_ms = clip.duration_ms();
+            let stream = clip.take_stream();
+            let samples = clip.into_transcription_samples();
+            let recording = crate::history::Recording::keep(&samples);
             let job = OutputJob::Dictation(Job {
-                transcript: engine.finish(clip.take_stream(), clip.into_transcription_samples())?,
+                transcript: engine.finish(stream, samples)?,
                 audio_ms,
+                recording,
                 print,
                 raw,
             });

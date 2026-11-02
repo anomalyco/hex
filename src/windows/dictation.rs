@@ -27,6 +27,8 @@ const TAIL_STALL_GRACE: Duration = Duration::from_millis(100);
 struct Job {
     transcript: PendingTranscript,
     audio_ms: u64,
+    /// The clip, kept for History while Labs › Keep recordings is on.
+    recording: Option<crate::history::Recording>,
     /// Dictate without processing: paste the transcript as heard.
     raw: bool,
     /// `hex dictation stop --print`: the text goes here, never pasted.
@@ -864,6 +866,7 @@ fn process_dictation_job(
                 job.audio_ms,
                 inference_ms,
                 started.elapsed().as_millis() as u64,
+                job.recording.take(),
             );
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
@@ -1097,9 +1100,13 @@ fn submit_capture(
         }
         Finish::Transcribe(mut clip) => {
             let audio_ms = clip.duration_ms();
+            let stream = clip.take_stream();
+            let samples = clip.into_transcription_samples();
+            let recording = crate::history::Recording::keep(&samples);
             let job = OutputJob::Dictation(Job {
-                transcript: engine.finish(clip.take_stream(), clip.into_transcription_samples())?,
+                transcript: engine.finish(stream, samples)?,
                 audio_ms,
+                recording,
                 print,
                 raw,
             });

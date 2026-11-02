@@ -81,6 +81,7 @@ pub fn history_draft(
     audio_ms: u64,
     inference_ms: u64,
     total_ms: u64,
+    recording: Option<crate::history::Recording>,
 ) -> crate::history::HistoryDraft {
     crate::history::HistoryDraft {
         kind: crate::history::HistoryKind::Dictation,
@@ -97,6 +98,7 @@ pub fn history_draft(
         audio_ms,
         inference_ms,
         total_ms,
+        recording,
     }
 }
 

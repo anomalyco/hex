@@ -415,6 +415,8 @@ pub struct LabsSettings {
     pub picker_downloaded: bool,
     /// The ISO § key may be a shortcut on its own (Linux, issue 1050).
     pub section_key_alone: bool,
+    /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
+    pub keep_recordings: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -454,6 +456,7 @@ impl Default for LabsSettings {
             model_in_place: false,
             picker_downloaded: false,
             section_key_alone: false,
+            keep_recordings: false,
         }
     }
 }
