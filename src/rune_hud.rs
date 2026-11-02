@@ -567,7 +567,9 @@ impl Target {
 }
 
 struct HudCompositor {
-    gpu: Option<Painter>,
+    /// The painter and the device its buffers live on: an overlay shown
+    /// again can draw on another device (#982).
+    gpu: Option<(wgpu::Device, Painter)>,
     animating: Arc<AtomicBool>,
 }
 
@@ -605,10 +607,14 @@ impl Compositor<Hud> for HudCompositor {
             drop(clear_pass(f.encoder, f.target));
             return;
         };
-        if self.gpu.as_ref().is_none_or(|gpu| gpu.format != f.format) {
-            self.gpu = Some(Painter::new(f.device, f.format));
+        if self
+            .gpu
+            .as_ref()
+            .is_none_or(|(device, gpu)| device != f.device || gpu.format != f.format)
+        {
+            self.gpu = Some((f.device.clone(), Painter::new(f.device, f.format)));
         }
-        let gpu = self.gpu.as_ref().expect("created above");
+        let (_, gpu) = self.gpu.as_ref().expect("created above");
         let uniforms = gpu.write(&drawn, layout, target, |buffer, data| {
             f.write_buffer(buffer, 0, data)
         });
