@@ -148,6 +148,7 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 Default::default(),
                 // Only shortcuts drive a foreground listener.
                 std::sync::mpsc::channel().1.into(),
+                Default::default(),
                 std::sync::mpsc::channel().1,
             )
         }

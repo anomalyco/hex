@@ -218,7 +218,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         })
         .map_err(|_| eyre!("the Hex runtime already started"))?;
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
-    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls);
+    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls, None);
     let quit = window.clone();
     let runtime_tray = tray.clone();
     let runtime_shared = shared.clone();

@@ -114,8 +114,8 @@ pub struct LocalApiOptions {
     pub developer_control: Option<SyncSender<crate::control::developer_control::DeveloperCall>>,
     /// The `hex` control commands (`POST /control`).
     pub control: Option<SyncSender<crate::control::ControlCall>>,
-    /// Running-app dictation (`/dictations`), which only the macOS
-    /// recognition loop drives so far.
+    /// Running-app dictation (`/dictations`): the macOS recognition loop or
+    /// the Linux listener.
     pub dictation_control: Option<dictation::Control>,
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
@@ -141,6 +141,7 @@ impl LocalApi {
     pub fn start_for_app(
         event_path: &Path,
         control: SyncSender<crate::control::ControlCall>,
+        dictation_control: Option<dictation::Control>,
     ) -> Option<Self> {
         let started = EventLog::create(event_path)
             .map_err(Into::into)
@@ -149,6 +150,7 @@ impl LocalApi {
                     events,
                     LocalApiOptions {
                         control: Some(control),
+                        dictation_control,
                         ..Default::default()
                     },
                 )
@@ -1366,10 +1368,10 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
+    use crate::dictation::service::DictationControl;
 
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     /// How long a test waits on another thread before failing instead of hanging.
-    #[cfg(target_os = "macos")]
     const TEST_WAIT: Duration = Duration::from_secs(5);
 
     #[test]
@@ -1607,7 +1609,22 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    /// The next `/dictations` control the capture loop receives.
     #[cfg(target_os = "macos")]
+    fn next_dictation_control(
+        controls: &mpsc::Receiver<crate::recognition::RecognitionControl>,
+    ) -> DictationControl {
+        match controls.recv_timeout(TEST_WAIT).unwrap() {
+            crate::recognition::RecognitionControl::Dictation(control) => control,
+            control => panic!("expected a dictation control, got {control:?}"),
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn next_dictation_control(controls: &mpsc::Receiver<DictationControl>) -> DictationControl {
+        controls.recv_timeout(TEST_WAIT).unwrap()
+    }
+
     #[test]
     fn authenticated_running_app_dictation_streams_observations_and_returns_raw_text() {
         let directory = temp_directory();
@@ -1625,35 +1642,35 @@ mod tests {
         let token = api.document.token.clone();
         let (attached, audio_attached) = mpsc::channel();
         let controller = thread::spawn(move || {
-            let crate::recognition::RecognitionControl::StartDictation {
+            let DictationControl::Start {
                 source,
                 owner_token,
                 levels,
                 reply,
-            } = controls.recv_timeout(TEST_WAIT).unwrap()
+            } = next_dictation_control(&controls)
             else {
                 panic!("expected dictation start")
             };
             assert_eq!(source, "tp7");
             assert!(owner_token.starts_with("hex_"));
             reply
-                .send(Ok(crate::recognition::ProgrammaticDictationStart {
+                .send(Ok(crate::dictation::service::ProgrammaticDictationStart {
                     id: 7,
                     sample_rate: 48_000,
                 }))
                 .unwrap();
             levels
-                .send(crate::recognition::DictationLevel {
+                .send(crate::dictation::service::DictationLevel {
                     rms_db: -24.5,
                     peak_db: -8.0,
                 })
                 .unwrap();
 
-            let crate::recognition::RecognitionControl::HeartbeatDictation {
+            let DictationControl::Heartbeat {
                 id,
                 owner_token: heartbeat_token,
                 reply,
-            } = controls.recv_timeout(TEST_WAIT).unwrap()
+            } = next_dictation_control(&controls)
             else {
                 panic!("expected dictation heartbeat")
             };
@@ -1661,12 +1678,12 @@ mod tests {
             assert_eq!(heartbeat_token, owner_token);
             reply.send(Ok(())).unwrap();
 
-            let crate::recognition::RecognitionControl::AttachDictationAudio {
+            let DictationControl::AttachAudio {
                 id,
                 owner_token: audio_token,
                 audio,
                 reply,
-            } = controls.recv_timeout(TEST_WAIT).unwrap()
+            } = next_dictation_control(&controls)
             else {
                 panic!("expected dictation audio subscription")
             };
@@ -1674,24 +1691,24 @@ mod tests {
             assert_eq!(audio_token, owner_token);
             reply.send(Ok(())).unwrap();
             audio
-                .send(crate::recognition::DictationAudioChunk {
+                .send(crate::dictation::service::DictationAudioChunk {
                     samples: vec![0.25, -0.5],
                 })
                 .unwrap();
             attached.send(()).unwrap();
 
-            let crate::recognition::RecognitionControl::FinishDictation {
+            let DictationControl::Finish {
                 id,
                 owner_token: finish_token,
                 reply,
-            } = controls.recv_timeout(TEST_WAIT).unwrap()
+            } = next_dictation_control(&controls)
             else {
                 panic!("expected dictation finish")
             };
             assert_eq!(id, 7);
             assert_eq!(finish_token, owner_token);
             reply
-                .send(Ok(crate::recognition::ProgrammaticDictationResult {
+                .send(Ok(crate::dictation::service::ProgrammaticDictationResult {
                     transcript: "raw words".into(),
                     duration_ms: 875,
                 }))
@@ -2239,7 +2256,6 @@ mod tests {
     }
 
     /// Like `raw_request_bytes`, signalling once the response contains `marker`.
-    #[cfg(target_os = "macos")]
     fn raw_request_signalling(
         port: u16,
         request: &str,
@@ -2265,7 +2281,6 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     fn request_with_dictation_token(
         port: u16,
         token: &str,
@@ -2281,7 +2296,6 @@ mod tests {
         )
     }
 
-    #[cfg(target_os = "macos")]
     fn request_bytes(port: u16, token: &str, owner_token: &str, path: &str) -> Vec<u8> {
         raw_request_bytes(
             port,
