@@ -542,16 +542,20 @@ Hex's own windows                        // capture.own-windows
 │   ├── Other recorders -> the capsule, picker, and ink are left out
 │   │   (sharingType none) while shown; the dictation HUD and meeting
 │   │   capsules show
-│   │   └── Hidden (prewarmed, alpha zero on every Space) -> sharingType
-│   │       readOnly once the hide finishes, so Mission Control's Space
-│   │       thumbnails stay drawn (Rune's prewarmed panels do this)
+│   │   └── Hidden -> ordered out of every Space once the hide finishes,
+│   │       before sharingType returns to readOnly; prewarming keeps the
+│   │       surface ready but leaves no invisible panel ordered in. This
+│   │       avoids relying on macOS restoring sharing after exclusion
 │   ├── Show in screen recordings on -> every recorder, Hex's captures
 │   │   included, shows all of it (sharingType readOnly, no SCK exclusions);
 │   │   still never in the window log or the target. Rune's
 │   │   OverlayHandle::set_exclude_from_capture flips open windows, and the
 │   │   sampler rebuilds its filter mid-recording (OwnWindows::recorded) and
 │   │   the recording's (capture-core's Recording::set_exclusions)
-│   └── Not proven natively end to end yet
+│   └── Rune's presence tests check ordering and sharing together, including
+│       stale fade completions and setting changes. Its native `spaces_probe`
+│       checks this process's WindowServer ordering. Mission Control's actual
+│       thumbnail report and third-party recording exclusion remain unverified
 │   └── Click-through chrome (the full-screen ink overlay, the capsule's
 │       640×424 panel outside its pill) -> clicks there count for the app
 │       beneath; only the pill's (capture_host::set_capsule_pill) are Hex's
