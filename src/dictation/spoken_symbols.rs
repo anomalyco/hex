@@ -1,10 +1,13 @@
 //! Labs › Spoken symbols: whole spoken words for punctuation and symbols
 //! become the characters, joined to their neighbours as written text joins
 //! them: "hashtag release" is "#release", "my underscore variable" is
-//! "my_variable", and "done comma thanks" is "done, thanks". Matching
-//! ignores ASCII case and needs word boundaries, so "commas" or "hashtags"
-//! stay as they are. The commas, periods, and spaces a model puts around a
+//! "my_variable", and "done comma thanks" is "done, thanks". Spanish words
+//! ("arroba", "guion bajo", "punto y coma", …) work too. Matching ignores
+//! case and Spanish accents and needs word boundaries, so "commas" or
+//! "hashtags" stay as they are. The commas, periods, and spaces a model puts around a
 //! spoken symbol go with it.
+
+use super::spoken_formatting::fold;
 
 /// Which neighbour a symbol attaches to.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -27,6 +30,12 @@ const SYMBOLS: &[(&[&str], char, Join)] = &[
     (&["comma"], ',', Join::Previous),
     (&["semicolon"], ';', Join::Previous),
     (&["colon"], ':', Join::Previous),
+    (&["arroba"], '@', Join::Next),
+    (&["guion", "bajo"], '_', Join::Both),
+    (&["guion"], '-', Join::Both),
+    (&["punto", "y", "coma"], ';', Join::Previous),
+    (&["coma"], ',', Join::Previous),
+    (&["dos", "puntos"], ':', Join::Previous),
 ];
 
 /// `transcript` with its spoken symbols applied.
@@ -65,7 +74,7 @@ fn symbol_at(chars: &[char], start: usize) -> Option<(char, Join, usize)> {
             }
             for expected in word.chars() {
                 match chars.get(position) {
-                    Some(c) if c.to_ascii_lowercase() == expected => position += 1,
+                    Some(&c) if fold(c) == expected => position += 1,
                     _ => return None,
                 }
             }
@@ -150,8 +159,23 @@ mod tests {
     }
 
     #[test]
+    fn spanish_words_become_symbols_with_or_without_accents() {
+        assert_eq!(apply("escríbeme a arroba casa"), "escríbeme a @casa");
+        assert_eq!(apply("mi guion bajo variable"), "mi_variable");
+        assert_eq!(apply("mi Guión Bajo variable"), "mi_variable");
+        assert_eq!(apply("bien guión conocido"), "bien-conocido");
+        assert_eq!(apply("uno punto y coma dos"), "uno; dos");
+        assert_eq!(apply("hola coma gracias"), "hola, gracias");
+        assert_eq!(apply("la lista dos puntos manzanas"), "la lista: manzanas");
+        assert_eq!(apply("hola comma gracias"), "hola, gracias");
+    }
+
+    #[test]
     fn other_words_are_left_alone() {
         for text in [
+            "comas",
+            "guiones largos",
+            "un punto y aparte",
             "commas",
             "slashed prices",
             "hashtags everywhere",
