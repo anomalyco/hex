@@ -1874,8 +1874,10 @@ mod tests {
 
     /// The call-ended, ready, and automatic-recording capsules against
     /// `tests/golden/meeting-capsule-*.png`; `HEX_UPDATE_GOLDENS=1` rewrites
-    /// them. Without a GPU adapter it skips.
+    /// them. Without a GPU adapter it skips. Like every golden it is checked
+    /// on Linux only: glyph coverage on Metal differs past the tolerance.
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "goldens are checked on Linux")]
     fn panel_goldens() {
         let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
             eprintln!("skipping meeting capsule golden: no GPU adapter");
