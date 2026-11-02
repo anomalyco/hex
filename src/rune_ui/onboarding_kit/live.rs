@@ -505,7 +505,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
 
     // The model download.
     live.failed = !choice_installed && !preparing && (errored || failure.is_some());
-    live.progress = (preparing && !choice_installed).then(|| match live.progress {
+    live.progress = (preparing && !choice_installed).then_some(match live.progress {
         Some((bytes, since)) if bytes == downloaded_bytes => (bytes, since),
         _ => (downloaded_bytes, now),
     });
