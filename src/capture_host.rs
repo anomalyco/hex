@@ -2336,7 +2336,10 @@ fn as_pen(event: scrawl_capture::capture::InputEvent) -> scrawl_capture::capture
 
 /// A pointer move on the drawing overlay, at `x`, `y` in its points;
 /// `scale` is its pixels per point (Linux). The capture's target becomes
-/// the recorded screen in points, so strokes land where they were drawn.
+/// the recorded screen in points, so strokes land where they were drawn:
+/// the portal's logical size when it gives one, since a fractional scale
+/// (1.5, 1.33) reaches the overlay rounded up to a whole number, which
+/// would shrink the target and pin strokes past it to its edge.
 #[cfg(target_os = "linux")]
 pub fn draw(x: f32, y: f32, scale: f32) {
     if !drawing() {
@@ -2346,7 +2349,10 @@ pub fn draw(x: f32, y: f32, scale: f32) {
         && scale > 0.0
         && let Some(source) = ink_source()
     {
-        let area = [width as f32 / scale, height as f32 / scale];
+        let area = scrawl_capture::capture::recorded_screen_points().map_or(
+            [width as f32 / scale, height as f32 / scale],
+            |(width, height)| [width as f32, height as f32],
+        );
         let mut frame = source
             .telemetry
             .target_frame
