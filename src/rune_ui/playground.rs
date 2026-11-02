@@ -127,19 +127,10 @@ const PATHS: &[(&str, &str)] = &[
         "language-fallback",
         "Window/Transcription model/Language fallback",
     ),
-    ("shortcut-explainer", "Window/Shortcut explainer/Hold"),
-    (
-        "shortcut-explainer-toggle",
-        "Window/Shortcut explainer/Toggle",
-    ),
-    (
-        "shortcut-explainer-chord",
-        "Window/Shortcut explainer/Chord",
-    ),
-    (
-        "shortcut-explainer-motion",
-        "Window/Shortcut explainer/Looping",
-    ),
+    ("shortcut-mode", "Window/Shortcut mode/Modifier"),
+    ("shortcut-mode-key", "Window/Shortcut mode/Key"),
+    ("shortcut-mode-chord", "Window/Shortcut mode/Chord"),
+    ("shortcut-mode-motion", "Window/Shortcut mode/Looping"),
     ("sound-sets", "Window/Sounds/Sheet"),
     ("sound-sets-playing", "Window/Sounds/Playing"),
     ("output", "Window/Output/Steps"),

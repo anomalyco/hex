@@ -230,15 +230,15 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
 #[test]
 fn each_panes_advanced_fold_starts_closed_and_stays_its_own() {
     let mut rt = runtime("portal", true, TALL_SIZE);
-    assert!(rt.find("double-tap-only").is_none(), "closed at first");
+    assert!(
+        rt.find("avoid-bluetooth-microphone").is_none(),
+        "closed at first"
+    );
     tap(&mut rt, "advanced-toggle");
     tap(&mut rt, "advanced-toggle");
     tap(&mut rt, "advanced-toggle");
-    rt.state.settings.double_tap_lock = true;
-    rt.state.settings.double_tap_only = true;
-    rt.invalidate();
     settle(&mut rt);
-    assert!(rt.find("double-tap-only").is_some());
+    assert!(rt.find("avoid-bluetooth-microphone").is_some());
     assert_eq!(rt.state.advanced, vec![Pane::General]);
 }
 
@@ -672,7 +672,7 @@ fn every_scene_stops_asking_for_frames() {
         for _ in 0..150 {
             rt.frame(1.0 / 30.0);
         }
-        if *scene != "shortcut-explainer-motion" {
+        if *scene != "shortcut-mode-motion" {
             moving.extend(
                 rt.elements()
                     .into_iter()
@@ -890,19 +890,21 @@ fn a_press_in_a_sidebar_gap_selects_the_nearest_item() {
 fn a_settings_row_shows_no_hover_or_press_of_its_own() {
     let mut rt = runtime("portal", true, TALL_SIZE);
     open_advanced(&mut rt, Pane::General);
-    let before = rt.state.settings.double_tap_lock;
-    let (x, y) = rt.find("double-tap/lead/copy").expect("the row's title");
+    let before = rt.state.settings.avoid_bluetooth_microphone;
+    let (x, y) = rt
+        .find("avoid-bluetooth-microphone/lead/copy")
+        .expect("the row's title");
     rt.pointer_move(x, y);
     rt.frame(1.0 / 120.0);
-    let row = element(&rt, "double-tap");
+    let row = element(&rt, "avoid-bluetooth-microphone");
     assert_eq!((row.hover, row.fill), (0.0, rune::Color::TRANSPARENT));
     rt.pointer_down(x, y);
     rt.frame(1.0 / 120.0);
-    assert_eq!(element(&rt, "double-tap").press, 0.0);
+    assert_eq!(element(&rt, "avoid-bluetooth-microphone").press, 0.0);
     rt.pointer_up(x, y);
     settle(&mut rt);
     assert_ne!(
-        rt.state.settings.double_tap_lock, before,
+        rt.state.settings.avoid_bluetooth_microphone, before,
         "pressing the row still flips it"
     );
 }
@@ -939,8 +941,8 @@ fn segments_and_switch_tracks_hover_at_once() {
     let mut rt = runtime("portal", true, TALL_SIZE);
     open_advanced(&mut rt, Pane::General);
     let targets = [
-        rt.find("shortcut-mode-control-trigger"),
-        rt.find("double-tap/switch"),
+        rt.find("speech-engine-control-trigger"),
+        rt.find("avoid-bluetooth-microphone/switch"),
     ];
     for (target, name) in targets.into_iter().zip(["select", "switch"]) {
         let (x, y) = target.unwrap_or_else(|| panic!("no {name}"));

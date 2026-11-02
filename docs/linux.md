@@ -289,8 +289,10 @@ unmanaged development Hex instead; without one it forwards to the installed Hex.
 
 Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
 recording, and press the same chord again to finish. Escape never cancels:
-every dictation finishes and pastes. **Double-tap only** waits for two complete taps before
-recording, and **Toggle** mode starts and stops with single presses.
+every dictation finishes and pastes. **Shortcut mode** picks how the shortcut
+triggers: **Hold or double-tap** (the default), **Hold**, **Tap** (starts and
+stops with single presses), or **Double-tap** (waits for two complete taps,
+and needs a shortcut with a key).
 **Ctrl-Alt-V** pastes the last dictation again. Settings shows listener state,
 Start/Stop, and operational errors. Changing a shortcut or a setting the
 listener reads at start temporarily stops listening and restores the previous

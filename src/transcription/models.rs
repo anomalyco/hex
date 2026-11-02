@@ -13,11 +13,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::artifacts::{
-    COHERE_ARTIFACT, COHERE_LANGUAGES, IVRIT_WHISPER_ARTIFACT, NEMOTRON_3_5_ASR_ARTIFACT,
-    NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES, PARAKEET_ULTRA_ARTIFACT,
-    PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT, PARAKEET_V3_ARTIFACT,
-    PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT, SENSEVOICE_ARTIFACT,
-    UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT, WHISPER_ARTIFACT,
+    COHERE_ARTIFACT, COHERE_LANGUAGES, GIGAAM_V3_E2E_RNNT_ARTIFACT, IVRIT_WHISPER_ARTIFACT,
+    NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES,
+    PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT,
+    PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT,
+    SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT,
+    WHISPER_ARTIFACT,
 };
 pub use super::custom_models::CustomModelId;
 pub use super::languages::{LANGUAGES, language_name};
@@ -44,6 +45,7 @@ pub enum TranscriptionModelId {
     UnderdogBark3Clean,
     ParakeetUltra,
     Nemotron35Asr,
+    GigaAmV3,
     AppleSpeech,
     Custom(CustomModelId),
 }
@@ -77,6 +79,7 @@ impl TranscriptionModelId {
             Self::UnderdogBark3Clean => "underdog_bark_3_clean",
             Self::ParakeetUltra => "parakeet_ultra",
             Self::Nemotron35Asr => "nemotron_3_5_asr",
+            Self::GigaAmV3 => "gigaam_v3",
             Self::AppleSpeech => "apple_speech",
             Self::Custom(id) => id.as_str(),
         }
@@ -112,6 +115,7 @@ impl FromStr for TranscriptionModelId {
             "underdog_bark_3_clean" => Ok(Self::UnderdogBark3Clean),
             "parakeet_ultra" => Ok(Self::ParakeetUltra),
             "nemotron_3_5_asr" => Ok(Self::Nemotron35Asr),
+            "gigaam_v3" => Ok(Self::GigaAmV3),
             "apple_speech" => Ok(Self::AppleSpeech),
             _ => CustomModelId::parse(value)
                 .map(Self::Custom)
@@ -532,6 +536,22 @@ pub const MODELS: &[ModelDefinition] = &[
         supports_language_detection: true,
     },
     ModelDefinition {
+        id: TranscriptionModelId::GigaAmV3,
+        name: "GigaAM v3",
+        // On apollo's Vulkan GPU it ran 1.2 to 1.4 times as fast as Parakeet
+        // v3 (the FLEURS Russian test split, and a 10 s clip of it).
+        realtime: "~40x",
+        // FLEURS Russian test, Hex's run (`model_benchmarks`): Parakeet v3
+        // scored 6.52% on the same run and Whisper large-v3-turbo 5.36%.
+        word_error_rate: Some(5.37),
+        streams: false,
+        runtime: ModelRuntime::Gguf(&GIGAAM_V3_E2E_RNNT_ARTIFACT),
+        languages: &["ru"],
+        // Russian only: it has no language input.
+        accepts_language_hint: false,
+        supports_language_detection: false,
+    },
+    ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
         name: "Apple Speech",
         realtime: "On device",
@@ -571,7 +591,7 @@ pub fn all_models() -> Vec<&'static ModelDefinition> {
 pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     use Recommendation::{Fastest, MostAccurate, Recommended, Vocabulary};
     use TranscriptionModelId::{
-        CohereTranscribe, IvritWhisperLargeV3Turbo, ParakeetUnifiedEnglish, ParakeetV3,
+        CohereTranscribe, GigaAmV3, IvritWhisperLargeV3Turbo, ParakeetUnifiedEnglish, ParakeetV3,
         Qwen3Asr06B, SenseVoiceSmall, WhisperLargeV3Turbo,
     };
     let choices: &[(TranscriptionModelId, Recommendation)] = match language {
@@ -610,6 +630,9 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
             (IvritWhisperLargeV3Turbo, Recommended),
             (WhisperLargeV3Turbo, Vocabulary),
         ],
+        // FLEURS Russian test: 5.37% WER against Parakeet v3's 6.52%, and
+        // Whisper turbo's 5.36% at a fifth of its speed (Hex's run).
+        "ru" => &[(GigaAmV3, Recommended), (WhisperLargeV3Turbo, Vocabulary)],
         "vi" => &[
             (Qwen3Asr06B, Recommended),
             (CohereTranscribe, MostAccurate),
@@ -1392,6 +1415,24 @@ mod tests {
     }
 
     #[test]
+    fn russian_recommends_gigaam_without_a_hint() {
+        use Recommendation::{Recommended, Vocabulary};
+        use TranscriptionModelId::{GigaAmV3, WhisperLargeV3Turbo};
+        let russian: Vec<_> = choices_for_runtime("ru")
+            .into_iter()
+            .map(|choice| (choice.model.id, choice.recommendation))
+            .collect();
+        assert_eq!(
+            russian,
+            [(GigaAmV3, Recommended), (WhisperLargeV3Turbo, Vocabulary)]
+        );
+        let gigaam = definition(GigaAmV3);
+        assert_eq!(gigaam.language_choices(), ["ru"]);
+        assert_eq!(gigaam.runtime_language_hint("ru"), None);
+        assert_eq!(gigaam.vocabulary_use(), VocabularyUse::None);
+    }
+
+    #[test]
     fn recommendations_are_language_specific() {
         let english = choices_for_runtime("en");
         assert_eq!(
@@ -1570,6 +1611,7 @@ mod tests {
             ),
             (TranscriptionModelId::ParakeetUltra, "parakeet_ultra"),
             (TranscriptionModelId::Nemotron35Asr, "nemotron_3_5_asr"),
+            (TranscriptionModelId::GigaAmV3, "gigaam_v3"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
         ] {
             assert_eq!(id.as_str(), name);

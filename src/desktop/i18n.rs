@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 mod french;
 mod portuguese;
+mod traditional_chinese;
 
 /// A persisted interface-language code (`None` follows the system) and its
 /// native name.
@@ -18,12 +19,14 @@ pub(crate) type LanguageChoice = (Option<&'static str>, &'static str);
 
 /// The selectable interface languages: persisted code and native name. The
 /// leading `None` entry follows the system display language. Português
-/// (Brasil) and Français have not had a native speaker's review yet.
+/// (Brasil), Français, and 繁體中文 have not had a native speaker's review
+/// yet.
 pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (None, "System"),
     (Some("en"), "English"),
     (Some("pl"), "Polski"),
-    (Some("zh"), "中文"),
+    (Some("zh"), "简体中文"),
+    (Some("zh-Hant"), "繁體中文"),
     (Some("ja"), "日本語"),
     (Some("de"), "Deutsch"),
     (Some("es"), "Español"),
@@ -68,6 +71,9 @@ const ENGLISH: u8 = 255;
 const PORTUGUESE_COLUMN: u8 = 6;
 /// French, kept in its own table ([`french::TRANSLATIONS`]).
 const FRENCH_COLUMN: u8 = 7;
+/// Traditional Chinese, drawn from the Simplified column
+/// ([`traditional_chinese::table`]).
+const TRADITIONAL_CHINESE_COLUMN: u8 = 8;
 
 /// The column for a persisted code; `pt` (any Portuguese system language)
 /// is Brazilian Portuguese, and `fr` any French one.
@@ -75,6 +81,7 @@ fn column_for_code(code: &str) -> u8 {
     match code {
         "pl" => 0,
         "zh" => 1,
+        "zh-Hant" => TRADITIONAL_CHINESE_COLUMN,
         "ja" => 2,
         "de" => 3,
         "es" => 4,
@@ -90,15 +97,35 @@ fn column_for_code(code: &str) -> u8 {
 pub(crate) fn apply(setting: Option<&str>) {
     let code = match setting {
         Some(code) => column_for_code(code),
-        None => column_for_language_tag(&preferred_language()),
+        None => column_for_language_tag(&preferred_locale()),
     };
     set_current(code);
 }
 
-/// The column for a system language tag such as `zh-Hans-CN` or `pl`;
-/// unknown or empty tags stay English.
+/// The column for a system locale such as `zh-Hans-CN`, `zh_TW.UTF-8`, or
+/// `pl`; unknown or empty tags stay English. Chinese with the Hant script,
+/// or the Taiwan, Hong Kong, or Macau region, is Traditional Chinese.
 fn column_for_language_tag(tag: &str) -> u8 {
-    primary_subtag(tag).map_or(ENGLISH, |code| column_for_code(&code))
+    // POSIX locales carry an encoding and modifier: `zh_TW.UTF-8@euro`.
+    let tag = tag.split(['.', '@']).next().unwrap_or_default();
+    match primary_subtag(tag).as_deref() {
+        Some("zh") if is_traditional_chinese(tag) => TRADITIONAL_CHINESE_COLUMN,
+        Some(code) => column_for_code(code),
+        None => ENGLISH,
+    }
+}
+
+/// Whether a Chinese locale's script or region asks for Traditional
+/// characters. An explicit script wins over the region (`zh-Hans-HK`).
+fn is_traditional_chinese(tag: &str) -> bool {
+    for subtag in tag.split(['-', '_']).skip(1) {
+        match subtag.trim().to_ascii_lowercase().as_str() {
+            "hant" | "tw" | "hk" | "mo" => return true,
+            "hans" => return false,
+            _ => {}
+        }
+    }
+    false
 }
 
 pub(crate) fn system_language() -> String {
@@ -116,6 +143,33 @@ pub(crate) fn system_language() -> String {
     }
 }
 
+/// The system locale with its script and region, for the interface
+/// language: the Windows user locale or the POSIX locale variables.
+fn system_locale() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        windows_user_locale()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        locale_from_env(
+            std::env::var("LC_ALL").ok().as_deref(),
+            std::env::var("LC_MESSAGES").ok().as_deref(),
+            std::env::var("LANG").ok().as_deref(),
+        )
+    }
+}
+
+/// The person's first preferred locale in full (`zh-Hant-TW`), for the
+/// interface language; on macOS the system's language list.
+fn preferred_locale() -> String {
+    #[cfg(target_os = "macos")]
+    if let Some(locale) = macos_preferred_locale() {
+        return locale;
+    }
+    system_locale()
+}
+
 /// The person's first preferred language, for choosing a speech model. On
 /// macOS this is the system's language list, which apps opened from Finder
 /// see without `LANG`.
@@ -129,6 +183,12 @@ pub(crate) fn preferred_language() -> String {
 
 #[cfg(target_os = "macos")]
 fn macos_preferred_language() -> Option<String> {
+    primary_subtag(&macos_preferred_locale()?)
+}
+
+/// The first entry of `NSLocale.preferredLanguages`, such as `zh-Hant-TW`.
+#[cfg(target_os = "macos")]
+fn macos_preferred_locale() -> Option<String> {
     use objc2::msg_send;
     use objc2::rc::Retained;
     use objc2::runtime::AnyClass;
@@ -137,8 +197,7 @@ fn macos_preferred_language() -> Option<String> {
     let class = AnyClass::get(c"NSLocale")?;
     let languages: Option<Retained<NSArray<NSString>>> =
         unsafe { msg_send![class, preferredLanguages] };
-    let first = languages?.firstObject()?.to_string();
-    primary_subtag(&first)
+    Some(languages?.firstObject()?.to_string())
 }
 
 /// `pt-BR` and `zh-Hans-CN` yield `pt` and `zh`.
@@ -150,6 +209,16 @@ fn primary_subtag(tag: &str) -> Option<String> {
 /// The primary subtag of the Windows user locale: `pl-PL` yields `pl`.
 #[cfg(target_os = "windows")]
 fn windows_user_language() -> String {
+    windows_user_locale()
+        .split(['-', '_'])
+        .next()
+        .unwrap_or("en")
+        .to_ascii_lowercase()
+}
+
+/// The Windows user locale name in full, such as `zh-TW`; `en` if unread.
+#[cfg(target_os = "windows")]
+fn windows_user_locale() -> String {
     use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
     const LOCALE_NAME_CAPACITY: usize = 85;
     let mut buffer = [0_u16; LOCALE_NAME_CAPACITY];
@@ -157,12 +226,7 @@ fn windows_user_language() -> String {
     if length <= 1 {
         return "en".into();
     }
-    let locale = String::from_utf16_lossy(&buffer[..length as usize - 1]);
-    locale
-        .split(['-', '_'])
-        .next()
-        .unwrap_or("en")
-        .to_ascii_lowercase()
+    String::from_utf16_lossy(&buffer[..length as usize - 1])
 }
 
 /// The primary language subtag from POSIX locale variables, in their
@@ -188,12 +252,31 @@ fn language_from_env(
         .unwrap_or_default()
 }
 
+/// The first set POSIX locale variable in full, in the same precedence as
+/// [`language_from_env`]: `zh_TW.UTF-8` stays `zh_TW.UTF-8`.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn locale_from_env(lc_all: Option<&str>, lc_messages: Option<&str>, lang: Option<&str>) -> String {
+    [lc_all, lc_messages, lang]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty() && *value != "C" && *value != "POSIX")
+        .unwrap_or_default()
+        .to_owned()
+}
+
 /// Translate one UI string. Returns the input unchanged for English or for
 /// strings missing from the table, so dynamic values pass through safely.
 pub(crate) fn tr(english: &str) -> &str {
     let column = current();
     if column == ENGLISH {
         return english;
+    }
+    if column == TRADITIONAL_CHINESE_COLUMN {
+        return match traditional_chinese::table().get(english) {
+            Some(text) => text.as_str(),
+            None => english,
+        };
     }
     let table = match column {
         PORTUGUESE_COLUMN => portuguese::table(),
@@ -608,9 +691,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Language and on-device speech model", ["Język i model mowy na urządzeniu", "语言与本地语音模型", "言語とオンデバイス音声モデル", "Sprache und lokales Sprachmodell", "Idioma y modelo de voz local", "Мова й модель розпізнавання мовлення на пристрої"]),
     ("Microphone", ["Mikrofon", "麦克风", "マイク", "Mikrofon", "Micrófono", "Мікрофон"]),
     ("Dictation shortcut", ["Skrót dyktowania", "听写快捷键", "音声入力ショートカット", "Diktat-Tastenkürzel", "Atajo de dictado", "Комбінація клавіш для диктування"]),
-    ("Double-tap to lock", ["Podwójne naciśnięcie blokuje", "双击锁定", "ダブルタップでロック", "Doppeltippen zum Sperren", "Doble pulsación para bloquear", "Двічі натисніть, щоб зафіксувати"]),
-    ("Double-tap only", ["Tylko podwójne naciśnięcie", "仅限双击", "ダブルタップのみ", "Nur Doppeltippen", "Solo doble pulsación", "Лише подвійне натискання"]),
-    ("Wait for two complete shortcut taps before recording", ["Nagrywanie zaczyna się dopiero po dwóch pełnych naciśnięciach skrótu", "需要连按两次快捷键才开始录音", "ショートカットを2回押し切ってから録音を開始", "Aufnahme erst nach zwei vollständigen Kürzel-Tipps", "La grabación espera dos pulsaciones completas del atajo", "Починати запис лише після двох повних натискань комбінації клавіш"]),
     ("Paste last dictation", ["Wklej ostatnie dyktowanie", "粘贴上次听写", "前回の音声入力を貼り付け", "Letztes Diktat einfügen", "Pegar último dictado", "Вставити останнє диктування"]),
     ("Capture", ["Nagrywanie", "采集", "キャプチャ", "Aufnahme", "Captura", "Запис"]),
     ("Processing", ["Przetwarzanie", "处理", "処理", "Verarbeitung", "Procesamiento", "Обробка"]),
@@ -809,12 +889,15 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Terminal paste", ["Wklejanie w terminalu", "终端粘贴", "端末への貼り付け", "Einfügen im Terminal", "Pegado en terminal", "Вставлення в термінал"]),
     ("The config could not be created.", ["Nie udało się utworzyć konfiguracji.", "无法创建配置。", "設定を作成できませんでした。", "Die Konfiguration konnte nicht erstellt werden.", "No se pudo crear la configuración.", "Не вдалося створити конфігурацію."]),
     ("Thinking", ["Rozumowanie", "思考", "思考", "Denken", "Razonamiento", "Міркування"]),
-    ("Toggle", ["Przełącz", "切换", "トグル", "Umschalten", "Alternar", "Перемикати"]),
+    ("Hold or double-tap", ["Przytrzymaj lub stuknij dwa razy", "按住或双击", "長押しまたはダブルタップ", "Halte oder tippe zweimal", "Mantén o pulsa dos veces", "Утримувати або натиснути двічі"]),
+    ("Tap", ["Stuknij", "单击", "タップ", "Tippe", "Pulsa", "Натиснути"]),
+    ("Double-tap", ["Stuknij dwa razy", "双击", "ダブルタップ", "Tippe zweimal", "Pulsa dos veces", "Натиснути двічі"]),
+    ("Hold to talk, or double-tap to talk hands-free", ["Przytrzymaj, aby mówić, lub stuknij dwa razy, aby mówić bez trzymania", "按住说话，或双击免按住说话", "押したまま話すか、ダブルタップして押さずに話します", "Halten zum Sprechen, oder zweimal tippen, um freihändig zu sprechen", "Mantén para hablar, o pulsa dos veces para hablar sin mantener", "Утримуйте, щоб говорити, або натисніть двічі, щоб говорити без рук"]),
+    ("Hold to talk, let go to paste", ["Przytrzymaj, aby mówić, puść, aby wkleić", "按住说话，松开粘贴", "押したまま話し、離すと貼り付けます", "Halten zum Sprechen, loslassen zum Einfügen", "Mantén para hablar, suelta para pegar", "Утримуйте, щоб говорити, відпустіть, щоб вставити"]),
+    ("Tap to talk hands-free, tap again to paste", ["Stuknij, aby mówić bez trzymania, stuknij ponownie, aby wkleić", "单击免按住说话，再按一次粘贴", "タップして押さずに話し、もう一度タップで貼り付けます", "Tippen, um freihändig zu sprechen, erneut tippen zum Einfügen", "Pulsa para hablar sin mantener, pulsa otra vez para pegar", "Натисніть, щоб говорити без рук, натисніть знову, щоб вставити"]),
+    ("Double-tap to talk hands-free, tap again to paste", ["Stuknij dwa razy, aby mówić bez trzymania, stuknij ponownie, aby wkleić", "双击免按住说话，再按一次粘贴", "ダブルタップして押さずに話し、もう一度タップで貼り付けます", "Zweimal tippen, um freihändig zu sprechen, erneut tippen zum Einfügen", "Pulsa dos veces para hablar sin mantener, pulsa otra vez para pegar", "Натисніть двічі, щоб говорити без рук, натисніть знову, щоб вставити"]),
+    ("Needs a shortcut with a key, like {}", ["Wymaga skrótu z klawiszem, np. {}", "需要带按键的快捷键，例如 {}", "キーを含むショートカットが必要です（例: {}）", "Braucht ein Kürzel mit einer Taste, etwa {}", "Necesita un atajo con una tecla, como {}", "Потрібна комбінація з клавішею, наприклад {}"]),
     ("How it works", ["Jak to działa", "工作原理", "仕組み", "So funktioniert es", "Cómo funciona", "Як це працює"]),
-    ("How the shortcut works", ["Jak działa skrót", "快捷键如何工作", "ショートカットの仕組み", "So funktioniert das Kürzel", "Cómo funciona el atajo", "Як працює сполучення клавіш"]),
-    ("Hold to talk. Let go to paste.", ["Przytrzymaj, aby mówić. Puść, aby wkleić.", "按住说话，松开粘贴。", "押したまま話し、離すと貼り付けます。", "Halten zum Sprechen. Loslassen zum Einfügen.", "Mantén para hablar. Suelta para pegar.", "Утримуйте, щоб говорити. Відпустіть, щоб вставити."]),
-    ("Press to start, press to stop.", ["Naciśnij, aby zacząć, naciśnij, aby zakończyć.", "按一下开始，再按一下停止。", "押して開始、もう一度押して停止。", "Drücken zum Starten, erneut drücken zum Stoppen.", "Pulsa para empezar, pulsa para parar.", "Натисніть, щоб почати, натисніть, щоб зупинити."]),
-    ("Tap twice to talk hands-free. Press once to stop.", ["Stuknij dwa razy, aby mówić bez trzymania. Naciśnij raz, aby zakończyć.", "连按两次即可免按住说话，按一次停止。", "2回タップすると押さずに話せます。1回押すと停止します。", "Zweimal tippen, um freihändig zu sprechen. Einmal drücken zum Stoppen.", "Toca dos veces para hablar sin mantener. Pulsa una vez para parar.", "Натисніть двічі, щоб говорити без рук. Натисніть раз, щоб зупинити."]),
     ("Transformations", ["Transformacje", "转换", "変換", "Transformationen", "Transformaciones", "Перетворення"]),
     ("Turn Hex on in every app whenever it opens", ["Włączaj Hex we wszystkich aplikacjach przy każdym uruchomieniu", "每次打开时在所有应用中启用 Hex", "起動するたびに、すべてのアプリで Hex をオンにする", "Hex bei jedem Start in allen Apps einschalten", "Activar Hex en todas las apps cada vez que se abra", "Вмикати Hex в усіх програмах під час кожного запуску"]),
     ("Up to date", ["Aktualne", "已是最新", "最新です", "Aktuell", "Actualizado", "Актуальна версія"]),
@@ -1068,6 +1151,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Parakeet, tuned for fewer wrong words in English", ["Parakeet dostrojony, by mylić mniej angielskich słów", "针对英语调优的 Parakeet，错词更少", "英語の誤りを減らすよう調整した Parakeet", "Parakeet, abgestimmt auf weniger falsche Wörter im Englischen", "Parakeet, ajustado para menos palabras erróneas en inglés", "Parakeet, налаштована на менше хибних слів англійською"]),
     ("English, with the ums and uhs taken out", ["Angielski, bez „yyy” i „eee”", "英语，去掉嗯、呃等口头语", "英語。「えー」「あー」などを取り除きます", "Englisch, ohne Ähs und Ähms", "Inglés, sin los eh y los mm", "Англійська, без «е-е» та «м-м»"]),
     ("Writes while you talk, in 27 languages", ["Pisze, gdy mówisz, w 27 językach", "边说边写，支持 27 种语言", "話しながら書き起こし、27 言語に対応", "Schreibt mit, während du sprichst, in 27 Sprachen", "Escribe mientras hablas, en 27 idiomas", "Пише, поки ви говорите, 27 мов"]),
+    ("Russian, with punctuation. A small download", ["Rosyjski, z interpunkcją. Mały plik", "俄语，带标点。下载较小", "ロシア語、句読点付き。ダウンロードは小さめ", "Russisch, mit Satzzeichen. Ein kleiner Download", "Ruso, con puntuación. Una descarga pequeña", "Російська, з розділовими знаками. Мале завантаження"]),
     ("Apple's speech recognition, kept up to date by macOS", ["Rozpoznawanie mowy Apple, aktualizowane przez macOS", "Apple 的语音识别，由 macOS 保持更新", "Apple の音声認識。macOS が最新に保ちます", "Apples Spracherkennung, von macOS aktuell gehalten", "El reconocimiento de voz de Apple, actualizado por macOS", "Розпізнавання мовлення Apple, яке оновлює macOS"]),
     ("Start using Hex", ["Zacznij używać Hex", "开始使用 Hex", "Hex を使い始める", "Hex verwenden", "Empezar a usar Hex", "Почати користуватися Hex"]),
     ("Transcribing…", ["Transkrybowanie…", "正在转写…", "文字起こし中…", "Transkribiert …", "Transcribiendo…", "Розпізнавання мовлення…"]),
@@ -1243,6 +1327,55 @@ mod tests {
     }
 
     #[test]
+    fn traditional_chinese_locales_choose_traditional_and_others_simplified() {
+        use super::{
+            LANGUAGE_CHOICES, TRADITIONAL_CHINESE_COLUMN, column_for_code, column_for_language_tag,
+            locale_from_env,
+        };
+        for tag in [
+            "zh-Hant-TW",
+            "zh-Hant",
+            "zh-TW",
+            "zh_HK.UTF-8",
+            "zh-MO",
+            "zh-Hant-CN",
+        ] {
+            assert_eq!(
+                column_for_language_tag(tag),
+                TRADITIONAL_CHINESE_COLUMN,
+                "{tag}"
+            );
+        }
+        for tag in [
+            "zh-Hans-CN",
+            "zh-CN",
+            "zh-SG",
+            "zh-Hans-HK",
+            "zh_CN.UTF-8",
+            "zh",
+        ] {
+            assert_eq!(column_for_language_tag(tag), column_for_code("zh"), "{tag}");
+        }
+        assert_eq!(column_for_code("zh-Hant"), TRADITIONAL_CHINESE_COLUMN);
+        assert!(LANGUAGE_CHOICES.contains(&(Some("zh"), "简体中文")));
+        assert!(LANGUAGE_CHOICES.contains(&(Some("zh-Hant"), "繁體中文")));
+        let locale = locale_from_env(None, Some("zh_TW.UTF-8"), Some("en_US.UTF-8"));
+        assert_eq!(locale, "zh_TW.UTF-8");
+        assert_eq!(column_for_language_tag(&locale), TRADITIONAL_CHINESE_COLUMN);
+        assert_eq!(locale_from_env(Some("C"), None, None), "");
+    }
+
+    #[test]
+    fn traditional_chinese_translates_with_its_column() {
+        super::set_current(super::TRADITIONAL_CHINESE_COLUMN);
+        assert_eq!(super::tr("Don't switch"), "不切換");
+        assert_eq!(super::tr("Not installed"), "未安裝");
+        assert_eq!(super::tr_fill("Remove {}?", "x"), "移除 x？");
+        super::set_current(super::ENGLISH);
+        assert_eq!(super::tr("Don't switch"), "Don't switch");
+    }
+
+    #[test]
     fn french_translates_with_its_column() {
         super::set_current(super::FRENCH_COLUMN);
         assert_eq!(super::tr("Don't switch"), "Ne pas changer");
@@ -1337,6 +1470,7 @@ mod tests {
         #[cfg(hex_capture)]
         include_str!("../rune_ui/scrawl.rs"),
         include_str!("../rune_ui/settings.rs"),
+        include_str!("../rune_ui/shortcut_mode.rs"),
         include_str!("../rune_ui/sound_sets.rs"),
         include_str!("../rune_ui/vocabulary.rs"),
         include_str!("../rune_ui/windows_host.rs"),

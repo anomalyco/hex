@@ -226,6 +226,9 @@ initial open fails OR stream interrupts
 no input device at all (macOS)
   -> devices whose name can't be read are skipped     // audio::device_name, never Display
   -> bounded recovery; `hex status` listener: "No microphone"
+no input opens, at startup or after an interruption (Linux) // #937
+  -> one "could not open the microphone: …" failure per outage // take_failure
+  -> last failure filled in while it keeps retrying; reset once one opens
 listener worker returns an error or panics (macOS)
   -> status: running false, "Stopped", capture unknown // never "Enabled"
 saved microphone missing or will not open
@@ -258,6 +261,7 @@ programmatic dictation (local API) when the stream interrupts or gaps
 ```
 Checks in [audio.rs](../../src/audio.rs):
 `an_unreadable_device_name_is_skipped_instead_of_panicking`,
+`a_microphone_that_cannot_open_is_reported_once_per_outage`,
 `microphone_recovery_retries_with_bounded_backoff_and_resets`,
 `startup_retry_recovers_metadata_and_audio_without_restarting`,
 `a_missing_selection_uses_the_default_until_it_returns`,

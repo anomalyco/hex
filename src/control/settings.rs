@@ -495,7 +495,9 @@ const KEYS: &[Key] = &[
     ),
     optional(
         "ui_language",
-        Kind::Choice(&["en", "pl", "zh", "ja", "de", "es", "uk", "pt", "fr"]),
+        Kind::Choice(&[
+            "en", "pl", "zh", "zh-Hant", "ja", "de", "es", "uk", "pt", "fr",
+        ]),
         "Interface language; none follows the system",
     ),
     key(
@@ -1029,7 +1031,7 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
             let normalized = trimmed.to_ascii_lowercase().replace('-', "_");
             let choice = choices
                 .iter()
-                .find(|choice| **choice == normalized)
+                .find(|choice| choice.to_ascii_lowercase().replace('-', "_") == normalized)
                 .ok_or_else(|| invalid(name, &format!("expected one of {}", choices.join(", "))))?;
             Ok(if name == "meetings.calendar.lead_minutes" {
                 let minutes: u8 = choice.parse().expect("lead choices are numbers");
@@ -1313,6 +1315,18 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), keys().count(), "a key is listed twice");
+    }
+
+    #[test]
+    fn ui_language_accepts_traditional_chinese_in_any_case() {
+        for raw in ["zh-Hant", "zh-hant", "ZH_HANT"] {
+            let change = apply(&AppSettings::default(), "ui_language", raw, &rules()).unwrap();
+            let shown = get(&change.settings, "ui_language").unwrap();
+            assert_eq!(shown[0].value, Value::String("zh-Hant".into()), "{raw}");
+        }
+        let change = apply(&AppSettings::default(), "ui_language", "zh", &rules()).unwrap();
+        let shown = get(&change.settings, "ui_language").unwrap();
+        assert_eq!(shown[0].value, Value::String("zh".into()));
     }
 
     #[test]

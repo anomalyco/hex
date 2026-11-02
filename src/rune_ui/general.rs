@@ -11,9 +11,9 @@ use rune::{Color, El, Tx, col, el, row, text};
 use rune_kit::{Placement, Select, SelectAppearance};
 
 use super::controls::{
-    self, ButtonKind, CardRow, DEVICE_SELECT_WIDTH, KeySize, METRICS, Paint, button, card,
-    copy_row, folding, icon_button, icon_described_row, icon_row, icon_toggle_row, key_tray,
-    keycap, note, page, pressable_row, row_switch, section,
+    self, ButtonKind, CardRow, DEVICE_SELECT_WIDTH, KeySize, METRICS, Paint, button, card, folding,
+    icon_button, icon_described_row, icon_row, icon_toggle_row, key_tray, keycap, note, page,
+    pressable_row, row_switch, section,
 };
 use super::icons::*;
 use super::lists::{PermissionControl, permission_control, slider};
@@ -25,7 +25,6 @@ use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::desktop::login_item::LoginItemStatus;
 use crate::desktop::onboarding::PermissionKind;
-use crate::dictation::ShortcutMode;
 use crate::transcription::models as transcription_models;
 
 /// The missing permissions, the listener (Windows and Linux), the basics,
@@ -79,6 +78,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             ShortcutTarget::Dictation,
             None,
         ));
+        rows.push(super::shortcut_mode::row(ui, p).into());
         // Labs › Second dictation shortcut (macOS): another key that
         // dictates like the one above, such as on an external keyboard.
         #[cfg(target_os = "macos")]
@@ -798,67 +798,6 @@ fn dictation(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             layer,
         ));
     }
-    let toggle_mode = settings.shortcut_mode == ShortcutMode::Toggle;
-    rows.push(
-        copy_row(
-            p,
-            "shortcut-mode",
-            Some(&HAND),
-            tr("Shortcut mode"),
-            Some(super::explainer::link(p)),
-            pick_select(
-                ui,
-                p,
-                "shortcut-mode",
-                vec![tr("Hold"), tr("Toggle")],
-                usize::from(toggle_mode),
-                |ui, index| {
-                    let mode = if index == 1 {
-                        ShortcutMode::Toggle
-                    } else {
-                        ShortcutMode::Hold
-                    };
-                    if ui.settings.shortcut_mode != mode {
-                        ui.update(|settings| settings.shortcut_mode = mode);
-                    }
-                },
-                layer,
-            ),
-            true,
-        )
-        .into(),
-    );
-    rows.push(folding(
-        "double-tap-fold",
-        (!toggle_mode).then(|| {
-            icon_toggle_row(
-                p,
-                "double-tap",
-                &LOCK,
-                tr("Double-tap to lock"),
-                None,
-                settings.double_tap_lock,
-                super::explainer::flip_lock,
-            )
-        }),
-    ));
-    rows.push(folding(
-        "double-tap-only-fold",
-        s::double_tap_only_applies(settings).then(|| {
-            icon_toggle_row(
-                p,
-                "double-tap-only",
-                &TIMER,
-                tr("Double-tap only"),
-                tr("Wait for two complete shortcut taps before recording"),
-                settings.double_tap_only,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.double_tap_only;
-                    ui.update(|settings| settings.double_tap_only = enabled);
-                },
-            )
-        }),
-    ));
     // Labs › Switch model with keyboard language: its mappings, while on.
     if ui.platform.caps.keyboard_model_switching {
         rows.push(folding(
