@@ -48,6 +48,9 @@ const ACTIONS_INSET: f32 = 8.0;
 const PILL_RADIUS: f32 = 999.0;
 /// The reminder: the meeting's title beside up to three buttons.
 const REMINDER_PANEL_WIDTH: f32 = 520.0;
+/// "Microsoft Teams left the call" beside Keep recording and Stop &
+/// transcribe (#835).
+const CALL_ENDED_PANEL_WIDTH: f32 = 520.0;
 /// How often an open reminder recounts "Starts in N min".
 const REMINDER_TICK: Duration = Duration::from_secs(5);
 /// The recording capsule's window, as wide as the open pill.
@@ -532,14 +535,7 @@ impl MeetingCapsules {
     fn show_panel(&self, kind: Kind, timeout: Option<Duration>) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
-        self.panel.resize((
-            if reminder {
-                REMINDER_PANEL_WIDTH
-            } else {
-                MEETING_PANEL_WIDTH
-            },
-            MEETING_PANEL_HEIGHT,
-        ));
+        self.panel.resize((panel_width(&kind), MEETING_PANEL_HEIGHT));
         self.panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
             capsule.more_open = false;
@@ -747,6 +743,16 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Kind::Ready(manifest) => ready(p, manifest, capsule.copied),
     };
     pill(p, dot, &title, &subtitle, actions)
+}
+
+/// The panel capsule's width for `kind`, room for its title beside its
+/// buttons.
+fn panel_width(kind: &Kind) -> f32 {
+    match kind {
+        Kind::Reminder { .. } => REMINDER_PANEL_WIDTH,
+        Kind::CallEnded { .. } => CALL_ENDED_PANEL_WIDTH,
+        _ => MEETING_PANEL_WIDTH,
+    }
 }
 
 /// "Starts in 1 min", "Starting now", or "Started 2 min ago".
@@ -1103,6 +1109,7 @@ mod tests {
     const MENU: (f32, f32) = (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT);
     const RECORDING: (f32, f32) = (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT);
     const REMINDER: (f32, f32) = (REMINDER_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
+    const CALL_ENDED: (f32, f32) = (CALL_ENDED_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
 
     /// "Design sync" a minute from now, with a Zoom link or none.
     fn design_sync(link: bool) -> CalendarMeeting {
@@ -1580,6 +1587,37 @@ mod tests {
         );
     }
 
+    fn call_ended() -> Kind {
+        Kind::CallEnded {
+            app: MeetingSource::Teams.label().into(),
+        }
+    }
+
+    #[test]
+    fn the_call_ended_title_fits_beside_its_buttons() {
+        let kind = call_ended();
+        assert_eq!(panel_width(&kind), CALL_ENDED.0);
+        let (mut rt, _, _) = runtime(kind, false, false, CALL_ENDED);
+        rt.settle_all();
+        rt.frame(0.0);
+        let title = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("title"))
+            .unwrap();
+        assert_eq!(
+            title.text.as_deref(),
+            Some("Microsoft Teams left the call")
+        );
+        let style = rune_theme_opencode::kit(false).ty.ui_medium;
+        let (width, _) = rt.text.measure("Microsoft Teams left the call", style, 2.0);
+        assert!(
+            width <= title.rect[2] + 0.5,
+            "title needs {width} pt, has {}",
+            title.rect[2]
+        );
+    }
+
     /// No `--snap` scene draws an overlay, so this renders the capsules to
     /// PNGs in `HEX_CAPSULE_SNAPS` for review; without it, or a GPU, it skips.
     #[test]
@@ -1606,6 +1644,7 @@ mod tests {
             ("reminder", reminder(true, false), false, REMINDER),
             ("reminder-no-link", reminder(false, false), false, REMINDER),
             ("reminder-automatic", reminder(true, true), false, REMINDER),
+            ("call-ended", call_ended(), false, CALL_ENDED),
             (
                 "recording-automatic",
                 Kind::Recording {
@@ -1695,27 +1734,72 @@ mod tests {
             for dark in [false, true] {
                 let (mut rt, _, _) = runtime(kind.clone(), more_open, dark, size);
                 rt.update(move |capsule, _| setup(capsule));
-                rt.settle_all();
-                rt.frame(0.0);
-                let (w, h) = ((size.0 * 2.0) as u32, (size.1 * 2.0) as u32);
-                let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
-                let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
-                renderer.prepare(
-                    &gpu.device,
-                    &gpu.queue,
-                    &mut rt.text.atlas,
-                    &rt.instances,
-                    (w, h),
-                );
-                let mut encoder = gpu.device.create_command_encoder(&Default::default());
-                renderer.draw(&mut encoder, &target.view, rt.clear_color());
-                target.copy(&mut encoder);
-                gpu.queue.submit([encoder.finish()]);
-                let pixels = target.read(&gpu.device);
+                let (w, h, pixels) = render(&gpu, &mut rt, size);
                 let theme = if dark { "dark" } else { "light" };
                 let path = folder.join(format!("capsule-{name}-{theme}.png"));
                 rune::render::write_png(&path, w, h, &pixels).unwrap();
             }
+        }
+    }
+
+    fn render(
+        gpu: &rune::render::Gpu,
+        rt: &mut Runtime<Capsule>,
+        size: (f32, f32),
+    ) -> (u32, u32, Vec<u8>) {
+        rt.settle_all();
+        rt.frame(0.0);
+        let (w, h) = ((size.0 * 2.0) as u32, (size.1 * 2.0) as u32);
+        let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
+        let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
+        renderer.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &mut rt.text.atlas,
+            &rt.instances,
+            (w, h),
+        );
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        renderer.draw(&mut encoder, &target.view, rt.clear_color());
+        target.copy(&mut encoder);
+        gpu.queue.submit([encoder.finish()]);
+        (w, h, target.read(&gpu.device))
+    }
+
+    /// The call-ended capsule against `tests/golden/meeting-capsule-*.png`;
+    /// `HEX_UPDATE_GOLDENS=1` rewrites them. Without a GPU adapter it skips.
+    #[test]
+    fn call_ended_golden() {
+        let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+            eprintln!("skipping meeting capsule golden: no GPU adapter");
+            return;
+        };
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+        for dark in [false, true] {
+            let theme = if dark { "dark" } else { "light" };
+            let path = folder.join(format!("meeting-capsule-call-ended-{theme}.png"));
+            let (mut rt, _, _) = runtime(call_ended(), false, dark, CALL_ENDED);
+            let (w, h, pixels) = render(&gpu, &mut rt, CALL_ENDED);
+            if std::env::var_os("HEX_UPDATE_GOLDENS").is_some() {
+                rune::render::write_png(&path, w, h, &pixels).unwrap();
+                continue;
+            }
+            let decoder =
+                png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap()));
+            let mut reader = decoder.read_info().unwrap();
+            let mut golden = vec![0; reader.output_buffer_size().unwrap()];
+            let info = reader.next_frame(&mut golden).unwrap();
+            assert_eq!((info.width, info.height), (w, h), "{theme} size changed");
+            // GPUs differ in the last bit of blending and glyph coverage.
+            let differing = pixels
+                .chunks(4)
+                .zip(golden.chunks(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 12))
+                .count();
+            assert!(
+                differing <= (w * h) as usize / 500,
+                "call-ended-{theme}: {differing} pixels differ"
+            );
         }
     }
 }

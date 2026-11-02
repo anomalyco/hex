@@ -23,6 +23,9 @@ const CALL_ENDED_AFTER: Duration = Duration::from_secs(3);
 /// Observations further apart than this (a sleeping Mac, a stalled loop) do
 /// not make one run: the clock restarts rather than counting the gap.
 const MAX_OBSERVATION_GAP: Duration = Duration::from_secs(10);
+/// A call that drops off one microphone check (or two, on a slow loop) and
+/// is back right after keeps its time toward the offer (#835).
+const DROPOUT_GRACE: Duration = Duration::from_secs(2);
 /// A page the browser showed while it held the microphone still names the
 /// call this long after it was last read.
 const BROWSER_PAGE_MEMORY: Duration = Duration::from_secs(60);
@@ -410,7 +413,13 @@ impl MeetingDetector {
         now_ms: i64,
     ) -> Option<MeetingCandidate> {
         let Some(candidate) = candidate else {
-            self.pending = None;
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| now.saturating_duration_since(pending.run.last) > DROPOUT_GRACE)
+            {
+                self.pending = None;
+            }
             let since = *self.last_present.get_or_insert(now);
             if now.saturating_duration_since(since) >= ABSENT_FOR_RESET {
                 self.offered = None;
@@ -1343,11 +1352,11 @@ mod tests {
         )];
         let mut watch = Watch::new();
         assert!(watch.run(Some(&problems), &always, 6_000).is_empty());
-        assert!(watch.run(None, &always, 500).is_empty());
+        assert!(watch.run(None, &always, 5_000).is_empty());
         assert!(watch.run(Some(&problems), &always, 20_000).is_empty());
         assert_eq!(
             watch.run(Some(&problems), &always, 500),
-            [(26_500, Detection::Record(problems))]
+            [(31_000, Detection::Record(problems))]
         );
     }
 
@@ -1400,11 +1409,44 @@ mod tests {
         );
         let candidate = candidate_from_microphone(&brave(), &problems).unwrap();
         let mut watch = Watch::new();
-        // A six-second voice note, then the mic closes.
+        // A six-second voice note, then the mic closes for a few seconds.
         assert!(watch.run(Some(&candidate), &[], 6_000).is_empty());
-        assert!(watch.run(None, &[], 500).is_empty());
+        assert!(watch.run(None, &[], 5_000).is_empty());
         assert!(watch.run(Some(&candidate), &[], 20_000).is_empty());
         assert_eq!(watch.run(Some(&candidate), &[], 500).len(), 1);
+    }
+
+    #[test]
+    fn a_missed_microphone_check_does_not_restart_the_wait_for_an_offer() {
+        let app = ActiveMicrophoneApplication {
+            pid: 7,
+            bundle_id: "net.whatsapp.WhatsApp".into(),
+            name: "WhatsApp".into(),
+        };
+        let call = candidate_from_microphone(&app, &ContextSnapshot::default()).unwrap();
+        // One check misses the call 10 s in: still offered at 20 s.
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&call), &[], 10_000).is_empty());
+        assert!(watch.run(None, &[], 500).is_empty());
+        assert!(watch.run(Some(&call), &[], 9_500).is_empty());
+        assert_eq!(offered(&watch.run(Some(&call), &[], 500)), [20_000]);
+
+        // On a slow loop, two missed checks in a row are still a dropout.
+        let mut watch = Watch::new();
+        assert!(watch.run_every(Some(&call), &[], 9_900, 900).is_empty());
+        assert!(watch.run_every(None, &[], 1_800, 900).is_empty());
+        assert!(watch.run_every(Some(&call), &[], 9_000, 900).is_empty());
+        assert_eq!(
+            offered(&watch.run_every(Some(&call), &[], 900, 900)),
+            [20_700]
+        );
+
+        // A longer release is the call (or voice note) ending: start over.
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&call), &[], 10_000).is_empty());
+        assert!(watch.run(None, &[], 3_000).is_empty());
+        assert!(watch.run(Some(&call), &[], 20_000).is_empty());
+        assert_eq!(offered(&watch.run(Some(&call), &[], 500)), [33_000]);
     }
 
     #[test]
