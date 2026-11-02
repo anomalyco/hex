@@ -1,8 +1,9 @@
 //! Labs › Spoken formatting: whole spoken phrases ("new line", "line
 //! break", "new paragraph", "open quote", "close quote") become line breaks
-//! and quotation marks. Matching ignores ASCII case and needs word
-//! boundaries, so "newline" or "new liner" stay as they are. The commas,
-//! periods, and spaces a model puts around a command go with it.
+//! and quotation marks, in English and Spanish ("nuevo párrafo", "nueva
+//! línea", "abre comillas", …). Matching ignores case and Spanish accents
+//! and needs word boundaries, so "newline" or "new liner" stay as they are.
+//! The commas, periods, and spaces a model puts around a command go with it.
 
 #[derive(Clone, Copy)]
 enum Command {
@@ -17,7 +18,32 @@ const COMMANDS: &[(&[&str], Command)] = &[
     (&["line", "break"], Command::Break("\n")),
     (&["open", "quote"], Command::OpenQuote),
     (&["close", "quote"], Command::CloseQuote),
+    (&["nuevo", "parrafo"], Command::Break("\n\n")),
+    (&["nueva", "linea"], Command::Break("\n")),
+    (&["salto", "de", "linea"], Command::Break("\n")),
+    (&["abrir", "comillas"], Command::OpenQuote),
+    (&["abre", "comillas"], Command::OpenQuote),
+    (&["cerrar", "comillas"], Command::CloseQuote),
+    (&["cierra", "comillas"], Command::CloseQuote),
 ];
+
+/// `c` lowercased with Spanish accents dropped, as the phrase lists are
+/// written: "Párrafo" reads as "parrafo".
+pub(super) fn fold(c: char) -> char {
+    let mut lower = c.to_lowercase();
+    let lower = match (lower.next(), lower.next()) {
+        (Some(single), None) => single,
+        _ => c,
+    };
+    match lower {
+        'á' => 'a',
+        'é' => 'e',
+        'í' => 'i',
+        'ó' => 'o',
+        'ú' | 'ü' => 'u',
+        other => other,
+    }
+}
 
 /// `transcript` with its spoken formatting phrases applied.
 pub fn apply(transcript: &str) -> String {
@@ -53,7 +79,7 @@ fn command_at(chars: &[char], start: usize) -> Option<(Command, usize)> {
             }
             for expected in word.chars() {
                 match chars.get(position) {
-                    Some(c) if c.to_ascii_lowercase() == expected => position += 1,
+                    Some(&c) if fold(c) == expected => position += 1,
                     _ => return None,
                 }
             }
@@ -147,8 +173,30 @@ mod tests {
     }
 
     #[test]
+    fn spanish_phrases_work_with_or_without_accents_and_in_any_case() {
+        assert_eq!(apply("Hola. Nuevo párrafo. Adiós."), "Hola.\n\nAdiós.");
+        assert_eq!(apply("Hola. nuevo parrafo. Adiós."), "Hola.\n\nAdiós.");
+        assert_eq!(apply("uno, nueva línea, dos"), "uno\ndos");
+        assert_eq!(apply("uno NUEVA LINEA dos"), "uno\ndos");
+        assert_eq!(apply("uno salto de línea dos"), "uno\ndos");
+        assert_eq!(
+            apply("dijo abre comillas hola cierra comillas"),
+            "dijo \"hola\""
+        );
+        assert_eq!(
+            apply("Dijo Abrir Comillas sí Cerrar Comillas y se fue"),
+            "Dijo \"sí\" y se fue"
+        );
+        assert_eq!(apply("Hola. New paragraph. Adiós."), "Hola.\n\nAdiós.");
+    }
+
+    #[test]
     fn other_words_are_left_alone() {
         for text in [
+            "comillas",
+            "una línea lineal",
+            "dos parrafos nuevos",
+            "nuevo parrafos",
             "The newline character",
             "a new liner",
             "renew line items",
