@@ -90,10 +90,11 @@ pub enum Feature {
     RecentDictations,
     SkipPauses,
     StopWhenCallEnds,
+    OutputFixes,
 }
 
 impl Feature {
-    pub const ALL: [Self; 31] = [
+    pub const ALL: [Self; 32] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -125,6 +126,7 @@ impl Feature {
         Self::RecentDictations,
         Self::SkipPauses,
         Self::StopWhenCallEnds,
+        Self::OutputFixes,
     ];
 
     /// The features this OS and build have.
@@ -178,7 +180,8 @@ impl Feature {
             | Self::HistoryStats
             | Self::RecentDictations
             | Self::SkipPauses
-            | Self::StopWhenCallEnds => Audience::Everyone,
+            | Self::StopWhenCallEnds
+            | Self::OutputFixes => Audience::Everyone,
         }
     }
 
@@ -235,6 +238,7 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::HistoryStats
+            | Self::OutputFixes
             | Self::FillerWords => true,
         }
     }
@@ -273,6 +277,7 @@ impl Feature {
             Self::RecentDictations => "recent-dictations",
             Self::SkipPauses => "skip-pauses",
             Self::StopWhenCallEnds => "stop-when-call-ends",
+            Self::OutputFixes => "output-fixes",
         }
     }
 
@@ -310,6 +315,7 @@ impl Feature {
             Self::RecentDictations => "labs.recent_dictations",
             Self::SkipPauses => "labs.skip_pauses",
             Self::StopWhenCallEnds => "labs.stop_when_call_ends",
+            Self::OutputFixes => "labs.output_fixes",
         }
     }
 
@@ -393,6 +399,9 @@ impl Feature {
             Self::StopWhenCallEnds => {
                 "Stop a meeting recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"
             }
+            Self::OutputFixes => {
+                "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
+            }
         }
     }
 
@@ -434,6 +443,7 @@ impl Feature {
             Self::RecentDictations => settings.labs.recent_dictations,
             Self::SkipPauses => settings.labs.skip_pauses,
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends,
+            Self::OutputFixes => settings.labs.output_fixes,
         }
     }
 
@@ -469,6 +479,7 @@ impl Feature {
             Self::RecentDictations => settings.labs.recent_dictations = on,
             Self::SkipPauses => settings.labs.skip_pauses = on,
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends = on,
+            Self::OutputFixes => settings.labs.output_fixes = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;

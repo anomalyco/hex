@@ -2392,3 +2392,30 @@ fn the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed() {
     );
     assert!(rt.find("allow-transformations").is_none());
 }
+
+/// Labs › Fix results in Output: the Try card offers Vocabulary and Fix
+/// this only with the toggle on, and Fix this copies for the sentence typed.
+#[test]
+fn output_fixes_show_only_with_their_lab_and_fix_this_copies_for_the_sentence() {
+    let output = |on: bool| {
+        let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        output::fixture(&mut state);
+        state.pane = Pane::Output;
+        state.settings.labs.output_fixes = on;
+        runtime_for(state, false, TALL_SIZE)
+    };
+    let off = output(false);
+    assert!(off.find("output-vocabulary").is_none());
+    assert!(off.find("fix-this").is_none());
+
+    let mut on = output(true);
+    assert!(on.find("output-vocabulary").is_some());
+    tap(&mut on, "fix-this");
+    assert!(on.state.output.prompt_copied);
+    assert_eq!(
+        on.state.output.fix_copied.as_deref(),
+        Some("Um, open code shipped the hex app today.")
+    );
+    tap(&mut on, "output-vocabulary");
+    assert!(on.state.vocabulary.open);
+}

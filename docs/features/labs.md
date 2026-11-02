@@ -51,6 +51,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Stop when the call ends no labs.stop_when_call_ends (macOS) a recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet (#835)
+├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -578,6 +579,26 @@ in [labs.rs](../../src/labs.rs) and the auto-stop checks listed in
 [meetings.md](meetings.md#record). Not yet observed: a real WhatsApp, Zoom,
 or Teams call on a Mac with the toggle on; the row renders only in macOS
 builds, so no golden changes.
+
+Fix results in Output (`output-fixes`, issue 989, every OS): for a Try
+result in Settings › Output that comes out wrong. While on, the Try card
+adds a row under the sentence with a Vocabulary button, which opens the same
+Vocabulary sheet as General's Vocabulary row, and, once a sentence is typed,
+Fix this, which copies Edit with agent's prompt ending `What I want: When I
+say "<sentence>", Hex pastes "<result>". It should paste: ` for the person to
+finish in their agent; it reads Copied until the sentence changes or the pane
+is left. The result is what the Try card shows (corrections and built-in
+steps; scripts and rewriting run only when dictating). Nothing is saved:
+the agent changes the steps or vocabulary as for Edit with agent. The gate is
+the Try card (`try_card` in [rune_ui/output.rs](../../src/rune_ui/output.rs)
+reads `labs.output_fixes`), and both actions check it again. Off, the pane is
+exactly as before. Checks:
+`output_fixes_show_only_with_their_lab_and_fix_this_copies_for_the_sentence`
+in [rune_ui/tests.rs](../../src/rune_ui/tests.rs) and
+`fix_this_ends_edit_with_agents_prompt_with_the_sentence_and_its_result` in
+[rune_ui/output.rs](../../src/rune_ui/output.rs). Not yet observed: the row
+in a real window; the Labs page goldens need regenerating on Linux with the
+new row (the Output goldens keep the toggle off and are unchanged).
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

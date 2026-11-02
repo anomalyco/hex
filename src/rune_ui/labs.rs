@@ -349,6 +349,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Show a summary of your retained dictations at the top of History, with hex history stats"),
     ));
     rows.push(row(
+        Feature::OutputFixes,
+        &BOOK,
+        tr("Fix results in Output"),
+        tr("Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"),
+    ));
+    rows.push(row(
         Feature::PickerSortFilter,
         &HINTS,
         tr("Sort and filter models"),
@@ -422,6 +428,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::SkipPauses => "lab-skip-pauses",
         Feature::StopWhenCallEnds => "lab-stop-when-call-ends",
+        Feature::OutputFixes => "lab-output-fixes",
     }
 }
 

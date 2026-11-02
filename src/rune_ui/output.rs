@@ -5,7 +5,7 @@
 //! agent, which copies a prompt saying where the steps live and what each
 //! can be.
 
-use rune::{El, TextEdit, Tx, col, row, text};
+use rune::{El, TextEdit, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, TextInput};
 
 use super::controls::{
@@ -47,6 +47,9 @@ pub(super) struct OutputPane {
     pub(super) trial: TextEdit,
     /// Edit with agent copied its prompt, until the pane is left.
     pub(super) prompt_copied: bool,
+    /// The Try sentence Labs › Fix results in Output's Fix this copied a
+    /// prompt for; it reads Copied while the sentence stays the same.
+    pub(super) fix_copied: Option<String>,
     /// The app rule opened to show its steps.
     pub(super) expanded: Option<usize>,
     /// Where the agent card's examples stand.
@@ -220,15 +223,16 @@ fn agent_card(ui: &Ui, p: Paint, reduced: bool) -> El {
     let edit = button(
         p,
         "edit-with-agent",
-        if ui.output.prompt_copied {
+        if ui.output.prompt_copied && ui.output.fix_copied.is_none() {
             tr("Copied")
         } else {
             tr("Edit with agent")
         },
         ButtonKind::Primary,
         |ui: &mut Ui, tx: &mut Tx| {
-            tx.copy(agent_prompt());
+            tx.copy(agent_prompt(None));
             ui.output.prompt_copied = true;
+            ui.output.fix_copied = None;
         },
     );
     raised(p, "agent-card").child(
@@ -482,31 +486,63 @@ fn try_card(ui: &Ui, p: Paint, mode: &DictationMode) -> El {
                 .wrap()
                 .grow(1.0),
         );
-    card(
-        p,
-        "try-card",
-        vec![
-            row()
-                .key("try")
-                .px(METRICS.row_px)
-                .py(12.0)
-                .gap(10.0)
-                .center_y()
-                .child(
-                    text(tr("Try"))
-                        .key("label")
-                        .font(p.k.ty.ui)
-                        .color(p.muted()),
-                )
-                .child(col().key("in").w(0.0).grow(1.0).child(input))
-                .child(
-                    rune::icon(&rune_kit::glyphs::ARROW_RIGHT, 16.0)
-                        .key("arrow")
-                        .color(c.icon_faint),
-                )
-                .child(col().key("out").w(0.0).grow(1.0).child(result)),
-        ],
-    )
+    let mut rows = vec![
+        row()
+            .key("try")
+            .px(METRICS.row_px)
+            .py(12.0)
+            .gap(10.0)
+            .center_y()
+            .child(
+                text(tr("Try"))
+                    .key("label")
+                    .font(p.k.ty.ui)
+                    .color(p.muted()),
+            )
+            .child(col().key("in").w(0.0).grow(1.0).child(input))
+            .child(
+                rune::icon(&rune_kit::glyphs::ARROW_RIGHT, 16.0)
+                    .key("arrow")
+                    .color(c.icon_faint),
+            )
+            .child(col().key("out").w(0.0).grow(1.0).child(result)),
+    ];
+    if ui.settings.labs.output_fixes {
+        rows.push(fix_row(ui, p, trial));
+    }
+    card(p, "try-card", rows)
+}
+
+/// Labs › Fix results in Output: Vocabulary opens the shared vocabulary
+/// sheet, and Fix this (once there is a sentence) copies Edit with agent's
+/// prompt ending with the sentence and what Hex pastes for it.
+fn fix_row(ui: &Ui, p: Paint, trial: &str) -> El {
+    let vocabulary = Button::new(tr("Vocabulary"))
+        .variant(ButtonVariant::Ghost)
+        .on_press(|ui: &mut Ui| {
+            if ui.settings.labs.output_fixes {
+                super::vocabulary::open(ui);
+            }
+        })
+        .build_push(p.k)
+        .key("output-vocabulary");
+    let fix = (!trial.is_empty()).then(|| {
+        let copied = ui.output.prompt_copied && ui.output.fix_copied.as_deref() == Some(trial);
+        Button::new(if copied { tr("Copied") } else { tr("Fix this") })
+            .variant(ButtonVariant::Ghost)
+            .on_press_tx(|ui: &mut Ui, tx: &mut Tx| fix_this(ui, tx))
+            .build_push(p.k)
+            .key("fix-this")
+    });
+    row()
+        .key("try-fixes")
+        .px(METRICS.row_px)
+        .pb(10.0)
+        .gap(4.0)
+        .center_y()
+        .child(el().key("spacer").grow(1.0))
+        .child(vocabulary)
+        .children(fix)
 }
 
 /// Rules whose steps run instead of Every dictation's in the apps and
@@ -649,10 +685,33 @@ fn allow_config(ui: &mut Ui, hash: &str) {
     ui.modes.approved = Some(hash.into());
 }
 
+/// Fix this: copies the agent prompt naming the Try sentence and what Hex
+/// pastes for it (Labs › Fix results in Output).
+fn fix_this(ui: &mut Ui, tx: &mut Tx) {
+    if !ui.settings.labs.output_fixes {
+        return;
+    }
+    let trial = ui.output.trial.text.trim().to_string();
+    if trial.is_empty() {
+        return;
+    }
+    let result = preview(&ui.settings.dictation_processing.default_mode, &trial);
+    tx.copy(agent_prompt(Some((&trial, &result))));
+    ui.output.prompt_copied = true;
+    ui.output.fix_copied = Some(trial);
+}
+
 /// What Edit with agent copies: where the steps live, their shape, the
 /// built-in ones, and how to change them while Hex runs, so any coding
-/// agent can do it.
-fn agent_prompt() -> String {
+/// agent can do it. With `fix`, a sentence and what Hex pastes for it,
+/// it ends asking for the right result.
+fn agent_prompt(fix: Option<(&str, &str)>) -> String {
+    let want = match fix {
+        Some((said, pasted)) => {
+            format!("When I say \"{said}\", Hex pastes \"{pasted}\". It should paste: ")
+        }
+        None => String::new(),
+    };
     let path = crate::app_settings::path().map_or_else(
         |_| "Hex's settings.json".into(),
         |path| path.display().to_string(),
@@ -694,7 +753,7 @@ fn agent_prompt() -> String {
          (or `dictation_processing.modes`), which Hex applies at once. Don't edit the \
          file while Hex runs.\n\
          \n\
-         What I want: "
+         What I want: {want}"
     )
 }
 
@@ -768,5 +827,16 @@ mod tests {
             ..DictationMode::default()
         };
         assert_eq!(preview(&mode, "Open code shipped."), "opencode shipped");
+    }
+
+    #[test]
+    fn fix_this_ends_edit_with_agents_prompt_with_the_sentence_and_its_result() {
+        let plain = agent_prompt(None);
+        assert!(plain.ends_with("What I want: "));
+        let fix = agent_prompt(Some(("open code shipped", "opencode shipped")));
+        assert!(fix.starts_with(plain.as_str()));
+        assert!(fix.ends_with(
+            "What I want: When I say \"open code shipped\", Hex pastes \"opencode shipped\". It should paste: "
+        ));
     }
 }
