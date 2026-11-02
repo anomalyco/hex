@@ -416,6 +416,36 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.state.settings.share_dictation_shortcut);
 }
 
+/// The cancel shortcut's row shows only in Toggle; its default, Escape,
+/// can't be recorded (Escape ends the recorder), so restoring puts it back.
+#[test]
+fn the_cancel_shortcut_shows_in_toggle_and_restores_escape() {
+    use crate::app_settings::HotkeyBinding;
+    let hold = runtime("mac-settings", true, PANE_SIZE);
+    assert!(hold.find("cancel-shortcut").is_none(), "Hold has no cancel");
+
+    let mut rt = runtime("toggle-cancel", true, PANE_SIZE);
+    assert!(rt.find("cancel-hotkey").is_some());
+    assert!(
+        rt.find("restore-cancel-shortcut").is_none(),
+        "already Escape"
+    );
+    rt.state.settings.cancel_hotkey = HotkeyBinding::paste_last_default();
+    rt.state.settings.paste_last_hotkey = None;
+    settle(&mut rt);
+    tap(&mut rt, "restore-cancel-shortcut");
+    assert_eq!(
+        rt.state.settings.cancel_hotkey,
+        HotkeyBinding::cancel_default()
+    );
+
+    // On Wayland the portal would hold the key for good: the row points
+    // to `hex dictation cancel` instead of recording one.
+    let portal = runtime("portal-toggle-cancel", true, PANE_SIZE);
+    assert!(portal.find("cancel-shortcut").is_some());
+    assert!(portal.find("cancel-hotkey").is_none());
+}
+
 #[test]
 fn general_hides_advanced_options_until_asked() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
@@ -1486,6 +1516,7 @@ fn platform_goldens() {
             "mac-settings-permissions-stale",
             "shortcut-mode",
             "shortcut-mode-key",
+            "toggle-cancel",
             "sound-sets",
             "sound-sets-playing",
         ] {
@@ -1493,6 +1524,7 @@ fn platform_goldens() {
         }
     }
     check_golden("shortcut-mode-chord", false, PANE_SIZE);
+    check_golden("portal-toggle-cancel", false, PANE_SIZE);
     check_golden("mac-settings-permissions", true, PANE_SIZE);
     check_golden("mac-settings-advanced", false, PANE_SIZE);
     check_golden("mac-microphone-bluetooth", true, PANE_SIZE);

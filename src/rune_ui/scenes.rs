@@ -620,6 +620,16 @@ pub(super) const SCENES: &[Scene] = &[
         ui.activity = activity::ActivityPane::fixture();
         ui.pane = Pane::Activity;
     }),
+    // Toggle's cancel shortcut under the shortcut mode, on its default
+    // (Escape), and on Wayland, where the desktop binds it.
+    ("toggle-cancel", |ui| {
+        *ui = mac_fixture();
+        ui.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+    }),
+    ("portal-toggle-cancel", |ui| {
+        *ui = portal_fixture();
+        ui.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+    }),
     ("mac-settings-sides", |ui| {
         *ui = mac_fixture();
         ui.advanced = vec![Pane::General];
