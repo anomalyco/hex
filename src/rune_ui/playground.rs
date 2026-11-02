@@ -239,6 +239,10 @@ const PATHS: &[(&str, &str)] = &[
         "Linux & Windows/Onboarding · download failed",
     ),
     (
+        "onboarding-no-model",
+        "Linux & Windows/Onboarding · continued without a model",
+    ),
+    (
         "onboarding-model-found",
         "Linux & Windows/Onboarding · models on this computer",
     ),

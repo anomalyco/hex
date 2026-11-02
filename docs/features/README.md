@@ -128,11 +128,12 @@ with 2.1.17; the initial 2.1.16 mirror preserves that release's original bytes.
 Launch Hex, setup incomplete              // setup.tour; every build and OS, full window
 ├── One onboarding: the first-run story (rune_ui/onboarding_kit/live.rs) over
 │   the tour state machine (desktop::onboarding::Flow); no flag, no other tour
-├── Skip (quiet, top-right, every page but Hex is ready)    // setup.skip
-│   ├── Ends onboarding at once and marks it done; Run setup again replays it
-│   └── A model not ready yet keeps downloading: the one picked, else the
-│       recommended one, also when the model step or the scan held it, so a
-│       blocked network (#894) never traps the person in onboarding
+├── Skip (quiet, top-right, only on the demo and the practice)    // setup.skip
+│   ├── Passes over that part to the next step setup still needs: permissions,
+│   │   then Almost ready while the model downloads, else Hex is ready
+│   ├── Never closes onboarding or records it done
+│   └── No Skip on permissions, the model step or download, or the paste
+│       permission. Check: `onboarding_skip` (scripts/check-onboarding.sh)
 ├── GNOME/KDE Wayland (pastes through the RemoteDesktop portal, no wtype)
 │   and no saved grant -> before Your turn, "Let Hex paste for you"     // setup.paste-access
 │   ├── Says why: Hex only sends the paste keystroke, never sees the screen;
@@ -170,6 +171,13 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   ├── Progress moves to the top pill once the story moves on; failure ->
 │   │   why, in one line (a proxy or certificate, #894), + Use a model
 │   │   file… + Try again
+│   ├── Failed, or stalled 30 s without bytes, with every permission ready
+│   │   -> Continue without a model (quiet), saying dictation won't work
+│   │   until a model is added with Add model file…      // setup.without-model
+│   │   └── Records completion and closes onboarding; Settings › General's
+│   │       Speech model row says no model is installed (with the download's
+│   │       error), + Download + Add model file…. Check: golden
+│   │       `onboarding-no-model`, `onboarding_continue_without_model`
 │   └── Change or delete the model later in Settings      // setup.delete-model
 ├── The demo: Without Hex (typed, with typos) -> With Hex (spoken) -> Continue
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume

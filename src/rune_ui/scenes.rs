@@ -228,6 +228,11 @@ pub(super) const SCENES: &[Scene] = &[
     ("onboarding-download-failed", |ui| {
         first_run(ui, FirstRun::Failed, Page::Download)
     }),
+    // Continue without a model after it, then Settings with no model.
+    ("onboarding-no-model", |ui| {
+        first_run(ui, FirstRun::Failed, Page::Download);
+        onboarding_kit::live::continue_without_model(ui);
+    }),
     ("onboarding-model-found", found::listed),
     ("onboarding-model-found-downloading", found::loading),
     ("onboarding-model-found-recommended", found::present),

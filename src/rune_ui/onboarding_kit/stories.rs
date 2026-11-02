@@ -72,6 +72,24 @@ pub(crate) enum Step {
     Ready,
 }
 
+impl Step {
+    /// The demo and the practice: the pages setup doesn't need, which Skip
+    /// passes over.
+    pub(crate) fn optional(self) -> bool {
+        matches!(
+            self,
+            Self::Parked
+                | Self::YourTurn
+                | Self::Hearing
+                | Self::Heard
+                | Self::Done
+                | Self::Try
+                | Self::TryHearing
+                | Self::TryHeard
+        )
+    }
+}
+
 pub(crate) struct Onboard {
     pub(crate) flow: Flow,
     pub(crate) speech: Speech,
@@ -361,6 +379,21 @@ impl Onboard {
                 self.jump_to_ready();
             }
             _ => {}
+        }
+    }
+
+    /// Skip on the demo or the practice: on to the next step setup still
+    /// needs (the permissions, then the model), else Hex is ready.
+    pub(crate) fn skip_optional(&mut self) {
+        if !self.step.optional() {
+            return;
+        }
+        if !self.granted {
+            self.jump_to_permissions();
+        } else if !self.can_hear() {
+            self.jump_to_waiting();
+        } else {
+            self.jump_to_ready();
         }
     }
 
