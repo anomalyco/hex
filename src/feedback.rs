@@ -135,6 +135,11 @@ pub enum OnboardingTone {
     /// The triumphant sting as `"With Hex"` peaks: one of the candidates
     /// (`0..TRIUMPHS`) still being chosen between.
     Triumph(u8),
+    /// A word shooting out of the HUD, one of three (`0..3`) so a burst
+    /// never repeats one.
+    Word(u8),
+    /// A card struck by lightning and dissolving.
+    Burn,
 }
 
 /// [`KeySoundStyle::Clack`]'s distinct presses, each also played a little
@@ -774,6 +779,8 @@ struct OnboardingSounds {
     confetti: SamplesBuffer,
     fireworks: SamplesBuffer,
     triumphs: [SamplesBuffer; TRIUMPHS as usize],
+    words: [SamplesBuffer; 3],
+    burn: SamplesBuffer,
 }
 
 impl OnboardingSounds {
@@ -858,6 +865,12 @@ impl OnboardingSounds {
                 decode_wav(bundled_sound!("onboarding", "triumph_2"))?,
                 decode_wav(bundled_sound!("onboarding", "triumph_3"))?,
             ],
+            words: [
+                decode_wav(bundled_sound!("onboarding", "word_1"))?,
+                decode_wav(bundled_sound!("onboarding", "word_2"))?,
+                decode_wav(bundled_sound!("onboarding", "word_3"))?,
+            ],
+            burn: decode_wav(bundled_sound!("onboarding", "card_burn"))?,
         })
     }
 
@@ -905,6 +918,8 @@ impl OnboardingSounds {
             OnboardingTone::Confetti => &self.confetti,
             OnboardingTone::Fireworks => &self.fireworks,
             OnboardingTone::Triumph(i) => &self.triumphs[usize::from(i) % self.triumphs.len()],
+            OnboardingTone::Word(i) => &self.words[usize::from(i) % self.words.len()],
+            OnboardingTone::Burn => &self.burn,
         })
     }
 }
@@ -1489,6 +1504,9 @@ mod tests {
             OnboardingTone::Read,
             OnboardingTone::Rewind,
             OnboardingTone::Heartbeat,
+            OnboardingTone::Word(0),
+            OnboardingTone::Word(1),
+            OnboardingTone::Word(2),
         ] {
             let buf = sounds
                 .get(SoundSet::Signature, Tone::Onboarding(cue))
@@ -1504,6 +1522,7 @@ mod tests {
             OnboardingTone::HeartbeatSlow,
             OnboardingTone::SlowDown,
             OnboardingTone::Slam,
+            OnboardingTone::Burn,
         ]
         .iter()
         .chain(&tapbacks)

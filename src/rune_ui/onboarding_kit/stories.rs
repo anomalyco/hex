@@ -3,6 +3,8 @@
 //! and in a live desktop window pauses on `"Your turn"` with a focused
 //! [`rune::TextEdit`] so you can hold `⌥` and test real voice dictation live.
 
+#[cfg(test)]
+mod motion_gate;
 mod replay;
 mod side;
 
@@ -95,6 +97,12 @@ pub(crate) struct Onboard {
     pub(crate) motion: super::landing::Motion,
     download_from: Option<f64>,
     pub(crate) download: Option<Download>,
+    /// Whether the download showed in the top bar at the last poll, when it
+    /// last flew there or back, and when that poll was
+    /// ([`super::pill::landed`]).
+    pub(crate) pill_up: bool,
+    pub(crate) pill_flew: f64,
+    polled: f64,
     pub(crate) parked_from: Option<f64>,
     pub(crate) typing_from: Option<f64>,
     pub(crate) voice_from: Option<f64>,
@@ -238,6 +246,9 @@ impl Onboard {
             motion: super::landing::Motion::default(),
             download_from: None,
             download: None,
+            pill_up: false,
+            pill_flew: f64::NEG_INFINITY,
+            polled: f64::NEG_INFINITY,
             parked_from: None,
             typing_from: None,
             voice_from: None,
@@ -996,6 +1007,10 @@ fn hear(s: &mut Onboard, now: f64) {
     s.take = Script::chosen().take();
     s.take_from = Some(now);
     s.sfx.on_voice_take(now, s.take);
+    s.sfx.on_words(
+        versus::launches(s.streams()).into_iter().map(|at| now + at),
+        &mut super::sfx::WordHits::default(),
+    );
     let beats = versus::hex_beats(s.streams(), &s.timing);
     s.sfx.on_hex_reply(now, &beats);
 }
@@ -1114,6 +1129,9 @@ pub(crate) const TAPS_BEFORE_TOGGLE: u8 = 2;
 /// How long the first run waits on the Launch Room's row before the
 /// pointer clicks it open.
 const WATCH_AFTER: f64 = super::inbox::CLICK_AT;
+
+/// The longest gap between polls that still plays a flight.
+const FLIGHT_SEEN: f64 = 0.25;
 
 /// How long `"Without Hex"`'s last line holds before the first run moves on.
 const COMEDY_HOLD: f64 = 1.6;
@@ -1315,6 +1333,23 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         s.hud.clear();
     }
 
+    // The download flies when its place changes. A jump in the story's
+    // clock (a fixture, a seek) lands it at once.
+    let up = super::pill::up(s);
+    if up != s.pill_up {
+        s.pill_up = up;
+        s.pill_flew = if now - s.polled <= FLIGHT_SEEN {
+            now
+        } else {
+            f64::NEG_INFINITY
+        };
+    }
+    // The conversation takes over from the plate it grew on in one frame;
+    // its own surface would otherwise fade in as the plate goes, a flash.
+    if versus::grown(s, s.polled, now) {
+        tx.instant();
+    }
+    s.polled = now;
     s.sfx.advance_to(now);
     if s.ready_from.is_some_and(|from| now - from >= BUILD_SECS) {
         s.sfx.flush_offline_if_requested(now + 1.5);
@@ -1635,6 +1670,41 @@ mod tests {
         let (sketch, done, tried) = (sketch.unwrap(), done.unwrap(), tried.unwrap());
         assert!(sketch < done && done < tried, "the model lands mid-sketch");
         assert_eq!(s.step, Step::Ready);
+        // Every beat keeps its sound, the sketch's hand-off to the game too.
+        use crate::feedback::{OnboardingTone, Tone};
+        let fired = s.sfx.fired_cues();
+        let sounds = |from: f64, to: f64, tone: fn(Tone) -> bool| {
+            fired
+                .iter()
+                .any(|&(at, t, _)| at >= from && at < to && tone(t))
+        };
+        assert!(sounds(0.0, waiting.unwrap(), |t| matches!(
+            t,
+            Tone::Onboarding(OnboardingTone::Key(..))
+        )));
+        assert!(sounds(sketch, done, |t| matches!(
+            t,
+            Tone::Onboarding(OnboardingTone::Key(..))
+        )));
+        for tone in [
+            |t| matches!(t, Tone::Onboarding(OnboardingTone::ShortcutDown)),
+            |t| matches!(t, Tone::Onboarding(OnboardingTone::Word(_))),
+            |t| matches!(t, Tone::Onboarding(OnboardingTone::Burn)),
+            |t| matches!(t, Tone::Onboarding(OnboardingTone::Triumph(_))),
+        ] as [fn(Tone) -> bool; 4]
+        {
+            assert!(sounds(tried, now, tone));
+        }
+        let longest = fired
+            .windows(2)
+            .map(|w| (w[1].0 - w[0].0, w[0].0))
+            .fold((0.0, 0.0), |a, b| if b.0 > a.0 { b } else { a });
+        assert!(
+            longest.0 < 8.0,
+            "{:.1} s silent from {:.1} s",
+            longest.0,
+            longest.1
+        );
     }
 
     #[test]

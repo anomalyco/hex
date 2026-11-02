@@ -19,6 +19,11 @@ library only, so it runs anywhere:
   that thin out as the paper falls.
 - `fireworks`: a quiet whistle rising (900 Hz -> 2.2 kHz), a soft boom and
   the crackle after it.
+- `word_1` to `word_3`: a word shooting out of the HUD, a tiny bright tick
+  on a short airy flick upward, each a little different so a burst of them
+  never repeats.
+- `card_burn`: a card struck and dissolving, a dry crack over a soft low
+  knock, then a falling hiss with embers crackling out.
 
 The heartbeat and the triumph candidates come from `comedy.py`. Peaks are set to sit with the other onboarding cues (about -14 dBFS)."""
 
@@ -174,6 +179,22 @@ def main():
         at = 0.45 + rng.uniform(0.0, 0.95) * (i / 40) ** 0.7
         add(fireworks, at, [0.35 * (1.0 - i / 48) * v for v in noise_burst(0.006, 0.0015, hp=0.95)])
     write("fireworks", finish([math.tanh(1.6 * v) for v in fireworks], -14.0, fade=0.1))
+
+    # After every other sound, so adding these leaves the rest unchanged.
+    for i, (lo, hi, tick) in enumerate([(700.0, 3000.0, 2400.0), (850.0, 3600.0, 2800.0), (600.0, 2600.0, 2100.0)]):
+        word = silence(0.075)
+        add(word, 0.0, [0.55 * v for v in pip(tick, 0.018, 0.004, attack=0.0005)])
+        add(word, 0.004, swish(0.07, lo, hi))
+        write(f"word_{i + 1}", finish(word, -21.0, fade=0.008))
+
+    burn = silence(0.8)
+    add(burn, 0.0, [0.7 * v for v in noise_burst(0.025, 0.006, hp=0.9)])
+    add(burn, 0.0, [0.5 * v for v in thump(0.25, 160.0, 60.0, 0.06, h2=0.3, attack=0.002)])
+    add(burn, 0.03, [0.6 * v for v in swish(0.75, 3000.0, 700.0)])
+    for i in range(18):
+        at = 0.1 + 0.6 * (i / 18) ** 1.3 + rng.uniform(-0.01, 0.01)
+        add(burn, at, [0.3 * (1.0 - i / 22) * v for v in noise_burst(0.005, 0.0012, hp=0.95)])
+    write("card_burn", finish(burn, -17.0, fade=0.06))
 
 
 if __name__ == "__main__":

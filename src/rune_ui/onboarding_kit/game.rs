@@ -17,6 +17,7 @@ mod share;
 
 use crate::desktop::i18n::tr;
 use std::cell::Cell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ use super::high_score;
 use super::hud_stage::{LiveHud, frame_slot};
 use super::landing::{LEAD, keys, title_font};
 use super::live;
+use super::sfx::{SfxTrack, WordHits};
 use super::sparks::impacts;
 use super::stories::{Onboard, physical_shortcut_held};
 use crate::desktop::onboarding::Practice;
@@ -622,7 +624,9 @@ impl Script {
         }
     }
 
-    fn run(&mut self, play: &mut Play, now: f64) {
+    /// Plays the script to `now`, returning the take it starts saying, if
+    /// it presses the shortcut now.
+    fn run(&mut self, play: &mut Play, now: f64) -> Option<&'static Take> {
         if self.keep && play.share.is_some_and(|at| now >= at + SHARE_HOLD) {
             play.keep(now);
         }
@@ -641,12 +645,13 @@ impl Script {
             .map(|r| (r.n, r.lit_at(), r.spec.demo));
         let Some((n, lit, take)) = next.filter(|_| play.playing()) else {
             play.hear(false, None, now);
-            return;
+            return None;
         };
         match self.held.filter(|(held, _)| *held == n) {
             None if now >= lit + 0.55 => {
                 self.held = Some((n, now));
                 play.hear(true, None, now);
+                return Some(take);
             }
             None => play.hear(false, None, now),
             Some((_, from)) if now - from < take.release => {
@@ -659,6 +664,7 @@ impl Script {
                 play.paste(take.text(), now);
             }
         }
+        None
     }
 }
 
@@ -676,6 +682,11 @@ pub(crate) struct Session {
     hud: GameHud,
     /// Whether the run's first score card has sounded its triumph.
     cheered: bool,
+    /// How many of each card's words have sounded leaving the HUD.
+    flicked: BTreeMap<usize, usize>,
+    /// The cards whose burn has sounded.
+    burnt: BTreeSet<usize>,
+    hits: WordHits,
 }
 
 impl Session {
@@ -707,11 +718,25 @@ impl Session {
             saved: None,
             hud: GameHud::default(),
             cheered: false,
+            flicked: BTreeMap::new(),
+            burnt: BTreeSet::new(),
+            hits: WordHits::default(),
         }
     }
 
-    /// The first score card of the run lands on the comedy's triumph.
-    fn cheer(&mut self, sfx: &mut super::sfx::SfxTrack) {
+    /// Schedules what the game has newly set in motion: each word leaving
+    /// the HUD, each card's strike, and the first score card's triumph.
+    fn sound(&mut self, sfx: &mut SfxTrack) {
+        for r in &self.play.rounds {
+            let flicked = self.flicked.entry(r.n).or_default();
+            if r.launch.len() > *flicked {
+                sfx.on_words(r.launch[*flicked..].iter().copied(), &mut self.hits);
+                *flicked = r.launch.len();
+            }
+            if r.explode.is_finite() && self.burnt.insert(r.n) {
+                sfx.on_burn(r.explode);
+            }
+        }
         if let Some(at) = self.play.share.filter(|_| !self.cheered) {
             self.cheered = true;
             sfx.on_game_score(at);
@@ -745,12 +770,14 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
     let mut session = s.game.take().unwrap_or_else(|| Session::new(s, now));
     let reduced = s.reduced.get();
     if let Some(script) = session.script.as_mut() {
-        script.run(&mut session.play, now);
+        if let Some(take) = script.run(&mut session.play, now) {
+            s.sfx.on_voice_take(now, take);
+        }
         let peak = script.meter.map(|(_, peak)| peak);
         session
             .hud
             .step(&session.play, now, peak.is_some(), peak, reduced);
-        session.cheer(&mut s.sfx);
+        session.sound(&mut s.sfx);
         let leave = s.autoplay
             && session
                 .play
@@ -803,7 +830,7 @@ pub(super) fn step(s: &mut Onboard, now: f64) -> bool {
     let peak = crate::audio::input_level::recent().filter(|_| held);
     session.hud.step(&session.play, now, held, peak, reduced);
     session.keep_best();
-    session.cheer(&mut s.sfx);
+    session.sound(&mut s.sfx);
     s.game = Some(session);
     true
 }

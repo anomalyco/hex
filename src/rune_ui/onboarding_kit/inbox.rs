@@ -23,13 +23,14 @@ const FACE: f32 = 22.0;
 /// The ring each ding sends out: how long, and how far past the row.
 const RING: f64 = 0.9;
 const RING_OUT: f32 = 12.0;
+/// When the pointer's click opens the conversation, after the row parks:
+/// time to click it yourself first.
+pub(crate) const CLICK_AT: f64 = 5.0;
 /// The pointer comes in, glides onto the row, presses it, and clicks.
-const POINTER_IN: f64 = 1.6;
+const POINTER_IN: f64 = CLICK_AT - 0.9;
 const GLIDE: f64 = 0.62;
-const PRESS_AT: f64 = 2.3;
+const PRESS_AT: f64 = CLICK_AT - 0.2;
 const PRESS: f64 = 0.12;
-/// When the pointer's click opens the conversation, after the row parks.
-pub(crate) const CLICK_AT: f64 = 2.5;
 /// How far a press sinks the row.
 pub(crate) const PRESSED: f32 = 0.97;
 /// Where on the row the pointer clicks, and where it comes from.
@@ -39,6 +40,15 @@ const FROM: [f32; 2] = [AIM[0] + 120.0, AIM[1] + 150.0];
 /// The ids the row's faces, title, and Jay's question share with the
 /// conversation they fly into ([`rune::El::matched`]).
 pub(crate) const MATCHED: [&str; 3] = ["launch-room-faces", "launch-room-title", "launch-room-ask"];
+
+/// How far the badge has popped `t` seconds after a message lands, `0..=1`:
+/// up over a few frames rather than in one, then back.
+fn pop(t: f64) -> f32 {
+    const RISE: f64 = 0.08;
+    let u = (t / RISE).clamp(0.0, 1.0);
+    let up = u * u * (3.0 - 2.0 * u);
+    (up * (-(t - RISE).max(0.0) / 0.14).exp()) as f32
+}
 
 /// The row `since` seconds after the stage parked; a click opens the
 /// conversation.
@@ -71,7 +81,9 @@ pub(crate) fn launch_row(p: Paint, s: &Onboard, since: f64) -> El {
             .min_w(0.0)
             .truncate()
     };
-    let asking = preview(newest.text.clone(), "preview");
+    // A newer message crossfades in over the one before.
+    let asking =
+        preview(newest.text.clone(), &format!("preview-{count}")).transition(Transition::opacity());
     let asking = if count == asked.len() {
         asking.matched(MATCHED[2])
     } else {
@@ -83,7 +95,7 @@ pub(crate) fn launch_row(p: Paint, s: &Onboard, since: f64) -> El {
     let pop = if reduced || landed == 0 {
         1.0
     } else {
-        1.0 + 0.35 * (-(since - last).max(0.0) / 0.14).exp() as f32
+        1.0 + 0.35 * pop(since - last)
     };
     let badge = el()
         .key("badge")

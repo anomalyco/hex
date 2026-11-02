@@ -17,7 +17,7 @@ use super::super::controls::Paint;
 use super::cards::CHAT_W;
 use super::fixture::Download;
 use super::live;
-use super::pill::{CAPSULE, FLY};
+use super::pill::{CAPSULE, FLY, after_flight};
 use super::scene_script::{Script, parse_sketch};
 use super::stories::{Onboard, Step};
 use super::typing::Scene;
@@ -234,15 +234,19 @@ pub(super) fn progress(p: Paint, s: &Onboard, d: Download) -> El {
                         .w(BAR_W * fill)
                         .h(4.0)
                         .radius(2.0)
-                        .fill(p.muted()),
+                        .fill(p.muted())
+                        // It follows the download, not a spring behind it.
+                        .instant_changes(),
                 ),
         )
-        .child(
+        // Its caption shows once it has landed below "Almost ready".
+        .child(after_flight(
             text(status(s, d))
                 .key("bytes")
                 .font(TextStyle::new(12.0, 450.0).lh(16.0).features("'tnum' 1"))
                 .color(p.faint()),
-        );
+            s,
+        ));
     let button = offered(s).then(|| {
         let label = "Watch another one";
         let button = Button::new(label)
@@ -253,8 +257,7 @@ pub(super) fn progress(p: Paint, s: &Onboard, d: Download) -> El {
         } else {
             button.on_press(watch)
         };
-        button
-            .build(p.k)
+        after_flight(button.build(p.k), s)
             .key("watch-another")
             .transition(Transition::opacity())
     });

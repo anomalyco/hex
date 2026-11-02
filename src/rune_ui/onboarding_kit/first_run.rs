@@ -26,7 +26,7 @@ use super::landing::{LEAD, arrives, keys, ready, title_font};
 use super::live::{Live, ModelStep};
 use super::login::{self, Login, login_ask};
 use super::mic_line::mic_capsule;
-use super::pill::{CAPSULE, FLY, PILL, language_capsule, pill, slot};
+use super::pill::{CAPSULE, FLY, PILL, after_flight, language_capsule, pill, slot};
 use super::sparks::impacts;
 use super::stories::{Onboard, Step, is_live_window};
 use super::{live, permissions, versus};
@@ -56,7 +56,6 @@ const BURST: f64 = 0.06;
 
 pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     let sketch = super::sketches::playing(s);
-    let centred = matches!(s.step, Step::Pick | Step::Started | Step::Waiting) && !sketch;
     let top = row()
         .key("top-bar")
         .w_full()
@@ -65,7 +64,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         .center_y()
         .justify_center()
         .child(match s.download {
-            Some(d) if !s.had_model && !centred && s.step != Step::Ready => pill(p, d, s.closed),
+            Some(d) if super::pill::up(s) => pill(p, d, s.closed),
             _ => slot(),
         });
     let top = top
@@ -84,9 +83,10 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         Step::Waiting => download_page(p, s, true),
         Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard | Step::Done => demo_page(p, s),
         Step::Microphone | Step::Accessibility => permissions::page(p, s),
-        Step::Try | Step::TryHearing | Step::TryHeard => {
-            super::game::page(p, s).unwrap_or_else(|| try_page(p, s))
-        }
+        // The download flies up past the game's title from "Almost ready".
+        Step::Try | Step::TryHearing | Step::TryHeard => super::game::page(p, s)
+            .map(|game| after_flight(game, s))
+            .unwrap_or_else(|| try_page(p, s)),
         Step::Ready => ready_page(p, s),
     };
     vec![
@@ -512,23 +512,28 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .key(if waiting { "waiting" } else { "download" })
         .gap(22.0)
         .items_center()
-        .child(flow_box(
-            if waiting {
-                "waiting-hud"
-            } else {
-                "download-hud"
-            },
-            1.24,
+        // On "Almost ready" the download flies down past both into its bar.
+        .child(after_flight(
+            flow_box(
+                if waiting {
+                    "waiting-hud"
+                } else {
+                    "download-hud"
+                },
+                1.24,
+                s,
+            ),
             s,
         ))
-        .child(head)
+        .child(after_flight(head, s))
         .child(progress_capsule)
         .children(retry)
 }
 
 /// A sketch from `"Watch another one"`, the download up in the top pill.
 fn sketch_page(p: Paint, s: &Onboard) -> El {
-    col()
+    // The download flies up past it from the bar.
+    after_flight(col(), s)
         .key("sketch")
         .gap(16.0)
         .items_center()

@@ -34,7 +34,7 @@ use super::inbox::{self, MATCHED};
 use super::keyboard::{self, keyboard_lit};
 use super::landing::{LEAD, UI_SPRING, keys, language_pick, ready, title_font};
 use super::mic_line::mic_line;
-use super::pill::{pill, slot};
+use super::pill::{after_flight, pill, slot};
 use super::scene_script::{Script, fill};
 use super::stories::{Flow, Onboard, Step};
 use super::triumph::{self, HexBeats, Said};
@@ -193,6 +193,11 @@ fn flights_for(
             )
         })
         .collect()
+}
+
+/// When each of the answer's words leaves the HUD, from the shortcut.
+pub(crate) fn launches(streams: bool) -> Vec<f64> {
+    heard_for(take(), streams)
 }
 
 fn flights(s: &Onboard) -> Vec<(Flight, field_text::Slot<'static>)> {
@@ -396,7 +401,8 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             line("lead-done", "The same reply, typed and then spoken.".into()),
         ),
     };
-    col()
+    // The first run's download flies up past it from "Setting up Hex".
+    after_flight(col(), s)
         .key(key)
         .gap(8.0)
         .items_center()
@@ -462,6 +468,12 @@ fn opening(s: &Onboard) -> Option<f64> {
     opened_at(s)
         .map(|at| s.now - at)
         .filter(|&age| age < OPEN_SECS && s.step == Step::Parked && !s.reduced.get())
+}
+
+/// Whether the row finished growing into the conversation after `from`
+/// and by `to`.
+pub(super) fn grown(s: &Onboard, from: f64, to: f64) -> bool {
+    opened_at(s).is_some_and(|at| from < at + OPEN_SECS && at + OPEN_SECS <= to)
 }
 
 /// A zero-bounce spring's progress `t` seconds after it starts.
@@ -1045,7 +1057,13 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         all
     } else {
         let question = if composing { 1.0 } else { OLDER };
-        thread_at(p, s, &s.scene, -1e-3, None, |_, _| question)
+        let mut thread = thread_at(p, s, &s.scene, -1e-3, None, |_, _| question);
+        // Jay typing at the question gives way to the reply's own beats
+        // once it's sent: one set of dots, one face.
+        if sent && s.scene.dots(-1e-3).is_some() {
+            thread.pop();
+        }
+        thread
     };
     if sent {
         let taps: Vec<Glyph> = beats

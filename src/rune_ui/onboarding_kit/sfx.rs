@@ -13,6 +13,8 @@
 //! - Quiet motion landing cues: the hexagon mark, permission rows ticking to
 //!   `Allowed`, the Accessibility helper detaching and docking beside System
 //!   Settings, and `"Almost ready"`.
+//! - Words shooting out of the HUD ([`WordHits`]: a few varied flicks a
+//!   burst, not one a word) and the game's cards burning away.
 //! - Optional offline WAV export (`HEX_ONBOARDING_AUDIO_OUT`) so headless
 //!   `--video` renders produce a frame-accurate 48 kHz soundtrack without ever
 //!   opening an audio output device.
@@ -70,6 +72,25 @@ fn tapback(glyph: typing::Glyph) -> Tone {
     }))
 }
 
+/// The shortest gap between two word flicks: a burst of words sounds a few
+/// of them, not every one.
+const WORD_GAP: f64 = 0.15;
+
+/// The word flicks one burst has sounded.
+pub(crate) struct WordHits {
+    last: f64,
+    n: usize,
+}
+
+impl Default for WordHits {
+    fn default() -> Self {
+        Self {
+            last: f64::NEG_INFINITY,
+            n: 0,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct SfxTrack {
     pub(crate) style: KeySoundStyle,
@@ -81,9 +102,10 @@ pub(crate) struct SfxTrack {
 }
 
 impl SfxTrack {
+    /// Drops every cue still to come. What already played stays on the
+    /// record the offline soundtrack is mixed from.
     pub(crate) fn clear(&mut self) {
-        self.cues.clear();
-        self.fired = 0;
+        self.cues.truncate(self.fired);
         self.almost_ready_scheduled = false;
         self.flushed = false;
     }
@@ -325,6 +347,34 @@ impl SfxTrack {
 
     pub(crate) fn on_live_dictation_landed(&mut self, now: f64) {
         self.push(now, Tone::DictationDone);
+    }
+
+    /// Words leaving the HUD at `launches`: a flick on the first, then on
+    /// each at least [`WORD_GAP`] after the last, never the same twice
+    /// running, each at its own level.
+    pub(crate) fn on_words(
+        &mut self,
+        launches: impl IntoIterator<Item = f64>,
+        hits: &mut WordHits,
+    ) {
+        for at in launches {
+            if at - hits.last < WORD_GAP {
+                continue;
+            }
+            hits.last = at;
+            let level = 72 + (scramble(hits.n) % 24) as u8;
+            self.push_at(
+                at,
+                Tone::Onboarding(OnboardingTone::Word((hits.n % 3) as u8)),
+                level,
+            );
+            hits.n += 1;
+        }
+    }
+
+    /// A card struck at `at`, burning away.
+    pub(crate) fn on_burn(&mut self, at: f64) {
+        self.push(at, Tone::Onboarding(OnboardingTone::Burn));
     }
 
     /// The microphone step: a tick as macOS's prompt grants it.
