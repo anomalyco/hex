@@ -48,6 +48,7 @@ pub(super) const SCENES: &[&str] = &[
 
 /// The optional pages: the demo and the practice.
 const OPTIONAL: &[&str] = &[
+    "onboarding-model-found-back",
     "onboarding-demo",
     "onboarding-try",
     "mac-onboarding-try",
@@ -134,6 +135,10 @@ fn onboarding_continue_without_model() {
     );
     assert!(rt.find("transcription-download").is_some(), "Download");
     assert!(rt.find("transcription-add-file").is_some(), "Add model file…");
+    assert!(
+        texts(&rt).contains(&"Hex can't dictate until a speech model is installed".to_owned()),
+        "the status says so too"
+    );
 
     // A download that gains nothing for a while offers it too.
     let mut rt = runtime("onboarding-waiting", true, PANE_SIZE);

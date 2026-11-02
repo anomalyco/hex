@@ -207,7 +207,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 /// The selected speech model's download, while it is not installed, so
 /// Hex can't listen yet. Fixtures that name no installed models say nothing,
 /// so their rows never depend on this machine's models.
-fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::ModelProgress> {
+pub(super) fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::ModelProgress> {
     if !ui.live() && ui.picker.installed.is_none() {
         return None;
     }
