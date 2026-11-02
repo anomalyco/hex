@@ -2,7 +2,8 @@
 //! owner-only registration names a loopback URL and password, `/api/info`
 //! confirms the registered process still answers, and requests are plain
 //! authenticated HTTP over `TcpStream`. Hex never runs an OpenCode
-//! executable; when no service answers, OpenCode isn't running.
+//! executable; when no service answers, OpenCode isn't running, and when
+//! one answers `/api/info` with 404 it predates the current OpenCode 2.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -15,7 +16,9 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::Deserialize;
 
 /// What features say when no service answers.
-pub(crate) const NOT_RUNNING: &str = "OpenCode isn't running";
+const NOT_RUNNING: &str = "OpenCode isn't running";
+/// What features say when a registered service has no `/api/info`.
+const OUTDATED: &str = "Update OpenCode 2 from https://opencode.ai/v2/install";
 const MAX_REGISTRATION_BYTES: u64 = 64 * 1024;
 const MAX_REGISTRATIONS: usize = 16;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -37,15 +40,33 @@ pub(crate) struct Response {
     pub(crate) body: Vec<u8>,
 }
 
-/// The running service, or `None` when OpenCode isn't running. Reads only
-/// registration files and asks each registered service for `/api/info`.
-pub(crate) fn find() -> Option<Service> {
-    find_in(&state_dir()?)
+/// Why no service was found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Missing {
+    NotRunning,
+    /// A registered service answered `/api/info` with 404: an obsolete
+    /// OpenCode build. The current OpenCode 2 serves it.
+    Outdated,
+}
+
+impl Missing {
+    pub(crate) fn message(self) -> &'static str {
+        match self {
+            Missing::NotRunning => NOT_RUNNING,
+            Missing::Outdated => OUTDATED,
+        }
+    }
+}
+
+/// The running service, or why there is none. Reads only registration files
+/// and asks each registered service for `/api/info`.
+pub(crate) fn find() -> Result<Service, Missing> {
+    find_in(&state_dir().ok_or(Missing::NotRunning)?)
 }
 
 /// Whether a service answers now; a short loopback check for availability.
 pub(crate) fn running() -> bool {
-    find().is_some()
+    find().is_ok()
 }
 
 /// OpenCode's state directory on every OS: `$XDG_STATE_HOME` when set, else
@@ -60,9 +81,9 @@ fn state_dir() -> Option<PathBuf> {
 
 /// `service.json` (the stable, beta and dev channels) first, then other
 /// channels' `service-<channel>.json`; the first that answers wins.
-fn find_in(state: &Path) -> Option<Service> {
+fn find_in(state: &Path) -> Result<Service, Missing> {
     let mut others: Vec<PathBuf> = fs::read_dir(state)
-        .ok()?
+        .map_err(|_| Missing::NotRunning)?
         .flatten()
         .take(512)
         .map(|entry| entry.path())
@@ -73,11 +94,19 @@ fn find_in(state: &Path) -> Option<Service> {
         })
         .collect();
     others.sort();
-    std::iter::once(state.join("service.json"))
+    let mut missing = Missing::NotRunning;
+    for registration in std::iter::once(state.join("service.json"))
         .chain(others)
         .take(MAX_REGISTRATIONS)
         .filter_map(|path| read_registration(&path))
-        .find_map(|registration| confirm(&registration))
+    {
+        match confirm(&registration) {
+            Ok(service) => return Ok(service),
+            Err(Missing::Outdated) => missing = Missing::Outdated,
+            Err(Missing::NotRunning) => {}
+        }
+    }
+    Err(missing)
 }
 
 #[derive(Deserialize)]
@@ -128,9 +157,9 @@ fn open_private(path: &Path) -> Option<fs::File> {
 
 /// The service a registration names, when it is on loopback and the process
 /// answering `/api/info` is the registered one.
-fn confirm(registration: &Registration) -> Option<Service> {
+fn confirm(registration: &Registration) -> Result<Service, Missing> {
     let service = Service {
-        address: loopback_address(&registration.url)?,
+        address: loopback_address(&registration.url).ok_or(Missing::NotRunning)?,
         password: registration
             .password
             .clone()
@@ -150,17 +179,25 @@ fn confirm(registration: &Registration) -> Option<Service> {
             INFO_DEADLINE,
             &AtomicBool::new(false),
         )
-        .ok()?;
-    if response.status != 200 {
-        return None;
+        .map_err(|_| Missing::NotRunning)?;
+    if response.status == 404 {
+        tracing::warn!(
+            version = registration.version.as_deref().unwrap_or("unknown"),
+            "the registered OpenCode service has no /api/info; {OUTDATED}"
+        );
+        return Err(Missing::Outdated);
     }
-    let info: Info = serde_json::from_slice(&response.body).ok()?;
+    if response.status != 200 {
+        return Err(Missing::NotRunning);
+    }
+    let info: Info = serde_json::from_slice(&response.body).map_err(|_| Missing::NotRunning)?;
     (info.pid == registration.pid
         && registration
             .version
             .as_ref()
             .is_none_or(|version| *version == info.version))
     .then_some(service)
+    .ok_or(Missing::NotRunning)
 }
 
 /// A registered `http://` URL's loopback socket; an unspecified address
@@ -498,17 +535,27 @@ pub(crate) mod tests {
     #[test]
     fn a_stale_registration_means_opencode_isnt_running() {
         let state = state_root("stale");
-        assert_eq!(find_in(&state), None);
+        assert_eq!(find_in(&state), Err(Missing::NotRunning));
         let info = r#"{"pid":7,"version":"2.0.0"}"#.to_owned();
         let (url, server) = serve(vec![("GET /api/info".into(), 200, info)]);
         register(&state, "service.json", &url, 42);
-        assert_eq!(find_in(&state), None);
+        assert_eq!(find_in(&state), Err(Missing::NotRunning));
         server.join().unwrap();
         let closed = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/", closed.local_addr().unwrap());
         drop(closed);
         register(&state, "service.json", &url, 42);
-        assert_eq!(find_in(&state), None);
+        assert_eq!(find_in(&state), Err(Missing::NotRunning));
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]
+    fn a_service_without_api_info_needs_an_opencode_update() {
+        let state = state_root("outdated");
+        let (url, server) = serve(vec![("GET /api/info".into(), 404, "Not Found".into())]);
+        register(&state, "service.json", &url, 42);
+        assert_eq!(find_in(&state), Err(Missing::Outdated));
+        server.join().unwrap();
         fs::remove_dir_all(state).unwrap();
     }
 

@@ -670,9 +670,14 @@ fn ranked_candidates_for(service: &Service) -> Vec<Model> {
 
 /// The running service's model catalog. Reads OpenCode's registration and
 /// talks loopback HTTP; never starts anything. Call off the UI thread.
+/// `None` when OpenCode isn't running; an obsolete OpenCode is an error that
+/// says to update it.
 pub fn load_model_catalog() -> Result<Option<ModelCatalog>> {
-    let Some(service) = crate::desktop::opencode_service::find() else {
-        return Ok(None);
+    use crate::desktop::opencode_service::Missing;
+    let service = match crate::desktop::opencode_service::find() {
+        Ok(service) => service,
+        Err(Missing::NotRunning) => return Ok(None),
+        Err(missing) => return Err(eyre!(missing.message())),
     };
     let models: ModelsResponse = opencode_api(&service, "/api/model")?;
     let default: DefaultModelResponse = opencode_api(&service, "/api/model/default")?;
@@ -883,8 +888,8 @@ fn generate_cancellable(
     if crate::policy::Policy::current().locks(lock) {
         return Err(eyre!(lock.refusal()));
     }
-    let service = crate::desktop::opencode_service::find()
-        .ok_or_else(|| eyre!(crate::desktop::opencode_service::NOT_RUNNING))?;
+    let service =
+        crate::desktop::opencode_service::find().map_err(|missing| eyre!(missing.message()))?;
     generate_with_candidates(
         prompt,
         model,
