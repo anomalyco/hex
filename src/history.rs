@@ -801,7 +801,10 @@ mod tests {
         store.record(recorded("two"), 2_000).unwrap();
         assert_eq!(recording_ids(&path).len(), 2);
         store.clear().unwrap();
-        assert!(recording_ids(&path).is_empty(), "Clear all deletes the audio");
+        assert!(
+            recording_ids(&path).is_empty(),
+            "Clear all deletes the audio"
+        );
     }
 
     #[test]
@@ -860,15 +863,19 @@ mod tests {
     fn retranscribing_a_missing_recording_says_so() {
         let path = temp_path("retranscribe-missing");
         let missing = recordings::path(&recordings::directory(&path), 7);
-        let error =
-            recordings::retranscribe(&missing, crate::transcription::models::TranscriptionSelection::default())
-                .unwrap_err();
+        let error = recordings::retranscribe(
+            &missing,
+            crate::transcription::models::TranscriptionSelection::default(),
+        )
+        .unwrap_err();
         assert_eq!(error, "The recording is gone.");
         fs::create_dir_all(missing.parent().unwrap()).unwrap();
         fs::write(&missing, b"not a wav").unwrap();
-        let error =
-            recordings::retranscribe(&missing, crate::transcription::models::TranscriptionSelection::default())
-                .unwrap_err();
+        let error = recordings::retranscribe(
+            &missing,
+            crate::transcription::models::TranscriptionSelection::default(),
+        )
+        .unwrap_err();
         assert_eq!(error, "The recording could not be read.");
     }
 
