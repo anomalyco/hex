@@ -67,6 +67,16 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
 │   the bundle (keyframes, contact sheet, scrawl.json)
+├── Linux: strokes are placed on the recorded screen in its logical points,
+│   from the ScreenCast portal's stream size when it reports one smaller
+│   than the frames, so a fractional scale (1.5, 1.33), which reaches the
+│   overlay rounded up to 2, no longer pins strokes to a top-left part of
+│   the screen; without that size it divides the pixels by the overlay's
+│   scale. Check: scrawl-capture capture::platform::tests
+│   a_fractionally_scaled_screen_keeps_its_logical_size; not observed on a
+│   fractionally scaled monitor. Known gap: the overlay starts below a
+│   desktop bar's reserved area, so saved ink sits that bar's height off
+│   the live ink
 └── Linux recordings show the overlay itself (Wayland can't leave it out)
 
 On Linux                                 // capture.linux

@@ -242,9 +242,40 @@ pub fn recorded_screen() -> Option<(u32, u32)> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// The recorded screen's size in the desktop's logical points, when the portal said so and it
+/// shows the screen is scaled.
+static RECORDED_POINTS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
+
+/// The size of the screen being recorded in the desktop's logical points, as the screen-cast
+/// portal reported it (Wayland). A host drawing over the screen uses it rather than dividing
+/// the pixels by its own scale, which a fractional scale (1.5, 1.33) rounds up to a whole
+/// number. `None` when the portal didn't say, or said nothing a scale could come from.
+pub fn recorded_screen_points() -> Option<(f64, f64)> {
+    *RECORDED_POINTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The screen's logical size from the portal's stream `size`, when it is smaller than the
+/// frames' `pixels` in the same shape: a size as large as the frames (some portals report
+/// pixels), missing, or of another shape gives no scale to trust.
+fn logical_screen(size: Option<(i32, i32)>, pixels: (u32, u32)) -> Option<(f64, f64)> {
+    let (width, height) = size?;
+    let (width, height) = (f64::from(width), f64::from(height));
+    let (pixel_width, pixel_height) = (f64::from(pixels.0), f64::from(pixels.1));
+    if width <= 0.0 || height <= 0.0 || width >= pixel_width || height >= pixel_height {
+        return None;
+    }
+    let (sx, sy) = (pixel_width / width, pixel_height / height);
+    ((sx - sy).abs() <= 0.02 * sx).then_some((width, height))
+}
+
 pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
     let recorded = record(&sampler);
     *RECORDED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *RECORDED_POINTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     match recorded {
@@ -308,6 +339,14 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             Some((format.width, format.height));
+        let points = logical_screen(cast.size, (format.width, format.height));
+        scrawl_log(format!(
+            "Screen size from the portal: {:?}, in points: {points:?}",
+            cast.size
+        ));
+        *RECORDED_POINTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = points;
     }
     let edge = if source == Source::Window {
         WINDOW_EDGE
@@ -628,5 +667,28 @@ fn candidate(
             Some(RgbaFrame::new(t_ms, width, height, rgba))
         }
         Encoding::Software { .. } => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::logical_screen;
+
+    #[test]
+    fn a_fractionally_scaled_screen_keeps_its_logical_size() {
+        // 1.5 and 1.33: the overlay's whole-number scale (2) would give 1920x1080 and 1280x720.
+        assert_eq!(
+            logical_screen(Some((2560, 1440)), (3840, 2160)),
+            Some((2560.0, 1440.0))
+        );
+        assert_eq!(
+            logical_screen(Some((1920, 1080)), (2560, 1440)),
+            Some((1920.0, 1080.0))
+        );
+        // Nothing a scale could come from: unsaid, pixels, or another shape.
+        assert_eq!(logical_screen(None, (3840, 2160)), None);
+        assert_eq!(logical_screen(Some((3840, 2160)), (3840, 2160)), None);
+        assert_eq!(logical_screen(Some((1440, 2560)), (3840, 2160)), None);
+        assert_eq!(logical_screen(Some((0, 0)), (3840, 2160)), None);
     }
 }
