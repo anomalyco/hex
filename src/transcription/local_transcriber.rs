@@ -226,6 +226,14 @@ impl LocalTranscriber {
     /// or prewarm that fails retries on the CPU, and when the CPU works the
     /// GPU is remembered as failed.
     pub fn load(selection: &TranscriptionSelection) -> Result<Self> {
+        let loaded = Self::load_where(selection)?;
+        gpu_health::set_auto_on_cpu(
+            loaded.preference == TranscriptionDevice::Auto && loaded.gpu.is_none(),
+        );
+        Ok(loaded)
+    }
+
+    fn load_where(selection: &TranscriptionSelection) -> Result<Self> {
         let backend = init_backends()?;
         let preference = device();
         if backend == Backend::Cpu || preference == TranscriptionDevice::Cpu {
@@ -520,6 +528,7 @@ impl LocalTranscriber {
         if let Some(gpu) = &gpu {
             gpu_health::record(gpu, &format!("{error:#}"));
         }
+        gpu_health::set_auto_on_cpu(self.preference == TranscriptionDevice::Auto);
         *self = cpu;
         Ok(())
     }
