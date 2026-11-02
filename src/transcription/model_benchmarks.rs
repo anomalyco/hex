@@ -162,6 +162,22 @@ const NEMOTRON_3_5_ASR_RECORD: BenchmarkRecord = BenchmarkRecord {
     hardware: Some("Radeon 8060S (Vulkan)"),
 };
 
+/// Hex's run of the same harness over the full FLEURS Russian test split
+/// on apollo (#952). Parakeet v3 scored 6.52% and Whisper large-v3-turbo
+/// (with `ru`) 5.36% on the same run; transcribe.cpp publishes 5.35%.
+const GIGAAM_V3_RECORD: BenchmarkRecord = BenchmarkRecord {
+    metric: ErrorMetric::Wer,
+    value: 5.37,
+    language: "ru",
+    dataset: Some("FLEURS test"),
+    source: Some("Hex's run of the transcribe.cpp WER harness"),
+    source_revision: Some("7045d1c"),
+    utterances: Some(775),
+    batch_size: Some(1),
+    timestamps: Some(false),
+    hardware: Some("Radeon 8060S (Vulkan)"),
+};
+
 /// `model`'s benchmark record, or `None` when the system manages the model
 /// and publishes no figure (Apple Speech).
 pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
@@ -172,6 +188,7 @@ pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
         TranscriptionModelId::IvritWhisperLargeV3Turbo => Some(IVRIT_WHISPER_RECORD),
         TranscriptionModelId::ParakeetUltra => Some(PARAKEET_ULTRA_RECORD),
         TranscriptionModelId::Nemotron35Asr => Some(NEMOTRON_3_5_ASR_RECORD),
+        TranscriptionModelId::GigaAmV3 => Some(GIGAAM_V3_RECORD),
         // The catalog's English figures: their dataset, source, and
         // conditions were not recorded.
         _ => model

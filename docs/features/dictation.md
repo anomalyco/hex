@@ -692,6 +692,9 @@ Model advertises streaming, GPU device             // dictate.streaming
   ├── he: ivrit.ai Whisper large-v3-turbo Recommended (Hebrew only, always with
   │   the `he` hint; 18.45% WER on FLEURS Hebrew test against stock turbo's
   │   29.69%, Hex's run), then Whisper turbo for Vocabulary (#752)
+  ├── ru: GigaAM v3 Recommended (ai-sage's e2e RNN-T, Russian only, 274 MB, no
+  │   hint; 5.37% WER on FLEURS Russian test against Parakeet v3's 6.52% and
+  │   Whisper turbo's 5.36%, Hex's run), then Whisper turbo for Vocabulary (#952)
   └── Every other available model follows without a badge, selectable and
       deletable; never auto-switched or auto-downloaded (setup.language-select)
 ```

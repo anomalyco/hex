@@ -813,6 +813,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Parakeet, tuned for fewer wrong words in English", "Parakeet, ajusté pour moins de mots erronés en anglais"),
     ("English, with the ums and uhs taken out", "Anglais, sans les euh et les hum"),
     ("Writes while you talk, in 27 languages", "Écrit pendant que vous parlez, en 27 langues"),
+    ("Russian, with punctuation. A small download", "Russe, avec ponctuation. Un petit téléchargement"),
     ("Apple's speech recognition, kept up to date by macOS", "La reconnaissance vocale d'Apple, tenue à jour par macOS"),
     ("Start using Hex", "Commencer à utiliser Hex"),
     ("Transcribing…", "Transcription…"),
