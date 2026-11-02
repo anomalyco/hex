@@ -281,8 +281,8 @@ pub(in crate::rune_ui) enum Page {
     Ready,
 }
 
-/// The page the first run shows, for tests.
-#[cfg(test)]
+/// The page the first run shows, for the window tests (Linux only).
+#[cfg(all(test, target_os = "linux"))]
 pub(in crate::rune_ui) fn page(ui: &Ui) -> Option<Page> {
     Some(match ui.first_run.as_ref()?.step {
         Step::Pick | Step::Started => Page::Download,

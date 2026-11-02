@@ -17,9 +17,6 @@ use std::sync::OnceLock;
 
 use crate::app_settings::AppSettings;
 
-/// Shown beside a setting an organization locked.
-pub const MANAGED_NOTE: &str = "Managed by your organization";
-
 /// One managed lock.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Lock {
