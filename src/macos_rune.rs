@@ -1200,8 +1200,12 @@ impl Pump {
             ControllerEvent::OpenMeeting(id) => {
                 show(&self.window, Destination::Meetings(Some(id)));
             }
-            ControllerEvent::CallEnded { app } => {
-                tracing::info!(%app, "the call ended; the recording continues until Stop");
+            ControllerEvent::CallEnded { app, auto_stop } => {
+                if auto_stop {
+                    tracing::info!(%app, "the call ended; the recording stops after its grace unless kept");
+                } else {
+                    tracing::info!(%app, "the call ended; the recording continues until Stop");
+                }
             }
             ControllerEvent::Transcribing => self.meeting_state = MeetingMenuState::Transcribing,
             ControllerEvent::Finished(manifest) => {

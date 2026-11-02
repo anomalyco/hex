@@ -15,6 +15,9 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Stop when the call ends", "Parar quando a chamada terminar"),
+    ("Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet", "Para uma gravação que o Hex iniciou sozinho 30 s depois que o app de chamada solta o microfone e fica em silêncio"),
+    ("Hex stops recording in 30 s unless you keep recording.", "O Hex para de gravar em 30 s, a menos que você continue gravando."),
     ("Turn off the mic when not dictating", "Desligar o microfone quando não estiver ditando"),
     ("The mic opens only while you dictate; the first moment can be clipped", "O microfone abre só enquanto você dita; o primeiro instante pode ser cortado"),
     ("The mic stays ready so dictation starts instantly; your system shows it in use", "O microfone fica pronto para o ditado começar na hora; o sistema mostra que ele está em uso"),

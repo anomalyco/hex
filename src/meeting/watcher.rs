@@ -15,7 +15,7 @@ use color_eyre::eyre::{Result, eyre};
 use crate::calendar::{CalendarMeeting, ReminderScheduler, ReminderUpdate};
 use crate::dictation::context::ContextSnapshot;
 use crate::meeting::detection::{
-    BrowserPageMemory, CallPresence, Detection, MeetingCandidate, MeetingDetector,
+    AutoStop, BrowserPageMemory, CallPresence, Detection, MeetingCandidate, MeetingDetector,
     candidate_from_microphone,
 };
 use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart};
@@ -39,6 +39,10 @@ pub(crate) enum ControllerCommand {
     /// Not now, or Don't record: the meeting's call is neither offered nor
     /// recorded automatically.
     DismissReminder(CalendarMeeting),
+    /// Keep recording on the call-ended capsule: Labs › Stop when the call
+    /// ends doesn't stop this absence (it arms again if the call app comes
+    /// back and leaves again).
+    KeepRecording,
 }
 
 pub(crate) enum ControllerEvent {
@@ -68,8 +72,12 @@ pub(crate) enum ControllerEvent {
     Chapters(Vec<meeting::Chapter>),
     OpenMeeting(String),
     Transcribing,
+    /// `auto_stop` when the recording stops on its own after
+    /// [`crate::meeting::detection::AUTO_STOP_GRACE`] (Labs › Stop when the
+    /// call ends).
     CallEnded {
         app: String,
+        auto_stop: bool,
     },
     Finished(Box<meeting::MeetingManifest>),
     Failed {
@@ -86,6 +94,8 @@ struct ActiveRecording {
     app_label: String,
     automatic: bool,
     presence: CallPresence,
+    /// Labs › Stop when the call ends, armed while the call is over.
+    auto_stop: AutoStop,
     stop: Arc<AtomicBool>,
     updates: Receiver<meeting::RecordingUpdate>,
     reported_started: bool,
@@ -363,6 +373,13 @@ fn handle_command(
                 let _ = events.send(ControllerEvent::Transcribing);
             }
         }
+        ControllerCommand::KeepRecording => {
+            if let Some(active) = recording.as_mut()
+                && active.auto_stop.disarm()
+            {
+                tracing::info!("kept recording after the call ended");
+            }
+        }
         ControllerCommand::Open(id) => {
             let _ = events.send(ControllerEvent::OpenMeeting(id));
         }
@@ -604,6 +621,7 @@ fn start_recording(
         app_label: start.app_label,
         automatic,
         presence: CallPresence::default(),
+        auto_stop: AutoStop::default(),
         stop,
         updates,
         reported_started: false,
@@ -678,7 +696,8 @@ fn poll_recording(
         && let Some(application) = active.application.as_deref()
     {
         // A failed query must not end the controller while it owns a recording.
-        let present = match active_microphone_applications() {
+        let auto_stop = stops_when_call_ends(active.automatic, crate::labs::stop_when_call_ends());
+        let on_microphone = match active_microphone_applications() {
             Ok(applications) => applications
                 .iter()
                 .any(|candidate| candidate.canonical_bundle_id() == Some(application)),
@@ -687,17 +706,66 @@ fn poll_recording(
                 true
             }
         };
+        // Muting keeps a call on the microphone in some apps and off it in
+        // others, but its audio output stays open until it hangs up (#835).
+        let present = on_microphone || (auto_stop && call_app_playing(application));
         if present {
             detector.keep_snooze_alive();
         }
+        if present || !auto_stop {
+            active.auto_stop.disarm();
+        }
         if active.presence.observe(present) {
-            tracing::info!(application, "meeting application released the microphone");
+            tracing::info!(
+                application,
+                auto_stop,
+                "meeting application released the microphone"
+            );
+            if auto_stop {
+                active.auto_stop.arm();
+            }
             let _ = events.send(ControllerEvent::CallEnded {
                 app: active.app_label.clone(),
+                auto_stop,
             });
+        }
+        if active.auto_stop.due() {
+            tracing::info!(
+                application,
+                "meeting recording stopped automatically after its call ended"
+            );
+            if !active.stop.swap(true, Ordering::Relaxed) {
+                let _ = events.send(ControllerEvent::Transcribing);
+            }
         }
     }
     Ok(())
+}
+
+/// Whether a recording stops on its own once its call ends: only one Hex
+/// started automatically (Always record), and only with Labs › Stop when
+/// the call ends on. Manual and offered recordings never do.
+fn stops_when_call_ends(automatic: bool, lab_on: bool) -> bool {
+    automatic && lab_on
+}
+
+/// Whether the call app still plays audio; a failed read counts as playing,
+/// so it never stops a recording.
+fn call_app_playing(application: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        crate::microphone_activity::application_running_output(application).unwrap_or_else(
+            |error| {
+                tracing::warn!(%error, "could not inspect the call app's audio output");
+                true
+            },
+        )
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = application;
+        false
+    }
 }
 
 /// How often a browser's tabs are queried while it holds the microphone.
@@ -972,6 +1040,48 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn only_automatic_recordings_stop_when_the_call_ends_and_only_with_the_lab_on() {
+        assert!(stops_when_call_ends(true, true));
+        // Manual, offered, and calendar recordings never stop on their own.
+        assert!(!stops_when_call_ends(false, true));
+        // The toggle off leaves every recording running until Stop.
+        assert!(!stops_when_call_ends(true, false));
+        assert!(!stops_when_call_ends(false, false));
+    }
+
+    #[test]
+    fn keep_recording_disarms_a_pending_automatic_stop() {
+        let (events, _received) = mpsc::sync_channel(4);
+        let (_update_sender, updates) = mpsc::sync_channel(1);
+        let mut recording = Some(ActiveRecording {
+            title: "WhatsApp call".into(),
+            application: Some("net.whatsapp.WhatsApp".into()),
+            app_label: "WhatsApp".into(),
+            automatic: true,
+            presence: CallPresence::default(),
+            auto_stop: AutoStop::default(),
+            stop: Arc::new(AtomicBool::new(false)),
+            updates,
+            reported_started: true,
+            worker: thread::spawn(|| Err(eyre!("not recording"))),
+        });
+        if let Some(active) = recording.as_mut() {
+            active.auto_stop.arm();
+        }
+        handle_command(
+            &mut recording,
+            &mut MeetingDetector::default(),
+            &mut Reminders::default(),
+            ControllerCommand::KeepRecording,
+            true,
+            &events,
+        );
+        let active = recording.as_mut().unwrap();
+        assert!(!active.auto_stop.disarm(), "nothing is left to stop");
+        assert!(!active.stop.load(Ordering::Relaxed));
     }
 
     fn banshee_tab() -> ContextSnapshot {

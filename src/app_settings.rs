@@ -1416,6 +1416,8 @@ pub struct LabsSettings {
     pub history_stats: bool,
     pub recent_dictations: bool,
     pub skip_pauses: bool,
+    /// An automatic meeting recording stops after its call ends (macOS, issue 835).
+    pub stop_when_call_ends: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1449,6 +1451,7 @@ impl Default for LabsSettings {
             history_stats: false,
             recent_dictations: false,
             skip_pauses: false,
+            stop_when_call_ends: false,
         }
     }
 }
