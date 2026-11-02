@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 mod french;
 mod portuguese;
+mod traditional_chinese;
 
 /// A persisted interface-language code (`None` follows the system) and its
 /// native name.
@@ -18,12 +19,14 @@ pub(crate) type LanguageChoice = (Option<&'static str>, &'static str);
 
 /// The selectable interface languages: persisted code and native name. The
 /// leading `None` entry follows the system display language. Português
-/// (Brasil) and Français have not had a native speaker's review yet.
+/// (Brasil), Français, and 繁體中文 have not had a native speaker's review
+/// yet.
 pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (None, "System"),
     (Some("en"), "English"),
     (Some("pl"), "Polski"),
-    (Some("zh"), "中文"),
+    (Some("zh"), "简体中文"),
+    (Some("zh-Hant"), "繁體中文"),
     (Some("ja"), "日本語"),
     (Some("de"), "Deutsch"),
     (Some("es"), "Español"),
@@ -68,6 +71,9 @@ const ENGLISH: u8 = 255;
 const PORTUGUESE_COLUMN: u8 = 6;
 /// French, kept in its own table ([`french::TRANSLATIONS`]).
 const FRENCH_COLUMN: u8 = 7;
+/// Traditional Chinese, drawn from the Simplified column
+/// ([`traditional_chinese::table`]).
+const TRADITIONAL_CHINESE_COLUMN: u8 = 8;
 
 /// The column for a persisted code; `pt` (any Portuguese system language)
 /// is Brazilian Portuguese, and `fr` any French one.
@@ -75,6 +81,7 @@ fn column_for_code(code: &str) -> u8 {
     match code {
         "pl" => 0,
         "zh" => 1,
+        "zh-Hant" => TRADITIONAL_CHINESE_COLUMN,
         "ja" => 2,
         "de" => 3,
         "es" => 4,
@@ -90,15 +97,35 @@ fn column_for_code(code: &str) -> u8 {
 pub(crate) fn apply(setting: Option<&str>) {
     let code = match setting {
         Some(code) => column_for_code(code),
-        None => column_for_language_tag(&preferred_language()),
+        None => column_for_language_tag(&preferred_locale()),
     };
     set_current(code);
 }
 
-/// The column for a system language tag such as `zh-Hans-CN` or `pl`;
-/// unknown or empty tags stay English.
+/// The column for a system locale such as `zh-Hans-CN`, `zh_TW.UTF-8`, or
+/// `pl`; unknown or empty tags stay English. Chinese with the Hant script,
+/// or the Taiwan, Hong Kong, or Macau region, is Traditional Chinese.
 fn column_for_language_tag(tag: &str) -> u8 {
-    primary_subtag(tag).map_or(ENGLISH, |code| column_for_code(&code))
+    // POSIX locales carry an encoding and modifier: `zh_TW.UTF-8@euro`.
+    let tag = tag.split(['.', '@']).next().unwrap_or_default();
+    match primary_subtag(tag).as_deref() {
+        Some("zh") if is_traditional_chinese(tag) => TRADITIONAL_CHINESE_COLUMN,
+        Some(code) => column_for_code(code),
+        None => ENGLISH,
+    }
+}
+
+/// Whether a Chinese locale's script or region asks for Traditional
+/// characters. An explicit script wins over the region (`zh-Hans-HK`).
+fn is_traditional_chinese(tag: &str) -> bool {
+    for subtag in tag.split(['-', '_']).skip(1) {
+        match subtag.trim().to_ascii_lowercase().as_str() {
+            "hant" | "tw" | "hk" | "mo" => return true,
+            "hans" => return false,
+            _ => {}
+        }
+    }
+    false
 }
 
 pub(crate) fn system_language() -> String {
@@ -116,6 +143,33 @@ pub(crate) fn system_language() -> String {
     }
 }
 
+/// The system locale with its script and region, for the interface
+/// language: the Windows user locale or the POSIX locale variables.
+fn system_locale() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        windows_user_locale()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        locale_from_env(
+            std::env::var("LC_ALL").ok().as_deref(),
+            std::env::var("LC_MESSAGES").ok().as_deref(),
+            std::env::var("LANG").ok().as_deref(),
+        )
+    }
+}
+
+/// The person's first preferred locale in full (`zh-Hant-TW`), for the
+/// interface language; on macOS the system's language list.
+fn preferred_locale() -> String {
+    #[cfg(target_os = "macos")]
+    if let Some(locale) = macos_preferred_locale() {
+        return locale;
+    }
+    system_locale()
+}
+
 /// The person's first preferred language, for choosing a speech model. On
 /// macOS this is the system's language list, which apps opened from Finder
 /// see without `LANG`.
@@ -129,6 +183,12 @@ pub(crate) fn preferred_language() -> String {
 
 #[cfg(target_os = "macos")]
 fn macos_preferred_language() -> Option<String> {
+    primary_subtag(&macos_preferred_locale()?)
+}
+
+/// The first entry of `NSLocale.preferredLanguages`, such as `zh-Hant-TW`.
+#[cfg(target_os = "macos")]
+fn macos_preferred_locale() -> Option<String> {
     use objc2::msg_send;
     use objc2::rc::Retained;
     use objc2::runtime::AnyClass;
@@ -137,8 +197,7 @@ fn macos_preferred_language() -> Option<String> {
     let class = AnyClass::get(c"NSLocale")?;
     let languages: Option<Retained<NSArray<NSString>>> =
         unsafe { msg_send![class, preferredLanguages] };
-    let first = languages?.firstObject()?.to_string();
-    primary_subtag(&first)
+    Some(languages?.firstObject()?.to_string())
 }
 
 /// `pt-BR` and `zh-Hans-CN` yield `pt` and `zh`.
@@ -150,6 +209,16 @@ fn primary_subtag(tag: &str) -> Option<String> {
 /// The primary subtag of the Windows user locale: `pl-PL` yields `pl`.
 #[cfg(target_os = "windows")]
 fn windows_user_language() -> String {
+    windows_user_locale()
+        .split(['-', '_'])
+        .next()
+        .unwrap_or("en")
+        .to_ascii_lowercase()
+}
+
+/// The Windows user locale name in full, such as `zh-TW`; `en` if unread.
+#[cfg(target_os = "windows")]
+fn windows_user_locale() -> String {
     use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
     const LOCALE_NAME_CAPACITY: usize = 85;
     let mut buffer = [0_u16; LOCALE_NAME_CAPACITY];
@@ -157,12 +226,7 @@ fn windows_user_language() -> String {
     if length <= 1 {
         return "en".into();
     }
-    let locale = String::from_utf16_lossy(&buffer[..length as usize - 1]);
-    locale
-        .split(['-', '_'])
-        .next()
-        .unwrap_or("en")
-        .to_ascii_lowercase()
+    String::from_utf16_lossy(&buffer[..length as usize - 1])
 }
 
 /// The primary language subtag from POSIX locale variables, in their
@@ -188,12 +252,31 @@ fn language_from_env(
         .unwrap_or_default()
 }
 
+/// The first set POSIX locale variable in full, in the same precedence as
+/// [`language_from_env`]: `zh_TW.UTF-8` stays `zh_TW.UTF-8`.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn locale_from_env(lc_all: Option<&str>, lc_messages: Option<&str>, lang: Option<&str>) -> String {
+    [lc_all, lc_messages, lang]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty() && *value != "C" && *value != "POSIX")
+        .unwrap_or_default()
+        .to_owned()
+}
+
 /// Translate one UI string. Returns the input unchanged for English or for
 /// strings missing from the table, so dynamic values pass through safely.
 pub(crate) fn tr(english: &str) -> &str {
     let column = current();
     if column == ENGLISH {
         return english;
+    }
+    if column == TRADITIONAL_CHINESE_COLUMN {
+        return match traditional_chinese::table().get(english) {
+            Some(text) => text.as_str(),
+            None => english,
+        };
     }
     let table = match column {
         PORTUGUESE_COLUMN => portuguese::table(),
@@ -1240,6 +1323,55 @@ mod tests {
         assert_eq!(column_for_language_tag("fr_CA"), super::FRENCH_COLUMN);
         assert_eq!(column_for_code("fr"), super::FRENCH_COLUMN);
         assert!(LANGUAGE_CHOICES.contains(&(Some("fr"), "Français")));
+    }
+
+    #[test]
+    fn traditional_chinese_locales_choose_traditional_and_others_simplified() {
+        use super::{
+            LANGUAGE_CHOICES, TRADITIONAL_CHINESE_COLUMN, column_for_code, column_for_language_tag,
+            locale_from_env,
+        };
+        for tag in [
+            "zh-Hant-TW",
+            "zh-Hant",
+            "zh-TW",
+            "zh_HK.UTF-8",
+            "zh-MO",
+            "zh-Hant-CN",
+        ] {
+            assert_eq!(
+                column_for_language_tag(tag),
+                TRADITIONAL_CHINESE_COLUMN,
+                "{tag}"
+            );
+        }
+        for tag in [
+            "zh-Hans-CN",
+            "zh-CN",
+            "zh-SG",
+            "zh-Hans-HK",
+            "zh_CN.UTF-8",
+            "zh",
+        ] {
+            assert_eq!(column_for_language_tag(tag), column_for_code("zh"), "{tag}");
+        }
+        assert_eq!(column_for_code("zh-Hant"), TRADITIONAL_CHINESE_COLUMN);
+        assert!(LANGUAGE_CHOICES.contains(&(Some("zh"), "简体中文")));
+        assert!(LANGUAGE_CHOICES.contains(&(Some("zh-Hant"), "繁體中文")));
+        let locale = locale_from_env(None, Some("zh_TW.UTF-8"), Some("en_US.UTF-8"));
+        assert_eq!(locale, "zh_TW.UTF-8");
+        assert_eq!(column_for_language_tag(&locale), TRADITIONAL_CHINESE_COLUMN);
+        assert_eq!(locale_from_env(Some("C"), None, None), "");
+    }
+
+    #[test]
+    fn traditional_chinese_translates_with_its_column() {
+        super::set_current(super::TRADITIONAL_CHINESE_COLUMN);
+        assert_eq!(super::tr("Don't switch"), "不切換");
+        assert_eq!(super::tr("Not installed"), "未安裝");
+        assert_eq!(super::tr_fill("Remove {}?", "x"), "移除 x？");
+        super::set_current(super::ENGLISH);
+        assert_eq!(super::tr("Don't switch"), "Don't switch");
     }
 
     #[test]

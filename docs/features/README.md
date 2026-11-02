@@ -38,7 +38,10 @@ and conditions (#647).
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
 used for any French system language (#892). Neither has had a native
-speaker's review yet.
+speaker's review yet. It offers 简体中文 (`zh`) and 繁體中文 (`zh-Hant`, #944);
+Traditional Chinese is drafted from the Simplified strings by a character and
+Taiwan-usage phrase converter (`desktop/i18n/traditional_chinese.rs`), not yet
+reviewed by a native speaker.
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
 [Your own speech models](own-models.md) covers adding a GGUF file and using
 models another app already downloaded.
@@ -712,8 +715,9 @@ General                                  // settings
 │   │   (Dictate without processing sits in the Output pane; see dictation.md)
 │   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
 │       Interface language, Update channel (self-updating installs)
-│       // Interface language System: macOS's first preferred language (zh-Hans -> 中文),
-│       // Linux LC_ALL/LC_MESSAGES/LANG, Windows the user locale; unknown -> English
+│       // Interface language System: macOS's first preferred language (zh-Hans -> 简体中文,
+│       // zh-Hant, zh-TW, zh-HK, zh-MO -> 繁體中文), Linux LC_ALL/LC_MESSAGES/LANG
+│       // (zh_TW.UTF-8 -> 繁體中文), Windows the user locale; unknown -> English
 ├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Labs > Share dictation shortcut with other apps (Windows, off)
