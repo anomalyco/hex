@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use transcribe_cpp::{Backend, Device, DeviceType};
@@ -146,8 +147,22 @@ pub(crate) fn forget(device: &Device) {
     });
 }
 
-/// The newest failure that keeps a GPU off now, for Settings.
+/// Whether the last model Auto loaded runs on the CPU. Another healthy GPU
+/// can run it while a failed one stays off, so a remembered failure alone
+/// doesn't mean Auto uses the CPU (#966).
+static AUTO_ON_CPU: AtomicBool = AtomicBool::new(false);
+
+/// Records where the last model loaded: on the CPU under Auto, or not.
+pub(crate) fn set_auto_on_cpu(on_cpu: bool) {
+    AUTO_ON_CPU.store(on_cpu, Ordering::Relaxed);
+}
+
+/// The newest failure that keeps a GPU off now, for Settings, only while
+/// Auto actually runs the model on the CPU.
 pub(crate) fn current() -> Option<Failure> {
+    if !AUTO_ON_CPU.load(Ordering::Relaxed) {
+        return None;
+    }
     let driver = driver();
     with_failures(|failures| {
         failures
@@ -279,6 +294,14 @@ mod tests {
             Err(transcribe_cpp::Error::InputTooShort("x".into())).wrap_err("transcription failed");
         assert!(!device_error(&short.unwrap_err()));
         assert!(!device_error(&color_eyre::eyre::eyre!("cancelled")));
+    }
+
+    #[test]
+    fn no_note_while_auto_runs_on_a_gpu() {
+        // A healthy GPU runs the model while another one's failure is
+        // remembered (#966): Settings names no failure.
+        set_auto_on_cpu(false);
+        assert_eq!(current(), None);
     }
 
     #[cfg(target_os = "linux")]
