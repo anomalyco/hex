@@ -108,7 +108,18 @@ fn loopback<T: SizedSample + Send + 'static>(
                     .collect();
                 let _ = sender.try_send(mono);
             },
-            move |error| {
+            move |error: cpal::Error| {
+                // A buffer discontinuity (WASAPI's data-discontinuity flag)
+                // is reported while the stream keeps delivering audio, so
+                // it must not end the source: reopening on each one left
+                // the system track empty (#1035).
+                if matches!(
+                    error.kind(),
+                    cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied
+                ) {
+                    tracing::debug!(%error, "system audio loopback glitched; continuing");
+                    return;
+                }
                 let _ = errors.try_send(error.to_string());
             },
             None,
