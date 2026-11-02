@@ -313,23 +313,31 @@ impl HistoryStore {
     }
 
     /// Delete one entry. Returns whether it existed.
+    /// A failed save keeps the entry, so the deletion can be retried.
     pub fn delete(&mut self, id: u64) -> io::Result<bool> {
-        let before = self.entries.len();
-        self.entries.retain(|entry| entry.id != id);
-        if self.entries.len() == before {
+        let Some(index) = self.entries.iter().position(|entry| entry.id == id) else {
             return Ok(false);
+        };
+        let removed = self.entries.remove(index);
+        if let Err(error) = self.persist() {
+            self.entries.insert(index, removed);
+            return Err(error);
         }
-        self.persist()?;
         Ok(true)
     }
 
-    /// Delete every entry.
+    /// Delete every entry. A failed save keeps them, so the clear can be
+    /// retried.
     pub fn clear(&mut self) -> io::Result<()> {
-        if self.entries.is_empty() {
+        if self.entries.is_empty() && !self.prune_pending {
             return Ok(());
         }
-        self.entries.clear();
-        self.persist()
+        let entries = std::mem::take(&mut self.entries);
+        if let Err(error) = self.persist() {
+            self.entries = entries;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Change retention and immediately prune to the new window. Turning
@@ -987,6 +995,27 @@ mod tests {
         store.clear().unwrap();
 
         assert_eq!(store.len(), 0);
+        let reopened = HistoryStore::open(path, HistoryRetention::Week, 3_000);
+        assert_eq!(reopened.len(), 0);
+    }
+
+    #[test]
+    fn failed_clear_and_delete_keep_entries_for_a_retry() {
+        let path = temp_path("failed-clear");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
+        let first = store.record(draft("one"), 1_000).unwrap().unwrap();
+        store.record(draft("two"), 2_000).unwrap();
+        let temporary = path.with_extension("json.tmp");
+        fs::create_dir(&temporary).unwrap();
+
+        assert!(store.delete(first).is_err());
+        assert!(store.clear().is_err());
+        assert_eq!(store.len(), 2, "a failed save keeps the entries");
+
+        fs::remove_dir(temporary).unwrap();
+        store.sync();
+        assert!(store.delete(first).unwrap());
+        store.clear().unwrap();
         let reopened = HistoryStore::open(path, HistoryRetention::Week, 3_000);
         assert_eq!(reopened.len(), 0);
     }
