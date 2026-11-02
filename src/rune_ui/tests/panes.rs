@@ -432,7 +432,7 @@ fn the_cancel_shortcut_shows_in_toggle_and_restores_escape() {
     );
     rt.state.settings.cancel_hotkey = HotkeyBinding::paste_last_default();
     rt.state.settings.paste_last_hotkey = None;
-    settle(&mut rt);
+    refresh(&mut rt);
     tap(&mut rt, "restore-cancel-shortcut");
     assert_eq!(
         rt.state.settings.cancel_hotkey,
