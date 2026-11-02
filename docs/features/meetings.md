@@ -152,6 +152,8 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / browser call uses the microp
   -> "Left the call" prompt after the call app is off the microphone for 3 s
   -> Times are wall-clock runs: observations more than 10 s apart (sleep, a
      stalled loop) start a stability run again instead of counting the gap
+     └── A call off the microphone for at most 2 s (a missed check) keeps
+         its run; a longer release starts it over
 
 Choices persist as `meetings.providers` (`key`, `label`, `policy`:
 `ask` / `always_record` / `never_offer`) in `settings.json`. Missing means Ask.

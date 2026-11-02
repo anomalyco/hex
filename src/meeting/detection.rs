@@ -413,11 +413,9 @@ impl MeetingDetector {
         now_ms: i64,
     ) -> Option<MeetingCandidate> {
         let Some(candidate) = candidate else {
-            if self
-                .pending
-                .as_ref()
-                .is_some_and(|pending| now.saturating_duration_since(pending.run.last) > DROPOUT_GRACE)
-            {
+            if self.pending.as_ref().is_some_and(|pending| {
+                now.saturating_duration_since(pending.run.last) > DROPOUT_GRACE
+            }) {
                 self.pending = None;
             }
             let since = *self.last_present.get_or_insert(now);

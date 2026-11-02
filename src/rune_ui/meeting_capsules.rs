@@ -535,7 +535,8 @@ impl MeetingCapsules {
     fn show_panel(&self, kind: Kind, timeout: Option<Duration>) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
-        self.panel.resize((panel_width(&kind), MEETING_PANEL_HEIGHT));
+        self.panel
+            .resize((panel_width(&kind), MEETING_PANEL_HEIGHT));
         self.panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
             capsule.more_open = false;
@@ -1605,10 +1606,7 @@ mod tests {
             .into_iter()
             .find(|e| e.key.as_deref() == Some("title"))
             .unwrap();
-        assert_eq!(
-            title.text.as_deref(),
-            Some("Microsoft Teams left the call")
-        );
+        assert_eq!(title.text.as_deref(), Some("Microsoft Teams left the call"));
         let style = rune_theme_opencode::kit(false).ty.ui_medium;
         let (width, _) = rt.text.measure("Microsoft Teams left the call", style, 2.0);
         assert!(
