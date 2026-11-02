@@ -732,6 +732,10 @@ Labs › Keep recordings on                     // labs.keep-recordings
 ├── Over 512 MiB of audio -> the oldest entries lose their audio, keep their text
 ├── History card, entry with audio -> "Saved recording" + "Transcribe again" menu
 │   ├── Lists every available model installed for the language it would use
+│   ├── A model that takes a language hint (not Parakeet v3/Ultra, GigaAM,
+│   │   Bark) -> "<model> · Language: <saved language>" menu (Auto when it
+│   │   detects, then its languages) + Transcribe; the language applies to
+│   │   that run only, never to settings (#1068)
 │   ├── Choose one -> "Transcribing with <model>…" on a worker: its own
 │   │   transcription service, sharing the dictation engine's model when it is
 │   │   the one chosen, yielding to dictation; otherwise loads a copy for the run
@@ -751,7 +755,8 @@ of the clip is made. Checks: `a_kept_recording_is_an_owner_only_wav_that_reads_b
 `replacing_the_text_keeps_the_entry_and_its_recording`, and
 `retranscribing_a_missing_recording_says_so` in
 [history.rs](../../src/history.rs);
-`transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry` in
+`transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry` and
+`transcribe_again_offers_a_language_only_for_models_that_take_one` in
 [tests.rs](../../src/rune_ui/tests.rs);
 `keep_recordings_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real dictation kept and
