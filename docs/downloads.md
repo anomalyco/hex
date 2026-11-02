@@ -39,8 +39,10 @@ and updater routes.
 The release workflow uploads every file to the release service (stored by
 hash, never replaced), then the release, then mirrors the files to the GitHub
 release (verified byte for byte). App tags remain separate from TypeScript SDK
-tags; do not use GitHub's generic `releases/latest` redirect for an app
-download.
+tags. The stable app release is GitHub's Latest release (the repository badge);
+SDK releases are created with `--latest=false` and never take it. Still, do not
+use GitHub's generic `releases/latest` redirect for an app download: links
+name the release service or an explicit `v<version>` tag.
 
 The site reads the stable manifest when it builds, so the production deploy
 that follows a stable release updates every link. Bump the README's explicit

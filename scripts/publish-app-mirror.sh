@@ -2,6 +2,9 @@
 set -eu
 
 # Mirror prepared, signed bytes; never rebuild or overwrite an existing asset.
+# Legacy: the 2.x app-v<version> mirror. These old releases stay off GitHub's
+# "Latest", which belongs to the newest v<version> app release
+# (.github/release/publish-github-release.sh).
 version=${1:?Usage: publish-app-mirror.sh VERSION DMG NOTES COMMIT}
 artifact_path=${2:?Pass the prepared signed DMG}
 notes=${3:?Pass release notes}

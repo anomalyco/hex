@@ -1444,8 +1444,10 @@ target and file names and the direct-install receipt, and
 and old clients. The 2.3.1 feeds and appcast at `https://anoma.ly/hex/files`
 (and Kit's `downloads.hex.kitlangton.dev`/`.com`, which must keep redirecting
 there) stay frozen. GitHub app releases use `v<VERSION>` tags (`app-v…`
-through 2.3.1) with `--latest=false`, keeping them distinct from SDK
-releases. Never overwrite a published artifact with different bytes.
+through 2.3.1); each stable one is created as GitHub's Latest release
+(`--latest=true`, stable only), and SDK releases (`release-typescript.yml`)
+are created with `--latest=false` so they never take the badge. Nothing
+downloads through GitHub's `releases/latest` redirect. Never overwrite a published artifact with different bytes.
 `https://anoma.ly/hex` (in-repo `site/`) is the only Hex website. One
 `site/cloudflare.config.ts` defines the production Worker `hex-production-site` (anoma.ly/hex,
 bucket `hex-production-files`) and the dev Worker `hex-dev-site` (dev.anoma.ly/hex,
