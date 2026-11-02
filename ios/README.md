@@ -52,6 +52,13 @@ it never accesses the microphone, speech model, or network.
     `Casual` (lowercase chat without trailing period), `Notes` (spoken
     `"bullet"` / `"next line"` markers), and `Verbatim`, with cursor-aware
     insertion spacing and repeating backspace.
+  - **Full keyboard Hex key (Experiments › Full keyboard):** A tap does
+    nothing, so a stray one while typing is harmless. A still hold of 0.35 s
+    starts dictation in a warm session (or opens Hex without one), with a
+    haptic. Moving more than 10 pt before then opens the style and **Return
+    to** menu; releasing over a row picks it, and releasing elsewhere leaves
+    the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
+    and the **Dictation styles** action opens the menu.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
