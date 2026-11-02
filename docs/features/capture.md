@@ -554,8 +554,12 @@ Hex's own windows                        // capture.own-windows
 │   │   the recording's (capture-core's Recording::set_exclusions)
 │   └── Rune's presence tests check ordering and sharing together, including
 │       stale fade completions and setting changes. Its native `spaces_probe`
-│       checks this process's WindowServer ordering. Mission Control's actual
-│       thumbnail report and third-party recording exclusion remain unverified
+│       checks this process's WindowServer ordering. A native Hex smoke on
+│       2026-11-02 failed before the pin bump and passed after it: capsule,
+│       Screen/Area picker, ink, dictation HUD and meeting capsule show and
+│       leave no onscreen window after hiding. This used isolated test state,
+│       without recording. Mission Control's actual thumbnail report and
+│       third-party recording exclusion remain unverified
 │   └── Click-through chrome (the full-screen ink overlay, the capsule's
 │       640×424 panel outside its pill) -> clicks there count for the app
 │       beneath; only the pill's (capture_host::set_capsule_pill) are Hex's
