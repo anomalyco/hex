@@ -1076,6 +1076,15 @@ fn processing(
     current: &DictationMode,
     layer: &mut Vec<El>,
 ) -> El {
+    if super::platform_settings::opencode_managed() {
+        let row = super::controls::managed_row(
+            p,
+            "processing-enabled",
+            None,
+            tr("OpenCode transformation"),
+        );
+        return section(p, "processing", tr("Processing"), vec![row]);
+    }
     let enabled = current.post_processing.enabled;
     let can_toggle = enabled || ui.models.available();
     let toggle = Switch::new(enabled)
@@ -1152,6 +1161,10 @@ fn processing(
 /// The mode's transformations, in the order they run; the + menu adds a
 /// registered one it does not use yet.
 fn transformations(ui: &Ui, p: Paint, current: &DictationMode, layer: &mut Vec<El>) -> El {
+    if crate::policy::Policy::current().locks(crate::policy::Lock::Transforms) {
+        let row = note("transformations-managed", super::managed_note(), p.muted());
+        return section(p, "transformations", tr("Transformations"), vec![row]);
+    }
     let catalog = &ui.modes.status.transformations;
     let action = (!catalog.is_empty()).then(|| transformation_menu(ui, p, current, layer));
     let mut rows = Vec::new();

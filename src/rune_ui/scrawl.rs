@@ -42,6 +42,9 @@ fn set_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static
 }
 
 pub(super) fn toggle(ui: &mut Ui) {
+    if crate::policy::Policy::current().locks(crate::policy::Lock::Annotate) {
+        return;
+    }
     cancel_capture(ui);
     let enabled = !ui.settings.capture.enabled;
     let mut candidate = ui.drafted();
@@ -386,14 +389,18 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         p,
         "enable",
         vec![
-            toggle_row(
-                p,
-                "capture-enabled",
-                tr("Annotate"),
-                description(enabled),
-                enabled,
-                toggle,
-            )
+            if crate::policy::Policy::current().locks(crate::policy::Lock::Annotate) {
+                super::controls::managed_row(p, "capture-enabled", None, tr("Annotate"))
+            } else {
+                toggle_row(
+                    p,
+                    "capture-enabled",
+                    tr("Annotate"),
+                    description(enabled),
+                    enabled,
+                    toggle,
+                )
+            }
             .into(),
             folding(
                 "capture-error-fold",

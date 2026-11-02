@@ -93,6 +93,9 @@ impl Meetings {
 
 /// Asks the controller to start, stop, or summarize a meeting.
 pub(crate) fn request(request: MeetingRequest) -> Result<(), String> {
+    if let Some(lock) = crate::labs::Feature::Meetings.managed() {
+        return Err(lock.refusal().into());
+    }
     REQUESTS
         .get()
         .ok_or("meetings are not running")?

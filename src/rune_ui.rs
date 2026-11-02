@@ -221,6 +221,11 @@ pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
     app
 }
 
+/// Beside a setting an organization locked (`crate::policy`).
+fn managed_note() -> &'static str {
+    tr("Managed by your organization")
+}
+
 /// A `hex://` link the system opened with Hex: a story link opens the window
 /// on that playground story; anything else is ignored.
 #[cfg(target_os = "macos")]

@@ -262,6 +262,11 @@ substitute for source inspection or a second roadmap.
 - `desktop/login_item`: the native `SMAppService.mainAppService` adapter and its worker
   thread. macOS owns registration state; it is deliberately not duplicated in
   `settings.json`.
+- `policy`: macOS managed-preference feature locks in `anomaly.hex`
+  (`DisableMeetings`, `DisableAnnotate`, `DisableOpenCodeProcessing`,
+  `DisableTransforms`, `DisableLabs`, `RestrictTransformsToLoopback`), forced
+  values only. Locked switches read off at load and keep their saved values on
+  save; list-driven work checks the policy where it starts.
 - `app_paths`: the Application Support owner (`hex` on every OS) for runtime
   logs and shared state.
 - `desktop/onboarding`, `desktop/permission_guide`: required permission health, the native

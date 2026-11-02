@@ -26,16 +26,57 @@ pub type Config = ureq::config::ConfigBuilder<ureq::typestate::AgentScope>;
 /// An agent for requests to `url`: platform TLS and roots, and the proxy the
 /// computer uses for it.
 pub fn agent(url: &str, configure: impl FnOnce(Config) -> Config) -> ureq::Agent {
-    let config = ureq::Agent::config_builder()
+    configure(base().proxy(proxy_for(url))).build().into()
+}
+
+/// An agent that only connects to this computer: no proxy, and every name,
+/// redirects included, must resolve to loopback addresses alone
+/// ([`LoopbackResolver`]), checked on the addresses it then connects to.
+pub fn loopback_agent(configure: impl FnOnce(Config) -> Config) -> ureq::Agent {
+    ureq::Agent::with_parts(
+        configure(base().proxy(None)).build(),
+        ureq::unversioned::transport::DefaultConnector::new(),
+        LoopbackResolver,
+    )
+}
+
+fn base() -> Config {
+    ureq::Agent::config_builder()
         .tls_config(
             TlsConfig::builder()
                 .provider(TlsProvider::NativeTls)
                 .root_certs(RootCerts::PlatformVerifier)
                 .build(),
         )
-        .proxy(proxy_for(url))
-        .timeout_connect(Some(Duration::from_secs(15)));
-    configure(config).build().into()
+        .timeout_connect(Some(Duration::from_secs(15)))
+}
+
+/// Resolves as ureq does, then refuses any name with an address off this
+/// computer, so neither a hostname nor a redirect can leave it.
+#[derive(Debug)]
+pub struct LoopbackResolver;
+
+/// Why [`LoopbackResolver`] refused, as the request's error says.
+pub const NOT_LOOPBACK: &str = "only this computer (loopback) may be reached";
+
+impl ureq::unversioned::resolver::Resolver for LoopbackResolver {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        config: &ureq::config::Config,
+        timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        let resolved = ureq::unversioned::resolver::DefaultResolver::default()
+            .resolve(uri, config, timeout)?;
+        if resolved.iter().all(|address| address.ip().is_loopback()) {
+            Ok(resolved)
+        } else {
+            Err(ureq::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                NOT_LOOPBACK,
+            )))
+        }
+    }
 }
 
 /// The host of `url`, for messages and logs (never the path or query).

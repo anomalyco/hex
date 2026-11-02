@@ -275,10 +275,7 @@ fn meeting(stop: bool, title: Option<String>) -> ControlReply {
     use crate::meeting::MeetingRequest;
     use crate::meeting::watcher::MeetingMenuState;
     if !crate::app_settings::meetings_enabled() {
-        return ControlReply::error(
-            "feature-off",
-            "Meetings are off; turn them on with `hex settings set meetings.enabled on`",
-        );
+        return ControlReply::error("feature-off", crate::app_settings::meetings_off_reason());
     }
     let request = match (crate::meeting::runtime::state(), stop) {
         (MeetingMenuState::Recording { title, .. }, false) => {

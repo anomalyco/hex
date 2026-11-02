@@ -447,6 +447,50 @@ impl Feature {
         }
     }
 
+    /// Every feature's switch in `settings`, for the Labs lock
+    /// (`crate::policy`).
+    pub fn switches(settings: &mut AppSettings) -> Vec<&mut bool> {
+        let labs = &mut settings.labs;
+        vec![
+            &mut settings.meetings.enabled,
+            &mut settings.experimental.hex_microphone,
+            &mut settings.paste_with_shift,
+            &mut settings.keyboard_model_switching.enabled,
+            &mut settings.pause_browser_media,
+            &mut settings.share_dictation_shortcut,
+            &mut labs.playground,
+            &mut labs.live_text,
+            &mut labs.live_chapters,
+            &mut labs.vocabulary_biasing,
+            &mut labs.mouse_shortcuts,
+            &mut labs.unload_idle,
+            &mut labs.restore_shortcut_default,
+            &mut labs.keep_on_clipboard,
+            &mut labs.copy_only,
+            &mut labs.spoken_formatting,
+            &mut labs.filler_words,
+            &mut labs.subtitle_export,
+            &mut labs.second_dictation_shortcut,
+            &mut labs.smart_spacing,
+            &mut labs.spoken_symbols,
+            &mut labs.picker_sort_filter,
+            &mut labs.sided_modifier_chords,
+            &mut labs.tap_or_hold,
+            &mut labs.benchmark_details,
+            &mut labs.parakeet_ultra,
+            &mut labs.standalone_special_keys,
+            &mut labs.history_stats,
+            &mut labs.recent_dictations,
+            &mut labs.skip_pauses,
+            &mut labs.stop_when_call_ends,
+        ]
+    }
+
+    /// The managed lock that holds this feature off, if any.
+    pub fn managed(self) -> Option<crate::policy::Lock> {
+        crate::policy::Policy::current().labs_lock(self)
+    }
+
     pub fn set(self, settings: &mut AppSettings, on: bool) {
         match self {
             Self::Meetings => settings.meetings.enabled = on,
@@ -666,7 +710,10 @@ pub(crate) fn apply(settings: &LabsSettings) {
 }
 
 fn encode(settings: &LabsSettings) -> u32 {
-    encode_where(settings, Feature::shipped)
+    let policy = crate::policy::Policy::current();
+    encode_where(settings, |feature| {
+        feature.shipped() && policy.labs_lock(feature).is_none()
+    })
 }
 
 /// The switches `settings` hold for the features `reaches` admits; the
@@ -803,6 +850,9 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         return Ok(());
     }
     let feature = resolve(name, Feature::shipped)?;
+    if let Some(lock) = feature.managed() {
+        return Err(eyre!(lock.refusal()));
+    }
     if feature == Feature::VoiceFilter
         && !on
         && crate::audio::hex_microphone::driver_bundle_installed()
@@ -874,9 +924,15 @@ fn list(settings: &AppSettings) -> String {
             || (feature == Feature::VoiceFilter
                 && crate::audio::hex_microphone::driver_bundle_installed());
         out.push_str(&format!(
-            "{:<width$}  {:<3}  {:<8}  {} (hex settings {})\n",
+            "{:<width$}  {:<7}  {:<8}  {} (hex settings {})\n",
             feature.name(),
-            if on { "on" } else { "off" },
+            if feature.managed().is_some() {
+                "managed"
+            } else if on {
+                "on"
+            } else {
+                "off"
+            },
             feature.audience().name(),
             feature.description(),
             feature.settings_key(),
@@ -915,6 +971,22 @@ mod tests {
             feature.set(&mut settings, true);
             assert!(feature.on(&settings));
         }
+    }
+
+    #[test]
+    fn switches_hold_every_feature() {
+        let mut settings = AppSettings::default();
+        for switch in Feature::switches(&mut settings) {
+            *switch = true;
+        }
+        for feature in Feature::ALL {
+            assert!(feature.on(&settings), "{} has no switch", feature.name());
+        }
+        assert_eq!(
+            Feature::switches(&mut settings).len(),
+            Feature::ALL.len(),
+            "one switch per feature"
+        );
     }
 
     #[test]

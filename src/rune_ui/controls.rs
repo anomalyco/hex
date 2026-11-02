@@ -337,6 +337,30 @@ pub(super) fn fixed_select(p: Paint, key: &str, label: &str) -> El {
         .key(key)
 }
 
+/// A switch an organization holds off (`crate::policy`): shown off and
+/// disabled with the managed note; pressing it does nothing.
+pub(super) fn managed_row(
+    p: Paint,
+    key: &str,
+    glyph: Option<&'static rune::Icon>,
+    title: &str,
+) -> El {
+    let switch = managed_switch(p);
+    match glyph {
+        Some(glyph) => icon_row(p, key, glyph, title, Some(super::managed_note()), switch),
+        None => setting_row(p, key, title, Some(super::managed_note()), switch),
+    }
+}
+
+/// An off switch that can't be turned on.
+pub(super) fn managed_switch(p: Paint) -> El {
+    rune_kit::Switch::new(false)
+        .disabled(true)
+        .build(p.k)
+        .key("switch")
+        .focusable(false)
+}
+
 /// A whole-row switch led by an icon.
 pub(super) fn icon_toggle_row<'a>(
     p: Paint,
