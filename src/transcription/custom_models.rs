@@ -35,13 +35,20 @@ const DIGITS: usize = 16;
 const MAX_NAME_CHARS: usize = 64;
 
 /// The model families Hex's runtime handles, with the names people know.
-const ARCHITECTURES: [(&str, &str); 5] = [
+const ARCHITECTURES: [(&str, &str); 6] = [
     ("parakeet", "Parakeet"),
     ("whisper", "Whisper"),
     ("qwen3_asr", "Qwen3-ASR"),
     ("cohere_asr", "Cohere Transcribe"),
     ("sensevoice", "SenseVoice"),
+    ("gigaam", "GigaAM"),
 ];
+
+/// Whether a family takes a language prompt: Parakeet and GigaAM heads
+/// don't (their catalog entries are the same); the other families do.
+fn takes_language_hint(architecture: &str) -> bool {
+    !matches!(architecture, "parakeet" | "gigaam")
+}
 
 /// An imported model's stable ID: `custom-` and the first 16 hex digits of
 /// the file's SHA-256.
@@ -329,10 +336,9 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         streams: false,
         runtime: ModelRuntime::Gguf(artifact),
         languages,
-        // Parakeet heads take no language prompt (Parakeet v3's catalog
-        // entry is the same); the other families do.
-        accepts_language_hint: architecture != "parakeet",
-        supports_language_detection: manifest.detects_language && architecture != "parakeet",
+        accepts_language_hint: takes_language_hint(architecture),
+        supports_language_detection: manifest.detects_language
+            && takes_language_hint(architecture),
     }))
 }
 
@@ -494,7 +500,7 @@ fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
     if !ARCHITECTURES.iter().any(|(name, _)| *name == architecture) {
         bail!(
             "its architecture is {architecture}; Hex runs Parakeet, Whisper, Qwen3-ASR, \
-             Cohere Transcribe, and SenseVoice models"
+             Cohere Transcribe, SenseVoice, and GigaAM models"
         );
     }
     let Some(variant) = header.string("stt.variant") else {
@@ -1048,6 +1054,44 @@ mod tests {
         assert_eq!(profile.languages, ["en", "de"]);
         assert!(profile.detects_language);
         assert_eq!(profile.license.as_deref(), Some("cc-by-4.0"));
+    }
+
+    #[test]
+    fn a_gigaam_header_is_accepted_and_takes_no_language_hint() {
+        let header = gguf_header::tests::read_header(gguf(
+            &[
+                ("general.architecture", "gigaam"),
+                ("general.name", "GigaAM v3"),
+                ("stt.variant", "gigaam-v3-e2e-rnnt"),
+            ],
+            &[("general.languages", &["ru"])],
+            &[("stt.capability.lang_detect", true)],
+            &[("a", 8, 64)],
+        ));
+        let profile = profile(&header, "file").unwrap();
+        assert_eq!(profile.architecture, "gigaam");
+        assert_eq!(family(&profile.architecture), "GigaAM");
+        let manifest = Manifest {
+            name: profile.name.clone(),
+            metadata_name: profile.name,
+            architecture: profile.architecture,
+            variant: profile.variant,
+            languages: profile.languages,
+            detects_language: profile.detects_language,
+            bytes: 1,
+            sha256: "1a".repeat(32),
+            source: "file".into(),
+            license: None,
+            repository: None,
+            imported_at: 0,
+            path: None,
+            origin: None,
+        };
+        let definition = build(CustomModelId::from_sha256(&manifest.sha256), &manifest);
+        assert!(!definition.accepts_language_hint);
+        assert!(!definition.supports_language_detection);
+        assert!(takes_language_hint("whisper"));
+        assert!(!takes_language_hint("parakeet"));
     }
 
     #[test]
