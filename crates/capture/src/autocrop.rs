@@ -1555,9 +1555,14 @@ pub fn pixel_rect(r: Rect, width: u32, height: u32) -> [u32; 4] {
 pub fn crop_frame(frame: &RgbaFrame, r: Rect) -> RgbaFrame {
     let [x, y, w, h] = pixel_rect(r, frame.width, frame.height);
     let mut rgba = Vec::with_capacity(w as usize * h as usize * 4);
+    let len = w as usize * 4;
     for row in y..y + h {
         let start = (row as usize * frame.width as usize + x as usize) * 4;
-        rgba.extend_from_slice(&frame.rgba[start..start + w as usize * 4]);
+        // Rows a short buffer doesn't hold come out transparent.
+        match frame.rgba.get(start..start + len) {
+            Some(px) => rgba.extend_from_slice(px),
+            None => rgba.resize(rgba.len() + len, 0),
+        }
     }
     RgbaFrame::new(frame.t_ms, w, h, rgba)
 }
@@ -1662,8 +1667,10 @@ pub fn change_regions(prev: &RgbaFrame, cur: &RgbaFrame) -> Vec<Rect> {
         let x = ((nx * f.width as f32) as usize).min(f.width as usize - 1);
         let y = ((ny * f.height as f32) as usize).min(f.height as usize - 1);
         let i = (y * f.width as usize + x) * 4;
-        let p = &f.rgba[i..i + 3];
-        (u32::from(p[0]) * 3 + u32::from(p[1]) * 6 + u32::from(p[2])) / 10
+        // A buffer shorter than its stated size reads as black past its end.
+        f.rgba.get(i..i + 3).map_or(0, |p| {
+            (u32::from(p[0]) * 3 + u32::from(p[1]) * 6 + u32::from(p[2])) / 10
+        })
     };
     let mut changed = vec![false; COLS * rows];
     for row in 0..rows {
@@ -1750,44 +1757,43 @@ pub fn annotate_and_crop(
     let plan = settings
         .filter(|_| target.mode == crate::model::CaptureMode::Display && !selected.is_empty())
         .and_then(|settings| {
-            let changes: Vec<Vec<Rect>> = (0..selected.len())
-                .map(|i| match (i, baseline) {
-                    (0, Some(first)) if selected[0].0.t > first.t_ms => {
-                        change_regions(first, &selected[0].1)
-                    }
-                    (0, _) => Vec::new(),
-                    _ => change_regions(&selected[i - 1].1, &selected[i].1),
-                })
-                .collect();
-            let times: Vec<u64> = selected.iter().map(|(k, _)| k.t).collect();
-            let mut input = Input::new(
-                target.frame,
-                duration_ms,
-                &times,
-                strokes,
-                events,
-                windows,
-                cursor,
-                &changes,
-            );
-            input.pin_ink(selected.iter().map(|(k, _)| k), strokes, marks);
-            let screen = input.screen;
-            input.content = std::thread::scope(|scope| {
-                let workers: Vec<_> = selected
-                    .iter()
-                    .map(|(_, frame)| scope.spawn(move || Content::from_frame(frame, screen)))
-                    .collect();
-                workers.into_iter().map(|w| w.join().ok()).collect()
-            });
             // A crop bug must never cost the capture: fall back to the full frames.
-            let crops = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                compute(&input, settings)
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let changes: Vec<Vec<Rect>> = (0..selected.len())
+                    .map(|i| match (i, baseline) {
+                        (0, Some(first)) if selected[0].0.t > first.t_ms => {
+                            change_regions(first, &selected[0].1)
+                        }
+                        (0, _) => Vec::new(),
+                        _ => change_regions(&selected[i - 1].1, &selected[i].1),
+                    })
+                    .collect();
+                let times: Vec<u64> = selected.iter().map(|(k, _)| k.t).collect();
+                let mut input = Input::new(
+                    target.frame,
+                    duration_ms,
+                    &times,
+                    strokes,
+                    events,
+                    windows,
+                    cursor,
+                    &changes,
+                );
+                input.pin_ink(selected.iter().map(|(k, _)| k), strokes, marks);
+                let screen = input.screen;
+                input.content = std::thread::scope(|scope| {
+                    let workers: Vec<_> = selected
+                        .iter()
+                        .map(|(_, frame)| scope.spawn(move || Content::from_frame(frame, screen)))
+                        .collect();
+                    workers.into_iter().map(|w| w.join().ok()).collect()
+                });
+                let crops = compute(&input, settings);
+                (crops.len() == selected.len() && crops.iter().any(|c| c.kind != CropKind::Full))
+                    .then_some((crops, changes))
             }))
-            .ok()?;
-            crops
-                .iter()
-                .any(|c| c.kind != CropKind::Full)
-                .then_some((crops, changes))
+            .ok()
+            .flatten()
         });
     let Some((crops, changes)) = plan else {
         let frames = std::thread::scope(|scope| {
@@ -2096,6 +2102,92 @@ mod tests {
         let mut short = solid(640, 360, 255);
         short.rgba.truncate(640 * 100 * 4);
         Content::from_frame(&short, [1920.0, 1080.0]);
+    }
+
+    /// #945: GNOME at 166 % on a 2560x1440 monitor reports a 1920x1080 frame with 640x360
+    /// keyframes. Autocrop takes keyframes of any size, short or padded buffers included, and
+    /// never panics.
+    #[test]
+    fn autocrop_never_panics_on_odd_frame_and_keyframe_sizes() {
+        let raw = |w: u32, h: u32, len: usize| RgbaFrame {
+            t_ms: 0,
+            width: w,
+            height: h,
+            rgba: (0..len).map(|i| (i * 37 % 251) as u8).collect(),
+            badge_top_right: false,
+        };
+        let px = |w: u32, h: u32| w as usize * h as usize * 4;
+        let mut frames = Vec::new();
+        for (w, h) in [
+            (640, 360),
+            (641, 359),
+            (853, 480),
+            (2560, 1440),
+            (1, 1),
+            (2, 3),
+            (0, 0),
+        ] {
+            frames.push(raw(w, h, px(w, h)));
+            // A padded stride, and a buffer cut short.
+            frames.push(raw(w, h, px(w + 7, h)));
+            frames.push(raw(w, h, px(w, h) / 2 + 1));
+        }
+        let screens = [
+            [1920.0, 1080.0],
+            [1536.0, 864.0],
+            [2560.0, 1440.0],
+            [1.0, 1.0],
+        ];
+        for frame in &frames {
+            for screen in screens {
+                Content::from_frame(frame, screen);
+            }
+            for other in &frames {
+                change_regions(frame, other);
+            }
+            for r in [FULL, [0.25, 0.25, 0.75, 0.75], [0.9, 0.9, 1.0, 1.0]] {
+                if frame.width > 0 && frame.height > 0 {
+                    let out = crop_frame(frame, r);
+                    assert_eq!(out.rgba.len(), px(out.width, out.height));
+                }
+            }
+        }
+        for (width, height) in [(1920.0, 1080.0), (1537.0, 865.0)] {
+            let target = TargetInfo {
+                mode: CaptureMode::Display,
+                app: None,
+                bundle_id: None,
+                window_title: None,
+                window_id: None,
+                display_id: 1,
+                frame: TargetFrame {
+                    width,
+                    height,
+                    scale: 1.0,
+                    ..FRAME
+                },
+            };
+            let events = vec![click(1_000, 0.25, 0.3), click(1_300, 0.3, 0.35)];
+            let selected: Vec<_> = frames
+                .iter()
+                .filter(|f| f.width > 0 && f.height > 0 && f.rgba.len() >= px(f.width, f.height))
+                .enumerate()
+                .map(|(i, f)| (keyframe(i, 1_000 + i as u64 * 100), f.clone()))
+                .collect();
+            let (out, _) = annotate_and_crop(
+                selected.clone(),
+                None,
+                Some(&Settings::default()),
+                &target,
+                10_000,
+                &[],
+                &[],
+                &events,
+                &[],
+                &[],
+            );
+            assert_eq!(out.len(), selected.len());
+        }
     }
 
     /// A real capture: a tall Focus crop whose right edge ran through a ragged paragraph,
