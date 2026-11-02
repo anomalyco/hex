@@ -16,9 +16,10 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VkKeyScanW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT,
-    PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED, MSG,
+    MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
+    UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN,
+    WM_SYSKEYUP,
 };
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
@@ -221,9 +222,13 @@ impl HotkeyEvent {
         observed_at_ms: u32,
         captured_through: CaptureInstant,
     ) -> CaptureInstant {
-        let delay = observed_at_ms
-            .wrapping_sub(self.timestamp_ms)
-            .min(MAX_EVENT_DELAY_MS);
+        // A delay this long is not a real one: tools that inject keys (a
+        // Stream Deck Hotkey action) can stamp events with a time from
+        // elsewhere, even slightly in the future, which wraps. Clamping it
+        // moved the shortcut a minute back and trimmed the clip to nothing,
+        // so such an event counts as happening now.
+        let delay = observed_at_ms.wrapping_sub(self.timestamp_ms);
+        let delay = if delay > MAX_EVENT_DELAY_MS { 0 } else { delay };
         captured_through
             .checked_sub(Duration::from_millis(u64::from(delay)))
             .unwrap_or(CaptureInstant::ZERO)
@@ -629,7 +634,14 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
     let vk = track_numpad(event, is_down).unwrap_or(event.vkCode);
-    match process_button(vk, is_down, event.time) {
+    // Injected keys carry whatever time their sender gave them, so they
+    // are stamped with the time the hook sees them.
+    let time = if event.flags & LLKHF_INJECTED != 0 {
+        unsafe { GetTickCount() }
+    } else {
+        event.time
+    };
+    match process_button(vk, is_down, time) {
         Disposition::Pass => unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) },
         Disposition::Suppress => 1,
         Disposition::Mask if replay_masked_release(event) => 1,
@@ -1746,6 +1758,24 @@ mod tests {
         };
         let captured = CaptureInstant::from_nanos(1_000_000_000);
         assert_eq!(event.occurred_at_with(5, captured).as_nanos(), 990_000_000);
+    }
+
+    #[test]
+    fn an_implausible_event_time_counts_as_now() {
+        // Injected input stamped slightly in the future wraps to a huge
+        // delay; it must not move the shortcut a minute back (#1005).
+        let captured = CaptureInstant::from_nanos(90_000_000_000);
+        for timestamp_ms in [1_010, 1_000u32.wrapping_sub(MAX_EVENT_DELAY_MS + 1)] {
+            let event = HotkeyEvent {
+                action: HotkeyAction::Start,
+                raw: false,
+                timestamp_ms,
+            };
+            assert_eq!(
+                event.occurred_at_with(1_000, captured).as_nanos(),
+                captured.as_nanos()
+            );
+        }
     }
 
     #[test]
