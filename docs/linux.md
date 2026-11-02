@@ -291,8 +291,7 @@ unmanaged development Hex instead; without one it forwards to the installed Hex.
 ## Dictate
 
 Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
-recording, and press the same chord again to finish. Escape never cancels:
-every dictation finishes and pastes. **Shortcut mode** picks how the shortcut
+recording, and press the same chord again to finish. **Shortcut mode** picks how the shortcut
 triggers: **Hold or double-tap** (the default), **Hold**, **Tap** (starts and
 stops with single presses), or **Double-tap** (waits for two complete taps,
 and needs a shortcut with a key).
@@ -488,9 +487,14 @@ and stopping while idle do nothing, so key repeat is
 harmless. Start and stop bypass Hold, Toggle, and double-tap: start records,
 stop finishes. A shortcut press also finishes a recording a command started.
 
-Dictation has no cancel (#786): Escape always stays with your applications,
-and every dictation finishes and pastes. To drop one, finish it and delete the
-text. On KDE, Hex removes the Cancel dictation shortcut older builds asked for,
+In **Tap** mode, a **Cancel** shortcut (Escape by default) throws away the
+recording: nothing is pasted or saved, and dictations already transcribing
+still finish. On X11, Hex grabs that key only while a recording runs, so it
+works normally everywhere else. On Wayland a desktop shortcut would hold the
+key all the time, so Hex binds nothing; bind `hex dictation cancel` to a key in
+your desktop's keyboard shortcuts instead. `hex dictation cancel` works in any
+mode. In the Hold modes there is no cancel: every dictation finishes and pastes.
+On KDE, Hex removes the Cancel dictation shortcut older builds asked for,
 so its key returns to your applications.
 
 Shortcuts need a non-modifier key. Modifier-only shortcuts, such as Super

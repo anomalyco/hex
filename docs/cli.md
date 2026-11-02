@@ -79,8 +79,8 @@ hex
 ```
 
 `dictation start` locks the recording, as a double tap would: `dictation stop`
-or the next shortcut press finishes it. Dictation has no cancel (#786): every
-dictation finishes and pastes. A CLI start has no press to judge, so its recording counts as
+or the next shortcut press finishes it, and `dictation cancel` discards it.
+A CLI start has no press to judge, so its recording counts as
 intentional at once: the start tone plays once the microphone is open, and the
 recording behavior (mute or pause media, idle-sleep prevention) and the live
 stream start as they do after a held shortcut. A `stop` replies `done` only
@@ -107,8 +107,12 @@ processing shortcut (`raw_dictation_hotkey`) does. History keeps it as `raw`,
 and Paste Last pastes it. `--raw` with `stop` is a usage error
 (exit 2); `stop --print` of a raw dictation prints the transcript as heard.
 
-`dictation cancel` was removed (#786); an older `hex` that sends it gets
-`removed`. `meetings cancel` doesn't exist because Hex has no way to discard a
+`dictation cancel` discards the recording in any shortcut mode: nothing is
+transcribed, pasted, or saved to History, and dictations already transcribing
+finish. With nothing recording it answers `unchanged`. In Toggle mode the
+cancel shortcut (`cancel_hotkey`, Escape by default) does the same; on Wayland,
+bind `hex dictation cancel` to a key in the desktop instead (#786, #1022).
+`meetings cancel` doesn't exist because Hex has no way to discard a
 meeting recording.
 
 `onboarding reset` (or `onboarding restart`) opens the window on the
@@ -246,7 +250,7 @@ Requests are flat objects tagged by `command` (kebab-case):
 
 ```ts
 status | quit {force} | restart {force}
-dictation {action, print?}                       action: start | stop | toggle (`cancel` answers `removed`);
+dictation {action, print?}                       action: start | stop | toggle | cancel;
                                                  print (stop only) answers `transcript`
 paste-last
 meeting-record {title?} | meeting-stop | meeting-copy-last

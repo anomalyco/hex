@@ -15,13 +15,14 @@ Agent or terminal                                  // control.cli; every OS
 │   ├── Listener didn't answer, no --force -> busy (it might be recording)
 │   └── restart -> reopens with the running Hex's HEX_* variables (macOS);
 │       Linux unit -> systemctl restart; else waits for the drain, then start
-├── hex dictation start|stop|toggle
+├── hex dictation start|stop|toggle|cancel
 │   ├── Same shortcut state machine as the hotkey; start locks the capture
 │   ├── start -> intentional at once: tone once the mic is open, recording
 │   │   behavior, live stream
 │   ├── stop -> done only when the clip went to transcription;
 │   │   no audio yet or silent -> discarded, nothing transcribing
-│   ├── cancel (an older `hex`) -> removed, exit 1: dictation has no cancel (#786)
+│   ├── cancel -> discards the recording in any mode, nothing pasted or saved;
+│   │   jobs already transcribing finish; idle -> unchanged
 │   ├── Repeat a command -> unchanged, exit 0
 │   └── dictation stop --print -> stops at once, then waits ≤ 60 s and prints
 │       the transcript (processed as a paste) instead of pasting it
@@ -106,8 +107,8 @@ pins restart's; `macos_rune::control::tests` check that `model use` prepares
 its exact selection installed-only;
 `dictation::audio::tests::marked_captures_are_intentional_without_a_hold`
 covers the immediate stream and `ReadyIntentional`; `recognition::tests`
-cover the stop replies and the paste-last refusal; `control::tests::an_older_cancel_gets_removed`
-covers the `removed` reply; local API's
+cover the stop replies and the paste-last refusal; `control::tests::cancel_parses_and_takes_no_flags`
+covers `cancel` and its flags; local API's
 `control_requests_are_authenticated_versioned_and_typed` covers authentication,
 bounds, and error codes; `tests::control_commands_parse_beside_the_read_commands`
 covers parsing next to `history` and `meetings`; `control::host::tests` cover
