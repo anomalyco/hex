@@ -374,6 +374,11 @@ const KEYS: &[Key] = &[
         "Labs: shortcuts may use Menu, Pause, or Scroll Lock, alone or with modifiers (Linux); off puts such a shortcut back to its default",
     ),
     key(
+        "labs.section_key_alone",
+        Kind::Bool,
+        "Labs: a shortcut may be the § key, left of 1 on ISO keyboards, with no modifier (Linux); off puts such a shortcut back to its default",
+    ),
+    key(
         "labs.history_stats",
         Kind::Bool,
         "Labs: a summary of retained dictations at the top of History, and hex history stats",
@@ -935,6 +940,7 @@ pub fn apply(
             ));
         }
         "labs.standalone_special_keys" => candidate.repair_special_keys(),
+        "labs.section_key_alone" => candidate.repair_section_key(),
         "labs.parakeet_ultra" if !candidate.labs.parakeet_ultra => {
             if let Some(why) = crate::labs::Feature::ParakeetUltra.off_refusal(settings) {
                 return Err(invalid(name, why));
@@ -1201,6 +1207,7 @@ pub fn parse_hotkey(
             && !key.is_mouse()
             && !HotkeyKey::special_name(&key.label)
             && !(cfg!(target_os = "windows") && HotkeyKey::navigation_name(&key.label))
+            && !(cfg!(target_os = "linux") && HotkeyKey::section_name(&key.label))
         {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
@@ -1215,6 +1222,11 @@ pub fn parse_hotkey(
 /// a navigation key alone needs the toggle there; elsewhere one alone still
 /// needs a modifier.
 fn special_key_refusal(settings: &AppSettings, binding: &HotkeyBinding) -> Option<String> {
+    // The § key alone needs Labs › Section key alone (Linux).
+    if cfg!(target_os = "linux") && binding.is_lone_section_key() && !settings.section_key_allowed()
+    {
+        return Some("section needs Labs › Section key alone: hex labs on section-key".into());
+    }
     if cfg!(target_os = "windows") {
         let key = binding.key.as_ref()?;
         return (binding.is_lone_navigation_key() && !settings.special_keys_allowed()).then(|| {
@@ -1622,6 +1634,26 @@ mod tests {
         } else {
             assert!(change.is_err(), "only Linux has the toggle");
         }
+    }
+
+    /// Issue 1050: § alone is a Linux shortcut only with Labs › Section key
+    /// alone on, and turning the toggle off puts it back to the default.
+    #[test]
+    fn section_alone_needs_its_labs_toggle() {
+        let settings = AppSettings::default();
+        let without_toggle = apply(&settings, "dictation_hotkey", "§", &rules());
+        assert_eq!(without_toggle.unwrap_err().code, "invalid-value");
+        if !cfg!(target_os = "linux") {
+            return;
+        }
+        let on = apply(&settings, "labs.section_key_alone", "on", &rules())
+            .unwrap()
+            .settings;
+        let change = apply(&on, "dictation_hotkey", "§", &rules()).unwrap();
+        assert!(change.settings.dictation_hotkey.is_lone_section_key());
+        assert_eq!(format_hotkey(&change.settings.dictation_hotkey), "§");
+        let off = apply(&change.settings, "labs.section_key_alone", "off", &rules()).unwrap();
+        assert_eq!(off.settings.dictation_hotkey, HotkeyBinding::default());
     }
 
     #[test]

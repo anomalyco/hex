@@ -321,6 +321,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Special keys alone"),
             tr("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"),
         ));
+        rows.push(row(
+            Feature::SectionKeyAlone,
+            &KEYBOARD,
+            tr("Section key alone"),
+            tr("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound"),
+        ));
     }
     // Linux's and Windows' engines transcribe a whole clip on the CPU.
     if caps.os != super::platform::Os::Macos {
@@ -476,6 +482,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::PickerActiveFirst => "lab-picker-active-first",
         Feature::ModelInPlace => "lab-model-in-place",
         Feature::PickerDownloaded => "lab-picker-downloaded",
+        Feature::SectionKeyAlone => "lab-section-key",
     }
 }
 

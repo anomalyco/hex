@@ -94,10 +94,11 @@ pub enum Feature {
     PickerActiveFirst,
     ModelInPlace,
     PickerDownloaded,
+    SectionKeyAlone,
 }
 
 impl Feature {
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -133,6 +134,7 @@ impl Feature {
         Self::PickerActiveFirst,
         Self::ModelInPlace,
         Self::PickerDownloaded,
+        Self::SectionKeyAlone,
     ];
 
     /// The features this OS and build have.
@@ -190,7 +192,8 @@ impl Feature {
             | Self::OutputFixes
             | Self::PickerActiveFirst
             | Self::ModelInPlace
-            | Self::PickerDownloaded => Audience::Everyone,
+            | Self::PickerDownloaded
+            | Self::SectionKeyAlone => Audience::Everyone,
         }
     }
 
@@ -223,6 +226,7 @@ impl Feature {
             }
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
+            Self::SectionKeyAlone => cfg!(target_os = "linux"),
             Self::StandaloneSpecialKeys | Self::SkipPauses => {
                 cfg!(any(target_os = "linux", target_os = "windows"))
             }
@@ -293,6 +297,7 @@ impl Feature {
             Self::PickerActiveFirst => "picker-active-first",
             Self::ModelInPlace => "model-in-place",
             Self::PickerDownloaded => "picker-downloaded",
+            Self::SectionKeyAlone => "section-key",
         }
     }
 
@@ -334,6 +339,7 @@ impl Feature {
             Self::PickerActiveFirst => "labs.picker_active_first",
             Self::ModelInPlace => "labs.model_in_place",
             Self::PickerDownloaded => "labs.picker_downloaded",
+            Self::SectionKeyAlone => "labs.section_key_alone",
         }
     }
 
@@ -427,6 +433,9 @@ impl Feature {
             Self::PickerDownloaded => {
                 "Show only downloaded speech models in the picker, with the space they take"
             }
+            Self::SectionKeyAlone => {
+                "Use the § key, left of 1 on ISO keyboards, alone as a shortcut; Hex takes § from every app while it's bound"
+            }
         }
     }
 
@@ -472,6 +481,7 @@ impl Feature {
             Self::PickerActiveFirst => settings.labs.picker_active_first,
             Self::ModelInPlace => settings.labs.model_in_place,
             Self::PickerDownloaded => settings.labs.picker_downloaded,
+            Self::SectionKeyAlone => settings.labs.section_key_alone,
         }
     }
 
@@ -515,6 +525,7 @@ impl Feature {
             &mut labs.picker_active_first,
             &mut labs.model_in_place,
             &mut labs.picker_downloaded,
+            &mut labs.section_key_alone,
         ]
     }
 
@@ -563,6 +574,10 @@ impl Feature {
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
                 settings.repair_special_keys();
+            }
+            Self::SectionKeyAlone => {
+                settings.labs.section_key_alone = on;
+                settings.repair_section_key();
             }
         }
     }

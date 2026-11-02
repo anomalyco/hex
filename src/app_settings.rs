@@ -394,8 +394,7 @@ pub struct LabsSettings {
     pub sided_modifier_chords: bool,
     /// In Toggle mode, a press held past the hold threshold dictates until it lifts (macOS, issue 711).
     pub tap_or_hold: bool,
-    /// The Local transcription picker shows each model's raw error rate
-    /// (WER or CER), its benchmark, source, and conditions (issue 647).
+    /// The picker shows each model's raw error rate, benchmark, source, and conditions (issue 647).
     pub benchmark_details: bool,
     /// Parakeet Ultra joins the Local transcription picker (issue 648).
     pub parakeet_ultra: bool,
@@ -410,12 +409,12 @@ pub struct LabsSettings {
     pub output_fixes: bool,
     /// The speech model picker lists the model in use first (issue 1019).
     pub picker_active_first: bool,
-    /// The picker's "Use model file where it is…" adds a GGUF file without
-    /// copying it, as a found file is used (issue 941).
+    /// The picker's "Use model file where it is…" adds a GGUF file without copying it (issue 941).
     pub model_in_place: bool,
-    /// The picker's All speech models view offers "Only downloaded models"
-    /// with their total size (issue 1018).
+    /// The picker's All speech models view offers "Only downloaded models" (issue 1018).
     pub picker_downloaded: bool,
+    /// The ISO § key may be a shortcut on its own (Linux, issue 1050).
+    pub section_key_alone: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -454,6 +453,7 @@ impl Default for LabsSettings {
             picker_active_first: false,
             model_in_place: false,
             picker_downloaded: false,
+            section_key_alone: false,
         }
     }
 }

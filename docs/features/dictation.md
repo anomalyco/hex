@@ -73,6 +73,16 @@ when settings load or the toggle turns off. Limit: Rune doesn't report these
 keys to the window's recorder, so set them with `hex settings`. Details and
 checks in [labs.md](labs.md).
 
+Linux with Labs › Section key alone on (`labs.section_key_alone`, off by
+default; issue 1050): the ISO § key, left of 1, may be a shortcut with no
+modifier. The window's recorder takes § pressed alone and shows §, and
+`hex settings set dictation_hotkey §` (or `section`) saves it. It reaches X11
+grabs as keysym 0xa7 and the portal as `section`. Off, the recorder answers
+"Add a modifier" as before, `hex settings` refuses it, and a saved § shortcut
+without a modifier goes back to its default when settings load or the toggle
+turns off. While bound, § is Hex's in every app. Details and checks in
+[labs.md](labs.md).
+
 Checks: `mouse_buttons_record_with_or_without_modifiers`,
 `mouse_bindings_persist_and_conflict_only_with_the_same_trigger`,
 `mouse_hold_and_release_use_the_dictation_state_machine`,

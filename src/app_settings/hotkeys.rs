@@ -417,6 +417,10 @@ pub(super) fn key_label(name: &str) -> String {
     if shortcut_repair::is_scroll_lock(name) {
         return "Scroll Lock".into();
     }
+    // `section`, as `hex settings` may name the § key.
+    if name.eq_ignore_ascii_case("section") {
+        return "§".into();
+    }
     if name.chars().count() == 1 {
         return name.to_uppercase();
     }
