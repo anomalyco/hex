@@ -138,6 +138,8 @@ struct LinuxDesktopHost {
     transcription_error: Option<String>,
     updater: crate::updater::Updater,
     output: crate::linux::dictation::DictationOutput,
+    /// The local API's `/dictations` controls, for whichever listener runs.
+    dictations: crate::linux::dictation::DictationQueue,
     /// Hosts the personal transformations workspace while a mode uses one.
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
@@ -348,7 +350,12 @@ pub(crate) fn run(
     // Before any thread can load a model or the window can create its GPU.
     crate::transcription::local_transcriber::initialize_backends();
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
-    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls);
+    let (dictation_controls, dictations) = mpsc::sync_channel(8);
+    let local_api = crate::local_api::LocalApi::start_for_app(
+        &event_path,
+        control_calls,
+        Some(dictation_controls),
+    );
     let enable_on_launch = settings.enable_on_launch;
     let mut host = LinuxDesktopHost::new(
         event_path,
@@ -356,6 +363,7 @@ pub(crate) fn run(
         error,
         crate::updater::Updater::start(),
     );
+    host.dictations = dictations.into();
     if enable_on_launch {
         host.start();
     }
@@ -555,6 +563,7 @@ impl LinuxDesktopHost {
             transcription_error: None,
             updater,
             output,
+            dictations: crate::linux::dictation::DictationQueue::default(),
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
             settings_modified: settings_modified(),
@@ -651,6 +660,7 @@ impl LinuxDesktopHost {
         let worker_stop = stop.clone();
         let settings = self.settings.clone();
         let output = self.output.clone();
+        let dictations = self.dictations.clone();
         let event_path = self.event_path.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
         let hotkey_status = crate::linux::input::HotkeyStatus::default();
@@ -668,6 +678,7 @@ impl LinuxDesktopHost {
                     prepared_transcriber,
                     worker_hotkey_status,
                     command_receiver.into(),
+                    dictations,
                     update_receiver,
                 )
             });

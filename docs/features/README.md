@@ -1857,7 +1857,12 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No silence gate                  // model output, unlike hotkey dictation;
 │   │                                     // only recognition-hint echoes are dropped
-│   └── Linux, Windows -> serviceCapture false, 404 service-capture-unavailable
+│   ├── Linux -> The listener records it (dictation::service owner)
+│   │   ├── Shortcut or `hex dictation` records -> 409 dictation-busy
+│   │   ├── Client's dictation records -> shortcut starts and ends nothing
+│   │   ├── Lapsed lease or owner's cancel -> only that dictation is dropped
+│   │   └── Microphone lost -> finish answers microphone-lost (no kept clip)
+│   └── Windows, hex service -> serviceCapture false, 404 service-capture-unavailable
 └── Distribution
     ├── SDK 0.3.0 -> Published
     └── Turnkey signed helper -> Unfinished
@@ -1871,6 +1876,14 @@ without it. On Linux, the embedded service answered `/health`,
 English on the Vulkan iGPU (October 30). The running app's shared-engine path,
 `/streams` on a live Linux or Windows listener, and anything on Windows beyond
 `cargo xwin clippy` (x64) are unverified.
+
+Linux `/dictations` (#981) shares the macOS HTTP contract and the owner,
+lease, and level logic in [dictation/service.rs](../../src/dictation/service.rs);
+the listener ([linux/dictation.rs](../../src/linux/dictation.rs)) records it
+without a hold threshold or release tail. Unit tests cover ownership, lease
+expiry, busy refusal beside a shortcut capture, and the HTTP round trip
+(`local_api` tests now run on Linux). A live Linux microphone run through the
+SDK is unverified.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

@@ -113,6 +113,9 @@ not a network API or the macOS embedded transcription SDK service. It carries
 `Activate`, `Status`, and Annotate's recording commands. The `hex` control
 commands reach Hex through its local API's `POST /control`; dictation
 commands go straight from there to the listener, never through the window.
+The local API's `/dictations` (the TypeScript SDK's `hex.dictation`) also
+records on the listener while Hex is listening, as on macOS: one capture at a
+time, so a client's dictation and the shortcut never end each other.
 
 For development, run `cargo run --release`. `hex dictate` remains an explicit
 foreground diagnostic listener without the window or HUD and cannot coexist
