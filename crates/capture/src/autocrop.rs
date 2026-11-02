@@ -327,13 +327,16 @@ impl Content {
     pub fn from_frame(frame: &RgbaFrame, screen: [f32; 2]) -> Self {
         let cols = ((screen[0] / Self::CELL_PT).round() as usize).max(1);
         let rows = ((screen[1] / Self::CELL_PT).round() as usize).max(1);
-        let (w, h) = (frame.width as usize, frame.height as usize);
+        let w = frame.width as usize;
+        // Only the rows the buffer actually holds.
+        let h = (frame.height as usize).min(frame.rgba.len() / (w * 4).max(1));
         let mut sum = vec![0_u32; (cols + 1) * (rows + 1)];
         if w < 2 || h < 2 {
             return Self { cols, rows, sum };
         }
+        // Neighbour reads past the last column or row (cells as narrow as a pixel) stay on it.
         let luma = |x: usize, y: usize| {
-            let i = (y * w + x) * 4;
+            let i = (y.min(h - 1) * w + x.min(w - 1)) * 4;
             let p = &frame.rgba[i..i + 3];
             (i32::from(p[0]) * 3 + i32::from(p[1]) * 6 + i32::from(p[2])) / 10
         };
@@ -2077,6 +2080,22 @@ mod tests {
         let r = ctx.snap([0.28, 0.25, 0.6, 0.55], &content, [0.4, 0.3, 0.5, 0.4]);
         assert!(r[2] >= 0.70 && r[2] < 0.76, "right edge {r:?}");
         assert!(r[0] <= 0.30 && r[0] > 0.26, "left edge {r:?}");
+    }
+
+    /// #945: a keyframe no wider than the cell grid (one pixel per cell) read past the last
+    /// column and row.
+    #[test]
+    fn content_reads_stay_inside_frames_as_small_as_the_grid() {
+        for (w, h) in [(640, 360), (320, 180), (1920, 1080)] {
+            let mut frame = solid(w, h, 255);
+            let last = frame.rgba.len() - 4;
+            frame.rgba[last..last + 3].copy_from_slice(&[0, 0, 0]);
+            let content = Content::from_frame(&frame, [1920.0, 1080.0]);
+            assert_eq!((content.cols, content.rows), (640, 360));
+        }
+        let mut short = solid(640, 360, 255);
+        short.rgba.truncate(640 * 100 * 4);
+        Content::from_frame(&short, [1920.0, 1080.0]);
     }
 
     /// A real capture: a tall Focus crop whose right edge ran through a ragged paragraph,
