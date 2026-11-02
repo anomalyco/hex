@@ -5,7 +5,10 @@ use std::sync::mpsc::{self, Receiver};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use cpal::traits::{DeviceTrait, StreamTrait};
-use cpal::{Device, SampleFormat, Stream, StreamConfig, SupportedStreamConfig};
+use cpal::{
+    BufferSize, Device, SampleFormat, Stream, StreamConfig, SupportedBufferSize,
+    SupportedStreamConfig,
+};
 
 use super::{CaptureInstant, StreamErrorReporter, build_stream};
 
@@ -33,7 +36,12 @@ pub(super) fn start_stream_with_fallback(
     let supported = device
         .default_input_config()
         .wrap_err("could not read the input device configuration")?;
-    let error = match start_stream(device, &supported, default_name.clone()) {
+    let error = match start_stream(
+        device,
+        &supported,
+        BufferSize::Default,
+        default_name.clone(),
+    ) {
         Ok(started) => return Ok(started),
         Err(error) => error,
     };
@@ -42,12 +50,23 @@ pub(super) fn start_stream_with_fallback(
         device = %device_name,
         "the microphone refused its default format; trying the others it lists"
     );
+    // Some drivers refuse every format with the backend's default buffer
+    // (Intel Smart Sound answered E_INVALIDARG for each, #988) yet accept
+    // the same format with an explicit buffer duration, so each format is
+    // tried both ways.
+    let mut candidates = vec![(supported.clone(), fixed_buffer_size(&supported))];
     for candidate in alternative_input_configs(device, &supported) {
-        match start_stream(device, &candidate, default_name.clone()) {
+        candidates.push((candidate.clone(), BufferSize::Default));
+        let fixed = fixed_buffer_size(&candidate);
+        candidates.push((candidate, fixed));
+    }
+    for (candidate, buffer_size) in candidates {
+        match start_stream(device, &candidate, buffer_size, default_name.clone()) {
             Ok(started) => {
                 tracing::info!(
                     device = %device_name,
                     format = %describe_config(&candidate),
+                    buffer = ?buffer_size,
                     "opened the microphone in another format"
                 );
                 return Ok(started);
@@ -55,11 +74,23 @@ pub(super) fn start_stream_with_fallback(
             Err(error) => tracing::warn!(
                 error = format!("{error:#}"),
                 device = %device_name,
+                buffer = ?buffer_size,
                 "the microphone refused another format"
             ),
         }
     }
     Err(error)
+}
+
+/// An explicit buffer of about 20 ms at `config`'s rate, within the range
+/// the device reports.
+fn fixed_buffer_size(config: &SupportedStreamConfig) -> BufferSize {
+    let frames = (config.sample_rate() / 50).max(1);
+    let frames = match *config.buffer_size() {
+        SupportedBufferSize::Range { min, max } if min <= max => frames.clamp(min, max),
+        _ => frames,
+    };
+    BufferSize::Fixed(frames)
 }
 
 fn is_supported_sample_format(format: SampleFormat) -> bool {
@@ -124,10 +155,12 @@ fn alternative_input_configs(
 fn start_stream(
     device: &Device,
     supported: &SupportedStreamConfig,
+    buffer_size: BufferSize,
     default_name: Option<String>,
 ) -> Result<StartedStream> {
     let sample_format = supported.sample_format();
-    let config: StreamConfig = supported.clone().into();
+    let mut config: StreamConfig = supported.clone().into();
+    config.buffer_size = buffer_size;
     let sample_rate = config.sample_rate;
     let channels = usize::from(config.channels);
     let (sender, chunks) = mpsc::channel();
