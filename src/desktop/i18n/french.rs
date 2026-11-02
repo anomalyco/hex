@@ -15,6 +15,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Transcribe", "Transcrire"),
+    ("{model} · Language: {language}", "{model} · Langue : {language}"),
     ("Hide menu bar icon", "Masquer l'icône de la barre des menus"),
     ("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings", "Masque l'icône de Hex dans la barre des menus. Les raccourcis continuent de fonctionner ; rouvrez Hex depuis le Finder ou Spotlight pour accéder aux Réglages"),
     ("Keep recordings", "Conserver les enregistrements"),
