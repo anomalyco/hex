@@ -169,6 +169,9 @@ rustPlatform.buildRustPackage (finalAttrs: {
     homepage = "https://anoma.ly/hex/";
     license = lib.licenses.mit;
     mainProgram = "hex";
-    platforms = [ "x86_64-linux" ];
+    platforms = [
+      "x86_64-linux"
+      "aarch64-linux"
+    ];
   };
 })
