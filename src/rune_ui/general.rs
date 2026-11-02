@@ -129,13 +129,11 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                     tr("Hex can't listen until the speech model has downloaded").to_string(),
                     p.muted(),
                 ),
-                (None, Some(error)) => (
-                    tr_fill("No speech model installed: {}", &error),
-                    p.danger(),
-                ),
+                (None, Some(error)) => {
+                    (tr_fill("No speech model installed: {}", &error), p.danger())
+                }
                 (None, None) => (
-                    tr("No speech model installed. Download one or add a model file.")
-                        .to_string(),
+                    tr("No speech model installed. Download one or add a model file.").to_string(),
                     p.danger(),
                 ),
             };

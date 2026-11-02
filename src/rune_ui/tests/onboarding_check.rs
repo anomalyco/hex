@@ -134,7 +134,10 @@ fn onboarding_continue_without_model() {
         texts(&rt)
     );
     assert!(rt.find("transcription-download").is_some(), "Download");
-    assert!(rt.find("transcription-add-file").is_some(), "Add model file…");
+    assert!(
+        rt.find("transcription-add-file").is_some(),
+        "Add model file…"
+    );
     assert!(
         texts(&rt).contains(&"Hex can't dictate until a speech model is installed".to_owned()),
         "the status says so too"
