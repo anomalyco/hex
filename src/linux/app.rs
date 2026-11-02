@@ -140,6 +140,10 @@ struct LinuxDesktopHost {
     /// Hosts the personal transformations workspace while a mode uses one.
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
+    /// When `settings.json` was last seen changed, so an edit made outside
+    /// the window (by hand or by an agent) is adopted instead of being
+    /// overwritten by the next save (#970).
+    settings_modified: Option<std::time::SystemTime>,
     keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher,
     /// The XKB connection, only while keyboard model switching is on.
     input_sources: Option<crate::keyboard_input_sources::Watcher>,
@@ -552,6 +556,7 @@ impl LinuxDesktopHost {
             output,
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
+            settings_modified: settings_modified(),
             keyboard_switcher,
             input_sources: None,
             input_sources_polled_at: Instant::now(),
@@ -579,6 +584,28 @@ impl LinuxDesktopHost {
             tracing::warn!(%error, "could not apply the history retention");
         }
         self.refresh_personal_commands();
+    }
+
+    /// Adopts `settings.json` when something other than Hex changed it, so
+    /// its modes reach the listener and the window's next save keeps the
+    /// edit. Hex's own saves read back equal and change nothing.
+    fn reload_changed_settings(&mut self) {
+        if cfg!(test) || self.shortcut_edit.is_some() {
+            return;
+        }
+        let modified = settings_modified();
+        if modified == self.settings_modified {
+            return;
+        }
+        self.settings_modified = modified;
+        match AppSettings::load() {
+            Ok(settings) if settings != self.settings => {
+                tracing::info!("settings.json changed outside Hex; applying it");
+                self.adopt_settings(settings);
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(error = format!("{error:#}"), "could not reload settings"),
+        }
     }
 
     fn refresh_personal_commands(&mut self) {
@@ -737,6 +764,7 @@ impl LinuxDesktopHost {
         if self.personal_commands_checked_at.elapsed() >= Duration::from_secs(2) {
             self.personal_commands_checked_at = Instant::now();
             self.refresh_personal_commands();
+            self.reload_changed_settings();
         }
         let mut start_listener = false;
         if let Some(preparation) = self
@@ -756,10 +784,13 @@ impl LinuxDesktopHost {
                         let selection = prepared.selection.clone();
                         match save_with(|settings| settings.remember_transcription(selection)) {
                             Ok(candidate) => {
+                                // Read from disk, so it may carry an outside
+                                // edit the modes must pick up too.
                                 self.settings = candidate;
                                 self.settings_valid = true;
                                 self.transcription_error = None;
                                 self.settings_error = None;
+                                self.apply_output_settings();
                                 // A running listener swaps the model in place.
                                 if let Some(listener) = &self.listener {
                                     listener.update(ListenerUpdate::Transcriber {
@@ -1152,6 +1183,13 @@ fn capture_shortcut(settings: &AppSettings) -> Option<&crate::app_settings::Hotk
     }
     let _ = settings;
     None
+}
+
+fn settings_modified() -> Option<std::time::SystemTime> {
+    let path = crate::app_settings::path().ok()?;
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
 }
 
 fn save_with(change: impl FnOnce(&mut AppSettings)) -> Result<AppSettings> {

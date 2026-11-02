@@ -57,7 +57,11 @@ Launch -> read settings.json
 
 Loading repaired settings does not itself rewrite the file. A later settings
 save (including a migration save) takes the backup before replacing it.
-Backups are never automatically removed. Unchosen `meetings.retention` is
+Backups are never automatically removed. On Linux, the running Hex checks
+`settings.json` every two seconds and adopts an edit made outside the window
+(by hand or by an agent), so its modes reach the listener and the next save
+keeps it (#970); macOS and Windows still read it only at launch or through
+`hex settings set`. Unchosen `meetings.retention` is
 written as an absent key, so older builds with a non-optional retention still
 read the file; existing `null` values also load in the current build.
 
@@ -407,6 +411,7 @@ ordinary dictation -> corrections -> optional rewrite -> transformations -> past
                                       v                  v
                              rewrite fails       chain fails
                              -> corrected text   -> chain's input // discard partial results
+                             // the log says why: rewrite off for the mode, or the failure reason
 
 later request -> expected output                       // recovery still needs observation
 ```
