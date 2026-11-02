@@ -399,8 +399,8 @@ pub struct Encoder {
     coded: Id,
     /// The small RGBX copy for candidate frames, and its image.
     small: Option<(Id, Image, Id)>,
-    /// Imported screen buffers, by their fd.
-    imported: HashMap<i64, Id>,
+    /// Imported screen buffers, by their fd, with the size each was imported at.
+    imported: HashMap<i64, (Id, (u32, u32))>,
     width: u32,
     height: u32,
     pixel: PixelFormat,
@@ -673,12 +673,35 @@ impl Encoder {
         Ok((surface, image, context))
     }
 
-    /// The surface for a screen buffer, imported on first sight.
-    fn import(&mut self, frame: &Frame) -> Result<Id> {
-        if let Some(&surface) = self.imported.get(&frame.fd) {
-            return Ok(surface);
+    /// The surface for a screen buffer and the size it covers, imported on first sight.
+    ///
+    /// Some drivers (Intel's iHD) pad a linear surface's height to a multiple of four rows
+    /// and refuse a buffer that ends before the padding, which a window or a fractionally
+    /// scaled screen of odd size does (1915×1043). Then the buffer is imported again at an
+    /// even width and a height rounded down to four rows, losing at most three edge rows.
+    fn import(&mut self, frame: &Frame) -> Result<(Id, (u32, u32))> {
+        if let Some(&imported) = self.imported.get(&frame.fd) {
+            return Ok(imported);
         }
         let (width, height) = self.source;
+        let imported = match self.import_at(frame, (width, height)) {
+            Ok(surface) => (surface, (width, height)),
+            Err(error) => {
+                let aligned = (width & !1, height & !3);
+                if aligned == (width, height) || aligned.0 == 0 || aligned.1 == 0 {
+                    return Err(error);
+                }
+                let surface = self
+                    .import_at(frame, aligned)
+                    .map_err(|_| error.context(format!("also at {}x{}", aligned.0, aligned.1)))?;
+                (surface, aligned)
+            }
+        };
+        self.imported.insert(frame.fd, imported);
+        Ok(imported)
+    }
+
+    fn import_at(&self, frame: &Frame, (width, height): (u32, u32)) -> Result<Id> {
         let mut descriptor: PrimeDescriptor = unsafe { std::mem::zeroed() };
         descriptor.fourcc = match self.pixel {
             PixelFormat::Bgrx => u32::from_le_bytes(*b"BGRX"),
@@ -730,7 +753,6 @@ impl Encoder {
             },
             "import the screen buffer",
         )?;
-        self.imported.insert(frame.fd, surface);
         Ok(surface)
     }
 
@@ -841,11 +863,11 @@ impl Encoder {
 
     /// Imports `frame` and scales it into the frame to encode.
     pub fn load(&mut self, frame: &Frame) -> Result<()> {
-        let source = self.import(frame)?;
+        let (source, size) = self.import(frame)?;
         let output = (self.width, self.height);
         self.process(
             self.vpp,
-            (source, self.source),
+            (source, size),
             (self.input, output),
             (COLOR_SRGB, COLOR_BT709),
         )?;
@@ -1043,7 +1065,7 @@ impl Drop for Encoder {
     fn drop(&mut self) {
         let (va, display) = (self.va, self.display);
         unsafe {
-            for (_, mut surface) in self.imported.drain() {
+            for (_, (mut surface, _)) in self.imported.drain() {
                 (va.vaDestroySurfaces)(display, &mut surface, 1);
             }
             if let Some((mut surface, image, context)) = self.small.take() {

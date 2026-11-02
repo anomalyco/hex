@@ -566,7 +566,7 @@ fn load(encoding: &mut Encoding, frame: &Frame, format: &VideoFormat) -> Result<
         } => {
             let row = format.width as usize * 4;
             pixels.resize(row * format.height as usize, 0);
-            let rows = match (frame.rows(), hardware.as_deref()) {
+            let rows = match (frame.rows(row, format.height as usize), hardware.as_deref()) {
                 (Ok(rows), _) => rows,
                 (Err(error), None) => return Err(error),
                 (Err(error), Some(why)) => {

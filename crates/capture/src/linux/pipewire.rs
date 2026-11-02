@@ -546,15 +546,33 @@ pub struct Frame {
     pub stride: u32,
     /// The whole buffer object's size, for importing it.
     pub size: u32,
+    /// Bytes the CPU may read from the first pixel on.
+    readable: usize,
     /// Where the CPU reads its first row, or why it can't (a DMA-BUF that won't map).
     rows: std::result::Result<*const u8, String>,
 }
 
 impl Frame {
-    /// Rows in memory, `stride` apart, starting at the frame's first pixel.
-    pub fn rows(&self) -> Result<*const u8> {
-        self.rows.clone().map_err(|why| anyhow!("{why}"))
+    /// Rows in memory, `stride` apart, starting at the frame's first pixel, checked to hold
+    /// `height` rows of `row` bytes.
+    pub fn rows(&self, row: usize, height: usize) -> Result<*const u8> {
+        let rows = self.rows.clone().map_err(|why| anyhow!("{why}"))?;
+        let needed = (self.stride as usize)
+            .checked_mul(height.saturating_sub(1))
+            .and_then(|n| n.checked_add(row));
+        if height > 0 && needed.is_none_or(|needed| needed > self.readable) {
+            bail!("the screen buffer is smaller than its frame");
+        }
+        Ok(rows)
     }
+}
+
+/// A DMA-BUF's size as the kernel knows it: seeking to its end reports it.
+fn dmabuf_size(fd: i64) -> Option<u32> {
+    let fd = fd as c_int;
+    let end = unsafe { libc::lseek(fd, 0, libc::SEEK_END) };
+    unsafe { libc::lseek(fd, 0, libc::SEEK_SET) };
+    u32::try_from(end).ok().filter(|&size| size > 0)
 }
 
 pub struct Stream {
@@ -716,30 +734,47 @@ impl Stream {
             .ok()
             .filter(|&s| s > 0)
             .unwrap_or(format.width * 4);
+        let dmabuf = data.kind == DATA_DMA_BUF;
+        // Some producers report a DMA-BUF's `maxsize` larger than the buffer object (Hyprland
+        // on a hybrid laptop), which both the import and a CPU mapping refuse. The object's
+        // own size, from the kernel, is the truth.
+        let reported = data.maxsize.saturating_add(data.mapoffset);
+        let object = if dmabuf {
+            dmabuf_size(data.fd).unwrap_or(reported)
+        } else {
+            reported
+        };
         // The GPU encoder imports a DMA-BUF without reading it, so one the CPU can't map
         // still records there; only the CPU path needs `rows`.
-        let base = if data.data.is_null() {
-            self.map(data)
+        let (base, mapped) = if data.data.is_null() {
+            (
+                self.map(data, object),
+                object.saturating_sub(data.mapoffset),
+            )
         } else {
-            Ok(data.data.cast::<u8>().cast_const())
+            (Ok(data.data.cast::<u8>().cast_const()), data.maxsize)
         };
         Some(Frame {
             fd: data.fd,
-            dmabuf: data.kind == DATA_DMA_BUF,
+            dmabuf,
             offset: chunk.offset,
             stride,
-            size: data.maxsize + data.mapoffset,
+            size: object,
+            readable: mapped.saturating_sub(chunk.offset) as usize,
             rows: base.map(|base| unsafe { base.add(chunk.offset as usize) }),
         })
     }
 
     /// A CPU view of a buffer PipeWire didn't map (a DMA-BUF), kept until it's removed.
-    fn map(&self, data: &SpaData) -> std::result::Result<*const u8, String> {
+    fn map(&self, data: &SpaData, object: u32) -> std::result::Result<*const u8, String> {
         let mut maps = self.listener.maps.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(&(address, _)) = maps.get(&data.fd) {
             return Ok((address + data.mapoffset as usize) as *const u8);
         }
-        let length = (data.maxsize + data.mapoffset) as usize;
+        let length = object as usize;
+        if length <= data.mapoffset as usize {
+            return Err("the screen's GPU buffer is empty".into());
+        }
         let address = unsafe {
             libc::mmap(
                 ptr::null_mut(),
@@ -817,6 +852,22 @@ pub fn available() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rows_must_fit_the_buffer() {
+        let pixels = [0_u8; 64];
+        let frame = Frame {
+            fd: -1,
+            dmabuf: true,
+            offset: 0,
+            stride: 16,
+            size: 64,
+            readable: 64,
+            rows: Ok(pixels.as_ptr()),
+        };
+        assert!(frame.rows(12, 4).is_ok());
+        assert!(frame.rows(12, 5).is_err());
+    }
 
     #[test]
     fn offered_formats_parse_back() {
