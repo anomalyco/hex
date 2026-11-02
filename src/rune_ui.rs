@@ -605,6 +605,8 @@ enum Menu {
     InputSourceLanguage(usize),
     /// How long History keeps dictations.
     HistoryRetention,
+    /// The installed models History's Transcribe again offers.
+    HistoryAgain,
     /// The OpenCode thinking variant.
     Variant,
     /// The selected meeting's overflow menu.

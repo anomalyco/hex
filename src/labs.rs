@@ -19,7 +19,7 @@
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use clap::Subcommand;
 use color_eyre::Result;
@@ -95,10 +95,11 @@ pub enum Feature {
     ModelInPlace,
     PickerDownloaded,
     SectionKeyAlone,
+    KeepRecordings,
 }
 
 impl Feature {
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -135,6 +136,7 @@ impl Feature {
         Self::ModelInPlace,
         Self::PickerDownloaded,
         Self::SectionKeyAlone,
+        Self::KeepRecordings,
     ];
 
     /// The features this OS and build have.
@@ -193,7 +195,8 @@ impl Feature {
             | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::PickerDownloaded
-            | Self::SectionKeyAlone => Audience::Everyone,
+            | Self::SectionKeyAlone
+            | Self::KeepRecordings => Audience::Everyone,
         }
     }
 
@@ -255,6 +258,7 @@ impl Feature {
             | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::PickerDownloaded
+            | Self::KeepRecordings
             | Self::FillerWords => true,
         }
     }
@@ -298,6 +302,7 @@ impl Feature {
             Self::ModelInPlace => "model-in-place",
             Self::PickerDownloaded => "picker-downloaded",
             Self::SectionKeyAlone => "section-key",
+            Self::KeepRecordings => "keep-recordings",
         }
     }
 
@@ -340,6 +345,7 @@ impl Feature {
             Self::ModelInPlace => "labs.model_in_place",
             Self::PickerDownloaded => "labs.picker_downloaded",
             Self::SectionKeyAlone => "labs.section_key_alone",
+            Self::KeepRecordings => "labs.keep_recordings",
         }
     }
 
@@ -436,6 +442,9 @@ impl Feature {
             Self::SectionKeyAlone => {
                 "Use the § key, left of 1 on ISO keyboards, alone as a shortcut; Hex takes § from every app while it's bound"
             }
+            Self::KeepRecordings => {
+                "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
+            }
         }
     }
 
@@ -482,6 +491,7 @@ impl Feature {
             Self::ModelInPlace => settings.labs.model_in_place,
             Self::PickerDownloaded => settings.labs.picker_downloaded,
             Self::SectionKeyAlone => settings.labs.section_key_alone,
+            Self::KeepRecordings => settings.labs.keep_recordings,
         }
     }
 
@@ -526,6 +536,7 @@ impl Feature {
             &mut labs.model_in_place,
             &mut labs.picker_downloaded,
             &mut labs.section_key_alone,
+            &mut labs.keep_recordings,
         ]
     }
 
@@ -570,6 +581,7 @@ impl Feature {
             Self::PickerActiveFirst => settings.labs.picker_active_first = on,
             Self::ModelInPlace => settings.labs.model_in_place = on,
             Self::PickerDownloaded => settings.labs.picker_downloaded = on,
+            Self::KeepRecordings => settings.labs.keep_recordings = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -584,39 +596,40 @@ impl Feature {
 }
 
 /// Set once this process knows its settings.
-const KNOWN: u32 = 1;
-const LIVE_TEXT: u32 = 1 << 1;
-const LIVE_CHAPTERS: u32 = 1 << 2;
-const PLAYGROUND: u32 = 1 << 3;
-const VOCABULARY_BIASING: u32 = 1 << 4;
-const MOUSE_SHORTCUTS: u32 = 1 << 5;
-const UNLOAD_IDLE: u32 = 1 << 6;
-const KEEP_ON_CLIPBOARD: u32 = 1 << 7;
-const COPY_ONLY: u32 = 1 << 8;
-const SPOKEN_FORMATTING: u32 = 1 << 9;
-const FILLER_WORDS: u32 = 1 << 10;
-const SUBTITLE_EXPORT: u32 = 1 << 11;
-const SMART_SPACING: u32 = 1 << 12;
-const SPOKEN_SYMBOLS: u32 = 1 << 13;
-const SIDED_CHORDS: u32 = 1 << 14;
-const TAP_OR_HOLD: u32 = 1 << 15;
-const SKIP_PAUSES: u32 = 1 << 16;
-const PARAKEET_ULTRA: u32 = 1 << 17;
-const HISTORY_STATS: u32 = 1 << 18;
-const RECENT_DICTATIONS: u32 = 1 << 19;
-const STOP_WHEN_CALL_ENDS: u32 = 1 << 20;
+const KNOWN: u64 = 1;
+const LIVE_TEXT: u64 = 1 << 1;
+const LIVE_CHAPTERS: u64 = 1 << 2;
+const PLAYGROUND: u64 = 1 << 3;
+const VOCABULARY_BIASING: u64 = 1 << 4;
+const MOUSE_SHORTCUTS: u64 = 1 << 5;
+const UNLOAD_IDLE: u64 = 1 << 6;
+const KEEP_ON_CLIPBOARD: u64 = 1 << 7;
+const COPY_ONLY: u64 = 1 << 8;
+const SPOKEN_FORMATTING: u64 = 1 << 9;
+const FILLER_WORDS: u64 = 1 << 10;
+const SUBTITLE_EXPORT: u64 = 1 << 11;
+const SMART_SPACING: u64 = 1 << 12;
+const SPOKEN_SYMBOLS: u64 = 1 << 13;
+const SIDED_CHORDS: u64 = 1 << 14;
+const TAP_OR_HOLD: u64 = 1 << 15;
+const SKIP_PAUSES: u64 = 1 << 16;
+const PARAKEET_ULTRA: u64 = 1 << 17;
+const HISTORY_STATS: u64 = 1 << 18;
+const RECENT_DICTATIONS: u64 = 1 << 19;
+const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
+const KEEP_RECORDINGS: u64 = 1 << 21;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u32 = 21;
+const MINUTES_SHIFT: u64 = 32;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
-static STATE: AtomicU32 = AtomicU32::new(0);
+static STATE: AtomicU64 = AtomicU64::new(0);
 
-fn on(bit: u32) -> bool {
+fn on(bit: u64) -> bool {
     state() & bit != 0
 }
 
-fn state() -> u32 {
+fn state() -> u64 {
     match STATE.load(Ordering::Acquire) {
         0 => {
             let saved = encode(&AppSettings::saved_labs());
@@ -746,12 +759,19 @@ pub fn stop_when_call_ends() -> bool {
     on(STOP_WHEN_CALL_ENDS) && Feature::StopWhenCallEnds.on_this_os()
 }
 
+/// A dictation saved to History keeps its 16 kHz audio, and History offers
+/// Transcribe again for it (read as each capture is handed to the engine,
+/// again as History records it, and when the History pane draws).
+pub fn keep_recordings() -> bool {
+    on(KEEP_RECORDINGS)
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
     let state = state();
     (state & UNLOAD_IDLE != 0)
-        .then(|| std::time::Duration::from_secs(u64::from(state >> MINUTES_SHIFT) * 60))
+        .then(|| std::time::Duration::from_secs((state >> MINUTES_SHIFT) * 60))
 }
 
 /// Records the switches the loaded or saved settings hold.
@@ -759,7 +779,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
 }
 
-fn encode(settings: &LabsSettings) -> u32 {
+fn encode(settings: &LabsSettings) -> u64 {
     let policy = crate::policy::Policy::current();
     encode_where(settings, |feature| {
         feature.shipped() && policy.labs_lock(feature).is_none()
@@ -768,8 +788,8 @@ fn encode(settings: &LabsSettings) -> u32 {
 
 /// The switches `settings` hold for the features `reaches` admits; the
 /// rest read off while their saved setting stays as it is.
-fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u32 {
-    let minutes = settings.unload_idle_minutes.clamp(1, 24 * 60) << MINUTES_SHIFT;
+fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u64 {
+    let minutes = u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60)) << MINUTES_SHIFT;
     [
         (Feature::LiveText, settings.live_text, LIVE_TEXT),
         (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
@@ -830,6 +850,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::StopWhenCallEnds,
             settings.stop_when_call_ends,
             STOP_WHEN_CALL_ENDS,
+        ),
+        (
+            Feature::KeepRecordings,
+            settings.keep_recordings,
+            KEEP_RECORDINGS,
         ),
     ]
     .into_iter()
@@ -1228,6 +1253,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & STOP_WHEN_CALL_ENDS, 0);
         assert_eq!(state & RECENT_DICTATIONS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn keep_recordings_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & KEEP_RECORDINGS, 0);
+        labs.keep_recordings = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & KEEP_RECORDINGS, 0);
+        assert_eq!(state & STOP_WHEN_CALL_ENDS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

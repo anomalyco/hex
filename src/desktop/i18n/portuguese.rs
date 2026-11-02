@@ -15,6 +15,22 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Keep recordings", "Manter gravações"),
+    ("Keep the audio of dictations saved to History, so you can transcribe them again with another model", "Mantém o áudio dos ditados salvos no Histórico, para transcrevê-los de novo com outro modelo"),
+    ("Saved recording", "Gravação salva"),
+    ("Transcribe again", "Transcrever de novo"),
+    ("Transcribing with {}…", "Transcrevendo com {}…"),
+    ("Transcribed again with {}", "Transcrito de novo com {}"),
+    ("No speech was found.", "Nenhuma fala foi encontrada."),
+    ("Replace", "Substituir"),
+    ("Could not transcribe again: {}", "Não foi possível transcrever de novo: {}"),
+    ("Transcription stopped.", "A transcrição parou."),
+    ("The recording is gone.", "A gravação não existe mais."),
+    ("The recording could not be read.", "Não foi possível ler a gravação."),
+    ("The recording is too long.", "A gravação é longa demais."),
+    ("Another transcription is running.", "Outra transcrição está em andamento."),
+    ("Transcribing took too long.", "A transcrição demorou demais."),
+    ("Transcription was cancelled.", "A transcrição foi cancelada."),
     ("Section key alone", "Tecla § sozinha"),
     ("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound", "Usa a tecla §, à esquerda do 1 em teclados ISO, como atalho sem modificador. Enquanto estiver atribuída, o Hex toma a tecla § de todos os apps"),
     ("Downloaded models only", "Só modelos baixados"),

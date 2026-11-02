@@ -379,6 +379,11 @@ const KEYS: &[Key] = &[
         "Labs: a shortcut may be the § key, left of 1 on ISO keyboards, with no modifier (Linux); off puts such a shortcut back to its default",
     ),
     key(
+        "labs.keep_recordings",
+        Kind::Bool,
+        "Labs: dictations saved to History keep their audio, so History can transcribe them again with another model; off stops saving, clearing History deletes it",
+    ),
+    key(
         "labs.history_stats",
         Kind::Bool,
         "Labs: a summary of retained dictations at the top of History, and hex history stats",

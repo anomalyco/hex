@@ -1219,6 +1219,7 @@ fn history_search_without_matches_says_so() {
             audio_ms: 900,
             inference_ms: 80,
             total_ms: 200,
+            recording: None,
         })
         .unwrap();
     let mut rt = runtime("history-empty", true, PANE_SIZE);
@@ -1238,6 +1239,79 @@ fn history_search_without_matches_says_so() {
             .iter()
             .all(|text| text != "No dictations retained yet.")
     );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
+    use crate::history::{
+        History, HistoryDraft, HistoryKind, HistoryRetention, HistoryStore, Recording,
+    };
+    let directory = std::env::temp_dir().join(format!("hex-rune-again-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let history = History::new(HistoryStore::open(
+        directory.join("history.json"),
+        HistoryRetention::Week,
+        crate::history::now_ms(),
+    ));
+    let draft = |recording| HistoryDraft {
+        kind: HistoryKind::Dictation,
+        raw_text: "ship it".into(),
+        final_text: "Ship it.".into(),
+        application: None,
+        processing: None,
+        audio_ms: 900,
+        inference_ms: 80,
+        total_ms: 200,
+        recording,
+    };
+    let plain = history.record(draft(None)).unwrap().unwrap();
+    let id = history
+        .record(draft(Some(Recording::from_samples(vec![0.2; 1_600]))))
+        .unwrap()
+        .unwrap();
+    let mut rt = runtime("history-empty", true, GOLDEN_SIZE);
+    rt.state.history = history::HistoryPane::shared(Some(history.clone()));
+    rt.state.history.reload();
+    rt.state.history.selected = Some(id);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("history-again").is_none(), "off, History is unchanged");
+
+    rt.state.settings.labs.keep_recordings = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("history-again").is_some());
+    rt.state.history.selected = Some(plain);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("history-again").is_none(),
+        "an entry without audio has nothing to transcribe"
+    );
+
+    rt.state.history.selected = Some(id);
+    rt.state.history.again = Some(history::Again::finished(
+        id,
+        "Whisper",
+        Ok("Ship it now.".into()),
+    ));
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(texts(&rt).iter().any(|text| text == "Ship it now."));
+    tap(&mut rt, "again-copy");
+    assert_eq!(rt.copy_request.as_deref(), Some("Ship it now."));
+    tap(&mut rt, "again-replace");
+    settle(&mut rt);
+    assert!(rt.state.history.again.is_none());
+    let entry = history
+        .search("")
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .unwrap();
+    assert_eq!(entry.final_text, "Ship it now.");
+    assert!(entry.has_recording(), "replacing keeps the recording");
     let _ = std::fs::remove_dir_all(&directory);
 }
 

@@ -2,9 +2,11 @@
 //! successful dictation results.
 //!
 //! History is a product record, deliberately separate from the diagnostic
-//! Activity event stream. Entries hold text and bounded metadata only; audio
-//! is never retained here. Every retention choice remains subject to hard
-//! entry and byte caps, writes are atomic, and files are owner-only.
+//! Activity event stream. Entries hold text and bounded metadata; audio is
+//! kept only while Labs › Keep recordings is on ([`recordings`]), as a file
+//! per entry that follows the entry's retention plus its own byte cap. Every
+//! retention choice remains subject to hard entry and byte caps, writes are
+//! atomic, and files are owner-only.
 
 use std::fs;
 use std::io::{self, Write};
@@ -15,7 +17,10 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+pub mod recordings;
 pub mod stats;
+
+pub use recordings::Recording;
 
 const VERSION: u32 = 1;
 const MAX_ENTRIES: usize = 10_000;
@@ -114,9 +119,22 @@ pub struct HistoryEntry {
     pub inference_ms: u64,
     #[serde(default)]
     pub total_ms: u64,
+    /// The size of this entry's kept audio (Labs › Keep recordings); 0
+    /// when it has none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub recording_bytes: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 impl HistoryEntry {
+    /// Whether this entry kept its audio.
+    pub fn has_recording(&self) -> bool {
+        self.recording_bytes > 0
+    }
+
     fn text_bytes(&self) -> usize {
         self.raw_text.len() + self.final_text.len()
     }
@@ -144,6 +162,8 @@ pub struct HistoryDraft {
     pub audio_ms: u64,
     pub inference_ms: u64,
     pub total_ms: u64,
+    /// The dictation's audio, while Labs › Keep recordings is on.
+    pub recording: Option<Recording>,
 }
 
 #[derive(Serialize)]
@@ -188,6 +208,9 @@ pub fn read_snapshot(path: &std::path::Path) -> io::Result<Vec<HistoryEntry>> {
 /// Owner-only bounded history store. Entries are held oldest-first.
 pub struct HistoryStore {
     path: PathBuf,
+    /// Labs › Keep recordings' audio, one file per entry.
+    recordings: PathBuf,
+    recording_cap: u64,
     entries: Vec<HistoryEntry>,
     next_id: u64,
     retention: HistoryRetention,
@@ -210,6 +233,8 @@ impl HistoryStore {
     /// being silently destroyed.
     pub fn open(path: PathBuf, retention: HistoryRetention, now_ms: u64) -> Self {
         let mut store = Self {
+            recordings: recordings::directory(&path),
+            recording_cap: recordings::MAX_RECORDING_BYTES,
             path,
             entries: Vec::new(),
             next_id: 1,
@@ -287,6 +312,12 @@ impl HistoryStore {
         }
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
+        let recording_bytes = draft.recording.as_ref().map_or(0, |recording| {
+            recordings::write(&self.recordings, id, recording).unwrap_or_else(|error| {
+                tracing::warn!(%error, "could not keep the dictation's recording");
+                0
+            })
+        });
         self.entries.push(HistoryEntry {
             id,
             timestamp_ms: now_ms,
@@ -306,6 +337,7 @@ impl HistoryStore {
             audio_ms: draft.audio_ms,
             inference_ms: draft.inference_ms,
             total_ms: draft.total_ms,
+            recording_bytes,
         });
         self.prune(now_ms);
         self.persist()?;
@@ -324,6 +356,33 @@ impl HistoryStore {
             return Err(error);
         }
         Ok(true)
+    }
+
+    /// Replace entry `id`'s text with `text`, such as a transcription of
+    /// its recording with another model; its processing record goes, since
+    /// no processing shaped the new text. Returns whether it existed.
+    pub fn replace_text(&mut self, id: u64, text: &str) -> io::Result<bool> {
+        let Some(index) = self.entries.iter().position(|entry| entry.id == id) else {
+            return Ok(false);
+        };
+        let previous = self.entries[index].clone();
+        let entry = &mut self.entries[index];
+        entry.raw_text = truncated(text, MAX_TEXT_BYTES);
+        entry.final_text = entry.raw_text.clone();
+        entry.processing = None;
+        if let Err(error) = self.persist() {
+            self.entries[index] = previous;
+            return Err(error);
+        }
+        Ok(true)
+    }
+
+    /// Where entry `id`'s recording is, if it kept one.
+    pub fn recording_path(&self, id: u64) -> Option<PathBuf> {
+        self.entries
+            .iter()
+            .find(|entry| entry.id == id && entry.has_recording())
+            .map(|_| recordings::path(&self.recordings, id))
     }
 
     /// Delete every entry. A failed save keeps them, so the clear can be
@@ -442,6 +501,18 @@ impl HistoryStore {
         }
         self.entries.drain(..remove);
         changed |= remove > 0;
+        // Past the recordings' own cap the oldest entries keep their text.
+        let mut recorded: u64 = self.entries.iter().map(|entry| entry.recording_bytes).sum();
+        for entry in &mut self.entries {
+            if recorded <= self.recording_cap {
+                break;
+            }
+            if entry.has_recording() {
+                recorded -= entry.recording_bytes;
+                entry.recording_bytes = 0;
+                changed = true;
+            }
+        }
         self.prune_pending |= changed;
         changed
     }
@@ -467,6 +538,13 @@ impl HistoryStore {
         self.file_state = file_state(&self.path);
         self.prune_pending = false;
         self.prune_error_reported = false;
+        // Whatever left History, or lost its audio, loses its file.
+        let entries = &self.entries;
+        recordings::sweep(&self.recordings, self.next_id, |id| {
+            entries
+                .iter()
+                .any(|entry| entry.id == id && entry.has_recording())
+        });
         Ok(())
     }
 
@@ -536,6 +614,14 @@ impl History {
 
     pub fn clear(&self) -> io::Result<()> {
         self.synced().clear()
+    }
+
+    pub fn replace_text(&self, id: u64, text: &str) -> io::Result<bool> {
+        self.synced().replace_text(id, text)
+    }
+
+    pub fn recording_path(&self, id: u64) -> Option<PathBuf> {
+        self.synced().recording_path(id)
     }
 
     pub fn set_retention(&self, retention: HistoryRetention) -> io::Result<()> {
@@ -623,7 +709,167 @@ mod tests {
             audio_ms: 900,
             inference_ms: 80,
             total_ms: 1_100,
+            recording: None,
         }
+    }
+
+    fn recorded(text: &str) -> HistoryDraft {
+        HistoryDraft {
+            recording: Some(Recording::from_samples(vec![0.25; 1_600])),
+            ..draft(text)
+        }
+    }
+
+    fn recording_ids(path: &std::path::Path) -> Vec<u64> {
+        let mut ids: Vec<u64> = fs::read_dir(recordings::directory(path))
+            .map(|files| {
+                files
+                    .flatten()
+                    .filter_map(|file| {
+                        file.file_name()
+                            .to_str()?
+                            .strip_suffix(".wav")?
+                            .parse()
+                            .ok()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        ids.sort_unstable();
+        ids
+    }
+
+    #[test]
+    fn a_kept_recording_is_an_owner_only_wav_that_reads_back() {
+        let path = temp_path("recording");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
+        let plain = store.record(draft("plain"), 1_000).unwrap().unwrap();
+        let id = store.record(recorded("kept"), 2_000).unwrap().unwrap();
+        assert!(!store.entry(plain).unwrap().has_recording());
+        assert!(store.recording_path(plain).is_none());
+        assert!(store.entry(id).unwrap().has_recording());
+        assert_eq!(recording_ids(&path), [id]);
+
+        let file = store.recording_path(id).unwrap();
+        let clip = crate::transcription::service::AudioClip::decode_wav(std::io::BufReader::new(
+            fs::File::open(&file).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(clip.duration_ms, 100);
+        let reopened = HistoryStore::open(path, HistoryRetention::Week, 3_000);
+        assert!(reopened.entry(id).unwrap().has_recording());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode();
+            assert_eq!(mode(&file) & 0o777, 0o600);
+            assert_eq!(mode(file.parent().unwrap()) & 0o777, 0o700);
+        }
+    }
+
+    #[test]
+    fn recordings_leave_with_their_entries() {
+        let path = temp_path("recording-retention");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 0);
+        let old = store.record(recorded("old"), 1_000).unwrap().unwrap();
+        let deleted = store.record(recorded("deleted"), day_ms).unwrap().unwrap();
+        let kept = store.record(recorded("kept"), day_ms).unwrap().unwrap();
+        assert_eq!(recording_ids(&path), [old, deleted, kept]);
+
+        // Retention takes the first; Delete the second.
+        store.expire(day_ms + 1_001);
+        assert_eq!(recording_ids(&path), [deleted, kept]);
+        store.delete(deleted).unwrap();
+        assert_eq!(recording_ids(&path), [kept]);
+
+        // The entry cap takes the oldest entry's audio with it.
+        store.entries = (0..MAX_ENTRIES + 1)
+            .map(|offset| HistoryEntry {
+                id: kept + offset as u64,
+                ..store.entries[0].clone()
+            })
+            .collect();
+        store.next_id = kept + MAX_ENTRIES as u64 + 1;
+        store.prune(day_ms + 1_002);
+        store.persist().unwrap();
+        assert!(recording_ids(&path).is_empty());
+
+        let path = temp_path("recording-clear");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
+        store.record(recorded("one"), 1_000).unwrap();
+        store.record(recorded("two"), 2_000).unwrap();
+        assert_eq!(recording_ids(&path).len(), 2);
+        store.clear().unwrap();
+        assert!(recording_ids(&path).is_empty(), "Clear all deletes the audio");
+    }
+
+    #[test]
+    fn the_recordings_byte_cap_drops_the_oldest_audio_but_keeps_the_text() {
+        let path = temp_path("recording-cap");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Forever, 0);
+        let first = store.record(recorded("first"), 1_000).unwrap().unwrap();
+        let size = store.entry(first).unwrap().recording_bytes;
+        store.recording_cap = 2 * size;
+        let second = store.record(recorded("second"), 2_000).unwrap().unwrap();
+        let third = store.record(recorded("third"), 3_000).unwrap().unwrap();
+
+        assert_eq!(store.len(), 3, "every entry keeps its text");
+        assert!(!store.entry(first).unwrap().has_recording());
+        assert!(store.entry(second).unwrap().has_recording());
+        assert!(store.entry(third).unwrap().has_recording());
+        assert_eq!(recording_ids(&path), [second, third]);
+    }
+
+    #[test]
+    fn a_recording_another_process_has_not_saved_yet_survives_a_sweep() {
+        let path = temp_path("recording-race");
+        let mut window = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
+        let mut listener = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
+        let early = listener.record(recorded("early"), 1_000).unwrap().unwrap();
+        window.sync();
+        // The listener's next recording is on disk before its entry is.
+        recordings::write(
+            &recordings::directory(&path),
+            early + 1,
+            &Recording::from_samples(vec![0.1; 160]),
+        )
+        .unwrap();
+        window.delete(early).unwrap();
+        assert_eq!(recording_ids(&path), [early + 1]);
+    }
+
+    #[test]
+    fn replacing_the_text_keeps_the_entry_and_its_recording() {
+        let path = temp_path("replace");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
+        let id = store.record(recorded("befor"), 1_000).unwrap().unwrap();
+        assert!(store.replace_text(id, "before").unwrap());
+        assert!(!store.replace_text(id + 1, "nothing").unwrap());
+
+        let reopened = HistoryStore::open(path.clone(), HistoryRetention::Week, 2_000);
+        let entry = reopened.entry(id).unwrap();
+        assert_eq!(entry.final_text, "before");
+        assert_eq!(entry.raw_text, "before");
+        assert!(entry.processing.is_none());
+        assert!(entry.has_recording());
+        assert_eq!(recording_ids(&path), [id]);
+    }
+
+    #[test]
+    fn retranscribing_a_missing_recording_says_so() {
+        let path = temp_path("retranscribe-missing");
+        let missing = recordings::path(&recordings::directory(&path), 7);
+        let error =
+            recordings::retranscribe(&missing, crate::transcription::models::TranscriptionSelection::default())
+                .unwrap_err();
+        assert_eq!(error, "The recording is gone.");
+        fs::create_dir_all(missing.parent().unwrap()).unwrap();
+        fs::write(&missing, b"not a wav").unwrap();
+        let error =
+            recordings::retranscribe(&missing, crate::transcription::models::TranscriptionSelection::default())
+                .unwrap_err();
+        assert_eq!(error, "The recording could not be read.");
     }
 
     #[test]
