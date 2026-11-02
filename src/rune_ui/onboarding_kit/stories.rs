@@ -41,6 +41,9 @@ pub(crate) fn is_live_window() -> bool {
 const DOWNLOAD_SECS: f64 = 9.0;
 const FIRST_RUN_SECS: f64 = 23.0;
 const SLOW_SECS: f64 = 31.0;
+/// Long enough that `"Almost ready"` waits and a sketch plays before the
+/// model lands.
+const SKETCH_DOWNLOAD_SECS: f64 = 66.0;
 const DOWNLOAD_HOLD: f64 = 2.8;
 const PERMISSIONS_WAIT: f64 = 0.6;
 const CLOSE_SECS: f64 = 0.65;
@@ -790,6 +793,11 @@ fn first_run() -> Story<Onboard> {
     .variant("Whole run, scripted game", |s| {
         s.rehearsal = Some(Rehearsal::new(true));
         s.autoplay = true;
+    })
+    .variant("Whole run, slow download, a sketch", |s| {
+        s.rehearsal = Some(Rehearsal::new(true));
+        s.autoplay = true;
+        s.download_secs = SKETCH_DOWNLOAD_SECS;
     })
     .variant("Your turn, keeps tapping", |s| {
         s.rehearsal = Some(Rehearsal::new(true));
@@ -1593,6 +1601,40 @@ mod tests {
             triumphs, 2,
             "`With Hex`'s payoff and the game's first score card"
         );
+    }
+
+    #[test]
+    fn the_slow_download_story_plays_a_sketch_then_the_game() {
+        let mut s = Onboard::new(Flow::FirstRun);
+        s.speech = Speech::AfterDownload;
+        s.rehearsal = Some(Rehearsal::new(true));
+        s.autoplay = true;
+        s.download_secs = SKETCH_DOWNLOAD_SECS;
+        s.manual_override = true;
+        s.auto_due_at = begin_first_run(&mut s, 0.0);
+        let mut tx = Tx::default();
+        let mut now = 0.0;
+        let (mut waiting, mut sketch, mut done, mut tried) = (None, None, None, None);
+        while now < 200.0 && s.step != Step::Ready {
+            poll(&mut s, now, &mut tx);
+            if s.step == Step::Waiting {
+                waiting.get_or_insert(now);
+            }
+            if super::super::sketches::playing(&s) {
+                sketch.get_or_insert(now);
+            }
+            if s.download.is_some_and(|d| d.done()) {
+                done.get_or_insert(now);
+            }
+            if s.step == Step::Try {
+                tried.get_or_insert(now);
+            }
+            now += 1.0 / 60.0;
+        }
+        assert!(waiting.is_some(), "Almost ready waits for the model");
+        let (sketch, done, tried) = (sketch.unwrap(), done.unwrap(), tried.unwrap());
+        assert!(sketch < done && done < tried, "the model lands mid-sketch");
+        assert_eq!(s.step, Step::Ready);
     }
 
     #[test]

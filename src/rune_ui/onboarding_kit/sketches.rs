@@ -48,6 +48,9 @@ const PACE_WINDOW: f64 = 8.0;
 /// How long the pace has to be measured over before a time left shows.
 const PACE_MIN: f64 = 3.0;
 const BAR_W: f32 = 220.0;
+/// How long an autoplaying story looks at `"Almost ready"` before it
+/// presses `"Watch another one"`.
+const AUTOPLAY_WATCH: f64 = 2.5;
 
 #[derive(Default)]
 pub(crate) struct Sketches {
@@ -58,6 +61,8 @@ pub(crate) struct Sketches {
     sent_seen: usize,
     /// The download's bytes over the last few seconds, for its time left.
     samples: VecDeque<(f64, u64)>,
+    /// When `"Almost ready"` showed.
+    waiting_since: Option<f64>,
 }
 
 struct Playing {
@@ -130,6 +135,12 @@ pub(super) fn advance(s: &mut Onboard, now: f64, tx: &mut Tx) {
                 .is_some_and(|&(at, _)| now - at > PACE_WINDOW)
         {
             samples.pop_front();
+        }
+    }
+    if s.step == Step::Waiting {
+        let since = *s.sketches.waiting_since.get_or_insert(now);
+        if s.autoplay && s.sketches.played == 0 && now - since >= AUTOPLAY_WATCH {
+            watch(s);
         }
     }
     let Some(playing) = s.sketches.playing.as_ref() else {
