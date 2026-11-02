@@ -483,6 +483,7 @@ impl Feature {
             &mut labs.recent_dictations,
             &mut labs.skip_pauses,
             &mut labs.stop_when_call_ends,
+            &mut labs.output_fixes,
         ]
     }
 
