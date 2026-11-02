@@ -673,7 +673,7 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
         .child(section_label(p, "label", tr("Saved recording")))
         .child(menu);
     match again.and_then(|again| again.result.as_ref().map(|result| (again, result))) {
-        Some((again, Ok(text))) => {
+        Some((again, Ok(found))) => {
             section = section
                 .child(section_label(
                     p,
@@ -681,17 +681,17 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
                     &tr_fill("Transcribed again with {}", &again.model),
                 ))
                 .child(
-                    text(if text.is_empty() {
+                    text(if found.is_empty() {
                         tr("No speech was found.").to_string()
                     } else {
-                        text.clone()
+                        found.clone()
                     })
                     .key("again-text")
                     .font(p.k.ty.body)
                     .color(p.text())
                     .wrap(),
                 );
-            if !text.is_empty() {
+            if !found.is_empty() {
                 section = section.child(
                     row()
                         .key("again-actions")
