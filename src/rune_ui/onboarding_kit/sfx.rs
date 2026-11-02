@@ -177,13 +177,15 @@ impl SfxTrack {
         }
     }
 
-    /// The Launch Room was opened before its row had finished dinging.
-    pub(crate) fn on_opened(&mut self) {
+    /// The Launch Room opening at `now`, by a click or by itself: the
+    /// click's tap, and no more dings if its row hadn't finished.
+    pub(crate) fn on_opened(&mut self, now: f64) {
         let incoming = Tone::Onboarding(OnboardingTone::Incoming);
         let fired = self.fired.min(self.cues.len());
         let mut kept = self.cues.split_off(fired);
         kept.retain(|&(_, tone, _)| tone != incoming);
         self.cues.extend(kept);
+        self.push(now, Tone::Onboarding(OnboardingTone::ShortcutDown));
     }
 
     /// `"Without Hex"` from `from`: every keystroke, harder as panic builds

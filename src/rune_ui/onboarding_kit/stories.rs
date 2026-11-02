@@ -511,7 +511,7 @@ impl Onboard {
         // clock starts once it lands.
         let from = self.now + typing::INTRO;
         self.typing_from = Some(from);
-        self.sfx.on_opened();
+        self.sfx.on_opened(self.now);
         self.sfx.on_without_hex(from, &self.scene);
         self.auto_due_at = Some(from + self.scene.duration());
     }
