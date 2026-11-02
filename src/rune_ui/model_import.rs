@@ -60,6 +60,22 @@ pub(super) fn add_button(ui: &Ui, p: Paint) -> El {
     )
 }
 
+/// Settings' "Add model file…" while no model is installed: the file
+/// becomes the selected model ([`use_file`]).
+pub(super) fn use_file_button(ui: &Ui, p: Paint) -> El {
+    button(
+        p,
+        "transcription-add-file",
+        if ui.picker.import.busy() {
+            tr("Adding model…")
+        } else {
+            tr("Add model file…")
+        },
+        ButtonKind::Secondary,
+        |ui: &mut Ui, _| use_file(ui),
+    )
+}
+
 /// "Use a model file…": chooses a GGUF file, imports it, and makes it the
 /// selected model, for when the model can't be downloaded (#894). Errors land
 /// in `ui.picker.import.error`.

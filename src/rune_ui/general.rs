@@ -162,17 +162,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                             });
                         },
                     ))
-                    .child(button(
-                        p,
-                        "transcription-add-file",
-                        if ui.picker.import.busy() {
-                            tr("Adding model…")
-                        } else {
-                            tr("Add model file…")
-                        },
-                        ButtonKind::Secondary,
-                        |ui: &mut Ui, _| super::model_import::use_file(ui),
-                    )),
+                    .child(super::model_import::use_file_button(ui, p)),
             };
             (Some(description), controls.child(picker_button))
         }
