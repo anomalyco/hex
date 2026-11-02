@@ -311,6 +311,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Copy recent dictations"),
                 tr("Copy one of your last five dictations from the menu bar, under Paste Last Dictation"),
             ));
+            // macOS's status item hides itself while nothing records.
+            rows.push(row(
+                Feature::HideMenuBarIcon,
+                &HINTS,
+                tr("Hide menu bar icon"),
+                tr("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings"),
+            ));
         }
     }
     // Linux's X11 grabs and shortcuts portal take these keys alone.
@@ -490,6 +497,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::PickerDownloaded => "lab-picker-downloaded",
         Feature::SectionKeyAlone => "lab-section-key",
         Feature::KeepRecordings => "lab-keep-recordings",
+        Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
     }
 }
 

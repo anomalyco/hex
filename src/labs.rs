@@ -96,10 +96,11 @@ pub enum Feature {
     PickerDownloaded,
     SectionKeyAlone,
     KeepRecordings,
+    HideMenuBarIcon,
 }
 
 impl Feature {
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 38] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -137,6 +138,7 @@ impl Feature {
         Self::PickerDownloaded,
         Self::SectionKeyAlone,
         Self::KeepRecordings,
+        Self::HideMenuBarIcon,
     ];
 
     /// The features this OS and build have.
@@ -196,7 +198,8 @@ impl Feature {
             | Self::ModelInPlace
             | Self::PickerDownloaded
             | Self::SectionKeyAlone
-            | Self::KeepRecordings => Audience::Everyone,
+            | Self::KeepRecordings
+            | Self::HideMenuBarIcon => Audience::Everyone,
         }
     }
 
@@ -241,7 +244,8 @@ impl Feature {
             | Self::SmartSpacing
             | Self::SidedChords
             | Self::TapOrHold
-            | Self::RecentDictations => cfg!(target_os = "macos"),
+            | Self::RecentDictations
+            | Self::HideMenuBarIcon => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -303,6 +307,7 @@ impl Feature {
             Self::PickerDownloaded => "picker-downloaded",
             Self::SectionKeyAlone => "section-key",
             Self::KeepRecordings => "keep-recordings",
+            Self::HideMenuBarIcon => "hide-menu-bar-icon",
         }
     }
 
@@ -346,6 +351,7 @@ impl Feature {
             Self::PickerDownloaded => "labs.picker_downloaded",
             Self::SectionKeyAlone => "labs.section_key_alone",
             Self::KeepRecordings => "labs.keep_recordings",
+            Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
         }
     }
 
@@ -445,6 +451,9 @@ impl Feature {
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
             }
+            Self::HideMenuBarIcon => {
+                "Hide Hex's menu bar icon; shortcuts keep working, and opening Hex again shows Settings"
+            }
         }
     }
 
@@ -492,6 +501,7 @@ impl Feature {
             Self::PickerDownloaded => settings.labs.picker_downloaded,
             Self::SectionKeyAlone => settings.labs.section_key_alone,
             Self::KeepRecordings => settings.labs.keep_recordings,
+            Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
         }
     }
 
@@ -537,6 +547,7 @@ impl Feature {
             &mut labs.picker_downloaded,
             &mut labs.section_key_alone,
             &mut labs.keep_recordings,
+            &mut labs.hide_menu_bar_icon,
         ]
     }
 
@@ -582,6 +593,7 @@ impl Feature {
             Self::ModelInPlace => settings.labs.model_in_place = on,
             Self::PickerDownloaded => settings.labs.picker_downloaded = on,
             Self::KeepRecordings => settings.labs.keep_recordings = on,
+            Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -618,6 +630,7 @@ const HISTORY_STATS: u64 = 1 << 18;
 const RECENT_DICTATIONS: u64 = 1 << 19;
 const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
+const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -766,6 +779,13 @@ pub fn keep_recordings() -> bool {
     on(KEEP_RECORDINGS)
 }
 
+/// The menu-bar icon is hidden while nothing records (macOS; read each
+/// time the status item refreshes, about twice a second).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn hide_menu_bar_icon() -> bool {
+    on(HIDE_MENU_BAR_ICON) && Feature::HideMenuBarIcon.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -855,6 +875,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::KeepRecordings,
             settings.keep_recordings,
             KEEP_RECORDINGS,
+        ),
+        (
+            Feature::HideMenuBarIcon,
+            settings.hide_menu_bar_icon,
+            HIDE_MENU_BAR_ICON,
         ),
     ]
     .into_iter()
@@ -1265,6 +1290,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & KEEP_RECORDINGS, 0);
         assert_eq!(state & STOP_WHEN_CALL_ENDS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn hide_menu_bar_icon_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & HIDE_MENU_BAR_ICON, 0);
+        labs.hide_menu_bar_icon = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & HIDE_MENU_BAR_ICON, 0);
+        assert_eq!(state & KEEP_RECORDINGS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

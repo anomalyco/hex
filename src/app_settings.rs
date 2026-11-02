@@ -348,11 +348,7 @@ impl Default for ExperimentalSettings {
     }
 }
 
-/// The `labs` switches (`crate::labs`), every one off by default (`history_stats`: issue 790, `recent_dictations`: issue 877, macOS,
-/// `skip_pauses`: whole-clip runs skip long pauses, Linux and Windows, issue 899).
-/// Labs features that already had a home keep it: `meetings.enabled`, `paste_with_shift`,
-/// `experimental.hex_microphone`, `keyboard_model_switching.enabled`, `pause_browser_media`,
-/// and `share_dictation_shortcut`. An older `labs.enabled` master switch is read and ignored.
+/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and `labs.enabled` is ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
@@ -366,9 +362,8 @@ pub struct LabsSettings {
     pub vocabulary_biasing: bool,
     /// Mouse buttons may be recorded as shortcuts (macOS, issue 209).
     pub mouse_shortcuts: bool,
-    /// The engine unloads the speech model after `unload_idle_minutes` unused (issue 442).
+    /// The engine unloads the speech model after `unload_idle_minutes` (5, 15 default, 30, 60) unused (issue 442).
     pub unload_idle: bool,
-    /// 5, 15 (the default), 30, or 60.
     pub unload_idle_minutes: u32,
     /// Paste last dictation's row offers its default shortcut back (issue 613).
     pub restore_shortcut_default: bool,
@@ -417,6 +412,7 @@ pub struct LabsSettings {
     pub section_key_alone: bool,
     /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
     pub keep_recordings: bool,
+    pub hide_menu_bar_icon: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -457,6 +453,7 @@ impl Default for LabsSettings {
             picker_downloaded: false,
             section_key_alone: false,
             keep_recordings: false,
+            hide_menu_bar_icon: false,
         }
     }
 }

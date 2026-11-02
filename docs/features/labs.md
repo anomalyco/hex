@@ -57,6 +57,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
+├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -755,6 +756,26 @@ of the clip is made. Checks: `a_kept_recording_is_an_owner_only_wav_that_reads_b
 `keep_recordings_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real dictation kept and
 transcribed again with another model in a window, on any OS.
+
+Hide menu bar icon (`hide-menu-bar-icon`, issue 1064, macOS): for people
+who only use the shortcut and want the menu-bar space back. The status item
+stays installed and is only hidden (`NSStatusItem` `setVisible`), so
+dictation, the shortcuts, and the listener are unchanged. The gate,
+`labs::hide_menu_bar_icon()`, is read when the item is installed and on each
+menu-bar refresh (`status_item::update_meeting`, about twice a second), so
+turning it on or off applies at once. A meeting starting, recording, or
+transcribing brings the icon back, so a recording stays visible and
+stoppable from the menu bar, and it hides again once the meeting ends; an
+Annotate capture keeps its own capsule and doesn't bring it back. With the
+Dock icon off too, a launch stays quiet, and opening Hex again from Finder
+or Spotlight (the reopen Apple event) opens Settings, which has Quit Hex.
+Off, the icon is exactly as before. Checks:
+`a_hidden_icon_comes_back_while_a_meeting_is_under_way` in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs) (macOS
+only); `hide_menu_bar_icon_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: the icon hiding on a real
+Mac, or macOS restoring an item's remembered visibility; the row renders
+only in macOS builds, so no golden changes.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

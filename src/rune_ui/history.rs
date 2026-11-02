@@ -250,7 +250,12 @@ fn installed_models(ui: &Ui) -> Vec<(TranscriptionModelId, &'static str)> {
 /// Starts transcribing entry `id`'s recording again with `model`.
 fn transcribe_again(ui: &mut Ui, id: u64, model: TranscriptionModelId, name: &str) {
     ui.open = None;
-    if ui.history.again.as_ref().is_some_and(|again| again.worker.is_some()) {
+    if ui
+        .history
+        .again
+        .as_ref()
+        .is_some_and(|again| again.worker.is_some())
+    {
         return;
     }
     let Some(path) = ui
@@ -699,7 +704,11 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
                         .child(button(
                             p,
                             "again-copy",
-                            if again.copied { tr("Copied") } else { tr("Copy") },
+                            if again.copied {
+                                tr("Copied")
+                            } else {
+                                tr("Copy")
+                            },
                             ButtonKind::Secondary,
                             move |ui: &mut Ui, tx: &mut Tx| {
                                 if let Some(again) =

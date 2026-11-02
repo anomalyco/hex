@@ -15,6 +15,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Hide menu bar icon", "Ocultar ícone da barra de menus"),
+    ("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings", "Oculta o ícone do Hex na barra de menus. Os atalhos continuam funcionando; abra o Hex de novo pelo Finder ou Spotlight para ver os Ajustes"),
     ("Keep recordings", "Manter gravações"),
     ("Keep the audio of dictations saved to History, so you can transcribe them again with another model", "Mantém o áudio dos ditados salvos no Histórico, para transcrevê-los de novo com outro modelo"),
     ("Saved recording", "Gravação salva"),

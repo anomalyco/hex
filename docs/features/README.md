@@ -1160,6 +1160,8 @@ Cancellation / interruption / failure    // recovery
 
 Menu bar and Settings                    // maintenance
 ├── Icon -> 18 pt monochrome Hex mark template (recording variant + elapsed time)
+│   └── Labs > Hide menu bar icon (off, #1064) -> hidden unless a meeting is under
+│       way; shortcuts keep working; Finder or Spotlight reopen -> Settings (labs.md)
 ├── Settings / Paste Last -> Reachable with Dock icon hidden
 ├── Launch at Login -> macOS owns registration state
 ├── Check for Updates -> The updater (maintain.updates)
