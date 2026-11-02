@@ -134,6 +134,7 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / browser call uses the microp
      ├── Always record -> starts recording, no offer   // meetings.auto-record
      │   └── recording capsule says "Started automatically" for 10 s; with the
      │       indicator off, a "Recording automatically" capsule with Stop
+     │       and ✕ (✕ only hides it; the recording goes on, in the menu bar)
      └── Ask -> Capsule below the menu bar, focus-free  // meetings.offer
          ├── Title: "Google Meet call detected", "Call on meet.jit.si",
          │   "Call in Brave Browser" (site unknown), or the meeting's name
@@ -505,7 +506,7 @@ The capsules are Rune overlays in [meeting_capsules.rs](../../src/rune_ui/meetin
 interactive, non-activating `NSPanel`s at status level on every Space,
 fed by the controller events the menu-bar pump receives
 ([macos_rune.rs](../../src/macos_rune.rs)). The offer (20 s), "left the
-call", ready (15 s, Copy / Reveal, notes refresh) and a recording capsule
+call", ready (15 s, Copy / Reveal / ✕, notes refresh) and a recording capsule
 (title, elapsed time, Copy new, Copy all, Open, Stop, in the configured
 corner, compact until hovered, dragged between corners) are ported. Copy new
 and Copy all are checked by
@@ -523,7 +524,11 @@ recording; Stop transcribed) and the ready capsule (Copy copied the
 Markdown). Before that day's fix the recording capsule never appeared: it
 closed and reopened in one overlay batch, and the hide ran last. The offer,
 "left the call", "…" choices, and automatic-recording capsules remain unseen
-on screen.
+on screen. The ready and automatic-recording capsules' ✕ (#996) is checked by
+`dismissing_a_ready_transcript_only_closes_it` and
+`dismissing_an_automatic_recording_never_stops_it`, and drawn by
+`panel_goldens` (`meeting-capsule-ready-*`, `-auto-started-*`); it has not
+been clicked on a real Mac.
 
 ### Transcribe
 
@@ -798,7 +803,7 @@ Final publication                                   // meetings.output
     ├── Never overwrites; adds " (2)"
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
-Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal
+Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
 Meetings pane -> Copy icon on a completed row's hover, the card's Copy transcript icon, Reveal Markdown (or Reveal Files when none)
 Menu bar (idle) -> Copy Last Meeting Transcript
 Option-Control-V -> `MeetingPasteCursor` in `meeting/delta.rs` over the transcript
