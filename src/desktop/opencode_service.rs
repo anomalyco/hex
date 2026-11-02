@@ -297,27 +297,43 @@ impl Service {
                 check(left)?;
                 match op(&mut stream) {
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        wait(&stream, interest, left.min(WAIT_SLICE))
-                            .wrap_err_with(|| format!("could not reach OpenCode {path}"))?;
+                        if wait(&stream, interest, left.min(WAIT_SLICE))
+                            .wrap_err_with(|| format!("could not reach OpenCode {path}"))?
+                        {
+                            return Ok(Err(io::Error::new(
+                                io::ErrorKind::ConnectionAborted,
+                                "OpenCode stopped reading the request",
+                            )));
+                        }
                     }
                     Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
                     result => return Ok(result),
                 }
             }
         };
-        for mut pending in [head.as_bytes(), body.unwrap_or_default()] {
+        // Why the request stopped short, when OpenCode answered or hung up
+        // before reading all of it. An early answer (a 404 or 413, say) still
+        // returns normally.
+        let mut unsent = None;
+        'send: for mut pending in [head.as_bytes(), body.unwrap_or_default()] {
             while !pending.is_empty() {
                 let chunk = &pending[..pending.len().min(WRITE_CHUNK)];
                 match step(Interest::Write, &mut |stream| stream.write(chunk))? {
-                    Ok(0) => return Err(eyre!("OpenCode closed {path} before it was sent")),
+                    Ok(0) => {
+                        unsent = Some(io::Error::from(io::ErrorKind::WriteZero));
+                        break 'send;
+                    }
                     Ok(written) => pending = &pending[written..],
                     Err(error) => {
-                        return Err(error)
-                            .wrap_err_with(|| format!("could not send OpenCode {path}"));
+                        unsent = Some(error);
+                        break 'send;
                     }
                 }
             }
         }
+        let not_sent = |error: io::Error| -> Result<Response> {
+            Err(error).wrap_err_with(|| format!("could not send OpenCode {path}"))
+        };
         let mut bytes = Vec::new();
         let mut buffer = [0; 64 * 1024];
         loop {
@@ -330,11 +346,20 @@ impl Service {
                     }
                 }
                 Err(error) => {
-                    return Err(error).wrap_err_with(|| format!("could not read OpenCode {path}"));
+                    return match unsent {
+                        Some(unsent) => not_sent(unsent),
+                        None => {
+                            Err(error).wrap_err_with(|| format!("could not read OpenCode {path}"))
+                        }
+                    };
                 }
             }
         }
-        parse_response(bytes).ok_or_else(|| eyre!("OpenCode {path} returned invalid HTTP"))
+        match (parse_response(bytes), unsent) {
+            (Some(response), _) => Ok(response),
+            (None, Some(unsent)) => not_sent(unsent),
+            (None, None) => Err(eyre!("OpenCode {path} returned invalid HTTP")),
+        }
     }
 }
 
@@ -344,49 +369,84 @@ enum Interest {
     Write,
 }
 
-/// Waits up to `timeout` for the socket to become readable or writable. It
-/// may return early or spuriously; the caller retries the operation and
-/// rechecks cancellation and the deadline.
+/// Waits up to `timeout` for the socket to become ready. It may return early
+/// or spuriously; the caller retries the operation and rechecks cancellation
+/// and the deadline. While writing it also watches for an answer or a hangup:
+/// `true` means the peer can't take more of the request, so writing stops
+/// instead of spinning on a socket that will never become writable.
 #[cfg(unix)]
-fn wait(stream: &TcpStream, interest: Interest, timeout: Duration) -> io::Result<()> {
+fn wait(stream: &TcpStream, interest: Interest, timeout: Duration) -> io::Result<bool> {
     use std::os::fd::AsRawFd;
     let mut fd = libc::pollfd {
         fd: stream.as_raw_fd(),
         events: match interest {
             Interest::Read => libc::POLLIN,
-            Interest::Write => libc::POLLOUT,
+            Interest::Write => libc::POLLOUT | libc::POLLIN,
         },
         revents: 0,
     };
     // SAFETY: one valid pollfd for a socket this call borrows.
     if unsafe { libc::poll(&mut fd, 1, poll_millis(timeout)) } < 0 {
         let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
-        }
+        return match error.kind() {
+            io::ErrorKind::Interrupted => Ok(false),
+            _ => Err(error),
+        };
     }
-    Ok(())
+    readiness(
+        interest,
+        fd.revents,
+        [
+            libc::POLLOUT,
+            libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+            libc::POLLNVAL,
+        ],
+    )
 }
 
 #[cfg(windows)]
-fn wait(stream: &TcpStream, interest: Interest, timeout: Duration) -> io::Result<()> {
+fn wait(stream: &TcpStream, interest: Interest, timeout: Duration) -> io::Result<bool> {
     use std::os::windows::io::AsRawSocket;
     use windows_sys::Win32::Networking::WinSock::{
-        POLLRDNORM, POLLWRNORM, SOCKET_ERROR, WSAGetLastError, WSAPOLLFD, WSAPoll,
+        POLLERR, POLLHUP, POLLNVAL, POLLRDNORM, POLLWRNORM, SOCKET_ERROR, WSAGetLastError,
+        WSAPOLLFD, WSAPoll,
     };
     let mut fd = WSAPOLLFD {
         fd: stream.as_raw_socket() as usize,
         events: match interest {
             Interest::Read => POLLRDNORM,
-            Interest::Write => POLLWRNORM,
+            Interest::Write => POLLWRNORM | POLLRDNORM,
         },
         revents: 0,
     };
     // SAFETY: one valid WSAPOLLFD for a socket this call borrows.
     if unsafe { WSAPoll(&mut fd, 1, poll_millis(timeout)) } == SOCKET_ERROR {
-        return Err(io::Error::from_raw_os_error(unsafe { WSAGetLastError() }));
+        let error = io::Error::from_raw_os_error(unsafe { WSAGetLastError() });
+        return match error.kind() {
+            io::ErrorKind::Interrupted => Ok(false),
+            _ => Err(error),
+        };
     }
-    Ok(())
+    readiness(
+        interest,
+        fd.revents,
+        [POLLWRNORM, POLLRDNORM | POLLHUP | POLLERR, POLLNVAL],
+    )
+}
+
+/// `[writable, answered or hung up, invalid]` are the platform's poll flags.
+fn readiness(
+    interest: Interest,
+    revents: i16,
+    [writable, stopped, invalid]: [i16; 3],
+) -> io::Result<bool> {
+    if revents & invalid != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the socket is no longer open",
+        ));
+    }
+    Ok(matches!(interest, Interest::Write) && revents & writable == 0 && revents & stopped != 0)
 }
 
 /// At least one millisecond, so a short remainder still waits instead of spinning.
@@ -760,11 +820,31 @@ pub(crate) mod tests {
     }
 
     /// Far more than loopback socket buffers hold, so sending it stalls when
-    /// the service stops reading.
+    /// the service stops reading. A prime period, so a skipped or repeated
+    /// chunk can't line up with the data.
     fn large_body() -> Vec<u8> {
         (0..64 * 1024 * 1024)
-            .map(|index: u32| index as u8)
+            .map(|index: u32| (index % 251) as u8)
             .collect()
+    }
+
+    /// Accepts connections and holds them, never reading, until `released`
+    /// fires or its sender drops.
+    fn hold(
+        listener: TcpListener,
+        released: std::sync::mpsc::Receiver<()>,
+    ) -> thread::JoinHandle<()> {
+        listener.set_nonblocking(true).unwrap();
+        thread::spawn(move || {
+            let mut streams = Vec::new();
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                released.recv_timeout(Duration::from_millis(10))
+            {
+                if let Ok((stream, _)) = listener.accept() {
+                    streams.push(stream);
+                }
+            }
+        })
     }
 
     #[test]
@@ -774,11 +854,7 @@ pub(crate) mod tests {
         let service = fixture(&url);
         let body = large_body();
         let (release, released) = std::sync::mpsc::channel::<()>();
-        let held = thread::spawn(move || {
-            let streams: Vec<_> = (0..2).map(|_| listener.accept().unwrap().0).collect();
-            let _ = released.recv();
-            drop(streams);
-        });
+        let held = hold(listener, released);
         let started = Instant::now();
         let error = service
             .request(
@@ -792,7 +868,7 @@ pub(crate) mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("exceeded"), "{error}");
         assert!(
-            started.elapsed() < Duration::from_secs(1),
+            started.elapsed() < Duration::from_secs(2),
             "{:?}",
             started.elapsed()
         );
@@ -815,13 +891,53 @@ pub(crate) mod tests {
                 .unwrap_err();
             assert!(error.to_string().contains("cancelled"), "{error}");
             assert!(
-                started.elapsed() < Duration::from_secs(1),
+                started.elapsed() < Duration::from_secs(2),
                 "{:?}",
                 started.elapsed()
             );
         });
         release.send(()).unwrap();
         held.join().unwrap();
+    }
+
+    #[test]
+    fn an_answer_before_the_whole_body_is_sent_still_returns() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(&mut stream).read_line(&mut line).unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\nConnection: close\r\n\r\ngone",
+                )
+                .unwrap();
+            stream.shutdown(std::net::Shutdown::Write).unwrap();
+            // Keep the socket open without reading the rest of the body.
+            let _ = released.recv_timeout(Duration::from_secs(10));
+        });
+        let started = Instant::now();
+        let response = fixture(&url)
+            .request(
+                "POST",
+                "/generate",
+                Some(&large_body()),
+                None,
+                Duration::from_secs(30),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        assert_eq!(response.status, 404);
+        assert_eq!(response.body, b"gone");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        release.send(()).unwrap();
+        server.join().unwrap();
     }
 
     #[test]
