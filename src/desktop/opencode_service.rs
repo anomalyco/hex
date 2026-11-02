@@ -336,6 +336,10 @@ impl Service {
         };
         let mut bytes = Vec::new();
         let mut buffer = [0; 64 * 1024];
+        // A service that answers early and closes with the body unread resets
+        // the connection after its answer, so the answer can end in an error
+        // instead of a clean close.
+        let mut closed = true;
         loop {
             match step(Interest::Read, &mut |stream| stream.read(&mut buffer))? {
                 Ok(0) => break,
@@ -345,17 +349,16 @@ impl Service {
                         return Err(eyre!("OpenCode {path} answered more than 16 MiB"));
                     }
                 }
+                Err(_) if unsent.is_some() => {
+                    closed = false;
+                    break;
+                }
                 Err(error) => {
-                    return match unsent {
-                        Some(unsent) => not_sent(unsent),
-                        None => {
-                            Err(error).wrap_err_with(|| format!("could not read OpenCode {path}"))
-                        }
-                    };
+                    return Err(error).wrap_err_with(|| format!("could not read OpenCode {path}"));
                 }
             }
         }
-        match (parse_response(bytes), unsent) {
+        match (parse_response(bytes, closed), unsent) {
             (Some(response), _) => Ok(response),
             (None, Some(unsent)) => not_sent(unsent),
             (None, None) => Err(eyre!("OpenCode {path} returned invalid HTTP")),
@@ -479,7 +482,10 @@ fn workspace(directory: &Path) -> Result<String> {
         .to_owned())
 }
 
-fn parse_response(bytes: Vec<u8>) -> Option<Response> {
+/// `closed` says the service closed cleanly, so a body without a length or
+/// chunked framing ends there; otherwise such a body may be cut short and is
+/// refused.
+fn parse_response(bytes: Vec<u8>, closed: bool) -> Option<Response> {
     let split = bytes.windows(4).position(|window| window == b"\r\n\r\n")?;
     let head = std::str::from_utf8(&bytes[..split]).ok()?;
     let mut lines = head.split("\r\n");
@@ -500,8 +506,10 @@ fn parse_response(bytes: Vec<u8>) -> Option<Response> {
         dechunk(body)?
     } else if let Some(length) = length {
         body.get(..length)?.to_vec()
-    } else {
+    } else if closed {
         body.to_vec()
+    } else {
+        return None;
     };
     Some(Response { status, body })
 }
@@ -902,6 +910,16 @@ pub(crate) mod tests {
 
     #[test]
     fn an_answer_before_the_whole_body_is_sent_still_returns() {
+        answered_early(true);
+        // Closing with the body unread resets the connection. Windows drops
+        // data already received when a reset arrives, so this case is Linux's.
+        #[cfg(target_os = "linux")]
+        answered_early(false);
+    }
+
+    /// The service answers 404 after the request line, then either half-closes
+    /// and keeps the socket open, or closes it with the body unread.
+    fn answered_early(half_close: bool) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
         let (release, released) = std::sync::mpsc::channel::<()>();
@@ -914,9 +932,10 @@ pub(crate) mod tests {
                     b"HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\nConnection: close\r\n\r\ngone",
                 )
                 .unwrap();
-            stream.shutdown(std::net::Shutdown::Write).unwrap();
-            // Keep the socket open without reading the rest of the body.
-            let _ = released.recv_timeout(Duration::from_secs(10));
+            if half_close {
+                stream.shutdown(std::net::Shutdown::Write).unwrap();
+                let _ = released.recv_timeout(Duration::from_secs(10));
+            }
         });
         let started = Instant::now();
         let response = fixture(&url)
@@ -936,7 +955,7 @@ pub(crate) mod tests {
             "{:?}",
             started.elapsed()
         );
-        release.send(()).unwrap();
+        let _ = release.send(());
         server.join().unwrap();
     }
 
