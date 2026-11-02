@@ -32,6 +32,8 @@ struct FullKeyboardSnapshotStage: View {
         case "inserted": "Running 10 min late, should be home by 7:30. Start without me."
         case "numbers": "Running 10 min late, home by 7:3"
         case "shift": "Running 10 min late. "
+        case "typing": "Running 10 min teh"
+        case "accents": "Caf"
         default: "Running 10 min late, "
         }
     }
@@ -58,6 +60,7 @@ struct FullKeyboardSnapshotStage: View {
                 .padding(.bottom, 10)
             FullKeyboardFixture(state: state, draft: draft, darkKeyboard: darkApp || darkField)
                 .frame(height: KeyboardLayout.height(for: .portrait))
+                .padding(.top, 12)
                 .background(Color(uiColor: backdrop).ignoresSafeArea(edges: .bottom))
         }
         .background(canvas.ignoresSafeArea())
@@ -121,11 +124,14 @@ private struct FullKeyboardFixture: UIViewRepresentable {
         view.orientationOverride = .portrait
         view.drawsBackdrop = true
         view.prepareForField()
+        view.warmUpTextCheckerAsync()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             switch state {
             case "pressed":
                 view.debugPress("g")
+            case "accents":
+                view.debugHoldAccent("e", selectIndex: 2)
             case "numbers":
                 view.engine.touchBegan(id: 900, at: center(of: .layerSwitch(.numbers), in: view))
                 view.engine.touchEnded(id: 900, at: center(of: .layerSwitch(.numbers), in: view))
@@ -163,18 +169,44 @@ private func center(of kind: KeyKind, in view: FullKeyboardView) -> CGPoint {
 @MainActor
 final class FixtureTextTarget: KeyboardTextTarget {
     private(set) var text: String
+    private(set) var cursorIndex: Int
     let keyboardAppearance: UIKeyboardAppearance?
     var autocapitalizationType: UITextAutocapitalizationType? = .sentences
+    var autocorrectionType: UITextAutocorrectionType? = .default
     var keyboardType: UIKeyboardType? = .default
     var returnKeyType: UIReturnKeyType? = .default
+    var enablesReturnKeyAutomatically: Bool? = false
 
     init(text: String = "", appearance: UIKeyboardAppearance? = nil) {
         self.text = text
+        self.cursorIndex = text.count
         keyboardAppearance = appearance
     }
 
-    var documentContextBeforeInput: String? { text }
+    var documentContextBeforeInput: String? {
+        let clamped = max(0, min(text.count, cursorIndex))
+        let idx = text.index(text.startIndex, offsetBy: clamped)
+        return String(text[..<idx])
+    }
+
     var hasText: Bool { !text.isEmpty }
-    func insertText(_ inserted: String) { text += inserted }
-    func deleteBackward() { if !text.isEmpty { text.removeLast() } }
+
+    func insertText(_ inserted: String) {
+        let clamped = max(0, min(text.count, cursorIndex))
+        let idx = text.index(text.startIndex, offsetBy: clamped)
+        text.insert(contentsOf: inserted, at: idx)
+        cursorIndex = clamped + inserted.count
+    }
+
+    func deleteBackward() {
+        let clamped = max(0, min(text.count, cursorIndex))
+        guard clamped > 0 else { return }
+        let removeIdx = text.index(text.startIndex, offsetBy: clamped - 1)
+        text.remove(at: removeIdx)
+        cursorIndex = clamped - 1
+    }
+
+    func adjustTextPosition(byCharacterOffset offset: Int) {
+        cursorIndex = max(0, min(text.count, cursorIndex + offset))
+    }
 }
