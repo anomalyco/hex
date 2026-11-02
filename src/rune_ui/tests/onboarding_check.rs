@@ -15,8 +15,9 @@ pub(super) const SCENES: &[&str] = &[
     // A fresh install: setting up Hex, the recommended model downloading.
     "onboarding",
     "mac-onboarding",
-    // The download stopped.
+    // The download stopped; Continue without a model, then Settings.
     "onboarding-download-failed",
+    "onboarding-no-model",
     // The model step: models on this computer; the recommended one among
     // them; ours picked and downloading; Back to the list from the next page.
     "onboarding-model-found",
@@ -45,36 +46,116 @@ pub(super) const SCENES: &[&str] = &[
     "mac-onboarding-ready",
 ];
 
-/// Skip on every page: it shows on each scene but Hex is ready, ends
-/// onboarding at once, and leaves the model downloading (the recommended
-/// one, also when the model step held it).
+/// The optional pages: the demo and the practice.
+const OPTIONAL: &[&str] = &[
+    "onboarding-model-found-back",
+    "onboarding-demo",
+    "onboarding-try",
+    "mac-onboarding-try",
+    "mac-onboarding-reopen",
+];
+
+/// Skip shows only on the optional pages, the demo and the practice, and
+/// passes over them to the next step setup still needs: permissions, then
+/// the model, else Hex is ready. It never closes onboarding.
 #[test]
 fn onboarding_skip() {
     for scene in SCENES {
         let rt = runtime(scene, true, PANE_SIZE);
-        let last = scene.ends_with("-ready");
-        assert_eq!(rt.find("skip").is_some(), !last, "{scene}: Skip");
-    }
-    for scene in [
-        "onboarding",
-        "onboarding-model-found",
-        "mac-onboarding-permissions",
-        "onboarding-try",
-    ] {
-        let mut rt = runtime(scene, true, PANE_SIZE);
-        tap(&mut rt, "skip");
-        assert!(rt.state.first_run.is_none(), "{scene}: onboarding closed");
-        assert!(rt.state.tour.is_none(), "{scene}: and its tour");
-        let installed = rt.state.picker.selected_installed(&rt.state.settings);
-        assert!(
-            installed
-                || sent(&rt)
-                    .iter()
-                    .any(|request| matches!(request, Request::ChooseModel { .. })),
-            "{scene}: the model keeps downloading, sent {:?}",
-            sent(&rt)
+        assert_eq!(
+            rt.find("skip").is_some(),
+            OPTIONAL.contains(scene),
+            "{scene}: Skip"
         );
     }
+    let page = |rt: &Runtime<Ui>| super::super::onboarding_kit::live::page(&rt.state);
+    let skip = |rt: &mut Runtime<Ui>, scene: &str, next: Page| {
+        tap(rt, "skip");
+        settle(rt);
+        assert_eq!(page(rt), Some(next), "{scene}: Skip lands here");
+        assert!(rt.state.tour.is_some(), "{scene}: onboarding stays open");
+        assert_eq!(
+            rt.find("skip").is_some(),
+            next == Page::Try,
+            "{scene}: no Skip on {next:?}"
+        );
+    };
+
+    // macOS, permissions still to grant: the demo skips to them.
+    let mut rt = runtime("mac-onboarding", true, PANE_SIZE);
+    rt.update(|ui, _| super::super::onboarding_kit::live::fixture_resume(ui, Page::Demo));
+    settle(&mut rt);
+    assert_eq!(page(&rt), Some(Page::Demo));
+    skip(&mut rt, "mac demo", Page::Permissions);
+
+    // Nothing to grant, the model still downloading: on to Almost ready.
+    let mut rt = runtime("onboarding-demo", true, PANE_SIZE);
+    skip(&mut rt, "onboarding-demo", Page::Waiting);
+
+    // Nothing left to set up: the demo and the practice skip to Hex is ready.
+    let mut rt = runtime("onboarding-demo", true, PANE_SIZE);
+    rt.update(|ui, tx| {
+        ui.picker.installed = Some(vec![ui.settings.transcription.model]);
+        if let Some(view) = &mut ui.view {
+            view.transcription.preparing = None;
+        }
+        super::super::onboarding_kit::live::poll(ui, tx);
+    });
+    skip(&mut rt, "onboarding-demo, model ready", Page::Ready);
+    for scene in ["onboarding-try", "mac-onboarding-try"] {
+        let mut rt = runtime(scene, true, PANE_SIZE);
+        skip(&mut rt, scene, Page::Ready);
+    }
+}
+
+/// Continue without a model (#894): only on the download step, only once
+/// the download failed or stalled. It finishes onboarding, and Settings ›
+/// General then says no model is installed, with Download and Add model
+/// file….
+#[test]
+fn onboarding_continue_without_model() {
+    for scene in SCENES {
+        let rt = runtime(scene, true, PANE_SIZE);
+        assert_eq!(
+            rt.find("continue-without-model").is_some(),
+            *scene == "onboarding-download-failed",
+            "{scene}: Continue without a model"
+        );
+    }
+
+    let mut rt = runtime("onboarding-download-failed", true, PANE_SIZE);
+    tap(&mut rt, "continue-without-model");
+    settle(&mut rt);
+    assert!(rt.state.first_run.is_none(), "onboarding closed");
+    assert!(rt.state.tour.is_none(), "and its tour");
+    assert!(
+        texts(&rt).contains(&"No speech model installed: The connection was reset.".to_owned()),
+        "{:?}",
+        texts(&rt)
+    );
+    assert!(rt.find("transcription-download").is_some(), "Download");
+    assert!(
+        rt.find("transcription-add-file").is_some(),
+        "Add model file…"
+    );
+    assert!(
+        texts(&rt).contains(&"Hex can't dictate until a speech model is installed".to_owned()),
+        "the status says so too"
+    );
+
+    // A download that gains nothing for a while offers it too.
+    let mut rt = runtime("onboarding-waiting", true, PANE_SIZE);
+    assert!(rt.find("continue-without-model").is_none());
+    rt.update(|ui, tx| {
+        if let Some(s) = ui.first_run.as_mut() {
+            s.now += 31.0;
+        }
+        super::super::onboarding_kit::live::poll(ui, tx);
+    });
+    settle(&mut rt);
+    assert!(rt.find("continue-without-model").is_some(), "stalled");
+    tap(&mut rt, "continue-without-model");
+    assert!(rt.state.first_run.is_none(), "onboarding closed");
 }
 
 #[test]

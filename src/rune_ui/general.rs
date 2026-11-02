@@ -118,49 +118,51 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     );
     let (description, control) = match missing_model(ui) {
         // Hex can't listen without the selected model: say so, with the
-        // download's progress, or a Download button when none runs.
+        // download's progress, or Download and Add model file… when none
+        // runs, as after Continue without a model (#894).
         Some(progress) => {
-            let error = ui
-                .view
-                .as_ref()
-                .and_then(|view| view.transcription.error.clone())
-                .filter(|_| progress.downloading.is_none());
-            let description = match error {
-                Some(error) => (error, p.danger()),
-                None => (
+            let description = match (
+                progress.downloading,
+                super::model_import::download_failure(ui),
+            ) {
+                (Some(_), _) => (
                     tr("Hex can't listen until the speech model has downloaded").to_string(),
                     p.muted(),
                 ),
-            };
-            let action = match progress.downloading {
-                Some(fraction) => rune_kit::Progress::new(Some(fraction))
-                    .show_value()
-                    .build(p.k)
-                    .key("transcription-progress")
-                    .w(120.0),
-                None => button(
-                    p,
-                    "transcription-download",
-                    tr("Download"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| {
-                        let selection = ui.settings.transcription.clone();
-                        ui.send(Request::ChooseModel {
-                            model: selection.model,
-                            language: selection.language,
-                        });
-                    },
+                (None, Some(error)) => {
+                    (tr_fill("No speech model installed: {}", &error), p.danger())
+                }
+                (None, None) => (
+                    tr("No speech model installed. Download one or add a model file.").to_string(),
+                    p.danger(),
                 ),
             };
-            (
-                Some(description),
-                row()
-                    .key("transcription-controls")
-                    .gap(8.0)
-                    .center_y()
-                    .child(action)
-                    .child(picker_button),
-            )
+            let controls = row().key("transcription-controls").gap(8.0).center_y();
+            let controls = match progress.downloading {
+                Some(fraction) => controls.child(
+                    rune_kit::Progress::new(Some(fraction))
+                        .show_value()
+                        .build(p.k)
+                        .key("transcription-progress")
+                        .w(120.0),
+                ),
+                None => controls
+                    .child(button(
+                        p,
+                        "transcription-download",
+                        tr("Download"),
+                        ButtonKind::Secondary,
+                        |ui: &mut Ui, _| {
+                            let selection = ui.settings.transcription.clone();
+                            ui.send(Request::ChooseModel {
+                                model: selection.model,
+                                language: selection.language,
+                            });
+                        },
+                    ))
+                    .child(super::model_import::use_file_button(ui, p)),
+            };
+            (Some(description), controls.child(picker_button))
         }
         None => (s::transcription_status(ui, p), picker_button),
     };
@@ -203,7 +205,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 /// The selected speech model's download, while it is not installed, so
 /// Hex can't listen yet. Fixtures that name no installed models say nothing,
 /// so their rows never depend on this machine's models.
-fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::ModelProgress> {
+pub(super) fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::ModelProgress> {
     if !ui.live() && ui.picker.installed.is_none() {
         return None;
     }
