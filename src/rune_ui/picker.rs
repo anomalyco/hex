@@ -95,6 +95,8 @@ pub(super) struct Picker {
     /// Only models that support the saved language (or detect it, for Auto),
     /// while Labs › Sort and filter models is on.
     supported_only: bool,
+    /// Only downloaded models, while Labs › Downloaded models only is on.
+    downloaded_only: bool,
     /// The model whose Delete (an import's Remove) is armed.
     pub(super) deletion: Option<TranscriptionModelId>,
     deletion_error: Option<String>,
@@ -142,6 +144,7 @@ pub(super) fn open(ui: &mut Ui) {
     super::found::scan(ui);
     ui.picker.sort = Sort::default();
     ui.picker.supported_only = false;
+    ui.picker.downloaded_only = false;
     ui.picker.view = View::Compare;
     ui.picker.others_open = false;
     ui.picker.in_use_first = (active_first_on(ui) && ui.picker.selected_installed(&ui.settings))
@@ -158,6 +161,55 @@ pub(super) fn show(ui: &mut Ui, view: View) {
 fn sort_filter_on(ui: &Ui) -> bool {
     let feature = crate::labs::Feature::PickerSortFilter;
     feature.shipped() && feature.on(&ui.settings)
+}
+
+/// Whether Labs › Downloaded models only is on.
+fn downloaded_on(ui: &Ui) -> bool {
+    let feature = crate::labs::Feature::PickerDownloaded;
+    feature.shipped() && feature.on(&ui.settings)
+}
+
+/// Whether the full list shows only downloaded models now.
+pub(super) fn downloaded_filter(ui: &Ui) -> bool {
+    downloaded_on(ui) && ui.picker.downloaded_only
+}
+
+/// Whether `model` is downloaded for the picker, as its row's state reads it.
+fn is_downloaded(ui: &Ui, model: &ModelDefinition, language: &str) -> bool {
+    ui.picker.installed(model, model.language_for(language))
+}
+
+/// The bytes the downloaded `models` take in Hex's own models folder: files
+/// another app downloaded, or added where they are, aren't Hex's.
+fn downloaded_total(
+    models: &[PickerModel],
+    downloaded: impl Fn(&ModelDefinition) -> bool,
+    owned: impl Fn(&ModelDefinition) -> bool,
+) -> u64 {
+    models
+        .iter()
+        .filter(|(model, _)| downloaded(model) && owned(model))
+        .filter_map(|(model, _)| model.download_bytes())
+        .sum()
+}
+
+/// Whether Hex keeps `model`'s file in its own models folder.
+fn owned_by_hex(model: &ModelDefinition) -> bool {
+    if model.id.is_custom() {
+        return !crate::transcription::custom_models::imported()
+            .iter()
+            .any(|import| import.definition.id == model.id && import.in_place);
+    }
+    !transcription_models::is_in_place(model)
+}
+
+/// A size as the picker writes one: `2.4 GB`, `640 MB`.
+fn bytes_label(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 {
+        format!("{:.1} GB", bytes as f64 / 1_000_000_000.0)
+    } else {
+        format!("{} MB", bytes / 1_000_000)
+    }
 }
 
 /// Whether Labs › Model in use first is on.
@@ -284,11 +336,16 @@ fn arranged(language: &str, sort: Sort, supported_only: bool) -> Vec<PickerModel
 /// The cards the picker shows: the catalog's order, or with the Lab on its
 /// sort and language toggle.
 fn shown_models(ui: &Ui, language: &str) -> Vec<PickerModel> {
-    if sort_filter_on(ui) {
+    let mut models = if sort_filter_on(ui) {
         arranged(language, ui.picker.sort, ui.picker.supported_only)
     } else {
         transcription_models::picker_models(language)
+    };
+    // Labs › Downloaded models only.
+    if downloaded_filter(ui) {
+        models.retain(|(model, _)| is_downloaded(ui, model, language));
     }
+    models
 }
 
 /// The model the language toggle hides that still matters: the one being
@@ -483,9 +540,14 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             let mut all = col().key("all");
             if sort_filter_on(ui) {
                 all = all.child(sort_filter_row(ui, p, &language));
-                if let Some(note) = hidden_note(ui, p, &shown, &language) {
-                    all = all.child(note);
-                }
+            }
+            if downloaded_on(ui) {
+                all = all.child(downloaded_row(ui, p, &language));
+            }
+            if (sort_filter_on(ui) || downloaded_on(ui))
+                && let Some(note) = hidden_note(ui, p, &shown, &language)
+            {
+                all = all.child(note);
             }
             all.child(list::body(ui, p, &entries, &language))
         }
@@ -621,6 +683,50 @@ fn sort_filter_row(ui: &Ui, p: Paint, language: &str) -> El {
         .child(toggle)
 }
 
+/// Labs › Downloaded models only's row under the header: what the
+/// downloaded models take on disk and the toggle. It saves nothing.
+fn downloaded_row(ui: &Ui, p: Paint, language: &str) -> El {
+    let total = downloaded_total(
+        &transcription_models::picker_models(language),
+        |model| is_downloaded(ui, model, language),
+        owned_by_hex,
+    );
+    let label = tr("Only downloaded models");
+    let toggle = pressable_row(
+        row()
+            .key("picker-downloaded")
+            .label(label)
+            .gap(8.0)
+            .center_y()
+            .shrink()
+            .child(
+                text(label)
+                    .key("label")
+                    .font(p.k.ty.small)
+                    .color(p.text())
+                    .shrink()
+                    .wrap(),
+            )
+            .child(row_switch(p, ui.picker.downloaded_only)),
+    )
+    .on_press(|ui: &mut Ui| ui.picker.downloaded_only = !ui.picker.downloaded_only);
+    row()
+        .key("picker-downloaded-controls")
+        .px(16.0)
+        .pb(16.0)
+        .gaps(8.0, 12.0)
+        .center_y()
+        .justify_between()
+        .flex_wrap()
+        .child(
+            text(tr_fill("Downloaded models take {}", &bytes_label(total)))
+                .key("downloaded-total")
+                .font(facts::tnum(p.k.ty.small))
+                .color(p.muted()),
+        )
+        .child(toggle)
+}
+
 /// One line outside the results naming the active model or the one being
 /// prepared while the language toggle hides it, with the preparation's
 /// Cancel.
@@ -642,6 +748,15 @@ fn hidden_note(ui: &Ui, p: Paint, shown: &[PickerModel], language: &str) -> Opti
     } else {
         tr("Active").to_owned()
     };
+    let names = [("model", model.name), ("state", state.as_str())];
+    let copy = if downloaded_filter(ui) && !is_downloaded(ui, model, language) {
+        tr_named(
+            "{model} is hidden by the downloaded filter: {state}",
+            &names,
+        )
+    } else {
+        tr_named("{model} is hidden by the language filter: {state}", &names)
+    };
     let mut note = row()
         .key("picker-hidden")
         .px(16.0)
@@ -649,16 +764,13 @@ fn hidden_note(ui: &Ui, p: Paint, shown: &[PickerModel], language: &str) -> Opti
         .gap(8.0)
         .center_y()
         .child(
-            text(tr_named(
-                "{model} is hidden by the language filter: {state}",
-                &[("model", model.name), ("state", state.as_str())],
-            ))
-            .key("label")
-            .font(p.k.ty.small)
-            .color(p.muted())
-            .grow(1.0)
-            .shrink()
-            .wrap(),
+            text(copy)
+                .key("label")
+                .font(p.k.ty.small)
+                .color(p.muted())
+                .grow(1.0)
+                .shrink()
+                .wrap(),
         );
     if is_preparing {
         note = note.child(button(
@@ -903,6 +1015,88 @@ mod tests {
         ui.picker.installed = Some(Vec::new());
         open(&mut ui);
         assert_eq!(pinned(&ui), None);
+    }
+
+    fn ui_with_downloaded(on: bool) -> Ui {
+        let mut settings = AppSettings::default();
+        settings.labs.picker_downloaded = on;
+        let mut ui = Ui::with(settings, super::super::Service::Fixture(Vec::new()));
+        ui.picker.installed = Some(vec![
+            TranscriptionModelId::ParakeetUnifiedEnglish,
+            TranscriptionModelId::WhisperLargeV3Turbo,
+        ]);
+        ui
+    }
+
+    #[test]
+    fn only_downloaded_models_keeps_the_installed_ones() {
+        let mut ui = ui_with_downloaded(true);
+        open(&mut ui);
+        assert!(!ui.picker.downloaded_only, "the switch starts off");
+        let all = shown_models(&ui, "en");
+        ui.picker.downloaded_only = true;
+        let shown = shown_models(&ui, "en");
+        assert_eq!(
+            ids(&shown),
+            ids(&all)
+                .into_iter()
+                .filter(|id| matches!(
+                    id,
+                    TranscriptionModelId::ParakeetUnifiedEnglish
+                        | TranscriptionModelId::WhisperLargeV3Turbo
+                ))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(shown.len(), 2);
+        // A model being downloaded is named while the switch hides it.
+        let cohere = TranscriptionModelId::CohereTranscribe;
+        assert_eq!(
+            hidden_model(&shown, Some(cohere), None),
+            Some((cohere, true))
+        );
+        close(&mut ui);
+        open(&mut ui);
+        assert!(!ui.picker.downloaded_only);
+    }
+
+    #[test]
+    fn the_downloaded_total_adds_up_hexs_own_files() {
+        let models = transcription_models::picker_models("en");
+        let installed = [
+            TranscriptionModelId::ParakeetUnifiedEnglish,
+            TranscriptionModelId::WhisperLargeV3Turbo,
+        ];
+        let expected: u64 = installed
+            .iter()
+            .filter_map(|id| transcription_models::definition(*id).download_bytes())
+            .sum();
+        assert!(expected > 0);
+        let downloaded = |model: &ModelDefinition| installed.contains(&model.id);
+        assert_eq!(downloaded_total(&models, downloaded, |_| true), expected);
+        // A file another app keeps isn't counted.
+        let whisper = transcription_models::definition(TranscriptionModelId::WhisperLargeV3Turbo)
+            .download_bytes()
+            .unwrap();
+        assert_eq!(
+            downloaded_total(&models, downloaded, |model| {
+                model.id != TranscriptionModelId::WhisperLargeV3Turbo
+            }),
+            expected - whisper
+        );
+        assert_eq!(bytes_label(2_400_000_000), "2.4 GB");
+        assert_eq!(bytes_label(640_000_000), "640 MB");
+    }
+
+    #[test]
+    fn without_downloaded_models_only_the_picker_is_unchanged() {
+        let mut ui = ui_with_downloaded(false);
+        open(&mut ui);
+        let all = shown_models(&ui, "en");
+        // Even a stale switch does nothing while the Lab is off.
+        ui.picker.downloaded_only = true;
+        assert!(!downloaded_filter(&ui));
+        assert_eq!(ids(&shown_models(&ui, "en")), ids(&all));
+        assert_eq!(ids(&all), ids(&transcription_models::picker_models("en")));
     }
 
     #[test]

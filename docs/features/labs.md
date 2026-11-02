@@ -54,6 +54,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
+├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -641,6 +642,31 @@ in [transcription/custom_models.rs](../../src/transcription/custom_models.rs);
 [labs.rs](../../src/labs.rs). Not yet observed: a real window or a second
 macOS account; the Labs page goldens need regenerating on Linux with the new
 row.
+
+Downloaded models only (`picker-downloaded`, issue 1018, every OS): for
+seeing which speech models take disk space and deleting unused ones. While
+on, the speech model picker's All speech models view shows one row under its
+header (below Sort and filter models' row when that Lab is on too): "Downloaded
+models take <size>", the sum of the pinned sizes of every downloaded catalog
+model and import whose file is in Hex's own models folder (files another app
+downloaded, and imports added where they are, aren't counted), and a switch,
+"Only downloaded models". The switch keeps only the rows the picker reads as
+downloaded (catalog models, imports, and found catalog models in use) and
+leaves out "On this computer"; each keeps its usual Delete (Forget for a file
+used in place) with its confirmation. It is view state in
+`rune_ui/picker.rs`, reset each time the picker opens; it saves nothing and
+sends no request. When it hides the model being downloaded, a line outside
+the results names it with its progress and Cancel. The gate is the picker
+(`downloaded_on` in `shown_models`, the row, and `list::body`); off, the
+picker is exactly as before. Not built: a button that shows the models folder
+in the file manager, or choosing another folder for models. Checks:
+`only_downloaded_models_keeps_the_installed_ones`,
+`the_downloaded_total_adds_up_hexs_own_files`, and
+`without_downloaded_models_only_the_picker_is_unchanged` in
+[picker.rs](../../src/rune_ui/picker.rs);
+`every_feature_is_off_by_default_and_round_trips` in
+[labs.rs](../../src/labs.rs). Not yet observed: the row in a real window; the
+Labs page goldens need regenerating on Linux with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

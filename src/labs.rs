@@ -93,10 +93,11 @@ pub enum Feature {
     OutputFixes,
     PickerActiveFirst,
     ModelInPlace,
+    PickerDownloaded,
 }
 
 impl Feature {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 35] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -131,6 +132,7 @@ impl Feature {
         Self::OutputFixes,
         Self::PickerActiveFirst,
         Self::ModelInPlace,
+        Self::PickerDownloaded,
     ];
 
     /// The features this OS and build have.
@@ -187,7 +189,8 @@ impl Feature {
             | Self::StopWhenCallEnds
             | Self::OutputFixes
             | Self::PickerActiveFirst
-            | Self::ModelInPlace => Audience::Everyone,
+            | Self::ModelInPlace
+            | Self::PickerDownloaded => Audience::Everyone,
         }
     }
 
@@ -247,6 +250,7 @@ impl Feature {
             | Self::OutputFixes
             | Self::PickerActiveFirst
             | Self::ModelInPlace
+            | Self::PickerDownloaded
             | Self::FillerWords => true,
         }
     }
@@ -288,6 +292,7 @@ impl Feature {
             Self::OutputFixes => "output-fixes",
             Self::PickerActiveFirst => "picker-active-first",
             Self::ModelInPlace => "model-in-place",
+            Self::PickerDownloaded => "picker-downloaded",
         }
     }
 
@@ -328,6 +333,7 @@ impl Feature {
             Self::OutputFixes => "labs.output_fixes",
             Self::PickerActiveFirst => "labs.picker_active_first",
             Self::ModelInPlace => "labs.model_in_place",
+            Self::PickerDownloaded => "labs.picker_downloaded",
         }
     }
 
@@ -418,6 +424,9 @@ impl Feature {
             Self::ModelInPlace => {
                 "Add a speech model file and use it where it is, without copying it, so several accounts can share one file"
             }
+            Self::PickerDownloaded => {
+                "Show only downloaded speech models in the picker, with the space they take"
+            }
         }
     }
 
@@ -462,6 +471,7 @@ impl Feature {
             Self::OutputFixes => settings.labs.output_fixes,
             Self::PickerActiveFirst => settings.labs.picker_active_first,
             Self::ModelInPlace => settings.labs.model_in_place,
+            Self::PickerDownloaded => settings.labs.picker_downloaded,
         }
     }
 
@@ -504,6 +514,7 @@ impl Feature {
             &mut labs.output_fixes,
             &mut labs.picker_active_first,
             &mut labs.model_in_place,
+            &mut labs.picker_downloaded,
         ]
     }
 
@@ -547,6 +558,7 @@ impl Feature {
             Self::OutputFixes => settings.labs.output_fixes = on,
             Self::PickerActiveFirst => settings.labs.picker_active_first = on,
             Self::ModelInPlace => settings.labs.model_in_place = on,
+            Self::PickerDownloaded => settings.labs.picker_downloaded = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;

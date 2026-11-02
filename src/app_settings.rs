@@ -1428,6 +1428,9 @@ pub struct LabsSettings {
     /// The picker's "Use model file where it is…" adds a GGUF file without
     /// copying it, as a found file is used (issue 941).
     pub model_in_place: bool,
+    /// The picker's All speech models view offers "Only downloaded models"
+    /// with their total size (issue 1018).
+    pub picker_downloaded: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1465,6 +1468,7 @@ impl Default for LabsSettings {
             output_fixes: false,
             picker_active_first: false,
             model_in_place: false,
+            picker_downloaded: false,
         }
     }
 }
