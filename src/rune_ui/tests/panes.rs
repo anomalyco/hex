@@ -1740,8 +1740,9 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
     tap(&mut rt, "lab-meetings");
     assert!(rt.find("nav-meetings").is_none(), "hidden while off");
 
-    // Windows lists Terminal paste in Labs, not General.
-    let mut rt = runtime("windows-settings", true, (980.0, 1400.0));
+    // Windows lists Terminal paste in Labs, not General. Labs is tall enough
+    // that its last row needs the macOS half's height to be on screen.
+    let mut rt = runtime("windows-settings", true, (980.0, 2000.0));
     assert!(rt.find("terminal-paste").is_none());
     tap(&mut rt, "nav-labs");
     tap(&mut rt, "lab-terminal-paste");
