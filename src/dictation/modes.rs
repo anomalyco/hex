@@ -44,12 +44,21 @@ impl ModeRuntime {
         transformations: &crate::personal_commands::TransformationClient,
     ) -> Processed {
         let text = self.replacements.replace(raw_text);
+        let profile = self.profile(context);
+        let cancelled = AtomicBool::new(false);
+        let mut processed = Profiles::new(profile).process_cancellable(&text, context, &cancelled);
+        processed.apply_transformations(transformations, context, &cancelled);
+        processed
+    }
+
+    /// The matching mode's profile, or Global's.
+    fn profile(&self, context: &crate::dictation::context::ContextSnapshot) -> Profile {
         let mode = mode_for_context(
             &self.modes,
             context.application.as_deref(),
             context.browser_host(),
         );
-        let profile = mode.map_or_else(
+        mode.map_or_else(
             || {
                 Profile::configured(
                     "Global",
@@ -60,11 +69,7 @@ impl ModeRuntime {
                 .vocabulary(self.default_vocabulary.clone())
             },
             Profile::from_mode,
-        );
-        let cancelled = AtomicBool::new(false);
-        let mut processed = Profiles::new(profile).process_cancellable(&text, context, &cancelled);
-        processed.apply_transformations(transformations, context, &cancelled);
-        processed
+        )
     }
 }
 
@@ -265,6 +270,24 @@ mod tests {
         let observation = processed.observation.as_ref().expect("transformation ran");
         assert_eq!(observation.profile, "Custom transformations");
         assert_eq!(observation.fallback, None);
+    }
+
+    #[test]
+    fn saved_post_processing_enables_the_global_rewrite() {
+        let path = std::env::temp_dir().join(format!("hex-970-{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            br#"{"dictation_processing":{"default_mode":{"post_processing":{"enabled":true,"prompt":"Fix it.","model":"opencode/big-pickle","deadline_seconds":30}}}}"#,
+        )
+        .unwrap();
+        let (settings, _) = AppSettings::read_from(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let runtime = ModeRuntime::from_settings(&settings);
+        let context = crate::dictation::context::ContextSnapshot {
+            application: Some("kitty".into()),
+            ..crate::dictation::context::ContextSnapshot::default()
+        };
+        assert!(runtime.profile(&context).rewrites());
     }
 
     #[test]

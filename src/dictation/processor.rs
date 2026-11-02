@@ -55,6 +55,12 @@ impl Profile {
         self
     }
 
+    /// Whether this profile runs the OpenCode rewrite.
+    #[cfg(test)]
+    pub(crate) fn rewrites(&self) -> bool {
+        self.ai_enabled
+    }
+
     pub(crate) fn replacements(mut self, replacements: ReplacementSet) -> Self {
         self.replacements = replacements;
         self
@@ -329,6 +335,12 @@ impl Profiles {
                 "dictation post-processing skipped for a numbers-only transcript"
             );
         }
+        if !profile.ai_enabled {
+            tracing::info!(
+                profile = profile.name,
+                "dictation post-processing skipped: the OpenCode rewrite is off for this mode"
+            );
+        }
         if !profile.ai_enabled || numbers_only {
             return Processed {
                 text: corrected,
@@ -353,12 +365,18 @@ impl Profiles {
             &profile.name,
             Instant::now(),
         );
-        if observation.fallback.is_none() {
-            tracing::info!(
+        match &observation.fallback {
+            None => tracing::info!(
                 profile = profile.name,
                 latency_ms = observation.latency_ms,
                 "dictation post-processing completed"
-            );
+            ),
+            Some(reason) => tracing::warn!(
+                profile = profile.name,
+                latency_ms = observation.latency_ms,
+                %reason,
+                "dictation post-processing failed; pasting the corrected transcript"
+            ),
         }
         Processed {
             text: text.unwrap_or(corrected),
