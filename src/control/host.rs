@@ -247,6 +247,7 @@ fn dictation_message(action: CaptureAction) -> &'static str {
         CaptureAction::Start => "Starting dictation",
         CaptureAction::Stop => "Stopping dictation",
         CaptureAction::Toggle => "Toggling dictation",
+        CaptureAction::Cancel => "Cancelling dictation",
     }
 }
 
@@ -722,7 +723,7 @@ mod tests {
     fn a_printing_stop_answers_with_the_transcript() {
         let host = FakeHost::default();
         let stop = |print| ControlCommand::Dictation {
-            action: CaptureAction::Stop.into(),
+            action: CaptureAction::Stop,
             print,
             raw: false,
         };
@@ -734,7 +735,7 @@ mod tests {
         );
         assert_eq!(code(&ask(&host, stop(false))), "ok");
         let start_print = ControlCommand::Dictation {
-            action: CaptureAction::Start.into(),
+            action: CaptureAction::Start,
             print: true,
             raw: false,
         };

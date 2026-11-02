@@ -135,6 +135,7 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
             .capture
             .enabled
             .then(|| LinuxHotkey::from(&settings.capture.hotkey)),
+        cancel: settings.active_cancel_hotkey().map(LinuxHotkey::from),
     };
     (LinuxHotkey::from(&settings.dictation_hotkey), options)
 }
@@ -779,6 +780,7 @@ pub(crate) fn run(
                 HotkeyEvent::Cancel if capture.is_recording() => {
                     capture.cancel();
                     feedback::retract_start();
+                    feedback::play(Tone::Cancel);
                     suppressor.restore();
                     if release_while_idle && !timeline.wants_audio() {
                         input.close();

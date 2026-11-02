@@ -68,6 +68,8 @@ pub struct WindowsDictationConfig {
     pub raw_dictation_hotkey: Option<WindowsHotkey>,
     /// The Annotate key, while Annotate is on.
     pub annotate_hotkey: Option<WindowsHotkey>,
+    /// Toggle mode's cancel shortcut; none in Hold mode.
+    pub cancel_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
     pub shortcut_mode: crate::dictation::ShortcutMode,
@@ -119,6 +121,7 @@ impl WindowsDictationConfig {
             annotate_hotkey: settings
                 .capture_on()
                 .then(|| WindowsHotkey::from(&settings.capture.hotkey)),
+            cancel_hotkey: settings.active_cancel_hotkey().map(WindowsHotkey::from),
             double_tap_lock: settings.double_tap_lock,
             double_tap_only: settings.double_tap_only,
             shortcut_mode: settings.shortcut_mode,
@@ -162,6 +165,7 @@ pub fn run(
         paste_last_hotkey,
         raw_dictation_hotkey,
         annotate_hotkey,
+        cancel_hotkey,
         double_tap_lock,
         double_tap_only,
         shortcut_mode,
@@ -230,6 +234,7 @@ pub fn run(
         paste_last_hotkey,
         raw_dictation_hotkey,
         annotate_hotkey,
+        cancel_hotkey,
         double_tap_lock,
         double_tap_only,
         shortcut_mode,
@@ -320,6 +325,7 @@ pub fn run(
                 paste_last_hotkey: next_config.paste_last_hotkey,
                 raw_dictation_hotkey: next_config.raw_dictation_hotkey,
                 annotate_hotkey: next_config.annotate_hotkey,
+                cancel_hotkey: next_config.cancel_hotkey,
                 double_tap_lock: next_config.double_tap_lock,
                 double_tap_only: next_config.double_tap_only,
                 shortcut_mode: next_config.shortcut_mode,
@@ -592,6 +598,9 @@ pub fn run(
                 HotkeyAction::Cancel if recording => {
                     audio_suppressor.restore();
                     crate::feedback::retract_start();
+                    if recording_feedback_started {
+                        crate::feedback::play(crate::feedback::Tone::Cancel);
+                    }
                     recording = false;
                     recording_feedback_started = false;
                     capture.cancel();
@@ -930,6 +939,7 @@ struct Shortcuts {
     paste_last_hotkey: Option<WindowsHotkey>,
     raw_dictation_hotkey: Option<WindowsHotkey>,
     annotate_hotkey: Option<WindowsHotkey>,
+    cancel_hotkey: Option<WindowsHotkey>,
     double_tap_lock: bool,
     double_tap_only: bool,
     shortcut_mode: crate::dictation::ShortcutMode,
@@ -945,6 +955,7 @@ impl Shortcuts {
             self.paste_last_hotkey.clone(),
             self.raw_dictation_hotkey.clone(),
             self.annotate_hotkey.clone(),
+            self.cancel_hotkey.clone(),
             self.double_tap_lock,
             self.double_tap_lock && self.double_tap_only,
             self.shortcut_mode,
@@ -1028,6 +1039,7 @@ fn next_action(
             match action {
                 CaptureAction::Start => HotkeyAction::Start,
                 CaptureAction::Stop => HotkeyAction::Finish,
+                CaptureAction::Cancel => HotkeyAction::Cancel,
                 CaptureAction::Toggle if recording => HotkeyAction::Finish,
                 CaptureAction::Toggle => HotkeyAction::Start,
             },

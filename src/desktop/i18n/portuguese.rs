@@ -172,6 +172,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Sided modifier chords", "Combinações de modificadores com lado"),
     ("Record which side each modifier of a shortcut is on, such as Right ⌘ + Right ⌥", "Grava de que lado está cada modificador de um atalho, como ⌘ direito + ⌥ direito"),
     ("Dictates like the shortcut above", "Dita como o atalho acima"),
+    ("Discards the recording", "Descarta a gravação"),
+    ("Bind hex dictation cancel to a key in your desktop's keyboard shortcuts", "Associe hex dictation cancel a uma tecla nos atalhos de teclado da sua área de trabalho"),
     ("Restore default shortcut", "Restaurar atalho padrão"),
     ("Default shortcut: {}", "Atalho padrão: {}"),
     ("Unload after", "Descarregar após"),

@@ -451,6 +451,7 @@ pub(crate) fn shortcut_rule(
         HotkeySlot::Dictation => ShortcutTarget::Dictation,
         HotkeySlot::PasteLast => ShortcutTarget::PasteLast,
         HotkeySlot::RawDictation => ShortcutTarget::RawDictation,
+        HotkeySlot::Cancel => ShortcutTarget::Cancel,
         #[cfg(hex_capture)]
         HotkeySlot::Capture => ShortcutTarget::Capture,
         #[cfg(target_os = "macos")]

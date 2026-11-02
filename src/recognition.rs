@@ -243,6 +243,7 @@ impl Hotkeys {
             machine.set_double_tap_enabled(crate::app_settings::double_tap_lock());
             machine.set_double_tap_only(crate::app_settings::double_tap_only());
             machine.set_toggle(crate::app_settings::shortcut_toggle());
+            machine.set_cancel(hotkeys.cancel);
         }
         raw_cancelled || second_cancelled
     }
@@ -1007,6 +1008,9 @@ pub fn listen(
         #[cfg(not(hex_capture))]
         let capture_escape = false;
         input_monitor.set_takes_escape(claims_escape(programmatic.is_some(), capture_escape));
+        // Toggle's cancel key is Hex's only while one of its shortcuts'
+        // recordings runs; the listener ignores keys during a programmatic one.
+        input_monitor.set_takes_cancel(programmatic.is_none() && hotkeys.any_recording());
         if received_worker_event {
             emit_engine_state(
                 &mut events,
@@ -1273,10 +1277,13 @@ fn handle_hotkey_action(
             raw,
         )
         .map(drop),
-        HotkeyAction::Discard(_) | HotkeyAction::Cancel => {
+        HotkeyAction::Discard(_) | HotkeyAction::Cancel | HotkeyAction::CancelShortcut => {
             feedback::retract_start();
+            if action == HotkeyAction::CancelShortcut {
+                feedback::play(Tone::Cancel);
+            }
             end_capture(
-                if matches!(action, HotkeyAction::Cancel) {
+                if matches!(action, HotkeyAction::Cancel | HotkeyAction::CancelShortcut) {
                     CaptureEnd::Cancelled
                 } else {
                     CaptureEnd::Discarded(action.discard_cause())
@@ -1435,6 +1442,23 @@ fn control_dictation(
         CaptureAction::Start => true,
         CaptureAction::Stop => false,
         CaptureAction::Toggle => !recording,
+        CaptureAction::Cancel if recording => {
+            hotkeys.suspend_recording();
+            handle_hotkey_action(
+                HotkeyAction::CancelShortcut,
+                false,
+                input.captured_through(),
+                input,
+                worker,
+                context,
+                &device,
+                events,
+                indicator,
+                release_while_idle,
+            )?;
+            return Ok(ControlReply::done("Cancelled the recording"));
+        }
+        CaptureAction::Cancel => return Ok(ControlReply::unchanged("Dictation isn't recording")),
     };
     Ok(match start {
         true if recording => ControlReply::unchanged("Dictation is already recording"),
@@ -1566,8 +1590,8 @@ fn fail_capture(
 enum CaptureEnd {
     /// The capture never became a dictation; no feedback tone.
     Discarded(Option<DiscardCause>),
-    /// Hex ended an intentional capture itself: its shortcuts were
-    /// suspended or the event tap was lost.
+    /// The capture ended unfinished: the cancel shortcut, or Hex itself
+    /// when its shortcuts were suspended or the event tap was lost.
     Cancelled,
 }
 

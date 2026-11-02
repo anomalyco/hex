@@ -404,6 +404,8 @@ pub(crate) enum ShortcutCommand {
     DictationStart,
     DictationStop,
     DictationToggle,
+    /// `hex dictation cancel`: discards whatever records, in any mode.
+    DictationCancel,
     PasteLast,
     /// `hex dictation start --raw` and `toggle --raw`.
     DictationStartRaw,
@@ -438,6 +440,9 @@ pub(crate) struct HotkeyOptions {
     /// Annotate's one key, while Annotate is on: tap to start and stop,
     /// hold to draw.
     pub(crate) capture: Option<LinuxHotkey>,
+    /// Toggle mode's cancel shortcut, which Hex takes only while a
+    /// recording runs; `None` in Hold mode, which has no cancel.
+    pub(crate) cancel: Option<LinuxHotkey>,
 }
 
 /// Whether Annotate draws now, so Escape is Hex's (it stops drawing).
@@ -684,6 +689,8 @@ enum Input {
     Released(Shortcut),
     /// Escape, which only stops Annotate's drawing (#786).
     Escape,
+    /// The cancel shortcut, pressed while Hex held it.
+    Cancel,
     /// The backend can no longer tell which keys are down.
     Lost,
     Command(ShortcutCommand),
@@ -701,12 +708,14 @@ enum Capture {
 }
 
 /// The shortcut rules every input shares: hold, double-tap lock, toggle,
-/// double-tap only, Paste Last, and commands.
+/// double-tap only, Toggle's cancel, Paste Last, and commands.
 struct ShortcutState {
     double_tap: bool,
     double_tap_only: bool,
     /// Every press acts as the second tap of a double-tap: releasing locks.
     toggle: bool,
+    /// Toggle mode has a cancel shortcut.
+    cancels: bool,
     capture: Capture,
     last_release: Option<Instant>,
     last_press: Option<Instant>,
@@ -723,6 +732,7 @@ impl ShortcutState {
             double_tap: options.double_tap,
             double_tap_only: options.double_tap_only,
             toggle: options.toggle,
+            cancels: options.toggle && options.cancel.is_some(),
             capture: Capture::Idle,
             last_release: None,
             last_press: None,
@@ -735,7 +745,15 @@ impl ShortcutState {
         matches!(self.capture, Capture::Idle | Capture::Armed)
     }
 
-    /// The backend lost track of the keys: whatever recorded ends.
+    /// Whether the cancel shortcut is Hex's now: only in Toggle mode, and
+    /// only while something records, so the key stays with every app
+    /// otherwise.
+    fn wants_cancel(&self) -> bool {
+        self.cancels && matches!(self.capture, Capture::Held { .. } | Capture::Locked)
+    }
+
+    /// Whatever records ends unfinished: the backend lost track of the
+    /// keys, or the person cancelled it.
     fn cancel(&mut self) -> Option<HotkeyEvent> {
         let active = matches!(self.capture, Capture::Held { .. } | Capture::Locked);
         self.capture = Capture::Idle;
@@ -794,6 +812,8 @@ impl ShortcutState {
                 self.down = false;
                 self.cancel()
             }
+            Input::Cancel if self.wants_cancel() => self.cancel(),
+            Input::Cancel => None,
             Input::Pressed(shortcut @ (Shortcut::Dictation | Shortcut::RawDictation)) => {
                 if !self.claim(shortcut == Shortcut::RawDictation) {
                     return None;
@@ -880,6 +900,7 @@ impl ShortcutState {
                 ShortcutCommand::DictationToggleRaw => {
                     self.stop_dictation().or_else(|| self.start_dictation(true))
                 }
+                ShortcutCommand::DictationCancel => self.cancel(),
                 ShortcutCommand::PasteLast => unreachable!("handled above"),
             },
         }
@@ -1316,6 +1337,8 @@ impl Backend {
             escape: keymap.keycode(XK_ESCAPE)?,
             keys: Vec::new(),
             escape_grabbed: Vec::new(),
+            cancel: None,
+            cancel_grabbed: Vec::new(),
         };
         let requested = [
             Some((Shortcut::Dictation, binding)),
@@ -1338,6 +1361,27 @@ impl Backend {
                     format!("{} is already in use by another X11 client", key.label())
                 })?;
         }
+        // Toggle's cancel key: grabbed only while a recording runs.
+        grabs.cancel = match options.cancel.as_ref().map(|key| -> Result<X11CancelKey> {
+            if mouse_button(&key.key).is_some() {
+                return Err(eyre!("a mouse button can't cancel on X11"));
+            }
+            Ok(X11CancelKey {
+                code: keymap.keycode(keysym(&key.key)?)?,
+                mask: key.modifier_mask(&connection, &keymap)?,
+            })
+        }) {
+            Some(Ok(key)) => Some(key),
+            Some(Err(error)) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    "the cancel shortcut can't be grabbed; recordings can't be cancelled"
+                );
+                None
+            }
+            None => None,
+        };
+        let cancel_on_escape = grabs.cancel.is_some_and(|key| key.code == grabs.escape);
         connection.flush()?;
         self.mark_ready(DesktopShortcuts::Registered);
 
@@ -1347,18 +1391,39 @@ impl Backend {
             ..X11Keys::default()
         };
         let mut escape_down = false;
-        // Another client held Escape at the last try; warn once per episode.
+        let mut cancel_down = false;
+        // Another client held Escape or the cancel key at the last try;
+        // warn once per episode.
         let mut escape_taken = false;
+        let mut cancel_taken = false;
         while !self.stopping() {
             let mut inputs = keys.expire(Instant::now());
             if let Some(event) = connection.poll_for_event()? {
                 match event {
                     Event::KeyPress(event) if event.detail == grabs.escape => {
                         escape_down = true;
-                        inputs.push(Input::Escape);
+                        let mask = u16::from(event.state) & 0xff & !lock_bits;
+                        // Drawing takes Escape first; it stops only that.
+                        inputs.push(
+                            if !annotate_drawing() && grabs.cancel_matches(event.detail, mask) {
+                                Input::Cancel
+                            } else {
+                                Input::Escape
+                            },
+                        );
                     }
                     Event::KeyRelease(event) if event.detail == grabs.escape => {
                         escape_down = false;
+                    }
+                    Event::KeyPress(event)
+                        if !grabs.cancel_grabbed.is_empty()
+                            && grabs.cancel_matches(
+                                event.detail,
+                                u16::from(event.state) & 0xff & !lock_bits,
+                            ) =>
+                    {
+                        cancel_down = true;
+                        inputs.push(Input::Cancel);
                     }
                     Event::KeyPress(event) => {
                         let mask = u16::from(event.state) & 0xff & !lock_bits;
@@ -1379,6 +1444,9 @@ impl Backend {
                         inputs.extend(shortcut.and_then(|shortcut| keys.press(shortcut)));
                     }
                     Event::KeyRelease(event) => {
+                        if grabs.cancel.is_some_and(|key| key.code == event.detail) {
+                            cancel_down = false;
+                        }
                         for grab in grabs
                             .keys
                             .iter()
@@ -1424,17 +1492,33 @@ impl Backend {
                 dispatcher.input(input);
             }
             dispatcher.commands();
-            // Escape is Hex's only while Annotate draws, and until its
-            // release so the release never reaches the app.
-            let wants_escape = annotate_drawing() || escape_down;
+            // Escape is Hex's only while Annotate draws or, as Toggle's
+            // cancel key, while a recording runs, and until its release so
+            // the release never reaches the app. Grabbing before the flush
+            // holds the key before dictation hears that recording started.
+            let wants_cancel = dispatcher.state.wants_cancel();
+            let wants_escape =
+                annotate_drawing() || escape_down || (wants_cancel && cancel_on_escape);
             if wants_escape && grabs.escape_grabbed.is_empty() {
                 let available = grabs.grab_escape()?;
                 if !available && !escape_taken {
-                    tracing::warn!("another application holds Escape; it can't stop drawing");
+                    tracing::warn!("another application holds Escape");
                 }
                 escape_taken = !available;
             } else if !wants_escape && !grabs.escape_grabbed.is_empty() {
                 grabs.release_escape()?;
+            }
+            if !cancel_on_escape {
+                let wants_cancel = wants_cancel || cancel_down;
+                if wants_cancel && grabs.cancel_grabbed.is_empty() {
+                    let available = grabs.grab_cancel()?;
+                    if !available && !cancel_taken {
+                        tracing::warn!("another application holds the cancel shortcut");
+                    }
+                    cancel_taken = !available;
+                } else if !wants_cancel && !grabs.cancel_grabbed.is_empty() {
+                    grabs.release_cancel()?;
+                }
             }
             if !dispatcher.flush()? {
                 return Ok(());
@@ -1543,6 +1627,13 @@ struct X11Grab {
     variants: [ModMask; 4],
 }
 
+/// Toggle's cancel key on X11.
+#[derive(Clone, Copy)]
+struct X11CancelKey {
+    code: u8,
+    mask: ModMask,
+}
+
 /// Passive grabs on the root window, released on drop.
 struct X11Grabs<'a> {
     connection: &'a RustConnection,
@@ -1551,6 +1642,8 @@ struct X11Grabs<'a> {
     escape: u8,
     keys: Vec<X11Grab>,
     escape_grabbed: Vec<ModMask>,
+    cancel: Option<X11CancelKey>,
+    cancel_grabbed: Vec<ModMask>,
 }
 
 impl X11Grabs<'_> {
@@ -1617,6 +1710,40 @@ impl X11Grabs<'_> {
         self.connection.flush()?;
         Ok(())
     }
+
+    /// Whether a press with `mask` (lock bits cleared) is the cancel key.
+    fn cancel_matches(&self, code: u8, mask: u16) -> bool {
+        self.cancel
+            .is_some_and(|key| key.code == code && u16::from(key.mask) == mask)
+    }
+
+    /// Returns false when another client holds the cancel key.
+    fn grab_cancel(&mut self) -> Result<bool> {
+        let Some(key) = self.cancel else {
+            return Ok(false);
+        };
+        let variants = lock_variants(key.mask, self.num_lock);
+        match grab_variants(self.connection, self.root, key.code, &variants) {
+            Ok(()) => self.cancel_grabbed = variants.to_vec(),
+            Err(error) if is_grab_conflict(&error) => {}
+            Err(error) => return Err(error).wrap_err("could not grab the cancel key"),
+        }
+        self.connection.flush()?;
+        Ok(!self.cancel_grabbed.is_empty())
+    }
+
+    fn release_cancel(&mut self) -> Result<()> {
+        let Some(key) = self.cancel else {
+            return Ok(());
+        };
+        for modifiers in self.cancel_grabbed.drain(..) {
+            self.connection
+                .ungrab_key(key.code, self.root, modifiers)?
+                .check()?;
+        }
+        self.connection.flush()?;
+        Ok(())
+    }
 }
 
 impl Drop for X11Grabs<'_> {
@@ -1625,6 +1752,11 @@ impl Drop for X11Grabs<'_> {
             let _ = self
                 .connection
                 .ungrab_key(self.escape, self.root, modifiers);
+        }
+        if let Some(key) = self.cancel {
+            for &modifiers in &self.cancel_grabbed {
+                let _ = self.connection.ungrab_key(key.code, self.root, modifiers);
+            }
         }
         for grab in &self.keys {
             for modifiers in grab.variants {
@@ -1685,6 +1817,7 @@ fn keysym(key: &str) -> Result<u32> {
     let key = key.to_ascii_lowercase();
     match key.as_str() {
         "space" => Ok(XK_SPACE),
+        "escape" => Ok(XK_ESCAPE),
         "enter" | "return" => Ok(0xff0d),
         "tab" => Ok(0xff09),
         "backspace" => Ok(0xff08),
@@ -2432,6 +2565,84 @@ mod tests {
         assert_eq!(test.events, [Finish]);
     }
 
+    fn toggle_with_cancel() -> HotkeyOptions {
+        HotkeyOptions {
+            toggle: true,
+            cancel: Some(LinuxHotkey {
+                alt: false,
+                key: "escape".into(),
+                ..LinuxHotkey::default()
+            }),
+            ..HotkeyOptions::default()
+        }
+    }
+
+    /// Toggle's cancel discards the recording, while the shortcut is still
+    /// down or after it locked, and the next press starts afresh.
+    #[test]
+    fn cancel_discards_a_toggled_recording() {
+        let mut test = Test::with(toggle_with_cancel());
+        test.press(Shortcut::Dictation);
+        assert!(test.state.wants_cancel());
+        test.input(Input::Cancel);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Cancel]);
+        assert_eq!(test.state.capture, Capture::Idle);
+        assert!(!test.state.wants_cancel());
+
+        test.tap();
+        assert_eq!(test.state.capture, Capture::Locked);
+        test.input(Input::Cancel);
+        test.input(Input::Cancel);
+        assert_eq!(test.events, [START, Cancel, START, Cancel]);
+        test.tap();
+        test.tap();
+        assert_eq!(test.events, [START, Cancel, START, Cancel, START, Finish]);
+    }
+
+    /// Hold mode has no cancel: the key is never Hex's, even while a
+    /// recording runs, and a press of it ends nothing.
+    #[test]
+    fn cancel_is_ignored_in_hold_mode() {
+        let mut test = Test::with(HotkeyOptions {
+            toggle: false,
+            double_tap: true,
+            ..toggle_with_cancel()
+        });
+        test.press(Shortcut::Dictation);
+        assert!(!test.state.wants_cancel());
+        test.input(Input::Cancel);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish]);
+        test.events.clear();
+        test.now += Duration::from_millis(20);
+        test.tap();
+        test.input(Input::Cancel);
+        assert_eq!(test.state.capture, Capture::Locked);
+        assert!(test.events.iter().all(|event| *event != Cancel));
+    }
+
+    /// While nothing records, Hex doesn't take the cancel key, so it stays
+    /// with the app in front.
+    #[test]
+    fn cancel_is_not_taken_while_idle() {
+        let mut test = Test::with(toggle_with_cancel());
+        assert!(!test.state.wants_cancel());
+        test.input(Input::Cancel);
+        assert!(test.events.is_empty());
+        test.tap();
+        test.tap();
+        assert!(!test.state.wants_cancel());
+        assert_eq!(test.events, [START, Finish]);
+        // Toggle without a cancel shortcut never takes one either.
+        let mut test = Test::with(HotkeyOptions {
+            cancel: None,
+            ..toggle_with_cancel()
+        });
+        test.tap();
+        assert!(!test.state.wants_cancel());
+    }
+
     #[test]
     fn lost_input_cancels_and_forgets_taps() {
         for locked in [false, true] {
@@ -2491,7 +2702,9 @@ mod tests {
         test.command(Command::DictationToggle);
         test.command(Command::DictationToggle);
         test.command(Command::DictationToggle);
-        assert_eq!(test.events, [START, Finish, START]);
+        test.command(Command::DictationCancel);
+        test.command(Command::DictationCancel);
+        assert_eq!(test.events, [START, Finish, START, Cancel]);
     }
 
     #[test]
