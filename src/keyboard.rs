@@ -18,6 +18,13 @@ const COMMAND_FLAG: u64 = 1 << 20;
 const SHIFT_KEY_CODE: u16 = 56;
 const SHIFT_FLAG: u64 = 1 << 17;
 const RETURN_KEY_CODE: u16 = 36;
+/// Right ⌘ through Fn: keys a real keyboard reports as flags-changed events.
+const MODIFIER_KEY_CODES: std::ops::RangeInclusive<u16> = 54..=63;
+const FLAGS_CHANGED_EVENT: u32 = 12;
+/// Pause between a posted shortcut's events. Remote desktop and VM clients
+/// (Microsoft's Windows App, #1048) track modifiers from their own events and
+/// can read a burst posted in one instant as the bare key, typing "v".
+const SHORTCUT_EVENT_GAP: std::time::Duration = std::time::Duration::from_millis(15);
 /// Quartz keeps at most 20 UTF-16 units of a keyboard event's Unicode string.
 const MAX_UNICODE_UNITS: usize = 20;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
@@ -67,6 +74,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     fn CGEventCreateKeyboardEvent(source: *mut c_void, key: u16, down: bool) -> EventRef;
     fn CGEventSetFlags(event: EventRef, flags: u64);
+    fn CGEventSetType(event: EventRef, event_type: u32);
     fn CGEventKeyboardSetUnicodeString(event: EventRef, length: usize, text: *const u16);
     fn CGEventSetIntegerValueField(event: EventRef, field: u32, value: i64);
     fn CGEventPost(tap: u32, event: EventRef);
@@ -320,7 +328,10 @@ fn chord_breaker_event_specs(flags: u64) -> impl Iterator<Item = (u16, bool, u64
 fn post_key_code(key_code: u16, modifiers: &[(u64, u16)], count: u8) -> Result<()> {
     let specs = shortcut_event_specs(key_code, modifiers, count);
     let events = specs.map(KeyboardEvent::new).collect::<Result<Vec<_>>>()?;
-    for event in events {
+    for (index, event) in events.iter().enumerate() {
+        if index > 0 {
+            std::thread::sleep(SHORTCUT_EVENT_GAP);
+        }
         event.post();
     }
     Ok(())
@@ -357,6 +368,12 @@ impl KeyboardEvent {
             return Err(eyre!("could not create keyboard event"));
         }
         unsafe {
+            // A real keyboard reports a modifier key as flags-changed, never
+            // key down or up; clients that track modifiers from those events
+            // (remote desktops, VMs) otherwise miss the held ⌘.
+            if MODIFIER_KEY_CODES.contains(&key) {
+                CGEventSetType(event, FLAGS_CHANGED_EVENT);
+            }
             CGEventSetFlags(event, flags);
             CGEventSetIntegerValueField(event, EVENT_SOURCE_USER_DATA, SYNTHETIC_EVENT_MARKER);
         }
@@ -480,6 +497,29 @@ mod tests {
             let mark = unsafe { CGEventGetIntegerValueField(event.0, EVENT_SOURCE_USER_DATA) };
             assert_eq!(mark, SYNTHETIC_EVENT_MARKER);
         }
+    }
+
+    /// Remote desktop clients (#1048) read ⌘ from flags-changed events, as a
+    /// real keyboard sends them; the shortcut's own key stays key down/up.
+    #[test]
+    fn posted_modifiers_are_flags_changed_events() {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        unsafe extern "C" {
+            fn CGEventGetType(event: EventRef) -> u32;
+        }
+        const KEY_DOWN: u32 = 10;
+        const KEY_UP: u32 = 11;
+        let types = shortcut_event_specs(9, &[(COMMAND_FLAG, COMMAND_KEY_CODE)], 1)
+            .map(|spec| {
+                let event = KeyboardEvent::new(spec).unwrap();
+                // SAFETY: the event is valid until `event` drops.
+                unsafe { CGEventGetType(event.0) }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            types,
+            [FLAGS_CHANGED_EVENT, KEY_DOWN, KEY_UP, FLAGS_CHANGED_EVENT]
+        );
     }
 
     #[test]
