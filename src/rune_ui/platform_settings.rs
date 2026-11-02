@@ -261,9 +261,22 @@ fn folder_label(ui: &Ui) -> String {
         .unwrap_or_else(|| folder.display().to_string())
 }
 
+/// Whether an organization turned OpenCode processing off.
+pub(super) fn opencode_managed() -> bool {
+    crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
+}
+
 /// The Meetings (beta) switch: the opt-in card's only row, and the first row
 /// of Meetings › Settings.
 pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
+    if crate::labs::Feature::Meetings.managed().is_some() {
+        return super::controls::managed_row(
+            p,
+            "meetings-enabled",
+            Some(Pane::Meetings.icon()),
+            tr("Meetings (beta)"),
+        );
+    }
     icon_toggle_row(
         p,
         "meetings-enabled",
@@ -384,7 +397,15 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 },
             ));
         }
-        more.push(icon_toggle_row(
+        more.push(if opencode_managed() {
+            super::controls::managed_row(
+                p,
+                "meeting-notes-opencode",
+                Some(&icons::SPARKLES),
+                tr("Summarize with OpenCode"),
+            )
+        } else {
+            icon_toggle_row(
             p,
             "meeting-notes-opencode",
             &icons::SPARKLES,
@@ -399,7 +420,8 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 let enabled = !ui.settings.meetings.summarize_with_opencode;
                 ui.update(|settings| settings.meetings.summarize_with_opencode = enabled);
             },
-        ));
+        )
+        });
         if let Some(error) = &ui.platform.meeting_folder_error {
             // A failed folder change shows where it happened, opening the fold.
             more.push(note("meeting-folder-error", error, p.danger()));

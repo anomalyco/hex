@@ -71,6 +71,9 @@ pub struct Script {
     deadline: Rc<Cell<Option<Instant>>>,
     registration: String,
     permissions: Permissions,
+    /// The `RestrictTransformsToLoopback` managed preference: `fetch`
+    /// reaches only this computer and no program runs (`crate::policy`).
+    loopback_only: bool,
 }
 
 impl Drop for Script {
@@ -132,7 +135,16 @@ impl Script {
             deadline,
             registration,
             permissions,
+            loopback_only: crate::policy::Policy::current()
+                .locks(crate::policy::Lock::LoopbackTransforms),
         })
+    }
+
+    /// Holds this script to loopback `fetch` and no programs, as the managed
+    /// preference does.
+    #[cfg(test)]
+    pub fn restrict_to_loopback(&mut self) {
+        self.loopback_only = true;
     }
 
     /// What the config can reach, for the trust prompt.
@@ -159,7 +171,9 @@ impl Script {
     ) -> Result<String, String> {
         let deadline = Instant::now() + limit;
         self.deadline.set(Some(deadline));
-        self.io.borrow_mut().begin(deadline, allowed);
+        self.io
+            .borrow_mut()
+            .begin(deadline, allowed, self.loopback_only);
         let result = self.context.with(|ctx| {
             let outcome = (|| {
                 let host = self.host.clone().restore(&ctx)?;

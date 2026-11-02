@@ -168,7 +168,13 @@ pub fn router() -> Router {
 }
 
 fn sends(config: &RouterConfig) -> bool {
-    config.send_captures && std::env::var_os("SCRAWL_NO_OPENCODE").is_none()
+    config.send_captures && std::env::var_os("SCRAWL_NO_OPENCODE").is_none() && !opencode_managed()
+}
+
+/// Whether an organization turned OpenCode processing off, which includes
+/// sending captures to OpenCode sessions (`DisableOpenCodeProcessing`).
+fn opencode_managed() -> bool {
+    crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
 }
 
 /// The tab, terminal, and sessions behind a capture that just stopped,
@@ -866,7 +872,11 @@ impl Worker {
     /// Retries sends OpenCode didn't take, unless another process owns
     /// retries: Scrawl's app, or anything serving Scrawl's ingest port.
     fn retry(&mut self) {
-        if cfg!(test) || crate::app_settings::scrawl_app_running() || ingest_port_served() {
+        if cfg!(test)
+            || opencode_managed()
+            || crate::app_settings::scrawl_app_running()
+            || ingest_port_served()
+        {
             return;
         }
         let router = router();
@@ -1229,6 +1239,16 @@ fn deliver(
     Option<Sent>,
     Option<scrawl_capture::OfferRule>,
 ) {
+    if opencode_managed() {
+        return (
+            RouteDelivery::Failed {
+                to: dest.title.clone(),
+                why: crate::policy::Lock::OpenCodeProcessing.refusal().into(),
+            },
+            None,
+            None,
+        );
+    }
     router.run(|| {
         let recorded = scrawl_capture::handoff::load_bundle(bundle).and_then(
             |(_, mut loaded): (PathBuf, ScrawlBundle)| {

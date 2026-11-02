@@ -258,3 +258,34 @@ fn unreadable_file_does_not_block_load_or_get_overwritten() {
     assert!(AppSettings::default().write_to(&file.path).is_err());
     assert!(file.path.is_dir());
 }
+
+#[test]
+fn a_managed_lock_reads_off_and_never_rewrites_the_saved_switch() {
+    use crate::policy::{Lock, Policy};
+    let file = SettingsFile::new(
+        br#"{"meetings":{"enabled":true,"summarize_with_opencode":true},"labs":{"live_text":true}}"#,
+    );
+    let policy = Policy::default()
+        .with(Lock::Meetings)
+        .with(Lock::OpenCodeProcessing)
+        .with(Lock::Labs);
+    let (mut settings, _) = AppSettings::read_managed_from(&file.path, policy).unwrap();
+    assert!(!settings.meetings.enabled);
+    assert!(!settings.meetings.summarize_with_opencode);
+    assert!(!settings.labs.live_text);
+
+    // Saving another change, or the locked switch itself, keeps the file's.
+    settings.sound_effects = false;
+    settings.meetings.enabled = true;
+    settings.write_managed_to(&file.path, policy).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
+    assert_eq!(saved["meetings"]["enabled"], json!(true));
+    assert_eq!(saved["meetings"]["summarize_with_opencode"], json!(true));
+    assert_eq!(saved["labs"]["live_text"], json!(true));
+    assert_eq!(saved["sound_effects"], json!(false));
+
+    // Without the policy the user's own choices come back.
+    let (unmanaged, _) = AppSettings::read_managed_from(&file.path, Policy::default()).unwrap();
+    assert!(unmanaged.meetings.enabled);
+    assert!(unmanaged.labs.live_text);
+}

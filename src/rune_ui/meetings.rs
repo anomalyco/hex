@@ -137,7 +137,8 @@ pub(super) enum View {
 /// Meetings is on, so the pane lists recordings and settings instead of the
 /// opt-in card (`MeetingSettings::available`; scenes leave `developer` off).
 pub(super) fn available(ui: &Ui) -> bool {
-    ui.settings.meetings.enabled || ui.platform.developer
+    crate::labs::Feature::Meetings.managed().is_none()
+        && (ui.settings.meetings.enabled || ui.platform.developer)
 }
 
 /// Whether something can write a meeting's notes: Apple Intelligence on a

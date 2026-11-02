@@ -144,7 +144,8 @@ struct Row {
     title: &'static str,
     about: &'static str,
     on: bool,
-    /// Shown on and can't be turned off (an installed Hex Microphone driver).
+    /// Can't be switched: on while an installed Hex Microphone driver or
+    /// the dictation model needs it, off under an organization's lock.
     locked: bool,
 }
 
@@ -159,6 +160,16 @@ fn rows(ui: &Ui) -> Vec<Row> {
         on: feature.on(settings),
         locked: false,
     };
+    // An organization's lock shows the row off, disabled, and says why.
+    let row = |feature: Feature, icon, title, about| match feature.managed() {
+        Some(_) => Row {
+            on: false,
+            locked: true,
+            about: super::managed_note(),
+            ..row(feature, icon, title, about)
+        },
+        None => row(feature, icon, title, about),
+    };
     let mut rows = Vec::new();
     if caps.meetings {
         rows.push(row(
@@ -168,7 +179,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Record calls and keep transcripts"),
         ));
     }
-    if caps.fun {
+    if caps.fun && Feature::VoiceFilter.managed().is_some() {
+        rows.push(row(
+            Feature::VoiceFilter,
+            &VOICE_FILTER_ICON,
+            tr("Voice Filter"),
+            "",
+        ));
+    } else if caps.fun {
         let locked = super::fun::driver_installed(ui);
         rows.push(Row {
             on: super::fun::running(ui),
@@ -366,15 +384,22 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Benchmark details"),
         tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
     ));
-    let ultra_locked = Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
-    rows.push(Row {
-        locked: ultra_locked,
-        about: if ultra_locked {
-            tr("On while it is the dictation model. Choose another model to turn it off.")
-        } else {
-            tr("Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker")
-        },
-        ..row(Feature::ParakeetUltra, &HINTS, tr("Parakeet Ultra"), "")
+    let ultra_locked = Feature::ParakeetUltra.managed().is_none()
+        && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
+    let ultra = row(Feature::ParakeetUltra, &HINTS, tr("Parakeet Ultra"), "");
+    // A managed row already says so.
+    rows.push(if ultra.locked {
+        ultra
+    } else {
+        Row {
+            locked: ultra_locked,
+            about: if ultra_locked {
+                tr("On while it is the dictation model. Choose another model to turn it off.")
+            } else {
+                tr("Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker")
+            },
+            ..ultra
+        }
     });
     if caps.share_shortcut {
         rows.push(row(
@@ -433,6 +458,9 @@ fn row_key(feature: Feature) -> &'static str {
 }
 
 fn flip(ui: &mut Ui, feature: Feature) {
+    if feature.managed().is_some() {
+        return;
+    }
     if feature == Feature::VoiceFilter && super::fun::driver_installed(ui) {
         return;
     }
@@ -503,7 +531,7 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
 
 fn feature_row(p: Paint, row: Row, flashing: bool) -> CardRow {
     let switch = if row.locked {
-        rune_kit::Switch::new(true)
+        rune_kit::Switch::new(row.on)
             .disabled(true)
             .build(p.k)
             .key("switch")

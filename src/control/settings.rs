@@ -608,6 +608,13 @@ fn needs(key: &str) -> Option<&'static str> {
 
 /// Why `hex settings set` refuses `name` on this OS, if it does.
 pub fn unavailable(name: &str) -> Option<ControlError> {
+    unavailable_under(name, crate::policy::Policy::current())
+}
+
+fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<ControlError> {
+    if let Some(lock) = policy.setting_lock(name) {
+        return Some(managed(name, lock));
+    }
     if let Some(feature) = crate::labs::Feature::for_settings_key(name)
         && !feature.shipped()
     {
@@ -623,6 +630,13 @@ pub fn unavailable(name: &str) -> Option<ControlError> {
             "`{name}` does nothing on this OS: it needs {capability}, which Hex has only elsewhere"
         ),
     ))
+}
+
+fn managed(name: &str, lock: crate::policy::Lock) -> ControlError {
+    ControlError::new(
+        "managed",
+        format!("`{name}` can't be changed: {}", lock.refusal()),
+    )
 }
 
 /// Every key, in registry order.
@@ -753,7 +767,10 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
             Kind::Choice(choices) => choices.iter().map(|&choice| choice.into()).collect(),
             _ => Vec::new(),
         },
-        writable: key.read_only.is_none(),
+        writable: key.read_only.is_none()
+            && crate::policy::Policy::current()
+                .setting_lock(key.key)
+                .is_none(),
         about: key.about.into(),
         available: needs(key.key).is_none_or(crate::rune_ui::capability),
     }
@@ -1237,6 +1254,32 @@ pub fn format_hotkey(binding: &HotkeyBinding) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_managed_setting_is_refused() {
+        use crate::policy::{Lock, Policy};
+        let policy = Policy::default()
+            .with(Lock::Meetings)
+            .with(Lock::Annotate)
+            .with(Lock::OpenCodeProcessing);
+        for name in [
+            "meetings.enabled",
+            "capture.enabled",
+            "meetings.summarize_with_opencode",
+        ] {
+            let error = unavailable_under(name, policy).expect(name);
+            assert_eq!(error.code, "managed");
+            assert!(error.message.contains("managed by your organization"));
+        }
+        assert!(unavailable_under("sound_effects", policy).is_none());
+        assert!(unavailable_under("labs.live_text", policy).is_none());
+        let labs = Policy::default().with(Lock::Labs);
+        assert_eq!(
+            unavailable_under("labs.live_text", labs).map(|error| error.code),
+            Some("managed")
+        );
+        assert!(unavailable_under("labs.live_text", Policy::default()).is_none());
+    }
 
     fn rules() -> ShortcutRules {
         ShortcutRules {

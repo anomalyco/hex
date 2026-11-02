@@ -1327,8 +1327,11 @@ impl Default for MeetingSettings {
 }
 
 impl MeetingSettings {
+    /// Whether meetings may record and process: always in developer builds,
+    /// otherwise once turned on, and never under a managed lock.
     pub fn available(&self) -> bool {
-        crate::DEVELOPER_FEATURES_ENABLED || self.enabled
+        crate::labs::Feature::Meetings.managed().is_none()
+            && (crate::DEVELOPER_FEATURES_ENABLED || self.enabled)
     }
 
     pub fn resolved_output_folder(&self) -> PathBuf {
@@ -2217,13 +2220,23 @@ impl AppSettings {
     }
 
     fn apply_runtime(&self) {
+        // Whatever an editor holds, a managed lock keeps its switches off.
+        let policy = crate::policy::Policy::current();
+        if policy.any() {
+            let mut managed = self.clone();
+            policy.enforce(&mut managed);
+            if managed != *self {
+                return managed.apply_runtime();
+            }
+        }
         MICROPHONE_POLICY.store(
             u8::from(self.release_microphone_while_idle),
             Ordering::Release,
         );
         crate::audio::set_avoid_bluetooth_microphone(self.avoid_bluetooth_microphone);
         CUSTOM_TRANSFORMATIONS_ENABLED.store(
-            transformations_used(&self.dictation_processing),
+            transformations_used(&self.dictation_processing)
+                && !policy.locks(crate::policy::Lock::Transforms),
             Ordering::Release,
         );
         crate::feedback::set_enabled(self.sound_effects);
@@ -2694,9 +2707,18 @@ pub fn meetings_enabled() -> bool {
     MEETINGS_ENABLED.load(Ordering::Acquire)
 }
 
+/// Why meetings can't record now.
+pub fn meetings_off_reason() -> &'static str {
+    match crate::labs::Feature::Meetings.managed() {
+        Some(lock) => lock.refusal(),
+        None => "Meetings are off; turn them on with `hex settings set meetings.enabled on`",
+    }
+}
+
 /// [`voice_filter_enabled`] for the running listener.
 pub fn hex_microphone_enabled() -> bool {
     crate::labs::Feature::VoiceFilter.shipped()
+        && crate::labs::Feature::VoiceFilter.managed().is_none()
         && voice_filter_enabled(
             HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
             crate::audio::hex_microphone::driver_bundle_installed(),

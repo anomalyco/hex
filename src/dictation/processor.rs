@@ -116,8 +116,32 @@ impl Profile {
         transformations: Vec<String>,
         settings: &PostProcessingSettings,
     ) -> Self {
+        Self::configured_under(
+            name,
+            replacements,
+            transformations,
+            settings,
+            crate::policy::Policy::current(),
+        )
+    }
+
+    /// [`Self::configured`] under `policy`: a managed lock drops the
+    /// OpenCode rewrite or every transformation, leaving the mode saved as is.
+    fn configured_under(
+        name: impl Into<String>,
+        replacements: ReplacementSet,
+        transformations: Vec<String>,
+        settings: &PostProcessingSettings,
+        policy: crate::policy::Policy,
+    ) -> Self {
+        use crate::policy::Lock;
+        let transformations = if policy.locks(Lock::Transforms) {
+            Vec::new()
+        } else {
+            transformations
+        };
         let mut profile = Self::new(name, &settings.prompt)
-            .ai_enabled(settings.enabled)
+            .ai_enabled(settings.enabled && !policy.locks(Lock::OpenCodeProcessing))
             .replacements(replacements)
             .transformations(transformations);
         if let Some((provider, model)) = settings
@@ -855,6 +879,10 @@ fn generate_cancellable(
     cancelled: &AtomicBool,
 ) -> Result<String> {
     let started = Instant::now();
+    let lock = crate::policy::Lock::OpenCodeProcessing;
+    if crate::policy::Policy::current().locks(lock) {
+        return Err(eyre!(lock.refusal()));
+    }
     let service = crate::desktop::opencode_service::find()
         .ok_or_else(|| eyre!(crate::desktop::opencode_service::NOT_RUNNING))?;
     generate_with_candidates(
@@ -1026,6 +1054,33 @@ fn wait_for_generation_retry(
 mod tests {
     use super::*;
     use url::Url;
+
+    #[test]
+    fn managed_locks_drop_the_rewrite_and_transformations() {
+        use crate::policy::{Lock, Policy};
+        let settings = PostProcessingSettings {
+            enabled: true,
+            ..PostProcessingSettings::default()
+        };
+        let build = |policy| {
+            Profile::configured_under(
+                "Mode",
+                ReplacementSet::default(),
+                vec!["lowercase".into()],
+                &settings,
+                policy,
+            )
+        };
+        let open = build(Policy::default());
+        assert!(open.rewrites());
+        assert_eq!(open.transformations, ["lowercase"]);
+        let rewrite = build(Policy::default().with(Lock::OpenCodeProcessing));
+        assert!(!rewrite.rewrites());
+        assert_eq!(rewrite.transformations, ["lowercase"]);
+        let transforms = build(Policy::default().with(Lock::Transforms));
+        assert!(transforms.rewrites());
+        assert!(transforms.transformations.is_empty());
+    }
 
     fn context(application: &str, url: Option<&str>) -> ContextSnapshot {
         ContextSnapshot {

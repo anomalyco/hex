@@ -376,7 +376,14 @@ pub struct PersonalCommands {
 }
 
 impl PersonalCommands {
+    /// Starts the host, unless an organization turned transformations off
+    /// (`DisableTransforms`).
     pub fn start(transformations: Arc<TransformationClient>) -> Option<Self> {
+        let lock = crate::policy::Lock::Transforms;
+        if crate::policy::Policy::current().locks(lock) {
+            tracing::info!("{}", lock.refusal());
+            return None;
+        }
         let (request_sender, requests) = mpsc::sync_channel(32);
         let stop = Arc::new(AtomicBool::new(false));
         let (done_sender, worker_done) = mpsc::sync_channel(1);
