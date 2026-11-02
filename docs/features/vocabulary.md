@@ -53,7 +53,7 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too) 
 ├── Left alone: case-only differences, inflections ("Cappuccinos"), and addresses
 │   and paths ("opencode.ai"); rescoring also skips terms under 5 letters
 │   without a spelling, which the RNN-T decoder can still write ("Kip" -> Kit)
-└── SenseVoice, Cohere, Apple Speech -> no vocabulary in transcription
+└── SenseVoice, Cohere, GigaAM, Apple Speech -> no vocabulary in transcription
 
 Context prompt (Whisper incl. ivrit.ai, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; transcription::gguf_session::with_vocabulary
 ├── Always on (not Labs): replaced the per-model Recognition hints box (#129)

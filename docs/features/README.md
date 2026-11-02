@@ -286,6 +286,8 @@ Choose a supported language              // setup.language-conditioning; macOS +
 │   context prompt (vocabulary.md); output that only repeats it is dropped
 ├── Hebrew -> ivrit.ai Whisper large-v3-turbo, always with the `he` hint (it
 │   lost Whisper's language detection); stock Whisper turbo also offers it
+├── Russian -> GigaAM v3 (Russian only, no language input); Parakeet v3 and
+│   Whisper turbo also offer it
 └── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
 ```
 

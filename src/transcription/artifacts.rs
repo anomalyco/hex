@@ -156,6 +156,23 @@ pub(super) const NEMOTRON_3_5_ASR_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "parakeet",
     variant: "nemotron-3.5-asr-streaming-0.6b",
 };
+// ai-sage's GigaAM v3 e2e RNN-T (MIT), Russian only, cased and punctuated.
+// Hex converted the `v3_e2e_rnnt` checkpoint that salute-developers/GigaAM
+// at 6e4b027c downloads and checks (MD5 2730de75…) with transcribe.cpp
+// 7045d1c's GigaAM converter and quantized it to Q8_0: all 560 tensors
+// match this file byte for byte, and the metadata differs only by four
+// capability flags the newer converter writes as false. The pinned file is
+// handy-computer's (from ai-sage/GigaAM-v3 at ec1dc1f), which ships the
+// licence and notice beside it.
+pub(super) const GIGAAM_V3_E2E_RNNT_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "gigaam-v3-e2e-rnnt-Q8_0.gguf",
+    revision: "3efd5b39882ceadca5570a8fb9fa1a2c801d6d6d",
+    repository: "handy-computer/gigaam-v3-e2e-rnnt-gguf",
+    bytes: 273_724_832,
+    sha256: "78d63b47723b7f8d78c6113a6ef983b5a86e2a86f6c273e1f5cb6967b1c4467a",
+    architecture: "gigaam",
+    variant: "gigaam-v3-e2e-rnnt",
+};
 /// The languages Nemotron 3.5 transcribes that Hex names, as the locales
 /// its language prompt takes (`runtime_language`). Its card also lists
 /// Norwegian Bokmål, which Hex doesn't offer yet.
