@@ -4,7 +4,8 @@ Record a call locally: Hex captures the other participants (system audio) and
 you (microphone) as separate tracks, transcribes them on this Mac, and saves a
 Markdown transcript with `You` and `Them` turns. Recording starts automatically
 only for calls from a website or app set to Always record, and never stops
-automatically. This map describes macOS; [Linux and Windows](#linux-and-windows)
+automatically unless Labs › Stop when the call ends is on (see
+[meetings.auto-stop](#record)). This map describes macOS; [Linux and Windows](#linux-and-windows)
 lists where they differ.
 
 Linked checks are locators unless an executed result is recorded below.
@@ -435,6 +436,21 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
   -> "Zoom left the call" capsule: Keep recording / Stop & transcribe
   -> No timeout; nothing stops automatically
 
+Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-stop
+  Only a recording Hex started on its own (Always record); manual, offered,
+  and calendar recordings are never stopped
+  -> The call app counts as present while it holds the microphone OR any of
+     its Core Audio processes plays output (WhatsApp keeps the microphone
+     while muted; its output stays open until hang-up)
+  -> Both off for about 3 s -> capsule says "Hex stops recording in 30 s
+     unless you keep recording."
+     ├── App back on the microphone or output within 30 s -> nothing stops
+     ├── Keep recording -> nothing stops for this absence; leaving again re-arms
+     ├── Stop & transcribe -> stops now
+     └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
+         "meeting recording stopped automatically after its call ended"
+  -> Off -> exactly as above: microphone only, nothing stops
+
 Capture sources (meeting/capture.rs)                // meetings.capture
 ├── Microphone -> dictation's input (saved device, else System default) via cpal, resampled to 16 kHz
 │   ├── System default changes, the Settings microphone changes, or a missing
@@ -461,6 +477,16 @@ A failure shows "Meeting could not be recorded." above the recordings until
 its close button dismisses it ([#562](https://github.com/anomalyco/hex/issues/562);
 check `a_meeting_recording_error_can_be_dismissed`).
 Checks: `call_end_is_reported_once_per_sustained_absence`,
+`an_ended_call_stops_after_the_grace_unless_it_comes_back_or_is_kept` in
+[meeting/detection.rs](../../src/meeting/detection.rs),
+`only_automatic_recordings_stop_when_the_call_ends_and_only_with_the_lab_on` and
+`keep_recording_disarms_a_pending_automatic_stop` in
+[meeting/watcher.rs](../../src/meeting/watcher.rs),
+`an_automatic_stop_says_so_and_keep_recording_cancels_it` in
+[meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs) (auto-stop; not
+yet observed on a real Mac: the output read
+`microphone_activity::application_running_output` against a live WhatsApp
+call, a muted call, and Zoom or Teams helpers),
 `paste_cursor_counts_coalesced_turns_and_advances_only_on_success` in
 [meeting/tests.rs](../../src/meeting/tests.rs),
 `meeting_delta_coalesces_turns_in_time_order` in

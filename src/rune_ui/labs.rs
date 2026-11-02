@@ -206,6 +206,16 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Subtitle export"),
             tr("Export meeting transcripts as SRT or VTT subtitles with hex meetings show"),
         ));
+        // macOS's meeting controller reads the call app's audio output, so
+        // Linux renders of macOS scenes leave it out.
+        if cfg!(target_os = "macos") {
+            rows.push(row(
+                Feature::StopWhenCallEnds,
+                &TIMER,
+                tr("Stop when the call ends"),
+                tr("Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"),
+            ));
+        }
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -411,6 +421,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::HistoryStats => "lab-history-stats",
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::SkipPauses => "lab-skip-pauses",
+        Feature::StopWhenCallEnds => "lab-stop-when-call-ends",
     }
 }
 

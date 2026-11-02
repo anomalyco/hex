@@ -157,6 +157,28 @@ pub(crate) fn browser_process_objects(which: BrowserProcesses) -> Result<Vec<Aud
     })
 }
 
+#[cfg(target_os = "macos")]
+/// Whether any Core Audio process of the app `canonical_bundle_id` (its
+/// helpers included) is playing output: a call keeps it open, muted or not,
+/// and a hung-up WhatsApp call closes it with the microphone (#835).
+pub(crate) fn application_running_output(canonical_bundle_id: &str) -> Result<bool> {
+    objc2::rc::autoreleasepool(|_| {
+        let process_objects = property_vec::<AudioObjectID>(
+            kAudioObjectSystemObject as AudioObjectID,
+            kAudioHardwarePropertyProcessObjectList,
+        )?;
+        Ok(process_objects.into_iter().any(|process_object| {
+            property_value::<u32>(process_object, kAudioProcessPropertyIsRunningOutput)
+                .is_ok_and(|running| running != 0)
+                && property_cf_string(process_object, kAudioProcessPropertyBundleID).is_some_and(
+                    |bundle_id| {
+                        canonical_bundle_id_for(&bundle_id, None) == Some(canonical_bundle_id)
+                    },
+                )
+        }))
+    })
+}
+
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
 const EXECUTABLES: [(&str, &str); 22] = [

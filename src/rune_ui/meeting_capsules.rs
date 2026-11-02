@@ -86,8 +86,11 @@ enum Kind {
         automatic: bool,
     },
     Offer(MeetingCandidate),
+    /// `auto_stop` when the recording stops on its own after a grace (Labs
+    /// › Stop when the call ends); Keep recording then cancels that.
     CallEnded {
         app: String,
+        auto_stop: bool,
     },
     Ready(Box<MeetingManifest>),
     /// An automatic recording while the recording indicator is off.
@@ -507,9 +510,15 @@ impl MeetingCapsules {
                     }
                 });
             }
-            ControllerEvent::CallEnded { app } => {
+            ControllerEvent::CallEnded { app, auto_stop } => {
                 self.close_recording();
-                self.show_panel(Kind::CallEnded { app: app.clone() }, None);
+                self.show_panel(
+                    Kind::CallEnded {
+                        app: app.clone(),
+                        auto_stop: *auto_stop,
+                    },
+                    None,
+                );
             }
             ControllerEvent::Finished(manifest) => {
                 self.close_recording();
@@ -726,12 +735,26 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
             }));
             (p.muted(), candidate.offer_title(), String::new(), actions)
         }
-        Kind::CallEnded { app } => (
+        Kind::CallEnded { app, auto_stop } => (
             p.danger(),
             tr_fill("{} left the call", app),
-            tr("Hex is still recording.").to_owned(),
+            if *auto_stop {
+                tr("Hex stops recording in 30 s unless you keep recording.")
+            } else {
+                tr("Hex is still recording.")
+            }
+            .to_owned(),
             vec![
                 button(p, "keep-recording", tr("Keep recording"), false, |c| {
+                    if matches!(
+                        c.kind,
+                        Some(Kind::CallEnded {
+                            auto_stop: true,
+                            ..
+                        })
+                    ) {
+                        c.send(ControllerCommand::KeepRecording);
+                    }
                     c.close();
                 }),
                 button(p, "stop-meeting", tr("Stop & transcribe"), true, |c| {
@@ -1591,7 +1614,33 @@ mod tests {
     fn call_ended() -> Kind {
         Kind::CallEnded {
             app: MeetingSource::Teams.label().into(),
+            auto_stop: false,
         }
+    }
+
+    #[test]
+    fn an_automatic_stop_says_so_and_keep_recording_cancels_it() {
+        let auto = Kind::CallEnded {
+            app: MeetingSource::WhatsApp.label().into(),
+            auto_stop: true,
+        };
+        let (mut rt, commands, _) = runtime(auto, false, true, CALL_ENDED);
+        assert!(
+            texts(&rt)
+                .contains(&"Hex stops recording in 30 s unless you keep recording.".to_string())
+        );
+        tap(&mut rt, "keep-recording");
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(ControllerCommand::KeepRecording)
+        ));
+        assert!(rt.state.kind.is_none());
+
+        // Without the lab, Keep recording only closes the capsule.
+        let (mut rt, commands, _) = runtime(call_ended(), false, true, CALL_ENDED);
+        assert!(texts(&rt).contains(&"Hex is still recording.".to_string()));
+        tap(&mut rt, "keep-recording");
+        assert!(commands.try_recv().is_err());
     }
 
     #[test]

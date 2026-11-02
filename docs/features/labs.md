@@ -50,6 +50,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
+├── Stop when the call ends no labs.stop_when_call_ends (macOS) a recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet (#835)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -552,6 +553,31 @@ clip is passed through untouched. Checks:
 Not yet observed: a real dictation with the toggle on in Hex (the reporter
 measured their own branch on an i5-8259U); the Labs page goldens need
 regenerating on Linux with the new row.
+
+Stop when the call ends (`stop-when-call-ends`, issue 835, macOS like
+Meetings; its row shows wherever Meetings does, in macOS builds): for an
+Always record call that keeps recording after hang-up. The gate,
+`labs::stop_when_call_ends()`, is read on each pass of the meeting
+controller (`poll_recording` in
+[meeting/watcher.rs](../../src/meeting/watcher.rs)), and only for a recording
+Hex started on its own. While on, the call app counts as present while it
+holds the microphone or any of its Core Audio processes has output running
+(`microphone_activity::application_running_output`), since WhatsApp keeps
+the microphone while muted and closes both on hang-up. Once both are off for
+about 3 s, the "left the call" capsule says "Hex stops recording in 30 s
+unless you keep recording."; Keep recording sends
+`ControllerCommand::KeepRecording`, which drops the stop for this absence, and
+the call app coming back drops it too. After 30 s (`AUTO_STOP_GRACE`,
+`AutoStop` in [meeting/detection.rs](../../src/meeting/detection.rs)) the
+controller stops the recording as Stop & Transcribe does and logs it. Manual,
+offered, and calendar recordings never stop, and off, nothing reads the
+output and the capsule and controller are exactly as before. Not built: the
+leave-call button as a signal, per-app rules, and holding off while the
+network is down. Checks: `stop_when_call_ends_is_its_own_bit_and_off_by_default`
+in [labs.rs](../../src/labs.rs) and the auto-stop checks listed in
+[meetings.md](meetings.md#record). Not yet observed: a real WhatsApp, Zoom,
+or Teams call on a Mac with the toggle on; the row renders only in macOS
+builds, so no golden changes.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

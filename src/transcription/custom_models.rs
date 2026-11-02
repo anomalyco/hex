@@ -337,8 +337,7 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         runtime: ModelRuntime::Gguf(artifact),
         languages,
         accepts_language_hint: takes_language_hint(architecture),
-        supports_language_detection: manifest.detects_language
-            && takes_language_hint(architecture),
+        supports_language_detection: manifest.detects_language && takes_language_hint(architecture),
     }))
 }
 

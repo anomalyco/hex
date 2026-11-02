@@ -179,7 +179,7 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
             });
             window.open();
         }
-        ControllerEvent::CallEnded { app } => {
+        ControllerEvent::CallEnded { app, .. } => {
             tracing::info!(%app, "the call ended; the recording continues until Stop");
         }
         ControllerEvent::Offer(_)
