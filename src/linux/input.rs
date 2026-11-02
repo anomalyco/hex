@@ -23,7 +23,6 @@ use crate::linux::session::LinuxSession;
 
 #[path = "input/x11.rs"]
 mod x11;
-use x11::*;
 pub(crate) use x11::{Keymap, MouseCapture, connect_x11};
 
 /// A shortcut as X11 grabs and the portal see it: held modifiers and a
@@ -1202,6 +1201,7 @@ pub(crate) fn send_event(sender: &SyncSender<HotkeyEvent>, event: HotkeyEvent) -
 
 #[cfg(test)]
 mod tests {
+    use super::x11::*;
     use super::*;
     use HotkeyEvent::{Cancel, Finish, PasteLast};
     const START: HotkeyEvent = HotkeyEvent::Start { raw: false };

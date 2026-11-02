@@ -161,7 +161,7 @@ impl HotkeyModifiers {
     }
 
     /// Every key `required` names is among these held ones; others may be held too.
-    fn contains(self, required: Self) -> bool {
+    pub(super) fn contains(self, required: Self) -> bool {
         side_covers(self.control, required.control)
             && side_covers(self.option, required.option)
             && side_covers(self.shift, required.shift)
@@ -171,7 +171,7 @@ impl HotkeyModifiers {
 
     /// Exactly the keys `required` names are held: no other modifier, and
     /// no other side of one it names.
-    fn holds_exactly(self, required: Self) -> bool {
+    pub(super) fn holds_exactly(self, required: Self) -> bool {
         side_exact(self.control, required.control)
             && side_exact(self.option, required.option)
             && side_exact(self.shift, required.shift)
@@ -180,7 +180,7 @@ impl HotkeyModifiers {
     }
 
     /// One keycap per modifier key, so both Options show as two.
-    fn sided(self) -> impl Iterator<Item = (Modifier, ModifierSide)> {
+    pub(super) fn sided(self) -> impl Iterator<Item = (Modifier, ModifierSide)> {
         let function = self.function.then_some(ModifierSide::Either);
         [
             (Modifier::Function, function),
@@ -203,14 +203,14 @@ impl HotkeyModifiers {
     }
 
     #[cfg(target_os = "macos")]
-    fn keycaps(self) -> impl Iterator<Item = &'static str> {
+    pub(super) fn keycaps(self) -> impl Iterator<Item = &'static str> {
         self.sided()
             .map(|(modifier, side)| side_keycap(side, modifier.keycap()))
     }
 
     /// Each modifier key's keycap and the side it must be pressed on.
     /// Linux binds no side, so its keycaps never name one.
-    fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
+    pub(super) fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
         self.sided().map(|(modifier, side)| {
             let side = if cfg!(target_os = "linux") {
                 ModifierSide::Either
@@ -222,7 +222,7 @@ impl HotkeyModifiers {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn keycaps(self) -> impl Iterator<Item = &'static str> {
+    pub(super) fn keycaps(self) -> impl Iterator<Item = &'static str> {
         self.sided_keycaps().map(|(label, _)| label)
     }
 }
@@ -399,7 +399,7 @@ impl HotkeyKey {
         self.label.clone()
     }
 
-    fn same_key(&self, other: &Self) -> bool {
+    pub(super) fn same_key(&self, other: &Self) -> bool {
         if cfg!(target_os = "macos") {
             self.code == other.code
         } else {
@@ -475,16 +475,16 @@ pub enum ChordSide {
 
 #[derive(Deserialize, Serialize)]
 pub(super) struct StoredChord {
-    keys: Vec<ChordKey>,
+    pub(super) keys: Vec<ChordKey>,
 }
 
 /// The shape settings stored before chords.
 #[derive(Deserialize)]
 pub(super) struct LegacyBinding {
     #[serde(default = "legacy_default_modifiers")]
-    modifiers: HotkeyModifiers,
+    pub(super) modifiers: HotkeyModifiers,
     #[serde(default = "legacy_default_key")]
-    key: Option<HotkeyKey>,
+    pub(super) key: Option<HotkeyKey>,
 }
 
 pub(super) fn legacy_default_modifiers() -> HotkeyModifiers {
@@ -633,7 +633,7 @@ impl Default for HotkeyBinding {
 
 impl HotkeyBinding {
     #[cfg(target_os = "linux")]
-    fn linux_dictation_default(alt_space_taken: bool) -> Self {
+    pub(super) fn linux_dictation_default(alt_space_taken: bool) -> Self {
         if alt_space_taken {
             Self::chord(HotkeyModifiers::control_option(), "space")
         } else {
@@ -643,7 +643,7 @@ impl HotkeyBinding {
 
     /// Modifiers plus a key identified by name (Windows and Linux).
     #[cfg_attr(target_os = "macos", allow(dead_code))]
-    fn chord(modifiers: HotkeyModifiers, key: &str) -> Self {
+    pub(super) fn chord(modifiers: HotkeyModifiers, key: &str) -> Self {
         Self {
             modifiers,
             key: Some(HotkeyKey::named(key)),
@@ -913,7 +913,7 @@ impl RuntimeHotkey {
     /// SecondaryFn whether or not Fn is held, and the recorder leaves it out
     /// of such a binding. Only for a binding on one of those keys that does
     /// not ask for Fn is the flag ignored; Fn is never stripped otherwise.
-    fn without_implied_function(self, flags: u64) -> u64 {
+    pub(super) fn without_implied_function(self, flags: u64) -> u64 {
         if cfg!(target_os = "macos")
             && !self.modifiers.function
             && self.key_code.is_some_and(key_reports_function_flag)

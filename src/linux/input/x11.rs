@@ -7,10 +7,10 @@ use super::*;
 /// Temporary pointer grab while Settings records a shortcut. Keyboard input
 /// stays with Rune; Escape, focus loss, saving and closing all drop the grab.
 pub(crate) struct MouseCapture {
-    connection: RustConnection,
-    window: Window,
-    grabbed: bool,
-    modifiers: [u16; 4],
+    pub(super) connection: RustConnection,
+    pub(super) window: Window,
+    pub(super) grabbed: bool,
+    pub(super) modifiers: [u16; 4],
 }
 
 impl MouseCapture {
@@ -388,17 +388,17 @@ pub(super) fn enable_detectable_auto_repeat(connection: &RustConnection) -> bool
 /// new press.
 #[derive(Default)]
 pub(super) struct X11Keys {
-    held: [bool; Shortcut::ALL.len()],
-    releasing: [Option<Instant>; Shortcut::ALL.len()],
-    detectable_repeat: bool,
+    pub(super) held: [bool; Shortcut::ALL.len()],
+    pub(super) releasing: [Option<Instant>; Shortcut::ALL.len()],
+    pub(super) detectable_repeat: bool,
 }
 
 impl X11Keys {
-    fn held(&self, shortcut: Shortcut) -> bool {
+    pub(super) fn held(&self, shortcut: Shortcut) -> bool {
         self.held[shortcut.index()]
     }
 
-    fn press(&mut self, shortcut: Shortcut) -> Option<Input> {
+    pub(super) fn press(&mut self, shortcut: Shortcut) -> Option<Input> {
         let index = shortcut.index();
         if self.releasing[index].take().is_some() || self.held[index] {
             return None;
@@ -407,7 +407,7 @@ impl X11Keys {
         Some(Input::Pressed(shortcut))
     }
 
-    fn release(&mut self, shortcut: Shortcut, now: Instant) -> Option<Input> {
+    pub(super) fn release(&mut self, shortcut: Shortcut, now: Instant) -> Option<Input> {
         let index = shortcut.index();
         if !self.held[index] {
             return None;
@@ -421,7 +421,7 @@ impl X11Keys {
         None
     }
 
-    fn expire(&mut self, now: Instant) -> Vec<Input> {
+    pub(super) fn expire(&mut self, now: Instant) -> Vec<Input> {
         let mut released = Vec::new();
         for shortcut in Shortcut::ALL {
             let index = shortcut.index();
@@ -438,34 +438,34 @@ impl X11Keys {
 }
 
 pub(super) struct X11Grab {
-    mouse: bool,
-    shortcut: Shortcut,
-    code: u8,
-    mask: u16,
-    variants: [ModMask; 4],
+    pub(super) mouse: bool,
+    pub(super) shortcut: Shortcut,
+    pub(super) code: u8,
+    pub(super) mask: u16,
+    pub(super) variants: [ModMask; 4],
 }
 
 /// Toggle's cancel key on X11.
 #[derive(Clone, Copy)]
 pub(super) struct X11CancelKey {
-    code: u8,
-    mask: ModMask,
+    pub(super) code: u8,
+    pub(super) mask: ModMask,
 }
 
 /// Passive grabs on the root window, released on drop.
 pub(super) struct X11Grabs<'a> {
-    connection: &'a RustConnection,
-    root: Window,
-    num_lock: ModMask,
-    escape: u8,
-    keys: Vec<X11Grab>,
-    escape_grabbed: Vec<ModMask>,
-    cancel: Option<X11CancelKey>,
-    cancel_grabbed: Vec<ModMask>,
+    pub(super) connection: &'a RustConnection,
+    pub(super) root: Window,
+    pub(super) num_lock: ModMask,
+    pub(super) escape: u8,
+    pub(super) keys: Vec<X11Grab>,
+    pub(super) escape_grabbed: Vec<ModMask>,
+    pub(super) cancel: Option<X11CancelKey>,
+    pub(super) cancel_grabbed: Vec<ModMask>,
 }
 
 impl X11Grabs<'_> {
-    fn grab(
+    pub(super) fn grab(
         &mut self,
         shortcut: Shortcut,
         code: u8,
@@ -512,14 +512,14 @@ impl X11Grabs<'_> {
     }
 
     /// Returns false when another client holds Escape.
-    fn grab_escape(&mut self) -> Result<bool> {
+    pub(super) fn grab_escape(&mut self) -> Result<bool> {
         let bare = lock_variants(ModMask::default(), self.num_lock);
         self.escape_grabbed = grab_escape(self.connection, self.root, self.escape, &bare)?;
         self.connection.flush()?;
         Ok(!self.escape_grabbed.is_empty())
     }
 
-    fn release_escape(&mut self) -> Result<()> {
+    pub(super) fn release_escape(&mut self) -> Result<()> {
         for modifiers in self.escape_grabbed.drain(..) {
             self.connection
                 .ungrab_key(self.escape, self.root, modifiers)?
@@ -530,13 +530,13 @@ impl X11Grabs<'_> {
     }
 
     /// Whether a press with `mask` (lock bits cleared) is the cancel key.
-    fn cancel_matches(&self, code: u8, mask: u16) -> bool {
+    pub(super) fn cancel_matches(&self, code: u8, mask: u16) -> bool {
         self.cancel
             .is_some_and(|key| key.code == code && u16::from(key.mask) == mask)
     }
 
     /// Returns false when another client holds the cancel key.
-    fn grab_cancel(&mut self) -> Result<bool> {
+    pub(super) fn grab_cancel(&mut self) -> Result<bool> {
         let Some(key) = self.cancel else {
             return Ok(false);
         };
@@ -550,7 +550,7 @@ impl X11Grabs<'_> {
         Ok(!self.cancel_grabbed.is_empty())
     }
 
-    fn release_cancel(&mut self) -> Result<()> {
+    pub(super) fn release_cancel(&mut self) -> Result<()> {
         let Some(key) = self.cancel else {
             return Ok(());
         };
@@ -691,9 +691,9 @@ pub(super) fn lock_variants(base: ModMask, num_lock: ModMask) -> [ModMask; 4] {
 }
 
 pub(crate) struct Keymap {
-    min: u8,
-    symbols_per_keycode: usize,
-    symbols: Vec<u32>,
+    pub(super) min: u8,
+    pub(super) symbols_per_keycode: usize,
+    pub(super) symbols: Vec<u32>,
 }
 
 impl Keymap {

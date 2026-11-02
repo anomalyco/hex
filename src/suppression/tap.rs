@@ -5,9 +5,9 @@
 use super::*;
 
 pub(super) struct AttachedTap {
-    tap: *mut c_void,
-    source: *mut c_void,
-    run_loop: *mut c_void,
+    pub(super) tap: *mut c_void,
+    pub(super) source: *mut c_void,
+    pub(super) run_loop: *mut c_void,
 }
 
 impl AttachedTap {
@@ -251,10 +251,10 @@ impl TapKind {
 }
 
 pub(super) struct ManagedTap {
-    kind: TapKind,
-    attached: Option<AttachedTap>,
+    pub(super) kind: TapKind,
+    pub(super) attached: Option<AttachedTap>,
     /// Creation failed and was logged; log again only once it recovers.
-    failing: bool,
+    pub(super) failing: bool,
 }
 
 impl ManagedTap {
@@ -305,9 +305,9 @@ impl ManagedTap {
 
 /// The taps on the event-tap thread, checked by its health timer.
 pub(super) struct TapSet {
-    context: *mut EventTapContext,
-    run_loop: *mut c_void,
-    taps: [ManagedTap; 3],
+    pub(super) context: *mut EventTapContext,
+    pub(super) run_loop: *mut c_void,
+    pub(super) taps: [ManagedTap; 3],
 }
 
 impl TapSet {
