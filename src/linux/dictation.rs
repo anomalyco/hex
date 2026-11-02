@@ -180,6 +180,7 @@ impl DictationOutput {
     /// Processes (unless `raw`) and pastes one transcript, or only
     /// processes it when there is no paster (a printing stop), then records
     /// it.
+    #[allow(clippy::too_many_arguments)]
     fn deliver(
         &self,
         raw_text: String,
