@@ -1436,9 +1436,15 @@ Linux beta                               // not macOS feature parity
 │   │   │   │   Open button, and process.log warns (#723)
 │   │   │   │   // no check; not run on a GNOME session
 │   │   │   // a desktop keeps a stored binding over a new preferred_trigger for the same id
-│   │   └── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
-│   │       under that shortcut's own row (Dictation, Output);
-│   │       the rest keep working
+│   │   ├── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
+│   │   │   under that shortcut's own row (Dictation, Output);
+│   │   │   the rest keep working
+│   │   └── The portal's backend fails the bind (Response 2 or a bus error, not
+│   │       a dismissal; niri with the GNOME backend, #1014) -> as without the
+│   │       portal below; this listener run doesn't bind again, a restart
+│   │       (Enable, a settings change) tries once more
+│   │       // check: only_backend_failures_count_as_a_missing_portal (the
+│   │       // classification only); not run on niri
 │   ├── Wayland without the portal -> Bind `hex` commands in the desktop
 │   │   ├── General hides shortcut rows and lists the commands
 │   │   └── GNOME: Add GNOME keyboard shortcuts -> custom shortcuts running
