@@ -108,6 +108,12 @@ impl crate::control::host::Host for LinuxControl {
     }
 
     fn show_window(&self, pane: Option<Pane>) -> std::result::Result<(), ControlError> {
+        if let Some(why) = self.host.window_failure() {
+            return Err(ControlError::new(
+                "unavailable",
+                super::window_failure_message(&why),
+            ));
+        }
         self.window(Control::Show(pane))
     }
 

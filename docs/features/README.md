@@ -1451,6 +1451,15 @@ Linux beta                               // not macOS feature parity
 │       │   // seen in headless mutter 51 + Xwayland on apollo: HUD at the top
 │       │   // centre, animating, focus unchanged, the pointer over it hits the
 │       │   // window below; not yet on a real GNOME Shell session
+│       │   ├── Drawn on the compositor's GPU only, opaque when its driver offers
+│       │   │   no translucent alpha (NVIDIA), never moved to an iGPU or lavapipe
+│       │   │   that can't make its swapchain (#979, #982)
+│       │   └── Surface refuses its configuration -> that overlay alone fails with
+│       │       wgpu's reason (Live text or the HUD); the window and other overlays
+│       │       keep running; the next show tries again
+│       │       // checked with a noop-backend Rune test; not on NVIDIA hardware
+│       ├── Window's Rune app panics anyway -> `hex window show` errors and
+│       │   `hex status` reports the window and HUD stopped, with the reason (#979)
 │       ├── Neither (Rune refused it, or no layer-shell and no XWayland)
 │       │   -> process.log warns once; `hex status` reports `hud_limitation`
 │       │   and the listener warning

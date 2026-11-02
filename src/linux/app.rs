@@ -189,6 +189,9 @@ struct Shared {
     waker: Mutex<Option<Waker>>,
     /// Whether the window shows, as its app reports it.
     window_visible: Mutex<Option<WindowVisible>>,
+    /// Why the window's app stopped, once it panicked (#979): the window
+    /// and overlays are gone until Hex restarts.
+    window_failure: Mutex<Option<String>>,
     shutdown: &'static AtomicBool,
 }
 
@@ -205,6 +208,7 @@ impl HostHandle {
             host: Mutex::new(host),
             waker: Mutex::new(None),
             window_visible: Mutex::new(None),
+            window_failure: Mutex::new(None),
             shutdown,
         }))
     }
@@ -278,8 +282,28 @@ impl HostHandle {
     }
 
     fn window_open(&self) -> bool {
+        if self.window_failure().is_some() {
+            return false;
+        }
         let visible = self.0.window_visible.lock().unwrap().clone();
         visible.is_some_and(|visible| visible())
+    }
+
+    /// Why the window's app stopped, if it did.
+    fn window_failure(&self) -> Option<String> {
+        self.0
+            .window_failure
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    fn window_failed(&self, reason: String) {
+        *self
+            .0
+            .window_failure
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(reason);
     }
 
     /// A closed window leaves no shortcut capture behind.
@@ -298,7 +322,11 @@ impl HostHandle {
     }
 
     fn status(&self, snapshot: HostSnapshot, session: linux_service::Session) -> Status {
-        let hud_limitation = crate::linux::rune_hud::limitation();
+        // The HUD runs in the window's app, so it went with it.
+        let hud_limitation = self
+            .window_failure()
+            .map(|why| window_failure_message(&why))
+            .or_else(crate::linux::rune_hud::limitation);
         let mut desktop = snapshot.desktop;
         // A running listener also reports the missing HUD as its warning.
         if desktop.listener.running && desktop.listener.warning.is_none() {
@@ -481,16 +509,35 @@ fn run_window(
     shutdown: &'static AtomicBool,
 ) {
     let app = host.clone();
-    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::rune_ui::run_app(app, requests, first, shutdown)
-    }))
-    .is_err()
-    {
-        tracing::error!("the Hex window failed; Hex keeps running without it");
+    })) {
+        let reason = panic_reason(panic.as_ref());
+        tracing::error!(%reason, "the Hex window failed; Hex keeps running without it");
+        // `hex window show` and `hex status` say so instead of reporting
+        // a window that can no longer open (#979).
+        host.window_failed(reason);
         while !shutdown.load(Ordering::Acquire) {
             std::thread::sleep(Duration::from_millis(100));
         }
     }
+}
+
+/// A panic's message, when it carries one.
+fn panic_reason(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|message| (*message).to_owned())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no reason given".into())
+}
+
+/// What `hex status` and `hex window show` report once the window failed.
+fn window_failure_message(reason: &str) -> String {
+    let reason = reason.lines().next().unwrap_or(reason);
+    format!(
+        "The Hex window and recording HUD stopped ({reason}). Dictation still works; restart Hex to try again."
+    )
 }
 
 fn reopen_marker() -> Option<PathBuf> {
@@ -1393,6 +1440,24 @@ mod tests {
             std::thread::yield_now();
         }
         host.shortcut_edit.as_mut().unwrap().worker = Some(worker);
+    }
+
+    #[test]
+    fn a_failed_window_never_reports_itself_open() {
+        static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+        let host = HostHandle::new(host_for_edit(false), &SHUTDOWN);
+        host.set_window_visible(Arc::new(|| true));
+        assert!(host.window_open());
+        let panic = std::panic::catch_unwind(|| panic!("Invalid surface")).unwrap_err();
+        host.window_failed(panic_reason(panic.as_ref()));
+        assert!(!host.window_open());
+        let status = host.status(host.snapshot(), linux_service::Session::current());
+        assert!(!status.window_open);
+        assert!(
+            status
+                .hud_limitation
+                .is_some_and(|why| why.contains("Invalid surface"))
+        );
     }
 
     #[test]
