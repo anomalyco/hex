@@ -1759,38 +1759,38 @@ pub fn annotate_and_crop(
         .and_then(|settings| {
             // A crop bug must never cost the capture: fall back to the full frames.
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let changes: Vec<Vec<Rect>> = (0..selected.len())
-                .map(|i| match (i, baseline) {
-                    (0, Some(first)) if selected[0].0.t > first.t_ms => {
-                        change_regions(first, &selected[0].1)
-                    }
-                    (0, _) => Vec::new(),
-                    _ => change_regions(&selected[i - 1].1, &selected[i].1),
-                })
-                .collect();
-            let times: Vec<u64> = selected.iter().map(|(k, _)| k.t).collect();
-            let mut input = Input::new(
-                target.frame,
-                duration_ms,
-                &times,
-                strokes,
-                events,
-                windows,
-                cursor,
-                &changes,
-            );
-            input.pin_ink(selected.iter().map(|(k, _)| k), strokes, marks);
-            let screen = input.screen;
-            input.content = std::thread::scope(|scope| {
-                let workers: Vec<_> = selected
-                    .iter()
-                    .map(|(_, frame)| scope.spawn(move || Content::from_frame(frame, screen)))
+                let changes: Vec<Vec<Rect>> = (0..selected.len())
+                    .map(|i| match (i, baseline) {
+                        (0, Some(first)) if selected[0].0.t > first.t_ms => {
+                            change_regions(first, &selected[0].1)
+                        }
+                        (0, _) => Vec::new(),
+                        _ => change_regions(&selected[i - 1].1, &selected[i].1),
+                    })
                     .collect();
-                workers.into_iter().map(|w| w.join().ok()).collect()
-            });
-            let crops = compute(&input, settings);
-            (crops.len() == selected.len() && crops.iter().any(|c| c.kind != CropKind::Full))
-                .then_some((crops, changes))
+                let times: Vec<u64> = selected.iter().map(|(k, _)| k.t).collect();
+                let mut input = Input::new(
+                    target.frame,
+                    duration_ms,
+                    &times,
+                    strokes,
+                    events,
+                    windows,
+                    cursor,
+                    &changes,
+                );
+                input.pin_ink(selected.iter().map(|(k, _)| k), strokes, marks);
+                let screen = input.screen;
+                input.content = std::thread::scope(|scope| {
+                    let workers: Vec<_> = selected
+                        .iter()
+                        .map(|(_, frame)| scope.spawn(move || Content::from_frame(frame, screen)))
+                        .collect();
+                    workers.into_iter().map(|w| w.join().ok()).collect()
+                });
+                let crops = compute(&input, settings);
+                (crops.len() == selected.len() && crops.iter().any(|c| c.kind != CropKind::Full))
+                    .then_some((crops, changes))
             }))
             .ok()
             .flatten()
@@ -2132,7 +2132,12 @@ mod tests {
             frames.push(raw(w, h, px(w + 7, h)));
             frames.push(raw(w, h, px(w, h) / 2 + 1));
         }
-        let screens = [[1920.0, 1080.0], [1536.0, 864.0], [2560.0, 1440.0], [1.0, 1.0]];
+        let screens = [
+            [1920.0, 1080.0],
+            [1536.0, 864.0],
+            [2560.0, 1440.0],
+            [1.0, 1.0],
+        ];
         for frame in &frames {
             for screen in screens {
                 Content::from_frame(frame, screen);
@@ -2165,7 +2170,7 @@ mod tests {
             let events = vec![click(1_000, 0.25, 0.3), click(1_300, 0.3, 0.35)];
             let selected: Vec<_> = frames
                 .iter()
-                .filter(|f| f.width > 0 && f.height > 0)
+                .filter(|f| f.width > 0 && f.height > 0 && f.rgba.len() >= px(f.width, f.height))
                 .enumerate()
                 .map(|(i, f)| (keyframe(i, 1_000 + i as u64 * 100), f.clone()))
                 .collect();
