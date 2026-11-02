@@ -91,10 +91,11 @@ pub enum Feature {
     SkipPauses,
     StopWhenCallEnds,
     OutputFixes,
+    PickerActiveFirst,
 }
 
 impl Feature {
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -127,6 +128,7 @@ impl Feature {
         Self::SkipPauses,
         Self::StopWhenCallEnds,
         Self::OutputFixes,
+        Self::PickerActiveFirst,
     ];
 
     /// The features this OS and build have.
@@ -181,7 +183,8 @@ impl Feature {
             | Self::RecentDictations
             | Self::SkipPauses
             | Self::StopWhenCallEnds
-            | Self::OutputFixes => Audience::Everyone,
+            | Self::OutputFixes
+            | Self::PickerActiveFirst => Audience::Everyone,
         }
     }
 
@@ -239,6 +242,7 @@ impl Feature {
             | Self::ParakeetUltra
             | Self::HistoryStats
             | Self::OutputFixes
+            | Self::PickerActiveFirst
             | Self::FillerWords => true,
         }
     }
@@ -278,6 +282,7 @@ impl Feature {
             Self::SkipPauses => "skip-pauses",
             Self::StopWhenCallEnds => "stop-when-call-ends",
             Self::OutputFixes => "output-fixes",
+            Self::PickerActiveFirst => "picker-active-first",
         }
     }
 
@@ -316,6 +321,7 @@ impl Feature {
             Self::SkipPauses => "labs.skip_pauses",
             Self::StopWhenCallEnds => "labs.stop_when_call_ends",
             Self::OutputFixes => "labs.output_fixes",
+            Self::PickerActiveFirst => "labs.picker_active_first",
         }
     }
 
@@ -402,6 +408,7 @@ impl Feature {
             Self::OutputFixes => {
                 "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
             }
+            Self::PickerActiveFirst => "The speech model picker lists the model you're using first",
         }
     }
 
@@ -444,6 +451,7 @@ impl Feature {
             Self::SkipPauses => settings.labs.skip_pauses,
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends,
             Self::OutputFixes => settings.labs.output_fixes,
+            Self::PickerActiveFirst => settings.labs.picker_active_first,
         }
     }
 
@@ -484,6 +492,7 @@ impl Feature {
             &mut labs.skip_pauses,
             &mut labs.stop_when_call_ends,
             &mut labs.output_fixes,
+            &mut labs.picker_active_first,
         ]
     }
 
@@ -525,6 +534,7 @@ impl Feature {
             Self::SkipPauses => settings.labs.skip_pauses = on,
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends = on,
             Self::OutputFixes => settings.labs.output_fixes = on,
+            Self::PickerActiveFirst => settings.labs.picker_active_first = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;

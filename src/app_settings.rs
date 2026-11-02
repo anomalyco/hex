@@ -1423,6 +1423,8 @@ pub struct LabsSettings {
     pub stop_when_call_ends: bool,
     /// Output's Try card offers Vocabulary and Fix this beside its result (issue 989).
     pub output_fixes: bool,
+    /// The speech model picker lists the model in use first (issue 1019).
+    pub picker_active_first: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1458,6 +1460,7 @@ impl Default for LabsSettings {
             skip_pauses: false,
             stop_when_call_ends: false,
             output_fixes: false,
+            picker_active_first: false,
         }
     }
 }

@@ -107,6 +107,9 @@ pub(super) struct Picker {
     /// The card whose details are open (Parakeet Ultra's credit and
     /// published benchmarks).
     pub(super) details: super::model_details::DetailsState,
+    /// The model in use when the picker opened, which Labs › Model in use
+    /// first lists first; fixed until the picker closes.
+    in_use_first: Option<TranscriptionModelId>,
 }
 
 impl Picker {
@@ -141,6 +144,8 @@ pub(super) fn open(ui: &mut Ui) {
     ui.picker.supported_only = false;
     ui.picker.view = View::Compare;
     ui.picker.others_open = false;
+    ui.picker.in_use_first = (active_first_on(ui) && ui.picker.selected_installed(&ui.settings))
+        .then_some(ui.settings.transcription.model);
 }
 
 /// Switches between the comparison and the full list.
@@ -153,6 +158,24 @@ pub(super) fn show(ui: &mut Ui, view: View) {
 fn sort_filter_on(ui: &Ui) -> bool {
     let feature = crate::labs::Feature::PickerSortFilter;
     feature.shipped() && feature.on(&ui.settings)
+}
+
+/// Whether Labs › Model in use first is on.
+fn active_first_on(ui: &Ui) -> bool {
+    let feature = crate::labs::Feature::PickerActiveFirst;
+    feature.shipped() && feature.on(&ui.settings)
+}
+
+/// The model the comparison shows first: the one in use when the picker
+/// opened, while Labs › Model in use first is on.
+fn pinned(ui: &Ui) -> Option<TranscriptionModelId> {
+    ui.picker.in_use_first.filter(|_| active_first_on(ui))
+}
+
+/// The model the full list leads with: [`pinned`], unless Labs › Sort and
+/// filter models sorts by size or name, which keep their exact order.
+fn list_first(ui: &Ui) -> Option<TranscriptionModelId> {
+    pinned(ui).filter(|_| !sort_filter_on(ui) || ui.picker.sort == Sort::Recommended)
 }
 
 /// Whether Labs › Benchmark details is on.
@@ -284,6 +307,7 @@ fn hidden_model(
 
 pub(super) fn close(ui: &mut Ui) {
     ui.picker.open = false;
+    ui.picker.in_use_first = None;
     ui.picker.clear_deletion();
 }
 
@@ -831,6 +855,50 @@ mod tests {
         settings.labs.benchmark_details = true;
         let ui = Ui::with(settings, super::super::Service::Fixture(Vec::new()));
         assert!(benchmark_details_on(&ui));
+    }
+
+    fn ui_with_active_first(on: bool) -> Ui {
+        let mut settings = AppSettings::default();
+        settings.labs.picker_active_first = on;
+        let mut ui = Ui::with(settings, super::super::Service::Fixture(Vec::new()));
+        ui.picker.installed = Some(vec![ui.settings.transcription.model]);
+        ui
+    }
+
+    #[test]
+    fn the_model_in_use_is_fixed_while_the_picker_is_open() {
+        let mut ui = ui_with_active_first(true);
+        let saved = ui.settings.transcription.model;
+        open(&mut ui);
+        assert_eq!(pinned(&ui), Some(saved));
+        assert_eq!(list_first(&ui), Some(saved));
+        // Another model becomes the saved one while it is open: no change.
+        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+        assert_eq!(pinned(&ui), Some(saved));
+        // By size and by name keep their exact order.
+        ui.settings.labs.picker_sort_filter = true;
+        ui.picker.sort = Sort::Size;
+        assert_eq!(list_first(&ui), None);
+        assert_eq!(pinned(&ui), Some(saved));
+        ui.picker.sort = Sort::Name;
+        assert_eq!(list_first(&ui), None);
+        ui.picker.sort = Sort::Recommended;
+        assert_eq!(list_first(&ui), Some(saved));
+        close(&mut ui);
+        assert_eq!(pinned(&ui), None);
+    }
+
+    #[test]
+    fn without_model_in_use_first_nothing_is_pinned() {
+        let mut ui = ui_with_active_first(false);
+        open(&mut ui);
+        assert_eq!(pinned(&ui), None);
+        assert_eq!(list_first(&ui), None);
+        // A model that isn't installed is never pinned.
+        let mut ui = ui_with_active_first(true);
+        ui.picker.installed = Some(Vec::new());
+        open(&mut ui);
+        assert_eq!(pinned(&ui), None);
     }
 
     #[test]

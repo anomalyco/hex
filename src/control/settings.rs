@@ -393,6 +393,11 @@ const KEYS: &[Key] = &[
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
     ),
     key(
+        "labs.picker_active_first",
+        Kind::Bool,
+        "Labs: the speech model picker lists the model in use first",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
