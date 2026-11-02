@@ -13,6 +13,8 @@ final class KeyboardViewController: UIInputViewController {
     private var fullKeyboard: FullKeyboardView?
     private var heightConstraint: NSLayoutConstraint?
     private var pollInterval: TimeInterval = 0
+    private var didHandOffCurrentField = false
+    private var didWarmLexicon = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -23,10 +25,17 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         coldStartJobID = UUID().uuidString
+        didHandOffCurrentField = false
         mountSurface()
         fullKeyboard?.prepareForField()
+        handOffNumericPadIfNeeded()
         syncFromBridge(animated: false)
         schedulePoll(force: true)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        warmFullKeyboardLexiconIfNeeded()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -35,10 +44,23 @@ final class KeyboardViewController: UIInputViewController {
         pollTimer = nil
     }
 
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        fullKeyboard?.handleMemoryWarning()
+    }
+
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
         if let fullKeyboard, heightConstraint?.constant != fullKeyboard.preferredHeight {
             heightConstraint?.constant = fullKeyboard.preferredHeight
+            preferredContentSize.height = fullKeyboard.preferredHeight
+        }
+    }
+
+    override func textWillChange(_ textInput: UITextInput?) {
+        super.textWillChange(textInput)
+        if KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) != .handOff {
+            didHandOffCurrentField = false
         }
     }
 
@@ -46,6 +68,32 @@ final class KeyboardViewController: UIInputViewController {
         super.textDidChange(textInput)
         updateKeyboardTraits()
         fullKeyboard?.textDidChange()
+        handOffNumericPadIfNeeded()
+    }
+
+    private func handOffNumericPadIfNeeded() {
+        guard fullKeyboard != nil else { return }
+        if KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) == .handOff {
+            guard !didHandOffCurrentField else { return }
+            didHandOffCurrentField = true
+            if needsInputModeSwitchKey {
+                advanceToNextInputMode()
+            }
+        } else {
+            didHandOffCurrentField = false
+        }
+    }
+
+    private func warmFullKeyboardLexiconIfNeeded() {
+        guard let fullKeyboard else { return }
+        fullKeyboard.warmUpTextCheckerAsync()
+        guard !didWarmLexicon else { return }
+        didWarmLexicon = true
+        requestSupplementaryLexicon { [weak self] lexicon in
+            DispatchQueue.main.async {
+                self?.fullKeyboard?.loadLexicon(lexicon)
+            }
+        }
     }
 
     private func configureView() {
@@ -99,6 +147,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         surface?.removeFromSuperview()
         fullKeyboard = nil
+        didWarmLexicon = false
 
         let mounted: UIView
         if wantsFull {
@@ -150,6 +199,7 @@ final class KeyboardViewController: UIInputViewController {
     private func syncFromBridge(animated: Bool) {
         let now = Date().timeIntervalSince1970
         updateKeyboardTraits()
+        fullKeyboard?.syncSettings()
 
         #if targetEnvironment(simulator)
         let simSnap = bridge.snapshot()
@@ -248,9 +298,14 @@ final class KeyboardViewController: UIInputViewController {
         overrideUserInterfaceStyle = textDocumentProxy.keyboardAppearance == .dark ? .dark : .unspecified
         let nextReturn: String = switch textDocumentProxy.returnKeyType {
         case .send: "Send"
-        case .search: "Search"
+        case .google, .yahoo, .search: "Search"
         case .go: "Go"
         case .done: "Done"
+        case .join: "Join"
+        case .next: "Next"
+        case .route: "Route"
+        case .continue: "Continue"
+        case .emergencyCall: "SOS"
         default: "Return"
         }
         if viewModel.returnKeyLabel != nextReturn {
