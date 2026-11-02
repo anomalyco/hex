@@ -643,6 +643,9 @@ Completed output                         // output
     ├── Inspect / search / copy (row hover or the card) / delete
     ├── Retention ("Keep: 7 days" menu) -> Seven days by default, always hard-capped
     ├── Off -> Stop new entries; preserve existing entries
+    └── Labs > Keep recordings (off) -> new entries keep their 16 kHz audio   // labs.keep-recordings
+        -> the card's "Transcribe again" menu runs it through any installed model
+        -> the new text with Copy and Replace; Clear all and retention delete the audio (labs.md, #1032)
 ```
 
 Checks in [paste.rs](../../src/paste.rs), [parakeet.rs](../../src/parakeet.rs), and

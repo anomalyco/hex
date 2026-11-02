@@ -393,7 +393,8 @@ substitute for source inspection or a second roadmap.
   translates lacks a language.
 - `history`: the owner-only bounded retained-dictation store: retention
   windows with hard entry and byte caps, atomic crash-safe persistence, and
-  search. Text and bounded metadata only, never audio.
+  search. Text and bounded metadata; audio only with Labs › Keep recordings
+  (`history/recordings`: one owner-only WAV per entry, Transcribe again).
 - `control/transcript_cli`: read-only release commands `hex history` and
   `hex meetings list|show|search` on every OS, versioned JSON projections and
   filters.
@@ -899,9 +900,15 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Do not persist captured audio by default. Explicit foreground meeting
   recording must remain visibly active. Diagnostic dictation retention is an
   explicit, bounded, owner-only opt-in through `HEX_RETAIN_DICTATION_AUDIO`.
+  Labs › Keep recordings (`keep-recordings`, off by default) is the only
+  other way dictation audio is stored: while on, each new History entry
+  keeps its 16 kHz clip as an owner-only WAV beside the store. The audio
+  follows its entry's retention, entry cap, Delete, and Clear all, under its
+  own 512 MiB cap (oldest audio dropped first, text kept). Turning it off
+  stops saving; existing audio stays until it expires or History is cleared.
 - Retained dictation history records only successful pasted output: raw and
-  final text plus bounded metadata, never audio, full browser URLs, or window
-  titles. History defaults to seven days, and every retention window remains
+  final text plus bounded metadata, never full browser URLs or window titles,
+  and no audio unless Labs › Keep recordings is on. History defaults to seven days, and every retention window remains
   subject to hard entry and byte caps. No new entries are accepted while Off.
   Turning retention Off preserves existing entries; clearing history is explicit.
   Time-based retention expires during idle uptime through the shared history

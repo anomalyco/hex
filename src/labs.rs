@@ -760,8 +760,8 @@ pub fn stop_when_call_ends() -> bool {
 }
 
 /// A dictation saved to History keeps its 16 kHz audio, and History offers
-/// Transcribe again for it (read as each capture is handed to the engine,
-/// again as History records it, and when the History pane draws).
+/// Transcribe again for it (read as each capture is handed to the engine;
+/// the History pane reads the saved setting).
 pub fn keep_recordings() -> bool {
     on(KEEP_RECORDINGS)
 }

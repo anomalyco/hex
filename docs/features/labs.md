@@ -56,6 +56,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
+├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -713,6 +714,47 @@ in the file manager, or choosing another folder for models. Checks:
 `every_feature_is_off_by_default_and_round_trips` in
 [labs.rs](../../src/labs.rs). Not yet observed: the row in a real window; the
 Labs page goldens need regenerating on Linux with the new row.
+
+Keep recordings (`keep-recordings`, issue 1032, every OS): for hearing a
+dictation again through a different model.
+
+```ts
+Labs › Keep recordings on                     // labs.keep-recordings
+├── Dictation saved to History -> its 16 kHz mono clip is written as a 16-bit
+│   WAV, history-audio/<id>.wav beside history.json (folder 0700, file 0600)
+│   ├── The gate: `Recording::keep`, read as each capture goes to the engine
+│   │   (parakeet::submit on macOS, submit_capture on Windows and Linux)
+│   ├── History Off, the local API's dictations -> no entry, no audio
+│   └── Entries from before the toggle was on -> no audio
+├── Retention, the 10,000-entry and text caps, Delete, Clear all -> the
+│   entry's WAV is deleted at the next save (`recordings::sweep`)
+├── Over 512 MiB of audio -> the oldest entries lose their audio, keep their text
+├── History card, entry with audio -> "Saved recording" + "Transcribe again" menu
+│   ├── Lists every available model installed for the language it would use
+│   ├── Choose one -> "Transcribing with <model>…" on a worker: its own
+│   │   transcription service, sharing the dictation engine's model when it is
+│   │   the one chosen, yielding to dictation; otherwise loads a copy for the run
+│   ├── Done -> "Transcribed again with <model>", the text, Copy, Replace
+│   │   └── Replace -> the entry's text becomes it (processing record dropped);
+│   │       the audio stays
+│   └── Failed -> "Could not transcribe again: <why>"
+└── Toggle off -> nothing new is saved and the menu hides; existing audio stays
+    until it expires or History is cleared
+```
+
+No playback yet. Off, History and dictation are exactly as before: no copy
+of the clip is made. Checks: `a_kept_recording_is_an_owner_only_wav_that_reads_back`,
+`recordings_leave_with_their_entries`,
+`the_recordings_byte_cap_drops_the_oldest_audio_but_keeps_the_text`,
+`a_recording_another_process_has_not_saved_yet_survives_a_sweep`,
+`replacing_the_text_keeps_the_entry_and_its_recording`, and
+`retranscribing_a_missing_recording_says_so` in
+[history.rs](../../src/history.rs);
+`transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry` in
+[tests.rs](../../src/rune_ui/tests.rs);
+`keep_recordings_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real dictation kept and
+transcribed again with another model in a window, on any OS.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
