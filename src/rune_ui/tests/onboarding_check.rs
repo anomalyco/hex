@@ -34,8 +34,10 @@ pub(super) const SCENES: &[&str] = &[
     "windows-onboarding-microphone",
     // GNOME and KDE on Wayland: the desktop's paste permission, explained.
     "onboarding-paste",
-    // Almost ready: the model still downloads.
+    // Almost ready: the model still downloads, and a sketch from "Watch
+    // another one" while it does.
     "onboarding-waiting",
+    "onboarding-sketch",
     // Your turn: the practice game, and the shortcut that didn't start.
     "onboarding-try",
     "mac-onboarding-try",

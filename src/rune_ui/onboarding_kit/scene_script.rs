@@ -435,10 +435,21 @@ struct Parser<'a> {
     /// What's in the field, to check deletes, sends and autocorrect.
     draft: String,
     labels: Vec<&'a str>,
+    /// A sketch: `"Without Hex"` alone, which ends at `end`.
+    sketch: bool,
 }
 
 /// Parses a scene file, or reports every mistake in it.
 pub(crate) fn parse(src: &str) -> Result<Script<'_>, ParseErrors> {
+    parse_as(src, false)
+}
+
+/// Parses a sketch: a scene with no `with`, which ends at `end`.
+pub(crate) fn parse_sketch(src: &str) -> Result<Script<'_>, ParseErrors> {
+    parse_as(src, true)
+}
+
+fn parse_as(src: &str, sketch: bool) -> Result<Script<'_>, ParseErrors> {
     let mut p = Parser {
         errors: Vec::new(),
         line: 0,
@@ -456,6 +467,7 @@ pub(crate) fn parse(src: &str) -> Result<Script<'_>, ParseErrors> {
         typed: None,
         draft: String::new(),
         labels: Vec::new(),
+        sketch,
     };
     for (i, raw) in src.lines().enumerate() {
         p.line = i + 1;
@@ -997,6 +1009,9 @@ impl<'a> Parser<'a> {
                 self.ops.push(Op::End { ending, text });
             }
             "with" => {
+                if self.sketch {
+                    return Err("a sketch ends at `end`; it has no `with`".into());
+                }
                 if self.part != Part::Ended {
                     return Err("`with` comes after `end`".into());
                 }
@@ -1123,17 +1138,19 @@ impl<'a> Parser<'a> {
         if self.part < Part::Ended {
             missing("`end`");
         }
-        if self.part < Part::With {
-            missing("`with`");
-        }
-        if self.hex.is_none() {
-            missing("`hex` line");
-        }
-        if self.score.is_none() {
-            missing("`score`");
-        }
-        if self.typed.is_none() {
-            missing("`typed` score");
+        if !self.sketch {
+            if self.part < Part::With {
+                missing("`with`");
+            }
+            if self.hex.is_none() {
+                missing("`hex` line");
+            }
+            if self.score.is_none() {
+                missing("`score`");
+            }
+            if self.typed.is_none() {
+                missing("`typed` score");
+            }
         }
         if !self.errors.is_empty() {
             return Err(ParseErrors(self.errors));
@@ -1148,10 +1165,10 @@ impl<'a> Parser<'a> {
             lead: self.lead.unwrap_or("One quick reply by hand."),
             ops: self.ops,
             with: Triumph {
-                hex: self.hex.expect("checked"),
+                hex: self.hex.unwrap_or_default(),
                 cheers: self.cheers,
-                score: self.score.expect("checked"),
-                typed: self.typed.expect("checked"),
+                score: self.score.unwrap_or_default(),
+                typed: self.typed.unwrap_or_default(),
             },
             take: OnceLock::new(),
         })

@@ -46,6 +46,7 @@ mod pill;
 mod scene_script;
 pub(super) mod scenes;
 mod sfx;
+mod sketches;
 mod sparks;
 mod stories;
 mod triumph;
@@ -54,5 +55,6 @@ mod versus;
 mod words;
 
 pub(crate) use game::add as game;
+pub(super) use sketches::fixture as sketch_fixture;
 pub(super) use stories::Onboard;
 pub(crate) use stories::{add as stories, set_live_window};

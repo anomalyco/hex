@@ -57,6 +57,14 @@ score  {hex}, no typos, one wedding.
 typed  Typing: {secs}, {typos}, and one date.
 ```
 
+## Sketches
+
+`sketch-*.scene` files are what "Watch another one" plays while the speech
+model downloads: a "Without Hex" part only, no `with`, `score` or `typed`,
+ending at `end`. Each runs 15–18 s, and the first run cuts one short only
+after a reply has gone out, so give it a few replies. They are listed in
+`sketches.rs`, in the order they play.
+
 ## Limits and checking
 
 A scene holds at most 18 lines in "Without Hex" (counting yours and the

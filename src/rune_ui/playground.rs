@@ -223,6 +223,11 @@ const PATHS: &[(&str, &str)] = &[
         "mac-onboarding-restart",
         "Window/Onboarding/Permissions · restart",
     ),
+    ("mac-onboarding-waiting", "Window/Onboarding/Almost ready"),
+    (
+        "mac-onboarding-sketch",
+        "Window/Onboarding/Almost ready · watch another one",
+    ),
     ("mac-onboarding-try", "Window/Onboarding/Your turn"),
     (
         "mac-onboarding-reopen",
@@ -267,6 +272,10 @@ const PATHS: &[(&str, &str)] = &[
     (
         "onboarding-waiting",
         "Linux & Windows/Onboarding · almost ready",
+    ),
+    (
+        "onboarding-sketch",
+        "Linux & Windows/Onboarding · watch another one",
     ),
     (
         "onboarding-paste",

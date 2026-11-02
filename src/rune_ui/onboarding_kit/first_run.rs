@@ -55,7 +55,8 @@ const KNOCK: f32 = 8.0;
 const BURST: f64 = 0.06;
 
 pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
-    let centred = matches!(s.step, Step::Pick | Step::Started | Step::Waiting);
+    let sketch = super::sketches::playing(s);
+    let centred = matches!(s.step, Step::Pick | Step::Started | Step::Waiting) && !sketch;
     let top = row()
         .key("top-bar")
         .w_full()
@@ -79,6 +80,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     };
     let page = match s.step {
         Step::Pick | Step::Started => download_page(p, s, false),
+        Step::Waiting if sketch => sketch_page(p, s),
         Step::Waiting => download_page(p, s, true),
         Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard | Step::Done => demo_page(p, s),
         Step::Microphone | Step::Accessibility => permissions::page(p, s),
@@ -451,10 +453,11 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .width_leads()
         .child(hex_meter(p, "meter", 18.0, d.fraction(), s.closed))
         .child(status_inner);
-    // "Almost ready" receives the capsule back from the top bar, so it
-    // arrives by that flight rather than a staggered entrance.
+    // "Almost ready" receives the download back from the top bar as a
+    // quiet bar, by that flight rather than a staggered entrance, with
+    // "Watch another one" beside it.
     let progress_capsule = if waiting {
-        progress_capsule
+        super::sketches::progress(p, s, d)
     } else {
         s.motion.staggered(progress_capsule, 2.0, 6.0)
     };
@@ -521,6 +524,22 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .child(head)
         .child(progress_capsule)
         .children(retry)
+}
+
+/// A sketch from `"Watch another one"`, the download up in the top pill.
+fn sketch_page(p: Paint, s: &Onboard) -> El {
+    col()
+        .key("sketch")
+        .gap(16.0)
+        .items_center()
+        .child(heading(
+            p,
+            s,
+            "without",
+            tr("Without Hex"),
+            lead(p, super::sketches::lead(s).unwrap_or_default()),
+        ))
+        .children(super::sketches::card(p, s))
 }
 
 fn demo_page(p: Paint, s: &Onboard) -> El {

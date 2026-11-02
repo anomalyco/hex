@@ -159,6 +159,8 @@ pub(crate) struct Onboard {
     pub(crate) replay: replay::Replay,
     /// Where Hex lives once onboarding closes, under `"Hex is ready"`.
     pub(crate) home: super::landing::Home,
+    /// `"Watch another one"` on `"Almost ready"`.
+    pub(crate) sketches: super::sketches::Sketches,
 }
 
 /// A story's dictation of [`ANSWER_TRY`] on the interactive `"Your turn"`,
@@ -279,6 +281,7 @@ impl Onboard {
             autoplay: false,
             replay: replay::Replay::default(),
             home: super::landing::Home::MenuBar,
+            sketches: super::sketches::Sketches::default(),
         }
     }
 
@@ -1153,6 +1156,12 @@ fn to_practice(s: &mut Onboard, now: f64) -> Option<f64> {
         }
         return Some(WAIT);
     }
+    // A sketch playing goes on to its next stop first.
+    if s.step == Step::Waiting
+        && let Some(left) = super::sketches::hold(s, now)
+    {
+        return Some(left);
+    }
     if s.step == Step::Waiting && s.closed < 1.0 {
         return Some(0.9);
     }
@@ -1232,6 +1241,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         tx.launch("w0", "hex-bubble");
     }
     s.hex_seen = hex_sent;
+    super::sketches::advance(s, now, tx);
     if s.manual_override
         && let Some(due) = s.auto_due_at
         && now >= due

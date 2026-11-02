@@ -2168,6 +2168,11 @@ const SCENES: &[Scene] = &[
     ("onboarding-waiting", |ui| {
         first_run(ui, FirstRun::Downloading, Page::Waiting)
     }),
+    // "Watch another one": the first sketch, after its second reply.
+    ("onboarding-sketch", |ui| {
+        first_run(ui, FirstRun::Downloading, Page::Waiting);
+        onboarding_kit::sketch_fixture(ui, 11.0);
+    }),
     // GNOME and KDE on Wayland: why the desktop asks before the first paste.
     ("onboarding-paste", |ui| {
         first_run(ui, FirstRun::PasteAccess, Page::Permissions)
@@ -2572,6 +2577,13 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-onboarding-restart", |ui| {
         mac_first_run(ui, onboarding::MacStep::SetupRestart, Page::Permissions)
+    }),
+    ("mac-onboarding-waiting", |ui| {
+        mac_first_run(ui, onboarding::MacStep::SetupWaiting, Page::Waiting)
+    }),
+    ("mac-onboarding-sketch", |ui| {
+        mac_first_run(ui, onboarding::MacStep::SetupWaiting, Page::Waiting);
+        onboarding_kit::sketch_fixture(ui, 11.0);
     }),
     ("mac-onboarding-try", |ui| {
         mac_first_run(ui, onboarding::MacStep::TryIt, Page::Try)

@@ -38,7 +38,7 @@ use super::pill::{pill, slot};
 use super::scene_script::{Script, fill};
 use super::stories::{Flow, Onboard, Step};
 use super::triumph::{self, HexBeats, Said};
-use super::typing::{Focus, Glyph, Line, Timing, Who};
+use super::typing::{Focus, Glyph, Line, Scene, Timing, Who};
 
 const STAGE_W: f32 = 500.0;
 const STAGE_H: f32 = 540.0;
@@ -778,19 +778,20 @@ fn slam(p: Paint, s: &Onboard, t: f64) -> Option<El> {
 
 /// The red pill in the header, from the first frame, flaring at scene
 /// time `t`.
-fn banner(p: Paint, s: &Onboard, t: f64) -> Option<El> {
-    script()
+fn banner(p: Paint, s: &Onboard, scene: &Scene, t: f64) -> Option<El> {
+    scene
+        .script()
         .pill
-        .map(|copy| presenting(p, copy, s.now, s.scene.flare(t)))
+        .map(|copy| presenting(p, copy, s.now, scene.flare(t)))
 }
 
-/// The conversation's header, named `title`.
-fn room(title: &'static str) -> Notice {
+/// `script`'s conversation header, named `title`.
+fn room(script: &'static Script<'static>, title: &'static str) -> Notice {
     Notice {
         key: "room",
         app: App::Messages,
         from: title,
-        place: script().group,
+        place: script.group,
         body: "",
         field: "iMessage",
     }
@@ -798,8 +799,12 @@ fn room(title: &'static str) -> Notice {
 
 /// Who sent one of theirs in a group: a name over the first of a run and a
 /// face beside the last.
-fn sender(who: u8, first: bool, last: bool) -> Option<Sender<'static>> {
-    let script = script();
+fn sender(
+    script: &'static Script<'static>,
+    who: u8,
+    first: bool,
+    last: bool,
+) -> Option<Sender<'static>> {
     script.group.is_some().then(|| {
         let person = script.person(who);
         Sender {
@@ -811,13 +816,20 @@ fn sender(who: u8, first: bool, last: bool) -> Option<Sender<'static>> {
     })
 }
 
-fn caption(who: u8, first: bool, last: bool) -> Caption<'static> {
-    sender(who, first, last).map_or(Caption::None, Caption::From)
+fn caption(script: &'static Script<'static>, who: u8, first: bool, last: bool) -> Caption<'static> {
+    sender(script, who, first, last).map_or(Caption::None, Caption::From)
 }
 
 /// The boss typing, beside their face in a group.
-fn boss_typing(p: Paint, now: f64, reduced: bool) -> El {
-    typing_dots(p, "dots".into(), now, 1.0, reduced, sender(0, false, true))
+fn boss_typing(p: Paint, script: &'static Script<'static>, now: f64, reduced: bool) -> El {
+    typing_dots(
+        p,
+        "dots".into(),
+        now,
+        1.0,
+        reduced,
+        sender(script, 0, false, true),
+    )
 }
 
 /// `"Without Hex"`'s thread at `t`: every line so far, each at
@@ -829,12 +841,13 @@ fn boss_typing(p: Paint, now: f64, reduced: bool) -> El {
 fn thread_at(
     p: Paint,
     s: &Onboard,
+    scene: &Scene,
     t: f64,
     reveal: Option<f32>,
     opacity: impl Fn(usize, &Line) -> f32,
 ) -> Vec<El> {
     let reduced = s.reduced.get();
-    let scene = &s.scene;
+    let script = scene.script();
     let lines = &scene.lines()[..scene.shown(t)];
     let asked = scene.lines().iter().rposition(|l| l.at < 0.0);
     let held = |line: El, o: f32| revealed(line, reveal.map(|reveal| o * reveal));
@@ -865,7 +878,7 @@ fn thread_at(
                     p,
                     format!("l{i}"),
                     Side::Them,
-                    caption(who, first, last),
+                    caption(script, who, first, last),
                     &line.text,
                     &taps,
                     o,
@@ -896,7 +909,7 @@ fn thread_at(
         });
     }
     if scene.dots(t).is_some() {
-        thread.push(held(boss_typing(p, s.now, reduced), 1.0));
+        thread.push(held(boss_typing(p, script, s.now, reduced), 1.0));
     }
     thread
 }
@@ -904,8 +917,38 @@ fn thread_at(
 /// The conversation as `"Without Hex"` stands now, Jay's question already
 /// there before the button.
 fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool, opening: Option<f64>) -> El {
-    let scene = &s.scene;
     let t = thread_time(s).unwrap_or(-1e-3);
+    scene_card(p, s, &s.scene, t, focus, frozen, opening, look(p, opening))
+}
+
+/// A sketch's conversation at its time `t`, typed by hand.
+pub(super) fn sketch_card(p: Paint, s: &Onboard, scene: &Scene, t: f64) -> El {
+    let focus = if t < 0.0 {
+        Focus::Waiting
+    } else {
+        scene.focus(t)
+    };
+    let look = Look {
+        icon: None,
+        matched: None,
+        bare: false,
+        reveal: None,
+    };
+    scene_card(p, s, scene, t, focus, scene.frozen(t), None, look)
+}
+
+/// `scene`'s conversation at its time `t`.
+#[allow(clippy::too_many_arguments)]
+fn scene_card(
+    p: Paint,
+    s: &Onboard,
+    scene: &Scene,
+    t: f64,
+    focus: Focus,
+    frozen: bool,
+    opening: Option<f64>,
+    look: Look,
+) -> El {
     let shown = scene.shown(t);
     let answering = scene.lines()[..shown]
         .iter()
@@ -928,19 +971,19 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool, opening: 
         _ if shown - i <= STACK => RECENT,
         _ => OLDER,
     };
-    let thread = thread_at(p, s, t, opening.map(reveal), opacity);
-    let room = room(scene.title(t));
+    let thread = thread_at(p, s, scene, t, opening.map(reveal), opacity);
+    let room = room(scene.script(), scene.title(t));
     if removed {
         let locked = scene.locked();
         return chat(
             p,
             &room,
-            banner(p, s, t),
+            banner(p, s, scene, t),
             thread,
             Reply::Locked(&locked),
             None,
             1.0,
-            look(p, None),
+            look,
         );
     }
     let (draft, caret) = scene.draft(t);
@@ -954,7 +997,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool, opening: 
     chat(
         p,
         &room,
-        banner(p, s, t),
+        banner(p, s, scene, t),
         thread,
         Reply::Lines {
             sent_bubbles: &[],
@@ -967,7 +1010,7 @@ fn without_hex_card(p: Paint, s: &Onboard, focus: Focus, frozen: bool, opening: 
         },
         scene.mark(t),
         if focus == Focus::Field { 1.0 } else { 0.6 },
-        look(p, opening),
+        look,
     )
 }
 
@@ -989,13 +1032,20 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
     let rewinding = since < REWIND && !reduced;
     let mut thread = if rewinding {
         let end = s.scene.duration();
-        let mut all = thread_at(p, s, end, None, |i, _| if i < asked { 1.0 } else { 0.5 });
+        let mut all = thread_at(
+            p,
+            s,
+            &s.scene,
+            end,
+            None,
+            |i, _| if i < asked { 1.0 } else { 0.5 },
+        );
         let gone = ((since / REWIND_STAGGER) as usize + 1).min(all.len() - asked);
         all.truncate(all.len() - gone);
         all
     } else {
         let question = if composing { 1.0 } else { OLDER };
-        thread_at(p, s, -1e-3, None, |_, _| question)
+        thread_at(p, s, &s.scene, -1e-3, None, |_, _| question)
     };
     if sent {
         let taps: Vec<Glyph> = beats
@@ -1016,7 +1066,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         ));
     }
     if typing {
-        thread.push(boss_typing(p, s.now, reduced));
+        thread.push(boss_typing(p, script(), s.now, reduced));
     }
     let cheers: Vec<_> = beats
         .lines
@@ -1042,7 +1092,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
                     p,
                     key,
                     Side::Them,
-                    caption(who, named, ends),
+                    caption(script(), who, named, ends),
                     copy,
                     &[],
                     1.0,
@@ -1059,7 +1109,10 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
             }
         });
     }
-    let room = room(beats.title(t.unwrap_or(f64::NEG_INFINITY), script().title));
+    let room = room(
+        script(),
+        beats.title(t.unwrap_or(f64::NEG_INFINITY), script().title),
+    );
     let flights = flights(s);
     let started = flights.iter().any(|(f, _)| s.now >= f.start());
     // The field grows a line only once a word heads for it.
@@ -1074,7 +1127,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         return chat(
             p,
             &room,
-            banner(p, s, -1e-3),
+            banner(p, s, &s.scene, -1e-3),
             thread,
             Reply::Locked(&locked),
             None,

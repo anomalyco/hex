@@ -1,0 +1,33 @@
+# A sketch: "Without Hex" alone, played while the model downloads.
+
+title   Morgan Lee
+boss    Morgan mint
+lead    Your dream job is calling. One quick reply by hand.
+
+Morgan: Great news. The team loved you.
+
+start
+Morgan: Can you start Monday? [0.35]
+type    Yes!! Absolutley [panic 0.35-0.5]
+send    meant Yes!! Absolutely
+tap     ❤ 0.45
+wait    0.3
+
+Morgan: Wonderful. The team is thrilled. [0.35]
+type    me tooo, cant wiat [panic 0.4-0.5]
+send    meant me too, can't wait
+tap     👍 0.4
+wait    0.3
+
+Morgan: Last thing: does 90k work for you? [0.4]
+type    Yes, 9 [panic 0.55-0.65]
+send    slip meant Yes, 90k works
+wait    freeze
+read
+wait    0.5
+
+Morgan: 9? [0.25]
+Morgan: Love the humility. 9 it is. [0.5]
+tap     ‼ 0.35
+type    NO WAIT [panic 0.95]
+end     left: Morgan sent your offer: $9 a year

@@ -262,6 +262,8 @@ pub(super) enum MacStep {
     SetupDenied,
     /// Every permission on, Accessibility waiting for a restart.
     SetupRestart,
+    /// Every permission on, the model still downloading.
+    SetupWaiting,
     TryIt,
     /// The shortcut listener failed after setup.
     TryItReopen,
@@ -291,6 +293,11 @@ pub(super) fn mac_fixture(ui: &mut Ui, state: MacStep) {
         MacStep::SetupRestart => crate::desktop::onboarding::SetupStatus {
             microphone: Ready,
             accessibility: NeedsRestart,
+            ..fresh
+        },
+        MacStep::SetupWaiting => crate::desktop::onboarding::SetupStatus {
+            microphone: Ready,
+            accessibility: Ready,
             ..fresh
         },
         _ => crate::desktop::onboarding::SetupStatus {

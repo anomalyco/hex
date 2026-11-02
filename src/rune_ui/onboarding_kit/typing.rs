@@ -708,6 +708,31 @@ impl Scene {
             .map_or(self.script.title, |&(_, name)| name)
     }
 
+    /// The script this scene plays.
+    pub(crate) fn script(&self) -> &'static Script<'static> {
+        self.script
+    }
+
+    /// Where the scene can stop without cutting anyone off: once each of
+    /// your replies has gone out, just before the next line or typing dots,
+    /// and its end.
+    pub(crate) fn stops(&self) -> Vec<f64> {
+        let mut stops: Vec<f64> = self
+            .lines
+            .iter()
+            .filter(|l| l.who == Who::You && l.at >= 0.0)
+            .filter_map(|sent| {
+                let line = self.lines.iter().map(|l| l.at).filter(|&at| at > sent.at);
+                let dots = self.dots.iter().map(|&(a, _)| a).filter(|&a| a > sent.at);
+                let next = line.chain(dots).min_by(f64::total_cmp)?;
+                Some((next - 0.05).max(sent.at))
+            })
+            .collect();
+        stops.push(self.end);
+        stops.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        stops
+    }
+
     /// Why the field is gone once you're cut off.
     pub(crate) fn locked(&self) -> String {
         self.ending.locked(self.script.boss())
