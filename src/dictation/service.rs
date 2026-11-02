@@ -5,7 +5,9 @@
 //! [`ServiceDictations`].
 
 use std::collections::VecDeque;
-use std::sync::mpsc::{SyncSender, TrySendError};
+use std::sync::mpsc::SyncSender;
+#[cfg(any(test, target_os = "linux"))]
+use std::sync::mpsc::TrySendError;
 use std::time::{Duration, Instant};
 
 /// How long a dictation lives without a heartbeat from its owner.
