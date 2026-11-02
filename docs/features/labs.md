@@ -53,6 +53,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Stop when the call ends no labs.stop_when_call_ends (macOS) a recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet (#835)
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
+├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -624,6 +625,22 @@ before. Checks: `the_model_in_use_is_fixed_while_the_picker_is_open` and
 picker in a real window with the toggle on, or an import's group moving
 (no automated check builds an import entry); the Labs page goldens need
 regenerating on Linux with the new row.
+
+Use model files where they are (`model-in-place`, issue 941, every OS): for
+one speech model file shared by several accounts. While on, the speech model
+picker's Every model header adds "Use model file where it is…" beside "Add
+model file…"; the chosen GGUF is checked, hashed once, and recorded with its
+path (`custom_models::add_in_place`), never copied
+([own-models.md](own-models.md#use-a-model-file-where-it-is-labs)). The gate
+is `model_import::in_place_on`, read when the button draws and again when the
+dialog answers, before the worker starts. Off, the picker is exactly as
+before. Checks:
+`a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`
+in [transcription/custom_models.rs](../../src/transcription/custom_models.rs);
+`every_feature_is_off_by_default_and_round_trips` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real window or a second
+macOS account; the Labs page goldens need regenerating on Linux with the new
+row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

@@ -170,6 +170,9 @@ pub struct Imported {
     pub license: Option<String>,
     /// A found file used where it is: `owner/name@abcdef1`.
     pub origin: Option<String>,
+    /// Used where it is (a found file, or one added in place), never
+    /// copied: removing it only forgets it.
+    pub in_place: bool,
 }
 
 struct Entry {
@@ -424,6 +427,7 @@ pub fn imported() -> Vec<Imported> {
             source: entry.manifest.source.clone(),
             license: entry.manifest.license.clone(),
             origin: entry.manifest.origin.clone(),
+            in_place: entry.manifest.path.is_some(),
         })
         .collect()
 }
@@ -790,6 +794,25 @@ pub fn adopt_in_place(
     origin: &str,
     canceled: &AtomicBool,
 ) -> Result<CustomModelId> {
+    record_in_place(path, blob_sha256, Some(origin), canceled)
+}
+
+/// Labs › Use model files where they are: adds a file the person chose
+/// and uses it where it is, as a found file is, so several accounts can
+/// share one file. Its header is checked, it is hashed in full once, and
+/// only Hex's receipt and record are written, in Hex's own folder. An
+/// earlier import of the same file by copy keeps its name, and Hex's copy
+/// goes. Forgetting it later leaves the file.
+pub fn add_in_place(path: &Path, canceled: &AtomicBool) -> Result<CustomModelId> {
+    record_in_place(path, None, None, canceled)
+}
+
+fn record_in_place(
+    path: &Path,
+    blob_sha256: Option<&str>,
+    origin: Option<&str>,
+    canceled: &AtomicBool,
+) -> Result<CustomModelId> {
     let header = gguf_header::read(path)
         .map_err(|error| eyre!("{} can't be used: {error}", display_name(path)))?;
     let profile = profile(&header, &file_stem(path))
@@ -804,6 +827,10 @@ pub fn adopt_in_place(
     let id = CustomModelId::from_sha256(&sha256);
     let directory = directory()?;
     fs::create_dir_all(&directory)?;
+    let existing = fs::read(manifest_file(&directory, id))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Manifest>(&data).ok())
+        .filter(|manifest| manifest.sha256 == sha256);
     super::models::write_json_atomically(
         &receipt_path(&model_file(&directory, id)),
         &Receipt::of(path, sha256.clone())?,
@@ -812,7 +839,9 @@ pub fn adopt_in_place(
         &directory,
         id,
         &Manifest {
-            name: profile.name.clone(),
+            name: existing
+                .as_ref()
+                .map_or_else(|| profile.name.clone(), |existing| existing.name.clone()),
             metadata_name: profile.name,
             architecture: profile.architecture,
             variant: profile.variant,
@@ -827,10 +856,21 @@ pub fn adopt_in_place(
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_secs()),
             path: Some(path.to_path_buf()),
-            origin: Some(origin.to_owned()),
+            origin: origin.map(str::to_owned),
         },
     )?;
-    tracing::info!(id = id.as_str(), path = %path.display(), "using a speech model found on this computer");
+    // The same file imported by copy before: the file in place replaces
+    // Hex's copy, which is never the file chosen.
+    let copy = model_file(&directory, id);
+    if existing.is_some_and(|existing| existing.path.is_none()) && copy != path {
+        match fs::remove_file(&copy) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                tracing::warn!(%error, id = id.as_str(), "could not remove Hex's copy of a model now used in place");
+            }
+            _ => {}
+        }
+    }
+    tracing::info!(id = id.as_str(), path = %path.display(), found = origin.is_some(), "using a speech model file where it is");
     Ok(id)
 }
 
@@ -981,6 +1021,70 @@ mod tests {
         assert!(source.is_file());
         assert_eq!(super::definition(id).name, "Imported model");
         assert!(!super::definition(id).available());
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    #[test]
+    fn a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it() {
+        let models = temporary_models_dir();
+        let source = models.join("shared-primeline.gguf");
+        fs::write(&source, parakeet("Shared primeLine")).unwrap();
+        // An earlier import by copy keeps its name, and its copy goes.
+        let id = import(&source, Some("Mine"), &AtomicBool::new(false)).unwrap();
+        let copy = model_file(&directory().unwrap(), id);
+        assert!(copy.is_file());
+        assert_eq!(add_in_place(&source, &AtomicBool::new(false)).unwrap(), id);
+        assert!(!copy.exists(), "nothing is copied");
+        assert_eq!(status(id), Status::Ready);
+        let model = definition(id);
+        assert_eq!(model.name, "Mine");
+        assert_eq!(super::super::models::model_path(model).unwrap(), source);
+        let added = imported()
+            .into_iter()
+            .find(|import| import.definition.id == TranscriptionModelId::Custom(id))
+            .unwrap();
+        assert!(added.in_place && added.origin.is_none());
+        assert_eq!(added.source, "shared-primeline.gguf");
+        remove(id).unwrap();
+        assert!(!is_registered(id));
+        assert!(source.is_file(), "forgetting leaves the file");
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relinked_copy_reads_as_changed_and_check_again_accepts_only_the_same_contents() {
+        let models = temporary_models_dir();
+        let shared = models.join("shared");
+        fs::create_dir_all(&shared).unwrap();
+        let source = shared.join("primeline.gguf");
+        fs::write(&source, parakeet("Shared primeLine")).unwrap();
+        let id = import(&source, None, &AtomicBool::new(false)).unwrap();
+        assert_eq!(status(id), Status::Ready);
+        let copy = model_file(&directory().unwrap(), id);
+        // Hex's copy swapped for a link to the identical shared file.
+        fs::remove_file(&copy).unwrap();
+        std::os::unix::fs::symlink(&source, &copy).unwrap();
+        invalidate();
+        assert_eq!(status(id), Status::Changed);
+        repair(id, &AtomicBool::new(false)).unwrap();
+        assert_eq!(status(id), Status::Ready);
+        // A link to other contents stays changed.
+        let other = shared.join("other.gguf");
+        fs::write(&other, parakeet("Another primeLine model")).unwrap();
+        fs::remove_file(&copy).unwrap();
+        std::os::unix::fs::symlink(&other, &copy).unwrap();
+        invalidate();
+        assert_eq!(status(id), Status::Changed);
+        assert!(
+            repair(id, &AtomicBool::new(false))
+                .unwrap_err()
+                .to_string()
+                .contains("no longer matches")
+        );
+        assert_eq!(status(id), Status::Changed);
         super::super::models::set_test_models_dir(None);
         fs::remove_dir_all(models).unwrap();
     }

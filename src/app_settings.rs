@@ -1425,6 +1425,9 @@ pub struct LabsSettings {
     pub output_fixes: bool,
     /// The speech model picker lists the model in use first (issue 1019).
     pub picker_active_first: bool,
+    /// The picker's "Use model file where it is…" adds a GGUF file without
+    /// copying it, as a found file is used (issue 941).
+    pub model_in_place: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1461,6 +1464,7 @@ impl Default for LabsSettings {
             stop_when_call_ends: false,
             output_fixes: false,
             picker_active_first: false,
+            model_in_place: false,
         }
     }
 }

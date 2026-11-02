@@ -209,6 +209,17 @@ pub(super) fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::Model
     if !ui.live() && ui.picker.installed.is_none() {
         return None;
     }
+    // A saved import that is missing or changed: Hex listens with a
+    // downloaded model in its place, and the row's notice says how to fix it.
+    if ui.settings.transcription.model.is_labs_gated()
+        && super::model_import::selection_notice(ui).is_some()
+    {
+        let fallback = crate::transcription::custom_models::fallback();
+        let model = transcription_models::definition(fallback.model);
+        if ui.picker.installed(model, &fallback.language) {
+            return None;
+        }
+    }
     let (installed, progress) = super::onboarding::progress(ui);
     (!installed).then_some(progress)
 }
