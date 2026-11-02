@@ -353,7 +353,7 @@ fn restricted_to_loopback_fetch_stays_on_this_computer_and_runs_no_programs() {
         r#"import {{ execFile }} from "node:child_process"
 import {{ promisify }} from "node:util"
 const attempt = async (url) => {{
-  try {{ return (await fetch(url)).status }} catch (error) {{ return error.message }}
+  try {{ return String((await fetch(url)).status) }} catch (error) {{ return error.message }}
 }}
 export default {{
   transformations: {{
