@@ -301,25 +301,101 @@ fn group_marks(
 /// Words that point at the screen. The strong ones are deliberate cues ("now", "look");
 /// the rest are just as often filler ("I see why", "here and there", "that's weird"), so they
 /// rank with ordinary scene changes and only break ties when they coincide with one.
+/// Every language's cues match at once, whatever the dictation language, so auto-detected and
+/// mixed speech work too.
 fn spoken_cue(word: &str) -> Option<(&'static str, f32, bool)> {
     let word = word
         .trim_matches(|c: char| !c.is_alphanumeric())
         .to_lowercase();
-    [
-        ("now", 58.0, true),
-        ("here", 56.0, true),
-        ("look", 58.0, true),
-        ("watch", 58.0, true),
-        ("see", 44.0, false),
-        ("there", 44.0, false),
-        ("this", 44.0, false),
-        ("these", 44.0, false),
-        ("that", 42.0, false),
-        ("those", 42.0, false),
-    ]
-    .into_iter()
-    .find(|(cue, _, _)| *cue == word)
+    SPOKEN_CUES.iter().copied().find(|(cue, _, _)| *cue == word)
 }
+
+const SPOKEN_CUES: &[(&str, f32, bool)] = &[
+    // English
+    ("now", 58.0, true),
+    ("here", 56.0, true),
+    ("look", 58.0, true),
+    ("watch", 58.0, true),
+    ("see", 44.0, false),
+    ("there", 44.0, false),
+    ("this", 44.0, false),
+    ("these", 44.0, false),
+    ("that", 42.0, false),
+    ("those", 42.0, false),
+    // Spanish
+    ("ahora", 58.0, true),
+    ("aquí", 56.0, true),
+    ("aqui", 56.0, true),
+    ("mira", 58.0, true),
+    ("mire", 58.0, true),
+    ("miren", 58.0, true),
+    ("fíjate", 58.0, true),
+    ("fijate", 58.0, true),
+    ("esto", 44.0, false),
+    ("esta", 44.0, false),
+    ("está", 44.0, false),
+    ("este", 44.0, false),
+    ("estos", 44.0, false),
+    ("estas", 44.0, false),
+    ("eso", 42.0, false),
+    ("esa", 42.0, false),
+    ("ese", 42.0, false),
+    ("ahí", 44.0, false),
+    ("allí", 44.0, false),
+    ("ves", 44.0, false),
+    // French
+    ("maintenant", 58.0, true),
+    ("ici", 56.0, true),
+    ("regarde", 58.0, true),
+    ("regardez", 58.0, true),
+    ("voilà", 58.0, true),
+    ("voila", 58.0, true),
+    ("voici", 56.0, true),
+    ("ceci", 44.0, false),
+    ("cela", 42.0, false),
+    ("ça", 42.0, false),
+    ("là", 44.0, false),
+    ("vois", 44.0, false),
+    // German
+    ("jetzt", 58.0, true),
+    // Also French for "yesterday", so it only counts as a weak cue.
+    ("hier", 44.0, false),
+    ("schau", 58.0, true),
+    ("schauen", 58.0, true),
+    ("guck", 58.0, true),
+    ("guckt", 58.0, true),
+    ("dies", 44.0, false),
+    ("diese", 44.0, false),
+    ("dieses", 44.0, false),
+    ("dieser", 44.0, false),
+    ("dort", 44.0, false),
+    ("siehst", 44.0, false),
+    // Portuguese
+    ("agora", 58.0, true),
+    ("olha", 58.0, true),
+    ("olhe", 58.0, true),
+    ("veja", 58.0, true),
+    ("isto", 44.0, false),
+    ("isso", 42.0, false),
+    ("aí", 44.0, false),
+    ("ali", 44.0, false),
+    ("vê", 44.0, false),
+    // Italian
+    ("ora", 58.0, true),
+    ("adesso", 58.0, true),
+    // Also French for "who", so it only counts as a weak cue.
+    ("qui", 44.0, false),
+    ("qua", 56.0, true),
+    ("guarda", 58.0, true),
+    ("guardate", 58.0, true),
+    ("ecco", 58.0, true),
+    ("questo", 44.0, false),
+    ("questa", 44.0, false),
+    ("questi", 44.0, false),
+    ("quello", 42.0, false),
+    ("quella", 42.0, false),
+    ("vedi", 44.0, false),
+];
 
 fn ends_clause(text: &str, clause_words: usize) -> bool {
     let trimmed = text.trim_end_matches(['"', '\'', '”', '’', ')', ']']);
@@ -1302,6 +1378,52 @@ mod tests {
         assert_eq!(selected[1].0.reason, KeyframeReason::Speech);
         assert_eq!(selected[0].0.said.as_deref(), Some("Here's the list."));
         assert_eq!(selected[1].0.said.as_deref(), Some("Watch it now."));
+    }
+
+    #[test]
+    fn spoken_cues_count_in_other_languages() {
+        assert_eq!(spoken_cue("¡Mira!"), Some(("mira", 58.0, true)));
+        assert_eq!(spoken_cue("esto"), Some(("esto", 44.0, false)));
+        assert_eq!(spoken_cue("Aquí,"), Some(("aquí", 56.0, true)));
+        assert_eq!(spoken_cue("¿Ves?"), Some(("ves", 44.0, false)));
+        assert_eq!(spoken_cue("Regarde"), Some(("regarde", 58.0, true)));
+        assert_eq!(spoken_cue("lista"), None);
+    }
+
+    #[test]
+    fn a_spanish_cue_finds_the_change_it_points_at() {
+        let mut frames: Vec<_> = (0..=24).map(|i| frame(i * 250, 40)).collect();
+        for f in frames.iter_mut().filter(|f| f.t_ms >= 3_250) {
+            *f = frame(f.t_ms, 220);
+        }
+        let transcript = TranscriptData {
+            words: words(&[
+                (200, "La"),
+                (400, "lista"),
+                (600, "actual."),
+                (2_400, "¡Mira"),
+                (2_600, "esto"),
+                (2_800, "ahora!"),
+            ]),
+            ..Default::default()
+        };
+        let selected = select_keyframes(
+            &frames,
+            &[],
+            &mut [],
+            &[click(500)],
+            &transcript,
+            MAX_KEYFRAMES,
+        );
+        assert_eq!(
+            selected.len(),
+            2,
+            "{:?}",
+            selected.iter().map(|k| &k.0).collect::<Vec<_>>()
+        );
+        assert_eq!(selected[1].0.t, 3_250);
+        assert_eq!(selected[1].0.reason, KeyframeReason::Speech);
+        assert_eq!(selected[1].0.said.as_deref(), Some("¡Mira esto ahora!"));
     }
 
     #[test]
