@@ -6,7 +6,7 @@
 //! one answers `/api/info` with 404 it predates the current OpenCode 2.
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,8 +24,9 @@ const MAX_REGISTRATIONS: usize = 16;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const INFO_DEADLINE: Duration = Duration::from_secs(2);
 const CONNECT_DEADLINE: Duration = Duration::from_secs(2);
-/// How often a blocked read checks cancellation and the deadline.
-const READ_SLICE: Duration = Duration::from_millis(50);
+/// How often a stalled read or write checks cancellation and the deadline.
+const WAIT_SLICE: Duration = Duration::from_millis(50);
+const WRITE_CHUNK: usize = 64 * 1024;
 
 /// One running service: where it listens and how to authenticate.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -284,19 +285,43 @@ impl Service {
         let mut stream =
             TcpStream::connect_timeout(&self.address, remaining().min(CONNECT_DEADLINE))
                 .map_err(|_| eyre!(NOT_RUNNING))?;
-        stream.set_write_timeout(Some(remaining().max(Duration::from_millis(1))))?;
-        stream
-            .write_all(head.as_bytes())
-            .and_then(|()| stream.write_all(body.unwrap_or_default()))
-            .wrap_err_with(|| format!("could not send OpenCode {path}"))?;
+        // Non-blocking, so a service that stops reading or answering can't hold
+        // the request past cancellation or the deadline. Returning drops the
+        // stream, which closes the socket and discards anything unsent.
+        stream.set_nonblocking(true)?;
+        let mut step = |interest: Interest,
+                        op: &mut dyn FnMut(&mut TcpStream) -> io::Result<usize>|
+         -> Result<io::Result<usize>> {
+            loop {
+                let left = remaining();
+                check(left)?;
+                match op(&mut stream) {
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        wait(&stream, interest, left.min(WAIT_SLICE))
+                            .wrap_err_with(|| format!("could not reach OpenCode {path}"))?;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                    result => return Ok(result),
+                }
+            }
+        };
+        for mut pending in [head.as_bytes(), body.unwrap_or_default()] {
+            while !pending.is_empty() {
+                let chunk = &pending[..pending.len().min(WRITE_CHUNK)];
+                match step(Interest::Write, &mut |stream| stream.write(chunk))? {
+                    Ok(0) => return Err(eyre!("OpenCode closed {path} before it was sent")),
+                    Ok(written) => pending = &pending[written..],
+                    Err(error) => {
+                        return Err(error)
+                            .wrap_err_with(|| format!("could not send OpenCode {path}"));
+                    }
+                }
+            }
+        }
         let mut bytes = Vec::new();
         let mut buffer = [0; 64 * 1024];
         loop {
-            check(remaining())?;
-            stream.set_read_timeout(Some(
-                remaining().clamp(Duration::from_millis(1), READ_SLICE),
-            ))?;
-            match stream.read(&mut buffer) {
+            match step(Interest::Read, &mut |stream| stream.read(&mut buffer))? {
                 Ok(0) => break,
                 Ok(read) => {
                     bytes.extend_from_slice(&buffer[..read]);
@@ -304,13 +329,6 @@ impl Service {
                         return Err(eyre!("OpenCode {path} answered more than 16 MiB"));
                     }
                 }
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        std::io::ErrorKind::WouldBlock
-                            | std::io::ErrorKind::TimedOut
-                            | std::io::ErrorKind::Interrupted
-                    ) => {}
                 Err(error) => {
                     return Err(error).wrap_err_with(|| format!("could not read OpenCode {path}"));
                 }
@@ -318,6 +336,62 @@ impl Service {
         }
         parse_response(bytes).ok_or_else(|| eyre!("OpenCode {path} returned invalid HTTP"))
     }
+}
+
+#[derive(Clone, Copy)]
+enum Interest {
+    Read,
+    Write,
+}
+
+/// Waits up to `timeout` for the socket to become readable or writable. It
+/// may return early or spuriously; the caller retries the operation and
+/// rechecks cancellation and the deadline.
+#[cfg(unix)]
+fn wait(stream: &TcpStream, interest: Interest, timeout: Duration) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let mut fd = libc::pollfd {
+        fd: stream.as_raw_fd(),
+        events: match interest {
+            Interest::Read => libc::POLLIN,
+            Interest::Write => libc::POLLOUT,
+        },
+        revents: 0,
+    };
+    // SAFETY: one valid pollfd for a socket this call borrows.
+    if unsafe { libc::poll(&mut fd, 1, poll_millis(timeout)) } < 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn wait(stream: &TcpStream, interest: Interest, timeout: Duration) -> io::Result<()> {
+    use std::os::windows::io::AsRawSocket;
+    use windows_sys::Win32::Networking::WinSock::{
+        POLLRDNORM, POLLWRNORM, SOCKET_ERROR, WSAGetLastError, WSAPOLLFD, WSAPoll,
+    };
+    let mut fd = WSAPOLLFD {
+        fd: stream.as_raw_socket() as usize,
+        events: match interest {
+            Interest::Read => POLLRDNORM,
+            Interest::Write => POLLWRNORM,
+        },
+        revents: 0,
+    };
+    // SAFETY: one valid WSAPOLLFD for a socket this call borrows.
+    if unsafe { WSAPoll(&mut fd, 1, poll_millis(timeout)) } == SOCKET_ERROR {
+        return Err(io::Error::from_raw_os_error(unsafe { WSAGetLastError() }));
+    }
+    Ok(())
+}
+
+/// At least one millisecond, so a short remainder still waits instead of spinning.
+fn poll_millis(timeout: Duration) -> i32 {
+    timeout.as_millis().clamp(1, i32::MAX as u128) as i32
 }
 
 /// Creates Hex's OpenCode workspace on first use and returns the path
@@ -683,5 +757,90 @@ pub(crate) mod tests {
         });
         assert!(started.elapsed() < Duration::from_secs(5));
         drop(listener);
+    }
+
+    /// Far more than loopback socket buffers hold, so sending it stalls when
+    /// the service stops reading.
+    fn large_body() -> Vec<u8> {
+        (0..64 * 1024 * 1024)
+            .map(|index: u32| index as u8)
+            .collect()
+    }
+
+    #[test]
+    fn a_service_that_stops_reading_is_bounded_by_cancellation_and_the_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let service = fixture(&url);
+        let body = large_body();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let held = thread::spawn(move || {
+            let streams: Vec<_> = (0..2).map(|_| listener.accept().unwrap().0).collect();
+            let _ = released.recv();
+            drop(streams);
+        });
+        let started = Instant::now();
+        let error = service
+            .request(
+                "POST",
+                "/generate",
+                Some(&body),
+                None,
+                Duration::from_millis(300),
+                &AtomicBool::new(false),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("exceeded"), "{error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+        let cancelled = AtomicBool::new(false);
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(Duration::from_millis(100));
+                cancelled.store(true, Ordering::Release);
+            });
+            let started = Instant::now();
+            let error = service
+                .request(
+                    "POST",
+                    "/generate",
+                    Some(&body),
+                    None,
+                    Duration::from_secs(30),
+                    &cancelled,
+                )
+                .unwrap_err();
+            assert!(error.to_string().contains("cancelled"), "{error}");
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "{:?}",
+                started.elapsed()
+            );
+        });
+        release.send(()).unwrap();
+        held.join().unwrap();
+    }
+
+    #[test]
+    fn a_large_body_arrives_intact() {
+        let body = large_body();
+        let (url, server) = serve(vec![("POST /generate".into(), 200, "{}".into())]);
+        let response = fixture(&url)
+            .request(
+                "POST",
+                "/generate",
+                Some(&body),
+                None,
+                Duration::from_secs(30),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"{}");
+        let (_, received) = server.join().unwrap().remove(0);
+        assert!(received == body, "the body changed in transit");
     }
 }
