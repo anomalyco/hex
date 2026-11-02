@@ -272,6 +272,7 @@ pub struct RecoveringAudioInput {
     reports_new_devices: bool,
     opener: Opener,
     route_generation_source: fn() -> u64,
+    outage: Option<Option<String>>, // why no input opens; `Some(None)` once taken
 }
 
 /// Whether a listener's capture is idle, so [`RecoveringAudioInput`] may
@@ -587,6 +588,7 @@ impl RecoveringAudioInput {
             }
             Err(error) => {
                 tracing::warn!(%error, "could not open dictation microphone at startup; retrying");
+                self.outage.get_or_insert(Some(error.to_string()));
                 self.recovery.request_stream_recovery(now);
                 self.recovery.failed(now);
             }
@@ -610,7 +612,13 @@ impl RecoveringAudioInput {
             reports_new_devices: cfg!(target_os = "macos"),
             opener: Arc::new(open_configured_input),
             route_generation_source: input_route_generation,
+            outage: None,
         }
+    }
+
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn take_failure(&mut self) -> Option<String> {
+        self.outage.as_mut().and_then(Option::take)
     }
 
     /// An input whose opens and route changes come from the test.
@@ -670,6 +678,7 @@ impl RecoveringAudioInput {
         }
         input.feed_hex_microphone(true);
         self.input = Some(input);
+        self.outage = None;
     }
 
     pub fn close(&mut self) {
@@ -678,6 +687,7 @@ impl RecoveringAudioInput {
         }
         self.replacement = None;
         self.recovery.recovered();
+        self.outage = None;
     }
 
     pub fn is_open(&self) -> bool {
@@ -766,6 +776,9 @@ impl RecoveringAudioInput {
                         %error,
                         "could not reopen dictation microphone; retrying"
                     );
+                    if self.recovery.blocks_audio() {
+                        self.outage.get_or_insert(Some(error));
+                    }
                 }
             }
         }
@@ -1861,6 +1874,23 @@ mod tests {
             ),
             found(Named(0), Selection::InUse)
         );
+    }
+
+    #[test]
+    fn a_microphone_that_cannot_open_is_reported_once_per_outage() {
+        let mut input = RecoveringAudioInput::failed_for_test("Gone microphone");
+        let failure = input
+            .take_failure()
+            .expect("the startup failure is reported");
+        assert!(failure.contains("Gone microphone"), "{failure}");
+        assert_eq!(input.take_failure(), None);
+        // Retries within the same outage stay quiet.
+        input.outage.get_or_insert(Some("still gone".into()));
+        assert_eq!(input.take_failure(), None);
+        // Closing ends the outage; the next one is reported again.
+        input.close();
+        input.outage.get_or_insert(Some("gone again".into()));
+        assert_eq!(input.take_failure().as_deref(), Some("gone again"));
     }
 
     #[test]

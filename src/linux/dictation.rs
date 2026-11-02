@@ -396,6 +396,14 @@ pub(crate) fn run(
     );
 
     while !shutdown.load(Ordering::Relaxed) {
+        // No microphone could be opened (none connected, or the default
+        // went away): record why while it keeps retrying in the background.
+        if let Some(error) = input.take_failure() {
+            events.dictation(
+                DictationPhase::Failed(format!("could not open the microphone: {error}")),
+                "",
+            )?;
+        }
         for update in updates.try_iter() {
             match update {
                 ListenerUpdate::Settings(next) => next_settings = Some(*next),
