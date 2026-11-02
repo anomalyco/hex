@@ -607,6 +607,8 @@ enum Menu {
     HistoryRetention,
     /// The installed models History's Transcribe again offers.
     HistoryAgain,
+    /// The language of Transcribe again's chosen model, for that run.
+    HistoryAgainLanguage,
     /// The OpenCode thinking variant.
     Variant,
     /// The selected meeting's overflow menu.

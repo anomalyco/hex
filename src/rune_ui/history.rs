@@ -36,6 +36,17 @@ pub(super) struct HistoryPane {
     models: Vec<(TranscriptionModelId, &'static str)>,
     /// The latest Transcribe again, for one entry.
     pub(super) again: Option<Again>,
+    /// A model chosen for Transcribe again that takes a language hint,
+    /// waiting for its language and Transcribe.
+    pub(super) pending: Option<Pending>,
+}
+
+/// Transcribe again's chosen model and the language for this one run.
+pub(super) struct Pending {
+    pub(super) id: u64,
+    model: TranscriptionModelId,
+    name: &'static str,
+    pub(super) language: String,
 }
 
 /// One entry's recording transcribed again with another model.
@@ -247,8 +258,60 @@ fn installed_models(ui: &Ui) -> Vec<(TranscriptionModelId, &'static str)> {
         .collect()
 }
 
-/// Starts transcribing entry `id`'s recording again with `model`.
-fn transcribe_again(ui: &mut Ui, id: u64, model: TranscriptionModelId, name: &str) {
+/// The languages Transcribe again offers for `model`: Auto when it detects
+/// the language, then the ones it supports. `None` when it takes no hint, or
+/// has only one, so there is nothing to choose.
+pub(super) fn language_choices(model: TranscriptionModelId) -> Option<Vec<&'static str>> {
+    let model = crate::transcription::models::definition(model);
+    let choices = model.language_choices();
+    (model.accepts_language_hint && choices.len() > 1).then_some(choices)
+}
+
+/// A model chosen from Transcribe again's menu: one that takes a language
+/// waits for it, starting at the saved language; any other runs at once.
+pub(super) fn choose_model(ui: &mut Ui, id: u64, model: TranscriptionModelId, name: &'static str) {
+    ui.open = None;
+    let Some(choices) = language_choices(model) else {
+        ui.history.pending = None;
+        transcribe_again(ui, id, model, name, None);
+        return;
+    };
+    let saved = &ui.settings.transcription.language;
+    let language = if choices.contains(&saved.as_str()) {
+        saved.clone()
+    } else {
+        ui.settings.transcription_for_model(model).language
+    };
+    ui.history.pending = Some(Pending {
+        id,
+        model,
+        name,
+        language,
+    });
+}
+
+/// Runs the pending model with its chosen language.
+fn transcribe_pending(ui: &mut Ui) {
+    if let Some(pending) = ui.history.pending.take() {
+        transcribe_again(
+            ui,
+            pending.id,
+            pending.model,
+            pending.name,
+            Some(&pending.language),
+        );
+    }
+}
+
+/// Starts transcribing entry `id`'s recording again with `model`, in
+/// `language` for this run only, or the model's usual language.
+fn transcribe_again(
+    ui: &mut Ui,
+    id: u64,
+    model: TranscriptionModelId,
+    name: &str,
+    language: Option<&str>,
+) {
     ui.open = None;
     if ui
         .history
@@ -266,7 +329,10 @@ fn transcribe_again(ui: &mut Ui, id: u64, model: TranscriptionModelId, name: &st
     else {
         return;
     };
-    let selection = ui.settings.transcription_for_model(model);
+    let mut selection = ui.settings.transcription_for_model(model);
+    if let Some(language) = language {
+        selection.language = language.into();
+    }
     let (sender, receiver) = channel();
     let waker = ui.modes.waker.clone();
     let started = std::thread::Builder::new()
@@ -668,7 +734,7 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
         .on_choose(move |ui: &mut Ui, choice: &str, _: &mut Tx| {
             if let Some(&(model, name)) = ui.history.models.iter().find(|(_, name)| *name == choice)
             {
-                transcribe_again(ui, id, model, name);
+                choose_model(ui, id, model, name);
             }
         })
         .build(p.k, layer);
@@ -677,6 +743,14 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
         .gap(6.0)
         .child(section_label(p, "label", tr("Saved recording")))
         .child(menu);
+    if let Some(pending) = ui
+        .history
+        .pending
+        .as_ref()
+        .filter(|pending| pending.id == id && !running)
+    {
+        section = section.child(language_row(ui, p, pending, layer));
+    }
     match again.and_then(|again| again.result.as_ref().map(|result| (again, result))) {
         Some((again, Ok(found))) => {
             section = section
@@ -742,4 +816,51 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
         None => {}
     }
     section
+}
+
+/// The chosen model's language for this run, and Transcribe.
+fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El {
+    use crate::transcription::models::language_name;
+    let choices = language_choices(pending.model).unwrap_or_default();
+    let labels: Vec<&str> = choices.iter().map(|code| language_name(code)).collect();
+    let current = tr_named(
+        "{model} · Language: {language}",
+        &[
+            ("model", pending.name),
+            ("language", language_name(&pending.language)),
+        ],
+    );
+    let languages = Select::new("again-language", &labels)
+        .appearance(SelectAppearance::Inline)
+        .current(Some(&current))
+        .open(ui.open == Some(Menu::HistoryAgainLanguage))
+        .on_toggle(|ui: &mut Ui| {
+            ui.open = (ui.open != Some(Menu::HistoryAgainLanguage))
+                .then_some(Menu::HistoryAgainLanguage);
+        })
+        .on_close(|ui: &mut Ui| ui.open = None)
+        .on_choose(|ui: &mut Ui, choice: &str, _: &mut Tx| {
+            ui.open = None;
+            if let Some(pending) = &mut ui.history.pending
+                && let Some(code) = language_choices(pending.model).and_then(|choices| {
+                    choices
+                        .into_iter()
+                        .find(|code| crate::transcription::models::language_name(code) == choice)
+                })
+            {
+                pending.language = code.into();
+            }
+        })
+        .build(p.k, layer);
+    row()
+        .key("again-pending")
+        .gap(8.0)
+        .child(languages)
+        .child(button(
+            p,
+            "again-start",
+            tr("Transcribe"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| transcribe_pending(ui),
+        ))
 }

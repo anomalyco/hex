@@ -329,6 +329,8 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 6])] = &[
+    ("Transcribe", ["Transkrybuj", "转写", "文字起こし", "Transkribieren", "Transcribir", "Розпізнати"]),
+    ("{model} · Language: {language}", ["{model} · Język: {language}", "{model} · 语言：{language}", "{model} · 言語: {language}", "{model} · Sprache: {language}", "{model} · Idioma: {language}", "{model} · Мова: {language}"]),
     ("Hide menu bar icon", ["Ukryj ikonę na pasku menu", "隐藏菜单栏图标", "メニューバーのアイコンを隠す", "Menüleistensymbol ausblenden", "Ocultar el icono de la barra de menús", "Приховати значок у рядку меню"]),
     ("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings", ["Ukrywa ikonę Hex na pasku menu. Skróty nadal działają; otwórz Hex ponownie z Findera lub Spotlight, aby przejść do Ustawień", "从菜单栏隐藏 Hex 的图标。快捷键仍然有效；从访达或聚焦搜索再次打开 Hex 即可进入设置", "メニューバーから Hex のアイコンを隠します。ショートカットは引き続き使えます。設定を開くには Finder や Spotlight から Hex をもう一度開きます", "Blendet das Hex-Symbol in der Menüleiste aus. Kürzel funktionieren weiter; öffne Hex erneut über den Finder oder Spotlight, um zu den Einstellungen zu gelangen", "Oculta el icono de Hex en la barra de menús. Los atajos siguen funcionando; vuelve a abrir Hex desde el Finder o Spotlight para ir a Ajustes", "Приховує значок Hex у рядку меню. Комбінації клавіш і далі працюють; щоб відкрити Налаштування, знову відкрийте Hex із Finder або Spotlight"]),
     ("Keep recordings", ["Zachowuj nagrania", "保留录音", "録音を保存", "Aufnahmen behalten", "Conservar grabaciones", "Зберігати записи"]),

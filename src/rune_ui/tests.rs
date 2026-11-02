@@ -1243,6 +1243,49 @@ fn history_search_without_matches_says_so() {
 }
 
 #[test]
+fn transcribe_again_offers_a_language_only_for_models_that_take_one() {
+    use crate::transcription::models::{AUTO_LANGUAGE, TranscriptionModelId};
+    let whisper = history::language_choices(TranscriptionModelId::WhisperLargeV3Turbo).unwrap();
+    assert_eq!(whisper[0], AUTO_LANGUAGE);
+    assert!(whisper.contains(&"en") && whisper.contains(&"es"));
+    assert!(history::language_choices(TranscriptionModelId::ParakeetV3).is_none());
+    assert!(history::language_choices(TranscriptionModelId::GigaAmV3).is_none());
+
+    let mut rt = runtime("history", true, GOLDEN_SIZE);
+    rt.state.settings.labs.keep_recordings = true;
+    rt.state.settings.transcription.language = "es".into();
+    history::choose_model(
+        &mut rt.state,
+        2,
+        TranscriptionModelId::WhisperLargeV3Turbo,
+        "Whisper",
+    );
+    let pending = rt.state.history.pending.as_ref().unwrap();
+    assert_eq!(pending.id, 2);
+    assert_eq!(pending.language, "es", "it starts at the saved language");
+    assert!(
+        rt.state.history.again.is_none(),
+        "nothing runs before Transcribe"
+    );
+    assert_eq!(rt.state.settings.transcription.language, "es");
+
+    rt.state.settings.transcription.language = "pl".into();
+    history::choose_model(
+        &mut rt.state,
+        2,
+        TranscriptionModelId::CohereTranscribe,
+        "Cohere",
+    );
+    let pending = rt.state.history.pending.as_ref().unwrap();
+    assert!(
+        history::language_choices(TranscriptionModelId::CohereTranscribe)
+            .unwrap()
+            .contains(&pending.language.as_str()),
+        "an unsupported saved language falls back to one the model has"
+    );
+}
+
+#[test]
 fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
     use crate::history::{
         History, HistoryDraft, HistoryKind, HistoryRetention, HistoryStore, Recording,
