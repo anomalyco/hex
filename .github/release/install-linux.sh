@@ -43,6 +43,24 @@ fail() {
   exit 1
 }
 
+# download <max bytes> <max seconds> <url> <file>: HTTPS only, and never more
+# than one byte past <max bytes> on disk. Before 8.4.0 (Debian 12 has 7.88),
+# curl enforces --max-filesize only when the server announces the length, so
+# head caps the transfer too; a cut-off transfer fails, and callers check the
+# exact size afterwards.
+download() {
+  rm -f "$temporary/download-failed"
+  {
+    curl --fail --location --proto '=https' --proto-redir '=https' \
+      --silent --show-error --connect-timeout 10 --max-time "$2" \
+      --max-filesize "$1" "$3" || : > "$temporary/download-failed"
+  } | head -c "$(($1 + 1))" > "$4"
+  if [ -e "$temporary/download-failed" ]; then
+    rm -f "$temporary/download-failed"
+    return 1
+  fi
+}
+
 safe_user_directory() {
   path=$1
   if [ -L "$path" ]; then
@@ -195,9 +213,6 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
   for command in curl jq openssl; do
     require "$command"
   done
-  curl_version=$(curl --version | awk 'NR == 1 { print $2 }')
-  oldest=$(printf '%s\n%s\n' 8.4.0 "$curl_version" | sort -V | head -1)
-  test "$oldest" = 8.4.0 || fail "Hex installation requires curl 8.4.0 or newer."
   case "$origin" in
     https://*) ;;
     *) fail "HEX_RELEASE_BASE_URL must be an https:// URL." ;;
@@ -218,9 +233,7 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     esac
   fi
   manifest_url="$origin/hex/desktop/$channel.json"
-  curl --fail --location --proto '=https' --proto-redir '=https' \
-    --silent --show-error --connect-timeout 10 --max-time 60 \
-    --max-filesize 1048576 "$manifest_url" -o "$manifest"
+  download 1048576 60 "$manifest_url" "$manifest" || fail "Could not download $manifest_url."
   test "$(jq -r '"\(.schema) \(.app) \(.artifact) \(.channel)"' "$manifest")" = "1 hex desktop $channel" \
     || fail "$manifest_url is not the Hex desktop $channel manifest."
   version=$(jq -er .release.version "$manifest")
@@ -239,9 +252,7 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     || fail "Linux release names an unexpected file URL."
   host=$(printf '%s\n' "$origin" | sed -E 's#^([a-z]+://[^/]+).*#\1#')
 
-  curl --fail --location --proto '=https' --proto-redir '=https' \
-    --silent --show-error --connect-timeout 10 --max-time 600 \
-    --max-filesize "$bytes" "$host$url" -o "$artifact_path"
+  download "$bytes" 600 "$host$url" "$artifact_path" || fail "Could not download Hex $version."
   test "$(wc -c < "$artifact_path" | tr -d ' ')" = "$bytes" \
     || fail "Downloaded Linux release has the wrong size."
   test "$(sha256sum "$artifact_path" | awk '{ print $1 }')" = "$sha256" \
@@ -256,9 +267,7 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
   test "$signature_bytes" = 64 || fail "Linux release has an invalid signature."
   printf '%s\n' "$signature_url" | grep -Eq '^/([A-Za-z0-9._-]+/)*hex/files/[0-9a-f]{64}/[A-Za-z0-9._-]+$' \
     || fail "Linux release names an unexpected signature URL."
-  curl --fail --location --proto '=https' --proto-redir '=https' \
-    --silent --show-error --connect-timeout 10 --max-time 60 \
-    --max-filesize 64 "$host$signature_url" -o "$temporary/hex.sig"
+  download 64 60 "$host$signature_url" "$temporary/hex.sig" || fail "Could not download the Hex $version signature."
   test "$(sha256sum "$temporary/hex.sig" | awk '{ print $1 }')" = "$signature_sha256" \
     || fail "Downloaded Linux release signature checksum does not match."
   printf -- '-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----\n' "$signing_key" > "$temporary/signing.pem"
