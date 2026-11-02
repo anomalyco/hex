@@ -66,7 +66,6 @@ impl ureq::unversioned::resolver::Resolver for LoopbackResolver {
         config: &ureq::config::Config,
         timeout: ureq::unversioned::transport::NextTimeout,
     ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
-        use ureq::unversioned::resolver::Resolver as _;
         let resolved = ureq::unversioned::resolver::DefaultResolver::default()
             .resolve(uri, config, timeout)?;
         if resolved.iter().all(|address| address.ip().is_loopback()) {
