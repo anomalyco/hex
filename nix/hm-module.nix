@@ -106,8 +106,11 @@ in
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = pkgs.stdenv.hostPlatform.system == "x86_64-linux";
-        message = "The Hex Nix package supports x86_64-linux only.";
+        assertion = lib.elem pkgs.stdenv.hostPlatform.system [
+          "x86_64-linux"
+          "aarch64-linux"
+        ];
+        message = "The Hex Nix package supports x86_64-linux and aarch64-linux only.";
       }
     ];
     home.packages = [ cfg.package ];
