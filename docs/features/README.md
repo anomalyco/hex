@@ -1345,6 +1345,42 @@ stated limits when using it as evidence.
 points. Preview badges do not prove installed-app login registration or a signed
 update from an older supported build.
 
+### Managed feature locks (macOS)
+
+```ts
+Configuration profile forces a key in anomaly.hex     // maintain.managed-locks
+├── DisableMeetings -> no detection, recording, transcription, or notes;
+│   hex meetings and hex mcp still read existing meetings
+├── DisableAnnotate -> Annotate off
+├── DisableOpenCodeProcessing -> no mode rewrites, meeting notes, or capture sends
+├── DisableTransforms -> no transforms; the hex.config.ts host never starts
+├── RestrictTransformsToLoopback -> transforms on; fetch reaches loopback only
+│   (resolved addresses, every redirect, no proxy); exec/execFile refused
+├── DisableLabs -> every Labs feature off
+└── Window: setting off, disabled, "Managed by your organization";
+    hex settings set / hex labs on / local API refuse with code "managed"
+```
+
+Only values a profile forces count (`CFPreferencesAppValueIsForced`), read once
+per process; a `defaults write` value locks nothing. Windows and Linux read
+none of these keys. [policy.rs](../../src/policy.rs) owns the keys:
+`AppSettings` turns locked switches off as it loads and writes the saved values
+back on save, so the person's own settings return when the profile goes away.
+Work that follows a list rather than a switch checks the policy where it
+starts: `Profile::configured` (rewrites, transformations), OpenCode generation
+in `dictation/processor.rs`, `capture_host/routing.rs` sends,
+`PersonalCommands::start`, and `personal_commands/script.rs` with
+`net::loopback_agent`. Admin docs: `site/public/docs/admin.md`
+(https://anoma.ly/hex/docs/admin).
+
+Checks: `policy::tests`, `a_managed_lock_reads_off_and_never_rewrites_the_saved_switch`,
+`a_managed_setting_is_refused`, `managed_locks_drop_the_rewrite_and_transformations`,
+`switches_hold_every_feature`, and
+`restricted_to_loopback_fetch_stays_on_this_computer_and_runs_no_programs` (a
+redirect off the computer and a non-loopback address both fail before
+connecting). Not yet observed: a real configuration profile on a managed Mac,
+or the managed rows in the window.
+
 ## Other Platforms And Consumers
 
 ```ts
