@@ -59,6 +59,10 @@ const LISTEN_ONLY_EVENT_TAP: u32 = 1;
 const HID_SYSTEM_STATE: u32 = 1;
 const COMBINED_SESSION_STATE: u32 = 0;
 const STALE_KEY_NEUTRAL_DURATION: Duration = Duration::from_millis(100);
+/// A held key repeats well within this (macOS's slowest repeat setting is
+/// under 2 s), so a tracked key with no key event for this long is not held,
+/// even when both system key states still read it down (#1008).
+const TRACKED_KEY_REPEAT_TIMEOUT: Duration = Duration::from_secs(5);
 const PHYSICAL_KEY_DOWN_HISTORY: usize = 8;
 
 type EventRef = *mut c_void;
@@ -2347,13 +2351,25 @@ impl DictationHotkey {
         if history.since_neutral & !binding_mask != 0 {
             return Some("another modifier went down since the keyboard was neutral");
         }
-        if self
+        // Key repeats refresh `key_down_at`, so a silent keyboard key is latched.
+        let silent = |code: &u16| {
+            crate::app_settings::HotkeyKey::mouse_button(*code).is_none()
+                && self.key_down_at.get(code).is_some_and(|down| {
+                    now.checked_duration_since(*down)
+                        .is_some_and(|age| age >= TRACKED_KEY_REPEAT_TIMEOUT)
+                })
+        };
+        let held: Vec<u16> = self
             .pressed_keys
             .iter()
             .filter(|code| stale(code))
-            .any(|&code| (self.physical.key_down)(code))
-        {
+            .filter(|&&code| (self.physical.key_down)(code))
+            .copied()
+            .collect();
+        if !held.iter().all(silent) {
             return Some("a tracked key is physically down");
+        } else if !held.is_empty() {
+            tracing::info!(key_codes = ?held, "tracked keys sent no key repeat; released");
         }
         // As in recovery, arrow keys can leave SecondaryFn set after release.
         let mut others = HOTKEY_MODIFIERS_MASK & !binding_mask;
@@ -3634,6 +3650,56 @@ mod tests {
             let next = release + Duration::from_secs(1);
             assert_eq!(hotkey.process(option, next), Some(HotkeyAction::Start));
         }
+    }
+
+    #[test]
+    fn a_latched_key_without_key_repeats_stops_blocking_the_shortcut() {
+        let now = capture_time();
+        let fn_down = InputEvent::Flags(FUNCTION_KEY_MASK);
+        let neutral = InputEvent::Flags(NO_FLAGS);
+        // Both system key states keep reading Tab down after its release was
+        // missed, and no key repeat ever arrives (#1008).
+        let latched_tab = PhysicalKeyboard {
+            flags: || NO_FLAGS,
+            key_down: |code| code == 48,
+        };
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, function_binding());
+        hotkey.physical = latched_tab;
+        let released = command_tab(&mut hotkey, now);
+        let soon = released + Duration::from_secs(1);
+        assert_eq!(hotkey.process(fn_down, soon), None);
+        assert_eq!(
+            hotkey.process(neutral, soon + Duration::from_millis(100)),
+            None
+        );
+        let later = released + TRACKED_KEY_REPEAT_TIMEOUT;
+        assert_eq!(hotkey.process(fn_down, later), Some(HotkeyAction::Start));
+        assert!(hotkey.pressed_keys.is_empty());
+        assert_eq!(
+            hotkey.process(neutral, later + Duration::from_secs(1)),
+            Some(HotkeyAction::Finish)
+        );
+
+        // A Tab really held keeps repeating, so it still blocks the press.
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, function_binding());
+        hotkey.physical = latched_tab;
+        let released = command_tab(&mut hotkey, now);
+        let repeat = InputEvent::Key {
+            code: 48,
+            down: true,
+            flags: NO_FLAGS,
+        };
+        let repeated = released + Duration::from_secs(4);
+        assert_eq!(hotkey.process(repeat, repeated), None);
+        assert_eq!(
+            hotkey.process(neutral, repeated + Duration::from_millis(100)),
+            None
+        );
+        assert_eq!(
+            hotkey.process(fn_down, released + TRACKED_KEY_REPEAT_TIMEOUT),
+            None
+        );
+        assert!(hotkey.pressed_keys.contains(&48));
     }
 
     #[test]
