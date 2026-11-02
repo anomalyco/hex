@@ -14,7 +14,6 @@ src/linux/input.rs 1800
 src/meeting/query.rs 2450
 src/meeting/transcript.rs 2250
 src/recognition.rs 2050
-src/rune_ui.rs 2750
 src/rune_ui/capture_capsule/flow.rs 2050
 src/rune_ui/capture_capsule/mod.rs 2100
 src/rune_ui/onboarding_kit/game.rs 2200

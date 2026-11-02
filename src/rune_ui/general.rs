@@ -101,7 +101,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 ui,
                 p,
                 "annotate-shortcut",
-                &super::SCRAWL_ICON,
+                &super::sidebar::SCRAWL_ICON,
                 tr("Annotate"),
                 ShortcutTarget::Capture,
                 None,

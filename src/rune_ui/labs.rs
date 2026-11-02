@@ -10,7 +10,8 @@ use super::controls::{
 };
 use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::lists::{Tone, tone_tag};
-use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
+use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
+use super::{Pane, Ui};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::labs::Feature;
 
