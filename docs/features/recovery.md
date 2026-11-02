@@ -227,6 +227,10 @@ initial open fails OR stream interrupts
   -> bounded backoff -> reopen the resolved input     // warm microphone retries
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
+device refuses a stream in its own default format     // #988, Intel Smart Sound on Windows
+  -> log the refused format (channels, Hz, sample format) // audio/input_format
+  -> try the other formats it lists (F32, I16, U16, I32), at most 12
+  -> none opens -> the default format's error, with its format, goes to recovery
 no input device at all (macOS)
   -> devices whose name can't be read are skipped     // audio::device_name, never Display
   -> bounded recovery; `hex status` listener: "No microphone"
