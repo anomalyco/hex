@@ -15,6 +15,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Section key alone", "Tecla § sozinha"),
+    ("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound", "Usa a tecla §, à esquerda do 1 em teclados ISO, como atalho sem modificador. Enquanto estiver atribuída, o Hex toma a tecla § de todos os apps"),
     ("Downloaded models only", "Só modelos baixados"),
     ("Show only downloaded speech models in the picker, with the space they take", "Mostra no seletor só os modelos de voz baixados, com o espaço que ocupam"),
     ("Only downloaded models", "Só modelos baixados"),

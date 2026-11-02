@@ -204,6 +204,8 @@ fn keysym_name(key: &str) -> Result<String> {
         "menu" => "Menu",
         "pause" => "Pause",
         "scroll lock" | "scrolllock" | "scroll_lock" => "Scroll_Lock",
+        // The ISO key left of 1; alone only with Labs › Section key alone.
+        "§" | "section" => "section",
         key if key.len() == 1 && key.as_bytes()[0].is_ascii_alphanumeric() => key,
         key if key.starts_with('f')
             && key[1..]
@@ -1519,6 +1521,24 @@ mod tests {
             assert!(hotkey.validate().is_ok());
             assert_eq!(hotkey.portal_trigger().unwrap(), portal);
             assert_eq!(keysym(&hotkey.key).unwrap(), keysym_value);
+            assert_eq!(HotkeyBinding::from(&hotkey), saved);
+        }
+    }
+
+    /// Issue 1050: the § key, saved as `§` or named `section`, reaches the
+    /// portal as `section` and X11 as XK_section, and shows as §.
+    #[test]
+    fn the_section_key_has_portal_and_x11_names() {
+        for name in ["§", "section"] {
+            let saved = HotkeyBinding {
+                modifiers: HotkeyModifiers::default(),
+                key: Some(HotkeyKey::named(name)),
+            };
+            let hotkey = LinuxHotkey::from(&saved);
+            assert!(hotkey.validate().is_ok());
+            assert_eq!(hotkey.label(), "§");
+            assert_eq!(hotkey.portal_trigger().unwrap(), "section");
+            assert_eq!(keysym(&hotkey.key).unwrap(), 0xa7);
             assert_eq!(HotkeyBinding::from(&hotkey), saved);
         }
     }

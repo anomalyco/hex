@@ -323,7 +323,10 @@ pub(super) fn recorded_binding(event: &KeyEvent) -> Result<HotkeyBinding, &'stat
         command: held(event.mods.logo),
         function: false,
     };
-    if modifiers.is_empty() && !matches!(event.key, Key::Function(_)) {
+    // The § key alone is checked against Labs › Section key alone in
+    // `validate` (Linux).
+    let lone_section = cfg!(target_os = "linux") && HotkeyKey::section_name(&name);
+    if modifiers.is_empty() && !matches!(event.key, Key::Function(_)) && !lone_section {
         return Err(tr("Add a modifier"));
     }
     Ok(HotkeyBinding {
@@ -351,6 +354,11 @@ pub(super) fn validate(
         } else {
             tr("Unsupported key")
         });
+    }
+    // The § key alone needs Labs › Section key alone (Linux).
+    if cfg!(target_os = "linux") && binding.is_lone_section_key() && !settings.section_key_allowed()
+    {
+        return Err(tr("Add a modifier"));
     }
     // A navigation key alone needs Labs › Special keys alone (Windows).
     if cfg!(target_os = "windows")
@@ -1357,6 +1365,35 @@ mod special_keys_tests {
             validate(&settings, ShortcutTarget::Dictation, &menu),
             Ok(())
         );
+    }
+
+    /// Issue 1050: § alone only with Labs › Section key alone on; § with a
+    /// modifier as before.
+    #[test]
+    fn section_alone_needs_its_labs_toggle() {
+        let section = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: Some(HotkeyKey::named("§")),
+        };
+        let with_control = HotkeyBinding {
+            modifiers: HotkeyModifiers::control_option(),
+            key: Some(HotkeyKey::named("§")),
+        };
+        let mut settings = AppSettings::default();
+        assert_eq!(
+            validate(&settings, ShortcutTarget::Dictation, &section),
+            Err(tr("Add a modifier"))
+        );
+        assert_eq!(
+            validate(&settings, ShortcutTarget::Dictation, &with_control),
+            Ok(())
+        );
+        settings.labs.section_key_alone = true;
+        assert_eq!(
+            validate(&settings, ShortcutTarget::Dictation, &section),
+            Ok(())
+        );
+        assert_eq!(section.keycaps(), ["§"]);
     }
 }
 

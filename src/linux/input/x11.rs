@@ -634,6 +634,8 @@ pub(super) fn keysym(key: &str) -> Result<u32> {
         "menu" => Ok(0xff67),
         "pause" => Ok(0xff13),
         "scroll lock" | "scrolllock" | "scroll_lock" => Ok(0xff14),
+        // XK_section, the ISO key left of 1.
+        "§" | "section" => Ok(0xa7),
         key if key.len() == 1 && key.as_bytes()[0].is_ascii_graphic() => {
             Ok(u32::from(key.as_bytes()[0]))
         }

@@ -83,6 +83,8 @@ impl AppSettings {
         settings.repair_mouse_shortcuts();
         #[cfg(target_os = "linux")]
         settings.repair_special_keys();
+        #[cfg(target_os = "linux")]
+        settings.repair_section_key();
         settings.normalize_double_tap_settings();
         settings.migrate_legacy_replacements();
         settings.normalize_mode_application_names();
