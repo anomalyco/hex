@@ -1277,17 +1277,17 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
     rt.state.history.selected = Some(id);
     rt.invalidate();
     settle(&mut rt);
-    assert!(rt.find("history-again").is_none(), "off, History is unchanged");
+    assert!(rt.find("again").is_none(), "off, History is unchanged");
 
     rt.state.settings.labs.keep_recordings = true;
     rt.invalidate();
     settle(&mut rt);
-    assert!(rt.find("history-again").is_some());
+    assert!(rt.find("again").is_some());
     rt.state.history.selected = Some(plain);
     rt.invalidate();
     settle(&mut rt);
     assert!(
-        rt.find("history-again").is_none(),
+        rt.find("again").is_none(),
         "an entry without audio has nothing to transcribe"
     );
 
