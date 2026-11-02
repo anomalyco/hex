@@ -14,11 +14,16 @@ cargo_home=${CARGO_HOME:-"$HOME/.cargo"}
 rustup_home=${RUSTUP_HOME:-"$HOME/.rustup"}
 image=hex-linux-build
 
-command -v docker >/dev/null 2>&1 || {
-  echo "Linux release builds require docker." >&2
-  exit 1
-}
-mkdir -p "$dist"
+for command in docker rustup; do
+  command -v "$command" >/dev/null 2>&1 || {
+    echo "Linux release builds require $command." >&2
+    exit 1
+  }
+done
+mkdir -p "$dist" "$cargo_home" "$rustup_home"
+dist=$(realpath "$dist") cargo_home=$(realpath "$cargo_home") rustup_home=$(realpath "$rustup_home")
+# The toolchain's own directory, so the build needs no rustup proxy in PATH.
+toolchain=$(cd "$root" && dirname "$(rustup which cargo)")
 docker build --quiet --tag "$image" --file "$root/packaging/linux/build.Dockerfile" "$root/packaging/linux" >&2
 home=$(mktemp -d)
 trap 'rm -rf "$home"' EXIT HUP INT TERM
@@ -27,7 +32,8 @@ docker run --rm --user "$(id -u):$(id -g)" \
   --volume "$cargo_home:$cargo_home" --volume "$rustup_home:$rustup_home" \
   --volume "$home:$home" \
   --env HOME="$home" --env CARGO_HOME="$cargo_home" --env RUSTUP_HOME="$rustup_home" \
-  --env PATH="$cargo_home/bin:/usr/local/bin:/usr/bin:/bin" \
+  --volume "$toolchain:$toolchain:ro" \
+  --env PATH="$toolchain:$cargo_home/bin:/usr/local/bin:/usr/bin:/bin" \
   --env HEX_RELEASE_DIST="$dist" \
   --env HEX_VERSION --env HEX_BUILD_CHANNEL --env HEX_TEST_BUILD \
   --env CARGO_BUILD_JOBS --env OPENSSL_NO_VENDOR --env CC --env CXX \

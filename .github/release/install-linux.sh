@@ -43,22 +43,30 @@ fail() {
   exit 1
 }
 
-# download <max bytes> <max seconds> <url> <file>: HTTPS only, and never more
-# than one byte past <max bytes> on disk. Before 8.4.0 (Debian 12 has 7.88),
-# curl enforces --max-filesize only when the server announces the length, so
-# head caps the transfer too; a cut-off transfer fails, and callers check the
-# exact size afterwards.
-download() {
-  rm -f "$temporary/download-failed"
+# fetch <max bytes> <max seconds> <url> <file> [curl option...]: HTTPS only,
+# and never more than one byte past <max bytes> on disk. Before 8.4.0 (Debian
+# 12 has 7.88), curl enforces --max-filesize only when the server announces
+# the length, so head caps the transfer too; a cut-off transfer fails, and
+# callers check the exact size afterwards.
+fetch() {
+  limit=$1 seconds=$2 url=$3 file=$4
+  shift 4
+  rm -f "$temporary/fetch-failed"
   {
-    curl --fail --location --proto '=https' --proto-redir '=https' \
-      --silent --show-error --connect-timeout 10 --max-time "$2" \
-      --max-filesize "$1" "$3" || : > "$temporary/download-failed"
-  } | head -c "$(($1 + 1))" > "$4"
-  if [ -e "$temporary/download-failed" ]; then
-    rm -f "$temporary/download-failed"
+    curl --location --proto '=https' --proto-redir '=https' \
+      --silent --show-error --connect-timeout 10 --max-time "$seconds" \
+      --max-filesize "$limit" "$@" "$url" || : > "$temporary/fetch-failed"
+  } | head -c "$((limit + 1))" > "$file"
+  if [ -e "$temporary/fetch-failed" ]; then
+    rm -f "$temporary/fetch-failed"
     return 1
   fi
+}
+
+# download <max bytes> <max seconds> <url> <file>: fetch, failing on an HTTP
+# error.
+download() {
+  fetch "$@" --fail
 }
 
 safe_user_directory() {
@@ -218,11 +226,10 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     *) fail "HEX_RELEASE_BASE_URL must be an https:// URL." ;;
   esac
   if [ -z "$channel" ]; then
-    status=$(curl --location --proto '=https' --proto-redir '=https' \
-      --silent --show-error --connect-timeout 10 --max-time 60 \
-      --max-filesize 1048576 --write-out '%{http_code}' \
-      "$origin/hex/desktop/stable.json" -o "$manifest") \
+    fetch 1048576 60 "$origin/hex/desktop/stable.json" "$manifest" \
+      --dump-header "$temporary/stable-headers" \
       || fail "Could not reach $origin."
+    status=$(awk '/^HTTP\// { code = $2 } END { print code }' "$temporary/stable-headers")
     case "$status" in
       200) channel=stable ;;
       404)
