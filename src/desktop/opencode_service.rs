@@ -1,5 +1,6 @@
 //! The running OpenCode service, reached without starting anything: its
 //! owner-only registration names a loopback URL and password, `/api/info`
+//! (or, where a current service no longer serves it, its health route)
 //! confirms the registered process still answers, and requests are plain
 //! authenticated HTTP over `TcpStream`. Hex never runs an OpenCode
 //! executable; when no service answers, OpenCode isn't running.
@@ -20,6 +21,9 @@ const MAX_REGISTRATION_BYTES: u64 = 64 * 1024;
 const MAX_REGISTRATIONS: usize = 16;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const INFO_DEADLINE: Duration = Duration::from_secs(2);
+/// Liveness routes, tried in order while a service answers 404: the older
+/// `/api/info`, then the health routes current OpenCode serves.
+const INFO_ENDPOINTS: [&str; 3] = ["/api/info", "/api/health", "/global/health"];
 const CONNECT_DEADLINE: Duration = Duration::from_secs(2);
 /// How often a blocked read checks cancellation and the deadline.
 const READ_SLICE: Duration = Duration::from_millis(50);
@@ -138,29 +142,41 @@ fn confirm(registration: &Registration) -> Option<Service> {
     };
     #[derive(Deserialize)]
     struct Info {
-        pid: u32,
-        version: String,
+        #[serde(default)]
+        healthy: Option<bool>,
+        #[serde(default)]
+        pid: Option<u32>,
+        #[serde(default)]
+        version: Option<String>,
     }
-    let response = service
-        .request(
-            "GET",
-            "/api/info",
-            None,
-            None,
-            INFO_DEADLINE,
-            &AtomicBool::new(false),
-        )
-        .ok()?;
-    if response.status != 200 {
-        return None;
+    let started = Instant::now();
+    // Older services answer `/api/info` with their pid; current ones serve
+    // only a health route, which may not name the pid.
+    for path in INFO_ENDPOINTS {
+        let remaining = INFO_DEADLINE.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            return None;
+        }
+        let response = service
+            .request("GET", path, None, None, remaining, &AtomicBool::new(false))
+            .ok()?;
+        if response.status == 404 {
+            continue;
+        }
+        if response.status != 200 {
+            return None;
+        }
+        let info: Info = serde_json::from_slice(&response.body).ok()?;
+        let confirmed = info.healthy != Some(false)
+            && (info.pid.is_some() || info.healthy == Some(true))
+            && info.pid.is_none_or(|pid| pid == registration.pid)
+            && match (&registration.version, &info.version) {
+                (Some(registered), Some(answered)) => registered == answered,
+                _ => true,
+            };
+        return confirmed.then_some(service);
     }
-    let info: Info = serde_json::from_slice(&response.body).ok()?;
-    (info.pid == registration.pid
-        && registration
-            .version
-            .as_ref()
-            .is_none_or(|version| *version == info.version))
-    .then_some(service)
+    None
 }
 
 /// A registered `http://` URL's loopback socket; an unspecified address
@@ -492,6 +508,29 @@ pub(crate) mod tests {
         let (headers, _) = server.join().unwrap().remove(0);
         assert!(headers.contains("Authorization: Basic b3BlbmNvZGU6Zml4dHVyZS1wYXNzd29yZA==\r\n"));
         assert_eq!(service, fixture(&url));
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]
+    fn a_service_without_api_info_is_confirmed_by_its_health_route() {
+        let state = state_root("health");
+        let health = r#"{"healthy":true,"version":"2.0.0"}"#.to_owned();
+        let (url, server) = serve(vec![
+            ("GET /api/info".into(), 404, "Not Found".into()),
+            ("GET /api/health".into(), 200, health),
+        ]);
+        register(&state, "service.json", &url, 42);
+        assert_eq!(find_in(&state), Some(fixture(&url)));
+        server.join().unwrap();
+        let unhealthy = r#"{"healthy":false,"version":"2.0.0"}"#.to_owned();
+        let (url, server) = serve(vec![
+            ("GET /api/info".into(), 404, "Not Found".into()),
+            ("GET /api/health".into(), 404, "Not Found".into()),
+            ("GET /global/health".into(), 200, unhealthy),
+        ]);
+        register(&state, "service.json", &url, 42);
+        assert_eq!(find_in(&state), None);
+        server.join().unwrap();
         fs::remove_dir_all(state).unwrap();
     }
 
