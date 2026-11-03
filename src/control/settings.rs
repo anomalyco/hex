@@ -416,7 +416,7 @@ const KEYS: &[Key] = &[
     key(
         "labs.meeting_summary_model",
         Kind::Bool,
-        "Labs: meeting notes written with OpenCode use meetings.opencode_model, with no fallback to another model (macOS)",
+        "Labs: meeting notes written with OpenCode use meetings.opencode_model, with no fallback to another model",
     ),
     key(
         "labs.gnome_clipboard_restore",
