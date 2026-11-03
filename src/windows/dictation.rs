@@ -371,6 +371,16 @@ pub fn run(
             }
             model.want(&next.transcription);
         }
+        // A GPU without room for two copies: the engine swaps in place.
+        if !recording
+            && !start_pending
+            && finishing.is_none()
+            && pending == 0
+            && let Some(selection) = model.take_reload()
+            && let Err(error) = engine.reload(selection)
+        {
+            tracing::warn!(%error, "could not replace the transcription model");
+        }
         if !recording
             && !start_pending
             && finishing.is_none()

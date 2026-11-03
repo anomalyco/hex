@@ -410,6 +410,24 @@ Check in [recognition.rs](../../src/recognition.rs):
 Proof limit: controlled loader responsiveness, not a full model download or
 microphone session. See the [index](README.md) for dependency recovery actions.
 
+`recover.gpu-full`: on Linux and Windows a model, language, or Speech engine
+change loads beside the running model, so a small GPU (2 GB) can run out of
+memory for the second copy (#1170).
+
+```ts
+new model loads beside the running one -> GPU out of memory -> CPU copy loads
+  -> the CPU copy is dropped (not swapped in); the GPU isn't remembered as failed
+  -> once nothing records or transcribes -> engine drops its model, then loads
+     the new one in its place (GPU again, CPU only if it still doesn't fit)
+  -> commands sent meanwhile wait for the load; nothing recorded is lost
+```
+Source: `ModelSwap::place`/`take_reload` in
+[transcription/local_transcriber.rs](../../src/transcription/local_transcriber.rs)
+and `Command::Reload` in [transcription/engine.rs](../../src/transcription/engine.rs).
+Check: `a_model_without_room_on_the_gpu_reloads_in_place_once` (swap state
+only). Not observed on a real 2 GB GPU. A second process (another `hex`
+command that loads a model itself) still loads its own copy.
+
 `recover.command-pressure`: command recognition is best-effort; dictation
 audio is not.
 
