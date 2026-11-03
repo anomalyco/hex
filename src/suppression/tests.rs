@@ -452,6 +452,25 @@ fn mouse_hotkeys() -> RuntimeHotkeys {
 }
 
 #[test]
+fn mouse_events_reach_the_filtering_tap_only_while_a_mouse_shortcut_is_bound() {
+    // Idle clicks and drags on a filtering tap broke dragging windows
+    // between displays and Spaces (#1215).
+    assert!(!filters_mouse(RuntimeHotkeys::default()));
+    let (key, observation) = tap_masks(false);
+    assert_eq!(key & MOUSE_MASK, 0);
+    assert_eq!(observation & MOUSE_MASK, MOUSE_MASK);
+    assert!(filters_mouse(mouse_hotkeys()));
+    let (key, observation) = tap_masks(true);
+    assert_eq!(key & MOUSE_MASK, MOUSE_MASK);
+    assert_eq!(observation & MOUSE_MASK, 0);
+    for filter in [false, true] {
+        let (key, observation) = tap_masks(filter);
+        assert_eq!(key & KEY_MASK, KEY_MASK);
+        assert_eq!(observation & OBSERVATION_MASK, OBSERVATION_MASK);
+    }
+}
+
+#[test]
 fn mouse_hold_and_release_use_the_dictation_state_machine() {
     let now = capture_time();
     let bindings = mouse_hotkeys();

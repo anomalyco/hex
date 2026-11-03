@@ -122,6 +122,17 @@ settings load (macOS), with a one-time note in General
 `mouse_shortcuts_go_back_to_their_default_while_their_labs_toggle_is_off` in
 [app_settings.rs](../../src/app_settings.rs).
 
+Clicks and drags reach Hex's filtering (event-consuming) session tap only
+while some shortcut is a mouse button; otherwise they go to the listen-only
+tap, as chord evidence only. A filtering tap on mouse events, even one that
+passes every event through, broke dragging windows between displays and
+Spaces (#1215). The tap thread's 5 s health check moves them when a mouse
+shortcut is bound or cleared, so for up to 5 s after that a newly bound button
+still reaches the app. Check:
+`mouse_events_reach_the_filtering_tap_only_while_a_mouse_shortcut_is_bound` in
+[suppression/tests.rs](../../src/suppression/tests.rs) (macOS only). Not yet
+observed: a real two-display Mac dragging windows with Hex running.
+
 Unload model when idle (`unload-idle`, issue 442 from @theoneand33): while
 on, its row shows "Unload after" (5, 15, 30, or 60 minutes; default 15).
 `transcription/engine`'s worker unloads a loaded GGUF model once no command
