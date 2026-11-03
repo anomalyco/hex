@@ -835,8 +835,8 @@ fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El
         .current(Some(&current))
         .open(ui.open == Some(Menu::HistoryAgainLanguage))
         .on_toggle(|ui: &mut Ui| {
-            ui.open = (ui.open != Some(Menu::HistoryAgainLanguage))
-                .then_some(Menu::HistoryAgainLanguage);
+            ui.open =
+                (ui.open != Some(Menu::HistoryAgainLanguage)).then_some(Menu::HistoryAgainLanguage);
         })
         .on_close(|ui: &mut Ui| ui.open = None)
         .on_choose(|ui: &mut Ui, choice: &str, _: &mut Tx| {
