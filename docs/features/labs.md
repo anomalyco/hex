@@ -854,7 +854,7 @@ in [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs);
 [labs.rs](../../src/labs.rs); its frames render through the real shaders
 with `HEX_HUD_EARS=1` and `rune_hud_frames`. Not yet observed: a real
 dictation through the ears on a Mac with the lab on (`hex dev hud` drives
-them in a debug build), and the failure glyph outside a unit render; the
+them in a debug build), and the failure glyph, which no render covers yet; the
 row renders only in macOS builds, so no golden changes.
 
 Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
