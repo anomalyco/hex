@@ -411,6 +411,9 @@ impl EventReader {
     }
 
     pub fn refresh(&mut self) -> io::Result<()> {
+        if self.unchanged() {
+            return Ok(());
+        }
         let mut file = match File::open(&self.path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -447,6 +450,21 @@ impl EventReader {
             self.read_records(&buffer[..count]);
         }
         Ok(())
+    }
+
+    /// Whether the file is the one already read, at the length read: then
+    /// `refresh` has nothing to do. Hosts refresh several times a second, and
+    /// reading metadata opens no file for reading, which on Windows (where an
+    /// antivirus scans each such open) cost about 100 µs a refresh.
+    fn unchanged(&self) -> bool {
+        let Ok(metadata) = fs::metadata(&self.path) else {
+            return false;
+        };
+        #[cfg(unix)]
+        if self.file_id != Some((metadata.dev(), metadata.ino())) {
+            return false;
+        }
+        metadata.len() == self.offset
     }
 
     fn read_records(&mut self, bytes: &[u8]) {
@@ -728,6 +746,41 @@ mod tests {
         log.flush_within(Duration::from_secs(5)).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 500);
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn an_unchanged_log_is_not_read_again_and_appends_still_arrive() {
+        let path = std::env::temp_dir().join(format!(
+            "hex-unchanged-event-reader-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut reader = EventReader::open(&path);
+        reader.refresh().unwrap();
+        assert!(reader.events().is_empty());
+        fs::write(
+            &path,
+            b"{\"kind\":\"session_started\",\"timestamp_ms\":1}\n",
+        )
+        .unwrap();
+        assert!(!reader.unchanged());
+        reader.refresh().unwrap();
+        assert!(reader.unchanged());
+        reader.refresh().unwrap();
+        assert_eq!(reader.events().len(), 1);
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(b"{\"kind\":\"session_started\",\"timestamp_ms\":2}\n")
+            .unwrap();
+        drop(file);
+        reader.refresh().unwrap();
+        assert!(matches!(
+            reader.events().back(),
+            Some(VoiceEvent::SessionStarted { timestamp_ms: 2 })
+        ));
+        fs::remove_file(&path).unwrap();
+        assert!(!reader.unchanged());
+        reader.refresh().unwrap();
+        assert!(reader.events().is_empty());
     }
 
     #[test]
