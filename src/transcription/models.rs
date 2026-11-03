@@ -1591,13 +1591,15 @@ mod tests {
 
     #[test]
     fn gguf_artifacts_are_q8_0_for_the_vulkan_shader_subset() {
-        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, the types the
-        // Vulkan backend is built for (`CMAKE_ARGS` in .cargo/config.toml).
-        // Another quantization needs its type added there, or Vulkan aborts.
+        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, and NB-Whisper's
+        // whisper.cpp file q5_0 too: the types the Vulkan backend is built
+        // for (`CMAKE_ARGS` in .cargo/config.toml). Another quantization
+        // needs its type added there, or Vulkan aborts.
         for model in MODELS {
             if let ModelRuntime::Gguf(artifact) = model.runtime {
                 assert!(
-                    artifact.filename.ends_with("-Q8_0.gguf"),
+                    artifact.filename.ends_with("-Q8_0.gguf")
+                        || artifact.filename == "ggml-model-q5_0.bin",
                     "{} needs its tensor types in GGML_VULKAN_SHADER_TYPES",
                     artifact.filename
                 );
