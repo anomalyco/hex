@@ -253,6 +253,20 @@ struct OpenRequest {
     selected_device: Option<String>,
     fallback: SelectedFallback,
     keep: Option<String>,
+    /// Whether System default passes over a Bluetooth default when the
+    /// setting asks. Dictation does; a meeting records the input the call
+    /// is using, so the headset a call app holds is never swapped out.
+    avoids_bluetooth: bool,
+}
+
+impl OpenRequest {
+    /// The route this open resolves against.
+    fn route(&self, current: Route) -> Route {
+        Route {
+            avoid_bluetooth: current.avoid_bluetooth && self.avoids_bluetooth,
+            ..current
+        }
+    }
 }
 
 type Opener = Arc<dyn Fn(&OpenRequest) -> Result<Opened> + Send + Sync>;
@@ -433,6 +447,7 @@ impl AudioInput {
             selected_device: None,
             fallback: SelectedFallback::Immediate,
             keep: None,
+            avoids_bluetooth: true,
         })? {
             Opened::Input(input) => Ok(*input),
             Opened::Unchanged { .. } => unreachable!("nothing to keep"),
@@ -529,6 +544,7 @@ impl RecoveringAudioInput {
             selected_device: selected_device.map(str::to_owned),
             fallback: SelectedFallback::Immediate,
             keep: None,
+            avoids_bluetooth: true,
         })
         .and_then(|opened| match opened {
             Opened::Input(input) => Ok(*input),
@@ -811,6 +827,7 @@ impl RecoveringAudioInput {
             selected_device: self.selected_device.clone(),
             fallback: SelectedFallback::AfterRetries,
             keep,
+            avoids_bluetooth: true,
         };
         self.route_generation = (self.route_generation_source)();
         let opener = self.opener.clone();
@@ -1054,7 +1071,7 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
     let (devices, names) = input_devices_of(&host)?;
     let (default, default_name) = default_input_of(&host).unzip();
     let transports = devices.iter().map(transport).collect::<Vec<_>>();
-    let route = current_route();
+    let route = request.route(current_route());
     let resolve = |selected: Option<&str>| {
         resolve_input(
             request.device_override.as_deref(),
@@ -1139,14 +1156,17 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
     )
 }
 
-/// Opens the microphone a meeting records, resolved like dictation's, or
-/// keeps the open one named `keep` when it resolves to that again.
+/// Opens the microphone a meeting records, resolved like dictation's except
+/// that a Bluetooth default is kept, since a call app on a headset talks
+/// through it; or keeps the open one named `keep` when it resolves to that
+/// again.
 pub fn open_meeting_input(selected_device: Option<&str>, keep: Option<&str>) -> Result<Opened> {
     open_configured_input(&OpenRequest {
         device_override: None,
         selected_device: selected_device.map(str::to_owned),
         fallback: SelectedFallback::Immediate,
         keep: keep.map(str::to_owned),
+        avoids_bluetooth: false,
     })
 }
 
@@ -1683,6 +1703,38 @@ mod tests {
             ),
             found(StandIn(2), Selection::InUse)
         );
+    }
+
+    #[test]
+    fn a_meeting_keeps_the_bluetooth_default_a_call_uses() {
+        use Transport::{Bluetooth, BuiltIn};
+        let names = listed(&["AirPods Pro", "MacBook Pro Microphone"]);
+        let transport = |index: usize| [Bluetooth, BuiltIn][index];
+        let current = Route {
+            lid_closed: false,
+            avoid_bluetooth: true,
+        };
+        let request = |avoids_bluetooth| OpenRequest {
+            device_override: None,
+            selected_device: None,
+            fallback: SelectedFallback::Immediate,
+            keep: None,
+            avoids_bluetooth,
+        };
+        let target = |request: OpenRequest| {
+            resolve_input(
+                None,
+                None,
+                &names,
+                Some("AirPods Pro"),
+                transport,
+                request.route(current),
+            )
+            .map(|plan| plan.target)
+        };
+        // Dictation passes over the headset; a meeting records it.
+        assert_eq!(target(request(true)), Ok(InputTarget::StandIn(1)));
+        assert_eq!(target(request(false)), Ok(InputTarget::SystemDefault));
     }
 
     #[test]

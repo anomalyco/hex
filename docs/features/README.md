@@ -717,7 +717,10 @@ General                                  // settings
 │   │       │   the stream is marked so WirePlumber never remembers the move. A Bluetooth
 │   │       │   default chosen while Hex's stream is open is followed until the next open
 │   │       ├── No other usable input (or lid closed, Bluetooth only) -> the Bluetooth default
-│   │       └── A saved Bluetooth mic or `--device` is always used as named
+│   │       ├── A saved Bluetooth mic or `--device` is always used as named
+│   │       └── Dictation only: meeting recording keeps the Bluetooth default, which
+│   │           a call app on the headset is using (#1086;
+│   │           a_meeting_keeps_the_bluetooth_default_a_call_uses)
 │   ├── Saved device missing -> System default stands in, value names it
 │   │   ├── Row says "SHURE MV7 isn't connected; using your Mac's input"
 │   │   ├── Menu keeps "SHURE MV7" checked with a faint "not connected"
