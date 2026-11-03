@@ -127,8 +127,13 @@ fn move_legacy_entry_in(directory: &Path) -> Result<()> {
     .wrap_err_with(|| format!("could not move {}", legacy.display()))
 }
 
-/// Whether the desktop starts Hex at login.
+/// Whether the desktop starts Hex at login: its autostart entry, or a user
+/// target that wants `hex.service`, as the Home Manager module's `autostart`
+/// or `systemctl --user enable hex.service` sets up (#1164).
 pub fn is_enabled() -> Result<bool> {
+    if service_enabled() {
+        return Ok(true);
+    }
     let path = entry_path()?;
     match fs::read_to_string(&path) {
         Ok(entry) => Ok(starts(&entry)),
@@ -144,6 +149,19 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     *changed = true;
+    // systemd starts Hex at login; that unit is the user's (or Home
+    // Manager's) to enable, and an autostart entry beside it would only
+    // start Hex twice.
+    if service_enabled() {
+        if enabled {
+            return Ok(());
+        }
+        bail!(
+            "Hex starts at login through its systemd user service (hex.service); \
+             turn it off where it was enabled, such as programs.hex.autostart in \
+             Home Manager or `systemctl --user disable hex.service`"
+        );
+    }
     let path = entry_path()?;
     let existing = read(&path)?;
     if let Some(entry) = &existing
@@ -196,6 +214,26 @@ pub fn announce_background() {
     if let Err(error) = ask() {
         tracing::warn!(error = format!("{error:#}"), "the Background portal failed");
     }
+}
+
+/// Whether a user target in `~/.config/systemd/user` wants `hex.service`:
+/// the link `systemctl --user enable` and Home Manager's `WantedBy` leave.
+fn service_enabled() -> bool {
+    dirs::config_dir()
+        .is_some_and(|config| service_enabled_in(&config.join("systemd").join("user")))
+}
+
+fn service_enabled_in(units: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(units) else {
+        return false;
+    };
+    entries.filter_map(|entry| entry.ok()).any(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.ends_with(".wants"))
+            && fs::symlink_metadata(entry.path().join("hex.service")).is_ok()
+    })
 }
 
 /// Launch at login changes and the startup announcement, one at a time:
@@ -506,6 +544,25 @@ mod tests {
         refresh_in(&directory, &launcher).unwrap();
         assert!(fs::read_to_string(&path).unwrap().contains("gone"));
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn an_enabled_systemd_unit_starts_hex_at_login() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let units = std::env::temp_dir().join(format!("hex-login-units-{unique}"));
+        assert!(!service_enabled_in(&units));
+        fs::create_dir_all(&units).unwrap();
+        fs::write(units.join("hex.service"), "[Unit]\n").unwrap();
+        assert!(!service_enabled_in(&units));
+        let wants = units.join("graphical-session.target.wants");
+        fs::create_dir_all(&wants).unwrap();
+        assert!(!service_enabled_in(&units));
+        std::os::unix::fs::symlink(units.join("hex.service"), wants.join("hex.service")).unwrap();
+        assert!(service_enabled_in(&units));
+        fs::remove_dir_all(units).unwrap();
     }
 
     #[test]
