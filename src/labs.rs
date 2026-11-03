@@ -240,8 +240,7 @@ impl Feature {
             | Self::LiveChapters
             | Self::SubtitleExport
             | Self::StopWhenCallEnds
-            | Self::MovableMeetingCapsules
-            | Self::MeetingSummaryModel => cfg!(target_os = "macos"),
+            | Self::MovableMeetingCapsules => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
             Self::SectionKeyAlone | Self::GnomeClipboardRestore => cfg!(target_os = "linux"),
@@ -275,6 +274,7 @@ impl Feature {
             | Self::ModelInPlace
             | Self::PickerDownloaded
             | Self::KeepRecordings
+            | Self::MeetingSummaryModel
             | Self::FillerWords => true,
         }
     }
@@ -834,8 +834,8 @@ pub fn movable_meeting_capsules() -> bool {
 }
 
 /// Meeting notes written with OpenCode use the saved
-/// `meetings.opencode_model`, with no fallback to another model (macOS;
-/// read at each generation).
+/// `meetings.opencode_model`, with no fallback to another model (every OS
+/// with meetings; read at each generation).
 pub fn meeting_summary_model() -> bool {
     on(MEETING_SUMMARY_MODEL) && Feature::MeetingSummaryModel.on_this_os()
 }

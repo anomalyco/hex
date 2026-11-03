@@ -59,7 +59,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
-├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (macOS)
+├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (every OS with Meetings)
 │                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
@@ -831,9 +831,9 @@ through the panel outside its buttons. Checks:
 [labs.rs](../../src/labs.rs). Not yet observed: a drag on a real Mac; the
 row renders only in macOS builds, so no golden changes.
 
-Choose meeting summary model (`meeting-summary-model`, issue 1107, macOS
-like Meetings; its row shows wherever Meetings does, in macOS builds): for
-choosing which OpenCode provider and subscription writes meeting notes.
+Choose meeting summary model (`meeting-summary-model`, issue 1107; macOS,
+Linux, and Windows since issue 1160; its row shows wherever Meetings does):
+for choosing which OpenCode provider and subscription writes meeting notes.
 
 ```ts
 Meetings › Settings › Advanced, Summarize with OpenCode on   // labs.meeting-summary-model
@@ -862,8 +862,9 @@ and `without_its_labs_toggle_no_summary_model_is_used` in
 [meeting/generator.rs](../../src/meeting/generator.rs);
 `a_chosen_model_is_asked_alone_and_never_falls_back` in
 [dictation/processor.rs](../../src/dictation/processor.rs). Not yet
-observed: a real meeting summarized with a chosen model; the rows render only
-in macOS builds, so no golden changes.
+observed: a real meeting summarized with a chosen model, on any OS; the Labs
+page goldens need regenerating on Linux with the row (the Meetings Advanced
+field shows only with the toggle on, so its goldens are unchanged).
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

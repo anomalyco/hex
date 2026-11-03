@@ -424,8 +424,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
         });
         // Labs › Choose meeting summary model, for OpenCode's notes only.
         let summary_model = crate::labs::Feature::MeetingSummaryModel;
-        if cfg!(target_os = "macos")
-            && meetings.summarize_with_opencode
+        if meetings.summarize_with_opencode
             && !opencode_managed()
             && summary_model.managed().is_none()
             && summary_model.shipped()

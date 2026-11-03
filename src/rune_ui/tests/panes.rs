@@ -416,6 +416,23 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.state.settings.share_dictation_shortcut);
 }
 
+/// Choose meeting summary model is a Labs toggle wherever Meetings is,
+/// Windows and Linux included (#1160), off by default.
+#[test]
+fn the_meeting_summary_model_lab_is_on_every_os_with_meetings() {
+    for scene in ["portal", "windows-settings", "mac-settings"] {
+        let mut rt = runtime(scene, true, (980.0, 2000.0));
+        tap(&mut rt, "nav-labs");
+        assert!(
+            rt.find("lab-meeting-summary-model").is_some(),
+            "{scene} lists Choose meeting summary model"
+        );
+        assert!(!rt.state.settings.labs.meeting_summary_model);
+        tap(&mut rt, "lab-meeting-summary-model");
+        assert!(rt.state.settings.labs.meeting_summary_model, "{scene}");
+    }
+}
+
 /// The cancel shortcut's row shows only in Toggle; its default, Escape,
 /// can't be recorded (Escape ends the recorder), so restoring puts it back.
 #[test]

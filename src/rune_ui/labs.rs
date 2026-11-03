@@ -241,14 +241,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Movable meeting capsules"),
                 tr("Drag meeting capsules out of the way; they come back in the corner you left them"),
             ));
-            // Meeting notes run on macOS's meeting controller.
-            rows.push(row(
-                Feature::MeetingSummaryModel,
-                &SPARKLES,
-                tr("Choose meeting summary model"),
-                tr("Pick the OpenCode provider and model that write meeting titles and summaries, in Meetings › Settings › Advanced"),
-            ));
         }
+        // Every OS's meeting controller writes notes with OpenCode.
+        rows.push(row(
+            Feature::MeetingSummaryModel,
+            &SPARKLES,
+            tr("Choose meeting summary model"),
+            tr("Pick the OpenCode provider and model that write meeting titles and summaries, in Meetings › Settings › Advanced"),
+        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,

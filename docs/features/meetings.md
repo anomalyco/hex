@@ -95,6 +95,9 @@ Notes and live chapters -> Summarize with OpenCode (off by default); it sends
     the transcript excerpt to the OpenCode model
     ├── Summarize -> "Writing a title and summary with OpenCode…" (never
     │   Apple Intelligence off a Mac that has it)
+    ├── Labs › Choose meeting summary model (off by default; #1160) -> Advanced
+    │   shows Summary model while Summarize with OpenCode is on; a saved
+    │   provider/model is used alone, as on macOS (labs.md)
     └── No writer (OpenCode not running) -> "Notes could not be written." with
         the reason, recorded as notes_error (#1151: it was dropped silently)
 Idle sleep -> systemd-inhibit idle:sleep (Linux),
