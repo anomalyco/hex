@@ -203,7 +203,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, reduced: bool) -> El {
     if ui.records_shortcuts() {
         content = content.child(without_processing(ui, p));
     }
-    super::scroll_body("output-scroll", content)
+    super::scroll_body(p.k, "output-scroll", content)
 }
 
 /// The pane's one action: the agent writes the steps, so this card is how

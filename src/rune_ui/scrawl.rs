@@ -443,7 +443,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             storage_rows(ui, p, &view, layer),
         ));
     }
-    super::scroll_body("scroll", content)
+    super::scroll_body(p.k, "scroll", content)
 }
 
 #[cfg(test)]

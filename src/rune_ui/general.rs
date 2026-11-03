@@ -59,7 +59,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 application(ui, p, layer),
             ));
     }
-    super::scroll_body("scroll", content)
+    super::scroll_body(p.k, "scroll", content)
 }
 
 // ---------------------------------------------------------------------------

@@ -544,13 +544,13 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             "enable",
             vec![super::platform_settings::meetings_toggle(ui, p)],
         ));
-        return (Vec::new(), super::scroll_body("scroll", content));
+        return (Vec::new(), super::scroll_body(p.k, "scroll", content));
     }
     let action = recording_action(ui, p);
     if ui.meetings.view == View::Settings {
         let content =
             page("content").children(super::platform_settings::meetings_settings(ui, p, layer));
-        return (vec![action], super::scroll_body("settings-scroll", content));
+        return (vec![action], super::scroll_body(p.k, "settings-scroll", content));
     }
     recordings(ui, p, layer, action)
 }
@@ -779,7 +779,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                 None,
             ),
         };
-        let column = ld::list_column(search(ui, p), "meetings-scroll", list);
+        let column = ld::list_column(p, search(ui, p), "meetings-scroll", list);
         ld::body(p, "meetings-body", column, detail)
     };
     (
@@ -988,7 +988,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         .shrink()
         .child(ld::card_header(title, meta, actions))
         .children(confirm)
-        .child(ld::card_scroll("meeting-transcript", body))
+        .child(ld::card_scroll(p, "meeting-transcript", body))
 }
 
 /// The meeting's chapters, each with its start, name, line, and Copy

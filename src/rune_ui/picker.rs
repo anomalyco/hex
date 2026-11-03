@@ -582,7 +582,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         View::Compare => panel.child(content),
         View::All => panel
             .h(PANEL_HEIGHT)
-            .child(super::scroll_body("model-scroll", content)),
+            .child(super::scroll_body(p.k, "model-scroll", content)),
     };
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);

@@ -43,14 +43,14 @@ pub(super) fn body(p: Paint, key: &str, list: El, detail: El) -> El {
 }
 
 /// The search field over the scrolling list, both on the title's edge.
-pub(super) fn list_column(search: El, scroll_key: &str, list: El) -> El {
+pub(super) fn list_column(p: Paint, search: El, scroll_key: &str, list: El) -> El {
     col()
         .key("list-column")
         .w(LIST_W)
         .h_full()
         .pl(HANG)
         .child(search)
-        .child(super::faded_body(
+        .child(super::faded_body(p.k, 
             scroll_key,
             super::lists::source_list(list),
             LIST_FADE,
@@ -199,8 +199,8 @@ pub(super) fn meta_text(p: Paint, meta: &str) -> El {
 }
 
 /// The card's scrolling content under its header.
-pub(super) fn card_scroll(key: &str, content: El) -> El {
-    super::faded_body(key, content, LIST_FADE)
+pub(super) fn card_scroll(p: Paint, key: &str, content: El) -> El {
+    super::faded_body(p.k, key, content, LIST_FADE)
 }
 
 /// A quiet empty state: an icon, a short title, and at most one line.
