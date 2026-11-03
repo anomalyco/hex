@@ -61,6 +61,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (macOS)
 │                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
+├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
+│                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page

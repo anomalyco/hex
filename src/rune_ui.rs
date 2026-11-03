@@ -723,11 +723,15 @@ impl Ui {
         let store = host::history(&connect, settings.history_retention);
         #[cfg(target_os = "linux")]
         let paste = connect.is_some().then(paste_access::detect).flatten();
+        #[cfg(target_os = "linux")]
+        let clipboard_unrestorable =
+            connect.is_some() && crate::linux::clipboard::wayland_without_data_control();
         let mut ui = Self::with(settings, Service::Pending(connect));
         ui.error = error;
         #[cfg(target_os = "linux")]
         {
             ui.platform.paste = paste;
+            ui.platform.clipboard_unrestorable = clipboard_unrestorable;
         }
         // A mouse-button shortcut went back to its default: say so once.
         if ui.settings.mouse_shortcut_notice {

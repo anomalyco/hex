@@ -367,6 +367,23 @@ read as held, and pastes. Checks:
 [linux/paste.rs](../../src/linux/paste.rs) (constructed state; not run on a
 desktop).
 
+**Added November 3, 2026 (issue 1111):** on GNOME Wayland the previous
+clipboard never came back after a paste, because Mutter offers neither
+ext-data-control nor wlr-data-control. Labs › Restore clipboard on GNOME
+(`gnome-clipboard-restore`, off by default, Linux) now snapshots, checks, and
+restores it through XWayland's CLIPBOARD selection, which Mutter bridges to
+Wayland apps both ways. It applies only on a Wayland session without
+data-control and only while this user's Xwayland process already runs with
+`DISPLAY` set, so Hex never starts XWayland; the generation and
+still-holds-the-paste rules are unchanged. While it is off there, Settings ›
+Output shows a note pointing to it. Checks:
+`xwayland_restores_only_by_opt_in_without_data_control`,
+`xwayland_is_looked_for_only_when_it_could_be_used`, and
+`xwayland_counts_only_this_users_process` in
+[linux/clipboard.rs](../../src/linux/clipboard.rs);
+`gnome_desktops_point_to_the_clipboard_lab_until_it_is_on` (constructed state;
+not run on GNOME).
+
 **Fixed November 2, 2026 (issue 978):** a Windows paste refused to run when
 the clipboard held only a format Hex can't snapshot (an app's private
 format), failing every dictation with "the current clipboard format cannot be

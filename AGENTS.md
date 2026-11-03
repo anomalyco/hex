@@ -300,7 +300,9 @@ substitute for source inspection or a second roadmap.
 - `linux/clipboard`: the clipboard a Linux paste restores: every format of the
   CLIPBOARD selection read within a size cap and deadline, then served again
   from Hex (ext-data-control, else wlr-data-control on Wayland, its own selection owner with INCR on
-  X11) until another client takes it.
+  X11) until another client takes it. Without either protocol (GNOME), only
+  the Labs opt-in `gnome-clipboard-restore` reads and restores through an
+  already running XWayland's selection.
 - `linux/input`: the one shortcut state machine (hold, double-tap lock, toggle,
   double-tap only, Paste Last, and `hex` commands) and the
   monitor that feeds it from X11 key grabs, the Wayland GlobalShortcuts portal,
@@ -1238,8 +1240,15 @@ CoreAudio formats, AppleScript details, or event serialization.
   privileged input injection (uinput). One allowed exception: on a compositor
   without layer-shell (GNOME), Rune opens only the HUD, an input-free overlay,
   as an override-redirect X11 window on XWayland when `DISPLAY` is set (empty
-  input shape, never focused); everything else stays on Wayland, and without
-  XWayland Settings reports the HUD unavailable. The desktop may grant a different
+  input shape, never focused); without XWayland Settings reports the HUD
+  unavailable. One explicit opt-in exception: Labs › Restore clipboard on
+  GNOME (`gnome-clipboard-restore`, off by default) snapshots and restores the
+  clipboard through XWayland's CLIPBOARD selection, which Mutter bridges both
+  ways, only on a Wayland session with no data-control protocol and only while
+  this user's XWayland process already runs with `DISPLAY` set; Hex never
+  connects first, so it never starts XWayland. While it is off there, Settings
+  › Output says the clipboard can't be restored and points to the toggle.
+  Everything else stays on Wayland. The desktop may grant a different
   trigger, keep an older one, or refuse one; Settings shows what it granted,
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
   Hex's app id is `anomaly.hex`: every install (direct, AUR, deb/rpm, Nix)
@@ -1338,8 +1347,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   clipboard is cleared again; an oversized or unreadable one is not restored,
   and the log says why. A paste that only reached the clipboard keeps it for
   Ctrl+V, and a capture copy is never restored over. Wayland restoration needs
-  ext-data-control (KWin) or wlr-data-control; there is no consumption
-  acknowledgment. The RemoteDesktop paste session closes 15 s after the last
+  ext-data-control (KWin) or wlr-data-control, or, without either, the
+  explicit `gnome-clipboard-restore` Labs opt-in with XWayland already running
+  (same generation and still-holds-the-paste rules, the same bytes read back
+  through XWayland, bounded reads); there is no consumption acknowledgment. The RemoteDesktop paste session closes 15 s after the last
   paste when its grant restores, so GNOME's remote-control indicator shows
   only around pastes (#718); the next paste reopens it without a dialog, and
   only a session that showed the dialog waits the 250 ms focus settle.

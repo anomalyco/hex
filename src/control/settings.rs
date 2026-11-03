@@ -419,6 +419,11 @@ const KEYS: &[Key] = &[
         "Labs: meeting notes written with OpenCode use meetings.opencode_model, with no fallback to another model (macOS)",
     ),
     key(
+        "labs.gnome_clipboard_restore",
+        Kind::Bool,
+        "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
+    ),
+    key(
         "labs.output_fixes",
         Kind::Bool,
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",

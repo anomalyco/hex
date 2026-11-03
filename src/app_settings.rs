@@ -420,6 +420,8 @@ pub struct LabsSettings {
     pub hide_menu_bar_icon: bool,
     pub movable_meeting_capsules: bool,
     pub meeting_summary_model: bool,
+    /// A paste restores the clipboard through a running XWayland on Wayland desktops without data-control, such as GNOME (Linux, issue 1111).
+    pub gnome_clipboard_restore: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -463,6 +465,7 @@ impl Default for LabsSettings {
             hide_menu_bar_icon: false,
             movable_meeting_capsules: false,
             meeting_summary_model: false,
+            gnome_clipboard_restore: false,
         }
     }
 }

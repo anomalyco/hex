@@ -543,7 +543,16 @@ target read the paste, so a target stalled past the delay can paste the
 restored clipboard instead (see [#24](https://github.com/anomalyco/hex/issues/24)).
 On Wayland, restoring needs the compositor's `ext-data-control` protocol
 (KDE Plasma 6, recent wlroots compositors) or `wlr-data-control` (wlroots
-compositors, niri, Hyprland); without either the transcript stays.
+compositors, niri, Hyprland); without either the transcript stays, and
+Settings › Output says so.
+
+GNOME offers neither. There you can opt in to Labs › Restore clipboard on
+GNOME (`hex labs on gnome-clipboard-restore`, off by default): Hex then reads
+and restores the clipboard through XWayland, which GNOME keeps in sync with
+Wayland apps both ways. It works only while XWayland is already running (an X11
+app is open and `DISPLAY` is set); Hex never starts XWayland, and otherwise the
+transcript stays and the log says why. The same rules apply: nothing newer is
+ever overwritten.
 
 On GNOME, Hex pastes through the RemoteDesktop portal, and GNOME shows its
 remote-control indicator while that session is open. Hex closes it 15 seconds
@@ -570,7 +579,8 @@ approved, so you're asked only once.
     Ctrl+V to paste" and the transcript stays on the clipboard.
 
   There is no silent XWayland, direct-typing, uinput, or privileged
-  input-injection fallback. Transcript text travels on stdin, not command-line
+  input-injection fallback; the only XWayland use besides the HUD is the
+  opt-in clipboard restore above. Transcript text travels on stdin, not command-line
   arguments.
 - The overlay uses layer-shell. Without it (GNOME), only the HUD opens on
   XWayland as an override-redirect, click-through window that never takes

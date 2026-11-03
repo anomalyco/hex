@@ -348,6 +348,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Section key alone"),
             tr("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound"),
         ));
+        rows.push(row(
+            Feature::GnomeClipboardRestore,
+            &HINTS,
+            tr("Restore clipboard on GNOME"),
+            tr("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running"),
+        ));
     }
     // Linux's and Windows' engines transcribe a whole clip on the CPU.
     if caps.os != super::platform::Os::Macos {
@@ -514,6 +520,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
         Feature::MeetingSummaryModel => "lab-meeting-summary-model",
+        Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
     }
 }
 

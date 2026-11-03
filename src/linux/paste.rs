@@ -320,15 +320,16 @@ impl LinuxPaster {
     /// unless something newer replaced the paste first.
     fn paste_as(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
         let restore = self.restore.clone();
+        let selection = self.selection.current();
         let mut state = restore.lock().unwrap_or_else(PoisonError::into_inner);
         state.generation = state.generation.wrapping_add(1);
         // A paste before the previous one restored keeps that one's original.
         let previous_pending = state
             .inserted
             .take()
-            .is_some_and(|(mime, bytes)| self.selection.holds(mime.wayland(), &bytes));
+            .is_some_and(|(mime, bytes)| selection.holds(mime.wayland(), &bytes));
         if !previous_pending {
-            state.original = match self.selection.snapshot() {
+            state.original = match selection.snapshot() {
                 Ok(snapshot) => Some(snapshot),
                 Err(error) => {
                     tracing::info!(
@@ -342,7 +343,7 @@ impl LinuxPaster {
         let result = self.send_paste(mime, bytes);
         if result.is_ok() {
             state.inserted = Some((mime, bytes.to_vec()));
-            schedule_restore(restore.clone(), state.generation, self.selection);
+            schedule_restore(restore.clone(), state.generation, selection);
         } else {
             // A paste that only reached the clipboard leaves it for Ctrl+V.
             state.original = None;
