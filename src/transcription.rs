@@ -28,6 +28,7 @@ pub(crate) mod preparation;
 pub(crate) mod service;
 pub(crate) mod speech_detector;
 pub(crate) mod stream;
+pub(crate) mod subtitle_credits;
 pub(crate) mod transcript;
 
 #[cfg(target_os = "macos")]

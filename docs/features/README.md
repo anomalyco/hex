@@ -336,6 +336,19 @@ Checks: `prompt_echo_is_dropped`, `speech_containing_the_hints_is_kept`,
 `hints_without_spaces_after_commas_are_matched` in
 [transcription/gguf_session.rs](../../src/transcription/gguf_session.rs).
 
+Models trained on subtitled video can end a clip with a subtitle credit nobody
+said, such as "Sous-titrage Société Radio-Canada" from Cohere Transcribe in
+French after a trailing pause (#1141). Every GGUF run and live stream drops a
+known credit only when it is the very end of the text (letters and digits
+compared, case and punctuation ignored), with its segment and words, in
+dictation, meetings, and the local API alike; the same words elsewhere stay.
+The list is in
+[transcription/subtitle_credits.rs](../../src/transcription/subtitle_credits.rs).
+Checks: `a_trailing_subtitle_credit_is_removed`,
+`speech_without_a_trailing_credit_is_kept`, and
+`a_trailing_subtitle_credit_is_dropped_from_text_segments_and_words`. No
+inference reproduces the credit.
+
 ```ts
 Settings picker > Compare                 // setup.model-card; shared by every desktop root
 ├── Column head -> Role (Recommended, Fewest wrong words, Fastest, Most languages,

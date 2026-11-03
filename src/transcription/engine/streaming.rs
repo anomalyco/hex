@@ -24,7 +24,9 @@ impl StreamFeed for transcribe_cpp::Stream<'_> {
 
     fn finalize(&mut self) -> Result<String, String> {
         transcribe_cpp::Stream::finalize(self).map_err(|error| error.to_string())?;
-        Ok(self.text().full.trim().to_string())
+        let text = self.text().full.trim().to_string();
+        // A subtitle credit the model appended at the end (#1141).
+        Ok(crate::transcription::subtitle_credits::strip(&text).map_or(text, |(kept, _)| kept))
     }
 
     fn partial(&self) -> Partial {
