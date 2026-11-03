@@ -531,6 +531,9 @@ impl Worker {
                 read = live.candidates.len(),
                 "a capture's look couldn't read all of OpenCode's sessions"
             );
+            if auth_refused(error) {
+                tracing::warn!("{AUTH_HINT}");
+            }
         }
         let unread = live.as_ref().and_then(sessions_unread);
         // Judged even without the sessions: a rule, page, or publisher names
@@ -943,7 +946,9 @@ fn unreachable_why(error: &str) -> String {
         .into_iter()
         .find_map(|prefix| error.strip_prefix(prefix))
         .unwrap_or(error);
-    if error.contains("didn't answer in time") || error.contains("took over") {
+    if auth_refused(error) {
+        AUTH_REFUSED.into()
+    } else if error.contains("didn't answer in time") || error.contains("took over") {
         "didn't answer in time".into()
     } else if error.contains("Could not reach server") {
         "it isn't running".into()
@@ -956,6 +961,27 @@ fn unreachable_why(error: &str) -> String {
 /// the bundle there first.
 const FILES_UNSEEN: &str = "OpenCode can't see files";
 
+/// OpenCode answered but refused Hex's credentials (HTTP 401 or 403): the
+/// password in its registration was missing or didn't match, as when the
+/// service runs in WSL and writes its registration inside WSL's home.
+const AUTH_REFUSED: &str = "OpenCode needs a password Hex doesn't have";
+
+/// What process.log says beside [`AUTH_REFUSED`]; it never names the
+/// password itself.
+const AUTH_HINT: &str = "OpenCode refused Hex's password. Hex reads it from OpenCode's \
+                         service.json under this user's ~/.local/state/opencode (or \
+                         OPENCODE_PASSWORD); an OpenCode running in WSL keeps its registration \
+                         inside WSL, which Hex on Windows can't read. The capture is saved and \
+                         copied either way";
+
+/// Whether a failed request (`{err:#}`) was OpenCode refusing the
+/// credentials.
+fn auth_refused(error: &str) -> bool {
+    ["HTTP 401", "HTTP 403", "401 Unauthorized", "403 Forbidden"]
+        .iter()
+        .any(|status| error.contains(status))
+}
+
 /// A failed send (`{err:#}`, outer context first) in the few words the
 /// capsule shows under "Copied". What OpenCode said comes first: it was
 /// reached. `agent_host` is whether bundles are copied to its Mac first.
@@ -967,6 +993,9 @@ fn send_why(error: &str, agent_host: bool) -> String {
     // The server reads the contact sheet from its own disk.
     if error.contains("Unable to read attachment") && !agent_host {
         return FILES_UNSEEN.into();
+    }
+    if auth_refused(error) {
+        return AUTH_REFUSED.into();
     }
     if error.contains("HTTP 404") {
         return "session not found".into();
@@ -1298,6 +1327,8 @@ fn deliver(
                         "OpenCode can't read a capture from its own disk; if it runs on another \
                          Mac, set capture.routing.agentHost to that Mac's SSH host. Retrying"
                     );
+                } else if why == AUTH_REFUSED {
+                    tracing::warn!("{AUTH_HINT}. Retrying");
                 } else {
                     tracing::warn!(
                         error = delivery::short(&error),
@@ -1583,6 +1614,11 @@ mod tests {
                 "session not found",
             ),
             ("bundle has no contact sheet", "bundle has no contact sheet"),
+            (
+                "OpenCode said: Unauthorized: OpenCode API failed: HTTP 401",
+                AUTH_REFUSED,
+            ),
+            ("OpenCode API failed: HTTP 403", AUTH_REFUSED),
         ];
         for (error, why) in cases {
             assert_eq!(send_why(error, false), why, "{error}");
@@ -1615,9 +1651,22 @@ mod tests {
         assert_eq!(unreachable_why(spent), "didn't answer in time");
         let down = "couldn't list sessions: Could not reach server at http://127.0.0.1:4096";
         assert_eq!(unreachable_why(down), "it isn't running");
+        // A service that wants a password Hex doesn't have (#1131: OpenCode
+        // in WSL, Hex on Windows) says so rather than a bare status.
         assert_eq!(
             unreachable_why("couldn't list sessions: 401 Unauthorized"),
-            "401 Unauthorized"
+            AUTH_REFUSED
+        );
+        assert_eq!(
+            unreachable_why(
+                "couldn't list sessions: OpenCode said: Unauthorized: OpenCode API failed: HTTP 401"
+            ),
+            AUTH_REFUSED
+        );
+        assert_eq!(
+            unreachable_why("couldn't list sessions: 500"),
+            "500",
+            "other refusals still say what OpenCode answered"
         );
         let Answered { answer, send, .. } = answer_for(
             Decided::Unreachable(unreachable_why(&error)),

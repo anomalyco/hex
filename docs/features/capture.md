@@ -698,6 +698,15 @@ Where it goes                            // capture.route; capture.routing's aut
 │       deadline, down, or refusing); a warning in process.log with the error, and
 │       the capsule reads "Couldn't reach OpenCode" with why ("didn't answer in
 │       time"), keeping Paste
+│       └── OpenCode refusing Hex's password (HTTP 401/403) -> "OpenCode needs a
+│           password Hex doesn't have", for the look and for a send, and
+│           process.log says where Hex reads it (service.json under this user's
+│           ~/.local/state/opencode, or OPENCODE_PASSWORD), never the password.
+│           The capture stays saved and copied. Check: capture_host::routing
+│           a_look_that_read_no_sessions_answers_unreachable,
+│           a_failed_send_says_what_went_wrong. Known gap (#1131): Hex on
+│           Windows can't read the registration of an OpenCode running in WSL,
+│           so that setup isn't supported
 ├── An answer for a capsule already closed (dismissed, or past its hold)
 │   leaves it closed; `hex capture list` and `send` still offer the capture
 ├── The capsule's commands act only on `last`, the newest routed capture:
