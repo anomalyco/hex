@@ -795,7 +795,7 @@ Checks:
   `the_shortcut_records_once_its_keys_come_up`,
   `a_failed_start_ends_before_escape_or_the_shortcut_sees_it`;
   `the_capture_shortcut_is_suppressed_and_never_chord_evidence` and
-  `a_capture_logs_only_keys_that_reach_the_app` in suppression.rs;
+  `a_capture_logs_only_keys_that_reach_the_app` in suppression/tests.rs;
   `only_the_capsules_pill_and_not_its_panel_takes_clicks` in capture_host.rs;
   `a_paste_goes_to_an_external_app_never_the_host` in capture/macos.rs;
   `the_hosts_normal_windows_count_and_its_chrome_does_not` in

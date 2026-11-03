@@ -345,7 +345,7 @@ the row renders only in macOS builds, so no golden changes.
 Tap or hold (`tap-or-hold`, issue 711, macOS): one dictation shortcut
 works as both tap-to-toggle and push-to-talk. It acts only in Toggle mode
 (`shortcut_mode: toggle`). The gate is the macOS shortcut machine
-(`DictationHotkey` in [suppression.rs](../../src/suppression.rs)), which reads
+(`DictationHotkey` in [suppression/hotkey.rs](../../src/suppression/hotkey.rs)), which reads
 `labs::tap_or_hold()` at each release of a Toggle press. With it on, a press
 released at least `MINIMUM_HOLD_DURATION` (300 ms, the hold threshold) after
 it started finishes the capture on release, as Hold does, with the usual
