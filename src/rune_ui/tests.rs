@@ -1424,9 +1424,9 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
     let shown = texts(&rt);
     assert!(shown.iter().any(|text| text == "Whisper"), "{shown:?}");
     assert!(shown.iter().any(|text| text.starts_with("Parakeet v3 · ")));
-    tap(&mut rt, "version0/copy");
+    tap(&mut rt, "version0/actions/copy");
     assert_eq!(rt.copy_request.as_deref(), Some("Ship it."));
-    tap(&mut rt, "version0/use");
+    tap(&mut rt, "version0/actions/use");
     settle(&mut rt);
     let entry = history
         .search("")
