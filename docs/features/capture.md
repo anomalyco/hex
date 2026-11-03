@@ -665,6 +665,12 @@ What a send carries                      // capture.send (router opencode::send_
 ├── With an agent host (routing's agentHost) the bundle is synced there and
 │   the contact sheet goes as a `file://` part instead; SSH can't carry the
 │   images
+│   └── macOS/Linux reuse the SSH connection for 60 s after its last use,
+│       through an owner-only control socket; Windows opens each connection.
+│       API reads now honor their caller's deadline over SSH too, including
+│       the optional 600 ms idle-status check before a prompt. A failed idle
+│       check records unknown status and still sends. Copying light bundle
+│       files and launching the remote CLI still cost time
 ├── No video: a capture's movie is too large for a prompt
 └── Check: router opencode tests; a send from apollo to a throwaway session
     on OpenCode V2 stored the contact sheet and keyframe as inline image/png (before one-sheet)
@@ -676,9 +682,18 @@ Where it goes                            // capture.route; capture.routing's aut
 │   Scrawl's own router folders, so `scrawl router undo` and its evals see Hex's
 │   sends as Scrawl's). The whole look has 15 s: steps not begun by then are
 │   skipped, and routing waits 1 s more for the one under way, then goes on
-│   without it. An app rule's folder is read with the sessions, and a failed
+│   without it. The newest-session list starts beside local sensing; exact
+│   folders are read in the other lane as soon as the clues name them (at most
+│   two API reads in flight, one shared 10 s session budget). Results merge in
+│   the same order; missing session IDs are read afterward. Session-ID rules
+│   still read the list: spoken session names take precedence over saved rules.
+│   An app rule's folder is read with the sessions, and a failed
 │   page of sessions keeps what was read and still reads the folders and
 │   sessions that rules name
+│   └── Timings in process.log: local sensing, total lookup, page publisher,
+│       written-to-look wait, judging, and sending (sync, idle check, post).
+│       Fake-dependency benchmarks and their proof limits:
+│       [Annotate routing latency](../../perf/annotate-routing.md)
 ├── Written -> the one capture-route thread (queue 16) decides; the snapshot's
 │   `last.route` follows: Looking -> Rule | Guess | Nothing | NoAnswer |
 │   Unreachable
