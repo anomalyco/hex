@@ -21,10 +21,11 @@ use windows::Win32::Media::Audio::{
     WAVEFORMATEX,
 };
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+    APTTYPE, APTTYPE_MAINSTA, APTTYPE_MTA, APTTYPE_NA, APTTYPE_STA, APTTYPEQUALIFIER, CLSCTX_ALL,
+    COINIT_MULTITHREADED, CoCreateInstance, CoGetApartmentType, CoInitializeEx, CoTaskMemFree,
 };
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
-use windows::core::{HSTRING, PCWSTR};
+use windows::core::{HSTRING, Interface, PCWSTR};
 
 use super::hex_microphone::{CaptureFeed, CaptureFeedSwitch, capture_feed};
 use super::input_format::{InputStream, StartedStream};
@@ -36,6 +37,8 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 /// The polling fallback's buffer: one second, which the Intel Smart Sound
 /// driver accepted without event callbacks in #988.
 const POLLING_BUFFER_HNS: i64 = 10_000_000;
+/// Shared mode requires a zero periodicity.
+const PERIODICITY_HNS: i64 = 0;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const EVENT_WAIT_MS: u32 = 100;
 
@@ -82,7 +85,8 @@ impl Wakeup {
 type Ready = std::result::Result<(u32, CaptureFeedSwitch), String>;
 
 /// Opens `device` in its mix format and starts capture.
-pub(super) fn start(device: &Device) -> Result<StartedStream> {
+pub(super) fn start(device: &Device, device_name: &str) -> Result<StartedStream> {
+    let name = device_name.to_owned();
     let id = device
         .id()
         .map_err(|error| eyre!("could not read the microphone's id: {error}"))?
@@ -103,7 +107,7 @@ pub(super) fn start(device: &Device) -> Result<StartedStream> {
                 chunks: sender,
                 errors: error_sender,
             };
-            run(&id, &worker_stop, &ready_sender, &streams);
+            run(&id, &name, &worker_stop, &ready_sender, &streams);
         })
         .map_err(|error| eyre!("could not start the microphone thread: {error}"))?;
     let (sample_rate, hex_microphone) = match ready.recv_timeout(OPEN_TIMEOUT) {
@@ -156,8 +160,8 @@ impl Drop for OwnedEvent {
     }
 }
 
-fn run(id: &str, stop: &AtomicBool, ready: &SyncSender<Ready>, streams: &Streams) {
-    let opened = match open(id) {
+fn run(id: &str, name: &str, stop: &AtomicBool, ready: &SyncSender<Ready>, streams: &Streams) {
+    let opened = match open(id, name) {
         Ok(opened) => opened,
         Err(error) => {
             let _ = ready.send(Err(error));
@@ -178,13 +182,39 @@ fn run(id: &str, stop: &AtomicBool, ready: &SyncSender<Ready>, streams: &Streams
 /// Activates `id`, reads its mix format, and initializes a fresh client
 /// in exactly that format, first event-driven, then polled. The error names
 /// the mix format and every flag and buffer tried.
-fn open(id: &str) -> std::result::Result<Opened, String> {
+fn open(id: &str, name: &str) -> std::result::Result<Opened, String> {
     let device = endpoint(id)
         .map_err(|error| format!("could not find the microphone: {}", hresult(&error)))?;
     let mut failures = Vec::new();
     let mut format_text = None;
     for wakeup in [Wakeup::Event, Wakeup::Polling] {
-        match open_with(&device, wakeup) {
+        let mut attempt = Attempt::default();
+        let result = open_with(&device, wakeup, &mut attempt);
+        // One line per attempt with every argument Initialize received, to
+        // compare against a standalone WASAPI call on the same endpoint (#988).
+        tracing::info!(
+            endpoint_id = %id,
+            endpoint_name = %name,
+            executable = %std::env::current_exe().map(|path| path.display().to_string()).unwrap_or_default(),
+            activation = "IMMDevice::Activate(CLSCTX_ALL, no activation params)",
+            iid = ?IAudioClient::IID,
+            apartment = %apartment(),
+            fresh_client = true,
+            initialize_calls_on_client = 1,
+            client_properties = "none set",
+            share_mode = "AUDCLNT_SHAREMODE_SHARED",
+            flags = format!("{:#x}", wakeup.flags()),
+            buffer_hns = wakeup.buffer_hns(),
+            periodicity_hns = PERIODICITY_HNS,
+            session_guid = "null",
+            format_source = "GetMixFormat pointer, unchanged",
+            format_bytes = %attempt.format_bytes,
+            is_format_supported = %attempt.is_format_supported,
+            device_period_hns = %attempt.device_period,
+            result = %result.as_ref().map_or_else(|failure| failure.error.as_str(), |_| "ok"),
+            "wasapi initialize attempt"
+        );
+        match result {
             Ok(opened) => {
                 tracing::info!(
                     format = %opened.format,
@@ -204,7 +234,7 @@ fn open(id: &str) -> std::result::Result<Opened, String> {
                     wakeup = ?wakeup,
                     flags = format!("{:#x}", wakeup.flags()),
                     buffer_hns = wakeup.buffer_hns(),
-                    periodicity_hns = 0,
+                    periodicity_hns = PERIODICITY_HNS,
                     error = %failure.error,
                     "the microphone refused its exact mix format"
                 );
@@ -229,7 +259,48 @@ struct Failure {
     error: String,
 }
 
-fn open_with(device: &IMMDevice, wakeup: Wakeup) -> std::result::Result<Opened, Failure> {
+/// What one attempt observed before Initialize, for its diagnostic line.
+struct Attempt {
+    format_bytes: String,
+    is_format_supported: String,
+    device_period: String,
+}
+
+impl Default for Attempt {
+    fn default() -> Self {
+        let unread = || "not read".to_owned();
+        Self {
+            format_bytes: unread(),
+            is_format_supported: unread(),
+            device_period: unread(),
+        }
+    }
+}
+
+/// The calling thread's COM apartment, as `CoGetApartmentType` reports it.
+pub(super) fn apartment() -> String {
+    let mut kind = APTTYPE::default();
+    let mut qualifier = APTTYPEQUALIFIER::default();
+    match unsafe { CoGetApartmentType(&mut kind, &mut qualifier) } {
+        Ok(()) => {
+            let kind = match kind {
+                APTTYPE_STA => "STA",
+                APTTYPE_MTA => "MTA",
+                APTTYPE_NA => "NA",
+                APTTYPE_MAINSTA => "main STA",
+                _ => "unknown",
+            };
+            format!("{kind} (qualifier {})", qualifier.0)
+        }
+        Err(error) => format!("unknown: {}", hresult(&error)),
+    }
+}
+
+fn open_with(
+    device: &IMMDevice,
+    wakeup: Wakeup,
+    attempt: &mut Attempt,
+) -> std::result::Result<Opened, Failure> {
     let fail = |format: Option<MixFormat>, step: &str, error: windows::core::Error| Failure {
         format,
         error: format!("{step}: {}", hresult(&error)),
@@ -239,10 +310,25 @@ fn open_with(device: &IMMDevice, wakeup: Wakeup) -> std::result::Result<Opened, 
     let mix = MixFormatPtr(
         unsafe { client.GetMixFormat() }.map_err(|error| fail(None, "GetMixFormat", error))?,
     );
+    if let Some(bytes) = mix.bytes() {
+        attempt.format_bytes = bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
     let format = mix.read().ok_or_else(|| Failure {
         format: None,
         error: "GetMixFormat returned an unreadable format".into(),
     })?;
+    attempt.is_format_supported = is_format_supported(&client, &mix);
+    let (mut default_period, mut minimum_period) = (0i64, 0i64);
+    attempt.device_period = match unsafe {
+        client.GetDevicePeriod(Some(&mut default_period), Some(&mut minimum_period))
+    } {
+        Ok(()) => format!("default {default_period}, minimum {minimum_period}"),
+        Err(error) => hresult(&error),
+    };
     if !format.is_decodable() {
         return Err(Failure {
             format: Some(format),
@@ -254,7 +340,7 @@ fn open_with(device: &IMMDevice, wakeup: Wakeup) -> std::result::Result<Opened, 
             AUDCLNT_SHAREMODE_SHARED,
             wakeup.flags(),
             wakeup.buffer_hns(),
-            0,
+            PERIODICITY_HNS,
             mix.0,
             None,
         )
@@ -295,21 +381,44 @@ fn endpoint(id: &str) -> windows::core::Result<IMMDevice> {
 struct MixFormatPtr(*mut WAVEFORMATEX);
 
 impl MixFormatPtr {
-    fn read(&self) -> Option<MixFormat> {
+    /// The `WAVEFORMATEX` and its `cbSize` extension bytes, as returned.
+    fn bytes(&self) -> Option<&[u8]> {
         if self.0.is_null() {
             return None;
         }
         // SAFETY: GetMixFormat returns a valid WAVEFORMATEX followed by
         // `cbSize` bytes of extension.
-        let bytes = unsafe {
+        Some(unsafe {
             let extra = usize::from(std::ptr::addr_of!((*self.0).cbSize).read_unaligned());
             std::slice::from_raw_parts(
                 self.0.cast::<u8>(),
                 std::mem::size_of::<WAVEFORMATEX>() + extra,
             )
-        };
-        MixFormat::parse(bytes)
+        })
     }
+
+    fn read(&self) -> Option<MixFormat> {
+        MixFormat::parse(self.bytes()?)
+    }
+}
+
+/// `IsFormatSupported` for the unchanged mix format in shared mode, freeing
+/// any closest match it allocates.
+fn is_format_supported(client: &IAudioClient, mix: &MixFormatPtr) -> String {
+    let mut closest: *mut WAVEFORMATEX = std::ptr::null_mut();
+    let result =
+        unsafe { client.IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, mix.0, Some(&mut closest)) };
+    let has_closest = !closest.is_null();
+    drop(MixFormatPtr(closest));
+    format!(
+        "{:#010x}{}",
+        result.0 as u32,
+        if has_closest {
+            " with a closest match"
+        } else {
+            ""
+        }
+    )
 }
 
 impl Drop for MixFormatPtr {

@@ -64,11 +64,12 @@ pub(super) fn start_stream_with_fallback(
     // Intel Smart Sound refused every stream cpal built, at any format and
     // buffer, yet opens in its exact mix format through WASAPI (#988).
     #[cfg(target_os = "windows")]
-    match super::wasapi_capture::start(device) {
+    match super::wasapi_capture::start(device, device_name) {
         Ok(started) => return Ok(started),
         Err(mix_error) => tracing::warn!(
             error = format!("{mix_error:#}"),
             device = %device_name,
+            cpal_thread_apartment = %super::wasapi_capture::apartment(),
             "the microphone refused its exact mix format; trying the formats it lists"
         ),
     }
