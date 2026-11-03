@@ -64,9 +64,8 @@ impl Drop for AttachedTap {
     }
 }
 
-pub(super) const KEY_MASK: u64 = (1_u64 << EVENT_KEY_DOWN)
-    | (1_u64 << EVENT_KEY_UP)
-    | (1_u64 << EVENT_LEFT_MOUSE_DOWN)
+pub(super) const KEY_MASK: u64 = (1_u64 << EVENT_KEY_DOWN) | (1_u64 << EVENT_KEY_UP);
+pub(super) const MOUSE_MASK: u64 = (1_u64 << EVENT_LEFT_MOUSE_DOWN)
     | (1_u64 << EVENT_LEFT_MOUSE_UP)
     | (1_u64 << EVENT_RIGHT_MOUSE_DOWN)
     | (1_u64 << EVENT_RIGHT_MOUSE_UP)
@@ -77,6 +76,40 @@ pub(super) const KEY_MASK: u64 = (1_u64 << EVENT_KEY_DOWN)
     | (1_u64 << EVENT_OTHER_MOUSE_DRAGGED);
 pub(super) const OBSERVATION_MASK: u64 = 1_u64 << EVENT_FLAGS_CHANGED;
 
+/// The shortcuts whose mouse button the session tap may consume.
+fn mouse_bindable(hotkeys: RuntimeHotkeys) -> [Option<RuntimeHotkey>; 5] {
+    [
+        Some(hotkeys.dictation),
+        hotkeys.raw_dictation,
+        hotkeys.second_dictation,
+        hotkeys.paste_last,
+        hotkeys.paste_meeting,
+    ]
+}
+
+/// Whether any shortcut is a mouse button, so clicks must pass through the
+/// filtering key tap to be consumed. Otherwise mouse events only ever reach
+/// the passive tap: a filtering tap on clicks and drags, even one returning
+/// every event unchanged, breaks dragging windows between displays and
+/// Spaces (#1215).
+pub(super) fn filters_mouse(hotkeys: RuntimeHotkeys) -> bool {
+    mouse_bindable(hotkeys).iter().flatten().any(|binding| {
+        binding
+            .key_code
+            .is_some_and(|code| crate::app_settings::HotkeyKey::mouse_button(code).is_some())
+    })
+}
+
+/// The key tap's and the passive observation tap's event masks. Mouse
+/// events go to exactly one of them.
+pub(super) fn tap_masks(filter_mouse: bool) -> (u64, u64) {
+    if filter_mouse {
+        (KEY_MASK | MOUSE_MASK, observation_mask())
+    } else {
+        (KEY_MASK, observation_mask() | MOUSE_MASK)
+    }
+}
+
 /// Translate only configured mouse triggers into the shared shortcut reducer.
 /// Ordinary clicks retain their cancellation/activity semantics.
 pub(super) fn mouse_input(
@@ -86,16 +119,10 @@ pub(super) fn mouse_input(
     hotkeys: RuntimeHotkeys,
 ) -> Option<InputEvent> {
     let code = crate::app_settings::HotkeyKey::mouse_code(button)?;
-    let bound = [
-        Some(hotkeys.dictation),
-        hotkeys.raw_dictation,
-        hotkeys.second_dictation,
-        hotkeys.paste_last,
-        hotkeys.paste_meeting,
-    ]
-    .iter()
-    .flatten()
-    .any(|binding| binding.key_code == Some(code));
+    let bound = mouse_bindable(hotkeys)
+        .iter()
+        .flatten()
+        .any(|binding| binding.key_code == Some(code));
     if bound {
         Some(InputEvent::Key { code, down, flags })
     } else {
@@ -131,7 +158,7 @@ pub(super) fn reads_held(code: u16, down: impl Fn(u32, u16) -> bool) -> bool {
 
 /// What the observation tap adds in builds with captures, while the
 /// `capture` experiment is on: the pointer moving and scrolling. Clicks and
-/// drags already reach the key tap, for mouse shortcuts. The callback drops
+/// drags already reach one of the session taps (`tap_masks`). The callback drops
 /// them at once unless a capture records (`capture_host::wants_input`); they
 /// never reach the listener.
 #[cfg(hex_capture)]
@@ -169,9 +196,11 @@ pub(super) fn run_event_tap(
     let context_ptr = &raw mut *context;
     // SAFETY: This is the dedicated event-tap thread's current run loop.
     let current_run_loop = unsafe { CFRunLoopGetCurrent() };
+    let filter_mouse = filters_mouse(crate::app_settings::runtime_hotkeys());
     let mut taps = Box::new(TapSet {
         context: context_ptr,
         run_loop: current_run_loop,
+        filter_mouse,
         taps: TapKind::ALL.map(|kind| ManagedTap {
             kind,
             attached: None,
@@ -180,7 +209,7 @@ pub(super) fn run_event_tap(
     });
     for tap in &mut taps.taps {
         // SAFETY: `context` outlives `taps`, which is declared after it.
-        if let Err(message) = unsafe { tap.attach(context_ptr, current_run_loop) } {
+        if let Err(message) = unsafe { tap.attach(context_ptr, current_run_loop, filter_mouse) } {
             match tap.kind {
                 TapKind::Key => {
                     let _ = ready.send(Err(eyre!(
@@ -264,24 +293,27 @@ impl ManagedTap {
         &mut self,
         context: *mut EventTapContext,
         run_loop: *mut c_void,
+        filter_mouse: bool,
     ) -> Result<(), &'static str> {
         // SAFETY: the caller keeps `context` alive; the slot lives in it.
         let slot = self.kind.slot(unsafe { &*context });
+        let (key_mask, observation_mask) = tap_masks(filter_mouse);
         let (location, options, mask, callback): (u32, u32, u64, EventTapCallback) = match self.kind
         {
             TapKind::Key => (
                 ANNOTATED_SESSION_EVENT_TAP,
                 DEFAULT_EVENT_TAP,
-                KEY_MASK,
+                key_mask,
                 event_callback,
             ),
             // A modifying tap disrupts Finder's Option-driven alternate menu items even
             // when it returns flagsChanged events unchanged. Observe modifiers with a
-            // passive tap; bound mouse clicks use the filtering tap.
+            // passive tap; mouse events too, unless a mouse shortcut needs the
+            // filtering tap to consume its button.
             TapKind::Observation => (
                 ANNOTATED_SESSION_EVENT_TAP,
                 LISTEN_ONLY_EVENT_TAP,
-                observation_mask(),
+                observation_mask,
                 event_callback,
             ),
             // Listens for key presses at the HID level, where shortcuts that other apps
@@ -307,19 +339,31 @@ impl ManagedTap {
 pub(super) struct TapSet {
     pub(super) context: *mut EventTapContext,
     pub(super) run_loop: *mut c_void,
+    /// Whether the key tap, rather than the passive one, receives mouse
+    /// events (`tap_masks`).
+    pub(super) filter_mouse: bool,
     pub(super) taps: [ManagedTap; 3],
 }
 
 impl TapSet {
     /// Re-enables a disabled tap and recreates an invalidated or missing one.
+    /// Also moves mouse events between the session taps once a mouse
+    /// shortcut is bound or unbound.
     pub(super) fn check(&mut self) {
         // SAFETY: `context` outlives this set (see `run_event_tap`).
         let context = unsafe { &*self.context };
         let mut interrupted = false;
+        let filter_mouse = filters_mouse(crate::app_settings::runtime_hotkeys());
+        let remask = filter_mouse != self.filter_mouse;
+        if remask {
+            tracing::info!(filter_mouse, "moving mouse events between event taps");
+            self.filter_mouse = filter_mouse;
+        }
         for tap in &mut self.taps {
             let kind = tap.kind.as_str();
             let recreate = match &tap.attached {
                 None => true,
+                Some(_) if remask && !matches!(tap.kind, TapKind::Physical) => true,
                 // SAFETY: `tap.tap` is a live CFMachPort owned by `AttachedTap`.
                 Some(attached) if unsafe { CFMachPortIsValid(attached.tap) } == 0 => {
                     tracing::warn!(tap = kind, "event tap was invalidated; recreating it");
@@ -349,7 +393,7 @@ impl TapSet {
                 .store(ptr::null_mut(), Ordering::Release);
             let was_attached = tap.attached.take().is_some();
             // SAFETY: `context` and the run loop outlive this set.
-            match unsafe { tap.attach(self.context, self.run_loop) } {
+            match unsafe { tap.attach(self.context, self.run_loop, filter_mouse) } {
                 Ok(()) => {
                     if was_attached || tap.failing {
                         tracing::warn!(tap = kind, "recreated event tap");
