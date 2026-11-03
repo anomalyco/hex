@@ -626,7 +626,9 @@ Saved shortcut                           // dictation; Option by default; Window
 ├── Tap, tap -> Speak hands-free -> Press again   // Shortcut mode: Hold or double-tap
 ├── Tap mode (Toggle) -> Cancel shortcut, Escape by default, while recording
 │   -> Discarded: nothing pasted or saved; transcribing jobs finish (#1022)
-└── Hold modes -> no cancel: Escape reaches the app, every dictation pastes (#786)
+├── Hold modes -> no cancel: Escape reaches the app, every dictation pastes (#786)
+└── macOS recorder: a key alone needs a modifier, except F1–F20 and Home, End,
+    Page Up, Page Down, Help (#1138; keys_without_modifiers_need_one_except_function_keys)
 
 General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
   -> Modal: each choice with its keys and a looping key/recording timeline
