@@ -122,7 +122,7 @@ navigation key press with the Fn flag, and the recorder leaves it out of the
 binding, so a recorded F14 (or ⌘F14 for Voice Action) never matched and never
 started. Matching now ignores that flag only for a binding on one of those keys
 that does not ask for Fn; Fn stays significant everywhere else. Check:
-`function_keys_match_despite_the_fn_flag_macos_adds` in `suppression.rs`
+`function_keys_match_despite_the_fn_flag_macos_adds` in `suppression/tests.rs`
 (constructed events; no physical-keyboard run).
 
 **Fixed October 30, 2026 (issue 462):** the Globe key can also send its own key
@@ -132,7 +132,7 @@ with it and discarded most presses as a chord 60–130 ms after they started.
 For a shortcut that holds Fn, key code 179 is now neither a chord key nor HID
 chord evidence; any other key still is. Check:
 `globe_key_events_are_not_a_chord_with_the_function_shortcut` in
-`suppression.rs` (constructed events; no physical-keyboard run).
+`suppression/tests.rs` (constructed events; no physical-keyboard run).
 
 ### Chord Shortcuts
 
@@ -198,7 +198,7 @@ can't bind both sides) and suggests adding one, such as Space.
 
 Checks: the `both_options_*` tests and
 `one_sided_options_never_start_with_both_held_but_either_side_does` in
-`suppression.rs`, `shortcuts_store_as_chords_and_old_files_convert_once` and
+`suppression/tests.rs`, `shortcuts_store_as_chords_and_old_files_convert_once` and
 `both_sides_conflict_only_with_either_side_and_match_only_together` in
 `app_settings.rs`, `both_options_record_as_one_chord_of_two_keys` in
 `rune_ui/macos_host.rs`, `both_sides_must_go_down_together` in
@@ -311,7 +311,7 @@ Intentional recording -> No automatic duration limit
 ```
 
 Source: `handle_hotkey_action` in [recognition.rs](../../src/recognition.rs).
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `callback_timestamps_preserve_nanoseconds_and_short_tap_discard`,
 `callback_press_reaches_intentional_hold_on_the_audio_clock`.
 These cover constructed callback/reducer timing, not physical event delivery.
@@ -558,7 +558,7 @@ LOCKED -> Speak hands-free -> Fresh shortcut press -> Finish
        -> Missed key release -> Neutral keyboard repairs tracking -> Still LOCKED
 ```
 
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `callback_double_tap_locks_for_modifier_and_key_bindings`,
 `callback_hold_and_double_tap_boundaries_are_milliseconds`,
 `second_tap_finishes_as_press_and_hold_when_double_tap_cannot_lock`,

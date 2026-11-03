@@ -104,7 +104,7 @@ LOCKED + key release missed while hands-free          // would block the finish 
 
 delayed pre-recovery input -> fenced                  // cannot corrupt the fresh hold
 ```
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `neutral_keyboard_rearms_after_a_missing_modifier_release`,
 `delayed_neutral_callback_after_recovery_preserves_the_next_hold`,
 `stale_key_recovery_requires_complete_neutrality_and_no_intervening_input`,
@@ -144,7 +144,7 @@ not even a key repeat, for 5 s (TRACKED_KEY_REPEAT_TIMEOUT)
 LOCKED + Escape -> Nothing, stale keys or not (#786)
 fenced edges, edges before a disabled tap, suspension -> no neutral evidence
 ```
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `option_soon_after_command_tab_records`,
 `shortcut_press_after_command_tab_from_dirty_records`,
 `typing_after_command_tab_does_not_block_the_next_press`,
@@ -178,7 +178,7 @@ SecondaryFn navigation metadata
 
 strip Fn globally from shortcut matching              // UNSAFE: not the recovery rule
 ```
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `arrow_function_metadata_does_not_block_the_next_option_hold`,
 `function_recovery_preserves_unknown_and_flags_only_fn_holds`.
 Proof limit: supplied modifier evidence, not universal native Fn behavior.
@@ -192,7 +192,7 @@ event tap disabled
   -> invalidate uncertain modifier evidence           // no inferred release
   -> fresh input -> next valid gesture -> expected output
 ```
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `tap_failure_cancels_recording_after_live_opt_in`,
 `blind_input_periods_invalidate_function_modifier_evidence`.
 Proof limit: reducer response to a supplied interruption, not macOS disabling
