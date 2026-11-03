@@ -11,7 +11,9 @@ use color_eyre::eyre::{Result, eyre};
 
 use crate::audio::recording_environment::{CaptureMarker, RecordingEnvironmentController};
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
-use crate::dictation::{ClipSource, DictationCapture, DictationClip, Finish};
+use crate::dictation::{
+    ClipSource, DictationCapture, DictationClip, Finish, POST_RELEASE_TAIL, ReleaseTail,
+};
 use crate::feedback::{self, Tone};
 use crate::suppression::PendingInputEvents;
 use crate::transcription::engine::TranscriptionEngine;
@@ -635,7 +637,11 @@ impl Owner {
                     self.capture
                         .end_recording_environment_then(|| feedback::play(Tone::DictationStop));
                 }
-                let deferred = announced.then(|| self.drain_tail(at, tail)).flatten();
+                let (tail, deferred) = if announced {
+                    self.drain_tail(at, feedback::stop_tone_length())
+                } else {
+                    (tail, None)
+                };
                 let mut finish = if self.pending_capture.take().is_some() {
                     if !self.capture_sink_open() {
                         self.input.cancel_open();
@@ -710,21 +716,34 @@ impl Owner {
         }
     }
 
-    /// Waits a bounded time for audio through `ended_at + tail`. A stream
-    /// failure or discontinuity inside the tail must not discard the finishing
-    /// capture, so the first such event is returned for handling afterwards.
+    /// Waits a bounded time for the release tail
+    /// ([`DictationCapture::release_tail`]): the base tail plus
+    /// [`TAIL_DELIVERY_GRACE`], or the longest tail plus the grace once
+    /// speech grows it. Returns the tail to keep. A stream failure or
+    /// discontinuity inside the tail must not discard the finishing capture,
+    /// so the first such event is returned for handling afterwards.
     fn drain_tail(
         &mut self,
         ended_at: CaptureInstant,
-        tail: Duration,
-    ) -> Option<RecoveringAudioInputEvent> {
-        let boundary = ended_at + tail;
-        let deadline = Instant::now() + tail + TAIL_DELIVERY_GRACE;
-        while self.state.captured_through.load(Ordering::Acquire) < boundary.as_nanos() {
+        tone: Duration,
+    ) -> (Duration, Option<RecoveringAudioInputEvent>) {
+        let started = Instant::now();
+        loop {
+            let state = self.capture.release_tail(ended_at, tone);
+            if let ReleaseTail::Through(tail) = state {
+                if tail > POST_RELEASE_TAIL {
+                    tracing::debug!(
+                        tail_ms = tail.as_millis() as u64,
+                        "speech carried past the release; kept a longer tail"
+                    );
+                }
+                return (tail, None);
+            }
+            let deadline = started + state.bound() + TAIL_DELIVERY_GRACE;
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() || !self.input.is_open() {
                 tracing::debug!("finished before the post-release tail arrived");
-                break;
+                return (state.bound(), None);
             }
             let capture_idle = self.input_idle();
             let event = self
@@ -744,11 +763,10 @@ impl Owner {
                 tracing::warn!(
                     "microphone stream changed during the post-release tail; finishing with the audio already captured"
                 );
-                return Some(event);
+                return (state.bound(), Some(event));
             }
             self.handle_input(event);
         }
-        None
     }
 
     fn chunk_gap(&self, frames: usize, captured_through: CaptureInstant) -> Option<Duration> {

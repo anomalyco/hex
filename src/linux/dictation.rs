@@ -15,7 +15,7 @@ use crate::desktop::events::{
     DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
 use crate::dictation::service::{DictationControl, Effect, MICROPHONE_LOST, ServiceDictations};
-use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL};
+use crate::dictation::{DictationCapture, Finish, ReleaseWait};
 use crate::feedback::{self, Tone};
 use crate::linux::input::{
     CommandQueue, HotkeyEvent, HotkeyOptions, HotkeyStatus, LinuxHotkey, LinuxHotkeyMonitor,
@@ -26,8 +26,6 @@ use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
 use crate::transcription::local_transcriber::LocalTranscriber;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
-/// How long past the tail a release waits for audio that never arrives.
-const TAIL_STALL_GRACE: Duration = Duration::from_millis(100);
 
 struct Job {
     transcript: PendingTranscript,
@@ -56,11 +54,10 @@ enum OutputKind {
 
 /// A release whose capture is still collecting its post-release tail.
 struct Finishing {
-    ended_at: CaptureInstant,
+    release: ReleaseWait,
     print: Option<PrintReply>,
     raw: bool,
     released: Instant,
-    deadline: Instant,
 }
 
 struct OutputWorker {
@@ -589,23 +586,24 @@ pub(crate) fn run(
         }
         // A release keeps recording through its tail; shortcut events wait,
         // so a press inside the tail starts after this clip is submitted.
-        if let Some(release) = &finishing
-            && (captured_through >= release.ended_at + POST_RELEASE_TAIL
-                || Instant::now() >= release.deadline)
+        if let Some(finish) = &finishing
+            && let Some(tail) = finish.release.tail(&capture, Instant::now())
         {
             tracing::debug!(
-                tail_ms = release.released.elapsed().as_millis(),
+                waited_ms = finish.released.elapsed().as_millis(),
+                tail_ms = tail.as_millis(),
                 "post-release tail captured"
             );
             let Finishing {
-                ended_at,
+                release,
                 print,
                 raw,
                 ..
             } = finishing.take().expect("a release is finishing");
             submit_capture(
                 &mut capture,
-                ended_at,
+                release.ended_at(),
+                tail,
                 &engine,
                 &jobs,
                 &mut events,
@@ -892,8 +890,8 @@ pub(crate) fn run(
             RecoveringAudioInputEvent::Interrupted => {
                 timeline.restart();
                 // A release still in its tail finishes with the audio it has.
-                if let Some(release) = &mut finishing {
-                    release.deadline = Instant::now();
+                if let Some(finish) = &mut finishing {
+                    finish.release.stop_waiting();
                 }
                 audio_ready = false;
                 if service.is_active() {
@@ -1023,21 +1021,15 @@ fn begin_finishing(
     print: Option<PrintReply>,
     announce: impl FnOnce(),
 ) -> Finishing {
-    let now = Instant::now();
-    let transcribes = capture.would_transcribe(ended_at);
-    if transcribes {
+    let release = ReleaseWait::new(capture, ended_at);
+    if release.waits() {
         announce();
     }
     Finishing {
-        ended_at,
+        release,
         print,
         raw: false,
-        released: now,
-        deadline: if transcribes {
-            now + POST_RELEASE_TAIL + TAIL_STALL_GRACE
-        } else {
-            now
-        },
+        released: Instant::now(),
     }
 }
 
@@ -1045,6 +1037,7 @@ fn begin_finishing(
 fn submit_capture(
     capture: &mut DictationCapture,
     ended_at: CaptureInstant,
+    tail: Duration,
     engine: &TranscriptionEngine,
     jobs: &SyncSender<OutputJob>,
     events: &mut EventLog,
@@ -1057,7 +1050,7 @@ fn submit_capture(
             print.send(PrintedTranscript::NoSpeech);
         }
     };
-    match capture.finish_with_tail(ended_at, POST_RELEASE_TAIL) {
+    match capture.finish_with_tail(ended_at, tail) {
         Finish::Discard => {
             // A short tap or chord withdraws the start tone of its press.
             feedback::retract_start();
@@ -1124,6 +1117,7 @@ fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dictation::POST_RELEASE_TAIL;
     use crate::transcription::engine::Command;
 
     fn capture_time() -> CaptureInstant {
@@ -1276,10 +1270,11 @@ mod tests {
             || sounds.push(Tone::DictationStop),
         );
         assert_eq!(sounds, [Tone::DictationStop]);
-        assert!(finishing.deadline > Instant::now());
+        assert!(finishing.release.waits());
         submit_capture(
             &mut capture,
-            finishing.ended_at,
+            finishing.release.ended_at(),
+            POST_RELEASE_TAIL,
             &engine,
             &jobs,
             &mut events,
@@ -1343,13 +1338,11 @@ mod tests {
             Some(print),
             || panic!("a short tap plays no stop tone"),
         );
-        assert!(
-            finishing.deadline <= Instant::now(),
-            "a short tap needs no tail"
-        );
+        assert!(!finishing.release.waits(), "a short tap needs no tail");
         submit_capture(
             &mut short,
-            finishing.ended_at,
+            finishing.release.ended_at(),
+            POST_RELEASE_TAIL,
             &engine,
             &jobs,
             &mut events,
@@ -1383,6 +1376,7 @@ mod tests {
         submit_capture(
             &mut capture,
             released.checked_sub(POST_RELEASE_TAIL).unwrap(),
+            POST_RELEASE_TAIL,
             &engine,
             &jobs,
             &mut events,

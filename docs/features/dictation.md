@@ -663,6 +663,27 @@ silent), `restoring_without_a_mute_runs_its_callback_first`, and
 (unmute, then tone) is checked by reading the code, not on a muted device, and a
 physical F12 release has not been recorded.
 
+**Growing tail, November 3, 2026 (issue 1101):** stopping while still saying
+the last word cut it partway, and the model guessed another word. The 200 ms
+tail is now the minimum: when sustained speech (100 ms of 20 ms frames 12 dB
+over the noise floor, syllable gaps up to 40 ms) runs into its end, capture
+continues until 160 ms of quiet or 600 ms after the release
+(`DictationCapture::release_tail`, `MAX_RELEASE_TAIL`). A key click is too
+short to count. The stop tone may be: speech then also has to be heard once
+the current set's stop sound (`feedback::stop_tone_length`) plus 60 ms has
+passed, so a release followed only by the tone waits until then and keeps
+200 ms. The release event stays exact. The macOS audio owner and the Linux
+and Windows loops (`ReleaseWait`) wait at most the base tail plus 100 ms, or
+700 ms once speech grows it; a lost microphone finishes with what arrived.
+Escape, short taps, voice controls, programmatic stops, and meetings still
+get no tail. Checks in dictation.rs:
+`a_word_said_through_the_release_keeps_the_tail_open_until_it_ends`,
+`a_release_after_the_speech_keeps_the_base_tail_without_waiting_longer`,
+`speech_that_carries_on_stops_the_tail_at_its_cap`, and
+`the_stop_tone_or_a_key_click_never_grows_the_tail` (synthetic tones through
+the capture timeline at 16 kHz). Not measured on a microphone or a real
+speaker playing the tone.
+
 ### Streaming Finish
 
 ```ts
@@ -674,7 +695,8 @@ Model advertises streaming, GPU device             // dictate.streaming
   Shortcut capture passes the hold threshold (Toggle on Windows and Linux: on press)
     -> Open one live stream; feed the 16 kHz backlog, then every 160 ms
        // same audio as the final clip, pre-roll included; never blocks capture
-  Release -> Collect the 200 ms tail -> Finish with the complete clip
+  Release -> Collect the release tail (200 ms, up to 600 ms while speech goes on)
+    -> Finish with the complete clip
     -> Feed any unfed remainder
     -> macOS Unified English: feed 400 ms of silence, as the whole clip gets
     -> Finalize -> Final text

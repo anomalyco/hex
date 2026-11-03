@@ -729,13 +729,19 @@ CoreAudio formats, AppleScript details, or event serialization.
   nanoseconds; changing tap location requires revalidating timestamp units.
   Delayed press handling reconstructs the original onset from the timeline;
   delayed release handling excludes audio captured after the physical release
-  plus `POST_RELEASE_TAIL` (200 ms).
+  plus the release tail.
 - A shortcut release or locked press that finishes a transcribed capture keeps
-  audio through that exact event plus the 200 ms tail. The event timestamp is
-  never moved; the hold threshold uses it alone. The audio owner waits at most
-  the tail plus 100 ms for that audio, and a stream stall, failure, or gap in
-  the tail finishes with the audio already delivered instead of failing the
-  capture. Short taps, programmatic stops, and meetings get no tail. A press during the tail is handled after the old clip finishes.
+  audio through that exact event plus at least the 200 ms tail
+  (`POST_RELEASE_TAIL`). When sustained speech (100 ms of speech frames) runs
+  into the tail's end, the tail grows until 160 ms of quiet or 600 ms after the
+  event (`MAX_RELEASE_TAIL`), whichever comes first. A key click is too short
+  to grow it, and the stop tone cannot: speech must also be heard once the
+  tone's own length plus 60 ms has passed. The event timestamp is never moved;
+  the hold threshold uses it alone. The audio owner waits at most the base tail
+  plus 100 ms, or 600 ms plus 100 ms once speech grows it, and a stream stall,
+  failure, or gap in the tail finishes with the audio already delivered instead
+  of failing the capture. Escape, short taps, programmatic stops, and meetings
+  get no tail. A press during the tail is handled after the old clip finishes.
 - Active dictation capture is lossless with respect to event, UI,
   context, and worker stalls.
 - The dictation shortcut has a persisted `shortcut_mode`: `hold` (default)
