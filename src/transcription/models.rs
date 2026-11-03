@@ -14,11 +14,11 @@ use sha2::{Digest, Sha256};
 
 use super::artifacts::{
     COHERE_ARTIFACT, COHERE_LANGUAGES, GIGAAM_V3_E2E_RNNT_ARTIFACT, IVRIT_WHISPER_ARTIFACT,
-    NB_WHISPER_MEDIUM_ARTIFACT, NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES,
-    PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT,
-    PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT,
-    SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT,
-    WHISPER_ARTIFACT,
+    NB_WHISPER_MEDIUM_ARTIFACT, NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES,
+    NEMOTRON_3_5_LOCALES, PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT,
+    PARAKEET_V2_ARTIFACT, PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT,
+    QWEN_LANGUAGES, QWENCLEO_ARTIFACT, SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT,
+    UNDERDOG_BARK_3_PRO_ARTIFACT, WHISPER_ARTIFACT,
 };
 pub use super::custom_models::CustomModelId;
 pub use super::languages::{LANGUAGES, language_name};
@@ -1472,13 +1472,20 @@ mod tests {
             .collect();
         assert_eq!(
             norwegian,
-            [(NbWhisperMedium, Recommended), (WhisperLargeV3Turbo, Vocabulary)]
+            [
+                (NbWhisperMedium, Recommended),
+                (WhisperLargeV3Turbo, Vocabulary)
+            ]
         );
         let nb = definition(NbWhisperMedium);
         assert_eq!(nb.language_choices(), ["no"]);
         assert_eq!(nb.runtime_language_hint("no"), Some("no"));
         assert!(!nb.supports_language(AUTO_LANGUAGE));
-        assert!(definition(WhisperLargeV3Turbo).language_choices().contains(&"no"));
+        assert!(
+            definition(WhisperLargeV3Turbo)
+                .language_choices()
+                .contains(&"no")
+        );
         assert_eq!(language_name("no"), "Norwegian");
     }
 
