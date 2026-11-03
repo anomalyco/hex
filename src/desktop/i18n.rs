@@ -329,6 +329,9 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 6])] = &[
+    ("Earlier versions", ["Wcześniejsze wersje", "早期版本", "以前のバージョン", "Frühere Versionen", "Versiones anteriores", "Попередні версії"]),
+    ("Unknown model", ["Nieznany model", "未知模型", "不明なモデル", "Unbekanntes Modell", "Modelo desconocido", "Невідома модель"]),
+    ("Use this version", ["Użyj tej wersji", "使用此版本", "このバージョンを使う", "Diese Version verwenden", "Usar esta versión", "Використати цю версію"]),
     ("Transcribe", ["Transkrybuj", "转写", "文字起こし", "Transkribieren", "Transcribir", "Розпізнати"]),
     ("Writing a title and summary with OpenCode…", ["Piszę tytuł i podsumowanie za pomocą OpenCode…", "正在用 OpenCode 撰写标题和摘要…", "OpenCode でタイトルと要約を作成中…", "Titel und Zusammenfassung werden mit OpenCode geschrieben…", "Escribiendo un título y un resumen con OpenCode…", "Пишемо назву та підсумок за допомогою OpenCode…"]),
     ("Hex is up to date", ["Hex jest aktualny", "Hex 已是最新版本", "Hex は最新です", "Hex ist auf dem neuesten Stand", "Hex está actualizado", "Hex має останню версію"]),

@@ -2,7 +2,9 @@
 //! retention choice, two-step Clear all, and a detail view with Copy and
 //! Delete. It shares the host's store, which the listener records into.
 //! With Labs › Keep recordings on, an entry that kept its audio offers
-//! Transcribe again with any installed model, run on a worker.
+//! Transcribe again with any installed model, run on a worker; Replace keeps
+//! the earlier transcripts as versions to copy or switch back to. Every
+//! entry names the model that made its text, when it is known.
 
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
@@ -15,7 +17,7 @@ use super::lists::{error_panel, section_label};
 use super::{Menu, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::stats::HistoryStats;
-use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
+use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention, Transcript};
 use crate::transcription::models::TranscriptionModelId;
 
 #[derive(Default)]
@@ -39,6 +41,8 @@ pub(super) struct HistoryPane {
     /// A model chosen for Transcribe again that takes a language hint,
     /// waiting for its language and Transcribe.
     pub(super) pending: Option<Pending>,
+    /// The version whose Copy was pressed last: entry and index.
+    pub(super) version_copied: Option<(u64, usize)>,
 }
 
 /// Transcribe again's chosen model and the language for this one run.
@@ -54,6 +58,8 @@ pub(super) struct Again {
     pub(super) id: u64,
     /// The model's name.
     pub(super) model: String,
+    /// The language chosen for the run; `None` when the model chose.
+    pub(super) language: Option<String>,
     worker: Option<Receiver<Result<String, String>>>,
     pub(super) result: Option<Result<String, String>>,
     pub(super) copied: bool,
@@ -66,6 +72,7 @@ impl Again {
         Self {
             id,
             model: model.into(),
+            language: None,
             worker: None,
             result: Some(result),
             copied: false,
@@ -166,6 +173,10 @@ impl HistoryPane {
                     inference_ms: 180,
                     total_ms: 640,
                     recording_bytes: 0,
+                    model: Some("Parakeet v3".into()),
+                    language: None,
+                    text_ms: None,
+                    versions: Vec::new(),
                 }
             };
         let mut rewritten = entry(
@@ -346,35 +357,57 @@ fn transcribe_again(
     ui.history.again = Some(Again {
         id,
         model: name.into(),
+        language: language
+            .filter(|language| *language != crate::transcription::models::AUTO_LANGUAGE)
+            .map(str::to_owned),
         worker: started.is_ok().then_some(receiver),
         result: started.err().map(|error| Err(error.to_string())),
         copied: false,
     });
 }
 
-/// Replaces entry `id`'s text with what Transcribe again found.
+/// Replaces entry `id`'s text with what Transcribe again found, keeping
+/// the current one as its newest version.
 fn replace(ui: &mut Ui, id: u64) {
-    let Some(Ok(text)) = ui
+    let Some(transcript) = ui
         .history
         .again
         .as_ref()
         .filter(|again| again.id == id)
-        .and_then(|again| again.result.clone())
+        .and_then(|again| match &again.result {
+            Some(Ok(text)) => Some(Transcript {
+                text: text.clone(),
+                model: Some(again.model.clone()),
+                language: again.language.clone(),
+            }),
+            _ => None,
+        })
     else {
         return;
     };
     if let Some(store) = &ui.history.store {
-        if let Err(error) = store.replace_text(id, &text) {
+        if let Err(error) = store.replace_text(id, transcript) {
             ui.history.error = Some(error.to_string());
             return;
         }
         ui.history.again = None;
         ui.history.reload();
     } else if let Some(entry) = ui.history.entries.iter_mut().find(|entry| entry.id == id) {
-        entry.raw_text.clone_from(&text);
-        entry.final_text = text;
-        entry.processing = None;
+        entry.replace(transcript, crate::history::now_ms());
         ui.history.again = None;
+    }
+}
+
+/// Brings entry `id`'s version `index` back as its text.
+fn restore(ui: &mut Ui, id: u64, index: usize) {
+    ui.history.version_copied = None;
+    if let Some(store) = &ui.history.store {
+        if let Err(error) = store.restore_version(id, index) {
+            ui.history.error = Some(error.to_string());
+        }
+        ui.history.reload();
+    } else if let Some(entry) = ui.history.entries.iter_mut().find(|entry| entry.id == id) {
+        entry.restore(index);
     }
 }
 
@@ -660,6 +693,9 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         }
         facts.push((tr("Processing"), summary));
     }
+    if let Some(model) = model_label(entry.model.as_deref(), entry.language.as_deref()) {
+        facts.push((tr("Speech model"), model));
+    }
     facts.push((tr("Latency"), latency));
     let mut body = col().key("detail-body").gap(20.0).child(
         text(entry.final_text.clone())
@@ -686,6 +722,9 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     body = body.child(ld::facts(p, facts));
     if ui.settings.labs.keep_recordings && entry.has_recording() {
         body = body.child(again_section(ui, p, id, layer));
+    }
+    if ui.settings.labs.keep_recordings && !entry.versions.is_empty() {
+        body = body.child(versions_section(ui, p, entry));
     }
     col()
         .key("history-detail")
@@ -863,4 +902,80 @@ fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El
             ButtonKind::Secondary,
             |ui: &mut Ui, _| transcribe_pending(ui),
         ))
+}
+
+/// The model that made a text, with the language chosen for its run.
+fn model_label(model: Option<&str>, language: Option<&str>) -> Option<String> {
+    let model = model?;
+    Some(match language {
+        Some(language) => format!(
+            "{model} · {}",
+            crate::transcription::models::language_name(language)
+        ),
+        None => model.to_owned(),
+    })
+}
+
+/// Labs › Keep recordings: the texts Replace kept, newest first, each with
+/// its model and age, Copy, and Use this version.
+fn versions_section(ui: &Ui, p: Paint, entry: &HistoryEntry) -> El {
+    let id = entry.id;
+    let mut section = col()
+        .key("versions")
+        .gap(12.0)
+        .child(section_label(p, "label", tr("Earlier versions")));
+    for (index, version) in entry.versions.iter().enumerate() {
+        let mut meta = model_label(version.model.as_deref(), version.language.as_deref())
+            .unwrap_or_else(|| tr("Unknown model").to_owned());
+        meta.push_str(" · ");
+        meta.push_str(&event_age(version.timestamp_ms));
+        let copied = ui.history.version_copied == Some((id, index));
+        section = section.child(
+            col()
+                .key(format!("version{index}"))
+                .gap(6.0)
+                .child(
+                    text(meta)
+                        .key("meta")
+                        .font(super::controls::DESCRIPTION)
+                        .color(p.muted()),
+                )
+                .child(
+                    text(version.final_text.clone())
+                        .key("text")
+                        .font(p.k.ty.body)
+                        .color(p.text())
+                        .wrap(),
+                )
+                .child(
+                    row()
+                        .key("actions")
+                        .gap(8.0)
+                        .child(button(
+                            p,
+                            "copy",
+                            if copied { tr("Copied") } else { tr("Copy") },
+                            ButtonKind::Secondary,
+                            move |ui: &mut Ui, tx: &mut Tx| {
+                                if let Some(version) = ui
+                                    .history
+                                    .entry(id)
+                                    .and_then(|entry| entry.versions.get(index))
+                                {
+                                    tx.copy(version.final_text.clone());
+                                    ui.history.version_copied = Some((id, index));
+                                }
+                            },
+                        ))
+                        .child(button(
+                            p,
+                            "use",
+                            tr("Use this version"),
+                            ButtonKind::Secondary,
+                            move |ui: &mut Ui, _| restore(ui, id, index),
+                        )),
+                ),
+        );
+    }
+    section
 }
