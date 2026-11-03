@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::os::fd::{IntoRawFd, OwnedFd};
 use std::ptr;
+use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -189,9 +190,8 @@ const DATA_MEM_PTR: u32 = 1;
 const DATA_MEM_FD: u32 = 2;
 const DATA_DMA_BUF: u32 = 3;
 /// `DRM_FORMAT_MOD_LINEAR`: rows in order, which both the CPU and the video engine read.
-const MODIFIER_LINEAR: i64 = 0;
+pub const MODIFIER_LINEAR: u64 = 0;
 const STREAM_FLAG_AUTOCONNECT: u32 = 1 << 0;
-const STREAM_FLAG_MAP_BUFFERS: u32 = 1 << 2;
 const DIRECTION_INPUT: u32 = 0;
 const STATE_ERROR: c_int = -1;
 const STATE_UNCONNECTED: c_int = 0;
@@ -382,6 +382,9 @@ pub struct VideoFormat {
     pub height: u32,
     /// Buffers are DMA-BUFs (a modifier was negotiated), not shared memory.
     pub dmabuf: bool,
+    /// The negotiated DRM format modifier of DMA-BUFs: linear unless the producer chose
+    /// another layout.
+    pub modifier: u64,
 }
 
 /// Reads a `Format` object: its pixel format, size, and whether it carries a modifier.
@@ -398,6 +401,7 @@ unsafe fn parse_format(pod: *const SpaPod) -> Option<VideoFormat> {
         Some(u32::from_ne_bytes(body.get(at..at + 4)?.try_into().ok()?))
     };
     let (mut pixel, mut size, mut dmabuf) = (None, None, false);
+    let mut modifier = MODIFIER_LINEAR;
     let mut at = 8;
     while at + 16 <= body.len() {
         let key = word(at)?;
@@ -423,7 +427,14 @@ unsafe fn parse_format(pod: *const SpaPod) -> Option<VideoFormat> {
                     u32::from_ne_bytes(bytes[4..].try_into().ok()?),
                 ));
             }
-            FORMAT_VIDEO_MODIFIER => dmabuf = true,
+            FORMAT_VIDEO_MODIFIER => {
+                dmabuf = true;
+                if kind == TYPE_LONG
+                    && let Some(bytes) = first(8).and_then(|b| <[u8; 8]>::try_from(b).ok())
+                {
+                    modifier = u64::from_ne_bytes(bytes);
+                }
+            }
             _ => {}
         }
         at += 16 + value_size.next_multiple_of(8);
@@ -434,6 +445,7 @@ unsafe fn parse_format(pod: *const SpaPod) -> Option<VideoFormat> {
         width,
         height,
         dmabuf,
+        modifier,
     })
 }
 
@@ -453,8 +465,14 @@ struct Listener {
     pw: &'static Pw,
     stream: *mut c_void,
     shared: Mutex<Shared>,
-    /// CPU views of DMA-BUFs, by fd, made on first read and unmapped with their buffer.
+    /// CPU views of buffers, by fd, made on first read and retired with their buffer.
     maps: Mutex<HashMap<i64, (usize, usize)>>,
+    /// Views whose buffer was removed: the recorder may still be copying from one, so they're
+    /// unmapped on its thread at its next [`Stream::newest`], never under it.
+    retired: Mutex<Vec<(usize, usize)>>,
+    /// The buffer the recorder holds. Touched only under the loop's lock (callbacks run
+    /// under it), and cleared when PipeWire removes that buffer so it's never queued again.
+    held: AtomicPtr<PwBuffer>,
 }
 
 unsafe extern "C" fn on_state(data: *mut c_void, _old: c_int, state: c_int, error: *const c_char) {
@@ -499,16 +517,26 @@ unsafe extern "C" fn on_param(data: *mut c_void, id: u32, param: *const SpaPod) 
 
 unsafe extern "C" fn on_remove_buffer(data: *mut c_void, buffer: *mut PwBuffer) {
     let listener = unsafe { &*data.cast::<Listener>() };
+    let _ = listener.held.compare_exchange(
+        buffer,
+        ptr::null_mut(),
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+    );
     let Some(data) = (unsafe { first_data(buffer) }) else {
         return;
     };
-    if let Some((address, length)) = listener
+    if let Some(view) = listener
         .maps
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&data.fd)
     {
-        unsafe { libc::munmap(address as *mut c_void, length) };
+        listener
+            .retired
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(view);
     }
 }
 
@@ -582,7 +610,6 @@ pub struct Stream {
     core: *mut c_void,
     listener: Box<Listener>,
     hook: Box<SpaHook>,
-    held: *mut PwBuffer,
 }
 
 // The raw handles are only used under the thread loop's lock.
@@ -618,9 +645,10 @@ impl Stream {
                 stream: ptr::null_mut(),
                 shared: Mutex::default(),
                 maps: Mutex::default(),
+                retired: Mutex::default(),
+                held: AtomicPtr::new(ptr::null_mut()),
             }),
             hook: Box::new(SpaHook([0; 6])),
-            held: ptr::null_mut(),
         };
         if unsafe { (pw.pw_thread_loop_start)(thread_loop) } < 0 {
             bail!("could not start the PipeWire loop");
@@ -667,7 +695,9 @@ impl Stream {
                 stream,
                 DIRECTION_INPUT,
                 node,
-                STREAM_FLAG_AUTOCONNECT | STREAM_FLAG_MAP_BUFFERS,
+                // Hex maps buffers itself (`Stream::map`), so a buffer PipeWire removes is never
+                // unmapped while the recorder still copies from it.
+                STREAM_FLAG_AUTOCONNECT,
                 params.as_mut_ptr(),
                 params.len() as u32,
             )
@@ -698,11 +728,36 @@ impl Stream {
     }
 
     /// Takes the newest buffer the producer queued, giving back the one held before (and any
-    /// older ones). `None` when nothing new arrived; the held frame stays valid.
+    /// older ones). `None` when nothing new arrived. A returned frame stays readable until the
+    /// next call, even if PipeWire removes its buffer meanwhile (a renegotiation).
     pub fn newest(&mut self) -> Option<Frame> {
         let pw = self.pw;
-        let stream = self.listener.stream;
+        self.unmap_retired();
         unsafe { (pw.pw_thread_loop_lock)(self.thread_loop) };
+        // The buffer is read under the lock: PipeWire frees removed buffers on its thread.
+        let frame = self.newest_locked();
+        unsafe { (pw.pw_thread_loop_unlock)(self.thread_loop) };
+        frame
+    }
+
+    /// Unmaps the views of removed buffers; the recorder read its last frame before this.
+    fn unmap_retired(&self) {
+        let retired = std::mem::take(
+            &mut *self
+                .listener
+                .retired
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        );
+        for (address, length) in retired {
+            unsafe { libc::munmap(address as *mut c_void, length) };
+        }
+    }
+
+    /// [`Self::newest`] under the loop's lock.
+    fn newest_locked(&self) -> Option<Frame> {
+        let pw = self.pw;
+        let stream = self.listener.stream;
         let mut newest: *mut PwBuffer = ptr::null_mut();
         loop {
             let buffer = unsafe { (pw.pw_stream_dequeue_buffer)(stream) };
@@ -714,15 +769,13 @@ impl Stream {
             }
             newest = buffer;
         }
-        if !newest.is_null() && !self.held.is_null() {
-            unsafe { (pw.pw_stream_queue_buffer)(stream, self.held) };
-            self.held = ptr::null_mut();
-        }
-        unsafe { (pw.pw_thread_loop_unlock)(self.thread_loop) };
         if newest.is_null() {
             return None;
         }
-        self.held = newest;
+        let held = self.listener.held.swap(newest, Ordering::Relaxed);
+        if !held.is_null() {
+            unsafe { (pw.pw_stream_queue_buffer)(stream, held) };
+        }
         let data = unsafe { first_data(newest) }?;
         let chunk = unsafe { data.chunk.as_ref() }?;
         if chunk.flags & 1 != 0 || data.kind == 0 {
@@ -765,13 +818,24 @@ impl Stream {
         })
     }
 
-    /// A CPU view of a buffer PipeWire didn't map (a DMA-BUF), kept until it's removed.
+    /// A CPU view of a buffer (a DMA-BUF or shared memory), kept until it's removed.
     fn map(&self, data: &SpaData, object: u32) -> std::result::Result<*const u8, String> {
         let mut maps = self.listener.maps.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(&(address, _)) = maps.get(&data.fd) {
+        let length = object as usize;
+        // Buffers may share one fd at different offsets (a shared-memory pool): a view is
+        // reused only when it covers this buffer, else it's retired for a larger one.
+        if let Some(&(address, mapped)) = maps.get(&data.fd)
+            && mapped >= length
+        {
             return Ok((address + data.mapoffset as usize) as *const u8);
         }
-        let length = object as usize;
+        if let Some(smaller) = maps.remove(&data.fd) {
+            self.listener
+                .retired
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(smaller);
+        }
         if length <= data.mapoffset as usize {
             return Err("the screen's GPU buffer is empty".into());
         }
@@ -803,8 +867,9 @@ impl Drop for Stream {
             (pw.pw_thread_loop_lock)(self.thread_loop);
             let stream = self.listener.stream;
             if !stream.is_null() {
-                if !self.held.is_null() {
-                    (pw.pw_stream_queue_buffer)(stream, self.held);
+                let held = self.listener.held.swap(ptr::null_mut(), Ordering::Relaxed);
+                if !held.is_null() {
+                    (pw.pw_stream_queue_buffer)(stream, held);
                 }
                 (pw.pw_stream_disconnect)(stream);
                 (pw.pw_stream_destroy)(stream);
@@ -817,6 +882,7 @@ impl Drop for Stream {
             (pw.pw_context_destroy)(self.context);
             (pw.pw_thread_loop_destroy)(self.thread_loop);
         }
+        self.unmap_retired();
         for (_, (address, length)) in self
             .listener
             .maps
@@ -877,6 +943,31 @@ mod tests {
             assert_eq!(format.pixel, PixelFormat::Bgrx);
             assert_eq!((format.width, format.height), (1920, 1080));
             assert_eq!(format.dmabuf, dmabuf);
+            assert_eq!(format.modifier, MODIFIER_LINEAR);
         }
+    }
+
+    #[test]
+    fn a_negotiated_tiled_modifier_is_read() {
+        // I915_FORMAT_MOD_4_TILED, fixated by the producer.
+        let tiled: u64 = (1 << 56) | 9;
+        let mut pod = Pod::default();
+        pod.object(OBJECT_FORMAT, PARAM_FORMAT, |pod| {
+            pod.prop(FORMAT_VIDEO_FORMAT, 0);
+            pod.id(PixelFormat::Bgrx as u32);
+            pod.prop(FORMAT_VIDEO_MODIFIER, PROP_MANDATORY);
+            pod.u32(8);
+            pod.u32(TYPE_LONG);
+            pod.0.extend_from_slice(&tiled.to_ne_bytes());
+            pod.prop(FORMAT_VIDEO_SIZE, 0);
+            pod.u32(8);
+            pod.u32(TYPE_RECTANGLE);
+            pod.0.extend_from_slice(&pair(2880, 1800));
+        });
+        let words = pod.into_words();
+        let format = unsafe { parse_format(words.as_ptr().cast()) }.unwrap();
+        assert!(format.dmabuf);
+        assert_eq!(format.modifier, tiled);
+        assert_eq!((format.width, format.height), (2880, 1800));
     }
 }

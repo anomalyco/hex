@@ -404,6 +404,8 @@ pub struct Encoder {
     width: u32,
     height: u32,
     pixel: PixelFormat,
+    /// The screen buffers' negotiated DRM format modifier.
+    modifier: u64,
     source: (u32, u32),
     frame: u32,
     idr_count: u16,
@@ -417,7 +419,7 @@ impl Encoder {
     /// tried in order: on a laptop with two GPUs the first may be one the VA driver can't use.
     pub fn new(
         source: (u32, u32),
-        pixel: PixelFormat,
+        (pixel, modifier): (PixelFormat, u64),
         output: (u32, u32),
         small: (u32, u32),
     ) -> Result<Self> {
@@ -429,7 +431,8 @@ impl Encoder {
         let mut failures = Vec::new();
         for node in nodes {
             match Self::open(va, drm, &node, source, pixel, output, small) {
-                Ok(encoder) => {
+                Ok(mut encoder) => {
+                    encoder.modifier = modifier;
                     if !failures.is_empty() {
                         crate::log::scrawl_log(format!(
                             "Hardware encoding on {} ({})",
@@ -489,6 +492,7 @@ impl Encoder {
             width,
             height,
             pixel,
+            modifier: super::pipewire::MODIFIER_LINEAR,
             source,
             frame: 0,
             idr_count: 0,
@@ -715,7 +719,7 @@ impl Encoder {
         descriptor.objects[0] = PrimeObject {
             fd: frame.fd as c_int,
             size: frame.size,
-            drm_format_modifier: 0,
+            drm_format_modifier: self.modifier,
         };
         descriptor.num_layers = 1;
         descriptor.layers[0].drm_format = self.pixel.drm_fourcc();
