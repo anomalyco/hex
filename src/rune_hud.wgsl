@@ -100,6 +100,8 @@ struct DotUniforms {
     // indicator's ears (y 1): the notch's half width, the mode, the voice's
     // 0–1 level, and seconds into the stage.
     field: vec4f,
+    // The notch indicator's done and failed, 0 to 1.
+    ears: vec4f,
 }
 
 // The island grown out of the notch: a box hanging from the screen's top
@@ -124,46 +126,110 @@ fn island_distance(point: vec2f, island: vec4f) -> f32 {
 const EAR_WIDTH: f32 = 34.0;
 const TAU: f32 = 6.2831853;
 
-// Labs' notch indicator: the notch widened sideways at its own height, a
-// glyph either side of the camera. Left, a red dot that swells with the
-// voice, becoming a spinner while Hex works; right, three dots that light
-// with the voice, then pulse in turn while Hex works. A failure turns both
-// coral (the palette's core).
+// Apple's dark-appearance system colours: the island is black in either
+// appearance, as the notch is.
+const SYSTEM_ORANGE: vec3f = vec3f(1.0, 0.624, 0.039);
+const SYSTEM_GREEN: vec3f = vec3f(0.188, 0.820, 0.345);
+const SYSTEM_RED: vec3f = vec3f(1.0, 0.271, 0.227);
+const LABEL: vec3f = vec3f(0.92, 0.92, 0.94);
+
+fn segment(point: vec2f, a: vec2f, b: vec2f, radius: f32) -> f32 {
+    let pa = point - a;
+    let ba = b - a;
+    let t = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * t) - radius;
+}
+
+// SF Symbols' mic.fill, 13 pt tall: the capsule, its cradle, and stand.
+fn mic(p: vec2f) -> f32 {
+    let body = rounded_box(p - vec2f(0.0, -2.3), vec2f(2.35, 4.1), 2.35);
+    // The cradle's middle is 1.2 pt above the glyph's.
+    let ring = abs(length(p - vec2f(0.0, -1.2)) - 4.5) - 0.62;
+    let cradle = min(max(ring, -1.2 - p.y), length(vec2f(abs(p.x) - 4.5, p.y + 1.2)) - 0.62);
+    let stem = rounded_box(p - vec2f(0.0, 4.75), vec2f(0.62, 1.1), 0.62);
+    let stand = rounded_box(p - vec2f(0.0, 6.0), vec2f(2.7, 0.62), 0.62);
+    return min(min(body, cradle), min(stem, stand));
+}
+
+// SF Symbols' checkmark, bold.
+fn checkmark(p: vec2f) -> f32 {
+    let knee = vec2f(-1.2, 2.9);
+    return min(segment(p, vec2f(-4.2, -0.2), knee, 0.95), segment(p, knee, vec2f(4.3, -3.6), 0.95));
+}
+
+// SF Symbols' exclamationmark: the stroke and its point.
+fn exclamation(p: vec2f) -> f32 {
+    return min(segment(p, vec2f(0.0, -3.3), vec2f(0.0, 0.8), 0.9), length(p - vec2f(0.0, 3.1)) - 1.0);
+}
+
+// Labs' notch indicator, in the Dynamic Island's compact style: the notch
+// widened sideways at its own height, one glyph either side of the camera.
+// Recording: an orange mic (the colour macOS and iOS use for a microphone
+// in use) and capsule level bars that move with the voice. Working: the
+// macOS 12-spoke spinner and the bars at rest with light running through
+// them. Done: a green checkmark pops in. Failed: a red
+// exclamationmark.circle.fill. Glyphs scale and unblur in as the ears open.
 fn ears(window_point: vec2f, island_shape: f32) -> vec4f {
     let notch_half = u.field.x;
     let level = clamp(u.field.z, 0.0, 1.0);
     let clock = u.field.w;
+    let done = clamp(u.ears.x, 0.0, 1.0);
+    let fail = clamp(u.ears.y, 0.0, 1.0);
     let ear = max(u.island.x - notch_half, 0.0);
-    let room = sstep(0.4, 1.0, ear / EAR_WIDTH);
-    let s = mix(0.6, 1.0, room);
-    let aa = 0.75 / u.backing_scale;
-    let live = clamp(u.live, 0.0, 1.0);
+    let room = sstep(0.35, 1.0, ear / EAR_WIDTH);
+    let s = mix(0.72, 1.0, room);
+    let aa = (0.75 / u.backing_scale + (1.0 - room) * 1.4) / s;
     let working = clamp(u.cool, 0.0, 1.0);
+    let done_in = done * sstep(0.0, 0.06, clock);
+    let w_fail = fail;
+    let w_done = done_in * (1.0 - fail);
+    let w_work = working * (1.0 - done_in) * (1.0 - fail);
+    let w_record = (1.0 - working) * (1.0 - fail);
     let middle_y = u.island.z + u.island.y * 0.5;
-    let inset = notch_half + EAR_WIDTH * 0.47;
+    let inset = notch_half + EAR_WIDTH * 0.5 - 1.0;
     var result = vec4f(0.0);
 
-    let red = vec3f(1.0, 0.27, 0.23);
-    let q = window_point - vec2f(-inset, middle_y);
-    let from_center = length(q);
-    let dot_radius = (3.4 + 1.4 * level * live) * s;
-    composite(&result, red, 0.55 * level * live * (1.0 - working)
-        * exp(-max(from_center - dot_radius, 0.0) / 2.6));
-    composite(&result, mix(u.core.rgb, red, live),
-        (1.0 - working) * coverage(from_center - dot_radius, aa));
-    let ring = abs(from_center - 4.3 * s) - 0.85 * s;
-    let turn = fract(atan2(q.y, q.x) / TAU + clock * 1.15);
-    composite(&result, u.core.rgb, working * 0.16 * coverage(ring, aa));
-    composite(&result, u.core.rgb, working * sstep(0.05, 1.0, turn) * coverage(ring, aa));
+    // Leading: the mic, the spinner, the checkmark, or the failure.
+    let lead = (window_point - vec2f(-inset, middle_y)) / s;
+    composite(&result, SYSTEM_ORANGE, w_record * coverage(mic(lead), aa));
+    if (w_work > 0.001) {
+        let sector = TAU / 12.0;
+        let k = round(atan2(lead.x, -lead.y) / sector);
+        let direction = vec2f(sin(k * sector), -cos(k * sector));
+        let along = clamp(dot(lead, direction), 2.7, 6.1);
+        let spoke = length(lead - direction * along) - 0.75;
+        let head = floor(clock * 12.0);
+        let behind = (head - k) - 12.0 * floor((head - k) / 12.0);
+        let shade = 0.2 + 0.8 * pow(1.0 - behind / 12.0, 1.5);
+        composite(&result, LABEL, w_work * shade * coverage(spoke, aa));
+    }
+    if (w_done > 0.001) {
+        let t = clamp(clock / 0.16, 0.0, 1.0);
+        let pop = max(sstep(0.0, 1.0, t) * (1.0 + 0.2 * sin(t * 3.14159)), 0.05);
+        composite(&result, SYSTEM_GREEN, w_done * coverage(checkmark(lead / pop), aa / pop));
+    }
+    if (w_fail > 0.001) {
+        let disc = coverage(length(lead) - 6.4, aa) * (1.0 - coverage(exclamation(lead), aa));
+        composite(&result, SYSTEM_RED, w_fail * disc);
+    }
 
-    for (var i = 0; i < 3; i++) {
+    // Trailing: the level bars, at rest with light running through them
+    // while Hex works.
+    let trail = (window_point - vec2f(inset, middle_y)) / s;
+    let profile = array<f32, 5>(0.5, 0.8, 1.0, 0.75, 0.55);
+    let rate = array<f32, 5>(1.7, 2.3, 1.9, 2.6, 2.1);
+    let phase = array<f32, 5>(0.0, 1.3, 2.1, 0.7, 1.7);
+    // Loudness reads as its square root, so ordinary speech moves the bars.
+    let heard = sqrt(level);
+    for (var i = 0; i < 5; i++) {
         let n = f32(i);
-        let center = vec2f(inset + (n - 1.0) * 6.0 * s, middle_y);
-        let heard = 0.25 + 0.75 * sstep(0.06 + n * 0.22, 0.28 + n * 0.22, level);
-        let pulse = 0.25 + 0.75 * pow(0.5 + 0.5 * cos(TAU * (clock * 1.3 - n * 0.17)), 4.0);
-        let bright = mix(heard, pulse, working);
-        let radius = (1.5 + 0.5 * bright) * s;
-        composite(&result, u.core.rgb, bright * coverage(length(window_point - center) - radius, aa));
+        let wobble = 0.6 + 0.4 * sin(TAU * clock * rate[i] * 0.5 + phase[i]);
+        let height = 2.4 + 10.0 * heard * profile[i] * wobble * w_record;
+        let bar = rounded_box(trail - vec2f((n - 2.0) * 4.0, 0.0), vec2f(1.1, height * 0.5), 1.1);
+        let light = 0.3 + 0.7 * pow(0.5 + 0.5 * cos(TAU * (clock * 1.1 - n * 0.14)), 3.0);
+        let color = mix(SYSTEM_ORANGE, LABEL, working);
+        let alpha = w_record + w_work * light;
+        composite(&result, color, alpha * coverage(bar, aa));
     }
 
     result *= u.opacity * room * island_shape;

@@ -94,6 +94,8 @@ pub struct Pose {
     /// Seconds into the current stage, held at 0 with Reduce Motion: what
     /// the notch indicator's glyphs animate by.
     pub clock: f32,
+    /// 1 once the dictation is done, else 0.
+    pub done: f32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -525,6 +527,7 @@ impl Scope {
             } else {
                 self.elapsed
             },
+            done: if self.stage == Stage::Done { 1.0 } else { 0.0 },
         }
     }
 

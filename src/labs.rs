@@ -240,7 +240,8 @@ impl Feature {
             .find(|feature| feature.settings_key() == key)
     }
 
-    fn on_this_os(self) -> bool {
+    /// Whether this OS has the feature at all, in any build.
+    pub fn on_this_os(self) -> bool {
         match self {
             Self::Meetings
             | Self::LiveChapters

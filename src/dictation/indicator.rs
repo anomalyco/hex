@@ -20,6 +20,9 @@ const PROCESSING_MIN_DURATION: Duration = Duration::from_millis(200);
 /// How long done shows before the HUD collapses: a third into done's
 /// 0.3 s wipe, so the collapse and the wipe end together.
 const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(100);
+/// How long the notch indicator holds its checkmark before folding back,
+/// as long as a system confirmation stays up.
+const EARS_COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(700);
 const FAILED_VISIBLE_DURATION: Duration = Duration::from_millis(600);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -151,8 +154,9 @@ fn active_phase(capturing: bool, pending_jobs: usize) -> Option<Phase> {
 }
 
 impl Phase {
-    fn visible_duration(self) -> Option<Duration> {
+    fn visible_duration(self, ears: bool) -> Option<Duration> {
         match self {
+            Self::Completed if ears => Some(EARS_COMPLETED_VISIBLE_DURATION),
             Self::Completed => Some(COMPLETED_VISIBLE_DURATION),
             Self::Cancelled => Some(Duration::ZERO),
             Self::Failed => Some(FAILED_VISIBLE_DURATION),
@@ -411,7 +415,7 @@ impl IndicatorModel {
         let elapsed = now.duration_since(self.phase_started);
         let terminal_finished = self
             .phase
-            .visible_duration()
+            .visible_duration(self.island.is_some_and(|island| island.ears))
             .is_some_and(|duration| elapsed >= duration);
         let visible = self.phase != Phase::Hidden && !terminal_finished;
         if let Some(stage) = self.phase.stage() {
@@ -585,6 +589,47 @@ mod tests {
         );
         run(&mut model, start, 1.0, 1.0 / 60.0);
         assert_eq!(model.stage, Stage::Done);
+    }
+
+    #[test]
+    fn the_notch_indicator_holds_done_for_its_checkmark() {
+        // How shown the HUD is `seconds` after done begins.
+        let shown_after = |island: Option<Island>, seconds: f32| {
+            let start = Instant::now();
+            let mut model = IndicatorModel::new(Tuning::default(), start);
+            model.set_island(island);
+            model.handle(DictationIndicatorEvent::Started, start, false);
+            run(&mut model, start, 0.0, 0.5);
+            for event in [
+                DictationIndicatorEvent::Submitted { job_id: 1 },
+                DictationIndicatorEvent::JobCompleted { job_id: 1 },
+            ] {
+                model.handle(event, at(start, 0.5), false);
+            }
+            // Processing shows for its 0.2 s minimum first.
+            let frames = run(&mut model, start, 0.5, 0.2 + seconds);
+            let pose = frames.last().unwrap().pose;
+            assert_eq!(pose.done, 1.0);
+            pose.opacity
+        };
+        let ears = Island {
+            notch: [185.0, 32.0],
+            width: 253.0,
+            top: -64.0,
+            ears: true,
+        };
+        assert!(
+            shown_after(Some(ears), 0.6) > 0.95,
+            "the checkmark stays up"
+        );
+        assert!(
+            shown_after(Some(ears), 1.3) < 0.05,
+            "then the ears fold back"
+        );
+        assert!(
+            shown_after(None, 0.6) < 0.05,
+            "Dot scope still collapses at once"
+        );
     }
 
     #[test]

@@ -58,7 +58,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
-├── Notch indicator no    labs.notch_indicator         (macOS) with the indicator at Top, the notch widens sideways on a screen that has one: a red recording dot left, level dots right, a spinner and pulsing dots while Hex works; flat screens keep it below the menu bar
+├── Notch indicator no    labs.notch_indicator         (macOS) with the indicator at Top, the notch widens sideways in the Dynamic Island's compact style: an orange mic and level bars, the macOS spinner, a green checkmark; flat screens keep it below the menu bar
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (every OS with Meetings)
 │                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
@@ -817,32 +817,45 @@ only); `hide_menu_bar_icon_is_its_own_bit_and_off_by_default` in
 Mac, or macOS restoring an item's remembered visibility; the row renders
 only in macOS builds, so no golden changes.
 
-Notch indicator (`notch-indicator`, macOS): for MacBooks with a notch,
-where a recording indicator that comes out of the notch reads like part of
-the screen. It is not Dot scope: the notch keeps its height and widens by
-`hud_placement::EAR_WIDTH` (34 pt) on each side, the island's ears, with
-one glyph beside the camera on each side (`ears` in
-[rune_hud.wgsl](../../src/rune_hud.wgsl)). While recording, the left ear
-holds a red dot that swells and glows with the voice and the right ear
-three dots that light as it gets louder; while Hex transcribes and
-processes, the dot becomes a spinner and the three dots pulse in turn; a
-failure turns both coral; then the ears fold back into the notch. Reduce
-Motion holds the spinner and pulse still (`Pose::clock` stays 0). The gate,
-`labs::notch_indicator()`, is read each time the HUD is placed on the
-pointer's screen (`Hud::place_on_pointer_screen` in
+Notch indicator (`notch-indicator`, macOS only): for MacBooks with a
+notch, a recording indicator in the Dynamic Island's compact style that
+reads as part of the Mac. It is not Dot scope: the notch keeps its height
+and widens by `hud_placement::EAR_WIDTH` (34 pt) on each side, with fully
+rounded bottom corners, and draws one SF Symbols–style glyph beside the
+camera on each side in Apple's dark system colours (`ears` in
+[rune_hud.wgsl](../../src/rune_hud.wgsl)):
+
+```ts
+Recording   -> orange mic.fill (the colour macOS and iOS give a microphone in use)
+               + five orange capsule bars that move with the voice (√ level)
+Working     -> the macOS 12-spoke spinner + the bars at rest with light running through them
+Done        -> a green checkmark pops in, held 700 ms (Dot scope's done stays 100 ms)
+Failed      -> red exclamationmark.circle.fill
+Then        -> the ears fold back into the notch; glyphs scale and unblur in and out with them
+Reduce Motion -> the spinner, bars' wobble, and light hold still (Pose::clock stays 0)
+```
+
+The gate, `labs::notch_indicator()`, is read each time the HUD is placed on
+the pointer's screen (`Hud::place_on_pointer_screen` in
 [rune_hud/macos.rs](../../src/rune_hud/macos.rs)), so it applies from the
 next dictation. `hud_placement::ears` places it only on a screen whose
 `NSScreen` reports a notch, and only with Settings' indicator position at
 Top; a flat external display, Bottom, and Hidden keep what they did, and
-with the lab off HUD Lab's placement stands. Checks:
-`ears_widen_the_notch_sideways_at_its_own_height` in
-[rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs);
+with the lab off HUD Lab's placement stands. Linux and Windows have no row,
+`hex labs on notch-indicator` doesn't know it there, and `hex settings set
+labs.notch_indicator` answers `unsupported` (as any `labs.` switch for
+another OS now does). Checks: `ears_widen_the_notch_sideways_at_its_own_height`
+in [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs);
+`the_notch_indicator_holds_done_for_its_checkmark` in
+[dictation/indicator.rs](../../src/dictation/indicator.rs);
+`a_labs_switch_for_another_os_is_refused` in
+[control/settings.rs](../../src/control/settings.rs);
 `notch_indicator_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs); its frames render through the real shaders
 with `HEX_HUD_EARS=1` and `rune_hud_frames`. Not yet observed: a real
 dictation through the ears on a Mac with the lab on (`hex dev hud` drives
-them in a debug build); the row renders only in macOS builds, so no golden
-changes.
+them in a debug build), and the failure glyph outside a unit render; the
+row renders only in macOS builds, so no golden changes.
 
 Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
 like Meetings; its row shows wherever Meetings does, in macOS builds): for

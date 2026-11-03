@@ -53,7 +53,7 @@ const NOTCH_RADIUS: f32 = 8.0;
 /// The open island's bottom corner radius.
 const ISLAND_RADIUS: f32 = 18.0;
 /// The notch indicator's bottom corner radius once its ears are out.
-const EARS_RADIUS: f32 = 11.0;
+const EARS_RADIUS: f32 = 14.0;
 
 /// The live text's gap from the HUD's plate.
 const LIVE_TEXT_GAP: f32 = 6.0;
@@ -439,9 +439,11 @@ pub(crate) struct DotUniforms {
     plate_layout: [f32; 4],
     island: [f32; 4],
     field: [f32; 4],
+    /// The notch indicator's done and failed, 0 to 1.
+    ears: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<DotUniforms>() == 192);
+const _: () = assert!(std::mem::size_of::<DotUniforms>() == 208);
 const DOT_UNIFORM_BYTES: u32 = std::mem::size_of::<DotUniforms>() as u32;
 const DOT_BYTES: u64 = (MAX_DOTS * 4) as u64;
 /// How `rune_hud.wgsl` declares `u` as a uniform buffer; with immediates it
@@ -500,6 +502,7 @@ impl DotUniforms {
                 Some(island) if island.ears => [island.notch[0] / 2.0, 1.0, pose.level, pose.clock],
                 _ => [field_radius(layout, pose), 0.0, 0.0, 0.0],
             },
+            ears: [pose.done, pose.fail, 0.0, 0.0],
         }
     }
 }

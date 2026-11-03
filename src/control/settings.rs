@@ -693,6 +693,16 @@ fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<Contro
             format!("`{name}` belongs to a Labs feature that only dev builds have"),
         ));
     }
+    // A `labs.` key is only its feature's switch, so off its OS it does nothing.
+    if let Some(feature) = crate::labs::Feature::for_settings_key(name)
+        && name.starts_with("labs.")
+        && !feature.on_this_os()
+    {
+        return Some(ControlError::new(
+            "unsupported",
+            format!("`{name}` belongs to a Labs feature this OS doesn't have"),
+        ));
+    }
     let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
     Some(ControlError::new(
         "unsupported",
@@ -1366,6 +1376,17 @@ mod tests {
             Some("managed")
         );
         assert!(unavailable_under("labs.live_text", Policy::default()).is_none());
+    }
+
+    #[test]
+    fn a_labs_switch_for_another_os_is_refused() {
+        let refused = unavailable_under("labs.notch_indicator", crate::policy::Policy::default())
+            .map(|error| error.code);
+        if cfg!(target_os = "macos") {
+            assert_eq!(refused, None);
+        } else {
+            assert_eq!(refused, Some("unsupported"));
+        }
     }
 
     fn rules() -> ShortcutRules {
