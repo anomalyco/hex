@@ -278,12 +278,19 @@ impl ModelDefinition {
     }
 
     /// The languages Settings offers for this model, in [`LANGUAGES`] order,
-    /// Auto first when the model detects the language.
+    /// Auto first when the model detects the language, then the other
+    /// languages the model declares (an import's Norwegian, #1148).
     pub fn language_choices(&self) -> Vec<&'static str> {
         LANGUAGES
             .iter()
             .map(|(code, _)| *code)
             .filter(|code| self.supports_language(code))
+            .chain(
+                self.languages
+                    .iter()
+                    .copied()
+                    .filter(|code| *code != "*" && !super::languages::is_listed(code)),
+            )
             .collect()
     }
 
@@ -1412,6 +1419,23 @@ mod tests {
         assert_eq!(ivrit.runtime_language_hint("he"), Some("he"));
         assert!(!ivrit.supports_language(AUTO_LANGUAGE));
         assert_eq!(language_name("he"), "Hebrew");
+    }
+
+    #[test]
+    fn an_import_offers_every_language_it_declares_by_name() {
+        let import = ModelDefinition {
+            languages: &["en", "no", "nn"],
+            supports_language_detection: true,
+            ..*definition(TranscriptionModelId::WhisperLargeV3Turbo)
+        };
+        assert_eq!(import.language_choices(), [AUTO_LANGUAGE, "en", "no", "nn"]);
+        assert_eq!(language_name("no"), "Norwegian");
+        assert_eq!(language_name("nn"), "Norwegian Nynorsk");
+        assert!(
+            !definition(TranscriptionModelId::WhisperLargeV3Turbo)
+                .language_choices()
+                .contains(&"no")
+        );
     }
 
     #[test]

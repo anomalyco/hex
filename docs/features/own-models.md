@@ -26,7 +26,10 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // set
 ├── Card -> name from general.name (Rename edits it), languages from the file,
 │   offline only (no streaming), Parakeet without language prompt or Auto,
 │   no benchmark; Use prepares it like a catalog model (verifies Hex's copy
-│   against its receipt instead of downloading)
+│   against its receipt instead of downloading). General's Language menu
+│   lists every language the file declares: Hex's usual list first, then the
+│   rest of Whisper's codes by English name (Norwegian `no`, Norwegian
+│   Nynorsk `nn`, …; #1148)
 ├── Remove -> Hex's copy, receipt, and manifest only; not the active model
 ├── Changed (a copy replaced by a link or hard link to the same file reads as
 │   changed: its file ID and mtime moved) -> "Check again" rehashes the file:
