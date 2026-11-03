@@ -111,7 +111,10 @@ start this service automatically.
 `hex start` records the current display/session environment in an owner-only
 file read by the unit; it clears stale variables when switching between X11 and
 Wayland. There is one Hex per user. Launching it from a different desktop
-explicitly restarts the unit for that session.
+explicitly restarts the unit for that session. The unit names Hex's default
+data folder, so Hex still treats it as its own supervised service: a stale
+`XAUTHORITY` from an earlier login (GNOME's XWayland cookie) is replaced with
+the user manager's current one, keeping the HUD working after a re-login (#1140).
 
 Home Manager's normal service-switch policy applies: newly enabled services
 can start during a switch if the session target is already active, and

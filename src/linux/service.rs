@@ -820,10 +820,17 @@ pub(crate) fn supervised() -> bool {
 
 /// A custom data root uses only its supplied desktop environment, not the
 /// user's manager or discovered display sockets. `HEX_SYSTEMD_UNIT` opts an
-/// isolated test into a managed unit explicitly.
+/// isolated test into a managed unit explicitly. A root that names the
+/// default folder (Home Manager's unit sets it, #1140) is not custom.
 fn custom_root() -> bool {
-    std::env::var_os("HEX_APPLICATION_SUPPORT_DIR").is_some()
-        && std::env::var_os("HEX_SYSTEMD_UNIT").is_none()
+    std::env::var_os("HEX_SYSTEMD_UNIT").is_none()
+        && std::env::var_os("HEX_APPLICATION_SUPPORT_DIR")
+            .is_some_and(|root| !default_root(Path::new(&root), dirs::data_dir().as_deref()))
+}
+
+/// Whether `root` is the default data root under the user's data directory.
+fn default_root(root: &Path, data: Option<&Path>) -> bool {
+    data.is_some_and(|data| root == data.join("hex"))
 }
 
 fn systemctl(arguments: &[&str]) -> Result<()> {
@@ -1139,6 +1146,21 @@ mod tests {
         assert!(!body.contains("XDG_DATA_DIRS"));
         assert!(!body.contains("LC_ALL"));
         assert!(environment_line("DISPLAY", ":0\nEVIL=yes").is_err());
+    }
+
+    #[test]
+    fn the_default_folder_named_explicitly_is_not_a_custom_root() {
+        let data = Path::new("/home/kit/.local/share");
+        assert!(default_root(
+            Path::new("/home/kit/.local/share/hex"),
+            Some(data)
+        ));
+        assert!(default_root(
+            Path::new("/home/kit/.local/share/hex/"),
+            Some(data)
+        ));
+        assert!(!default_root(Path::new("/tmp/hex-test"), Some(data)));
+        assert!(!default_root(Path::new("/home/kit/.local/share/hex"), None));
     }
 
     #[test]
