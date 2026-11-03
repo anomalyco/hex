@@ -71,6 +71,8 @@ pub struct LabsSettings {
     pub gnome_clipboard_restore: bool,
     /// Meeting titles and summaries read the vocabulary (issue 1154).
     pub meeting_notes_vocabulary: bool,
+    /// With the indicator at the top, the HUD grows out of the notch on a screen with one (macOS).
+    pub notch_indicator: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -116,6 +118,7 @@ impl Default for LabsSettings {
             meeting_summary_model: false,
             gnome_clipboard_restore: false,
             meeting_notes_vocabulary: false,
+            notch_indicator: false,
         }
     }
 }

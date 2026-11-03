@@ -399,6 +399,11 @@ const KEYS: &[Key] = &[
         "Labs: hide Hex's menu bar icon while nothing records; shortcuts keep working, and opening Hex again from Finder or Spotlight shows Settings (macOS)",
     ),
     key(
+        "labs.notch_indicator",
+        Kind::Bool,
+        "Labs: with indicator_position top, the recording indicator grows out of the notch on a screen that has one, and sits below the menu bar elsewhere (macOS)",
+    ),
+    key(
         "labs.skip_pauses",
         Kind::Bool,
         "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",

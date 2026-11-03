@@ -58,6 +58,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
+├── Notch indicator no    labs.notch_indicator         (macOS) with the indicator at Top, the HUD grows out of the notch on a screen that has one; flat screens keep it below the menu bar
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (every OS with Meetings)
 │                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
@@ -815,6 +816,26 @@ only); `hide_menu_bar_icon_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: the icon hiding on a real
 Mac, or macOS restoring an item's remembered visibility; the row renders
 only in macOS builds, so no golden changes.
+
+Notch indicator (`notch-indicator`, macOS): for MacBooks with a notch,
+where a recording indicator that grows out of the notch reads like part of
+the screen. It uses HUD Lab's existing From the notch placement
+(`Placement::Notch`): a black island the notch's shape that opens to hold
+Dot scope and shrinks back into it when the dictation is done. The gate,
+`labs::notch_indicator()`, is read each time the HUD is placed on the
+pointer's screen (`Hud::place_on_pointer_screen` in
+[rune_hud/macos.rs](../../src/rune_hud/macos.rs)), so it applies from the
+next dictation. `hud_placement::notch_placement` picks the island only with
+Settings' indicator position at Top and only on a screen whose
+`NSScreen` reports a notch; a flat external display, Bottom, and Hidden keep
+what they did, and with the lab off HUD Lab's placement stands. Checks:
+`the_notch_indicator_grows_out_of_a_notch_only_at_the_top` in
+[rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs);
+`notch_indicator_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs); the island's frames render through the real
+shaders with `HEX_HUD_TUNING='{"placement":"notch"}'` and `rune_hud_frames`.
+Not yet observed: a dictation through the notch on a real Mac with the lab
+on; the row renders only in macOS builds, so no golden changes.
 
 Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
 like Meetings; its row shows wherever Meetings does, in macOS builds): for

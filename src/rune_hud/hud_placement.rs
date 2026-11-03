@@ -4,6 +4,7 @@
 //! capsule can place alike; `dictation_indicator` reads the metrics from
 //! `NSScreen` and applies the result.
 
+use crate::app_settings::IndicatorPosition;
 use crate::rune_hud::dot_scope::Placement;
 
 /// The plate's gap under the menu bar: as close as it sits and still
@@ -244,6 +245,22 @@ pub fn place(placement: Placement, screen: &Screen, content: Content, bottom: bo
     }
 }
 
+/// The placement the HUD takes on `screen`: Labs' notch indicator turns the
+/// top position into the notch's island on a screen with a notch, and
+/// leaves every other screen and position to `tuned` (HUD Lab's choice).
+pub fn notch_placement(
+    tuned: Placement,
+    position: IndicatorPosition,
+    notch_indicator: bool,
+    screen: &Screen,
+) -> Placement {
+    if notch_indicator && position == IndicatorPosition::Top && screen.notch().is_some() {
+        Placement::Notch
+    } else {
+        tuned
+    }
+}
+
 /// The placed plate's top and bottom edges in screen coordinates (y up),
 /// with an island's room below it.
 pub fn plate_span(placed: &Placed, content: Content) -> (f64, f64) {
@@ -379,6 +396,30 @@ mod tests {
         close(
             beside(Placement::Notch, &notched, false),
             (false, notched.safe_top + 2.0 * ISLAND_PAD + plate + 4.0),
+        );
+    }
+
+    #[test]
+    fn the_notch_indicator_grows_out_of_a_notch_only_at_the_top() {
+        let top = IndicatorPosition::Top;
+        let notch =
+            |position, on, screen: &Screen| notch_placement(Placement::Below, position, on, screen);
+        assert_eq!(notch(top, true, &notched()), Placement::Notch);
+        // Off, on a flat display, or at the bottom, the tuned placement stays.
+        assert_eq!(notch(top, false, &notched()), Placement::Below);
+        assert_eq!(notch(top, true, &flat()), Placement::Below);
+        assert_eq!(
+            notch(IndicatorPosition::Bottom, true, &notched()),
+            Placement::Below
+        );
+        assert_eq!(
+            notch_placement(Placement::MenuBar, top, true, &flat()),
+            Placement::MenuBar
+        );
+        // A pretend notch counts as one.
+        assert_eq!(
+            notch(top, true, &flat().pretending_notch()),
+            Placement::Notch
         );
     }
 

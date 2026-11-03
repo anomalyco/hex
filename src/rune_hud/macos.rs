@@ -146,8 +146,14 @@ impl Hud {
         }
         let (width, height) = WINDOW;
         let content = content(tuning.island_spread);
-        let placed = hud_placement::place(
+        let placement = hud_placement::notch_placement(
             tuning.placement,
+            self.position,
+            crate::labs::notch_indicator(),
+            &metrics,
+        );
+        let placed = hud_placement::place(
+            placement,
             &metrics,
             content,
             self.position == IndicatorPosition::Bottom,
