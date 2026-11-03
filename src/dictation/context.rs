@@ -403,11 +403,13 @@ impl ScriptableBrowser {
 
     /// The front window's tab, even when another app is in front.
     /// Background tabs are deliberately not searched: a call open in one
-    /// says nothing about which tab is using the microphone.
+    /// says nothing about which tab is using the microphone. The tab is
+    /// named through the front window each time rather than kept in a
+    /// variable: Arc can't resolve the stored tab-by-id reference (#1113).
     fn meeting_tab(self) -> Result<Option<(Url, Option<String>)>> {
         let (tab, title) = self.tab();
         let script = format!(
-            "tell application id \"{}\"\n    if (count of windows) is 0 then return \"\"\n    set frontTab to {tab} of front window\n    return (URL of frontTab) & linefeed & ({title} of frontTab)\nend tell",
+            "tell application id \"{}\"\n    if (count of windows) is 0 then return \"\"\n    return (URL of {tab} of front window) & linefeed & ({title} of {tab} of front window)\nend tell",
             self.bundle_id
         );
         Ok(parse_tab_output(&self.run(&script)?))
