@@ -16,3 +16,4 @@ __pycache__/
 /ios/HEXMobile.xcodeproj
 /result
 /result-*
+/perf/seeds/.generated/

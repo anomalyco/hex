@@ -66,3 +66,14 @@ The copy loads no model. A future case that dictates must seed one into
 Secondary metrics are thread wakeups (`cpu.wakes`), GPU use, and private
 memory. `strobe query <rec> threads` names the threads; Hex names every
 long-lived thread, and the window's thread is `hex-ui` on Windows.
+
+## Listening cases
+
+`perf/listening.bench.ts` runs Hex with its listener on: the
+`hex-listening` profile (microphone released while idle) and
+`hex-listening-warm` (microphone open, the default). The copy installs its
+keyboard hook and loads the default English model, which
+`perf/seeds/listening.ts` copies from this machine's own Hex install into
+`perf/seeds/.generated` (read only; strobe copies the seed into each private
+home). The warm profile opens the machine's real microphone; neither records.
+Leave the dictation shortcut alone while it runs.
