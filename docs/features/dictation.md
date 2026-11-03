@@ -384,6 +384,16 @@ Output shows a note pointing to it. Checks:
 `gnome_desktops_point_to_the_clipboard_lab_until_it_is_on` (constructed state;
 not run on GNOME).
 
+**Fixed November 3, 2026 (issue 1158):** on Linux with PipeWire, Hex's
+microphone stream (held open while the microphone is kept ready) was named
+by the ALSA plugin after the binary, with spaces and varying by packaging,
+so audio idle inhibitors couldn't be told to ignore it and the screen never
+locked. Every ALSA stream Hex opens now carries `application.name` and
+`node.name` `hex` (`PIPEWIRE_ALSA`, set at startup beside
+`state.restore-target`). Check: `streams_carry_a_stable_name_without_spaces`
+in [linux/input_route.rs](../../src/linux/input_route.rs) (property string
+only; not run against PipeWire or an inhibitor).
+
 **Fixed November 2, 2026 (issue 978):** a Windows paste refused to run when
 the clipboard held only a format Hex can't snapshot (an app's private
 format), failing every dictation with "the current clipboard format cannot be
