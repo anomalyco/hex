@@ -12,9 +12,20 @@ use cpal::{
 
 use super::{CaptureInstant, StreamErrorReporter, build_stream};
 
+/// A running microphone stream; dropping it stops capture.
+pub(super) enum InputStream {
+    Cpal {
+        _stream: Stream,
+    },
+    #[cfg(target_os = "windows")]
+    Wasapi {
+        _capture: super::wasapi_capture::WasapiCapture,
+    },
+}
+
 /// A started microphone stream and the channels its callback feeds.
 pub(super) struct StartedStream {
-    pub stream: Stream,
+    pub stream: InputStream,
     pub chunks: Receiver<(Vec<f32>, CaptureInstant)>,
     pub stream_errors: Receiver<String>,
     pub hex_microphone: crate::audio::hex_microphone::CaptureFeedSwitch,
@@ -50,6 +61,17 @@ pub(super) fn start_stream_with_fallback(
         device = %device_name,
         "the microphone refused its default format; trying the others it lists"
     );
+    // Intel Smart Sound refused every stream cpal built, at any format and
+    // buffer, yet opens in its exact mix format through WASAPI (#988).
+    #[cfg(target_os = "windows")]
+    match super::wasapi_capture::start(device) {
+        Ok(started) => return Ok(started),
+        Err(mix_error) => tracing::warn!(
+            error = format!("{mix_error:#}"),
+            device = %device_name,
+            "the microphone refused its exact mix format; trying the formats it lists"
+        ),
+    }
     // Some drivers refuse every format with the backend's default buffer
     // (Intel Smart Sound answered E_INVALIDARG for each, #988) yet accept
     // the same format with an explicit buffer duration, so each format is
@@ -237,7 +259,7 @@ fn start_stream(
         )
     })?;
     Ok(StartedStream {
-        stream,
+        stream: InputStream::Cpal { _stream: stream },
         chunks,
         stream_errors,
         hex_microphone,

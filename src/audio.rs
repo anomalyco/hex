@@ -9,11 +9,15 @@ pub(crate) mod input_level;
 pub(crate) mod instant;
 #[cfg(target_os = "macos")]
 mod lid;
+#[cfg(any(target_os = "windows", test))]
+mod mix_format;
 pub(crate) mod output_ducking;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod voice_filter;
+#[cfg(target_os = "windows")]
+mod wasapi_capture;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
@@ -198,7 +202,7 @@ pub use instant::{CaptureInstant, duration_for_frames};
 
 pub struct AudioInput {
     // Tests can deliver PCM through channels without opening a native microphone.
-    _stream: Option<Stream>,
+    _stream: Option<input_format::InputStream>,
     chunks: Receiver<(Vec<f32>, CaptureInstant)>,
     pub sample_rate: u32,
     pub device_name: String,
