@@ -774,8 +774,13 @@ Labs › Keep recordings on                     // labs.keep-recordings
 │   │   transcription service, sharing the dictation engine's model when it is
 │   │   the one chosen, yielding to dictation; otherwise loads a copy for the run
 │   ├── Done -> "Transcribed again with <model>", the text, Copy, Replace
-│   │   └── Replace -> the entry's text becomes it (processing record dropped);
-│   │       the audio stays
+│   │   └── Replace -> the entry's text becomes it (processing record dropped),
+│   │       with its model and chosen language; the audio stays; the old text
+│   │       becomes the newest of at most 5 "Earlier versions" (#1177)
+│   ├── Earlier versions -> each with its model, language, and age, Copy and
+│   │   "Use this version" (swaps it back; the current text becomes a version).
+│   │   Stored in the entry: they count toward the 16 MiB text cap and leave
+│   │   with it (retention, Delete, Clear all); hidden while the toggle is off
 │   └── Failed -> "Could not transcribe again: <why>"
 └── Toggle off -> nothing new is saved and the menu hides; existing audio stays
     until it expires or History is cleared
@@ -793,7 +798,9 @@ of the clip is made. Checks: `a_kept_recording_is_an_owner_only_wav_that_reads_b
 `transcribe_again_offers_a_language_only_for_models_that_take_one` in
 [tests.rs](../../src/rune_ui/tests.rs);
 `keep_recordings_is_its_own_bit_and_off_by_default` in
-[labs.rs](../../src/labs.rs). Not yet observed: a real dictation kept and
+[labs.rs](../../src/labs.rs); the tests in
+[history/versions.rs](../../src/history/versions.rs) (newest first, five at
+most, switch back, text cap, Clear all). Not yet observed: a real dictation kept and
 transcribed again with another model in a window, on any OS.
 
 Hide menu bar icon (`hide-menu-bar-icon`, issue 1064, macOS): for people
