@@ -97,10 +97,11 @@ pub enum Feature {
     SectionKeyAlone,
     KeepRecordings,
     HideMenuBarIcon,
+    MovableMeetingCapsules,
 }
 
 impl Feature {
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -139,6 +140,7 @@ impl Feature {
         Self::SectionKeyAlone,
         Self::KeepRecordings,
         Self::HideMenuBarIcon,
+        Self::MovableMeetingCapsules,
     ];
 
     /// The features this OS and build have.
@@ -199,7 +201,8 @@ impl Feature {
             | Self::PickerDownloaded
             | Self::SectionKeyAlone
             | Self::KeepRecordings
-            | Self::HideMenuBarIcon => Audience::Everyone,
+            | Self::HideMenuBarIcon
+            | Self::MovableMeetingCapsules => Audience::Everyone,
         }
     }
 
@@ -227,9 +230,11 @@ impl Feature {
 
     fn on_this_os(self) -> bool {
         match self {
-            Self::Meetings | Self::LiveChapters | Self::SubtitleExport | Self::StopWhenCallEnds => {
-                cfg!(target_os = "macos")
-            }
+            Self::Meetings
+            | Self::LiveChapters
+            | Self::SubtitleExport
+            | Self::StopWhenCallEnds
+            | Self::MovableMeetingCapsules => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
             Self::SectionKeyAlone => cfg!(target_os = "linux"),
@@ -308,6 +313,7 @@ impl Feature {
             Self::SectionKeyAlone => "section-key",
             Self::KeepRecordings => "keep-recordings",
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
+            Self::MovableMeetingCapsules => "movable-meeting-capsules",
         }
     }
 
@@ -352,6 +358,7 @@ impl Feature {
             Self::SectionKeyAlone => "labs.section_key_alone",
             Self::KeepRecordings => "labs.keep_recordings",
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
+            Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
         }
     }
 
@@ -454,6 +461,9 @@ impl Feature {
             Self::HideMenuBarIcon => {
                 "Hide Hex's menu bar icon; shortcuts keep working, and opening Hex again shows Settings"
             }
+            Self::MovableMeetingCapsules => {
+                "Drag meeting capsules such as Meeting transcript ready out of the way; they come back in the corner you left them"
+            }
         }
     }
 
@@ -502,6 +512,7 @@ impl Feature {
             Self::SectionKeyAlone => settings.labs.section_key_alone,
             Self::KeepRecordings => settings.labs.keep_recordings,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
+            Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
         }
     }
 
@@ -548,6 +559,7 @@ impl Feature {
             &mut labs.section_key_alone,
             &mut labs.keep_recordings,
             &mut labs.hide_menu_bar_icon,
+            &mut labs.movable_meeting_capsules,
         ]
     }
 
@@ -594,6 +606,7 @@ impl Feature {
             Self::PickerDownloaded => settings.labs.picker_downloaded = on,
             Self::KeepRecordings => settings.labs.keep_recordings = on,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
+            Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -631,6 +644,7 @@ const RECENT_DICTATIONS: u64 = 1 << 19;
 const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
+const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -786,6 +800,13 @@ pub fn hide_menu_bar_icon() -> bool {
     on(HIDE_MENU_BAR_ICON) && Feature::HideMenuBarIcon.on_this_os()
 }
 
+/// The meeting panel capsules (Meeting transcript ready, Recording
+/// automatically, offers, reminders) show in the saved capsule corner and
+/// can be dragged to another (macOS; read each time one shows).
+pub fn movable_meeting_capsules() -> bool {
+    on(MOVABLE_MEETING_CAPSULES) && Feature::MovableMeetingCapsules.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -880,6 +901,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::HideMenuBarIcon,
             settings.hide_menu_bar_icon,
             HIDE_MENU_BAR_ICON,
+        ),
+        (
+            Feature::MovableMeetingCapsules,
+            settings.movable_meeting_capsules,
+            MOVABLE_MEETING_CAPSULES,
         ),
     ]
     .into_iter()
@@ -1302,6 +1328,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & HIDE_MENU_BAR_ICON, 0);
         assert_eq!(state & KEEP_RECORDINGS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn movable_meeting_capsules_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & MOVABLE_MEETING_CAPSULES, 0);
+        labs.movable_meeting_capsules = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & MOVABLE_MEETING_CAPSULES, 0);
+        assert_eq!(state & HIDE_MENU_BAR_ICON, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

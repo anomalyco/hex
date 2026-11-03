@@ -354,9 +354,7 @@ impl Default for ExperimentalSettings {
 pub struct LabsSettings {
     /// Live text beside the HUD while dictating.
     pub live_text: bool,
-    /// Live chapters while a meeting records.
     pub live_chapters: bool,
-    /// The playground in the window.
     pub playground: bool,
     /// Parakeet transcription biased toward the vocabulary.
     pub vocabulary_biasing: bool,
@@ -413,6 +411,7 @@ pub struct LabsSettings {
     /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
     pub keep_recordings: bool,
     pub hide_menu_bar_icon: bool,
+    pub movable_meeting_capsules: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -454,6 +453,7 @@ impl Default for LabsSettings {
             section_key_alone: false,
             keep_recordings: false,
             hide_menu_bar_icon: false,
+            movable_meeting_capsules: false,
         }
     }
 }

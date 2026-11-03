@@ -19,6 +19,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("{model} · Language: {language}", "{model} · Idioma: {language}"),
     ("Hide menu bar icon", "Ocultar ícone da barra de menus"),
     ("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings", "Oculta o ícone do Hex na barra de menus. Os atalhos continuam funcionando; abra o Hex de novo pelo Finder ou Spotlight para ver os Ajustes"),
+    ("Movable meeting capsules", "Cápsulas de reunião móveis"),
+    ("Drag meeting capsules out of the way; they come back in the corner you left them", "Arraste as cápsulas de reunião para fora do caminho; elas voltam no canto onde você as deixou"),
     ("Keep recordings", "Manter gravações"),
     ("Keep the audio of dictations saved to History, so you can transcribe them again with another model", "Mantém o áudio dos ditados salvos no Histórico, para transcrevê-los de novo com outro modelo"),
     ("Saved recording", "Gravação salva"),
