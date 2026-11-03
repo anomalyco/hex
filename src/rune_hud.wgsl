@@ -96,8 +96,12 @@ struct DotUniforms {
     // The island's half width, height, top edge, and bottom radius, pt.
     island: vec4f,
     // The field's corner radius, pt: half its height on a plate, the
-    // island's corners less its padding in an island.
+    // island's corners less its padding in an island. With the notch
+    // indicator's ears (y 1): the notch's half width, the mode, the voice's
+    // 0–1 level, and seconds into the stage.
     field: vec4f,
+    // The notch indicator's done and failed, 0 to 1.
+    ears: vec4f,
 }
 
 // The island grown out of the notch: a box hanging from the screen's top
@@ -116,6 +120,121 @@ fn island_distance(point: vec2f, island: vec4f) -> f32 {
     let square = rounded_box(q - square_center, vec2f(fillet * 0.5 + 0.5, fillet * 0.5), 0.0);
     let hollow = fillet - length(q - vec2f(half_width + fillet, top + fillet));
     return min(body, max(square, hollow));
+}
+
+// `hud_placement::EAR_WIDTH`: how far each ear reaches past the notch, pt.
+const EAR_WIDTH: f32 = 34.0;
+const TAU: f32 = 6.2831853;
+
+// Apple's dark-appearance system colours: the island is black in either
+// appearance, as the notch is.
+const SYSTEM_ORANGE: vec3f = vec3f(1.0, 0.624, 0.039);
+const SYSTEM_GREEN: vec3f = vec3f(0.188, 0.820, 0.345);
+const SYSTEM_RED: vec3f = vec3f(1.0, 0.271, 0.227);
+const LABEL: vec3f = vec3f(0.92, 0.92, 0.94);
+
+fn segment(point: vec2f, a: vec2f, b: vec2f, radius: f32) -> f32 {
+    let pa = point - a;
+    let ba = b - a;
+    let t = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * t) - radius;
+}
+
+// SF Symbols' mic.fill, 13 pt tall: the capsule, its cradle, and stand.
+fn mic(p: vec2f) -> f32 {
+    let body = rounded_box(p - vec2f(0.0, -2.3), vec2f(2.35, 4.1), 2.35);
+    // The cradle's middle is 1.2 pt above the glyph's.
+    let ring = abs(length(p - vec2f(0.0, -1.2)) - 4.5) - 0.62;
+    let cradle = min(max(ring, -1.2 - p.y), length(vec2f(abs(p.x) - 4.5, p.y + 1.2)) - 0.62);
+    let stem = rounded_box(p - vec2f(0.0, 4.75), vec2f(0.62, 1.1), 0.62);
+    let stand = rounded_box(p - vec2f(0.0, 6.0), vec2f(2.7, 0.62), 0.62);
+    return min(min(body, cradle), min(stem, stand));
+}
+
+// SF Symbols' checkmark, bold.
+fn checkmark(p: vec2f) -> f32 {
+    let knee = vec2f(-1.2, 2.9);
+    return min(segment(p, vec2f(-4.2, -0.2), knee, 0.95), segment(p, knee, vec2f(4.3, -3.6), 0.95));
+}
+
+// SF Symbols' exclamationmark: the stroke and its point.
+fn exclamation(p: vec2f) -> f32 {
+    return min(segment(p, vec2f(0.0, -3.3), vec2f(0.0, 0.8), 0.9), length(p - vec2f(0.0, 3.1)) - 1.0);
+}
+
+// Labs' notch indicator, in the Dynamic Island's compact style: the notch
+// widened sideways at its own height, one glyph either side of the camera.
+// Recording: an orange mic (the colour macOS and iOS use for a microphone
+// in use) and capsule level bars that move with the voice. Working: the
+// macOS 12-spoke spinner and the bars at rest with light running through
+// them. Done: a green checkmark pops in. Failed: a red
+// exclamationmark.circle.fill. Glyphs scale and unblur in as the ears open.
+fn ears(window_point: vec2f, island_shape: f32) -> vec4f {
+    let notch_half = u.field.x;
+    let level = clamp(u.field.z, 0.0, 1.0);
+    let clock = u.field.w;
+    let done = clamp(u.ears.x, 0.0, 1.0);
+    let fail = clamp(u.ears.y, 0.0, 1.0);
+    let ear = max(u.island.x - notch_half, 0.0);
+    let room = sstep(0.35, 1.0, ear / EAR_WIDTH);
+    let s = mix(0.72, 1.0, room);
+    let aa = (0.75 / u.backing_scale + (1.0 - room) * 1.4) / s;
+    let working = clamp(u.cool, 0.0, 1.0);
+    let done_in = done * sstep(0.0, 0.06, clock);
+    let w_fail = fail;
+    let w_done = done_in * (1.0 - fail);
+    let w_work = working * (1.0 - done_in) * (1.0 - fail);
+    let w_record = (1.0 - working) * (1.0 - fail);
+    let middle_y = u.island.z + u.island.y * 0.5;
+    let inset = notch_half + EAR_WIDTH * 0.5 - 1.0;
+    var result = vec4f(0.0);
+
+    // Leading: the mic, the spinner, the checkmark, or the failure.
+    let lead = (window_point - vec2f(-inset, middle_y)) / s;
+    composite(&result, SYSTEM_ORANGE, w_record * coverage(mic(lead), aa));
+    if (w_work > 0.001) {
+        let sector = TAU / 12.0;
+        let k = round(atan2(lead.x, -lead.y) / sector);
+        let direction = vec2f(sin(k * sector), -cos(k * sector));
+        let along = clamp(dot(lead, direction), 2.7, 6.1);
+        let spoke = length(lead - direction * along) - 0.75;
+        let head = floor(clock * 12.0);
+        let behind = (head - k) - 12.0 * floor((head - k) / 12.0);
+        let shade = 0.2 + 0.8 * pow(1.0 - behind / 12.0, 1.5);
+        composite(&result, LABEL, w_work * shade * coverage(spoke, aa));
+    }
+    if (w_done > 0.001) {
+        let t = clamp(clock / 0.16, 0.0, 1.0);
+        let pop = max(sstep(0.0, 1.0, t) * (1.0 + 0.2 * sin(t * 3.14159)), 0.05);
+        composite(&result, SYSTEM_GREEN, w_done * coverage(checkmark(lead / pop), aa / pop));
+    }
+    if (w_fail > 0.001) {
+        let disc = coverage(length(lead) - 6.4, aa) * (1.0 - coverage(exclamation(lead), aa));
+        composite(&result, SYSTEM_RED, w_fail * disc);
+    }
+
+    // Trailing: the level bars, at rest with light running through them
+    // while Hex works.
+    let trail = (window_point - vec2f(inset, middle_y)) / s;
+    let profile = array<f32, 5>(0.5, 0.8, 1.0, 0.75, 0.55);
+    let rate = array<f32, 5>(1.7, 2.3, 1.9, 2.6, 2.1);
+    let phase = array<f32, 5>(0.0, 1.3, 2.1, 0.7, 1.7);
+    // Loudness reads as its square root, so ordinary speech moves the bars.
+    let heard = sqrt(level);
+    for (var i = 0; i < 5; i++) {
+        let n = f32(i);
+        let wobble = 0.6 + 0.4 * sin(TAU * clock * rate[i] * 0.5 + phase[i]);
+        let height = 2.4 + 10.0 * heard * profile[i] * wobble * w_record;
+        let bar = rounded_box(trail - vec2f((n - 2.0) * 4.0, 0.0), vec2f(1.1, height * 0.5), 1.1);
+        let light = 0.3 + 0.7 * pow(0.5 + 0.5 * cos(TAU * (clock * 1.1 - n * 0.14)), 3.0);
+        let color = mix(SYSTEM_ORANGE, LABEL, working);
+        let alpha = w_record + w_work * light;
+        composite(&result, color, alpha * coverage(bar, aa));
+    }
+
+    result *= u.opacity * room * island_shape;
+    result.a += island_shape * (1.0 - result.a);
+    return result;
 }
 
 // `var<immediate> u: DotUniforms;` on a device with immediates
@@ -149,6 +268,9 @@ fn dot_scope_fragment(in: Varyings) -> @location(0) vec4f {
     if (in_island) {
         let island_aa = 0.75 / u.backing_scale;
         island_shape = coverage(island_distance(window_point, u.island), island_aa);
+        if (u.field.y > 0.5) {
+            return for_target(dithered(ears(window_point, island_shape), position));
+        }
     }
 
     // A soft drop shadow 3 pt below, as the prototype's 16 pt canvas blur.
