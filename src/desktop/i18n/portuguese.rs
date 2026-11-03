@@ -26,6 +26,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Drag meeting capsules out of the way; they come back in the corner you left them", "Arraste as cápsulas de reunião para fora do caminho; elas voltam no canto onde você as deixou"),
     ("Choose meeting summary model", "Escolher o modelo dos resumos de reunião"),
     ("Pick the OpenCode provider and model that write meeting titles and summaries, in Meetings › Settings › Advanced", "Escolha o provedor e o modelo do OpenCode que escrevem títulos e resumos de reuniões, em Reuniões › Ajustes › Avançado"),
+    ("Vocabulary in meeting notes", "Vocabulário nas notas de reunião"),
+    ("Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them", "Os títulos e resumos de reuniões leem seu vocabulário, para que os nomes sejam escritos como você os escreveu"),
     ("Summary model", "Modelo dos resumos"),
     ("Summaries use {model}. If it isn't available, the meeting shows the error instead of trying another model", "Os resumos usam {model}. Se ele não estiver disponível, a reunião mostra o erro em vez de tentar outro modelo"),
     ("Empty: Hex tries its list of fast models in order and uses the first one OpenCode has", "Vazio: o Hex tenta sua lista de modelos rápidos em ordem e usa o primeiro que o OpenCode tiver"),

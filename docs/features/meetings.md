@@ -987,6 +987,10 @@ While recording, setting on, model available           // meetings.title.provisi
 Final publication complete                               // meetings.notes
   -> meeting-notes thread, utility QoS; waits (≤30 s) while dictation is busy
   -> ONE call over a bounded excerpt, no map-reduce
+     ├── Labs › Vocabulary in meeting notes on (off by default; #1154) ->
+     │   "Names and terms that may appear: …" (≤30 vocabulary terms, read at
+     │   each generation, Regenerate included) ahead of the calendar context;
+     │   its length comes out of the budget. Off -> prompt unchanged
      ├── Lines "[mm:ss] You|Them: text" (long turns split at 600 chars)
      ├── Whole transcript when it fits; otherwise opening 30 %, up to six
      │   evenly spaced middle passages, ending 20 %, "[…]" between them
@@ -1042,6 +1046,7 @@ FoundationModels bridge [apple_intelligence.swift](../../src/apple_intelligence.
 model): `a_short_transcript_is_sent_whole_in_one_call`,
 `long_meetings_are_excerpted_from_the_opening_middle_and_ending`,
 `context_overflow_halves_the_excerpt_once_and_failures_stop`,
+`vocabulary_terms_lead_the_notes_prompt_and_share_its_budget`,
 `titles_are_requested_after_the_opening_then_once_at_ten_minutes`,
 `provisional_titles_use_the_title_prompt_over_the_transcript_so_far`,
 `generated_and_provisional_titles_replace_only_default_titles`,

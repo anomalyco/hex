@@ -251,7 +251,7 @@ pub(super) fn summarize_entries(
     deadline: Instant,
     generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
 ) -> Result<Summary> {
-    summarize_with_calendar(entries, None, max_chars, deadline, generate)
+    summarize_with_calendar(entries, None, &[], max_chars, deadline, generate)
 }
 
 /// The most attendee names a notes prompt lists.
@@ -285,15 +285,22 @@ fn calendar_preamble(calendar: Option<&super::MeetingCalendar>) -> String {
     preamble
 }
 
-/// [`summarize_entries`] with the calendar event as context.
+/// [`summarize_entries`] with the vocabulary's `terms` (Labs › Vocabulary
+/// in meeting notes; empty leaves them out) and the calendar event as
+/// context. Both count against the excerpt budget.
 pub(super) fn summarize_with_calendar(
     entries: &[TranscriptEntry],
     calendar: Option<&super::MeetingCalendar>,
+    terms: &[String],
     max_chars: usize,
     deadline: Instant,
     mut generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
 ) -> Result<Summary> {
-    let preamble = calendar_preamble(calendar);
+    let preamble = format!(
+        "{}{}",
+        super::chapters::vocabulary_line(terms),
+        calendar_preamble(calendar)
+    );
     let mut max_chars = max_chars.saturating_sub(preamble.len()).max(1);
     let mut calls = 0;
     loop {
@@ -841,10 +848,17 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
     if crate::labs::live_chapters() {
         super::chapters::refine_meeting(&directory, &entries, &never);
     }
+    // Read at each generation, so Regenerate summary uses the current list.
+    let terms = if crate::labs::meeting_notes_vocabulary() {
+        crate::dictation::vocabulary::terms()
+    } else {
+        Vec::new()
+    };
     let started = Instant::now();
     let result = summarize_with_calendar(
         &entries,
         manifest.calendar.as_ref(),
+        &terms,
         excerpt_budget(generator::context_tokens(), FINAL_EXCERPT_CHARS),
         started + TOTAL_DEADLINE,
         |instructions, prompt, timeout| {
@@ -1127,6 +1141,7 @@ mod tests {
         summarize_with_calendar(
             &conversation(2),
             Some(&calendar),
+            &[],
             FINAL_EXCERPT_CHARS,
             Instant::now() + Duration::from_secs(60),
             |_, prompt, _| {
@@ -1138,6 +1153,67 @@ mod tests {
         assert!(prompts[0].starts_with(
             "Calendar event: Q4 launch sync\nAttendees: Ana Ruiz, Ben Ito\n\nMeeting transcript:\n\n[00:00] You: Turn 0"
         ));
+    }
+
+    #[test]
+    fn vocabulary_terms_lead_the_notes_prompt_and_share_its_budget() {
+        let calendar = crate::meeting::MeetingCalendar {
+            title: "Q4 launch sync".into(),
+            attendees: vec!["Ana Ruiz".into()],
+        };
+        let terms = vec!["Kubernetes".to_string(), "Ana Ruiz".to_string()];
+        let mut prompts = Vec::new();
+        summarize_with_calendar(
+            &conversation(2),
+            Some(&calendar),
+            &terms,
+            FINAL_EXCERPT_CHARS,
+            Instant::now() + Duration::from_secs(60),
+            |_, prompt, _| {
+                prompts.push(prompt.to_string());
+                Ok(generated("Launch", "They met."))
+            },
+        )
+        .unwrap();
+        assert!(prompts[0].starts_with(
+            "Names and terms that may appear: Kubernetes, Ana Ruiz\n\nCalendar event: Q4 launch sync\nAttendees: Ana Ruiz\n\nMeeting transcript:\n\n[00:00] You: Turn 0"
+        ));
+
+        // No terms: the prompt is the one Hex sent before.
+        let mut without = Vec::new();
+        summarize_with_calendar(
+            &conversation(2),
+            None,
+            &[],
+            FINAL_EXCERPT_CHARS,
+            Instant::now() + Duration::from_secs(60),
+            |_, prompt, _| {
+                without.push(prompt.to_string());
+                Ok(generated("Launch", "They met."))
+            },
+        )
+        .unwrap();
+        assert!(without[0].starts_with("Meeting transcript:\n\n[00:00] You: Turn 0"));
+
+        // The vocabulary line comes out of the transcript's budget.
+        let entries = conversation(400);
+        let budget = 6_000;
+        let line = crate::meeting::chapters::vocabulary_line(&terms).len();
+        let mut excerpts = Vec::new();
+        for terms in [&[][..], &terms[..]] {
+            let summary = summarize_with_calendar(
+                &entries,
+                None,
+                terms,
+                budget,
+                Instant::now() + Duration::from_secs(60),
+                |_, _, _| Ok(generated("Launch", "They met.")),
+            )
+            .unwrap();
+            excerpts.push(summary.excerpt_chars);
+        }
+        assert!(excerpts[0] <= budget, "{excerpts:?}");
+        assert!(excerpts[1] <= budget - line, "{excerpts:?}");
     }
 
     #[test]

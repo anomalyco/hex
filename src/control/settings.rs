@@ -419,6 +419,11 @@ const KEYS: &[Key] = &[
         "Labs: meeting notes written with OpenCode use meetings.opencode_model, with no fallback to another model",
     ),
     key(
+        "labs.meeting_notes_vocabulary",
+        Kind::Bool,
+        "Labs: final meeting titles and summaries read the vocabulary, so names are spelled the way you wrote them",
+    ),
+    key(
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
@@ -649,6 +654,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.stop_when_call_ends", "meetings"),
     ("labs.movable_meeting_capsules", "meetings"),
     ("labs.meeting_summary_model", "meetings"),
+    ("labs.meeting_notes_vocabulary", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),
