@@ -466,7 +466,7 @@ fn local_server() -> (std::net::SocketAddr, Option<String>) {
             .filter(|dir| !dir.is_empty())
             .map(PathBuf::from)
     };
-    let home = dirs::home_dir();
+    let home = crate::user_dirs::home_dir();
     let files: Vec<ServiceFile> = [
         env_dir("XDG_STATE_HOME").map(|d| d.join("opencode/service.json")),
         home.as_ref()

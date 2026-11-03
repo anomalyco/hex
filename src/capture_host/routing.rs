@@ -152,7 +152,7 @@ pub enum RouteDelivery {
 pub fn router() -> Router {
     let settings = crate::app_settings::capture_settings();
     let config = settings.routing.config().clone();
-    let support = dirs::home_dir()
+    let support = crate::app_paths::home_dir()
         .unwrap_or_default()
         .join("Library/Application Support/scrawl");
     let dirs = RouterDirs::under(

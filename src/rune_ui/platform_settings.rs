@@ -251,7 +251,7 @@ fn notes_description(availability: NotesAvailability) -> &'static str {
 
 fn folder_label(ui: &Ui) -> String {
     let folder = ui.settings.meetings.resolved_output_folder();
-    dirs::home_dir()
+    crate::app_paths::home_dir()
         .and_then(|home| {
             folder
                 .strip_prefix(home)

@@ -176,7 +176,7 @@ pub fn safe_word(text: &str) -> bool {
 }
 
 fn expand(map: &BTreeMap<String, String>) -> Vec<(String, PathBuf)> {
-    let home = dirs::home_dir().unwrap_or_default();
+    let home = crate::user_dirs::home_dir().unwrap_or_default();
     map.iter()
         .map(|(id, path)| {
             let path = match path.strip_prefix("~/") {

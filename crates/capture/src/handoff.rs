@@ -46,7 +46,7 @@ pub fn configured_captures_dir(value: &str) -> Option<PathBuf> {
     }
     let path = match value.strip_prefix('~') {
         Some(rest) if rest.is_empty() || rest.starts_with(['/', '\\']) => {
-            dirs::home_dir()?.join(rest.trim_start_matches(['/', '\\']))
+            scrawl_router::user_dirs::home_dir()?.join(rest.trim_start_matches(['/', '\\']))
         }
         _ => PathBuf::from(value),
     };
@@ -65,12 +65,12 @@ pub fn configured_captures_dir(value: &str) -> Option<PathBuf> {
 /// Linux.
 pub fn builtin_captures_dir() -> PathBuf {
     if cfg!(any(target_os = "windows", target_os = "linux")) {
-        dirs::data_local_dir()
+        scrawl_router::user_dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("scrawl")
             .join("captures")
     } else {
-        dirs::home_dir()
+        scrawl_router::user_dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("Library/Application Support/scrawl/captures")
     }
@@ -583,7 +583,7 @@ pub fn default_config_path() -> PathBuf {
     std::env::var_os("SCRAWL_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            dirs::home_dir()
+            scrawl_router::user_dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".config/scrawl/config.json")
         })
@@ -884,7 +884,8 @@ fn router_env_from(path: &Path) -> scrawl_router::env::Env {
     if let Ok(host) = std::env::var("SCRAWL_AGENT_HOST") {
         config.agent_host = Some(host);
     }
-    let support = dirs::home_dir().map(|home| home.join("Library/Application Support/scrawl"));
+    let support = scrawl_router::user_dirs::home_dir()
+        .map(|home| home.join("Library/Application Support/scrawl"));
     let router = std::env::var_os("SCRAWL_ROUTER_DIR")
         .map(PathBuf::from)
         .or_else(|| support.as_ref().map(|s| s.join("router")));
@@ -1524,7 +1525,7 @@ mod tests {
 
     #[test]
     fn captures_dir_takes_absolute_and_home_paths_only() {
-        let home = dirs::home_dir().unwrap();
+        let home = scrawl_router::user_dirs::home_dir().unwrap();
         assert_eq!(configured_captures_dir("~"), Some(home.clone()));
         assert_eq!(
             configured_captures_dir(" ~/Scrawl Captures "),

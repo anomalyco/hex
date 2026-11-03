@@ -15,13 +15,15 @@ unlocked.
 
 ## What runs
 
-- `strobe.json` builds `hex` with `--profile strobe --features strobe` into
+- `strobe.json` builds `hex` with `cargo build --release` into
   `{cache}/cargo-target`, a target folder strobe shares between variants.
   Today the build output is the Windows executable.
-- The `strobe` profile is release's code with line tables kept in `hex.pdb`,
-  so CPU profiles name Hex's functions. It is never shipped.
-- The `strobe` feature is the hook for the UI toolkit's benchmark bridge. It
-  changes nothing in Hex yet.
+- The build's env keeps release's code and adds line tables in `hex.pdb`, so
+  CPU profiles name Hex's functions: `CARGO_PROFILE_RELEASE_DEBUG=line-tables-only`,
+  `CARGO_PROFILE_RELEASE_STRIP=false`, and `CARGO_PROFILE_RELEASE_INCREMENTAL=false`.
+  It needs no profile or feature in `Cargo.toml`, so every commit builds the
+  same way: a `--base` from before the benches existed, and `--bisect` across
+  history. Such a build is never shipped.
 - On a machine whose default Rust toolchain is not MSVC, set
   `RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc` before you run strobe.
   Windows builds also need the Vulkan SDK (`docs/windows.md`).
@@ -41,6 +43,13 @@ own Hex:
 - `HEX_DISABLE_UPDATES=1`: no update checks and no network.
 - `USERPROFILE` (Windows) and `HOME` locate `~/.config/hex`, so your
   `hex.config.ts` stays out of the copy.
+- Every folder Hex and Annotate derive from yours follows the copy's
+  environment on Windows too (`USERPROFILE`, `APPDATA`, `LOCALAPPDATA`;
+  `app_paths` and `scrawl_router::user_dirs`), where `dirs` would ask the
+  shell for your own: Annotate's captures folder and its retention, Scrawl's
+  router folders and the Scrawl settings import, the meetings folder, and the
+  Hugging Face cache. Annotate stays on in the benches, as it is for users,
+  and works only inside the private home.
 - `HF_HUB_CACHE={home}/.cache/huggingface/hub`: the copy never finds models
   in your Hugging Face cache (on Windows that scan otherwise reads your real
   profile).

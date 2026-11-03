@@ -59,12 +59,12 @@ pub fn file_log_enabled() -> bool {
 pub fn log_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
-        dirs::home_dir().map(|home| home.join("Library/Logs/Scrawl"))
+        scrawl_router::user_dirs::home_dir().map(|home| home.join("Library/Logs/Scrawl"))
     }
     #[cfg(target_os = "windows")]
     {
         Some(
-            dirs::data_local_dir()
+            scrawl_router::user_dirs::data_local_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("scrawl")
                 .join("Logs"),

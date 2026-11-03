@@ -1305,7 +1305,10 @@ mod tests {
         std::fs::create_dir_all(repo.join("site")).unwrap();
         let repo_s = repo.to_string_lossy().into_owned();
         let site_s = repo.join("site").to_string_lossy().into_owned();
-        let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
+        let home = crate::user_dirs::home_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
 
         let reg = |origin: &str, session: Option<&str>, directory: Option<&str>| Registration {
             origin: origin.into(),
