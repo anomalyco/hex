@@ -156,15 +156,9 @@ fn body(ui: &Ui, p: Paint, entry: &Row) -> El {
 fn fact(p: Paint, key: &str, label: &str, value: El) -> El {
     row()
         .key(key)
-        .gap(16.0)
+        .gap(8.0)
         .center_y()
-        .child(
-            text(label)
-                .key("label")
-                .font(DESCRIPTION)
-                .color(p.muted())
-                .w(96.0),
-        )
+        .child(text(label).key("label").font(DESCRIPTION).color(p.muted()))
         .child(value)
 }
 

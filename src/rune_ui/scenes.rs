@@ -593,14 +593,7 @@ pub(super) const SCENES: &[Scene] = &[
         ui.platform.developer = true;
         ui.pane = Pane::HudLab;
     }),
-    ("mac-labs", |ui| {
-        *ui = mac_fixture();
-        #[cfg(hex_capture)]
-        {
-            ui.platform.scrawl = Some(platform::ScrawlView::preview());
-        }
-        ui.labs_open = true;
-    }),
+    ("mac-labs", labs_with_some_on),
     ("mac-labs-link", |ui| {
         *ui = mac_fixture();
         ui.labs_open = true;
@@ -853,7 +846,8 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
     ui
 }
 
-/// Labs with a few labs on, for the store's scenes.
+/// Labs with a few labs on: every store scene's fixture, so a lab reads
+/// the same in each.
 fn labs_with_some_on(ui: &mut Ui) {
     *ui = mac_fixture();
     for feature in [

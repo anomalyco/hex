@@ -58,10 +58,13 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
     let is_new = |row: &Row| newest > 0 && row.lab.added() == newest;
     let mut content = col().key("content").px(METRICS.gutter).gap(12.0);
     let browsing = store.tab == Tab::Discover && store.category.is_none() && query.is_empty();
+    // Labs in New in Labs aren't repeated in the grid below.
+    let mut featured_labs = Vec::new();
     if browsing {
         let mut featured: Vec<&Row> = rows.iter().filter(|row| is_new(row)).collect();
         featured.sort_by_key(|row| std::cmp::Reverse((row.lab.added(), row.lab.index())));
         featured.truncate(2);
+        featured_labs = featured.iter().map(|row| row.lab).collect();
         if !featured.is_empty() {
             content = content
                 .child(heading(p, "new-heading", tr("New in Labs")))
@@ -84,6 +87,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
                 .is_none_or(|category| row.category == category)
         })
         .filter(|row| matches(row, &query))
+        .filter(|row| !featured_labs.contains(&row.lab))
         .collect();
     if matching.is_empty() {
         let empty = if store.tab == Tab::On && query.is_empty() {
@@ -259,17 +263,18 @@ fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
     if lab.audience() == crate::labs::Audience::Dev {
         tags.push(tone_tag(p, "dev-tag", tr("Dev"), Tone::Neutral));
     }
+    // Up to two lines, so a long name shows whole beside its tags.
     let title = row()
         .key("title-row")
         .min_w(0.0)
         .gap(6.0)
-        .center_y()
+        .items_start()
         .child(
             text(entry.title)
                 .key("title")
                 .font(p.k.ty.ui_medium)
                 .color(p.text())
-                .truncate()
+                .max_lines(2)
                 .shrink()
                 .min_w(0.0),
         )

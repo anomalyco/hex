@@ -1842,8 +1842,8 @@ fn a_labs_card_opens_its_drawer_and_its_button_turns_it_on() {
     use super::super::labs::Lab;
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
-    let feature = Feature::LiveText;
-    tap(&mut rt, "lab-card-live-text");
+    let feature = Feature::SubtitleExport;
+    tap(&mut rt, "lab-card-subtitle-export");
     assert_eq!(rt.state.lab_store.drawer, Some(Lab::Feature(feature)));
     assert!(
         !feature.on(&rt.state.settings),
@@ -1853,7 +1853,7 @@ fn a_labs_card_opens_its_drawer_and_its_button_turns_it_on() {
     assert!(feature.on(&rt.state.settings), "Try it turns it on");
     tap(&mut rt, "lab-drawer-close");
     assert!(rt.state.lab_store.drawer.is_none());
-    tap(&mut rt, "lab-live-text");
+    tap(&mut rt, "lab-subtitle-export");
     assert!(
         !feature.on(&rt.state.settings),
         "the card's On turns it off"
@@ -1918,6 +1918,57 @@ fn a_lone_lab_card_keeps_half_the_row() {
         );
     }
     assert!(lone, "some chip leaves a card alone in its row");
+}
+
+#[test]
+fn new_in_labs_isnt_repeated_in_the_grid() {
+    let rt = runtime("mac-labs", true, (980.0, 4000.0));
+    let featured: Vec<String> = rt
+        .elements()
+        .into_iter()
+        .filter_map(|e| e.key?.strip_prefix("lab-featured-").map(str::to_string))
+        .collect();
+    assert_eq!(featured.len(), 2, "two labs are featured");
+    for id in featured {
+        assert!(
+            rt.find(&format!("lab-card-{id}")).is_none(),
+            "{id} shows once"
+        );
+    }
+}
+
+/// Whether the button keyed `key` shows On (a card) or Turn off (a drawer).
+fn shows_on(rt: &Runtime<Ui>, key: &str) -> bool {
+    let inside = format!("/{key}/");
+    rt.elements()
+        .into_iter()
+        .any(|e| !e.exiting && e.key.as_deref() == Some("on") && e.path.contains(&inside))
+}
+
+/// Every card's Try or On matches its drawer's Try it or Turn off.
+#[test]
+fn a_labs_drawer_agrees_with_its_card() {
+    let mut rt = runtime("mac-labs-drawer", true, (980.0, 4000.0));
+    assert!(shows_on(&rt, "lab-drawer-toggle"), "Live text is on");
+    key(&mut rt, Key::Escape, Mods::default());
+    assert!(shows_on(&rt, "lab-live-text"), "and its card says so");
+    let ids: Vec<String> = rt
+        .elements()
+        .into_iter()
+        .filter_map(|e| e.key?.strip_prefix("lab-card-").map(str::to_string))
+        .collect();
+    assert!(ids.len() > 20, "{ids:?}");
+    for id in ids {
+        let card_on = shows_on(&rt, &format!("lab-{id}"));
+        tap(&mut rt, &format!("lab-card-{id}"));
+        assert_eq!(
+            shows_on(&rt, "lab-drawer-toggle"),
+            card_on,
+            "{id}: the drawer agrees with the card"
+        );
+        key(&mut rt, Key::Escape, Mods::default());
+        assert!(rt.state.lab_store.drawer.is_none());
+    }
 }
 
 #[test]
