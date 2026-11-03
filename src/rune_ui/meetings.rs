@@ -148,6 +148,16 @@ fn notes_available(ui: &Ui) -> bool {
         || ui.settings.meetings.summarize_with_opencode
 }
 
+/// What writes the notes now, as the generator picks it: Apple Intelligence
+/// on a Mac that has it, otherwise OpenCode.
+fn notes_running_label(ui: &Ui) -> &'static str {
+    if ui.platform.caps.os == super::platform::Os::Macos && ui.platform.notes.is_available() {
+        tr("Writing a title and summary with Apple Intelligence…")
+    } else {
+        tr("Writing a title and summary with OpenCode…")
+    }
+}
+
 #[derive(Default)]
 pub(super) struct MeetingsPane {
     pub(super) view: View,
@@ -950,7 +960,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         );
     } else if meeting.notes_running {
         body = body.child(
-            text(tr("Writing a title and summary with Apple Intelligence…"))
+            text(notes_running_label(ui))
                 .key("notes-running")
                 .font(DESCRIPTION)
                 .color(p.faint()),
@@ -1245,5 +1255,18 @@ mod tests {
         stop(&mut ui);
         assert!(!ui.meetings.stop_pending);
         assert!(ui.meetings.action_error.is_some());
+    }
+
+    /// Off a Mac the notes are written by OpenCode, so the progress line
+    /// names it, never Apple Intelligence (#1151).
+    #[test]
+    fn notes_progress_names_opencode_off_a_mac() {
+        let ui = Ui::with(
+            crate::app_settings::AppSettings::default(),
+            Service::Fixture(Vec::new()),
+        );
+        let label = notes_running_label(&ui);
+        assert!(label.contains("OpenCode"), "{label}");
+        assert!(!label.contains("Apple Intelligence"), "{label}");
     }
 }
