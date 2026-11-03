@@ -266,6 +266,11 @@ Bluetooth default input (macOS, avoid_bluetooth_microphone on) // transport type
   ├── no other usable input -> the Bluetooth default
   └── setting changes -> re-resolve like a device-list change -> switch once idle
 
+warm stream keeps running but delivers only exact zeros (macOS, #1122)
+  -> that dictation is discarded as near-silent, as before
+  -> its finish reopens the microphone like a stream failure // logged once
+  -> next dictation records from a fresh stream
+
 programmatic dictation (local API) when the stream interrupts or gaps
   ├── audio delivered before the loss -> kept under its id // recover.programmatic-loss
   │     -> /finish transcribes it; /cancel, heartbeats, and the lease still apply
@@ -288,7 +293,8 @@ Checks in [audio.rs](../../src/audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
 `microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,
 `microphone_loss_with_only_pre_roll_keeps_nothing`,
-`finish_after_an_unread_microphone_loss_takes_the_kept_clip`;
+`finish_after_an_unread_microphone_loss_takes_the_kept_clip`,
+`a_dictation_of_digital_silence_reopens_the_microphone`;
 [recognition.rs](../../src/recognition.rs):
 `microphone_loss_keeps_a_programmatic_clip_for_finish` (the hold, not a `/finish`
 through the running listener).
@@ -363,6 +369,15 @@ sink still records the gap itself. Not verified on the reporter's headset; the
 report that a Bluetooth device was used with `avoid_bluetooth_microphone` on
 was not reproduced (a saved Bluetooth microphone, or no other usable input,
 keeps it by design).
+
+**Fixed after dev ([#1122](https://github.com/anomalyco/hex/issues/1122)):**
+after a WhatsApp desktop call ended, the warm built-in microphone stream kept
+running without an error but delivered only exact zeros, so every dictation
+was discarded as near-silent (`zero_fraction` 1.0) until Hex restarted. A
+finished dictation whose audio through the release is exactly zero now
+reopens the stream the way a stream failure does; a cold microphone
+(release-while-idle) already opens fresh for each press. The first such
+dictation is still discarded. Not verified with a real WhatsApp call.
 
 ### Fence Late Capture Notifications
 

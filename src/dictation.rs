@@ -394,6 +394,15 @@ impl DictationClip {
         }
     }
 
+    /// Whether every sample through the release is exactly zero. A real
+    /// microphone always carries some noise, so this is a stream still
+    /// running but delivering digital silence (#1122), not a quiet room.
+    #[cfg(target_os = "macos")]
+    pub fn is_digital_silence(&self) -> bool {
+        let released = self.released();
+        !released.is_empty() && released.iter().all(|&sample| sample == 0.0)
+    }
+
     /// Whether the capture holds no speech worth transcribing: its level
     /// stays below the silence threshold or, once the speech detector is
     /// installed, the detector finds no speech in it (a key click, the start
