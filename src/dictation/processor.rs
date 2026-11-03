@@ -673,6 +673,15 @@ fn cache_ranked_candidates(service: &Service, catalog: &ModelCatalog) {
     }
 }
 
+/// Drops the cached ranked candidates once one of them failed: the catalog
+/// may have been read while OpenCode was still loading, listing models that
+/// left it since (#1123). The next generation reads the catalog again.
+fn forget_ranked_candidates() {
+    if let Ok(mut guard) = CACHED_RANKED_CANDIDATES.lock() {
+        *guard = None;
+    }
+}
+
 fn ranked_candidates_for(service: &Service) -> Vec<Model> {
     if let Ok(guard) = CACHED_RANKED_CANDIDATES.lock()
         && let Some((cached, candidates)) = guard.as_ref()
@@ -915,6 +924,7 @@ fn generate_cancellable(
         prompt,
         model,
         || ranked_candidates_for(&service),
+        forget_ranked_candidates,
         started,
         deadline,
         cancelled,
@@ -922,10 +932,12 @@ fn generate_cancellable(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_with_candidates(
     prompt: &str,
     model: Option<&Model>,
     candidates: impl FnOnce() -> Vec<Model>,
+    forget_candidates: impl FnMut(),
     started: Instant,
     deadline: Duration,
     cancelled: &AtomicBool,
@@ -937,6 +949,7 @@ fn generate_with_candidates(
             return generate_with_ranked_candidates(
                 prompt,
                 &candidates,
+                forget_candidates,
                 started,
                 deadline,
                 cancelled,
@@ -963,22 +976,33 @@ fn remaining_generation_deadline(started: Instant, deadline: Duration) -> Result
     }
 }
 
+/// Walks the ranked models in order. Any failure forgets the cached list so
+/// the next generation reads OpenCode's catalog again, and when every ranked
+/// model fails, OpenCode's own default model answers instead (#1123).
 fn generate_with_ranked_candidates(
     prompt: &str,
     candidates: &[Model],
+    mut forget_candidates: impl FnMut(),
     started: Instant,
     deadline: Duration,
     cancelled: &AtomicBool,
     mut post: impl FnMut(&str, Duration, &AtomicBool) -> Result<Response>,
 ) -> Result<Generated> {
     let mut last_error = None;
-    for (index, candidate) in candidates.iter().enumerate() {
+    for candidate in candidates {
         let remaining = remaining_generation_deadline(started, deadline)?;
         let data = serde_json::to_string(&Request {
             prompt,
             model: Some(candidate),
         })?;
-        match post(&data, remaining, cancelled)? {
+        let response = match post(&data, remaining, cancelled) {
+            Ok(response) => response,
+            Err(error) => {
+                forget_candidates();
+                return Err(error);
+            }
+        };
+        match response {
             Response::Success { data } => {
                 return Ok(Generated {
                     text: data.text,
@@ -986,19 +1010,27 @@ fn generate_with_ranked_candidates(
                 });
             }
             Response::Error { message } => {
-                if index + 1 < candidates.len() {
-                    tracing::warn!(
-                        provider = %candidate.provider,
-                        model = %candidate.id,
-                        %message,
-                        "ranked OpenCode model failed; trying next available candidate"
-                    );
-                }
-                last_error = Some(eyre!("OpenCode generation failed: {message}"));
+                forget_candidates();
+                tracing::warn!(
+                    provider = %candidate.provider,
+                    model = %candidate.id,
+                    %message,
+                    "ranked OpenCode model failed; trying the next one"
+                );
+                last_error = Some(message);
             }
         }
     }
-    Err(last_error.unwrap_or_else(|| eyre!("no OpenCode models available")))
+    tracing::warn!("every ranked OpenCode model failed; asking OpenCode's default model");
+    match generate_single_model(prompt, None, started, deadline, cancelled, &mut post) {
+        Ok(text) => Ok(Generated { text, model: None }),
+        Err(error) => Err(match last_error {
+            Some(message) => eyre!(
+                "OpenCode generation failed: {message}; OpenCode's default model also failed: {error:#}"
+            ),
+            None => error,
+        }),
+    }
 }
 
 fn generate_single_model(
@@ -1446,6 +1478,7 @@ mod tests {
             "Summarize.",
             Some(&chosen),
             || -> Vec<Model> { panic!("a chosen model never reads the ranked candidates") },
+            || panic!("a chosen model never forgets the ranked candidates"),
             Instant::now(),
             Duration::from_secs(5),
             &AtomicBool::new(false),
@@ -1680,9 +1713,11 @@ mod tests {
                 r#"{"data":{"text":"resolved from second ranked model"}}"#,
             ),
         ]);
+        let mut forgotten = 0;
         let output = generate_with_ranked_candidates(
             "Make this concise.",
             &candidates,
+            || forgotten += 1,
             Instant::now(),
             Duration::from_secs(5),
             &AtomicBool::new(false),
@@ -1691,6 +1726,7 @@ mod tests {
         .unwrap();
         assert_eq!(output.text, "resolved from second ranked model");
         assert_eq!(output.model.as_ref(), Some(&candidates[1]));
+        assert_eq!(forgotten, 1, "a failed candidate drops the cached list");
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 2);
         let first: serde_json::Value = serde_json::from_slice(&requests[0]).unwrap();
@@ -1710,6 +1746,48 @@ mod tests {
                 "id": "claude-haiku-4-5"
             })
         );
+    }
+
+    /// A ranked list read while OpenCode was still loading can name models
+    /// that left its catalog (#1123): every one failing forgets the list and
+    /// asks OpenCode's own default model instead.
+    #[test]
+    fn stale_ranked_models_fall_back_to_the_default_model() {
+        let candidates = vec![Model {
+            provider: "github-copilot".into(),
+            id: "gpt-5.4-nano".into(),
+            variant: None,
+        }];
+        let mut forgotten = 0;
+        let mut posted = Vec::new();
+        let output = generate_with_ranked_candidates(
+            "Summarize.",
+            &candidates,
+            || forgotten += 1,
+            Instant::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+            |data, _, _| {
+                posted.push(serde_json::from_str::<serde_json::Value>(data).unwrap());
+                Ok(if posted.len() == 1 {
+                    Response::Error {
+                        message: "Model not found: github-copilot/gpt-5.4-nano".into(),
+                    }
+                } else {
+                    Response::Success {
+                        data: ResponseData {
+                            text: "from the default".into(),
+                        },
+                    }
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(output.text, "from the default");
+        assert_eq!(output.model, None);
+        assert_eq!(forgotten, 1);
+        assert_eq!(posted.len(), 2);
+        assert!(posted[1].get("model").is_none(), "{}", posted[1]);
     }
 
     #[test]
