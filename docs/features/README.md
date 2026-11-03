@@ -55,7 +55,7 @@ Install the signed macOS app with `brew install --cask anomalyco/tap/hex` or the
 [manual DMG](../../README.md#downloads). The cask uses a versioned, checksum-pinned
 DMG, requires Apple silicon/macOS 15+, and leaves updates to Hex's own updater. It does
 not require OpenCode, launch the app automatically, migrate the legacy
-Swift app, or forcibly replace an existing app destination. Homebrew uninstall
+Swift app's data, or forcibly replace an existing app destination. Homebrew uninstall
 leaves runtime settings, models, and retained data intact.
 
 ```ts
@@ -145,6 +145,11 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   └── Skipped or refused -> Settings › General shows it under "Permissions
 │       needed" until allowed. Check: golden `onboarding-paste`; the real
 │       portal dialog is not exercised
+├── 2.3.1 or Swift Hex -> Sparkle offers the new Hex -> Install Update   // setup.legacy-update; macOS
+│   ├── Replaces the old app in place (its file name kept) and opens the new one
+│   ├── Accepted only because app/Info.plist keeps the old SUPublicEDKey;
+│   │   scripts/validate-app.sh requires it. Feed items: docs/plans/swift-app-handoff.md
+│   └── No automated check; a clean-Mac install from each old app is the proof
 ├── Upgrading from 2.3.1 or earlier (same `hex` folder)     // setup.upgrade; macOS
 │   ├── `anomaly.hex` is a new identity: macOS kept none of the old grants
 │   ├── Settings without `anomaly-hex-identity` in `migrations` -> checked once at launch

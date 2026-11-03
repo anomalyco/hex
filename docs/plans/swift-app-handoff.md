@@ -2,16 +2,18 @@
 
 ## Decision
 
-There is no Swift-to-Rust migration. This supersedes the in-place transition
-plan. The proposed handoff uses the old Swift app's existing Sparkle window to
-offer a download link; downloading and installing remains an explicit user action.
+There is no Swift-to-Rust data migration, but the old apps update straight
+into the new one (Kit, 2026-11-02: "gotta get everyone over"). 2.3.1 and Swift
+Hex both run Sparkle 2.9.4 with the same EdDSA key, so their feeds offer the
+released `Hex.app` and **Install Update** replaces the old app with it. See
+[Legacy Update](#legacy-update).
 
 - Do not import Swift settings, history, audio, models, or other data.
-- Do not automatically install, delete, or replace the old app. The one
-  exception (Kit, 2026-11-01): once setup is ready and the listener starts,
-  `anomaly.hex` asks a running old Hex (the retired bundle IDs below) to quit,
-  so the two never answer the same shortcut. It stays installed.
-- Do not adopt the Swift bundle identifier or publish a Rust payload to its feed.
+- Nothing installs without the user's Install Update click, and nothing is
+  deleted. Once setup is ready and the listener starts, `anomaly.hex` asks a
+  running old Hex (the retired bundle IDs below) to quit, so the two never
+  answer the same shortcut.
+- Do not adopt the Swift bundle identifier.
 - Do not move or copy existing Rust settings, models, or history.
 - Narrow TCC exception: when `anomaly.hex` shows an untrusted Accessibility,
   Screen Recording, or System Audio Recording permission row (or the user clicks
@@ -42,7 +44,31 @@ replace a destination whose bundle identifier is not the Rust identifier.
 Users should quit the old app before dictating in the new one to avoid running
 two global hotkey listeners.
 
-## Legacy Notice
+## Legacy Update
+
+Sparkle 2.9.4 installs the new app over 2.3.1 (`HEX.app` or `Hex.app`) and Swift
+Hex because:
+
+- **It finds the app.** The ZIP's `Hex.app` matches the old app's file name or
+  its `CFBundleName` plus `.app`
+  ([SUInstaller.m](https://github.com/sparkle-project/Sparkle/blob/2.9.4/Autoupdate/SUInstaller.m)).
+- **The key passes.** The old app has `SUPublicEDKey`, so Sparkle refuses an
+  update without one; `app/Info.plist` keeps the same key, and the ZIP is signed
+  with its private half. A passing EdDSA check is enough when the team differs
+  ([SUUpdateValidator.m](https://github.com/sparkle-project/Sparkle/blob/2.9.4/Sparkle/SUUpdateValidator.m)).
+- **It is not a downgrade.** The new `CFBundleVersion` (30300 and up) exceeds
+  2.3.1's 20301 and Swift's 92.
+- **The swap is not atomic.** The team differs, so Sparkle moves the old app
+  aside and the new one in, then opens it.
+
+Each feed gets one item whose enclosure is the release's
+`Hex-<version>-macos-arm64.zip`, with `sparkle:edSignature` from the old key,
+`sparkle:version` the new `CFBundleVersion`, `sparkle:minimumSystemVersion`
+15.0, and `sparkle:hardwareRequirements` arm64. Macs that cannot run the new
+Hex keep their last compatible release. The new Hex starts fresh: new
+permissions, model, and shortcut.
+
+## Legacy Notice (superseded)
 
 Swift 0.8.5/build 92 already ships a dismissible link to the Rust app. This Rust
 release does not publish another Swift build or change its S3 feed. The optional
