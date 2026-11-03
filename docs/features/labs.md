@@ -509,8 +509,9 @@ hex settings set dictation_hotkey menu        // labs.special-keys
 │   instead lets Insert, Home, End, Page Up, Page Down stand alone ("home alone
 │   needs Labs › Special keys alone" while off), and off puts a saved one back
 ├── macOS -> no toggle; a bare one still needs a modifier, as before
-├── Window recorder -> refuses them while off ("Add a modifier"); Rune reports
-│   none of these keys yet, so the recorder can't record them either way
+├── Window recorder (Linux) -> records them, alone too, while on (#1187);
+│   refuses them while off ("Add a modifier")
+│   Check: `recorder_takes_special_keys_alone` in `rune_ui/settings.rs`
 └── Toggle turned off (row, hex labs off, hex settings), or settings load with
     it off -> a Linux shortcut on one goes back to its default (Dictate without
     processing unbound), so the listener never registers it

@@ -69,9 +69,8 @@ remapped to Menu with GNOME's keyboard options and
 reach X11 grabs as keysyms 0xff67/0xff13/0xff14 and the portal as `Menu`,
 `Pause`, `Scroll_Lock`. Off, `hex settings` refuses them, the window's
 recorder refuses them, and a saved shortcut on one goes back to its default
-when settings load or the toggle turns off. Limit: Rune doesn't report these
-keys to the window's recorder, so set them with `hex settings`. Details and
-checks in [labs.md](labs.md).
+when settings load or the toggle turns off. On, the window's recorder takes
+them too (#1187). Details and checks in [labs.md](labs.md).
 
 Linux with Labs › Section key alone on (`labs.section_key_alone`, off by
 default; issue 1050): the ISO § key, left of 1, may be a shortcut with no
