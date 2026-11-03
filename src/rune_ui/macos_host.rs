@@ -68,6 +68,7 @@ pub(super) struct Backend {
     runtime: Option<RuntimeHandle>,
     wake: Arc<dyn Fn() + Send + Sync>,
     chords: Option<ChordWatch>,
+    read: super::LastPublication<crate::macos_rune::Published>,
 }
 
 impl Backend {
@@ -80,6 +81,7 @@ impl Backend {
             runtime,
             wake,
             chords: None,
+            read: Default::default(),
         }
     }
 
@@ -126,6 +128,12 @@ impl Backend {
 
     /// The runtime publishes into shared memory; nothing to pull.
     pub(super) fn refresh(&mut self) {}
+
+    /// Whether the runtime published since the window last read its state.
+    pub(super) fn changed(&mut self) -> bool {
+        self.read
+            .changed(self.runtime.as_ref().and_then(RuntimeHandle::published))
+    }
 
     pub(super) fn error(&self) -> Option<String> {
         self.runtime

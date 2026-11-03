@@ -124,6 +124,11 @@ impl Backend {
         }
     }
 
+    /// The Linux host's snapshot is read every poll.
+    pub(super) fn changed(&mut self) -> bool {
+        true
+    }
+
     pub(super) fn error(&self) -> Option<String> {
         match self {
             Self::Host(..) => None,

@@ -601,6 +601,52 @@ struct ServiceView {
     editing: bool,
 }
 
+/// The runtime publication (macOS, Windows) the window last read. The
+/// runtime replaces it only when something changed, so a poll that finds
+/// the same one skips copying and comparing its settings and view, which
+/// otherwise ran before every frame.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+struct LastPublication<T>(Option<Option<Arc<T>>>);
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl<T> Default for LastPublication<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl<T> LastPublication<T> {
+    /// True at the first poll and whenever `current` is a new publication.
+    fn changed(&mut self, current: Option<Arc<T>>) -> bool {
+        let changed = match (&self.0, &current) {
+            (Some(Some(seen)), Some(current)) => !Arc::ptr_eq(seen, current),
+            (Some(None), None) => false,
+            _ => true,
+        };
+        self.0 = Some(current);
+        changed
+    }
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+mod publication_tests {
+    use super::*;
+
+    #[test]
+    fn the_window_reads_each_runtime_publication_once() {
+        let mut read = LastPublication::default();
+        assert!(read.changed(None::<Arc<u32>>), "the first poll reads");
+        assert!(!read.changed(None));
+        let first = Arc::new(1);
+        assert!(read.changed(Some(first.clone())));
+        assert!(!read.changed(Some(first.clone())));
+        // An equal value published again is still a new publication.
+        assert!(read.changed(Some(Arc::new(1))));
+        assert!(read.changed(None));
+    }
+}
+
 /// The one anchored menu or popover that is open.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Menu {
@@ -1296,6 +1342,11 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         .poll(ui.platform.activity_log.as_ref(), ui.pane == Pane::Activity);
     if let Service::Live(backend) = &mut ui.service {
         backend.refresh();
+    }
+    // Read only what the host published since the last poll.
+    if let Service::Live(backend) = &mut ui.service
+        && backend.changed()
+    {
         let error = backend.error();
         let (view, settings) = match backend.state() {
             Some(state) => (Some(state.view), Some(state.settings)),
