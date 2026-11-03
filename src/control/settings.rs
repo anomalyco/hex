@@ -1416,6 +1416,7 @@ mod tests {
             }],
             meetings: crate::app_settings::MeetingSettings {
                 retention: Some(crate::app_settings::MeetingRetention::Day),
+                opencode_model: Some("anthropic/claude-haiku".into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -1628,6 +1629,28 @@ mod tests {
         assert_eq!(change.settings.meetings.calendar.lead_minutes, 5);
         let change = apply(&settings, "ui_language", "none", &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);
+        let change = apply(
+            &settings,
+            "meetings.opencode_model",
+            "anthropic/claude-haiku",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.meetings.opencode_model.as_deref(),
+            Some("anthropic/claude-haiku")
+        );
+        assert_eq!(
+            get(&change.settings, "meetings.opencode_model").unwrap()[0].value,
+            "anthropic/claude-haiku"
+        );
+        let cleared = apply(&change.settings, "meetings.opencode_model", "none", &rules()).unwrap();
+        assert_eq!(cleared.settings.meetings.opencode_model, None);
+        assert!(
+            get(&cleared.settings, "meetings.opencode_model").unwrap()[0]
+                .value
+                .is_null()
+        );
         let mut saved = settings.clone();
         saved.microphone = Some("USB Mic".into());
         let change = apply(&saved, "microphone", "system-default", &rules()).unwrap();
