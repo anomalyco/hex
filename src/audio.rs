@@ -257,6 +257,9 @@ struct OpenRequest {
     /// setting asks. Dictation does; a meeting records the input the call
     /// is using, so the headset a call app holds is never swapped out.
     avoids_bluetooth: bool,
+    /// The UID of the input a meeting's call app records from, opened ahead
+    /// of everything else while it is listed and opens.
+    call_input: Option<String>,
 }
 
 impl OpenRequest {
@@ -448,6 +451,7 @@ impl AudioInput {
             fallback: SelectedFallback::Immediate,
             keep: None,
             avoids_bluetooth: true,
+            call_input: None,
         })? {
             Opened::Input(input) => Ok(*input),
             Opened::Unchanged { .. } => unreachable!("nothing to keep"),
@@ -545,6 +549,7 @@ impl RecoveringAudioInput {
             fallback: SelectedFallback::Immediate,
             keep: None,
             avoids_bluetooth: true,
+            call_input: None,
         })
         .and_then(|opened| match opened {
             Opened::Input(input) => Ok(*input),
@@ -828,6 +833,7 @@ impl RecoveringAudioInput {
             fallback: SelectedFallback::AfterRetries,
             keep,
             avoids_bluetooth: true,
+            call_input: None,
         };
         self.route_generation = (self.route_generation_source)();
         let opener = self.opener.clone();
@@ -1135,6 +1141,23 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         }
         Ok(Opened::Input(Box::new(input)))
     };
+    if let Some(index) = request.call_input.as_deref().and_then(|uid| {
+        let ids = devices.iter().map(device_uid).collect::<Vec<_>>();
+        call_input_index(uid, &ids, &names)
+    }) {
+        let plan = InputPlan {
+            target: InputTarget::Named(index),
+            selection: Selection::InUse,
+        };
+        match open(plan) {
+            Ok(opened) => return Ok(opened),
+            Err(error) => tracing::warn!(
+                %error,
+                device = %names[index],
+                "the input the call uses would not open; resolving the microphone as usual"
+            ),
+        }
+    }
     let plan = resolve(request.selected_device.as_deref())?;
     let (Some(selected), InputTarget::Named(_), None) = (
         request.selected_device.as_deref(),
@@ -1156,17 +1179,37 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
     )
 }
 
-/// Opens the microphone a meeting records, resolved like dictation's except
-/// that a Bluetooth default is kept, since a call app on a headset talks
-/// through it; or keeps the open one named `keep` when it resolves to that
-/// again.
-pub fn open_meeting_input(selected_device: Option<&str>, keep: Option<&str>) -> Result<Opened> {
+/// Opens the microphone a meeting records: the input its call app records
+/// from (`call_input`, a device UID) while that is listed and opens, else
+/// one resolved like dictation's except that a Bluetooth default is kept,
+/// since a call app on a headset talks through it; or keeps the open one
+/// named `keep` when it resolves to that again.
+pub fn open_meeting_input(
+    selected_device: Option<&str>,
+    call_input: Option<&str>,
+    keep: Option<&str>,
+) -> Result<Opened> {
     open_configured_input(&OpenRequest {
         device_override: None,
         selected_device: selected_device.map(str::to_owned),
         fallback: SelectedFallback::Immediate,
         keep: keep.map(str::to_owned),
         avoids_bluetooth: false,
+        call_input: call_input.map(str::to_owned),
+    })
+}
+
+/// The device's stable identifier: its CoreAudio UID on macOS.
+fn device_uid(device: &Device) -> Option<String> {
+    device.id().ok().map(|id| id.id().to_owned())
+}
+
+/// Where the input with UID `uid` is listed, given each listed input's UID
+/// and name; never Hex's own virtual microphone.
+fn call_input_index(uid: &str, ids: &[Option<String>], names: &[String]) -> Option<usize> {
+    ids.iter().zip(names).position(|(id, name)| {
+        id.as_deref() == Some(uid)
+            && !crate::audio::hex_microphone::is_hex_virtual_device_name(name)
     })
 }
 
@@ -1720,6 +1763,7 @@ mod tests {
             fallback: SelectedFallback::Immediate,
             keep: None,
             avoids_bluetooth,
+            call_input: None,
         };
         let target = |request: OpenRequest| {
             resolve_input(
@@ -1735,6 +1779,19 @@ mod tests {
         // Dictation passes over the headset; a meeting records it.
         assert_eq!(target(request(true)), Ok(InputTarget::StandIn(1)));
         assert_eq!(target(request(false)), Ok(InputTarget::SystemDefault));
+    }
+
+    #[test]
+    fn a_meeting_finds_the_input_its_call_uses_by_uid() {
+        let names = listed(&["MacBook Pro Microphone", "Hex Microphone", "Jabra Evolve"]);
+        let ids = [Some("BuiltIn"), Some("HexMic"), Some("Jabra")].map(|id| id.map(str::to_owned));
+        assert_eq!(call_input_index("Jabra", &ids, &names), Some(2));
+        assert_eq!(call_input_index("BuiltIn", &ids, &names), Some(0));
+        // Never Hex's own microphone, and nothing for an unlisted input.
+        assert_eq!(call_input_index("HexMic", &ids, &names), None);
+        assert_eq!(call_input_index("Unplugged", &ids, &names), None);
+        // An input whose UID cannot be read never matches.
+        assert_eq!(call_input_index("Jabra", &[None, None, None], &names), None);
     }
 
     #[test]

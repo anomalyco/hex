@@ -454,6 +454,13 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
 
 Capture sources (meeting/capture.rs)                // meetings.capture
 ├── Microphone -> dictation's input (saved device, else System default) via cpal, resampled to 16 kHz
+│   ├── Detected call app (macOS 14+) -> the input that app records from, by
+│   │   device UID, ahead of the saved device and the default (#1086)
+│   │   ├── App switches input mid-call -> followed within 1 s, same track
+│   │   ├── App reports no input (muted) -> keeps the one it followed
+│   │   └── Not reported, not listed, Hex Microphone, or won't open -> as below
+│   │      // a_meeting_follows_the_input_its_call_app_records_from,
+│   │      // a_meeting_finds_the_input_its_call_uses_by_uid; unverified on a real call
 │   ├── System default changes, the Settings microphone changes, or a missing
 │   │   saved device returns, mid-meeting
 │   │   -> New input opens before the old drops; same track, no retry gap

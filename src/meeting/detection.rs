@@ -152,6 +152,7 @@ impl MeetingCandidate {
         crate::meeting::MeetingStart {
             title: self.named.then(|| self.title.clone()),
             app: self.app_label(),
+            application: self.application.clone(),
             calendar: None,
             title_source: if self.source == MeetingSource::Manual {
                 crate::meeting::TitleSource::User

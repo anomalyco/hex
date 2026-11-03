@@ -68,10 +68,16 @@ pub(super) struct SourceSupervisor {
 }
 
 impl SourceSupervisor {
-    pub(super) fn microphone(sink: PacketSink) -> Self {
-        Self::spawn(sink, || {
-            MicrophoneSource::open(crate::app_settings::microphone_selection())
-                .map(|source| Box::new(source) as Box<dyn LiveSource>)
+    /// Records the input the call app `application` (a canonical bundle
+    /// identifier) records from where the OS reports it, else the
+    /// configured microphone.
+    pub(super) fn microphone(sink: PacketSink, application: Option<String>) -> Self {
+        Self::spawn(sink, move || {
+            MicrophoneSource::open(
+                crate::app_settings::microphone_selection(),
+                application.clone(),
+            )
+            .map(|source| Box::new(source) as Box<dyn LiveSource>)
         })
     }
 
@@ -221,6 +227,41 @@ impl UnopenableRetry {
     }
 }
 
+/// How often a meeting looks at which input its call app records from.
+const CALL_INPUT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// The input a meeting follows for its call app, by UID: the one it follows
+/// while the app still reports it or reports none (as some do while muted),
+/// else the first the app reports.
+fn follow_call_input(current: Option<String>, reported: Vec<String>) -> Option<String> {
+    match current {
+        Some(current) if reported.is_empty() || reported.contains(&current) => Some(current),
+        _ => reported.into_iter().next(),
+    }
+}
+
+/// The UIDs of the inputs the call app records from; none where the OS
+/// does not report them.
+fn call_app_inputs(application: &str) -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::microphone_activity::application_input_devices(application).unwrap_or_else(|error| {
+            tracing::debug!(%error, "could not read the inputs the call app uses");
+            Vec::new()
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = application;
+        Vec::new()
+    }
+}
+
+/// The input the call app `application` records from, following `current`.
+fn current_call_input(application: Option<&str>, current: Option<String>) -> Option<String> {
+    application.and_then(|application| follow_call_input(current, call_app_inputs(application)))
+}
+
 struct MicrophoneSource {
     input: crate::audio::AudioInput,
     resample: To16k,
@@ -231,13 +272,22 @@ struct MicrophoneSource {
     /// The [`crate::audio::input_route_generation`] the input was resolved at.
     route_generation: u64,
     retry: UnopenableRetry,
+    /// The detected call app's canonical bundle identifier.
+    application: Option<String>,
+    /// The UID of the input the call app records from.
+    call_input: Option<String>,
+    call_input_checked: Instant,
 }
 
 impl MicrophoneSource {
-    fn open((selection_revision, selected): (u64, Option<String>)) -> Result<Self> {
+    fn open(
+        (selection_revision, selected): (u64, Option<String>),
+        application: Option<String>,
+    ) -> Result<Self> {
         let route_generation = crate::audio::input_route_generation();
+        let call_input = current_call_input(application.as_deref(), None);
         let crate::audio::Opened::Input(input) =
-            crate::audio::open_meeting_input(selected.as_deref(), None)?
+            crate::audio::open_meeting_input(selected.as_deref(), call_input.as_deref(), None)?
         else {
             unreachable!("nothing to keep");
         };
@@ -246,6 +296,7 @@ impl MicrophoneSource {
         tracing::info!(
             device = input.device_name,
             rate = resample.rate,
+            call_input = call_input.is_some(),
             "meeting microphone opened"
         );
         let mut retry = UnopenableRetry::default();
@@ -258,18 +309,33 @@ impl MicrophoneSource {
             selection_revision,
             route_generation,
             retry,
+            application,
+            call_input,
+            call_input_checked: Instant::now(),
         })
     }
 
-    /// Follows a change of the system default or of the saved microphone in
-    /// Settings, the saved microphone returning, or a due look at one that
-    /// would not open, by opening the input it now resolves to before
-    /// dropping the old one. A failed open keeps the current input.
+    /// Follows a change of the input the call app records from, of the
+    /// system default or of the saved microphone in Settings, the saved
+    /// microphone returning, or a due look at one that would not open, by
+    /// opening the input it now resolves to before dropping the old one. A
+    /// failed open keeps the current input.
     fn follow_route(&mut self) {
         let now = Instant::now();
+        let mut call_input_changed = false;
+        if self.application.is_some()
+            && now.duration_since(self.call_input_checked) >= CALL_INPUT_INTERVAL
+        {
+            self.call_input_checked = now;
+            let call_input =
+                current_call_input(self.application.as_deref(), self.call_input.clone());
+            call_input_changed = call_input != self.call_input;
+            self.call_input = call_input;
+        }
         let generation = crate::audio::input_route_generation();
         let (revision, selected) = crate::app_settings::microphone_selection();
-        if generation == self.route_generation
+        if !call_input_changed
+            && generation == self.route_generation
             && revision == self.selection_revision
             && !self.retry.is_due(now)
         {
@@ -283,6 +349,7 @@ impl MicrophoneSource {
         }
         let opened = crate::audio::open_meeting_input(
             self.selected.as_deref(),
+            self.call_input.as_deref(),
             Some(&self.input.device_name),
         );
         let input = match opened {
@@ -345,6 +412,29 @@ impl LiveSource for MicrophoneSource {
 mod tests {
     use super::*;
     use crate::audio::Selection;
+
+    #[test]
+    fn a_meeting_follows_the_input_its_call_app_records_from() {
+        let uids = |uids: &[&str]| uids.iter().map(|uid| (*uid).to_owned()).collect::<Vec<_>>();
+        let current = |uid: &str| Some(uid.to_owned());
+        // The first input the app reports, until it reports a different one.
+        assert_eq!(follow_call_input(None, uids(&["Jabra"])), current("Jabra"));
+        assert_eq!(
+            follow_call_input(current("Jabra"), uids(&["BuiltIn", "Jabra"])),
+            current("Jabra")
+        );
+        assert_eq!(
+            follow_call_input(current("Jabra"), uids(&["BuiltIn"])),
+            current("BuiltIn")
+        );
+        // An app that reports none, as some do while muted, keeps its input.
+        assert_eq!(
+            follow_call_input(current("Jabra"), Vec::new()),
+            current("Jabra")
+        );
+        // With nothing reported yet, the configured microphone stays.
+        assert_eq!(follow_call_input(None, Vec::new()), None);
+    }
 
     #[test]
     fn a_microphone_that_would_not_open_is_tried_a_bounded_number_of_times() {
