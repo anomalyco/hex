@@ -249,6 +249,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Choose meeting summary model"),
             tr("Pick the OpenCode provider and model that write meeting titles and summaries, in Meetings › Settings › Advanced"),
         ));
+        rows.push(row(
+            Feature::MeetingNotesVocabulary,
+            &BOOK,
+            tr("Vocabulary in meeting notes"),
+            tr("Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"),
+        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -528,6 +534,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
         Feature::MeetingSummaryModel => "lab-meeting-summary-model",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
+        Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
     }
 }
 

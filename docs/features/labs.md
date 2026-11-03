@@ -61,6 +61,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (every OS with Meetings)
 │                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
+├── Vocabulary in meeting notes no labs.meeting_notes_vocabulary (every OS with Meetings)
+│                                        final meeting titles and summaries (and Regenerate summary) read the vocabulary ahead of the transcript (#1154)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
@@ -871,6 +873,26 @@ and `without_its_labs_toggle_no_summary_model_is_used` in
 observed: a real meeting summarized with a chosen model, on any OS. The
 `rune-mac-labs-link` goldens show the row; the Meetings Advanced field shows
 only with the toggle on, so its goldens are unchanged.
+
+Vocabulary in meeting notes (`meeting-notes-vocabulary`, issue 1154; every
+OS with Meetings; its row shows wherever Meetings does): for names and terms
+spelled right in a meeting's final title and summary, as live chapters
+already do. The gate, `labs::meeting_notes_vocabulary()`, is read at each
+final notes generation (`summarize_claimed` in
+[meeting/notes.rs](../../src/meeting/notes.rs)), so automatic notes and
+Regenerate summary both use the vocabulary as it is then. While on, the
+prompt starts with live chapters' line, "Names and terms that may appear:"
+and up to 30 terms (`chapters::vocabulary_line`), ahead of the calendar
+event and the transcript; its length comes out of the excerpt budget like
+the calendar's. Provisional titles while recording are unchanged. Off, or
+with an empty vocabulary, the prompt is exactly as before. Not built: a
+per-meeting context field, or adding terms to retranscription. Checks:
+`vocabulary_terms_lead_the_notes_prompt_and_share_its_budget` in
+[meeting/notes.rs](../../src/meeting/notes.rs);
+`every_feature_is_off_by_default_and_round_trips` in
+[labs.rs](../../src/labs.rs). Not yet observed: real notes written with the
+toggle on; the Labs page goldens that show Meetings rows need regenerating
+with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

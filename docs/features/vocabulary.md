@@ -103,6 +103,12 @@ Live meeting chapters (experiment live-chapters)  // vocabulary.chapters
 └── Chapter passes and the boundary pass start with "Names and terms that may
     appear: a, b, …" (first 30 terms, no spellings), read on each call
 
+Meeting notes (Labs › Vocabulary in meeting notes)  // vocabulary.notes
+├── Off (default) -> notes prompts are unchanged
+└── On -> the final title and summary prompt (automatic notes and Regenerate
+    summary) starts with the same line, read at each generation, ahead of the
+    calendar event; it shares the transcript's excerpt budget (#1154)
+
 Search                                   // vocabulary.search
 ├── hex meetings search, MCP search_transcripts, hex history --search
 ├── Query word = a one-word term, fuzzy on

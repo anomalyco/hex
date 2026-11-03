@@ -100,10 +100,11 @@ pub enum Feature {
     MovableMeetingCapsules,
     MeetingSummaryModel,
     GnomeClipboardRestore,
+    MeetingNotesVocabulary,
 }
 
 impl Feature {
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 42] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -145,6 +146,7 @@ impl Feature {
         Self::MovableMeetingCapsules,
         Self::MeetingSummaryModel,
         Self::GnomeClipboardRestore,
+        Self::MeetingNotesVocabulary,
     ];
 
     /// The features this OS and build have.
@@ -208,7 +210,8 @@ impl Feature {
             | Self::HideMenuBarIcon
             | Self::MovableMeetingCapsules
             | Self::MeetingSummaryModel
-            | Self::GnomeClipboardRestore => Audience::Everyone,
+            | Self::GnomeClipboardRestore
+            | Self::MeetingNotesVocabulary => Audience::Everyone,
         }
     }
 
@@ -275,6 +278,7 @@ impl Feature {
             | Self::PickerDownloaded
             | Self::KeepRecordings
             | Self::MeetingSummaryModel
+            | Self::MeetingNotesVocabulary
             | Self::FillerWords => true,
         }
     }
@@ -323,6 +327,7 @@ impl Feature {
             Self::MovableMeetingCapsules => "movable-meeting-capsules",
             Self::MeetingSummaryModel => "meeting-summary-model",
             Self::GnomeClipboardRestore => "gnome-clipboard-restore",
+            Self::MeetingNotesVocabulary => "meeting-notes-vocabulary",
         }
     }
 
@@ -370,6 +375,7 @@ impl Feature {
             Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
             Self::MeetingSummaryModel => "labs.meeting_summary_model",
             Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
+            Self::MeetingNotesVocabulary => "labs.meeting_notes_vocabulary",
         }
     }
 
@@ -481,6 +487,9 @@ impl Feature {
             Self::GnomeClipboardRestore => {
                 "Put the previous clipboard back after a paste on GNOME Wayland, through the XWayland clipboard while XWayland is running"
             }
+            Self::MeetingNotesVocabulary => {
+                "Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"
+            }
         }
     }
 
@@ -532,6 +541,7 @@ impl Feature {
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
             Self::MeetingSummaryModel => settings.labs.meeting_summary_model,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
+            Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
         }
     }
 
@@ -581,6 +591,7 @@ impl Feature {
             &mut labs.movable_meeting_capsules,
             &mut labs.meeting_summary_model,
             &mut labs.gnome_clipboard_restore,
+            &mut labs.meeting_notes_vocabulary,
         ]
     }
 
@@ -630,6 +641,7 @@ impl Feature {
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
             Self::MeetingSummaryModel => settings.labs.meeting_summary_model = on,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
+            Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -670,6 +682,7 @@ const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
 const MEETING_SUMMARY_MODEL: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
+const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -840,6 +853,13 @@ pub fn meeting_summary_model() -> bool {
     on(MEETING_SUMMARY_MODEL) && Feature::MeetingSummaryModel.on_this_os()
 }
 
+/// Final meeting notes (title and summary) put the vocabulary ahead of the
+/// transcript (every OS with meetings; read at each generation, so
+/// Regenerate summary uses the current list).
+pub fn meeting_notes_vocabulary() -> bool {
+    on(MEETING_NOTES_VOCABULARY) && Feature::MeetingNotesVocabulary.on_this_os()
+}
+
 /// A paste on a Wayland desktop without data-control (GNOME) snapshots and
 /// restores the clipboard through an already running XWayland (Linux; read
 /// as each paste starts).
@@ -957,6 +977,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::GnomeClipboardRestore,
             settings.gnome_clipboard_restore,
             GNOME_CLIPBOARD_RESTORE,
+        ),
+        (
+            Feature::MeetingNotesVocabulary,
+            settings.meeting_notes_vocabulary,
+            MEETING_NOTES_VOCABULARY,
         ),
     ]
     .into_iter()
