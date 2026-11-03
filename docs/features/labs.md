@@ -862,9 +862,9 @@ and `without_its_labs_toggle_no_summary_model_is_used` in
 [meeting/generator.rs](../../src/meeting/generator.rs);
 `a_chosen_model_is_asked_alone_and_never_falls_back` in
 [dictation/processor.rs](../../src/dictation/processor.rs). Not yet
-observed: a real meeting summarized with a chosen model, on any OS; the Labs
-page goldens need regenerating on Linux with the row (the Meetings Advanced
-field shows only with the toggle on, so its goldens are unchanged).
+observed: a real meeting summarized with a chosen model, on any OS. The
+`rune-mac-labs-link` goldens show the row; the Meetings Advanced field shows
+only with the toggle on, so its goldens are unchanged.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
