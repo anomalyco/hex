@@ -160,6 +160,16 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / browser call uses the microp
      └── Absence counts from the last time the call app was on the microphone,
          a gap included (sleep, Meetings off, a recording): an app that left
          the microphone during a recording is not snoozed for another minute
+     ├── A call whose page names a meeting code (Google Meet's, from the
+     │   address or a code-only tab title) is snoozed by that code: another
+     │   code in the same browser is a new call and is offered or recorded;
+     │   a page without a code still counts as the snoozed call (#1113)
+     └── Stopped by hand -> the snooze ends once the call app has been off
+         the microphone for 3 s (seen while transcribing too), so the next
+         call in the same app is offered; a dismissed offer keeps the minute
+         for a muted call dropping off mid-call. Checks:
+         `a_different_meet_call_in_the_same_browser_is_not_snoozed_by_the_first`,
+         `a_stopped_call_s_app_is_snoozed_only_until_it_leaves_for_a_few_seconds`
   -> "Left the call" prompt after the call app is off the microphone for 3 s
   -> Times are wall-clock runs: observations more than 10 s apart (sleep, a
      stalled loop) start a stability run again instead of counting the gap
@@ -196,7 +206,10 @@ even if Brave is behind another window. When that AppleScript read fails or
 answers nothing (Automation not allowed, a failing script; #827, Arc), the
 page comes from the browser process's focused web area through Accessibility
 (`AXURL`), still behind another window; the first failure per browser is
-logged as `could not read the browser tab`. Arc (and other Chromium browsers)
+logged as `could not read the browser tab`. The script names the tab through
+the front window for each property instead of keeping it in a variable,
+which Arc failed to resolve on every read (#1113; not yet observed against a
+live Arc). Arc (and other Chromium browsers)
 behind another app often exposes no web area either, so without a page the
 browser's own focused window title is used: a tab titled `Meet - …` /
 `Meet – …` counts as a Google Meet call on `meet.google.com` (2 s, Always
@@ -213,7 +226,8 @@ an AppleScript round trip, so the watcher starts it on its own
 thread (at most one at a time, about once a second) and reads the newest answer,
 at most 5 s after it finished; a slow or timed-out query (the existing 2 s
 limit) never holds up the loop. Answers and the remembered page are dropped
-while Hex records, Meetings is off, the browser is snoozed, or no browser holds
+while Hex records, Meetings is off, the browser is snoozed for a call without
+a meeting code, or no browser holds
 the microphone; a query in flight at that moment is not repeated beside itself,
 and its answer is discarded. When a browser's page is found for a run already
 under way (the first pass had no answer yet), the run keeps counting, now

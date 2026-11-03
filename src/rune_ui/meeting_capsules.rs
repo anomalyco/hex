@@ -1233,6 +1233,7 @@ mod tests {
             named: false,
             site: None,
             application_name: Some("Slack".into()),
+            call: None,
         }
     }
 
@@ -1245,6 +1246,7 @@ mod tests {
             named: false,
             site: None,
             application_name: Some("Brave Browser".into()),
+            call: None,
         }
     }
 

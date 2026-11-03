@@ -370,6 +370,9 @@ fn handle_command(
             if let Some(active) = recording.as_ref()
                 && !active.stop.swap(true, Ordering::Relaxed)
             {
+                // Stopped by hand: the next call in the same app is offered
+                // once this one has left the microphone for a few seconds.
+                detector.recording_stopped();
                 let _ = events.send(ControllerEvent::Transcribing);
             }
         }
@@ -688,6 +691,24 @@ fn poll_recording(
             },
         };
         let _ = events.send(event);
+    }
+
+    // Stopped and transcribing: detection waits, but whether the call app
+    // left the microphone meanwhile still decides when its snooze ends.
+    if let Some(active) = recording.as_ref()
+        && active.stop.load(Ordering::Relaxed)
+        && let Some(application) = active.application.as_deref()
+    {
+        match active_microphone_applications() {
+            Ok(applications) => detector.observe_call_app(
+                applications
+                    .iter()
+                    .any(|candidate| candidate.canonical_bundle_id() == Some(application)),
+            ),
+            Err(error) => {
+                tracing::debug!(%error, "could not inspect microphone activity while transcribing");
+            }
+        }
     }
 
     if let Some(active) = recording.as_mut()
