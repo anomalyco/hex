@@ -178,6 +178,18 @@ const GIGAAM_V3_RECORD: BenchmarkRecord = BenchmarkRecord {
     hardware: Some("Radeon 8060S (Vulkan)"),
 };
 
+/// Hex's run of the same harness over the full FLEURS Norwegian (Bokmål)
+/// test split on apollo, with the `no` hint (#1150). On the same run Whisper
+/// large-v3-turbo scored 8.94%, NB-Whisper's distilled turbo beta 8.65%,
+/// its Medium converted to Q8_0 6.75%, and its Large (Q8_0, twice the size
+/// and half the speed) 5.62%.
+const NB_WHISPER_MEDIUM_RECORD: BenchmarkRecord = BenchmarkRecord {
+    value: 6.68,
+    language: "no",
+    utterances: Some(357),
+    ..GIGAAM_V3_RECORD
+};
+
 /// `model`'s benchmark record, or `None` when the system manages the model
 /// and publishes no figure (Apple Speech).
 pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
@@ -189,6 +201,7 @@ pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
         TranscriptionModelId::ParakeetUltra => Some(PARAKEET_ULTRA_RECORD),
         TranscriptionModelId::Nemotron35Asr => Some(NEMOTRON_3_5_ASR_RECORD),
         TranscriptionModelId::GigaAmV3 => Some(GIGAAM_V3_RECORD),
+        TranscriptionModelId::NbWhisperMedium => Some(NB_WHISPER_MEDIUM_RECORD),
         // The catalog's English figures: their dataset, source, and
         // conditions were not recorded.
         _ => model

@@ -25,6 +25,7 @@ pub const LANGUAGES: &[(&str, &str)] = &[
     ("tr", "Turkish"),
     ("sv", "Swedish"),
     ("da", "Danish"),
+    ("no", "Norwegian"),
     ("fi", "Finnish"),
     ("cs", "Czech"),
     ("el", "Greek"),
@@ -50,7 +51,6 @@ pub const LANGUAGES: &[(&str, &str)] = &[
 /// Names for the other languages Whisper knows, which Settings lists only
 /// for a model that declares them (an import), after [`LANGUAGES`].
 const OTHER_LANGUAGES: &[(&str, &str)] = &[
-    ("no", "Norwegian"),
     ("nn", "Norwegian Nynorsk"),
     ("ca", "Catalan"),
     ("ta", "Tamil"),
