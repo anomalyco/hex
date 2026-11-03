@@ -26,7 +26,13 @@ pub use discovery::{call_control, running_pid};
 use http::*;
 const API_VERSION: &str = "2";
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
-const ACCEPT_INTERVAL: Duration = Duration::from_millis(10);
+/// The longest the accept loop sleeps without a connection. Shutdown wakes
+/// it at once ([`wake_acceptor`]); this only bounds a shutdown whose wake
+/// could not connect.
+const ACCEPT_WAIT: Duration = Duration::from_secs(1);
+/// The pause after an accept error before the next try.
+const ACCEPT_RETRY: Duration = Duration::from_millis(10);
+const WAKE_TIMEOUT: Duration = Duration::from_millis(250);
 const CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
 const HEADER_DEADLINE: Duration = Duration::from_secs(2);
 const UPLOAD_DEADLINE: Duration = Duration::from_secs(30);
@@ -247,6 +253,7 @@ impl LocalApi {
             Ok(true) => {}
             Ok(false) | Err(_) => {
                 shutdown.store(true, Ordering::Release);
+                wake_acceptor(document.port);
                 let _ = worker.join();
                 bail!("local API HTTP workers could not start");
             }
@@ -290,6 +297,7 @@ impl LocalApi {
             discovery.remove_if_owned();
         }
         self.shutdown.store(true, Ordering::Release);
+        wake_acceptor(self.document.port);
         if worker.join().is_err() {
             tracing::error!("local API thread panicked during shutdown");
         }
@@ -415,6 +423,8 @@ fn serve(listener: TcpListener, context: HttpContext, ready: mpsc::SyncSender<bo
 
     while !shutdown.load(Ordering::Acquire) {
         match listener.accept() {
+            // The connection that woke a shutdown is not a request.
+            Ok(_) if shutdown.load(Ordering::Acquire) => break,
             Ok((stream, _)) => match connections.try_send(stream) {
                 Ok(()) => {}
                 Err(TrySendError::Full(mut stream)) => {
@@ -422,29 +432,16 @@ fn serve(listener: TcpListener, context: HttpContext, ready: mpsc::SyncSender<bo
                 }
                 Err(TrySendError::Disconnected(_)) => break,
             },
+            // Waking on the next connection (or shutdown's wake) instead of
+            // polling took a loopback request from 12.5 ms to 0.12 ms, and
+            // an idle Hex from 100 wakeups a second to one.
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                #[cfg(unix)]
-                {
-                    use std::os::fd::AsRawFd;
-                    let mut pfd = libc::pollfd {
-                        fd: listener.as_raw_fd(),
-                        events: libc::POLLIN,
-                        revents: 0,
-                    };
-                    // Waking on the next connection instead of sleeping took
-                    // a loopback request from 12.5 ms to 0.12 ms.
-                    // SAFETY: `pfd` is one valid pollfd for the listener's fd.
-                    unsafe {
-                        libc::poll(&raw mut pfd, 1, ACCEPT_INTERVAL.as_millis() as libc::c_int);
-                    }
-                }
-                #[cfg(not(unix))]
-                thread::sleep(ACCEPT_INTERVAL);
+                wait_for_connection(&listener, ACCEPT_WAIT);
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(error) => {
                 tracing::error!(%error, "local API accept failed");
-                thread::sleep(ACCEPT_INTERVAL);
+                thread::sleep(ACCEPT_RETRY);
             }
         }
     }
@@ -454,6 +451,46 @@ fn serve(listener: TcpListener, context: HttpContext, ready: mpsc::SyncSender<bo
             tracing::error!("local API HTTP worker panicked during shutdown");
         }
     }
+}
+
+/// Sleeps until `listener` has a connection to accept, or `limit` passes.
+fn wait_for_connection(listener: &TcpListener, limit: Duration) {
+    let timeout = limit.as_millis() as i32;
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let mut pfd = libc::pollfd {
+            fd: listener.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `pfd` is one valid pollfd for the listener's fd.
+        unsafe {
+            libc::poll(&raw mut pfd, 1, timeout);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawSocket;
+        use windows_sys::Win32::Networking::WinSock::{POLLRDNORM, WSAPOLLFD, WSAPoll};
+        let mut pfd = WSAPOLLFD {
+            fd: listener.as_raw_socket() as usize,
+            events: POLLRDNORM,
+            revents: 0,
+        };
+        // SAFETY: `pfd` is one valid entry for the listener's socket.
+        unsafe {
+            WSAPoll(&raw mut pfd, 1, timeout);
+        }
+    }
+}
+
+/// Ends the accept loop's wait: a connection to the listener wakes it, and
+/// it sees the shutdown flag set before. A wake that cannot connect leaves
+/// the loop to notice within [`ACCEPT_WAIT`].
+fn wake_acceptor(port: u16) {
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let _ = TcpStream::connect_timeout(&address, WAKE_TIMEOUT);
 }
 
 fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContext>) {
@@ -2193,6 +2230,29 @@ mod tests {
         let loading = response.find("\"type\":\"loading\"").unwrap();
         let ok = response.find("\"type\":\"ok\"").unwrap();
         assert!(loading < ok);
+    }
+
+    #[test]
+    fn an_idle_api_answers_at_once_and_shutdown_wakes_it() {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let mut api = start_unpublished(events, LocalApiOptions::default()).unwrap();
+        // The accept loop is asleep in its long wait by now.
+        thread::sleep(Duration::from_millis(100));
+        let asked = Instant::now();
+        let token = api.document.token.clone();
+        let health = request(api.document.port, Some(&token), "/health");
+        assert!(health.starts_with("HTTP/1.1 200"), "{health}");
+        assert!(asked.elapsed() < ACCEPT_WAIT / 2);
+        thread::sleep(Duration::from_millis(100));
+        let stopping = Instant::now();
+        api.shutdown();
+        assert!(
+            stopping.elapsed() < ACCEPT_WAIT / 2,
+            "shutdown took {:?}",
+            stopping.elapsed()
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
