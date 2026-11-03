@@ -114,8 +114,7 @@ impl Follow {
     }
 
     /// What the router's news for the shown capture tells the capsule. The
-    /// capsule shows a rule's or a chip's send as sent itself, so only what
-    /// it can't know moves it: the answer, the send going (for its sound),
+    /// capsule follows the answer and its refinements, the send going,
     /// a send OpenCode didn't take (and its later retry), how an Undo
     /// ended, and a failed send.
     fn routed(&mut self, snapshot: &CaptureSnapshot) -> Vec<Input> {

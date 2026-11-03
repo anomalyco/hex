@@ -87,7 +87,7 @@ pub enum RouteAnswer {
     ResolvingRule { name: String },
     /// A rule the person saved (`routing.sites` or `routing.apps`, a
     /// Shift pick's among them) says where it goes: sent to `to`
-    /// at once, and the capsule's Undo takes it back. `site` is what the
+    /// after the countdown, unless Undo cancels it. `site` is what the
     /// rule matches, for an always-rule sending it elsewhere instead.
     Rule {
         to: RouteDest,

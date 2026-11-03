@@ -202,12 +202,29 @@ mod tests {
             std::fs::write(
                 root.join("opencode/service.json"),
                 serde_json::json!({
-                    "url": format!("http://{address}"), "password": "fixture-only"
+                    "url": format!("http://{address}"), "password": "fixture-only", "pid": 42
                 })
                 .to_string(),
             )
             .unwrap();
             let server = std::thread::spawn(move || {
+                let (mut info, _) = listener.accept().unwrap();
+                info.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    info.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                assert!(request.starts_with(b"GET /api/info "));
+                let body = r#"{"pid":42}"#;
+                write!(
+                    info,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+                drop(info);
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))

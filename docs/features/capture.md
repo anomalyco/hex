@@ -365,7 +365,7 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   cancels before posting. The capsule remains visible until delivery;
 │   │   then it reads "Sent to X" and plays the Sent tone. A picked send still
 │   │   goes immediately with its plain Undo. No runner-up chip for a rule;
-│   │   when the Undo window ends the capsule leaves by
+│   │   after delivery and the Undo window, the capsule leaves by
 │   │   itself (with the list open it stays; the pointer on it holds it, and a
 │   │   folded list gives it a brief hold). Picking the rule's own session there (without
 │   │   "Always") only closes the list; nothing is sent again

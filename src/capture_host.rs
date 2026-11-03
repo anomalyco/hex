@@ -3355,8 +3355,8 @@ fn collect(
             };
             match jobs.try_send(job) {
                 Ok(()) => {
-                    // Only a queued capture is looked at, so a refused one
-                    // leaves no look running.
+                    // Reuse recording-time preparation; adapters without an
+                    // early context start their look once the capture queues.
                     if let Some(look) = prepared.or_else(|| context.and_then(routing::look)) {
                         let _ = give_look.send(look);
                     }

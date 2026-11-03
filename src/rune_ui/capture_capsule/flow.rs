@@ -113,7 +113,7 @@ pub(crate) enum Route {
     ResolvingRule {
         name: String,
     },
-    /// A rule matched, so it was sent to `to`. `site` is what the rule
+    /// A rule matched and will send to `to`. `site` is what the rule
     /// matches, for an always-rule sending it elsewhere instead.
     Rule {
         to: Dest,
@@ -1921,7 +1921,7 @@ fn routed_done(routed: &Routed, now: f64) -> Done {
         Route::ResolvingRule { name } => Done {
             why: routes::countdown(routed, now),
             undo: true,
-            ..Done::plain(Lead::Check, format!("Sending to {name}"))
+            ..Done::plain(Lead::Check, format!("Sending to {}", short(name)))
         },
         // The suggestions are the ask (closed, Send to… opens them).
         Route::Guess { .. } => Done {
