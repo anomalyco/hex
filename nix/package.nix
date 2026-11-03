@@ -20,6 +20,7 @@
   fontconfig,
   freetype,
   curl,
+  util-linux,
   wl-clipboard,
   wtype,
   makeWrapper,
@@ -129,8 +130,12 @@ rustPlatform.buildRustPackage (finalAttrs: {
     libxi
   ];
 
-  # OpenCode HTTP requests run through curl, including in the tests.
-  nativeCheckInputs = [ curl ];
+  # OpenCode HTTP requests run through curl, including in the tests; the
+  # 2.3.1 adoption test runs the Linux installer, which needs flock.
+  nativeCheckInputs = [
+    curl
+    util-linux
+  ];
 
   dontUseCmakeConfigure = true;
   env = buildEnv;
