@@ -164,17 +164,47 @@ On Windows                               // capture.windows
 │   frame wins and idle ticks repeat it. Stop logs genuine, duplicate, and
 │   discarded WGC frames. Eight outstanding GPU samples at most; pool exhaustion
 │   or falling eight ticks behind fails instead of building an unbounded backlog
+│   Known W1 gap: the scheduler still catches up within that eight-tick bound;
+│   it does not yet meet the requested no-catch-up-backlog policy
 ├── Encoding -> D3D11 video processor to NV12, GPU copy into an eight-sample
 │   Media Foundation allocator, DXGI surface buffers and a sink writer on the
 │   same protected D3D11 device. Only small keyframe candidates read back to RAM
 │   ├── H.264 High, BT.709 limited range, no B-frames, 60-frame GOP,
-│   │   peak-constrained VBR; requested and accepted parameters logged
+│   │   peak-constrained VBR; options supplied before type negotiation, then
+│   │   read back. NVIDIA's B-picture readback returns E_NOTIMPL: logged as
+│   │   unavailable, never as confirmed; inspect the bitstream for B0/GOP60
 │   └── Standard (Annotate) keeps 2560 display / 1280 window-area long-edge
 │       caps; capture-crate-only High/Master keep native even dimensions.
 │       No multiple-of-16 rounding; the GPU surface carries its actual pitch.
 │       Quality/bitrate and level selection: win/media/encoder.rs
-│   Check: macOS-hosted Windows-target cargo check passed; native verification
-│   of this 60 fps path is pending
+│       1080p60 / 1440p60 / 4K60 average Mbps: Standard 12/24/50,
+│       High 24/40/80, Master 40/70/120. Peaks are twice the average except
+│       4K Master (200 Mbps); other sizes interpolate by pixel rate
+├── Observed 2026-11-03, W1 incomplete: exon-desk, Windows 10 19045,
+│   Ryzen 7 5700, RTX 5070 / driver 617.42, 3840x2160 at 60 Hz
+│   ├── Native capture-crate and throwaway harness release builds passed;
+│   │   existing capture tests: 252 passed, one desktop-reading test ignored.
+│   │   recover_rebuilds_a_real_movie encoded and decoded synthetic colours
+│   ├── About ten seconds each: moving Standard (2560x1440), moving High
+│   │   (3840x2160), idle Standard. Latest files each have 581 frames over
+│   │   9.683317 s after a 336–358 ms startup offset. ffprobe: 60/1 average
+│   │   and nominal rates, High levels 5.1/5.2, 8-bit yuv420p, BT.709 limited,
+│   │   no B-frames; trace_headers: IDRs at frames 0,60,...,540
+│   ├── FAILED picture proof: every decoded thumbnail is black and unchanged;
+│   │   the separate BGRA candidate is black too. In the interactive console
+│   │   session, GDI CopyFromScreen independently fails "The handle is invalid".
+│   │   A display-wake request did not resolve it. Desktop availability is not
+│   │   established; this does not prove where WGC's picture is lost
+│   ├── Black-input measurements only, not moving-desktop performance proof:
+│   │   Standard/High/idle bitrates 0.065/0.134/0.065 Mbps; process mean CPU
+│   │   6.28/6.93/3.87% of one core (0.393/0.433/0.242% of the 16-thread CPU).
+│   │   Genuine/duplicate/dropped: 540/41/41, 581/0/1, 565/16/17.
+│   │   Genuine means a new WGC timestamp, not distinct image content;
+│   │   drops count discarded delivered frames, not WGC-internal losses
+│   └── macOS cargo fmt and Windows-target cargo check passed. Strict Clippy
+│       stopped at existing std::env::var violations in capture/build.rs.
+│       Still unverified: real moving and idle pictures, quality under motion,
+│       Master, non-multiple-of-16 dimensions, and other Windows GPUs
 ├── Units -> the engine's targets, windows, and pointer are physical pixels;
 │   the picker and ink overlays sit on the primary display and lay out in its
 │   points, converted with capture_host::pixels_per_point (mixed-DPI displays:
@@ -194,9 +224,8 @@ On Windows                               // capture.windows
 │   contact sheet, then the summary
 ├── Pane -> no Screen Recording row, no transcriber choice
 └── Gaps: no `hex annotate` (Windows has no control transport yet), no
-    iPhone, keys pressed in the app are not logged. Checked only by
-    cross-compiling (`cargo xwin clippy`, x86_64 and aarch64); never run on
-    a Windows machine
+    iPhone, keys pressed in the app are not logged. The capture-crate checks
+    above do not verify these host paths or Annotate end to end on Windows
 
 Settings › Annotate                      // capture.pane
 ├── Capture with Hex (capture.enabled, default off) -> off: no host, shortcut,

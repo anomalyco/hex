@@ -5,7 +5,6 @@ use std::path::Path;
 use anyhow::{Context, Result, ensure};
 use windows::Win32::Graphics::Direct3D11::{D3D11_BIND_RENDER_TARGET, ID3D11Texture2D};
 use windows::Win32::Media::MediaFoundation::*;
-use windows::Win32::System::Variant::VARIANT;
 use windows::core::{HSTRING, Interface};
 
 use super::{Gpu, MAX_FPS, frame_time, video_type};
@@ -122,12 +121,6 @@ impl Encoder {
             input.SetUINT32(&MF_MT_ALL_SAMPLES_INDEPENDENT, 1)?;
         }
         let stream = unsafe { writer.AddStream(&output) }?;
-        unsafe { writer.SetInputMediaType(stream, &input, None) }?;
-        let extended = writer.cast::<IMFSinkWriterEx>()?;
-        let mut transform = None;
-        unsafe { extended.GetTransformForStream(stream, 0, None, &mut transform) }?;
-        let transform = transform.context("sink writer encoder")?;
-        let codec = transform.cast::<ICodecAPI>()?;
         let settings = [
             (
                 "rate_control",
@@ -139,10 +132,20 @@ impl Encoder {
             ("b_frames", CODECAPI_AVEncMPVDefaultBPictureCount, 0),
             ("gop", CODECAPI_AVEncMPVGOPSize, MAX_FPS),
         ];
-        for (name, key, value) in settings {
-            unsafe { codec.SetValue(&key, &VARIANT::from(value)) }
-                .with_context(|| format!("Encoder setting {name}={value}"))?;
+        // B-picture count (among others) must be configured BEFORE type negotiation.
+        // Let the sink writer apply these during encoder creation, not afterwards.
+        let mut parameters = None;
+        unsafe { MFCreateAttributes(&mut parameters, settings.len() as u32) }?;
+        let parameters = parameters.context("encoding parameters")?;
+        for (_, key, value) in settings {
+            unsafe { parameters.SetUINT32(&key, value) }?;
         }
+        unsafe { writer.SetInputMediaType(stream, &input, &parameters) }?;
+        let extended = writer.cast::<IMFSinkWriterEx>()?;
+        let mut transform = None;
+        unsafe { extended.GetTransformForStream(stream, 0, None, &mut transform) }?;
+        let transform = transform.context("sink writer encoder")?;
+        let codec = transform.cast::<ICodecAPI>()?;
         unsafe { writer.BeginWriting() }?;
         let accepted = unsafe { transform.GetOutputCurrentType(0) }?;
         let profile = unsafe { accepted.GetUINT32(&MF_MT_MPEG2_PROFILE) }?;
@@ -155,7 +158,18 @@ impl Encoder {
             "Encoder {quality:?}: {width}x{height}@60 High level={accepted_level} NV12 BT.709 limited; DXGI surfaces, pool=8"
         ));
         for (name, key, wanted) in settings {
-            let value = unsafe { codec.GetValue(&key) }?;
+            let value = match unsafe { codec.GetValue(&key) } {
+                Ok(value) => value,
+                Err(error) if error.code() == windows::Win32::Foundation::E_NOTIMPL => {
+                    // NVIDIA exposes these as write-only. Do not label the requested value
+                    // as a readback: GOP and B-picture counts also need bitstream verification.
+                    scrawl_log(format!(
+                        "Encoder requested {name}={wanted}; readback unavailable: {error}"
+                    ));
+                    continue;
+                }
+                Err(error) => return Err(error).with_context(|| format!("Read encoder {name}")),
+            };
             let value = u32::try_from(&value)?;
             scrawl_log(format!(
                 "Encoder accepted {name}={value} (requested {wanted})"
@@ -199,6 +213,7 @@ impl Encoder {
             MFCreateDXGISurfaceBuffer(&ID3D11Texture2D::IID, &texture, subresource, false)
         }?;
         unsafe {
+            buffer.SetCurrentLength(buffer.GetMaxLength()?)?;
             sample.RemoveAllBuffers()?;
             sample.AddBuffer(&buffer)?;
             sample.SetSampleTime(frame_time(index))?;

@@ -485,7 +485,11 @@ impl Recorder {
     /// Takes every waiting frame, keeping the newest. Returns its capture time if one arrived.
     fn pump(&mut self) -> Result<Option<i64>> {
         let mut newest: Option<Direct3D11CaptureFrame> = None;
-        while let Ok(frame) = self.pool.TryGetNextFrame() {
+        // The WGC pool has two slots: never chase an indefinitely replenished queue.
+        for _ in 0..2 {
+            let Ok(frame) = self.pool.TryGetNextFrame() else {
+                break;
+            };
             if newest.is_some() {
                 self.dropped += 1;
             }
@@ -541,6 +545,9 @@ impl Recorder {
 
     /// One QPC-paced CFR tick. The frame index alone determines media timestamps.
     fn encode(&mut self) -> Result<()> {
+        if self.video.is_none() {
+            return Ok(());
+        }
         let Some((texture, size, time)) = self.latest.clone() else {
             return Ok(());
         };
