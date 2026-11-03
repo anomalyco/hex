@@ -17,6 +17,7 @@ use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection}
 
 mod dictation_processing;
 mod hotkeys;
+mod meeting_folder;
 mod persistence;
 mod shortcut_repair;
 
@@ -24,6 +25,7 @@ pub use dictation_processing::{
     DictationMode, DictationPostProcessing, DictationProcessingSettings,
 };
 pub use hotkeys::*;
+pub use meeting_folder::default_meeting_output_folder;
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
@@ -141,6 +143,10 @@ pub struct MeetingSettings {
     /// while unchosen: a build from before it can't read `null` (#744).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention: Option<MeetingRetention>,
+    /// Labs › Choose meeting summary model: the OpenCode `provider/model`
+    /// meeting notes use; left out of the file while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_model: Option<String>,
 }
 
 /// How long a finished meeting is kept, counted from when it ended.
@@ -307,6 +313,7 @@ impl Default for MeetingSettings {
             providers: Vec::new(),
             calendar: CalendarSettings::default(),
             retention: None,
+            opencode_model: None,
         }
     }
 }
@@ -412,6 +419,7 @@ pub struct LabsSettings {
     pub keep_recordings: bool,
     pub hide_menu_bar_icon: bool,
     pub movable_meeting_capsules: bool,
+    pub meeting_summary_model: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -454,6 +462,7 @@ impl Default for LabsSettings {
             keep_recordings: false,
             hide_menu_bar_icon: false,
             movable_meeting_capsules: false,
+            meeting_summary_model: false,
         }
     }
 }
@@ -470,17 +479,6 @@ pub fn env_hex_experimental_mic() -> bool {
     std::env::var("HEX_EXPERIMENTAL_MIC")
         .ok()
         .is_some_and(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "yes"))
-}
-
-pub fn default_meeting_output_folder() -> PathBuf {
-    dirs::document_dir()
-        .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(if crate::app_paths::is_macos_test_build() {
-            "Hex Test Meetings"
-        } else {
-            "Hex Meetings"
-        })
 }
 
 /// Where Linux and Windows run the speech model (#856): Auto picks a GPU
@@ -1288,6 +1286,7 @@ impl AppSettings {
             Ordering::Release,
         );
         MEETING_NOTES_OPENCODE.store(self.meetings.summarize_with_opencode, Ordering::Release);
+        crate::meeting::generator::set_summary_model(self.meetings.opencode_model.as_deref());
         MEETING_INDICATOR_ENABLED.store(self.meetings.show_recording_indicator, Ordering::Release);
         MEETING_INDICATOR_CORNER.store(
             self.meetings.recording_indicator_corner as u8,

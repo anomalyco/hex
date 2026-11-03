@@ -59,6 +59,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
+├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (macOS)
+│                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -805,6 +807,40 @@ through the panel outside its buttons. Checks:
 `movable_meeting_capsules_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: a drag on a real Mac; the
 row renders only in macOS builds, so no golden changes.
+
+Choose meeting summary model (`meeting-summary-model`, issue 1107, macOS
+like Meetings; its row shows wherever Meetings does, in macOS builds): for
+choosing which OpenCode provider and subscription writes meeting notes.
+
+```ts
+Meetings › Settings › Advanced, Summarize with OpenCode on   // labs.meeting-summary-model
+├── Toggle off -> no field; notes try Hex's ranked fast models, as before
+└── Toggle on -> "Summary model" field, placeholder provider/model, saved on Return or Save
+    ├── meetings.opencode_model, only for meeting notes (titles, summaries, live
+    │   chapters written by OpenCode); left out of settings.json while empty
+    ├── Set, e.g. openai/gpt-5.4-mini -> "Summaries use openai/gpt-5.4-mini. If it isn't
+    │   available, the meeting shows the error instead of trying another model"
+    ├── Empty -> "Empty: Hex tries its list of fast models in order and uses the first one OpenCode has"
+    └── No provider/ part -> says how to write it; the ranked models run until then
+```
+
+The gate is `labs::meeting_summary_model()`, read at each OpenCode
+generation in `meeting::generator::opencode`: with it on and a valid
+`provider/model` saved (`generator::parse_model`), the request goes to
+`processor::generate_text_with`, which asks that model alone (one retry when
+OpenCode is still starting it, as for a mode's model) and never the ranked
+list, so a failure is recorded as the meeting's `notes_error`
+("Notes could not be written.", prefixed with the model). Apple
+Intelligence, when it writes the notes, is unchanged. Off, notes are exactly
+as before. `hex settings set meetings.opencode_model openai/gpt-5.4-mini`
+sets it (`none` clears it). Not built: picking from the OpenCode catalog or
+a thinking variant. Checks: `a_summary_model_needs_a_provider_and_a_model`
+and `without_its_labs_toggle_no_summary_model_is_used` in
+[meeting/generator.rs](../../src/meeting/generator.rs);
+`a_chosen_model_is_asked_alone_and_never_falls_back` in
+[dictation/processor.rs](../../src/dictation/processor.rs). Not yet
+observed: a real meeting summarized with a chosen model; the rows render only
+in macOS builds, so no golden changes.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

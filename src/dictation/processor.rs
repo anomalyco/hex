@@ -478,6 +478,17 @@ pub(crate) fn generate_text(
     generate_cancellable(prompt, None, deadline, cancelled)
 }
 
+/// One generation from exactly `model`, never another provider's: a failure
+/// is OpenCode's answer for that model (Labs › Choose meeting summary model).
+pub(crate) fn generate_text_with(
+    prompt: &str,
+    model: &Model,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<String> {
+    generate_cancellable(prompt, Some(model), deadline, cancelled)
+}
+
 /// Runs one generation and reports it as a processing observation. The text is
 /// `None` whenever the caller must fall back, with the reason recorded in the
 /// observation.
@@ -1387,6 +1398,43 @@ mod tests {
         ));
         assert!(!retryable_generation_error("Provider request failed"));
         assert!(!retryable_generation_error("processor returned empty text"));
+    }
+
+    /// Labs › Choose meeting summary model: a chosen model is the only one
+    /// asked, and its failure is reported rather than another provider tried.
+    #[test]
+    fn a_chosen_model_is_asked_alone_and_never_falls_back() {
+        let chosen = Model {
+            provider: "openai".into(),
+            id: "gpt-5".into(),
+            variant: None,
+        };
+        let mut posted = Vec::new();
+        let error = generate_with_candidates(
+            "Summarize.",
+            Some(&chosen),
+            || -> Vec<Model> { panic!("a chosen model never reads the ranked candidates") },
+            Instant::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+            |data, _, _| {
+                posted.push(data.to_owned());
+                Ok(Response::Error {
+                    message: "Provider request failed".into(),
+                })
+            },
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("Provider request failed"),
+            "{error}"
+        );
+        assert_eq!(posted.len(), 1);
+        assert!(
+            posted[0].contains(r#""providerID":"openai""#),
+            "{}",
+            posted[0]
+        );
     }
 
     #[test]

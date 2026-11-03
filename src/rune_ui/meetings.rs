@@ -166,6 +166,9 @@ pub(super) struct MeetingsPane {
     copied: Option<(String, String)>,
     pub(super) start_pending: bool,
     pub(super) stop_pending: bool,
+    /// Labs › Choose meeting summary model's field while it holds typing
+    /// not yet saved; `None` shows the saved model.
+    pub(super) summary_model: Option<TextEdit>,
     /// Where Linux and Windows perform meeting requests.
     #[cfg(not(target_os = "macos"))]
     pub(super) local: super::meetings_host::LocalMeetings,

@@ -3,11 +3,14 @@
 //! model when the user turned that on. OpenCode receives the transcript
 //! excerpt, so it is opt-in on every OS.
 
+use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+
+use crate::dictation::processor::Model;
 
 /// OpenCode's models take far more than any excerpt Hex sends.
 const OPENCODE_CONTEXT_TOKENS: usize = 32_000;
@@ -211,10 +214,56 @@ fn opencode<T: DeserializeOwned>(
         "{instructions}\n\n{prompt}\n\nAnswer with only a JSON object shaped like {shape}, \
          without code fences or any other text."
     );
-    let text =
-        crate::dictation::processor::generate_text(&request, timeout, &AtomicBool::new(false))
-            .map_err(|error| GenerationError::Failed(format!("{error:#}")))?;
+    let cancelled = AtomicBool::new(false);
+    // Labs › Choose meeting summary model: exactly the chosen model, whose
+    // failure is the meeting's notes error; otherwise the ranked models.
+    let text = match summary_model() {
+        Some(model) => {
+            crate::dictation::processor::generate_text_with(&request, &model, timeout, &cancelled)
+                .map_err(|error| {
+                GenerationError::Failed(format!("{}/{}: {error:#}", model.provider, model.id))
+            })?
+        }
+        None => crate::dictation::processor::generate_text(&request, timeout, &cancelled)
+            .map_err(|error| GenerationError::Failed(format!("{error:#}")))?,
+    };
     parse_json(&text)
+}
+
+/// The saved `meetings.opencode_model`, as settings last applied it.
+static SUMMARY_MODEL: RwLock<Option<String>> = RwLock::new(None);
+
+/// Records the saved `meetings.opencode_model` (`AppSettings::apply_runtime`).
+pub(crate) fn set_summary_model(saved: Option<&str>) {
+    *SUMMARY_MODEL
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = saved.map(str::to_owned);
+}
+
+/// A `provider/model` identifier's two halves, or `None` unless both are
+/// there. The model half may itself hold slashes (`openrouter/a/b`).
+pub(crate) fn parse_model(saved: &str) -> Option<(&str, &str)> {
+    let (provider, model) = saved.trim().split_once('/')?;
+    let (provider, model) = (provider.trim(), model.trim());
+    (!provider.is_empty() && !model.is_empty()).then_some((provider, model))
+}
+
+/// The model meeting notes must use: only with Labs › Choose meeting
+/// summary model on and a valid `provider/model` saved.
+fn summary_model() -> Option<Model> {
+    if !crate::labs::meeting_summary_model() {
+        return None;
+    }
+    let saved = SUMMARY_MODEL
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()?;
+    let (provider, id) = parse_model(&saved)?;
+    Some(Model {
+        provider: provider.into(),
+        id: id.into(),
+        variant: None,
+    })
 }
 
 /// The JSON object in a model's answer, ignoring code fences or prose
@@ -250,5 +299,29 @@ mod tests {
         let lines: GeneratedChapterLines = parse_json("{\"lines\": [3, 4]}").unwrap();
         assert_eq!(lines.lines, [3, 4]);
         assert!(parse_json::<GeneratedNotes>("no json here").is_err());
+    }
+
+    #[test]
+    fn a_summary_model_needs_a_provider_and_a_model() {
+        assert_eq!(parse_model(""), None);
+        assert_eq!(parse_model("   "), None);
+        assert_eq!(parse_model("gpt-5"), None);
+        assert_eq!(parse_model("openai/"), None);
+        assert_eq!(parse_model("/gpt-5"), None);
+        assert_eq!(parse_model(" openai/gpt-5 "), Some(("openai", "gpt-5")));
+        assert_eq!(
+            parse_model("openrouter/anthropic/claude"),
+            Some(("openrouter", "anthropic/claude"))
+        );
+    }
+
+    #[test]
+    fn without_its_labs_toggle_no_summary_model_is_used() {
+        // Tests never load settings, so the Labs toggle reads off.
+        if !crate::labs::meeting_summary_model() {
+            set_summary_model(Some("openai/gpt-5"));
+            assert_eq!(summary_model(), None);
+            set_summary_model(None);
+        }
     }
 }

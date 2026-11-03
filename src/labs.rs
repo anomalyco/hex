@@ -98,10 +98,11 @@ pub enum Feature {
     KeepRecordings,
     HideMenuBarIcon,
     MovableMeetingCapsules,
+    MeetingSummaryModel,
 }
 
 impl Feature {
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 40] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -141,6 +142,7 @@ impl Feature {
         Self::KeepRecordings,
         Self::HideMenuBarIcon,
         Self::MovableMeetingCapsules,
+        Self::MeetingSummaryModel,
     ];
 
     /// The features this OS and build have.
@@ -202,7 +204,8 @@ impl Feature {
             | Self::SectionKeyAlone
             | Self::KeepRecordings
             | Self::HideMenuBarIcon
-            | Self::MovableMeetingCapsules => Audience::Everyone,
+            | Self::MovableMeetingCapsules
+            | Self::MeetingSummaryModel => Audience::Everyone,
         }
     }
 
@@ -234,7 +237,8 @@ impl Feature {
             | Self::LiveChapters
             | Self::SubtitleExport
             | Self::StopWhenCallEnds
-            | Self::MovableMeetingCapsules => cfg!(target_os = "macos"),
+            | Self::MovableMeetingCapsules
+            | Self::MeetingSummaryModel => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
             Self::SectionKeyAlone => cfg!(target_os = "linux"),
@@ -314,6 +318,7 @@ impl Feature {
             Self::KeepRecordings => "keep-recordings",
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
             Self::MovableMeetingCapsules => "movable-meeting-capsules",
+            Self::MeetingSummaryModel => "meeting-summary-model",
         }
     }
 
@@ -359,6 +364,7 @@ impl Feature {
             Self::KeepRecordings => "labs.keep_recordings",
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
             Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
+            Self::MeetingSummaryModel => "labs.meeting_summary_model",
         }
     }
 
@@ -464,6 +470,9 @@ impl Feature {
             Self::MovableMeetingCapsules => {
                 "Drag meeting capsules such as Meeting transcript ready out of the way; they come back in the corner you left them"
             }
+            Self::MeetingSummaryModel => {
+                "Choose the OpenCode provider and model that write meeting notes (meetings.opencode_model, provider/model)"
+            }
         }
     }
 
@@ -513,6 +522,7 @@ impl Feature {
             Self::KeepRecordings => settings.labs.keep_recordings,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
+            Self::MeetingSummaryModel => settings.labs.meeting_summary_model,
         }
     }
 
@@ -560,6 +570,7 @@ impl Feature {
             &mut labs.keep_recordings,
             &mut labs.hide_menu_bar_icon,
             &mut labs.movable_meeting_capsules,
+            &mut labs.meeting_summary_model,
         ]
     }
 
@@ -607,6 +618,7 @@ impl Feature {
             Self::KeepRecordings => settings.labs.keep_recordings = on,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
+            Self::MeetingSummaryModel => settings.labs.meeting_summary_model = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -645,6 +657,7 @@ const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
+const MEETING_SUMMARY_MODEL: u64 = 1 << 24;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -807,6 +820,13 @@ pub fn movable_meeting_capsules() -> bool {
     on(MOVABLE_MEETING_CAPSULES) && Feature::MovableMeetingCapsules.on_this_os()
 }
 
+/// Meeting notes written with OpenCode use the saved
+/// `meetings.opencode_model`, with no fallback to another model (macOS;
+/// read at each generation).
+pub fn meeting_summary_model() -> bool {
+    on(MEETING_SUMMARY_MODEL) && Feature::MeetingSummaryModel.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -906,6 +926,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MovableMeetingCapsules,
             settings.movable_meeting_capsules,
             MOVABLE_MEETING_CAPSULES,
+        ),
+        (
+            Feature::MeetingSummaryModel,
+            settings.meeting_summary_model,
+            MEETING_SUMMARY_MODEL,
         ),
     ]
     .into_iter()

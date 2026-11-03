@@ -414,6 +414,11 @@ const KEYS: &[Key] = &[
         "Labs: drag meeting capsules such as Meeting transcript ready out of the way; they show in the corner you left them, shared with the recording capsule (macOS)",
     ),
     key(
+        "labs.meeting_summary_model",
+        Kind::Bool,
+        "Labs: meeting notes written with OpenCode use meetings.opencode_model, with no fallback to another model (macOS)",
+    ),
+    key(
         "labs.output_fixes",
         Kind::Bool,
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
@@ -452,6 +457,11 @@ const KEYS: &[Key] = &[
         "meetings.summarize_with_opencode",
         Kind::Bool,
         "Title and summarize meetings with the OpenCode model (sends the transcript to it)",
+    ),
+    optional(
+        "meetings.opencode_model",
+        Kind::Text,
+        "The OpenCode provider/model meeting notes use, with labs.meeting_summary_model; none tries Hex's ranked fast models",
     ),
     key(
         "meetings.show_recording_indicator",
@@ -633,6 +643,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.subtitle_export", "meetings"),
     ("labs.stop_when_call_ends", "meetings"),
     ("labs.movable_meeting_capsules", "meetings"),
+    ("labs.meeting_summary_model", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),
@@ -854,8 +865,16 @@ pub fn apply(
     let value = parse(key, raw, shortcuts)?;
     let mut json = serde_json::to_value(settings)
         .map_err(|error| ControlError::new("internal", error.to_string()))?;
+    // An unset optional setting is left out of the file, so give it a slot.
+    let path = pointer(key.key);
+    if json.pointer(&path).is_none()
+        && let Some((parent, leaf)) = path.rsplit_once('/')
+        && let Some(Value::Object(object)) = json.pointer_mut(parent)
+    {
+        object.insert(leaf.to_owned(), Value::Null);
+    }
     let slot = json
-        .pointer_mut(&pointer(key.key))
+        .pointer_mut(&path)
         .ok_or_else(|| ControlError::new("internal", format!("`{name}` is missing")))?;
     *slot = value;
     let mut candidate: AppSettings =
