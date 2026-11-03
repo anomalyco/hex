@@ -1876,7 +1876,7 @@ fn the_labs_store_filters_by_tab_chip_and_search() {
     );
     tap(&mut rt, "chip-shortcuts");
     assert!(rt.find("featured").is_none());
-    assert!(rt.find("lab-card-tap-or-hold").is_some());
+    assert!(rt.find("lab-card-mouse-shortcuts").is_some());
     assert!(rt.find("lab-card-live-text").is_none());
     tap(&mut rt, "chip-all");
     rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("no such words".to_string()));
@@ -1887,18 +1887,37 @@ fn the_labs_store_filters_by_tab_chip_and_search() {
 
 #[test]
 fn a_lone_lab_card_keeps_half_the_row() {
-    let rt = runtime("mac-labs-search", true, (980.0, 760.0));
-    let widths: Vec<f32> = rt
-        .elements()
-        .into_iter()
-        .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
-        .map(|e| e.rect[2])
-        .collect();
-    assert_eq!(widths.len(), 3, "the search finds three labs");
-    assert!(
-        widths.iter().all(|w| (w - widths[0]).abs() < 0.5),
-        "every card is as wide: {widths:?}"
-    );
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    let mut width = None;
+    let mut lone = false;
+    let chips = [
+        "chip-all",
+        "chip-dictation",
+        "chip-shortcuts",
+        "chip-clipboard",
+        "chip-meetings",
+        "chip-models",
+        "chip-app",
+    ];
+    for chip in chips {
+        if rt.find(chip).is_none() {
+            continue;
+        }
+        tap(&mut rt, chip);
+        let widths: Vec<f32> = rt
+            .elements()
+            .into_iter()
+            .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
+            .map(|e| e.rect[2])
+            .collect();
+        lone |= widths.len() % 2 == 1;
+        let width = *width.get_or_insert(widths[0]);
+        assert!(
+            widths.iter().all(|w| (w - width).abs() < 0.5),
+            "{chip}: every card is as wide: {widths:?}"
+        );
+    }
+    assert!(lone, "some chip leaves a card alone in its row");
 }
 
 #[test]
@@ -2089,6 +2108,8 @@ fn an_installed_driver_keeps_the_voice_filter_on() {
         !rt.state.settings.experimental.hex_microphone,
         "the toggle is locked"
     );
+    assert!(rt.state.lab_store.drawer.is_some(), "its drawer says why");
+    key(&mut rt, Key::Escape, Mods::default());
     assert!(rt.find("nav-voice-filter").is_some());
 
     if let Some(driver) = &mut rt.state.platform.hex_microphone {
