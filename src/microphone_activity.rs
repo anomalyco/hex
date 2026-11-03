@@ -171,11 +171,8 @@ pub(crate) fn application_running_output(canonical_bundle_id: &str) -> Result<bo
         Ok(process_objects.into_iter().any(|process_object| {
             property_value::<u32>(process_object, kAudioProcessPropertyIsRunningOutput)
                 .is_ok_and(|running| running != 0)
-                && property_cf_string(process_object, kAudioProcessPropertyBundleID).is_some_and(
-                    |bundle_id| {
-                        canonical_bundle_id_for(&bundle_id, None) == Some(canonical_bundle_id)
-                    },
-                )
+                && property_cf_string(process_object, kAudioProcessPropertyBundleID)
+                    .is_some_and(|bundle_id| is_process_of(&bundle_id, canonical_bundle_id))
         }))
     })
 }
@@ -196,9 +193,7 @@ pub(crate) fn application_input_devices(canonical_bundle_id: &str) -> Result<Vec
                 property_value::<u32>(process_object, kAudioProcessPropertyIsRunningInput)
                     .is_ok_and(|running| running != 0)
                     && property_cf_string(process_object, kAudioProcessPropertyBundleID)
-                        .is_some_and(|bundle_id| {
-                            canonical_bundle_id_for(&bundle_id, None) == Some(canonical_bundle_id)
-                        });
+                        .is_some_and(|bundle_id| is_process_of(&bundle_id, canonical_bundle_id));
             if !recording {
                 continue;
             }
@@ -219,6 +214,14 @@ pub(crate) fn application_input_devices(canonical_bundle_id: &str) -> Result<Vec
         }
         Ok(uids)
     })
+}
+
+/// Whether the Core Audio process `bundle_id` belongs to the app
+/// `canonical_bundle_id`: the app itself or one of its helpers, such as the
+/// browser helper that holds the microphone for a Meet tab.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn is_process_of(bundle_id: &str, canonical_bundle_id: &str) -> bool {
+    canonical_bundle_id_for(bundle_id, None) == Some(canonical_bundle_id)
 }
 
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
@@ -854,6 +857,33 @@ mod tests {
         assert!(!BrowserProcesses::Playing.includes(Some(false)));
         assert!(BrowserProcesses::Playing.includes(None));
         assert!(BrowserProcesses::All.includes(Some(false)));
+    }
+
+    #[test]
+    fn a_call_apps_helper_processes_belong_to_it() {
+        // The processes that held the microphone in Google Meet calls (#1086).
+        assert!(is_process_of(
+            "company.thebrowser.browser.helper",
+            "company.thebrowser.Browser"
+        ));
+        assert!(is_process_of(
+            "com.google.Chrome.helper",
+            "com.google.Chrome"
+        ));
+        assert!(is_process_of(
+            "com.google.Chrome.helper.Renderer",
+            "com.google.Chrome"
+        ));
+        assert!(is_process_of("com.google.Chrome", "com.google.Chrome"));
+        assert!(!is_process_of(
+            "com.google.Chrome.helper",
+            "company.thebrowser.Browser"
+        ));
+        assert!(!is_process_of(
+            "company.thebrowser.dia",
+            "company.thebrowser.Browser"
+        ));
+        assert!(!is_process_of("com.google.Chromecast", "com.google.Chrome"));
     }
 
     #[test]
