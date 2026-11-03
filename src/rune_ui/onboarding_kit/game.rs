@@ -1162,6 +1162,8 @@ fn header<S: 'static>(
 /// microphone's level while dictation records.
 fn hud(p: Paint, g: &Play, t: f64, meter: Option<(f32, f32)>) -> El {
     let (avg, peak) = meter.unwrap_or((0.04, 0.06));
+    // Dot scope is dark in either appearance, so its stand-in is too.
+    let p = Paint::new(true, 1.0 / p.hair);
     let k = p.k;
     row()
         .key("hud")
@@ -1171,7 +1173,7 @@ fn hud(p: Paint, g: &Play, t: f64, meter: Option<(f32, f32)>) -> El {
         .opacity_motion(Anim::INSTANT)
         .center()
         .radius(15.0)
-        .fill(if k.dark { k.c.bg_deep } else { k.c.text_strong })
+        .fill(k.c.bg_deep)
         .border(p.hair, k.c.border_weak)
         .child(mic_level(p, "level", 16.0, avg, peak, meter.is_some()))
 }

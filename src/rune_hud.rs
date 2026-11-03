@@ -19,8 +19,8 @@ pub(crate) mod hud_placement;
 mod macos;
 pub(crate) mod spring;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use rune::compose::{Compositor, Frame};
@@ -70,6 +70,41 @@ fn set_live_text(spot: Spot) {
     *LIVE_TEXT.lock().unwrap_or_else(|error| error.into_inner()) = Some(spot);
 }
 
+/// How many [`Hidden`]s are held.
+static HIDERS: AtomicUsize = AtomicUsize::new(0);
+/// The HUD's overlay, once installed.
+static OVERLAY: OnceLock<OverlayHandle<Hud>> = OnceLock::new();
+
+/// Keeps the HUD and the live text off screen while held, because the
+/// window draws its own (the first run's "Your turn"). Capture and its
+/// events are unchanged; the next capture after the last one drops shows
+/// the HUD again.
+pub(crate) struct Hidden(());
+
+pub(crate) fn hide() -> Hidden {
+    if HIDERS.fetch_add(1, Ordering::AcqRel) == 0
+        && let Some(overlay) = OVERLAY.get()
+    {
+        overlay.update(|hud, _| {
+            if hidden() {
+                hud.hide();
+            }
+        });
+    }
+    Hidden(())
+}
+
+impl Drop for Hidden {
+    fn drop(&mut self) {
+        HIDERS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Whether anything holds a [`Hidden`].
+pub(crate) fn hidden() -> bool {
+    HIDERS.load(Ordering::Acquire) > 0
+}
+
 /// How a listener reports to the HUD; sending never waits.
 #[derive(Clone)]
 pub(crate) struct HudSender {
@@ -106,7 +141,7 @@ impl HudSender {
         if matches!(event, HudEvent::Started) {
             let presents = self.overlay.surface_stats().totals.presents;
             let mut watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
-            if watch.position != IndicatorPosition::Hidden && watch.pending.is_none() {
+            if watch.position != IndicatorPosition::Hidden && watch.pending.is_none() && !hidden() {
                 watch.pending = Some((Instant::now(), presents));
             }
         }
@@ -265,11 +300,16 @@ impl Hud {
         }
     }
 
-    /// Shows the overlay where the HUD belongs, unless it is set to Hidden.
+    /// Shows the overlay where the HUD belongs, unless it is set to Hidden
+    /// or the window holds it [`hidden`].
     fn show(&mut self) {
         let Some(overlay) = self.this.clone() else {
             return;
         };
+        if hidden() {
+            self.hide();
+            return;
+        }
         #[cfg(target_os = "macos")]
         {
             self.position = crate::app_settings::indicator_position();
@@ -376,6 +416,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
     );
     let this = overlay.clone();
     overlay.update(move |hud, _| hud.this = Some(this));
+    let _ = OVERLAY.set(overlay.clone());
     HudSender {
         overlay,
         #[cfg(target_os = "macos")]

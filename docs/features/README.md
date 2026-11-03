@@ -225,6 +225,12 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   ├── "Clear your messages": hold the saved shortcut and answer the lit card;
 │   │   Hex's own dictation (macOS listener, Linux and Windows event log) holds
 │   │   the keys, flies the live words, and lightning burns the answered card
+│   ├── While the window has the focus, the desktop HUD and the Live text
+│   │   line stay hidden (`rune_hud::hide`); the game draws its own pill
+│   │   (always dark, like Dot scope). Focus another app -> they come back
+│   ├── Practice reads only events logged after it began (opens the event
+│   │   log at its end); the game's strike and burn shaders compile on a
+│   │   thread while the first run shows. Not observed on a real Mac yet
 │   ├── A short, silent, or failed try -> a hint under the field
 │   └── Done at any time -> Hex is ready  // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused

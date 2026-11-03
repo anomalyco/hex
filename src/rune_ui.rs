@@ -246,6 +246,8 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
 pub(crate) struct WindowCompositor {
     onboarding: Option<onboarding_kit::gpu_stage::OnboardingGpu>,
     game: Option<onboarding_kit::game_fx::GameFx>,
+    /// The game's effects, built off this thread while the first run shows.
+    game_warming: Option<std::thread::JoinHandle<onboarding_kit::game_fx::GameFx>>,
     sounds: sound_sets::Preview,
 }
 
@@ -256,14 +258,23 @@ impl rune::compose::Compositor<Ui> for WindowCompositor {
     }
 
     fn render(&mut self, f: &mut rune::compose::Frame<'_, Ui>) {
+        if self.game.is_none() && self.game_warming.is_none() && f.rt.state.first_run.is_some() {
+            self.game_warming = onboarding_kit::game_fx::GameFx::prewarm(f.device, f.format);
+        }
         if f.rt
             .marks
             .iter()
             .any(|&m| onboarding_kit::game_fx::is_game_mark(m))
         {
-            self.game
-                .get_or_insert_with(|| onboarding_kit::game_fx::GameFx::new(f.device))
-                .render(f);
+            let game = match self.game.take() {
+                Some(game) => game,
+                None => self
+                    .game_warming
+                    .take()
+                    .and_then(|warming| warming.join().ok())
+                    .unwrap_or_else(|| onboarding_kit::game_fx::GameFx::new(f.device)),
+            };
+            self.game.insert(game).render(f);
         } else if self.onboarding.is_some()
             || f.rt
                 .marks
@@ -342,6 +353,7 @@ fn on_close(ui: &mut Ui, _: &mut Tx) {
     explainer::close(ui);
     sound_sets::close(ui);
     vocabulary::close(ui);
+    onboarding_kit::live::window_focused(ui, false);
     // HUD Lab's demo would otherwise stay on screen; reopening starts at
     // General, and coming back to HUD Lab starts the demo again.
     if ui.pane == Pane::HudLab {
@@ -1414,6 +1426,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
 
 fn window_focused(ui: &mut Ui, focused: bool, tx: &mut Tx) {
     explainer::window_focused(ui, focused, tx);
+    onboarding_kit::live::window_focused(ui, focused);
     if focused {
         ui.send(Request::Desktop(DesktopAction::WindowFocused));
     }
