@@ -27,6 +27,18 @@ const PAUSE: Duration = Duration::from_millis(600);
 const LONG_PIECE: Duration = Duration::from_secs(8);
 const LONG_PIECE_PAUSE: Duration = Duration::from_millis(300);
 
+/// One frame against the noise floor. A frame can be neither quiet nor
+/// speech, but never both.
+pub(crate) struct FrameLevel {
+    /// The frame sits at the noise floor (within `QUIET_MARGIN_DB`) or below
+    /// `QUIET_MINIMUM_DB`. Stricter than "not speech": speech only a few dB
+    /// above steady room noise, or from a quiet microphone, is not quiet, so
+    /// audio that is dropped as quiet is never quiet speech the speech
+    /// margin missed.
+    pub quiet: bool,
+    pub speech: bool,
+}
+
 /// Classifies consecutive 20 ms frames of 16 kHz audio as speech or not
 /// against the adaptive noise floor described above.
 #[derive(Default)]
@@ -37,18 +49,17 @@ pub(crate) struct SpeechFrames {
 impl SpeechFrames {
     /// Whether `frame`, the next `FRAME_SAMPLES` samples, is speech.
     pub(crate) fn is_speech(&mut self, frame: &[f32]) -> bool {
-        let (level_db, floor_db) = self.measure(frame);
-        level_db > (floor_db + SPEECH_MARGIN_DB).max(MINIMUM_SPEECH_DB)
+        self.classify(frame).speech
     }
 
-    /// Whether `frame` sits at the noise floor (within `QUIET_MARGIN_DB`) or
-    /// below `QUIET_MINIMUM_DB`. Stricter than "not speech": speech only a
-    /// few dB above steady room noise, or from a quiet microphone, is not
-    /// quiet, so audio that is dropped as quiet is never quiet speech the
-    /// speech margin missed.
-    pub(crate) fn is_quiet(&mut self, frame: &[f32]) -> bool {
+    /// How `frame`, the next `FRAME_SAMPLES` samples, sits against the noise
+    /// floor.
+    pub(crate) fn classify(&mut self, frame: &[f32]) -> FrameLevel {
         let (level_db, floor_db) = self.measure(frame);
-        level_db <= (floor_db + QUIET_MARGIN_DB).max(QUIET_MINIMUM_DB)
+        FrameLevel {
+            quiet: level_db <= (floor_db + QUIET_MARGIN_DB).max(QUIET_MINIMUM_DB),
+            speech: level_db > (floor_db + SPEECH_MARGIN_DB).max(MINIMUM_SPEECH_DB),
+        }
     }
 
     /// The frame's DC-removed level and the noise floor after it, both in

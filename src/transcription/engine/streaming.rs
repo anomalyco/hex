@@ -8,6 +8,11 @@ pub(super) trait StreamFeed {
     fn feed(&mut self, samples: &[f32]) -> Result<(), String>;
     fn finalize(&mut self) -> Result<String, String>;
     fn partial(&self) -> Partial;
+    /// Where the stream's text ends in the audio it heard, in milliseconds,
+    /// once it has finalized; `None` when the model gives no timing.
+    fn text_end_ms(&self) -> Option<u64> {
+        None
+    }
 }
 
 impl StreamFeed for transcribe_cpp::Stream<'_> {
@@ -28,6 +33,20 @@ impl StreamFeed for transcribe_cpp::Stream<'_> {
             stable: text.committed.trim_start().to_string(),
             tentative: text.tentative,
         }
+    }
+
+    fn text_end_ms(&self) -> Option<u64> {
+        let snapshot = self.snapshot();
+        if snapshot.timestamp_kind != transcribe_cpp::TimestampKind::Token {
+            return None;
+        }
+        snapshot
+            .tokens
+            .iter()
+            .map(|token| token.t1_ms)
+            .max()
+            .filter(|&end| end > 0)
+            .map(|end| end as u64)
     }
 }
 
@@ -51,15 +70,32 @@ pub(super) const PAUSE_HEAD_SAMPLES: usize = 40_000;
 /// Pause audio kept just before speech resumes after a cut.
 pub(super) const PAUSE_TAIL_SAMPLES: usize = 4_800;
 
+/// Speech the stream heard may end this long after its text does and still
+/// count as transcribed: a word's last token can be emitted before the word
+/// fully ends.
+pub(super) const UNTRANSCRIBED_SLACK_SAMPLES: usize = 6_400;
+/// Speech heard after the text's end (and its slack) that makes the stream
+/// unusable: a phrase the stream dropped (#1101). Longer than the stop
+/// tone or key click the clip's 200 ms tail can carry.
+pub(super) const UNTRANSCRIBED_SPEECH_SAMPLES: usize = 4_800;
+
 /// A dictation stream that hears at most the head and tail of each pause.
 /// Parakeet's buffered stream can drop the first word after a pause longer
 /// than its 5.6 s left context (#324, #338); the clip, and with it any
 /// offline fallback, keeps every sample.
+///
+/// It also checks the finalized text reaches the end of the speech the
+/// stream heard: speech left well past it means the stream dropped a phrase
+/// (#1101), and the whole clip decides.
 pub(super) struct PauseCap<'a, S> {
     stream: &'a mut S,
     speech: crate::transcription::pause_segmenter::SpeechFrames,
     /// Samples not yet a whole 20 ms frame.
     frame: Vec<f32>,
+    /// Samples passed to the stream so far.
+    sent: usize,
+    /// Where each speech frame the stream heard ends, in its samples.
+    speech_ends: Vec<usize>,
     /// Quiet samples since the last frame above the noise floor.
     pause: usize,
     /// The newest pause samples past the head, released if speech resumes.
@@ -77,6 +113,8 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
             stream,
             speech: Default::default(),
             frame: Vec::with_capacity(crate::transcription::pause_segmenter::FRAME_SAMPLES),
+            sent: 0,
+            speech_ends: Vec::new(),
             pause: 0,
             tail: VecDeque::with_capacity(PAUSE_TAIL_SAMPLES),
             dropped: 0,
@@ -89,11 +127,15 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
         // Only audio at the noise floor counts as pause. Speech a few dB over
         // steady noise misses the meeting detector's speech margin, and
         // cutting it truncated the transcript (#458).
-        if !self.speech.is_quiet(&self.frame) {
+        let level = self.speech.classify(&self.frame);
+        if !level.quiet {
             self.heard = true;
             out.extend(self.tail.drain(..));
             self.pause = 0;
             out.append(&mut self.frame);
+            if level.speech {
+                self.speech_ends.push(self.sent + out.len());
+            }
             return;
         }
         self.pause += self.frame.len();
@@ -124,6 +166,7 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         if out.is_empty() {
             return Ok(());
         }
+        self.sent += out.len();
         self.stream.feed(&out)
     }
 
@@ -150,7 +193,25 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         if self.trailing_silence > 0 {
             self.stream.feed(&vec![0.0; self.trailing_silence])?;
         }
-        self.stream.finalize()
+        let text = self.stream.finalize()?;
+        if !text.is_empty()
+            && let Some(end_ms) = self.stream.text_end_ms()
+        {
+            let covered = end_ms as usize * 16 + UNTRANSCRIBED_SLACK_SAMPLES;
+            let untranscribed = self
+                .speech_ends
+                .iter()
+                .filter(|&&end| end > covered)
+                .count()
+                * crate::transcription::pause_segmenter::FRAME_SAMPLES;
+            if untranscribed >= UNTRANSCRIBED_SPEECH_SAMPLES {
+                return Err(format!(
+                    "the stream's text ends at {end_ms} ms but {} ms of speech follows",
+                    untranscribed / 16
+                ));
+            }
+        }
+        Ok(text)
     }
 
     fn partial(&self) -> Partial {
