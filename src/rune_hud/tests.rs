@@ -14,6 +14,17 @@ fn dot_uniform_layout_matches_wgsl() {
 }
 
 #[test]
+fn the_hud_stays_hidden_until_the_last_hider_drops() {
+    let first = hide();
+    let second = hide();
+    assert!(hidden());
+    drop(first);
+    assert!(hidden());
+    drop(second);
+    assert!(!hidden());
+}
+
+#[test]
 fn dot_scope_window_fits_the_largest_plate() {
     let largest = |key| {
         dot_scope::KNOBS

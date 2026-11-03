@@ -92,7 +92,6 @@ impl OnboardingGpu {
             &f.rt.instances,
             f.size,
         );
-        let dark = f.rt.env.system_dark;
         f.ui.draw_with(f.encoder, f.target, clear, &mut |pass, site| {
             let Some(hud) = self.huds.get_mut(&site.mark) else {
                 return;
@@ -118,7 +117,8 @@ impl OnboardingGpu {
                     (bottom - top) as u32,
                 ],
                 scale: w / WINDOW.0,
-                dark,
+                // Dot scope sits on its dark plate in either appearance.
+                dark: true,
             };
             let painter = hud.painters.entry(site.format).or_insert_with(|| {
                 Painter::with_color_space(f.device, site.format, !site.srgb_blend)

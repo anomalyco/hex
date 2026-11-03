@@ -815,7 +815,10 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   is `labs.live_text` (off by default), asked as each dictation starts. The
   gate, `labs::live_text()`, is where the work starts: with it off, the engine gives a hotkey capture's
   live stream no partial slot and never reads the model's text between
-  feeds, and no host adds the line's overlay. Each dictation's `finished
+  feeds, and no host adds the line's overlay. The first run's practice asks
+  for the words to show them in the window; that never shows the line
+  unless the toggle is on, and never while the practice hides the HUD.
+  Each dictation's `finished
   live stream` line in process.log counts its text changes (`partials`);
   `RUST_LOG=hex=debug` adds a `live text` line per change with the audio
   fed and the word counts, never the words. Checks:
