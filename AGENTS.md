@@ -1423,6 +1423,16 @@ tests through cargo-nextest (`brew install cargo-nextest`) with
 the same config's `ci` profile. Read its output whole rather than piping it
 through `grep | head`; failures are summarized at the end.
 
+Benchmark with strobe (`docs/perf.md`): `strobe.json` builds `--profile strobe
+--features strobe` (release's code with line tables in `hex.pdb`), and
+`perf/*.bench.ts` holds the cases. A benchmarked copy runs with its own
+`HEX_APPLICATION_SUPPORT_DIR` (which on Windows also scopes the
+single-instance event to that root), `HEX_DISABLE_UPDATES=1` (no update
+checks, as a test build), `USERPROFILE`/`HOME` for `~/.config/hex`, and a
+seeded `settings.json` with the listener off. Never point a benchmark at the
+user's own data folder. Add a case beside each performance change, in the
+same PR.
+
 Keep source files under 800 non-test lines (`#[cfg(test)]` code excluded);
 1,500 is a hard cap, and older files above it live in
 `scripts/file-size-exceptions.txt` with ceilings that only go down. Keep

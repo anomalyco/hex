@@ -29,11 +29,21 @@ embed-resource = "3"
 
 [features]
 onnx-benchmark = ["dep:transcribe-rs"]
+# Benchmark builds (strobe.json, docs/perf.md).
+strobe = []
 
 # Shipped executables carry no symbol table (about 11 MB on Linux). Panic
 # backtraces lose function names; debug builds keep them.
 [profile.release]
 strip = true
+
+# Benchmarks (docs/perf.md): release's code, with line tables (in hex.pdb on
+# Windows) so profiles name Hex's functions. Never shipped.
+[profile.strobe]
+inherits = "release"
+incremental = false
+debug = "line-tables-only"
+strip = false
 
 # transcribe.cpp 0.4.1 plus one ggml patch that builds only the Vulkan
 # shaders Hex's models use (see `CMAKE_ARGS` in .cargo/config.toml) and
