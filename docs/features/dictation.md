@@ -1319,6 +1319,13 @@ behaviors. The cross-application flag explicitly allows the overlay to join
 another application's fullscreen Space (#75); panel style flags on an ordinary
 `NSWindow` were not sufficient.
 
+Each time the HUD shows, Rune clears and resets those collection behaviors
+before ordering the panel in, and orders it out first if it is still shown on
+another Space (#1084). Changing the activation policy (the Dock icon follows
+Settings) could leave the panel tied to one Space while AppKit still reported
+the old mask, and re-setting an unchanged mask does nothing. Not yet observed
+on hardware; only the macOS compile is checked.
+
 At the top position the HUD sits 6 pt below the menu bar (`rune_hud::hud_placement::TOP_OFFSET`), or below the
 notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar
 and `visibleFrame` reaches the top of a notched screen. Screens without a notch
