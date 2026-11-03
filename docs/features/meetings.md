@@ -79,7 +79,13 @@ Call detection                                    // meetings.detect
     by process image name
     └── executables map to the macOS keys (zoom -> us.zoom.xos, chrome ->
         com.google.Chrome, ms-teams.exe -> com.microsoft.teams2, ...)
-Browser calls -> offered as "Call in <browser>": no site is read yet
+Browser calls -> offered as "Call in <browser>": no site is read yet, so a
+    call on any website (Teams on the web, a Teams web app/PWA, Meet, ...) is
+    a browser call after 20 s, never the Microsoft Teams (or other service's)
+    choice; Always record can't be set for it from an offer
+    └── browsers: chrome, chromium, brave, firefox, msedge, vivaldi (vivaldi-bin,
+        vivaldi-stable, vivaldi-snapshot; a Vivaldi web app runs in Vivaldi's
+        process); others are not detected (#1105)
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> Summarize with OpenCode (off by default); it sends
@@ -163,10 +169,15 @@ The older `meetings.never_offer` list reads as Never offer entries and is
 rewritten as `providers` on the next load.
 ```
 
-Call detection knows Brave, Chrome, Safari, Firefox, Edge, and Arc
+Call detection knows Brave, Chrome, Safari, Firefox, Edge, Arc
 (`company.thebrowser.Browser`, foreground name `Arc`; its tab is read like
-Brave's). Arc was missing until #801, so its Meet calls were never detected.
-Check: `a_google_meet_call_in_arc_records_after_about_two_seconds`.
+Brave's), and Vivaldi (`com.vivaldi.Vivaldi`; `vivaldi-bin` and friends on
+Linux, `vivaldi.exe` on Windows). Arc was missing until #801, so its Meet
+calls were never detected; Vivaldi was missing until #1105, so its calls
+(Teams in a Vivaldi web app included) were never offered. Checks:
+`a_google_meet_call_in_arc_records_after_about_two_seconds`,
+`vivaldi_on_the_microphone_is_a_browser_call`. Not observed on a real
+Vivaldi call.
 
 Chromium and Electron apps (Brave, Chrome, Edge, Arc, Slack, Teams) capture microphone
 audio in sandboxed `audio.mojom.AudioService` utility processes (`*.helper`) that
