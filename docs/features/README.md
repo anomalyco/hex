@@ -309,12 +309,14 @@ Language row is unexercised.
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
 ├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
 ├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
-├── Whisper (ivrit.ai's too), Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Vocabulary ->
+├── Whisper (ivrit.ai's and NB-Whisper too), Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Vocabulary ->
 │   context prompt (vocabulary.md); output that only repeats it is dropped
 ├── Hebrew -> ivrit.ai Whisper large-v3-turbo, always with the `he` hint (it
 │   lost Whisper's language detection); stock Whisper turbo also offers it
 ├── Russian -> GigaAM v3 (Russian only, no language input); Parakeet v3 and
 │   Whisper turbo also offer it
+├── Norwegian -> NB-Whisper Medium, always with the `no` hint (Bokmål is all
+│   Hex measured); stock Whisper turbo also offers it (#1150)
 └── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
 ```
 

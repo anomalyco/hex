@@ -173,9 +173,25 @@ pub(super) const GIGAAM_V3_E2E_RNNT_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "gigaam",
     variant: "gigaam-v3-e2e-rnnt",
 };
+// The National Library of Norway's NB-Whisper Medium (Apache-2.0), a
+// Whisper medium fine-tune for Norwegian: NbAiLab's own whisper.cpp Q5_0
+// file at nb-whisper-medium 0ed074d5, which transcribe.cpp loads as Whisper.
+// Hex also converted the same revision's weights with transcribe.cpp
+// 7045d1c's Whisper converter at Q8_0 (832 MB): it scored 6.75% on FLEURS
+// Norwegian against this file's 6.68%, so the authors' smaller file stays.
+pub(super) const NB_WHISPER_MEDIUM_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "ggml-model-q5_0.bin",
+    revision: "0ed074d5985bd56ca4140159a9dbffbc3fb5117e",
+    repository: "NbAiLab/nb-whisper-medium",
+    bytes: 539_212_484,
+    sha256: "18733de634af639a43b0f8c5f5a2ea0920de4c5b32a5570ec130981581c0e5e7",
+    architecture: "whisper",
+    // transcribe.cpp names a legacy Whisper file by its geometry.
+    variant: "whisper-medium",
+};
 /// The languages Nemotron 3.5 transcribes that Hex names, as the locales
 /// its language prompt takes (`runtime_language`). Its card also lists
-/// Norwegian Bokmål, which Hex doesn't offer yet.
+/// Norwegian Bokmål, which Hex doesn't offer it for yet.
 pub(super) const NEMOTRON_3_5_LOCALES: &[(&str, &str)] = &[
     ("en", "en-US"),
     ("es", "es-ES"),

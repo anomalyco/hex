@@ -1646,11 +1646,11 @@ ARM64 host). Builds use `-DGGML_NATIVE=OFF` so the CPU kernels stay portable,
 and the static runtime in `.cargo/config.toml` keeps the Visual C++
 Redistributable unnecessary; the release workflow asserts neither Windows
 executable imports it. Every build embeds Vulkan shaders only for f32, f16,
-and q8_0 tensors and no MUL_MAT_ID (`CMAKE_ARGS` in `.cargo/config.toml`,
-through the patched `transcribe-cpp-sys` in `Cargo.toml`): about 7 MB of
-SPIR-V instead of 44 MB. ggml aborts a Vulkan run whose weights use another
-type, so widen `GGML_VULKAN_SHADER_TYPES` before the catalog gains a non-Q8_0
-model. Release executables are stripped (`[profile.release]`). The
+q8_0, and q5_0 (NB-Whisper Medium) tensors and no MUL_MAT_ID (`CMAKE_ARGS` in
+`.cargo/config.toml`, through the patched `transcribe-cpp-sys` in
+`Cargo.toml`) instead of every type. ggml aborts a Vulkan run whose weights
+use another type, so widen `GGML_VULKAN_SHADER_TYPES` before the catalog
+gains a model that needs one. Release executables are stripped (`[profile.release]`). The
 installers live in the locked `.github/release/` (`install-linux.sh`,
 `install-windows.ps1`; the Installers workflow serves them at
 `https://anoma.ly/hex/files/`) and install from the service's manifest,

@@ -183,6 +183,7 @@ export type ModelId =
   | "parakeet_ultra"
   | "nemotron_3_5_asr"
   | "gigaam_v3"
+  | "nb_whisper_medium"
   | "apple_speech"
   // An imported or found model, listed while it is ready.
   | `custom-${string}`;

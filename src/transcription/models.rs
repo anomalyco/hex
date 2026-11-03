@@ -14,11 +14,11 @@ use sha2::{Digest, Sha256};
 
 use super::artifacts::{
     COHERE_ARTIFACT, COHERE_LANGUAGES, GIGAAM_V3_E2E_RNNT_ARTIFACT, IVRIT_WHISPER_ARTIFACT,
-    NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES,
-    PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT,
-    PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT,
-    SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT,
-    WHISPER_ARTIFACT,
+    NB_WHISPER_MEDIUM_ARTIFACT, NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES,
+    NEMOTRON_3_5_LOCALES, PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT,
+    PARAKEET_V2_ARTIFACT, PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT,
+    QWEN_LANGUAGES, QWENCLEO_ARTIFACT, SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT,
+    UNDERDOG_BARK_3_PRO_ARTIFACT, WHISPER_ARTIFACT,
 };
 pub use super::custom_models::CustomModelId;
 pub use super::languages::{LANGUAGES, language_name};
@@ -46,6 +46,7 @@ pub enum TranscriptionModelId {
     ParakeetUltra,
     Nemotron35Asr,
     GigaAmV3,
+    NbWhisperMedium,
     AppleSpeech,
     Custom(CustomModelId),
 }
@@ -80,6 +81,7 @@ impl TranscriptionModelId {
             Self::ParakeetUltra => "parakeet_ultra",
             Self::Nemotron35Asr => "nemotron_3_5_asr",
             Self::GigaAmV3 => "gigaam_v3",
+            Self::NbWhisperMedium => "nb_whisper_medium",
             Self::AppleSpeech => "apple_speech",
             Self::Custom(id) => id.as_str(),
         }
@@ -116,6 +118,7 @@ impl FromStr for TranscriptionModelId {
             "parakeet_ultra" => Ok(Self::ParakeetUltra),
             "nemotron_3_5_asr" => Ok(Self::Nemotron35Asr),
             "gigaam_v3" => Ok(Self::GigaAmV3),
+            "nb_whisper_medium" => Ok(Self::NbWhisperMedium),
             "apple_speech" => Ok(Self::AppleSpeech),
             _ => CustomModelId::parse(value)
                 .map(Self::Custom)
@@ -559,6 +562,22 @@ pub const MODELS: &[ModelDefinition] = &[
         supports_language_detection: false,
     },
     ModelDefinition {
+        id: TranscriptionModelId::NbWhisperMedium,
+        name: "NB-Whisper Medium",
+        // On apollo's Vulkan GPU it ran FLEURS Norwegian at 0.89 times
+        // Whisper large-v3-turbo's speed (37x and 41x real time).
+        realtime: "~17x",
+        // FLEURS Norwegian test, Hex's run (`model_benchmarks`): Whisper
+        // large-v3-turbo scored 8.94% on the same run.
+        word_error_rate: Some(6.68),
+        streams: false,
+        runtime: ModelRuntime::Gguf(&NB_WHISPER_MEDIUM_ARTIFACT),
+        // Measured only for Bokmål with the `no` hint, which it always gets.
+        languages: &["no"],
+        accepts_language_hint: true,
+        supports_language_detection: false,
+    },
+    ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
         name: "Apple Speech",
         realtime: "On device",
@@ -598,8 +617,8 @@ pub fn all_models() -> Vec<&'static ModelDefinition> {
 pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     use Recommendation::{Fastest, MostAccurate, Recommended, Vocabulary};
     use TranscriptionModelId::{
-        CohereTranscribe, GigaAmV3, IvritWhisperLargeV3Turbo, ParakeetUnifiedEnglish, ParakeetV3,
-        Qwen3Asr06B, SenseVoiceSmall, WhisperLargeV3Turbo,
+        CohereTranscribe, GigaAmV3, IvritWhisperLargeV3Turbo, NbWhisperMedium,
+        ParakeetUnifiedEnglish, ParakeetV3, Qwen3Asr06B, SenseVoiceSmall, WhisperLargeV3Turbo,
     };
     let choices: &[(TranscriptionModelId, Recommendation)] = match language {
         AUTO_LANGUAGE => &[(WhisperLargeV3Turbo, Recommended), (Qwen3Asr06B, Fastest)],
@@ -640,6 +659,12 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         // FLEURS Russian test: 5.37% WER against Parakeet v3's 6.52%, and
         // Whisper turbo's 5.36% at a fifth of its speed (Hex's run).
         "ru" => &[(GigaAmV3, Recommended), (WhisperLargeV3Turbo, Vocabulary)],
+        // FLEURS Norwegian test: 6.68% WER against Whisper turbo's 8.94%, at
+        // 0.89 times its speed and 60% of its download (Hex's run).
+        "no" => &[
+            (NbWhisperMedium, Recommended),
+            (WhisperLargeV3Turbo, Vocabulary),
+        ],
         "vi" => &[
             (Qwen3Asr06B, Recommended),
             (CohereTranscribe, MostAccurate),
@@ -1424,18 +1449,44 @@ mod tests {
     #[test]
     fn an_import_offers_every_language_it_declares_by_name() {
         let import = ModelDefinition {
-            languages: &["en", "no", "nn"],
+            languages: &["en", "nn", "no"],
             supports_language_detection: true,
             ..*definition(TranscriptionModelId::WhisperLargeV3Turbo)
         };
         assert_eq!(import.language_choices(), [AUTO_LANGUAGE, "en", "no", "nn"]);
-        assert_eq!(language_name("no"), "Norwegian");
         assert_eq!(language_name("nn"), "Norwegian Nynorsk");
         assert!(
             !definition(TranscriptionModelId::WhisperLargeV3Turbo)
                 .language_choices()
+                .contains(&"nn")
+        );
+    }
+
+    #[test]
+    fn norwegian_recommends_nb_whisper_with_its_hint() {
+        use Recommendation::{Recommended, Vocabulary};
+        use TranscriptionModelId::{NbWhisperMedium, WhisperLargeV3Turbo};
+        let norwegian: Vec<_> = choices_for_runtime("no")
+            .into_iter()
+            .map(|choice| (choice.model.id, choice.recommendation))
+            .collect();
+        assert_eq!(
+            norwegian,
+            [
+                (NbWhisperMedium, Recommended),
+                (WhisperLargeV3Turbo, Vocabulary)
+            ]
+        );
+        let nb = definition(NbWhisperMedium);
+        assert_eq!(nb.language_choices(), ["no"]);
+        assert_eq!(nb.runtime_language_hint("no"), Some("no"));
+        assert!(!nb.supports_language(AUTO_LANGUAGE));
+        assert!(
+            definition(WhisperLargeV3Turbo)
+                .language_choices()
                 .contains(&"no")
         );
+        assert_eq!(language_name("no"), "Norwegian");
     }
 
     #[test]
@@ -1547,13 +1598,15 @@ mod tests {
 
     #[test]
     fn gguf_artifacts_are_q8_0_for_the_vulkan_shader_subset() {
-        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, the types the
-        // Vulkan backend is built for (`CMAKE_ARGS` in .cargo/config.toml).
-        // Another quantization needs its type added there, or Vulkan aborts.
+        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, and NB-Whisper's
+        // whisper.cpp file q5_0 too: the types the Vulkan backend is built
+        // for (`CMAKE_ARGS` in .cargo/config.toml). Another quantization
+        // needs its type added there, or Vulkan aborts.
         for model in MODELS {
             if let ModelRuntime::Gguf(artifact) = model.runtime {
                 assert!(
-                    artifact.filename.ends_with("-Q8_0.gguf"),
+                    artifact.filename.ends_with("-Q8_0.gguf")
+                        || artifact.filename == "ggml-model-q5_0.bin",
                     "{} needs its tensor types in GGML_VULKAN_SHADER_TYPES",
                     artifact.filename
                 );
@@ -1636,6 +1689,7 @@ mod tests {
             (TranscriptionModelId::ParakeetUltra, "parakeet_ultra"),
             (TranscriptionModelId::Nemotron35Asr, "nemotron_3_5_asr"),
             (TranscriptionModelId::GigaAmV3, "gigaam_v3"),
+            (TranscriptionModelId::NbWhisperMedium, "nb_whisper_medium"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
         ] {
             assert_eq!(id.as_str(), name);
@@ -1964,7 +2018,8 @@ mod tests {
                 WhisperLargeV3Turbo,
                 Qwen3Asr06B,
                 QwenCleoAsr17B,
-                IvritWhisperLargeV3Turbo
+                IvritWhisperLargeV3Turbo,
+                NbWhisperMedium
             ]
         );
         assert_eq!(

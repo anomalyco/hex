@@ -768,6 +768,10 @@ Model advertises streaming, GPU device             // dictate.streaming
   ├── ru: GigaAM v3 Recommended (ai-sage's e2e RNN-T, Russian only, 274 MB, no
   │   hint; 5.37% WER on FLEURS Russian test against Parakeet v3's 6.52% and
   │   Whisper turbo's 5.36%, Hex's run), then Whisper turbo for Vocabulary (#952)
+  ├── no: NB-Whisper Medium Recommended (National Library of Norway, Norwegian
+  │   only, always with the `no` hint, 539 MB; 6.68% WER on FLEURS Norwegian
+  │   test against Whisper turbo's 8.94%, Hex's run), then Whisper turbo for
+  │   Vocabulary (#1150)
   └── Every other available model follows without a badge, selectable and
       deletable; never auto-switched or auto-downloaded (setup.language-select)
 ```

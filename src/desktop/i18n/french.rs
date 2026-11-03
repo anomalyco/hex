@@ -870,6 +870,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Chinese and 29 more, and it reads your vocabulary", "Le chinois et 29 autres, et il lit votre vocabulaire"),
     ("Egyptian Arabic, mixed with English", "Arabe égyptien, mêlé d'anglais"),
     ("Whisper, tuned for Hebrew", "Whisper, ajusté pour l'hébreu"),
+    ("Whisper, tuned for Norwegian by its National Library", "Whisper, ajusté pour le norvégien par la Bibliothèque nationale de Norvège"),
     ("Chinese, Japanese, Korean and English. A small download", "Chinois, japonais, coréen et anglais. Un petit téléchargement"),
     ("Parakeet, tuned for fewer wrong words in English", "Parakeet, ajusté pour moins de mots erronés en anglais"),
     ("English, with the ums and uhs taken out", "Anglais, sans les euh et les hum"),
