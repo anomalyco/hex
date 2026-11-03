@@ -348,6 +348,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Section key alone"),
             tr("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound"),
         ));
+        // Linux's shortcut machine reads it with the listener's options.
+        rows.push(row(
+            Feature::TapOrHold,
+            &KEYBOARD,
+            tr("Tap or hold"),
+            tr("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"),
+        ));
         rows.push(row(
             Feature::GnomeClipboardRestore,
             &HINTS,

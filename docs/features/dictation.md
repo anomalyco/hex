@@ -472,9 +472,11 @@ Tap
   -> Fresh shortcut press -> Finish (with the release tail)
   -> Cancel shortcut (Escape by default) -> Cancelled, see Toggle Cancel below
   // Shortcut chords during the first 300 ms still discard
-  macOS, Labs › Tap or hold on (labs.tap_or_hold, off by default, #711):
+  macOS and Linux, Labs › Tap or hold on (labs.tap_or_hold, off by default, #711, #1144):
   ├── Release 300 ms or more after the press -> Finish (with the release tail)
-  └── Sooner -> Keeps recording, as above
+  ├── Sooner -> Keeps recording, as above
+  └── Linux: key repeats keep the first press's time; the dictation shortcut
+      and Dictate without processing alike; hex dictation commands unchanged
   Linux: release never arrives (Hyprland Lua bind, Alt up before Z)
   ├── Press 1 s or more after the last press -> Finish
   └── Sooner -> Ignored as a key repeat (KWin repeats held shortcuts)
