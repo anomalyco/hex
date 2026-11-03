@@ -224,7 +224,8 @@ impl Hud {
     /// While shown, every `FOLLOW_EVERY`: the HUD and the live text move to
     /// the display under the pointer when it moved to another, at once and
     /// without focus. Windows and X11; a layer-shell surface stays on the
-    /// compositor's focused output, and GNOME and KDE on the primary.
+    /// compositor's focused output, and GNOME and KDE on Wayland on the
+    /// primary.
     #[cfg(not(target_os = "macos"))]
     fn follow_pointer(&mut self, now: Instant) {
         if !self.shown || self.followed.is_some_and(|at| now < at + FOLLOW_EVERY) {
@@ -390,20 +391,31 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
 /// the pointer and pick its monitor; a layer-shell surface pins no output, so
 /// the compositor puts it on the focused one. GNOME (whose HUD runs on
 /// XWayland, blind to the pointer over Wayland windows) and KDE keep the
-/// primary display.
+/// primary display on Wayland; their X11 sessions follow the pointer (#1200).
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn display() -> rune::DisplayTarget {
     #[cfg(target_os = "linux")]
-    if std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| {
-        desktops.split(':').any(|desktop| {
-            ["GNOME", "KDE"]
-                .iter()
-                .any(|d| desktop.eq_ignore_ascii_case(d))
-        })
-    }) {
+    if keeps_primary_display(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        crate::linux::session::LinuxSession::detect().is_wayland(),
+    ) {
         return rune::DisplayTarget::Primary;
     }
     rune::DisplayTarget::UnderPointer
+}
+
+/// Whether the HUD stays on the primary display: GNOME and KDE on Wayland
+/// only. On X11 the pointer is readable on every desktop.
+#[cfg(any(target_os = "linux", test))]
+fn keeps_primary_display(desktops: Option<&str>, wayland: bool) -> bool {
+    wayland
+        && desktops.is_some_and(|desktops| {
+            desktops.split(':').any(|desktop| {
+                ["GNOME", "KDE"]
+                    .iter()
+                    .any(|d| desktop.eq_ignore_ascii_case(d))
+            })
+        })
 }
 
 fn view(_: &Hud, _: &mut Cx<Hud>) -> El {

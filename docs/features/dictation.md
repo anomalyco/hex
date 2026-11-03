@@ -1446,7 +1446,10 @@ capture starts, as macOS does (#486; `rune_hud::display`). Windows and X11
 read the pointer and pick its monitor; Windows keeps it inside that
 monitor's work area and draws it at that monitor's scale. A layer-shell
 surface pins no output, so niri, Sway and Hyprland put it on the focused
-output. GNOME and KDE keep the primary display. On Windows and X11, while
+output. GNOME and KDE on Wayland keep the primary display; on X11 they
+follow the pointer like any other X11 desktop (#1200; check
+`only_gnome_and_kde_on_wayland_keep_the_primary_display`, not run on a
+two-monitor GNOME X11 session). On Windows and X11, while
 the HUD shows it checks the pointer's display every 250 ms (`Hud::follow_pointer`,
 Rune's `refollow_pointer`), and the HUD and live text move there, without
 animating or taking focus, once two checks in a row find the pointer on the
