@@ -82,8 +82,11 @@ Draw                                     // capture.draw (capture_host::drawing)
 On Linux                                 // capture.linux
 ├── X11 session (DISPLAY set, WAYLAND_DISPLAY empty; never XWayland) ->
 │   Screen and Area are read from the X server itself (scrawl_capture::
-│   linux::x11): MIT-SHM GetImage each frame (plain GetImage without SHM),
-│   the pointer blended in from XFixes, 30 fps to x264 through ffmpeg. No
+│   linux::x11): MIT-SHM GetImage each frame borrowed in place (plain GetImage
+│   without SHM), the pointer cached from XFixes on XFixesCursorNotify and
+│   placed each frame from QueryPointer, 60 fps to x264 (`superfast` up to
+│   1440p, `ultrafast` above, wall-clock stamped into `fps=60`) through
+│   ffmpeg. No
 │   portal and no dialog, so i3 and other desktops without a ScreenCast
 │   backend record (#690, @nefthy). Screen is the RandR monitor under the
 │   pointer; Area is `hex annotate start --area X,Y,W,H` (pixels), clipped to
@@ -91,22 +94,31 @@ On Linux                                 // capture.linux
 │   the portal's picker and, without one, fails saying to record the screen
 │   or an area. Can't open the display, an unusual pixel depth, or no
 │   ffmpeg/x264 -> the capture fails at once with why in the capsule, never
-│   a capture without a picture. Check: x11 areas_are_clipped…; a headless
-│   Xvnc + i3 session on apollo with no ScreenCast portal recorded an
-│   800x500 Area (154 frames, 5.1 s) and the 1920x1080 screen (153 frames)
+│   a capture without a picture. Check: x11 areas_are_clipped…,
+│   cursor_blends_premultiplied_argb_in_place; on hex-linux-nvidia (T4, Ubuntu
+│   24.04) native Xorg + i3 recorded 1920x1080 at 60/1 fps (598 frames in
+│   9.97 s, 597 grabs) and a 1280x720 Area (298 frames in 4.97 s, 297 grabs),
+│   and rootful Xwayland at 3840x2160 recorded 2560x1440 at 60/1 fps (598
+│   frames in 9.97 s from 282 raw 4K grabs; raw 4K pipe readback is CPU-bound)
 ├── Wayland -> the ScreenCast portal (zbus): Screen asks the desktop once and
 │   keeps its restore token (<support>/screencast-token), so later captures
 │   start without a dialog; Window shows the desktop's picker every time (the
 │   capsule's Window chip goes straight to it); the cursor is embedded
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
-│   time; 32-bit RGB as a linear DMA-BUF (niri, GNOME, KDE) or shared memory
+│   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
+│   KDE) or shared memory
 ├── Encoding -> VA-API (libva loaded at run time): each DMA-BUF imported, scaled
-│   to a 2560 px long edge (1920 for a window) and converted on the video
-│   engine, H.264 High at a constant QP with Hex-written headers, 30 fps;
-│   `ffmpeg -c copy` muxes recording.mp4. Every /dev/dri render node is
+│   to a 2560 px long edge (1920 for a window, exact even sides padded to 16 px
+│   macroblocks and cropped in SPS) and converted on the video engine, H.264
+│   High at a constant QP and computed level (4.2 at 1080p60, 5.1 at 1440p60,
+│   5.2 at 4K60) with Hex-written headers, 60 fps; `ffmpeg -c copy` muxes
+│   recording.mp4. Every /dev/dri render node is
 │   tried in order, so a hybrid laptop whose first node is a GPU the VA
 │   driver can't use encodes on the next (#853). No VA-API -> frames copied
-│   and encoded with x264 through ffmpeg (slow on DMA-BUF-only compositors);
+│   and encoded at 60 fps with x264 (`superfast` up to 1440p, `ultrafast`
+│   above) through ffmpeg (slow on DMA-BUF-only compositors; on NVIDIA GBM +
+│   xdg-desktop-portal-wlr without DONT_FIXATE, linear DMA-BUF allocation is
+│   refused by the compositor and delivers no frames);
 │   VA-API refusing the first frame's buffer (#1179: Intel Arc on the xe
 │   driver) -> the same CPU path instead of failing. The negotiated DRM
 │   modifier goes to the import and the log; the CPU never reads a tiled
@@ -115,11 +127,17 @@ On Linux                                 // capture.linux
 │   a picture or a crash. Buffers PipeWire removes mid-stream (a
 │   renegotiation) are never queued again, and Hex maps buffers itself and
 │   unmaps a removed one only after the recorder's copy, so a renegotiation
-│   can't crash Hex. Check: vaapi render_nodes_in_order, pipewire
-│   a_negotiated_tiled_modifier_is_read; not observed on a hybrid laptop or
-│   an Intel Arc laptop
-├── Candidates -> a small copy from the video engine (at most 4× smaller per
-│   pass: radeonsi crashes past it)
+│   can't crash Hex. Check: vaapi render_nodes_in_order,
+│   level_and_sps_crop_match_resolution_and_60fps, pipewire
+│   offered_formats_parse_back, a_negotiated_tiled_modifier_is_read,
+│   capture::platform output_sizes_stay_exact_even_dimensions… and
+│   cpu_x264_uses_superfast…; PipeWire 1920x1080 SHM -> x264 recorded 60/1 fps
+│   (598 frames in 9.97 s, 594 delivered) on hex-linux-nvidia; VA-API 60 fps
+│   encoding not observed on Intel/AMD hardware (T4 has no VA-API encoder), nor
+│   on a hybrid laptop or an Intel Arc laptop
+├── Candidates -> a small copy from the video engine on demand every
+│   FRAME_SAMPLE_INTERVAL (at most 4× smaller per pass: radeonsi crashes past
+│   it)
 ├── Reading movies back (keyframes, probe, audio) -> `ffmpeg`/`ffprobe`
 ├── Missing PipeWire, ffmpeg, or a picker answer -> that capture fails with why
 │   └── The screen-share picker cancelled (or the stream never starting) after

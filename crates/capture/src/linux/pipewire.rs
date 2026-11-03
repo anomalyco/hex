@@ -179,6 +179,7 @@ const FORMAT_VIDEO_FORMAT: u32 = 0x20001;
 const FORMAT_VIDEO_MODIFIER: u32 = 0x20002;
 const FORMAT_VIDEO_SIZE: u32 = 0x20003;
 const FORMAT_VIDEO_FRAMERATE: u32 = 0x20004;
+const FORMAT_VIDEO_MAX_FRAMERATE: u32 = 0x20005;
 const MEDIA_TYPE_VIDEO: u32 = 2;
 const MEDIA_SUBTYPE_RAW: u32 = 1;
 const BUFFERS_DATA_TYPE: u32 = 6;
@@ -354,7 +355,18 @@ fn enum_format(dmabuf: bool) -> Vec<u64> {
             CHOICE_RANGE,
             TYPE_FRACTION,
             8,
-            &[&pair(0, 1), &pair(0, 1), &pair(1000, 1)],
+            &[&pair(super::media::FPS, 1), &pair(0, 1), &pair(1000, 1)],
+        );
+        pod.prop(FORMAT_VIDEO_MAX_FRAMERATE, 0);
+        pod.choice(
+            CHOICE_RANGE,
+            TYPE_FRACTION,
+            8,
+            &[
+                &pair(super::media::FPS, 1),
+                &pair(1, 1),
+                &pair(super::media::FPS, 1),
+            ],
         );
     });
     pod.into_words()
@@ -944,6 +956,12 @@ mod tests {
             assert_eq!((format.width, format.height), (1920, 1080));
             assert_eq!(format.dmabuf, dmabuf);
             assert_eq!(format.modifier, MODIFIER_LINEAR);
+            let bytes: &[u8] =
+                unsafe { std::slice::from_raw_parts(words.as_ptr().cast(), words.len() * 8) };
+            let max_fps_key = FORMAT_VIDEO_MAX_FRAMERATE.to_ne_bytes();
+            let fps_60_1 = pair(60, 1);
+            assert!(bytes.windows(4).any(|w| w == max_fps_key));
+            assert!(bytes.windows(8).any(|w| w == fps_60_1));
         }
     }
 
