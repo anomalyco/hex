@@ -677,7 +677,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         .h_full()
         .pl(LIST_COLUMN_PL)
         .pr(8.0)
-        .child(super::scroll_body("modes-scroll", source_list(list)));
+        .child(super::scroll_body(p.k, "modes-scroll", source_list(list)));
     let body = row()
         .key("modes-body")
         .grow(1.0)
@@ -749,7 +749,7 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         .key("mode-detail")
         .grow(1.0)
         .shrink()
-        .child(super::scroll_body("mode-detail-scroll", content))
+        .child(super::scroll_body(p.k, "mode-detail-scroll", content))
 }
 
 fn basics(ui: &Ui, p: Paint, selection: Selection, current: &DictationMode) -> El {

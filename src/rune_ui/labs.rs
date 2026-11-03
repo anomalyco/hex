@@ -607,7 +607,7 @@ pub(super) fn page(ui: &Ui, p: Paint) -> El {
         .child(lede)
         .child(card(p, "labs", rows))
         .child(card(p, "labs-setup", vec![run_setup_row(p)]));
-    super::scroll_body("scroll", content)
+    super::scroll_body(p.k, "scroll", content)
 }
 
 fn feature_row(p: Paint, row: Row, flashing: bool) -> CardRow {

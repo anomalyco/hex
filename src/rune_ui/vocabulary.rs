@@ -272,7 +272,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         .key("term-column")
         .h(height.min(ROWS_HEIGHT))
         .mx(-SIDE_ROOM)
-        .child(super::faded_body("term-scroll", rows, FADES));
+        .child(super::faded_body(p.k, "term-scroll", rows, FADES));
     let add = button(
         p,
         "add-term",

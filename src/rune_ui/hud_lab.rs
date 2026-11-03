@@ -246,6 +246,6 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
         .child(dot_scope_sliders(p, &lab.tuning));
     (
         dot_scope_actions(p, ui),
-        super::scroll_body("hud-lab-scroll", content),
+        super::scroll_body(p.k, "hud-lab-scroll", content),
     )
 }

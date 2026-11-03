@@ -1456,23 +1456,26 @@ const SCROLL_FADE: (f32, f32) = (4.0, 24.0);
 /// sits clear of the fades, so the first and last borders, rings, and fills
 /// are never cut; content needing room beside the edges (bordered cards)
 /// pads itself horizontally.
-fn scroll_body(key: &str, content: El) -> El {
-    faded_body(key, content, SCROLL_FADE)
+fn scroll_body(k: &rune_kit::Kit, key: &str, content: El) -> El {
+    faded_body(k, key, content, SCROLL_FADE)
 }
 
-/// A [`scroll_body`] with its own top and bottom fades.
-fn faded_body(key: &str, content: El, (top, bottom): (f32, f32)) -> El {
-    col()
-        .key(key)
-        .grow(1.0)
-        .shrink()
-        // Shrinks below its content in a fixed-height parent (#906).
-        .min_h(0.0)
+/// A [`scroll_body`] with its own top and bottom fades, and a scroll bar to
+/// drag while it overflows (#1209).
+fn faded_body(k: &rune_kit::Kit, key: &str, content: El, (top, bottom): (f32, f32)) -> El {
+    // Both shrink below their content in a fixed-height parent (#906).
+    let viewport = col().grow(1.0).shrink().min_h(0.0);
+    let viewport = viewport
         .clip_fade(0.0, top, 0.0, bottom)
         .scroll(ScrollSpec {
             stick_bottom: false,
         })
-        .child(col().key("inset").pt(top).pb(bottom).child(content))
+        .child(col().key("inset").pt(top).pb(bottom).child(content));
+    let area = format!("{key}-area");
+    rune_kit::scroll_bar(k, &area, key, viewport)
+        .grow(1.0)
+        .shrink()
+        .min_h(0.0)
 }
 
 #[cfg(all(test, target_os = "linux"))]
