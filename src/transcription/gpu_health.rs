@@ -208,6 +208,26 @@ pub(crate) fn device_error(error: &color_eyre::eyre::Report) -> bool {
     })
 }
 
+/// Whether `error` says the GPU ran out of memory. That is not a driver
+/// fault: another copy of a model (a model switch loading beside the running
+/// one, or a CLI check while Hex holds the model) can fill a small GPU, so
+/// the GPU is not remembered as failed for it (#1165).
+pub(crate) fn out_of_memory(error: &color_eyre::eyre::Report) -> bool {
+    error.chain().any(|cause| {
+        if matches!(
+            cause.downcast_ref::<transcribe_cpp::Error>(),
+            Some(transcribe_cpp::Error::OutOfMemory(_))
+        ) {
+            return true;
+        }
+        let message = cause.to_string().to_ascii_lowercase();
+        message.contains("out of memory")
+            || message.contains("outofdevicememory")
+            || message.contains("out_of_device_memory")
+            || message.contains("failed to allocate")
+    })
+}
+
 /// What a GPU's driver is now, so an update tries it again. Linux: the
 /// kernel (i915, xe, amdgpu, nouveau live there) and every installed Vulkan
 /// driver's library, by size and modification time (a Mesa or vendor
@@ -294,6 +314,19 @@ mod tests {
             Err(transcribe_cpp::Error::InputTooShort("x".into())).wrap_err("transcription failed");
         assert!(!device_error(&short.unwrap_err()));
         assert!(!device_error(&color_eyre::eyre::eyre!("cancelled")));
+    }
+
+    #[test]
+    fn out_of_memory_is_not_a_driver_fault() {
+        use color_eyre::eyre::WrapErr;
+        let vulkan: color_eyre::Result<()> = Err(transcribe_cpp::Error::Backend(
+            "vk::Device::allocateMemory: ErrorOutOfDeviceMemory".into(),
+        ))
+        .wrap_err("could not load");
+        assert!(out_of_memory(&vulkan.unwrap_err()));
+        let lost: color_eyre::Result<()> =
+            Err(transcribe_cpp::Error::Backend("device lost".into())).wrap_err("failed");
+        assert!(!out_of_memory(&lost.unwrap_err()));
     }
 
     #[test]
