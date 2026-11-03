@@ -133,6 +133,9 @@ pub fn retranscribe(path: &Path, selection: TranscriptionSelection) -> Result<St
             Ok(None) => Err("Transcribing took too long.".into()),
             Err(error) => Err(describe(error)),
         });
+    // The worker runs until every sender is gone; the handle holds one, so
+    // keeping it would make the shutdown wait forever after the result.
+    drop(handle);
     service.shutdown();
     result.map(|text| text.trim().to_string())
 }
@@ -157,4 +160,44 @@ fn restrict_directory(directory: &Path) -> io::Result<()> {
 #[cfg(not(unix))]
 fn restrict_directory(_directory: &Path) -> io::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::models::{CustomModelId, TranscriptionModelId};
+
+    #[test]
+    fn transcribe_again_returns_once_the_run_ends() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-retranscribe-{}-{}",
+            std::process::id(),
+            crate::history::now_ms()
+        ));
+        write(
+            &directory,
+            1,
+            &Recording::from_samples(vec![0.0; SAMPLE_RATE as usize]),
+        )
+        .unwrap();
+        let recording = path(&directory, 1);
+        // A model that is not on this computer fails at once, without loading
+        // anything; the answer must still come back (#1089).
+        let selection = TranscriptionSelection {
+            model: TranscriptionModelId::Custom(
+                CustomModelId::parse("custom-0000000000000000").unwrap(),
+            ),
+            language: "en".into(),
+        };
+        let (sender, answer) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(retranscribe(&recording, selection));
+        });
+        let answered = answer.recv_timeout(Duration::from_secs(60));
+        let _ = fs::remove_dir_all(&directory);
+        assert!(
+            answered.expect("Transcribe again never answered").is_err(),
+            "a missing model cannot transcribe"
+        );
+    }
 }
