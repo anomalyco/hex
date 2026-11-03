@@ -918,8 +918,19 @@ phrase from the same speaker lost the phrase in the stream (with or without
 the macOS 400 ms trailing silence) while the whole clip kept it ("…channels
 25 to 30 years"); the check flagged it. Seven ordinary clips (JFK, FLEURS,
 product names, 1.7–15 s) finished from the stream; an 84 s speech ending in
-applause fell back. Nemotron 3.5 ASR (the reporter's model), macOS, and a
-microphone were not run; the stream's own loss is not fixed upstream.
+applause fell back. The stream's own loss is not fixed upstream.
+
+**Nemotron 3.5 ASR, observed November 3, 2026, apollo (Vulkan, Q8, Auto):**
+ten clips through `PauseCap` and the real cache-aware stream (JFK, FLEURS
+English and German, product names, and speech, a 1–1.2 s pause, and a short
+phrase from the same or another speaker) matched the whole clip word for word
+(one clip differed on a single product name), and none lost the late phrase,
+so the drop did not reproduce with this model. Its tokens carry real
+timings, but it puts the closing full stop on the clip's last frame, which
+would have hidden a dropped phrase; the text's end is now the last token with
+letters or digits (`spoken_text_end_ms`), and no clip fell back. Check:
+`a_closing_full_stop_at_the_clips_end_does_not_cover_a_dropped_phrase`. Not
+macOS or a microphone.
 
 ### Ongoing Jobs And Output
 
