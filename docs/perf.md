@@ -40,6 +40,9 @@ own Hex:
 - `HEX_DISABLE_UPDATES=1`: no update checks and no network.
 - `USERPROFILE` (Windows) and `HOME` locate `~/.config/hex`, so your
   `hex.config.ts` stays out of the copy.
+- `HF_HUB_CACHE={home}/.cache/huggingface/hub`: the copy never finds models
+  in your Hugging Face cache (on Windows that scan otherwise reads your real
+  profile).
 - The seeded `settings.json` keeps the listener off (`enable_on_launch: false`):
   no keyboard hook, no microphone, and no model load. The seeded
   `onboarding-complete` marker skips first-run setup. The two `scrawl-*`

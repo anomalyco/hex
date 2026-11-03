@@ -19,9 +19,10 @@
       "args": ["app"],
       "env": {
         "HEX_APPLICATION_SUPPORT_DIR": "{home}/hex-data",
-        "HEX_DISABLE_UPDATES": "1"
+        "HEX_DISABLE_UPDATES": "1",
+        "HF_HUB_CACHE": "{home}/.cache/huggingface/hub"
       },
-      "unset": ["HEX_*", "WGPU_*", "RUNE_*", "RUST_LOG"],
+      "unset": ["HEX_*", "WGPU_*", "RUNE_*", "HF_HOME", "RUST_LOG"],
       "files": {
         "hex-data/onboarding-complete": "",
         "hex-data/settings.json": {
