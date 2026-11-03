@@ -591,7 +591,7 @@ fn newest_in(candidates: &[Candidate], folder: &Folder) -> Option<Candidate> {
 }
 
 pub(crate) fn is_home_or_root(path: &Path) -> bool {
-    path == Path::new("/") || dirs::home_dir().is_some_and(|home| path == home)
+    path == Path::new("/") || crate::user_dirs::home_dir().is_some_and(|home| path == home)
 }
 
 fn in_project(candidate: &Candidate, folder: &Folder) -> bool {
@@ -1556,7 +1556,7 @@ mod tests {
 
     #[test]
     fn home_is_not_a_project() {
-        let home = dirs::home_dir().unwrap();
+        let home = crate::user_dirs::home_dir().unwrap();
         let mut e = ev(vec![folder(Source::Port, &home.to_string_lossy())]);
         e.candidates
             .push(cand("ses_home", "HOME", &home.to_string_lossy(), 1));

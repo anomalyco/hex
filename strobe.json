@@ -1,10 +1,13 @@
 {
   "$schema": "https://raw.githubusercontent.com/Hona/strobe/main/schema/strobe.v1.json",
   "build": {
-    "command": "cargo build --locked --profile strobe --features strobe --bin hex",
-    "output": "{cache}/cargo-target/strobe/hex.exe",
+    "command": "cargo build --locked --release --bin hex",
+    "output": "{cache}/cargo-target/release/hex.exe",
     "env": {
       "CARGO_TARGET_DIR": "{cache}/cargo-target",
+      "CARGO_PROFILE_RELEASE_DEBUG": "line-tables-only",
+      "CARGO_PROFILE_RELEASE_STRIP": "false",
+      "CARGO_PROFILE_RELEASE_INCREMENTAL": "false",
       "TRANSCRIBE_CMAKE_ARGS": "-DGGML_NATIVE=OFF"
     }
   },
@@ -12,7 +15,7 @@
     "hex": {
       "kind": "native",
       "exe": {
-        "windows": "target/strobe/hex.exe",
+        "windows": "target/release/hex.exe",
         "macos": "/Applications/Hex.app/Contents/MacOS/hex",
         "linux": "~/.local/share/hex/current/hex"
       },

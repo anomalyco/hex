@@ -78,7 +78,8 @@ pub fn hub_dir() -> Option<PathBuf> {
     let directory = from_env("HF_HUB_CACHE")
         .or_else(|| from_env("HF_HOME").map(|home| home.join("hub")))
         .or_else(|| {
-            dirs::home_dir().map(|home| home.join(".cache").join("huggingface").join("hub"))
+            crate::app_paths::home_dir()
+                .map(|home| home.join(".cache").join("huggingface").join("hub"))
         })?;
     directory.is_dir().then_some(directory)
 }

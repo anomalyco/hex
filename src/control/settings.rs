@@ -1152,7 +1152,7 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
         Kind::Text => Ok(Value::String(raw.into())),
         Kind::Path => {
             let path = match trimmed.strip_prefix("~/") {
-                Some(rest) => dirs::home_dir()
+                Some(rest) => crate::app_paths::home_dir()
                     .ok_or_else(|| invalid(name, "no home folder to expand ~ in"))?
                     .join(rest),
                 None => std::path::PathBuf::from(trimmed),

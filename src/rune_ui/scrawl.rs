@@ -100,7 +100,7 @@ fn retention_description(policy: Policy) -> String {
 /// The captures folder, with the home folder as `~`.
 fn folder_label(ui: &Ui) -> String {
     let folder = ui.settings.capture.captures_dir();
-    dirs::home_dir()
+    crate::app_paths::home_dir()
         .and_then(|home| {
             folder
                 .strip_prefix(home)

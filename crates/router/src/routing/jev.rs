@@ -1105,7 +1105,7 @@ fn sentence(note: &str) -> String {
 }
 
 fn tilde(text: &str) -> String {
-    match dirs::home_dir() {
+    match crate::user_dirs::home_dir() {
         Some(home) => text.replace(&home.display().to_string(), "~"),
         None => text.to_owned(),
     }
@@ -1585,7 +1585,8 @@ fn opencode_db() -> Option<PathBuf> {
     if let Some(db) = super::served::opencode_db() {
         return Some(db);
     }
-    Some(dirs::home_dir()?.join(".local/share/opencode/opencode.db")).filter(|p| p.is_file())
+    Some(crate::user_dirs::home_dir()?.join(".local/share/opencode/opencode.db"))
+        .filter(|p| p.is_file())
 }
 
 fn sqlite_json(db: &Path, sql: &str) -> Option<Vec<Value>> {

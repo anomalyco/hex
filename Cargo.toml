@@ -37,14 +37,6 @@ strobe = []
 [profile.release]
 strip = true
 
-# Benchmarks (docs/perf.md): release's code, with line tables (in hex.pdb on
-# Windows) so profiles name Hex's functions. Never shipped.
-[profile.strobe]
-inherits = "release"
-incremental = false
-debug = "line-tables-only"
-strip = false
-
 # transcribe.cpp 0.4.1 plus one ggml patch that builds only the Vulkan
 # shaders Hex's models use (see `CMAKE_ARGS` in .cargo/config.toml) and
 # Parakeet's vocabulary rescoring (branch hex/parakeet-vocabulary). Drop this

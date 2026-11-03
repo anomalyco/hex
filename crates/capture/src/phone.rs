@@ -992,7 +992,8 @@ pub fn resolve_import(
         Some(path) => sibling(path, true)
             .with_context(|| format!("No .mp4 or .mov beside {}", path.display()))?,
         None => {
-            let downloads = dirs::download_dir().context("No Downloads folder")?;
+            let downloads =
+                scrawl_router::user_dirs::download_dir().context("No Downloads folder")?;
             std::fs::read_dir(&downloads)?
                 .filter_map(|entry| entry.ok().map(|e| e.path()))
                 .filter(|p| is_movie(p) && sibling(p, false).is_some())

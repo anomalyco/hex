@@ -558,7 +558,7 @@ impl AppSettings {
             if !settings.has_migration(SCRAWL_IMPORT_MIGRATION) {
                 settings.import_scrawl_settings(
                     engine.as_deref(),
-                    dirs::data_dir()
+                    crate::app_paths::data_dir()
                         .and_then(|data| read(data.join("scrawl/config.json")))
                         .as_deref(),
                 );
@@ -602,7 +602,7 @@ impl AppSettings {
             {
                 self.capture.transcriber = CaptureTranscriber::Apple;
             }
-            let home = dirs::home_dir();
+            let home = crate::app_paths::home_dir();
             if let Some(folder) = config
                 .get("capturesDir")
                 .or_else(|| config.get("captures_dir"))
