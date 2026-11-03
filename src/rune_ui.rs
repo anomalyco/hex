@@ -510,6 +510,12 @@ pub(crate) fn show_error(ui: &mut Ui, error: String) {
     ui.error = Some(error);
 }
 
+/// The menu bar asked for an update check: the footer says how it went.
+#[cfg(target_os = "macos")]
+pub(crate) fn update_check_asked(ui: &mut Ui) {
+    ui.update_asked = true;
+}
+
 /// A meeting recording could not start or finish; the Meetings pane says why.
 pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
     ui.meetings.start_pending = false;
@@ -697,6 +703,9 @@ pub(crate) struct Ui {
     /// Settings saves and Quit Hex a fixture recorded.
     saved: usize,
     quit_requested: bool,
+    /// The person asked for an update check (the footer or the menu bar),
+    /// so the footer says how it went.
+    update_asked: bool,
 }
 
 /// Which of the window's text editors hold unsaved typing.
@@ -801,6 +810,7 @@ impl Ui {
             hud_saved: false,
             saved: 0,
             quit_requested: false,
+            update_asked: false,
             window: None,
             tick_at: 0.0,
         }
