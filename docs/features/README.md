@@ -977,6 +977,28 @@ the GPUI occlusion regression went with GPUI and has no Rune counterpart.
 
 **Easy to misread:** an open microphone is not an active recording.
 
+### Scroll without a wheel
+
+```ts
+A pane, detail card or dropdown longer than its space    // ui.scroll-bar (#1209)
+├── Scroll bar -> a thin thumb on the right edge, only while the content overflows
+│   ├── Drag the thumb -> the content follows it
+│   └── Press above or below it -> jumps there
+├── Page Up / Page Down, Home / End -> page the pane around focus or the pointer
+├── Open menu or dropdown -> ↑ ↓ move the highlight, Page Up / Down by the rows it
+│   shows, Home / End to the ends; the highlight stays in view
+├── Model search picker -> the same; Home / End only while the search is empty
+└── Wheel and trackpad -> unchanged
+```
+
+The bar is Rune's `rune_kit::scroll_bar`, used by `scroll_body`, `faded_body`
+and every kit `Menu`, `Select` and `Combobox`. Checks:
+`a_long_transcript_scrolls_by_dragging_its_scroll_bar`, and in Rune the
+`scroll_bar` tests and `page_keys_move_a_scrolling_listbox_highlight_by_what_it_shows`.
+Gaps: dragging content with a touchscreen or pen does not scroll on desktop
+(Rune pans by touch only on the web), and the bar is not verified on a real
+Windows PC.
+
 ## Process Text With Modes
 
 ```ts
