@@ -963,7 +963,10 @@ mod tests {
         assert!(uses_xwayland(false, true, running));
         assert!(!uses_xwayland(true, true, running), "data-control wins");
         assert!(!uses_xwayland(false, false, running), "off by default");
-        assert!(!uses_xwayland(false, true, || false), "never starts XWayland");
+        assert!(
+            !uses_xwayland(false, true, || false),
+            "never starts XWayland"
+        );
     }
 
     #[test]
@@ -989,7 +992,10 @@ mod tests {
         };
         assert!(!xwayland_listed(1000, processes()));
         assert!(xwayland_listed(1001, processes()));
-        assert!(!xwayland_listed(1000, std::iter::once((1000, "Xwayland-helper\n".to_owned()))));
+        assert!(!xwayland_listed(
+            1000,
+            std::iter::once((1000, "Xwayland-helper\n".to_owned()))
+        ));
     }
 
     #[test]
