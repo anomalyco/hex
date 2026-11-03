@@ -281,6 +281,17 @@ Whole-clip run starts -> labs::skip_pauses()        // dictate.skip-pauses
 
 Details and checks in [labs.md](labs.md).
 
+**Fixed November 3, 2026 (issue 1194):** a clip longer than the model's
+window (Cohere's 35 s) is transcribed in chunks, and a chunk that was only
+silence (a locked dictation left waiting before the words) went to the model
+anyway; Cohere invented long repeating text for it, pasted before the real
+sentence. Each chunk of such a clip now goes through the speech detector
+first and is skipped when it hears no speech; without the detector every
+chunk still runs. Clips that fit the window are unchanged. Check:
+`a_long_clip_skips_only_chunks_the_detector_hears_no_speech_in` in
+[gguf_session.rs](../../src/transcription/gguf_session.rs) (detector verdict
+overridden; not run with Cohere on real audio).
+
 ### Vocabulary Quality Checks
 
 `hex benchmark-transcription` accepts a scoring vocabulary and expected terms,

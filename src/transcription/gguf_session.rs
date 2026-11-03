@@ -371,6 +371,13 @@ impl OfflineGgufSession {
             if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
                 return Err(eyre!("transcription was cancelled"));
             }
+            if !chunk_may_hold_speech(samples) {
+                tracing::info!(
+                    chunk_ms = samples.len() / 16,
+                    "skipped a chunk of a long clip with no speech"
+                );
+                continue;
+            }
             let mut chunk = samples.to_vec();
             crate::dictation::pad_for_parakeet(&mut chunk);
             let transcript = self.run(&chunk, options).wrap_err("transcription failed")?;
@@ -381,6 +388,14 @@ impl OfflineGgufSession {
         }
         Ok(output.join(" "))
     }
+}
+
+/// Whether one chunk of a long clip goes to the model. The clip as a whole
+/// held speech, but a chunk of it can be only silence (a locked dictation
+/// left waiting before the words), and models such as Cohere invent long,
+/// repeating text for that (#1194). Without the detector every chunk runs.
+fn chunk_may_hold_speech(samples: &[f32]) -> bool {
+    crate::transcription::speech_detector::contains_speech(samples) != Some(false)
 }
 
 /// transcribe-cpp 0.4 stops a decoder that starts looping and reports the text
@@ -585,6 +600,25 @@ mod tests {
             truncated,
             Err(transcribe_cpp::Error::OutputTruncated { .. })
         ));
+    }
+
+    #[test]
+    fn a_long_clip_skips_only_chunks_the_detector_hears_no_speech_in() {
+        use crate::transcription::speech_detector::override_for_test;
+        let chunk = [0.0; 16_000];
+        {
+            let _silent = override_for_test(Some(false));
+            assert!(!chunk_may_hold_speech(&chunk));
+        }
+        {
+            let _speech = override_for_test(Some(true));
+            assert!(chunk_may_hold_speech(&chunk));
+        }
+        let _unavailable = override_for_test(None);
+        assert!(
+            chunk_may_hold_speech(&chunk),
+            "no detector keeps every chunk"
+        );
     }
 
     #[test]
