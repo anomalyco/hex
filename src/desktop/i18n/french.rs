@@ -15,6 +15,9 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Earlier versions", "Versions précédentes"),
+    ("Unknown model", "Modèle inconnu"),
+    ("Use this version", "Utiliser cette version"),
     ("Transcribe", "Transcrire"),
     ("Writing a title and summary with OpenCode…", "Rédaction d'un titre et d'un résumé avec OpenCode…"),
     ("Hex is up to date", "Hex est à jour"),

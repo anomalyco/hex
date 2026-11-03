@@ -917,7 +917,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   stops saving; existing audio stays until it expires or History is cleared.
 - Retained dictation history records only successful pasted output: raw and
   final text plus bounded metadata, never full browser URLs or window titles,
-  and no audio unless Labs › Keep recordings is on. History defaults to seven days, and every retention window remains
+  and no audio unless Labs › Keep recordings is on. Entries name their speech
+  model; with Keep recordings, Replace keeps up to five earlier versions
+  inside the entry, counted by the same caps. History defaults to seven days, and every retention window remains
   subject to hard entry and byte caps. No new entries are accepted while Off.
   Turning retention Off preserves existing entries; clearing history is explicit.
   Time-based retention expires during idle uptime through the shared history

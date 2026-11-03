@@ -99,6 +99,7 @@ pub fn history_draft(
         inference_ms,
         total_ms,
         recording,
+        model: crate::history::dictation_model(),
     }
 }
 

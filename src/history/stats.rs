@@ -176,6 +176,10 @@ mod tests {
             inference_ms: 0,
             total_ms: 0,
             recording_bytes: 0,
+            model: None,
+            language: None,
+            text_ms: None,
+            versions: Vec::new(),
         }
     }
 
@@ -275,6 +279,7 @@ mod tests {
             inference_ms: 0,
             total_ms: 0,
             recording: None,
+            model: None,
         };
         store.record(draft("old words"), 1_000).unwrap();
         for _ in 0..(crate::history::MAX_SEARCH_RESULTS + 5) {

@@ -682,6 +682,8 @@ Completed output                         // output
     └── Labs > Keep recordings (off) -> new entries keep their 16 kHz audio   // labs.keep-recordings
         -> the card's "Transcribe again" menu runs it through any installed model
         -> the new text with Copy and Replace; Clear all and retention delete the audio (labs.md, #1032)
+        -> Replace keeps the old text as one of 5 earlier versions: Copy, Use this version (#1177)
+Every entry since #1177 -> "Speech model" fact: the model that made its text (+ language when chosen)
 ```
 
 Checks in [paste.rs](../../src/paste.rs), [parakeet.rs](../../src/parakeet.rs), and

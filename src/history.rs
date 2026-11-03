@@ -19,8 +19,10 @@ use serde::{Deserialize, Serialize};
 
 pub mod recordings;
 pub mod stats;
+pub mod versions;
 
 pub use recordings::Recording;
+pub use versions::{HistoryVersion, Transcript};
 
 const VERSION: u32 = 1;
 const MAX_ENTRIES: usize = 10_000;
@@ -123,6 +125,19 @@ pub struct HistoryEntry {
     /// when it has none.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub recording_bytes: u64,
+    /// The speech model that made the text, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The language chosen for the run that made the text; `None` when the
+    /// model or the saved setting chose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// When the text was made, if not when the entry was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_ms: Option<u64>,
+    /// Earlier transcripts, newest first ([`versions`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<HistoryVersion>,
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -136,7 +151,13 @@ impl HistoryEntry {
     }
 
     fn text_bytes(&self) -> usize {
-        self.raw_text.len() + self.final_text.len()
+        self.raw_text.len()
+            + self.final_text.len()
+            + self
+                .versions
+                .iter()
+                .map(HistoryVersion::text_bytes)
+                .sum::<usize>()
     }
 
     fn matches(&self, needle: &str) -> bool {
@@ -144,6 +165,7 @@ impl HistoryEntry {
         matches_field(&self.raw_text)
             || matches_field(&self.final_text)
             || self.application.as_deref().is_some_and(matches_field)
+            || self.model.as_deref().is_some_and(matches_field)
             || self
                 .processing
                 .as_ref()
@@ -164,6 +186,21 @@ pub struct HistoryDraft {
     pub total_ms: u64,
     /// The dictation's audio, while Labs › Keep recordings is on.
     pub recording: Option<Recording>,
+    /// The speech model that transcribed it ([`dictation_model`]).
+    pub model: Option<String>,
+}
+
+/// The name of the speech model dictation runs: the one the engine holds,
+/// else the saved one (Apple Speech, which the engine never holds).
+pub fn dictation_model() -> Option<String> {
+    let selection = crate::transcription::engine::TranscriptionEngine::shared()
+        .and_then(|engine| engine.held_selection())
+        .unwrap_or_else(|| crate::app_settings::transcription_selection().1);
+    Some(
+        crate::transcription::models::definition(selection.model)
+            .name
+            .to_string(),
+    )
 }
 
 #[derive(Serialize)]
@@ -338,6 +375,10 @@ impl HistoryStore {
             inference_ms: draft.inference_ms,
             total_ms: draft.total_ms,
             recording_bytes,
+            model: draft.model.map(|model| truncated(&model, MAX_LABEL_BYTES)),
+            language: None,
+            text_ms: None,
+            versions: Vec::new(),
         });
         self.prune(now_ms);
         self.persist()?;
@@ -358,18 +399,40 @@ impl HistoryStore {
         Ok(true)
     }
 
-    /// Replace entry `id`'s text with `text`, such as a transcription of
-    /// its recording with another model; its processing record goes, since
-    /// no processing shaped the new text. Returns whether it existed.
-    pub fn replace_text(&mut self, id: u64, text: &str) -> io::Result<bool> {
+    /// Replace entry `id`'s text with `transcript`, such as a transcription
+    /// of its recording with another model, keeping the current text as its
+    /// newest version. Returns whether it existed.
+    pub fn replace_text(
+        &mut self,
+        id: u64,
+        transcript: Transcript,
+        now_ms: u64,
+    ) -> io::Result<bool> {
+        self.change(id, |entry| {
+            entry.replace(transcript, now_ms);
+            true
+        })
+    }
+
+    /// Bring entry `id`'s version `index` back as its text. Returns whether
+    /// there was one.
+    pub fn restore_version(&mut self, id: u64, index: usize) -> io::Result<bool> {
+        self.change(id, |entry| entry.restore(index))
+    }
+
+    /// Changes entry `id` and saves; a failed save keeps it as it was.
+    fn change(
+        &mut self,
+        id: u64,
+        change: impl FnOnce(&mut HistoryEntry) -> bool,
+    ) -> io::Result<bool> {
         let Some(index) = self.entries.iter().position(|entry| entry.id == id) else {
             return Ok(false);
         };
         let previous = self.entries[index].clone();
-        let entry = &mut self.entries[index];
-        entry.raw_text = truncated(text, MAX_TEXT_BYTES);
-        entry.final_text = entry.raw_text.clone();
-        entry.processing = None;
+        if !change(&mut self.entries[index]) {
+            return Ok(false);
+        }
         if let Err(error) = self.persist() {
             self.entries[index] = previous;
             return Err(error);
@@ -616,8 +679,12 @@ impl History {
         self.synced().clear()
     }
 
-    pub fn replace_text(&self, id: u64, text: &str) -> io::Result<bool> {
-        self.synced().replace_text(id, text)
+    pub fn replace_text(&self, id: u64, transcript: Transcript) -> io::Result<bool> {
+        self.synced().replace_text(id, transcript, now_ms())
+    }
+
+    pub fn restore_version(&self, id: u64, index: usize) -> io::Result<bool> {
+        self.synced().restore_version(id, index)
     }
 
     pub fn recording_path(&self, id: u64) -> Option<PathBuf> {
@@ -710,6 +777,7 @@ mod tests {
             inference_ms: 80,
             total_ms: 1_100,
             recording: None,
+            model: None,
         }
     }
 
@@ -847,8 +915,13 @@ mod tests {
         let path = temp_path("replace");
         let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
         let id = store.record(recorded("befor"), 1_000).unwrap().unwrap();
-        assert!(store.replace_text(id, "before").unwrap());
-        assert!(!store.replace_text(id + 1, "nothing").unwrap());
+        let fixed = |text: &str| Transcript {
+            text: text.into(),
+            model: None,
+            language: None,
+        };
+        assert!(store.replace_text(id, fixed("before"), 1_500).unwrap());
+        assert!(!store.replace_text(id + 1, fixed("nothing"), 1_500).unwrap());
 
         let reopened = HistoryStore::open(path.clone(), HistoryRetention::Week, 2_000);
         let entry = reopened.entry(id).unwrap();

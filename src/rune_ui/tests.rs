@@ -1278,6 +1278,7 @@ fn history_search_without_matches_says_so() {
             inference_ms: 80,
             total_ms: 200,
             recording: None,
+            model: None,
         })
         .unwrap();
     let mut rt = runtime("history-empty", true, PANE_SIZE);
@@ -1366,6 +1367,7 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
         inference_ms: 80,
         total_ms: 200,
         recording,
+        model: Some("Parakeet v3".into()),
     };
     let plain = history.record(draft(None)).unwrap().unwrap();
     let id = history
@@ -1412,7 +1414,36 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
         .find(|entry| entry.id == id)
         .unwrap();
     assert_eq!(entry.final_text, "Ship it now.");
+    assert_eq!(entry.model.as_deref(), Some("Whisper"));
     assert!(entry.has_recording(), "replacing keeps the recording");
+    assert_eq!(entry.versions.len(), 1);
+    assert_eq!(entry.versions[0].final_text, "Ship it.");
+    assert_eq!(entry.versions[0].model.as_deref(), Some("Parakeet v3"));
+
+    // The kept version shows with its model, copies, and comes back.
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Whisper"), "{shown:?}");
+    assert!(shown.iter().any(|text| text.starts_with("Parakeet v3 · ")));
+    tap(&mut rt, "version0/actions/copy");
+    assert_eq!(rt.copy_request.as_deref(), Some("Ship it."));
+    tap(&mut rt, "version0/actions/use");
+    settle(&mut rt);
+    let entry = history
+        .search("")
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .unwrap();
+    assert_eq!(entry.final_text, "Ship it.");
+    assert_eq!(entry.versions[0].final_text, "Ship it now.");
+
+    rt.state.settings.labs.keep_recordings = false;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("versions").is_none(), "off, the versions hide");
+    assert!(
+        texts(&rt).iter().any(|text| text == "Parakeet v3"),
+        "the model shows either way"
+    );
     let _ = std::fs::remove_dir_all(&directory);
 }
 
