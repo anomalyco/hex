@@ -27,6 +27,9 @@ pub(super) struct HistoryPane {
     search: TextEdit,
     /// The query the entries were loaded for.
     searched: String,
+    /// The store's answer `entries` holds, so a poll that finds nothing
+    /// changed skips the search.
+    stamp: Option<crate::history::SearchStamp>,
     pub(super) selected: Option<u64>,
     pub(super) clear_armed: bool,
     pub(super) copied: Option<u64>,
@@ -99,17 +102,30 @@ impl HistoryPane {
     }
 
     fn reload_entries(&mut self) {
+        self.stamp = None;
         self.searched = self.search.text.clone();
+        self.refresh_entries();
+    }
+
+    /// Searches again when the query or the store changed since the last
+    /// search; true when the entries shown changed.
+    fn refresh_entries(&mut self) -> bool {
         let Some(store) = &self.store else {
-            return;
+            return false;
         };
-        self.entries = store.search(&self.searched);
+        let Some(entries) = store.search_if_changed(&self.search.text, &mut self.stamp) else {
+            return false;
+        };
+        self.searched = self.search.text.clone();
+        let changed = entries != self.entries;
+        self.entries = entries;
         if self
             .selected
             .is_some_and(|id| !self.entries.iter().any(|entry| entry.id == id))
         {
             self.selected = None;
         }
+        changed
     }
 
     /// Sums up every retained entry, only while Labs › Dictation stats is
@@ -121,16 +137,15 @@ impl HistoryPane {
         };
     }
 
-    /// While the pane shows, picks up new dictations and search edits. The
-    /// stats are summed again only when the entries or the toggle changed.
+    /// While the pane shows, picks up new dictations and search edits. It
+    /// runs before every frame, so it searches only when something changed.
+    /// The stats are summed again only when the entries or the toggle changed.
     pub(super) fn poll(&mut self, visible: bool) -> bool {
         let answered = self.poll_again();
         if !visible || self.store.is_none() {
             return answered;
         }
-        let previous = std::mem::take(&mut self.entries);
-        self.reload_entries();
-        let changed = self.entries != previous;
+        let changed = self.refresh_entries();
         if changed || self.stats.is_some() != crate::labs::history_stats() {
             self.reload_stats();
             return true;

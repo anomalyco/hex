@@ -161,7 +161,7 @@ impl HistoryEntry {
     }
 
     fn matches(&self, needle: &str) -> bool {
-        let matches_field = |field: &str| field.to_lowercase().contains(needle);
+        let matches_field = |field: &str| contains_lowercased(field, needle);
         matches_field(&self.raw_text)
             || matches_field(&self.final_text)
             || self.application.as_deref().is_some_and(matches_field)
@@ -171,6 +171,33 @@ impl HistoryEntry {
                 .as_ref()
                 .is_some_and(|processing| matches_field(&processing.profile))
     }
+}
+
+/// Whether `field`, lowercased, contains `needle` (already lowercase). An
+/// ASCII field is compared in place, so a search over thousands of entries
+/// does not copy each one; any other field is lowercased in full, which can
+/// change its length.
+fn contains_lowercased(field: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if field.is_ascii() {
+        return field
+            .as_bytes()
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()));
+    }
+    field.to_lowercase().contains(needle)
+}
+
+/// What a History search last answered, so asking again while nothing
+/// changed costs no scan or copy ([`History::search_if_changed`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SearchStamp {
+    query: String,
+    revision: u64,
+    /// When the oldest entry it returned leaves the retention window.
+    expires_ms: Option<u64>,
 }
 
 /// A successful result awaiting a history identity.
@@ -257,6 +284,9 @@ pub struct HistoryStore {
     /// listener and the History pane in separate processes, so each store
     /// rereads the file when another process changed it.
     file_state: Option<(SystemTime, u64)>,
+    /// Counts changes to the entries or retention, so a search can tell its
+    /// answer still stands.
+    revision: u64,
 }
 
 fn file_state(path: &std::path::Path) -> Option<(SystemTime, u64)> {
@@ -279,6 +309,7 @@ impl HistoryStore {
             prune_pending: false,
             prune_error_reported: false,
             file_state: None,
+            revision: 0,
         };
         store.file_state = file_state(&store.path);
         match fs::read(&store.path) {
@@ -339,6 +370,7 @@ impl HistoryStore {
             .max(max_entry_id.map_or(1, |id| id.saturating_add(1)));
         self.entries = loaded.entries;
         self.entries.sort_by_key(|entry| entry.id);
+        self.revision += 1;
     }
 
     /// Record one successful result. Returns the stable entry ID, or `None`
@@ -470,6 +502,7 @@ impl HistoryStore {
             return Ok(());
         }
         self.retention = retention;
+        self.revision += 1;
         if self.prune(now_ms) {
             self.persist()?;
         }
@@ -577,10 +610,15 @@ impl HistoryStore {
             }
         }
         self.prune_pending |= changed;
+        if changed {
+            self.revision += 1;
+        }
         changed
     }
 
+    /// Every caller changed the entries first.
     fn persist(&mut self) -> io::Result<()> {
+        self.revision += 1;
         let saved = SavedHistory {
             version: VERSION,
             next_id: self.next_id,
@@ -702,6 +740,37 @@ impl History {
             .into_iter()
             .cloned()
             .collect()
+    }
+
+    /// [`Self::search`], unless `last` says the answer has not changed: the
+    /// same query, no change to the store since, and none of the entries it
+    /// returned has left the retention window. Then `None`, without scanning
+    /// or copying entries. A pane polled every frame asks this.
+    pub fn search_if_changed(
+        &self,
+        query: &str,
+        last: &mut Option<SearchStamp>,
+    ) -> Option<Vec<HistoryEntry>> {
+        let store = self.synced();
+        let now = now_ms();
+        if last.as_ref().is_some_and(|stamp| {
+            stamp.query == query
+                && stamp.revision == store.revision
+                && stamp.expires_ms.is_none_or(|expires| now < expires)
+        }) {
+            return None;
+        }
+        let found = store.search(query, now);
+        let max_age = store.retention.max_age_ms();
+        *last = Some(SearchStamp {
+            query: query.into(),
+            revision: store.revision,
+            expires_ms: max_age.and_then(|max_age| {
+                let oldest = found.iter().map(|entry| entry.timestamp_ms).min()?;
+                Some(oldest.saturating_add(max_age))
+            }),
+        });
+        Some(found.into_iter().cloned().collect())
     }
 
     /// The newest `count` reusable entries, newest first
@@ -1257,6 +1326,79 @@ mod tests {
             store.entries[0].id > 0,
             "byte pressure also evicts oldest first"
         );
+    }
+
+    #[test]
+    fn matching_in_place_agrees_with_lowercasing_the_field() {
+        let fields = [
+            "Hello World",
+            "hello",
+            "",
+            "KELVIN \u{212A}elvin",
+            "\u{130}stanbul",
+            "Straße",
+            "ÉCOLE école",
+        ];
+        let needles = [
+            "hello", "o w", "k", "kelvin", "i", "stra", "ß", "é", "école", "xyz",
+        ];
+        for field in fields {
+            for needle in needles {
+                assert_eq!(
+                    contains_lowercased(field, needle),
+                    field.to_lowercase().contains(needle),
+                    "{field:?} {needle:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_search_is_answered_again_only_when_something_changed() {
+        let path = temp_path("search-if-changed");
+        let history = History::new(HistoryStore::open(path, HistoryRetention::Forever, 0));
+        history.record(draft("first")).unwrap();
+        let mut stamp = None;
+        assert_eq!(history.search_if_changed("", &mut stamp).unwrap().len(), 1);
+        assert!(history.search_if_changed("", &mut stamp).is_none());
+        assert_eq!(
+            history.search_if_changed("fir", &mut stamp).unwrap().len(),
+            1
+        );
+        assert!(history.search_if_changed("fir", &mut stamp).is_none());
+        history.record(draft("second")).unwrap();
+        assert_eq!(history.search_if_changed("", &mut stamp).unwrap().len(), 2);
+        let id = history.search("second")[0].id;
+        history.delete(id).unwrap();
+        assert_eq!(history.search_if_changed("", &mut stamp).unwrap().len(), 1);
+        history.set_retention(HistoryRetention::Day).unwrap();
+        assert!(history.search_if_changed("", &mut stamp).is_some());
+        history.clear().unwrap();
+        assert!(
+            history
+                .search_if_changed("", &mut stamp)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(history.search_if_changed("", &mut stamp).is_none());
+    }
+
+    #[test]
+    fn a_kept_answer_expires_with_its_oldest_entry() {
+        let path = temp_path("search-stamp-expiry");
+        let mut store = HistoryStore::open(path, HistoryRetention::Day, 0);
+        let now = now_ms();
+        let day = HistoryRetention::Day.max_age_ms().unwrap();
+        let recorded = now - day + 60_000;
+        store.record(draft("aging"), recorded).unwrap();
+        let history = History::new(store);
+        let mut stamp = None;
+        assert_eq!(history.search_if_changed("", &mut stamp).unwrap().len(), 1);
+        assert!(history.search_if_changed("", &mut stamp).is_none());
+        // The entry leaves the window a minute from now; move to then.
+        assert_eq!(stamp.as_ref().unwrap().expires_ms, Some(recorded + day));
+        stamp.as_mut().unwrap().expires_ms = Some(now_ms());
+        assert!(history.search_if_changed("", &mut stamp).is_some());
     }
 
     #[test]
