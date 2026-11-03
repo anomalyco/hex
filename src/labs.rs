@@ -7,7 +7,7 @@
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard or only copying it (macOS), a second dictation shortcut
-//! (macOS), Toggle's tap or hold (macOS), stopping an automatic meeting
+//! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
 //! recording when its call ends (macOS), and Terminal paste
 //! and shortcut sharing on Windows) is just its toggle.
 //!
@@ -255,9 +255,9 @@ impl Feature {
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SidedChords
-            | Self::TapOrHold
             | Self::RecentDictations
             | Self::HideMenuBarIcon => cfg!(target_os = "macos"),
+            Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -771,7 +771,8 @@ pub fn sided_modifier_chords() -> bool {
 }
 
 /// In Toggle mode, a press held past the hold threshold finishes its capture
-/// when it lifts instead of locking it (macOS; read at each release).
+/// when it lifts instead of locking it (macOS reads it at each release;
+/// Linux's listener reads the saved switch with its shortcut options).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn tap_or_hold() -> bool {
     on(TAP_OR_HOLD)

@@ -42,7 +42,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
-├── Tap or hold      no    labs.tap_or_hold             (macOS)   in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711)
+├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker rows show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
@@ -347,7 +347,7 @@ before. Checks: `with_sided_chords_each_modifier_keeps_its_side` and
 [labs.rs](../../src/labs.rs). Not yet observed: a real recording on a Mac;
 the row renders only in macOS builds, so no golden changes.
 
-Tap or hold (`tap-or-hold`, issue 711, macOS): one dictation shortcut
+Tap or hold (`tap-or-hold`, issue 711, macOS and Linux): one dictation shortcut
 works as both tap-to-toggle and push-to-talk. It acts only in Toggle mode
 (`shortcut_mode: toggle`). The gate is the macOS shortcut machine
 (`DictationHotkey` in [suppression/hotkey.rs](../../src/suppression/hotkey.rs)), which reads
@@ -357,13 +357,34 @@ it started finishes the capture on release, as Hold does, with the usual
 200 ms tail. A shorter press locks the capture as plain Toggle does, and the
 next press finishes it. Chord discards and the press that finishes a lock are
 unchanged. It applies to every `DictationHotkey` in Toggle mode.
-Off, or in Hold mode, nothing changes. Linux and Windows don't have it.
+Off, or in Hold mode, nothing changes.
+
+Linux (issue 1144): the gate is the listener's shortcut options
+(`shortcuts` in [linux/dictation.rs](../../src/linux/dictation.rs) sets
+`HotkeyOptions::tap_or_hold` only in Toggle mode with the toggle on; a
+change re-registers the shortcuts once nothing records). In
+`ShortcutState` ([linux/input.rs](../../src/linux/input.rs)) a Toggle press
+released at least 300 ms (`TAP_OR_HOLD_THRESHOLD`) after it went down
+finishes its capture, with the usual release tail; a sooner release locks as
+Toggle does. The desktop's key repeats of a held press don't move its start,
+and a release the desktop drops leaves the capture recording until the next
+press finishes it, as before. It applies to the dictation shortcut and
+Dictate without processing, each for the capture it started; `hex dictation`
+commands are unchanged. X11 counts a release after its 50 ms auto-repeat
+grace. Windows doesn't have it.
+
 Checks: `tap_or_hold_locks_a_short_tap_and_finishes_a_long_hold_on_release`
 and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
 [suppression.rs](../../src/suppression.rs) (macOS only);
+`tap_or_hold_finishes_a_held_press_and_locks_a_tap`,
+`without_tap_or_hold_a_held_toggle_press_locks`,
+`tap_or_hold_survives_repeats_and_dropped_releases`, and
+`tap_or_hold_applies_to_raw_dictation_but_not_commands` in
+[linux/input.rs](../../src/linux/input.rs);
 `tap_or_hold_is_its_own_bit_and_off_by_default` in
-[labs.rs](../../src/labs.rs). Not yet observed: a real Mac with the toggle
-on. The row renders only in macOS builds, so no golden changes.
+[labs.rs](../../src/labs.rs). Not yet observed: a real Mac or Linux desktop
+(X11 grab or Wayland portal) with the toggle on; the Linux Labs page goldens
+need regenerating with the new row.
 
 Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
 on, the speech model picker's Every model view shows one row between its

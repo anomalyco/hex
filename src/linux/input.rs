@@ -246,6 +246,9 @@ pub(crate) const KEY_PRESS: u8 = 2;
 pub(crate) const KEY_RELEASE: u8 = 3;
 const RELEASE_GRACE: Duration = Duration::from_millis(50);
 pub(crate) const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
+/// Labs › Tap or hold: a Toggle press held this long is a hold, as macOS's
+/// hold threshold.
+const TAP_OR_HOLD_THRESHOLD: Duration = Duration::from_millis(300);
 /// Desktops that repeat a held shortcut's press (KWin) repeat it sooner
 /// than this, so a press after a longer gap is a new press.
 const KEY_REPEAT_GAP: Duration = Duration::from_secs(1);
@@ -309,6 +312,9 @@ pub(crate) struct HotkeyOptions {
     /// Only a double-tap starts recording, which then stays locked.
     pub(crate) double_tap_only: bool,
     pub(crate) toggle: bool,
+    /// Labs › Tap or hold, in Toggle mode: a press held at least
+    /// [`TAP_OR_HOLD_THRESHOLD`] finishes its capture when it lifts.
+    pub(crate) tap_or_hold: bool,
     pub(crate) paste_last: Option<LinuxHotkey>,
     /// Dictate without processing, while it is bound.
     pub(crate) raw_dictation: Option<LinuxHotkey>,
@@ -589,11 +595,16 @@ struct ShortcutState {
     double_tap_only: bool,
     /// Every press acts as the second tap of a double-tap: releasing locks.
     toggle: bool,
+    /// Labs › Tap or hold in Toggle mode: a long press finishes on release.
+    tap_or_hold: bool,
     /// Toggle mode has a cancel shortcut.
     cancels: bool,
     capture: Capture,
     last_release: Option<Instant>,
     last_press: Option<Instant>,
+    /// When the press that started the held capture went down (its
+    /// repeats don't move it).
+    held_since: Option<Instant>,
     /// The dictation shortcut was pressed and its release hasn't arrived.
     down: bool,
     /// Dictate without processing, not the dictation shortcut, owns the
@@ -607,10 +618,12 @@ impl ShortcutState {
             double_tap: options.double_tap,
             double_tap_only: options.double_tap_only,
             toggle: options.toggle,
+            tap_or_hold: options.toggle && options.tap_or_hold,
             cancels: options.toggle && options.cancel.is_some(),
             capture: Capture::Idle,
             last_release: None,
             last_press: None,
+            held_since: None,
             down: false,
             raw: false,
         }
@@ -721,6 +734,7 @@ impl ShortcutState {
                             return None;
                         }
                         self.capture = Capture::Held { second_tap };
+                        self.held_since = Some(now);
                         Some(HotkeyEvent::Start { raw: self.raw })
                     }
                     // The desktop never sent the release that would have
@@ -745,6 +759,18 @@ impl ShortcutState {
                         self.capture = Capture::Idle;
                         self.last_release = Some(now);
                         None
+                    }
+                    // Labs › Tap or hold: a Toggle press held long enough
+                    // dictates only while held, as Hold does.
+                    Capture::Held { second_tap: true }
+                        if self.tap_or_hold
+                            && self.held_since.is_some_and(|pressed| {
+                                now.saturating_duration_since(pressed) >= TAP_OR_HOLD_THRESHOLD
+                            }) =>
+                    {
+                        self.capture = Capture::Idle;
+                        self.last_release = None;
+                        Some(HotkeyEvent::Finish)
                     }
                     Capture::Held { second_tap: true } => {
                         self.capture = Capture::Locked;
@@ -1837,6 +1863,115 @@ mod tests {
         test.release(Shortcut::Dictation);
         assert_eq!(test.events, [START]);
         assert_eq!(test.state.capture, Capture::Locked);
+    }
+
+    fn tap_or_hold() -> HotkeyOptions {
+        HotkeyOptions {
+            toggle: true,
+            tap_or_hold: true,
+            ..HotkeyOptions::default()
+        }
+    }
+
+    /// #1144: with Labs › Tap or hold, a held Toggle press dictates until it
+    /// lifts, and a short tap still locks until the next press.
+    #[test]
+    fn tap_or_hold_finishes_a_held_press_and_locks_a_tap() {
+        let mut test = Test::with(tap_or_hold());
+        test.press(Shortcut::Dictation);
+        test.now += Duration::from_millis(600);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish]);
+        assert_eq!(test.state.capture, Capture::Idle);
+
+        test.now += Duration::from_secs(1);
+        test.press(Shortcut::Dictation);
+        test.now += Duration::from_millis(299);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish, START]);
+        assert_eq!(test.state.capture, Capture::Locked);
+        test.now += Duration::from_secs(2);
+        test.press(Shortcut::Dictation);
+        test.now += Duration::from_millis(600);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish, START, Finish]);
+        assert_eq!(test.state.capture, Capture::Idle);
+    }
+
+    /// Off, or in Hold mode, a held Toggle press still locks as before.
+    #[test]
+    fn without_tap_or_hold_a_held_toggle_press_locks() {
+        for options in [
+            HotkeyOptions {
+                tap_or_hold: false,
+                ..tap_or_hold()
+            },
+            HotkeyOptions {
+                toggle: false,
+                double_tap: true,
+                ..tap_or_hold()
+            },
+        ] {
+            let toggle = options.toggle;
+            let mut test = Test::with(options);
+            if !toggle {
+                test.tap();
+                test.now += Duration::from_millis(20);
+            }
+            test.events.clear();
+            test.press(Shortcut::Dictation);
+            test.now += Duration::from_millis(600);
+            test.release(Shortcut::Dictation);
+            assert_eq!(test.events, [START]);
+            assert_eq!(test.state.capture, Capture::Locked);
+        }
+    }
+
+    /// Repeats of a held press neither finish early nor restart the hold,
+    /// and a dropped release leaves the capture recording until a new press.
+    #[test]
+    fn tap_or_hold_survives_repeats_and_dropped_releases() {
+        let mut test = Test::with(tap_or_hold());
+        test.press(Shortcut::Dictation);
+        for _ in 0..20 {
+            test.now += Duration::from_millis(33);
+            test.press(Shortcut::Dictation);
+        }
+        assert_eq!(test.events, [START]);
+        test.release(Shortcut::Dictation);
+        assert_eq!(
+            test.events,
+            [START, Finish],
+            "held 660 ms from the first press"
+        );
+
+        test.now += Duration::from_secs(1);
+        test.press(Shortcut::Dictation);
+        test.now += Duration::from_secs(5);
+        assert_eq!(test.state.capture, Capture::Held { second_tap: true });
+        test.press(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish, START, Finish]);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish, START, Finish]);
+        assert_eq!(test.state.capture, Capture::Idle);
+    }
+
+    /// Dictate without processing follows Tap or hold for its own capture,
+    /// and commands are unchanged.
+    #[test]
+    fn tap_or_hold_applies_to_raw_dictation_but_not_commands() {
+        const RAW: HotkeyEvent = HotkeyEvent::Start { raw: true };
+        let mut test = Test::with(tap_or_hold());
+        test.press(Shortcut::RawDictation);
+        test.now += Duration::from_millis(500);
+        test.tap();
+        test.release(Shortcut::RawDictation);
+        assert_eq!(test.events, [RAW, Finish]);
+        test.now += Duration::from_secs(1);
+        test.command(Command::DictationStart);
+        test.now += Duration::from_secs(1);
+        test.command(Command::DictationStop);
+        assert_eq!(test.events, [RAW, Finish, START, Finish]);
     }
 
     /// #786: Escape ends no dictation, held, locked, or idle.

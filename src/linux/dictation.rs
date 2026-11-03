@@ -125,6 +125,9 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
             && settings.double_tap_only
             && settings.dictation_hotkey.key.is_some(),
         toggle: settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle,
+        // Labs › Tap or hold, off by default; it acts only in Toggle mode.
+        tap_or_hold: settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle
+            && crate::labs::Feature::TapOrHold.on(settings),
         paste_last: settings.paste_last_hotkey.as_ref().map(LinuxHotkey::from),
         raw_dictation: settings
             .raw_dictation_hotkey
