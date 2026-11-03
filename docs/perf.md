@@ -32,11 +32,12 @@ The `hex` app profile in `strobe.json` keeps a launched copy away from your
 own Hex:
 
 - `HEX_APPLICATION_SUPPORT_DIR={home}/hex-data`: settings, history, logs,
-  models, locks, and `local-api.json` live in the private home. Use a folder
-  other than the OS default (`AppData/Roaming/hex`, `.local/share/hex`), so
-  the Linux app never hands the launch to your systemd unit.
-- On Windows, a copy with `HEX_APPLICATION_SUPPORT_DIR` set claims its own
-  single-instance event, so it never signals or yields to your running Hex.
+  models, locks, and `local-api.json` live in the private home.
+- A data root other than the default claims its own Windows single-instance
+  event, so the copy never signals or yields to your running Hex, and on
+  Linux never hands the launch to your systemd unit. Inside a redirected
+  home the default (`AppData/Roaming/hex`, `.local/share/hex`) follows the
+  redirection, so name another folder, as `hex-data` does.
 - `HEX_DISABLE_UPDATES=1`: no update checks and no network.
 - `USERPROFILE` (Windows) and `HOME` locate `~/.config/hex`, so your
   `hex.config.ts` stays out of the copy.

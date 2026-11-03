@@ -91,9 +91,18 @@ pub(crate) struct WindowsDesktopHost {
 /// Names the event that marks the running Hex app in this login session.
 const APP_INSTANCE_EVENT: &str = r"Local\anomaly.hex.app";
 
+/// The data root `HEX_APPLICATION_SUPPORT_DIR` names, unless it is the
+/// default one, which keeps the default event.
+fn custom_root() -> Option<std::path::PathBuf> {
+    let canonical = |path: std::path::PathBuf| path.canonicalize().unwrap_or(path);
+    let root = canonical(std::env::var_os("HEX_APPLICATION_SUPPORT_DIR")?.into());
+    let default = dirs::data_dir().map(|data| canonical(data.join("hex")));
+    (default.as_ref() != Some(&root)).then_some(root)
+}
+
 /// The instance event for a data root: [`APP_INSTANCE_EVENT`] for the
-/// default one, and its own event for a root `HEX_APPLICATION_SUPPORT_DIR`
-/// names (Windows installs never set it), so a copy of Hex with its own data,
+/// default one, and its own event for another root that
+/// `HEX_APPLICATION_SUPPORT_DIR` names, so a copy of Hex with its own data,
 /// such as a benchmark, neither signals nor yields to the person's Hex.
 fn instance_event_name(custom_root: Option<&std::path::Path>) -> String {
     use sha2::{Digest, Sha256};
@@ -126,10 +135,7 @@ impl AppInstance {
     /// asking it to show its window unless this launch is a hidden (login)
     /// launch, which must never pop up an app that is already running.
     pub(crate) fn claim(start_hidden: bool) -> Result<Option<Self>> {
-        let root = std::env::var_os("HEX_APPLICATION_SUPPORT_DIR")
-            .map(std::path::PathBuf::from)
-            .map(|root| root.canonicalize().unwrap_or(root));
-        let name = instance_event_name(root.as_deref());
+        let name = instance_event_name(custom_root().as_deref());
         let name: Vec<u16> = name.encode_utf16().chain([0]).collect();
         // SAFETY: `name` is a NUL-terminated UTF-16 string that outlives the call.
         let event = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
