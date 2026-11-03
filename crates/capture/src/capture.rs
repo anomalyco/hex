@@ -2210,8 +2210,35 @@ pub fn is_frontmost_terminal() -> bool {
 }
 
 /// Writes all bundle artifacts (`scrawl.json`, `summary.md`, `contact-sheet.png`, `frames/frame-XX.png`)
-/// into a new or specified `.scrawl` bundle directory.
+/// into a new or specified `.scrawl` bundle directory. The manifest comes last, whole, so a
+/// bundle with one is complete.
 pub fn write_bundle_artifacts(
+    out_dir: &Path,
+    bundle: &crate::model::ScrawlBundle,
+    annotated_frames: &[(crate::model::Keyframe, RgbaFrame)],
+    contact_sheet: &RgbaFrame,
+    summary_md: &str,
+) -> Result<()> {
+    write_bundle_files(out_dir, bundle, annotated_frames, contact_sheet, summary_md)?;
+    publish_manifest(out_dir, bundle)
+}
+
+/// Writes `scrawl.json` atomically (a temporary file renamed into place): the last step of a
+/// build, which marks the bundle finished.
+pub fn publish_manifest(out_dir: &Path, bundle: &crate::model::ScrawlBundle) -> Result<()> {
+    let manifest_bytes = serde_json::to_vec_pretty(bundle)?;
+    let tmp = out_dir.join(".scrawl.json.tmp");
+    crate::routing::undo::write_private(&tmp, &manifest_bytes)
+        .with_context(|| format!("could not write {}", tmp.display()))?;
+    if let Err(error) = std::fs::rename(&tmp, out_dir.join("scrawl.json")) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error).context("could not publish scrawl.json");
+    }
+    Ok(())
+}
+
+/// Everything [`write_bundle_artifacts`] writes except the manifest.
+pub fn write_bundle_files(
     out_dir: &Path,
     bundle: &crate::model::ScrawlBundle,
     annotated_frames: &[(crate::model::Keyframe, RgbaFrame)],
@@ -2244,8 +2271,6 @@ pub fn write_bundle_artifacts(
         Ok(())
     })?;
 
-    let manifest_bytes = serde_json::to_vec_pretty(bundle)?;
-    crate::routing::undo::write_private(&out_dir.join("scrawl.json"), &manifest_bytes)?;
     crate::routing::undo::write_private(&out_dir.join("summary.md"), summary_md.as_bytes())?;
 
     Ok(())
