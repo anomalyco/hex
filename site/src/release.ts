@@ -30,7 +30,7 @@ export const RELEASE = {
   },
   github: data.github,
   homebrew: "brew install --cask anomalyco/tap/hex",
-  nix: "nix profile install github:anomalyco/hex",
+  nix: "nix profile add github:anomalyco/hex",
 } as const
 
 export const DOWNLOAD_URLS = [
