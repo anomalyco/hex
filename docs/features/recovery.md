@@ -265,6 +265,10 @@ Bluetooth default input (macOS, avoid_bluetooth_microphone on) // transport type
   -> built-in mic stands in, else the first other real input
   ├── no other usable input -> the Bluetooth default
   └── setting changes -> re-resolve like a device-list change -> switch once idle
+virtual input or iPhone Continuity microphone (macOS: ccwd/ccwl transport) // #1100
+  -> never stands in: the phone prompts and can fail to open
+  ├── lid closed, nothing else -> "the built-in microphone is off while the lid is closed"
+  └── the default, the saved microphone, or --device -> used as named
 
 warm stream keeps running but delivers only exact zeros (macOS, #1122)
   -> that dictation is discarded as near-silent, as before
@@ -287,6 +291,9 @@ Checks in [audio.rs](../../src/audio.rs):
 `a_closed_lid_passes_over_the_built_in_microphone`,
 `only_the_internal_microphone_is_switched_off_by_the_lid`,
 `a_headphone_jack_microphone_is_used_with_the_lid_closed`,
+`an_iphone_microphone_never_stands_in`,
+`continuity_capture_transports_are_recognised` (pure resolution and fourcc
+values; no iPhone observed with the lid closed),
 `where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
 `only_an_idle_capture_lets_the_microphone_switch`;
 [dictation/audio.rs](../../src/dictation/audio.rs):
