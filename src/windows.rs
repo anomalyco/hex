@@ -169,6 +169,10 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         return Ok(());
     }
     let log_dir = crate::app_paths::init_process_logging(shutdown)?;
+    // 2.3.1's updater installed this build into its own folder.
+    if matches!(command, Command::App { .. }) && crate::updater::legacy::take_over() {
+        return Ok(());
+    }
 
     let event_path = log_dir.join("live.ndjson");
     match command {

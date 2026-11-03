@@ -116,6 +116,14 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
     if let Some(wayland_display) = adopted {
         tracing::info!(%wayland_display, "adopted the session's Wayland display");
     }
+    // 2.3.1's updater installed this build into its own folder.
+    if matches!(
+        command,
+        Command::App { .. } | Command::Service { embedded: false }
+    ) && crate::updater::legacy::take_over()
+    {
+        return Ok(());
+    }
 
     let event_path = log_dir.join("live.ndjson");
     match command {

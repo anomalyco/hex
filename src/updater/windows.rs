@@ -215,7 +215,7 @@ fn sync_file(path: &Path) -> Result<()> {
 /// `current-version` pointer atomically; the running version's files are
 /// never touched, and every version but the new, running, and previous one
 /// is pruned.
-fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
+pub(super) fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
     let versions = support.join("versions");
     let version_dir = versions.join(version);
     fs::create_dir_all(&version_dir)?;
