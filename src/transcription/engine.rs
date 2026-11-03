@@ -129,6 +129,10 @@ pub(crate) enum Command {
     /// Work that needs the model itself, such as loading or switching it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Run(Box<dyn FnOnce(&mut Model) + Send>),
+    /// Drops the model, then loads `selection` in its place, for a GPU with
+    /// no room for both (#1170).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    Reload(crate::transcription::models::TranscriptionSelection),
     Background {
         /// The dictation generation when the work was submitted.
         generation: u64,
@@ -767,6 +771,19 @@ impl TranscriptionEngine {
             .map_err(|_| eyre!("transcription engine stopped"))
     }
 
+    /// Replaces the model with `selection` after every command already sent:
+    /// the old one is dropped first, so its memory is free for the new one.
+    /// Commands sent meanwhile wait for the load.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn reload(
+        &self,
+        selection: crate::transcription::models::TranscriptionSelection,
+    ) -> Result<()> {
+        self.commands
+            .send(Command::Reload(selection))
+            .map_err(|_| eyre!("transcription engine stopped"))
+    }
+
     /// Drops the engine on its own thread, so replacing the model from the
     /// hotkey loop never waits on a run still in flight.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -994,6 +1011,14 @@ impl Worker {
                     if let Some(model) = self.model() {
                         work(model);
                     }
+                    self.publish_streams();
+                }
+                Command::Reload(selection) => {
+                    tracing::info!(model = ?selection.model, "replacing the speech model in place");
+                    self.model = None;
+                    self.parked = Some(selection);
+                    // A failed load stays parked; the next command tries again.
+                    let _ = self.model();
                     self.publish_streams();
                 }
                 Command::Background { generation, work } => {
