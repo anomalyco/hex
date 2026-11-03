@@ -700,7 +700,7 @@ impl BrowserPageMemory {
 fn is_browser_application(application_lower: &str) -> bool {
     // Arc's name is too short to match as a substring.
     application_lower == "arc"
-        || ["brave", "chrome", "safari", "firefox", "edge"]
+        || ["brave", "chrome", "safari", "firefox", "edge", "vivaldi"]
             .iter()
             .any(|browser| application_lower.contains(browser))
 }
@@ -724,6 +724,7 @@ fn context_matches_browser(
         "org.mozilla.firefox" => lower.contains("firefox"),
         "com.microsoft.edgemac" => lower.contains("edge"),
         "company.thebrowser.Browser" => lower == "arc",
+        "com.vivaldi.Vivaldi" => lower.contains("vivaldi"),
         _ => false,
     }
 }
@@ -783,6 +784,7 @@ const BROWSER_TITLE_SUFFIXES: &[&str] = &[
     " - Microsoft Edge",
     " - Safari",
     " - Arc",
+    " - Vivaldi",
 ];
 
 const GOOGLE_MEET_TITLE_PREFIXES: [&str; 3] = ["Meet - ", "Meet – ", "Meet — "];
@@ -1250,6 +1252,22 @@ mod tests {
         assert_eq!(watch.run(Some(&meet), &[], 500).len(), 1);
         assert!(watch.detector.is_application_snoozed("com.brave.Browser"));
         assert!(watch.run(Some(&fallback), &[], 5_000).is_empty());
+    }
+
+    #[test]
+    fn vivaldi_on_the_microphone_is_a_browser_call() {
+        // A Teams web app in Vivaldi runs in Vivaldi's own process (#1105).
+        let vivaldi = ActiveMicrophoneApplication {
+            pid: 4242,
+            bundle_id: "vivaldi-bin".into(),
+            name: "vivaldi-bin".into(),
+        };
+        let call = candidate_from_microphone(&vivaldi, &ContextSnapshot::default()).unwrap();
+        assert_eq!(call.source, MeetingSource::BrowserCall);
+        assert_eq!(call.application.as_deref(), Some("com.vivaldi.Vivaldi"));
+        assert_eq!(call.application_name.as_deref(), Some("Vivaldi"));
+        assert_eq!(call.offer_title(), "Call in Vivaldi");
+        assert_eq!(call.required_stability(), BROWSER_STABLE_FOR);
     }
 
     fn brave() -> ActiveMicrophoneApplication {

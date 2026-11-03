@@ -90,6 +90,7 @@ fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
                 | "org.mozilla.firefox"
                 | "com.microsoft.edgemac"
                 | "company.thebrowser.Browser"
+                | "com.vivaldi.Vivaldi"
         )
     )
 }
@@ -226,7 +227,7 @@ fn is_process_of(bundle_id: &str, canonical_bundle_id: &str) -> bool {
 
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
-const EXECUTABLES: [(&str, &str); 22] = [
+const EXECUTABLES: [(&str, &str); 26] = [
     // Gather for Windows.
     ("gather", "com.gather.GatherV2"),
     ("gatherv2", "com.gather.GatherV2"),
@@ -251,6 +252,11 @@ const EXECUTABLES: [(&str, &str); 22] = [
     ("msedge", "com.microsoft.edgemac"),
     ("microsoft-edge", "com.microsoft.edgemac"),
     ("microsoft-edge-stable", "com.microsoft.edgemac"),
+    // Vivaldi, its web apps (PWAs) included: they run in the same process.
+    ("vivaldi", "com.vivaldi.Vivaldi"),
+    ("vivaldi-bin", "com.vivaldi.Vivaldi"),
+    ("vivaldi-stable", "com.vivaldi.Vivaldi"),
+    ("vivaldi-snapshot", "com.vivaldi.Vivaldi"),
 ];
 
 fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'static str> {
@@ -290,6 +296,7 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         ("org.mozilla.plugincontainer", "org.mozilla.firefox"),
         ("com.microsoft.edgemac", "com.microsoft.edgemac"),
         ("company.thebrowser.browser", "company.thebrowser.Browser"),
+        ("com.vivaldi.vivaldi", "com.vivaldi.Vivaldi"),
     ]
     .iter()
     .find_map(|(prefix, canonical)| {
@@ -314,6 +321,7 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "org.mozilla.firefox" => Some("Firefox"),
         "com.microsoft.edgemac" => Some("Microsoft Edge"),
         "company.thebrowser.Browser" => Some("Arc"),
+        "com.vivaldi.Vivaldi" => Some("Vivaldi"),
         _ => None,
     }
 }
@@ -982,6 +990,14 @@ mod tests {
                 "msedge.exe",
                 "Microsoft Edge",
                 Some("com.microsoft.edgemac"),
+                true,
+            ),
+            ("vivaldi-bin", "Vivaldi", Some("com.vivaldi.Vivaldi"), true),
+            ("vivaldi.exe", "Vivaldi", Some("com.vivaldi.Vivaldi"), true),
+            (
+                "com.vivaldi.Vivaldi.helper",
+                "Vivaldi Helper",
+                Some("com.vivaldi.Vivaldi"),
                 true,
             ),
             ("spotify", "Spotify", None, false),
