@@ -25,15 +25,15 @@ mod meetings;
 mod persistence;
 mod shortcut_repair;
 
+#[cfg(hex_capture)]
+pub use capture::*;
 pub use dictation_processing::{
     DictationMode, DictationPostProcessing, DictationProcessingSettings,
 };
 pub use hotkeys::*;
-#[cfg(hex_capture)]
-pub use capture::*;
 pub use labs::*;
-pub use meetings::*;
 pub use meeting_folder::default_meeting_output_folder;
+pub use meetings::*;
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);

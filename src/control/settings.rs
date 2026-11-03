@@ -1644,7 +1644,13 @@ mod tests {
             get(&change.settings, "meetings.opencode_model").unwrap()[0].value,
             "anthropic/claude-haiku"
         );
-        let cleared = apply(&change.settings, "meetings.opencode_model", "none", &rules()).unwrap();
+        let cleared = apply(
+            &change.settings,
+            "meetings.opencode_model",
+            "none",
+            &rules(),
+        )
+        .unwrap();
         assert_eq!(cleared.settings.meetings.opencode_model, None);
         assert!(
             get(&cleared.settings, "meetings.opencode_model").unwrap()[0]

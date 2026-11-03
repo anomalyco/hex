@@ -108,7 +108,7 @@ impl MeetingRetention {
     /// The default for meetings recorded since it began.
     pub const DEFAULT: Self = Self::Day;
 
-    const fn encode(retention: Option<Self>) -> u8 {
+    pub(super) const fn encode(retention: Option<Self>) -> u8 {
         match retention {
             Some(Self::Day) => 0,
             Some(Self::Week) => 1,
