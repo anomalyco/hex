@@ -66,12 +66,19 @@ HEX_SITE_URL=http://127.0.0.1:5531 bun run generate:poster
 `perf/hex.bench.ts` is a [strobe](https://github.com/Hona/strobe) bench: load to
 the live head, the idle head for 8 s, and the first 20 s of the show after a click
 on the key. `strobe.json` builds the site and serves the Build Output under `/hex/`
-with `perf/serve.ts`. From the repository root, against a checkout of `dev` that
-has the same two files:
+with `perf/serve.ts`. strobe builds and serves both variants with this checkout's
+`strobe.json` and `perf/`, so any commit works as the base. From the repository root:
 
 ```sh
-strobe bench site/perf/hex.bench.ts --base <dev checkout> --head .
+strobe bench site/perf/hex.bench.ts --base origin/dev --head .
+strobe bench site/perf/hex.bench.ts --head . --check            # each case once, pass or fail
+strobe report experiment <exp_…> --format pr                     # tables for the PR body
 ```
+
+The show draws at its own frame rate, not the display's: `canvas.frames` and
+`canvas.interval.p95` count the show's WebGPU frames, where presented frames count
+the display's refreshes. `gpu.compile` is the GPU process's shader and pipeline work
+during a load.
 
 ## Social image
 

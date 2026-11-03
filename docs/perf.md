@@ -8,6 +8,7 @@ launches each in a fresh private home, and compares them in alternating runs.
 strobe bench perf/idle.bench.ts --base origin/dev --head .
 strobe bench perf/launch.bench.ts --base origin/dev --head .
 strobe bench perf/idle.bench.ts --check   # one short, untimed pass
+strobe report experiment <exp_…> --format pr   # tables for the PR body
 ```
 
 Run timed benches on a quiet machine. Close other apps and keep the session
@@ -95,6 +96,6 @@ strobe query <rec> threads
 `hex-listening-warm` (microphone open, the default). The copy installs its
 keyboard hook and loads the default English model, which
 `perf/seeds/listening.ts` copies from this machine's own Hex install into
-`perf/seeds/.generated` (read only; strobe copies the seed into each private
-home). The warm profile opens the machine's real microphone; neither records.
+`perf/seeds/.generated`. strobe shares a seed file this large (64 MB and up)
+read only between launches instead of copying it into each private home. The warm profile opens the machine's real microphone; neither records.
 Leave the dictation shortcut alone while it runs.
