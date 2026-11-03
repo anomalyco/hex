@@ -129,6 +129,7 @@ fn system_tool(name: &str) -> PathBuf {
 
 pub fn ssh(host: &str) -> Command {
     let mut command = Command::new(system_tool("ssh"));
+    remote::reuse_connection(&mut command);
     command.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host]);
     command
 }
@@ -269,6 +270,15 @@ impl Drop for RemoveOnDrop {
 /// One request to the running local service over HTTP, or, when the agents run on another Mac,
 /// `opencode api` there over SSH. Nothing local is ever started.
 fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> Result<Vec<u8>> {
+    opencode_api_within(method, path, data, SERVICE_TIMEOUT)
+}
+
+fn opencode_api_within(
+    method: &str,
+    path: &str,
+    data: Option<&serde_json::Value>,
+    timeout: std::time::Duration,
+) -> Result<Vec<u8>> {
     let Some(host) = agent_host() else {
         let body = data.map(serde_json::to_vec).transpose()?;
         let (address, password) = local_server();
@@ -278,7 +288,7 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
             &method.to_ascii_uppercase(),
             path,
             body.as_deref(),
-            SERVICE_TIMEOUT,
+            timeout,
         );
     };
     let command = {
@@ -298,7 +308,7 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
         command.arg(remote);
         command
     };
-    let output = bounded_output(command)?;
+    let output = bounded_output(command, timeout)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let message = format!("OpenCode API failed: {}", stderr.trim());
@@ -322,45 +332,8 @@ const SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// How much of the agent host's `opencode api` stderr is kept; the rest is read and dropped.
 const CLI_STDERR_LIMIT: u64 = 64 * 1024;
 
-/// `command.output()` with stdout capped at [`SERVER_RESPONSE_LIMIT`] (the child is killed
-/// past it) and stderr at [`CLI_STDERR_LIMIT`].
-fn bounded_output(mut command: Command) -> Result<std::process::Output> {
-    use std::io::Read;
-    use std::process::Stdio;
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("Could not reach the agent host")?;
-    let mut stderr = child.stderr.take().context("No agent host stderr")?;
-    let errors = std::thread::spawn(move || {
-        let mut kept = Vec::new();
-        let _ = (&mut stderr).take(CLI_STDERR_LIMIT).read_to_end(&mut kept);
-        let _ = std::io::copy(&mut stderr, &mut std::io::sink());
-        kept
-    });
-    let mut stdout = Vec::new();
-    let read = child
-        .stdout
-        .take()
-        .context("No agent host output")?
-        .take(SERVER_RESPONSE_LIMIT + 1)
-        .read_to_end(&mut stdout);
-    let too_much = stdout.len() as u64 > SERVER_RESPONSE_LIMIT;
-    if too_much {
-        let _ = child.kill();
-    }
-    let status = child.wait().context("Could not wait for the agent host")?;
-    let stderr = errors.join().unwrap_or_default();
-    read.context("Could not read the agent host output")?;
-    ensure!(!too_much, "OpenCode response too large");
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
-}
+use remote::bounded_output;
+mod remote;
 
 /// The status in `opencode api`'s `HTTP 409 Conflict` line.
 fn cli_status(stderr: &str) -> Option<u16> {
@@ -649,7 +622,7 @@ pub fn api_within(
     timeout: std::time::Duration,
 ) -> Result<Vec<u8>> {
     if agent_host().is_some() {
-        return opencode_api(&method.to_ascii_lowercase(), path, data);
+        return opencode_api_within(&method.to_ascii_lowercase(), path, data, timeout);
     }
     let body = data.map(serde_json::to_vec).transpose()?;
     let (address, password) = local_server();
@@ -667,7 +640,7 @@ pub fn api_within(
 /// [`SERVER_CONNECT_TIMEOUT`] connect cap and `timeout` read deadline.
 pub fn api_get_within(path: &str, timeout: std::time::Duration) -> Result<Vec<u8>> {
     if agent_host().is_some() {
-        return opencode_api("get", path, None);
+        return opencode_api_within("get", path, None, timeout);
     }
     let (address, password) = local_server();
     http_get(address, password.as_deref(), path, timeout)
@@ -882,12 +855,19 @@ pub fn posted_id(body: &[u8]) -> Option<String> {
 fn post_prompt(session: &str, mut body: serde_json::Value) -> Result<Posted> {
     let delivery = crate::env::get().config.delivery.label();
     body["delivery"] = serde_json::json!(delivery);
+    let started = std::time::Instant::now();
     let was_idle = session_idle(session);
+    let idle = started.elapsed();
     let answer = opencode_api(
         "post",
         &format!("/api/session/{session}/prompt"),
         Some(&body),
     )?;
+    crate::env::log(format!(
+        "routing time: send idle_ms={} post_ms={}",
+        idle.as_millis(),
+        started.elapsed().saturating_sub(idle).as_millis()
+    ));
     Ok(Posted {
         message_id: posted_id(&answer),
         delivery: delivery.to_owned(),
@@ -907,7 +887,12 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
         "Invalid OpenCode session ID"
     );
     if let Some(host) = agent_host() {
+        let started = std::time::Instant::now();
         sync_bundle_to(&host, &directory)?;
+        crate::env::log(format!(
+            "routing time: send sync_ms={}",
+            started.elapsed().as_millis()
+        ));
     }
     // The agent host has the bundle at the same path (synced above), and an
     // SSH command line can't carry inline images.
@@ -1423,7 +1408,7 @@ mod session_lookup {
     fn agent_host_output_is_bounded() {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "head -c 200000 /dev/zero >&2; printf ok; exit 3"]);
-        let output = bounded_output(command).unwrap();
+        let output = bounded_output(command, std::time::Duration::from_secs(2)).unwrap();
         assert_eq!(output.stdout, b"ok");
         assert_eq!(output.stderr.len() as u64, CLI_STDERR_LIMIT);
         assert_eq!(output.status.code(), Some(3));

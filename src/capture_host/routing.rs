@@ -158,7 +158,7 @@ pub fn router() -> Router {
     );
     Router::new(config, dirs)
         .with_log(|line| {
-            if line.starts_with("deliver:") {
+            if line.starts_with("deliver:") || line.starts_with("routing time:") {
                 tracing::info!(line, "capture router");
             } else {
                 tracing::debug!(line, "capture router");
@@ -496,6 +496,7 @@ impl Worker {
     }
 
     fn written(&mut self, bundle: PathBuf, look: Look) {
+        let started = Instant::now();
         let Look {
             router,
             seen,
@@ -514,6 +515,7 @@ impl Worker {
                 }
                 None
             });
+        let waited = started.elapsed();
         let loaded = scrawl_capture::handoff::load_bundle(&bundle)
             .map(|(_, loaded)| loaded)
             .inspect_err(|error| tracing::warn!(error = %format!("{error:#}"), "could not read a capture to route"))
@@ -567,6 +569,8 @@ impl Worker {
             bundle = %bundle_name(&bundle),
             answer = answer_kind(&answer),
             why = shown.as_ref().map(|shown| shown.why.as_str()),
+            look_wait_ms = waited.as_millis() as u64,
+            judge_ms = started.elapsed().saturating_sub(waited).as_millis() as u64,
             "capture routed"
         );
         if let Some(shown) = &shown
@@ -707,6 +711,7 @@ impl Worker {
     }
 
     fn send_current(&mut self, mut dest: Destination, via: Option<&str>) {
+        let started = Instant::now();
         if let Some(via) = via {
             via.clone_into(&mut dest.via);
         }
@@ -728,6 +733,7 @@ impl Worker {
             bundle = %bundle_name(&current.bundle),
             session = dest.session,
             delivery = delivery_kind(&delivery),
+            elapsed_ms = started.elapsed().as_millis() as u64,
             "capture sent"
         );
         current.sent = sent;
@@ -1772,6 +1778,35 @@ mod tests {
         }
         fn no_tab(_: Option<&str>, _: Option<&str>) -> Option<String> {
             None
+        }
+
+        #[test]
+        fn routing_latency_with_a_slow_session_server() {
+            static READS: AtomicU64 = AtomicU64::new(0);
+            fn slow(path: &str, budget: Duration) -> anyhow::Result<Vec<u8>> {
+                READS.fetch_add(1, Ordering::Relaxed);
+                std::thread::sleep(Duration::from_millis(300));
+                sessions(path, budget)
+            }
+            for (name, destination) in [("session_rule", "ses_board"), ("folder_rule", "/p/board")]
+            {
+                READS.store(0, Ordering::Relaxed);
+                let router = router_with(|c| {
+                    c.apps
+                        .insert("com.example.board".into(), destination.into());
+                });
+                let mut senses = senses(no_tab);
+                senses.hooks.api = slow;
+                let started = Instant::now();
+                let (answer, sent) = route(router, "com.example.board", senses);
+                eprintln!(
+                    "METRIC {name}_ms={} session_reads={}",
+                    started.elapsed().as_millis(),
+                    READS.load(Ordering::Relaxed)
+                );
+                assert!(matches!(answer, RouteAnswer::Rule { .. }));
+                assert_eq!(sent.as_deref(), Some("ses_board"));
+            }
         }
 
         fn senses(tab: fn(Option<&str>, Option<&str>) -> Option<String>) -> look::Senses {
