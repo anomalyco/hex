@@ -1001,6 +1001,11 @@ Final publication complete                               // meetings.notes
      ├── Text outside the block is preserved; changed mid-write -> not written
      └── Missing file -> manifest only
   -> Failure / timeout -> notes_error; Markdown untouched; recording stays Complete
+  -> OpenCode without a chosen model: the ranked models are cached per service;
+     any one failing drops the cache (the next call reads OpenCode's catalog
+     again), and all failing asks OpenCode's own default model, so a list read
+     while OpenCode was still loading no longer fails every call until a
+     restart (#1123; check: stale_ranked_models_fall_back_to_the_default_model)
 
 Unavailable (not eligible / Apple Intelligence off / model not ready / macOS < 26)
   -> Settings row says why; nothing runs
