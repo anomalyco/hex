@@ -531,6 +531,18 @@ fn sound_set() -> SoundSet {
     SoundSet::decode(SOUND_SET.load(Ordering::Relaxed))
 }
 
+/// How long the current set's stop sound lasts, or zero while sounds are
+/// off. A dictation's release tail must not take it for speech.
+pub fn stop_tone_length() -> Duration {
+    if !sounds_enabled() {
+        return Duration::ZERO;
+    }
+    let stop = BUNDLED_SETS[sound_set() as usize].stop;
+    hound::WavReader::new(std::io::Cursor::new(stop)).map_or(Duration::from_millis(450), |reader| {
+        Duration::from_secs_f64(f64::from(reader.duration()) / f64::from(reader.spec().sample_rate))
+    })
+}
+
 /// Plays `what` of `set` at the current volume, so the sound picker can be
 /// heard. It ends the audition still sounding, if any.
 pub fn audition(set: SoundSet, what: Audition) {

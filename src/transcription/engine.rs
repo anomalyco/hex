@@ -1506,6 +1506,25 @@ mod tests {
     }
 
     #[test]
+    fn a_closing_full_stop_at_the_clips_end_does_not_cover_a_dropped_phrase() {
+        // Nemotron 3.5 ASR puts its final full stop on the clip's last frame
+        // (apollo, FLEURS: the last word ended at 8.8 s, the stop at 10.16 s).
+        let token = |text: &str, t1_ms| transcribe_cpp::Token {
+            text: text.into(),
+            t1_ms,
+            ..Default::default()
+        };
+        let tokens = [
+            token(" channels", 2_480),
+            token(",", 2_500),
+            token(".", 4_400),
+            token(" ", 4_400),
+        ];
+        assert_eq!(spoken_text_end_ms(&tokens), Some(2_480));
+        assert_eq!(spoken_text_end_ms(&[token(".", 4_400)]), None);
+    }
+
+    #[test]
     fn a_short_sound_after_the_text_does_not_discard_the_stream() {
         // A key click or the stop tone in the tail is not a dropped phrase.
         let clip = speech_pause_phrase(2_400);

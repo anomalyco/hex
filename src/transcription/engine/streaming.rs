@@ -40,14 +40,21 @@ impl StreamFeed for transcribe_cpp::Stream<'_> {
         if snapshot.timestamp_kind != transcribe_cpp::TimestampKind::Token {
             return None;
         }
-        snapshot
-            .tokens
-            .iter()
-            .map(|token| token.t1_ms)
-            .max()
-            .filter(|&end| end > 0)
-            .map(|end| end as u64)
+        spoken_text_end_ms(&snapshot.tokens)
     }
+}
+
+/// Where the last token with letters or digits ends. Nemotron emits a
+/// closing full stop at the clip's last frame, which would cover any phrase
+/// the stream dropped before it.
+pub(super) fn spoken_text_end_ms(tokens: &[transcribe_cpp::Token]) -> Option<u64> {
+    tokens
+        .iter()
+        .filter(|token| token.text.chars().any(char::is_alphanumeric))
+        .map(|token| token.t1_ms)
+        .max()
+        .filter(|&end| end > 0)
+        .map(|end| end as u64)
 }
 
 /// Silence a dictation stream of `model` hears after the clip, before it
