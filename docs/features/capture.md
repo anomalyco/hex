@@ -160,6 +160,21 @@ On Linux                                 // capture.linux
 On Windows                               // capture.windows
 ├── Source -> the engine's Windows.Graphics.Capture recorder (win/media.rs):
 │   Screen, Window (the picker lists windows), and Area; no permission asked
+├── Movie -> QPC-paced 60 fps, rational frame-index timestamps; the newest WGC
+│   frame wins and idle ticks repeat it. Stop logs genuine, duplicate, and
+│   discarded WGC frames. Eight outstanding GPU samples at most; pool exhaustion
+│   or falling eight ticks behind fails instead of building an unbounded backlog
+├── Encoding -> D3D11 video processor to NV12, GPU copy into an eight-sample
+│   Media Foundation allocator, DXGI surface buffers and a sink writer on the
+│   same protected D3D11 device. Only small keyframe candidates read back to RAM
+│   ├── H.264 High, BT.709 limited range, no B-frames, 60-frame GOP,
+│   │   peak-constrained VBR; requested and accepted parameters logged
+│   └── Standard (Annotate) keeps 2560 display / 1280 window-area long-edge
+│       caps; capture-crate-only High/Master keep native even dimensions.
+│       No multiple-of-16 rounding; the GPU surface carries its actual pitch.
+│       Quality/bitrate and level selection: win/media/encoder.rs
+│   Check: macOS-hosted Windows-target cargo check passed; native verification
+│   of this 60 fps path is pending
 ├── Units -> the engine's targets, windows, and pointer are physical pixels;
 │   the picker and ink overlays sit on the primary display and lay out in its
 │   points, converted with capture_host::pixels_per_point (mixed-DPI displays:

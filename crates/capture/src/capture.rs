@@ -855,6 +855,8 @@ pub fn capture_size(target: &TargetInfo, long_edge: f64) -> (u32, u32) {
 /// What the platform's sampler thread records into. It runs until `stopping`, pushes candidate
 /// frames (at once when `urgent`), and returns the movie it recorded.
 pub(crate) struct Sampler {
+    #[cfg(target_os = "windows")]
+    pub quality: crate::win::media::Quality,
     pub target: TargetInfo,
     pub video_output_path: Option<PathBuf>,
     /// Scrawl's own windows to leave out of the recording.
@@ -913,6 +915,42 @@ impl ScreenCaptureSession {
         own_windows_recorded: Arc<AtomicBool>,
         budget_bytes: usize,
     ) -> Self {
+        Self::start_with_options(
+            target,
+            video_output_path,
+            excluded_window_ids,
+            own_windows_recorded,
+            budget_bytes,
+            #[cfg(target_os = "windows")]
+            crate::win::media::Quality::Standard,
+        )
+    }
+
+    /// Windows capture-crate selection; Annotate continues to call `start_with_budget`.
+    #[cfg(target_os = "windows")]
+    pub fn start_with_quality(
+        target: TargetInfo,
+        path: PathBuf,
+        quality: crate::win::media::Quality,
+    ) -> Self {
+        Self::start_with_options(
+            target,
+            Some(path),
+            Arc::default(),
+            Arc::default(),
+            CANDIDATE_BUDGET_BYTES,
+            quality,
+        )
+    }
+
+    fn start_with_options(
+        target: TargetInfo,
+        video_output_path: Option<PathBuf>,
+        excluded_window_ids: Arc<Mutex<Vec<u32>>>,
+        own_windows_recorded: Arc<AtomicBool>,
+        budget_bytes: usize,
+        #[cfg(target_os = "windows")] quality: crate::win::media::Quality,
+    ) -> Self {
         let started_at = Instant::now();
         #[cfg(target_os = "macos")]
         let started_host = capture_core::HostTime::now();
@@ -930,6 +968,8 @@ impl ScreenCaptureSession {
             .name("scrawl-frame-sampler".into())
             .spawn(move || {
                 platform::run_sampler(Sampler {
+                    #[cfg(target_os = "windows")]
+                    quality,
                     target: sampler_target,
                     video_output_path,
                     excluded_window_ids,

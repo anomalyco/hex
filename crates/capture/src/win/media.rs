@@ -38,18 +38,15 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::Media::MediaFoundation::{
-    IMF2DBuffer, IMFAttributes, IMFMediaType, IMFSample, IMFSinkWriter, IMFSourceReader,
-    MF_E_INVALIDSTREAMNUMBER, MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_BITS_PER_SAMPLE,
-    MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE,
-    MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE,
-    MF_MT_MAJOR_TYPE, MF_MT_MINIMUM_DISPLAY_APERTURE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE,
-    MF_PD_DURATION, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_ALL_STREAMS,
-    MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE,
-    MF_SOURCE_READERF_ENDOFSTREAM, MF_VERSION, MFAudioFormat_Float, MFCreateAttributes,
-    MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL,
-    MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_FULL, MFStartup,
-    MFVideoArea, MFVideoFormat_H264, MFVideoFormat_NV12, MFVideoFormat_RGB32,
+    IMF2DBuffer, IMFAttributes, IMFMediaType, IMFSample, IMFSourceReader, MF_E_INVALIDSTREAMNUMBER,
+    MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
+    MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE,
+    MF_MT_MINIMUM_DISPLAY_APERTURE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_PD_DURATION,
+    MF_SOURCE_READER_ALL_STREAMS, MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING,
+    MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+    MF_SOURCE_READER_MEDIASOURCE, MF_SOURCE_READERF_ENDOFSTREAM, MF_VERSION, MFAudioFormat_Float,
+    MFCreateAttributes, MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Audio,
+    MFMediaType_Video, MFSTARTUP_FULL, MFStartup, MFVideoArea, MFVideoFormat_RGB32,
     MFVideoInterlace_Progressive,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
@@ -68,9 +65,15 @@ use crate::helper::{FrameTimes, Probe};
 use crate::log::scrawl_log;
 use crate::model::{CaptureMode, RgbaFrame, TargetInfo};
 
-/// Recordings keep at most this many frames a second (screens only send frames on change).
-const MAX_FPS: u32 = 30;
-const FRAME_100NS: i64 = 10_000_000 / MAX_FPS as i64;
+mod encoder;
+use encoder::Encoder;
+pub use encoder::Quality;
+
+const MAX_FPS: u32 = 60;
+
+fn frame_time(index: u64) -> i64 {
+    (u128::from(index) * 10_000_000 / u128::from(MAX_FPS)) as i64
+}
 
 fn media_startup() {
     static STARTED: std::sync::Once = std::sync::Once::new();
@@ -130,9 +133,8 @@ impl Gpu {
         .context("D3D11CreateDevice")?;
         let device: ID3D11Device = device.context("no D3D11 device")?;
         let context: ID3D11DeviceContext = context.context("no D3D11 context")?;
-        if let Ok(multithread) = device.cast::<ID3D11Multithread>() {
-            let _ = unsafe { multithread.SetMultithreadProtected(true) };
-        }
+        let multithread = device.cast::<ID3D11Multithread>()?;
+        let _ = unsafe { multithread.SetMultithreadProtected(true) };
         let dxgi: IDXGIDevice = device.cast()?;
         let winrt: IDirect3DDevice =
             unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi) }?.cast()?;
@@ -191,10 +193,9 @@ struct Scaler {
     processor: ID3D11VideoProcessor,
     output: ID3D11Texture2D,
     output_view: ID3D11VideoProcessorOutputView,
-    staging: ID3D11Texture2D,
+    staging: Option<ID3D11Texture2D>,
     width: u32,
     height: u32,
-    format: DXGI_FORMAT,
 }
 
 impl Scaler {
@@ -222,7 +223,12 @@ impl Scaler {
         let enumerator = unsafe { gpu.video_device.CreateVideoProcessorEnumerator(&content) }?;
         let processor = unsafe { gpu.video_device.CreateVideoProcessor(&enumerator, 0) }?;
         let output = gpu.texture(width, height, format, false)?;
-        let staging = gpu.texture(width, height, format, true)?;
+        // Only low-frequency BGRA candidates ever have a CPU-readable texture.
+        let staging = if format == DXGI_FORMAT_B8G8R8A8_UNORM {
+            Some(gpu.texture(width, height, format, true)?)
+        } else {
+            None
+        };
         let desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
             ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
             Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0::default(),
@@ -260,12 +266,11 @@ impl Scaler {
             staging,
             width,
             height,
-            format,
         })
     }
 
-    /// Draws `source` (the `crop` of `input`) into the output, and copies it to the CPU.
-    fn run(&self, gpu: &Gpu, input: &ID3D11Texture2D, crop: RECT) -> Result<Vec<u8>> {
+    /// Draws into a GPU surface; encoding never maps this texture.
+    fn draw(&self, gpu: &Gpu, input: &ID3D11Texture2D, crop: RECT) -> Result<()> {
         let desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
             FourCC: 0,
             ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
@@ -303,103 +308,34 @@ impl Scaler {
         let [stream] = streams;
         drop(ManuallyDrop::into_inner(stream.pInputSurface));
         result?;
-        unsafe { gpu.context.CopyResource(&self.staging, &self.output) };
+        Ok(())
+    }
+
+    /// The unchanged low-frequency candidate readback, BGRA only.
+    fn run(&self, gpu: &Gpu, input: &ID3D11Texture2D, crop: RECT) -> Result<Vec<u8>> {
+        self.draw(gpu, input, crop)?;
+        let staging = self
+            .staging
+            .as_ref()
+            .context("Only candidates can be read back")?;
+        unsafe { gpu.context.CopyResource(staging, &self.output) };
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         unsafe {
             gpu.context
-                .Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
         }?;
         let pitch = mapped.RowPitch as usize;
         let base = mapped.pData.cast::<u8>();
         let (w, h) = (self.width as usize, self.height as usize);
-        let mut out;
-        if self.format == DXGI_FORMAT_NV12 {
-            // Y rows, then interleaved UV rows (half height), each `pitch` apart.
-            out = Vec::with_capacity(w * h * 3 / 2);
-            for row in 0..h + h / 2 {
-                let line = unsafe { std::slice::from_raw_parts(base.add(row * pitch), w) };
-                out.extend_from_slice(line);
-            }
-        } else {
-            out = Vec::with_capacity(w * h * 4);
-            for row in 0..h {
-                let line = unsafe { std::slice::from_raw_parts(base.add(row * pitch), w * 4) };
-                for px in line.chunks_exact(4) {
-                    out.extend_from_slice(&[px[2], px[1], px[0], 255]);
-                }
+        let mut out = Vec::with_capacity(w * h * 4);
+        for row in 0..h {
+            let line = unsafe { std::slice::from_raw_parts(base.add(row * pitch), w * 4) };
+            for px in line.chunks_exact(4) {
+                out.extend_from_slice(&[px[2], px[1], px[0], 255]);
             }
         }
-        unsafe { gpu.context.Unmap(&self.staging, 0) };
+        unsafe { gpu.context.Unmap(staging, 0) };
         Ok(out)
-    }
-}
-
-struct Encoder {
-    writer: IMFSinkWriter,
-    stream: u32,
-    first: Option<i64>,
-    last: Option<i64>,
-}
-
-impl Encoder {
-    fn new(path: &Path, width: u32, height: u32) -> Result<Self> {
-        let mut attributes: Option<IMFAttributes> = None;
-        unsafe { MFCreateAttributes(&mut attributes, 2) }?;
-        let attributes = attributes.context("attributes")?;
-        unsafe { attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1) }?;
-        let writer = unsafe {
-            MFCreateSinkWriterFromURL(&HSTRING::from(path.as_os_str()), None, &attributes)
-        }?;
-        let bitrate = (f64::from(width) * f64::from(height) * f64::from(MAX_FPS) * 0.08) as u32;
-        let output = video_type(&MFVideoFormat_H264, width, height)?;
-        unsafe { output.SetUINT32(&MF_MT_AVG_BITRATE, bitrate.clamp(2_000_000, 16_000_000)) }?;
-        let stream = unsafe { writer.AddStream(&output) }?;
-        let input = video_type(&MFVideoFormat_NV12, width, height)?;
-        unsafe {
-            input.SetUINT32(&MF_MT_DEFAULT_STRIDE, width)?;
-            input.SetUINT32(&MF_MT_ALL_SAMPLES_INDEPENDENT, 1)?;
-            writer.SetInputMediaType(stream, &input, None)?;
-            writer.BeginWriting()?;
-        }
-        Ok(Self {
-            writer,
-            stream,
-            first: None,
-            last: None,
-        })
-    }
-
-    /// Writes one NV12 frame captured at `time` (100 ns, QPC clock).
-    fn write(&mut self, nv12: &[u8], time: i64) -> Result<()> {
-        let first = *self.first.get_or_insert(time);
-        let mut t = time - first;
-        if let Some(last) = self.last
-            && t <= last
-        {
-            t = last + 1;
-        }
-        self.last = Some(t);
-        let buffer = unsafe { MFCreateMemoryBuffer(nv12.len() as u32) }?;
-        unsafe {
-            let mut data = std::ptr::null_mut();
-            buffer.Lock(&mut data, None, None)?;
-            std::ptr::copy_nonoverlapping(nv12.as_ptr(), data, nv12.len());
-            buffer.Unlock()?;
-            buffer.SetCurrentLength(nv12.len() as u32)?;
-        }
-        let sample: IMFSample = unsafe { MFCreateSample() }?;
-        unsafe {
-            sample.AddBuffer(&buffer)?;
-            sample.SetSampleTime(t)?;
-            sample.SetSampleDuration(FRAME_100NS)?;
-            self.writer.WriteSample(self.stream, &sample)?;
-        }
-        Ok(())
-    }
-
-    fn finish(self) -> Result<()> {
-        unsafe { self.writer.Finalize() }?;
-        Ok(())
     }
 }
 
@@ -459,13 +395,18 @@ struct Recorder {
     /// The newest frame, copied out of the frame pool (which recycles its textures).
     latest: Option<(ID3D11Texture2D, (u32, u32), i64)>,
     encoded: Option<i64>,
+    epoch: Option<i64>,
+    frame_index: u64,
+    genuine: u64,
+    duplicated: u64,
+    dropped: u64,
     video: Option<(Scaler, Encoder)>,
     candidates: Scaler,
     out: (u32, u32),
 }
 
 impl Recorder {
-    fn new(target: &TargetInfo, video_path: Option<&Path>, long_edge: f64) -> Result<Self> {
+    fn new(target: &TargetInfo, video_path: Option<&Path>, quality: Quality) -> Result<Self> {
         let gpu = Gpu::new()?;
         let source = capture_source(target)?;
         let pool_size = source.item.Size()?;
@@ -483,14 +424,19 @@ impl Recorder {
             pool_size.Width.max(1) as u32,
             pool_size.Height.max(1) as u32,
         );
-        // H.264 encoders and decoders work in 16 px macroblocks and pad rows to match; a size
-        // off that grid comes back sheared.
-        let (w, h) = capture_size(target, long_edge);
-        let out = ((w & !15).max(16), (h & !15).max(16));
+        let long_edge = if quality != Quality::Standard {
+            f64::INFINITY
+        } else if target.mode == CaptureMode::Display {
+            2560.0
+        } else {
+            1280.0
+        };
+        // NV12 needs even dimensions, not multiples of 16. DXGI carries the real pitch.
+        let out = capture_size(target, long_edge);
         let video = match video_path {
             Some(path) => {
                 let scaler = Scaler::new(&gpu, input, out.0, out.1, DXGI_FORMAT_NV12)?;
-                Some((scaler, Encoder::new(path, out.0, out.1)?))
+                Some((scaler, Encoder::new(&gpu, path, out.0, out.1, quality)?))
             }
             None => None,
         };
@@ -512,6 +458,11 @@ impl Recorder {
             pool_size,
             latest: None,
             encoded: None,
+            epoch: None,
+            frame_index: 0,
+            genuine: 0,
+            duplicated: 0,
+            dropped: 0,
             video,
             candidates,
             out,
@@ -535,6 +486,9 @@ impl Recorder {
     fn pump(&mut self) -> Result<Option<i64>> {
         let mut newest: Option<Direct3D11CaptureFrame> = None;
         while let Ok(frame) = self.pool.TryGetNextFrame() {
+            if newest.is_some() {
+                self.dropped += 1;
+            }
             newest = Some(frame);
         }
         let Some(frame) = newest else {
@@ -564,6 +518,13 @@ impl Recorder {
         };
         unsafe { self.gpu.context.CopyResource(&copy, &texture) };
         // Only the frame's content area is the window (a resized window leaves padding).
+        if self
+            .latest
+            .as_ref()
+            .is_some_and(|(_, _, t)| Some(*t) != self.encoded)
+        {
+            self.dropped += 1;
+        }
         self.latest = Some((copy, size, time));
         drop(frame);
         if content.Width != self.pool_size.Width || content.Height != self.pool_size.Height {
@@ -578,25 +539,33 @@ impl Recorder {
         Ok(Some(time))
     }
 
-    /// Encodes the newest frame if it is new and the frame rate allows.
-    fn encode(&mut self, force_at: Option<i64>) -> Result<()> {
+    /// One QPC-paced CFR tick. The frame index alone determines media timestamps.
+    fn encode(&mut self) -> Result<()> {
         let Some((texture, size, time)) = self.latest.clone() else {
             return Ok(());
         };
-        let time = force_at.unwrap_or(time);
-        if force_at.is_none()
-            && self
-                .encoded
-                .is_some_and(|last| time <= last || time - last < FRAME_100NS)
-        {
+        let now = qpc_100ns();
+        let epoch = *self.epoch.get_or_insert(now);
+        if now - epoch < frame_time(self.frame_index) {
             return Ok(());
         }
         let crop = self.crop(size);
         let Some((scaler, encoder)) = self.video.as_mut() else {
             return Ok(());
         };
-        let nv12 = scaler.run(&self.gpu, &texture, crop)?;
-        encoder.write(&nv12, time)?;
+        // Refuse an unbounded catch-up backlog rather than silently making a VFR movie.
+        ensure!(
+            now - epoch - frame_time(self.frame_index) < frame_time(8),
+            "60 fps recorder fell more than eight frames behind"
+        );
+        scaler.draw(&self.gpu, &texture, crop)?;
+        encoder.write(&self.gpu, &scaler.output, self.frame_index)?;
+        self.frame_index += 1;
+        if self.encoded == Some(time) {
+            self.duplicated += 1;
+        } else {
+            self.genuine += 1;
+        }
         self.encoded = Some(time);
         Ok(())
     }
@@ -616,7 +585,7 @@ impl Recorder {
 }
 
 /// A movie of solid colours, each `(ms, rgb)` shown until the next, through the recorder's
-/// encoder. `width` and `height` must be multiples of 16.
+/// encoder. `width` and `height` must be even.
 #[cfg(test)]
 pub fn write_test_movie(
     path: &Path,
@@ -625,7 +594,9 @@ pub fn write_test_movie(
     frames: &[(u64, [u8; 3])],
 ) -> Result<()> {
     media_startup();
-    let mut encoder = Encoder::new(path, width, height)?;
+    let gpu = Gpu::new()?;
+    let mut encoder = Encoder::new(&gpu, path, width, height, Quality::Standard)?;
+    let texture = gpu.texture(width, height, DXGI_FORMAT_NV12, false)?;
     let pixels = (width * height) as usize;
     for &(ms, [r, g, b]) in frames {
         let (r, g, b) = (f64::from(r), f64::from(g), f64::from(b));
@@ -634,7 +605,11 @@ pub fn write_test_movie(
         let v = (128.0 + 0.439 * r - 0.368 * g - 0.071 * b) as u8;
         let mut nv12 = vec![y; pixels];
         nv12.extend([u, v].repeat(pixels / 4));
-        encoder.write(&nv12, ms as i64 * 10_000)?;
+        unsafe {
+            gpu.context
+                .UpdateSubresource(&texture, 0, None, nv12.as_ptr().cast(), width, 0)
+        };
+        encoder.write(&gpu, &texture, ms * u64::from(MAX_FPS) / 1_000)?;
     }
     encoder.finish()
 }
@@ -650,17 +625,17 @@ pub(crate) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         urgent,
         frames,
         video_offset_ms,
+        quality,
+        failure,
         ..
     } = sampler;
-    let long_edge = if target.mode == CaptureMode::Display {
-        2560.0
-    } else {
-        1280.0
-    };
-    let mut recorder = match Recorder::new(&target, video_output_path.as_deref(), long_edge) {
+    let mut recorder = match Recorder::new(&target, video_output_path.as_deref(), quality) {
         Ok(recorder) => Some(recorder),
         Err(error) => {
             scrawl_log(format!("Screen capture failed to start: {error:#}"));
+            *failure
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
             None
         }
     };
@@ -680,18 +655,19 @@ pub(crate) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
             && !failed
         {
             let step = r.pump().and_then(|arrived| {
-                if let Some(time) = arrived
-                    && r.encoded.is_none()
-                {
+                if arrived.is_some() && r.epoch.is_none() {
                     // The movie starts at its first frame; place that on the capture clock.
-                    let lag_ms = (qpc_100ns() - time).max(0) / 10_000;
-                    let offset = (started_at.elapsed().as_millis() as i64 - lag_ms).max(0);
-                    video_offset_ms.store(offset as u64, Ordering::Release);
+                    video_offset_ms
+                        .store(started_at.elapsed().as_millis() as u64, Ordering::Release);
                 }
-                r.encode(None)
+                r.encode()
             });
             if let Err(error) = step {
                 scrawl_log(format!("Recording frame failed: {error:#}"));
+                *failure
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(format!("{error:#}"));
                 failed = true;
             }
         }
@@ -714,18 +690,32 @@ pub(crate) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
                     .push(frame, is_urgent);
             }
         }
-        std::thread::park_timeout(Duration::from_millis(8));
+        let wait = recorder
+            .as_ref()
+            .and_then(|r| {
+                r.epoch.map(|epoch| {
+                    Duration::from_nanos(
+                        ((epoch + frame_time(r.frame_index) - qpc_100ns()).max(0) as u64) * 100,
+                    )
+                })
+            })
+            .unwrap_or(Duration::from_millis(2));
+        std::thread::park_timeout(wait.min(Duration::from_millis(2)));
     }
     let recorder = recorder?;
-    let mut recorder = recorder;
-    // Hold the last frame until the end, so the movie lasts as long as the capture.
-    let _ = recorder.pump();
-    let _ = recorder.encode(Some(qpc_100ns()));
+    scrawl_log(format!(
+        "Recording frames: genuine={} duplicated={} dropped={} encoded={} fps=60",
+        recorder.genuine, recorder.duplicated, recorder.dropped, recorder.frame_index
+    ));
+    let has_frames = recorder.frame_index > 0;
     let Recorder { video, .. } = recorder;
     let (_, encoder) = video?;
-    encoder.first?;
+    if !has_frames {
+        return None;
+    }
     match encoder.finish() {
-        Ok(()) => video_output_path,
+        Ok(()) if !failed => video_output_path,
+        Ok(()) => None,
         Err(error) => {
             scrawl_log(format!("Finishing the recording failed: {error:#}"));
             None
