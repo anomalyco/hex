@@ -422,13 +422,18 @@ fn non_empty(value: Option<&str>) -> Option<String> {
 }
 
 /// The socket address in `http://127.0.0.1:4096…` when its host is an IP or `localhost` (no
-/// lookups).
+/// lookups). A service bound to every address (`0.0.0.0`, `::`) is reached through loopback:
+/// Windows refuses to connect to an unspecified address.
 fn server_address(url: &str) -> Option<std::net::SocketAddr> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     let parsed = crate::routing::parse_url(url.split_whitespace().next()?)?;
-    let ip = if parsed.host == "localhost" {
-        std::net::IpAddr::from([127, 0, 0, 1])
-    } else {
-        parsed.host.parse().ok()?
+    let ip = match parsed.host.as_str() {
+        "localhost" => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        host => match host.parse().ok()? {
+            IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+            ip => ip,
+        },
     };
     Some(std::net::SocketAddr::new(ip, parsed.port))
 }
@@ -1246,6 +1251,18 @@ mod session_lookup {
             Some("127.0.0.1:4096")
         );
         assert_eq!(addr("http://[::1]:5000").as_deref(), Some("[::1]:5000"));
+        // A service bound to every address is reached through loopback (#1210).
+        assert_eq!(
+            addr("http://0.0.0.0:4096").as_deref(),
+            Some("127.0.0.1:4096")
+        );
+        assert_eq!(addr("http://[::]:4096").as_deref(), Some("[::1]:4096"));
+        let wildcard = ServiceFile {
+            hostname: Some("0.0.0.0".into()),
+            port: Some(4096),
+            ..Default::default()
+        };
+        assert_eq!(wildcard.address(), Some("127.0.0.1:4096".parse().unwrap()));
         assert_eq!(addr("https://10.0.0.2").as_deref(), Some("10.0.0.2:443"));
         assert_eq!(addr("http://studio.example.ts.net:4096"), None);
         assert_eq!(addr("nonsense"), None);
