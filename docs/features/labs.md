@@ -34,7 +34,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (macOS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
-├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote" become line breaks and quotation marks; Spanish "nuevo párrafo", "nueva línea", "abre/cierra comillas", … too (#630, #1040)
+├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote", "quote … unquote" become line breaks and quotation marks; Spanish "nuevo párrafo", "nueva línea", "abre/cierra comillas", … too (#630, #1040)
 ├── Spoken symbols  no    labs.spoken_symbols          spoken "hashtag", "underscore", "comma", … become symbols joined to their words: "#release", "my_variable", "done, thanks"; Spanish "arroba", "guion bajo", "coma", … too (#678, #1040)
 ├── Remove filler words no labs.filler_words          um, umm, uh, uhh, erm, er, ah leave dictations, with no model (#631)
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
@@ -194,7 +194,12 @@ replacements). Whole phrases, ignoring case and Spanish accents, are
 replaced: "new line", "line break", "nueva línea", and "salto de línea" by
 one line break, "new paragraph" and "nuevo párrafo" by two, "open quote",
 "abrir comillas", and "abre comillas" by an opening `"`, and "close quote",
-"cerrar comillas", and "cierra comillas" by a closing one; the commas,
+"cerrar comillas", and "cierra comillas" by a closing one. A whole-word
+"quote" with a later "unquote" in the same dictation and words between them
+becomes the same pair of marks ("He said quote hello unquote." becomes
+`He said "hello".`, #1167); "quote" with no "unquote" after it, a lone
+"unquote", "quotes"/"quoted"/"unquoted", and "quote unquote" said back to
+back stay as they are. The commas,
 periods, and spaces the model puts around a command go with it ("Hello. New
 line. Next" becomes "Hello.\nNext"). Words such as "newline", "new liner",
 "lineal", or "comillas" alone stay as they are. English and Spanish phrases

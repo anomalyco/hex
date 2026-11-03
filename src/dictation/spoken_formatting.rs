@@ -1,5 +1,6 @@
 //! Labs › Spoken formatting: whole spoken phrases ("new line", "line
-//! break", "new paragraph", "open quote", "close quote") become line breaks
+//! break", "new paragraph", "open quote", "close quote", and "quote" …
+//! "unquote" around words, #1167) become line breaks
 //! and quotation marks, in English and Spanish ("nuevo párrafo", "nueva
 //! línea", "abre comillas", …). Matching ignores case and Spanish accents
 //! and needs word boundaries, so "newline" or "new liner" stay as they are.
@@ -50,10 +51,27 @@ pub fn apply(transcript: &str) -> String {
     let chars: Vec<char> = transcript.chars().collect();
     let mut out = String::with_capacity(transcript.len());
     let mut index = 0;
+    // Where the "unquote" closing an open "quote" starts.
+    let mut pending_unquote: Option<usize> = None;
     while index < chars.len() {
         let word_start = index == 0 || !chars[index - 1].is_alphanumeric();
+        if pending_unquote == Some(index) {
+            pending_unquote = None;
+            let end = index + "unquote".len();
+            index = emit(&mut out, Command::CloseQuote, &chars, end);
+            continue;
+        }
         if word_start && let Some((command, end)) = command_at(&chars, index) {
             index = emit(&mut out, command, &chars, end);
+            continue;
+        }
+        if word_start
+            && pending_unquote.is_none()
+            && let Some(end) = word_at(&chars, index, "quote")
+            && let Some(close) = unquote_after(&chars, end)
+        {
+            pending_unquote = Some(close);
+            index = emit(&mut out, Command::OpenQuote, &chars, end);
             continue;
         }
         out.push(chars[index]);
@@ -89,6 +107,35 @@ fn command_at(chars: &[char], start: usize) -> Option<(Command, usize)> {
             .is_none_or(|next| !next.is_alphanumeric());
         word_end.then_some((*command, position))
     })
+}
+
+/// Where the whole word `word` starting at `start` ends, if it is there.
+fn word_at(chars: &[char], start: usize, word: &str) -> Option<usize> {
+    let mut position = start;
+    for expected in word.chars() {
+        match chars.get(position) {
+            Some(&c) if fold(c) == expected => position += 1,
+            _ => return None,
+        }
+    }
+    chars
+        .get(position)
+        .is_none_or(|next| !next.is_alphanumeric())
+        .then_some(position)
+}
+
+/// Where the first whole-word "unquote" after `from` starts, when some words
+/// come between: "quote unquote experts" is a figure of speech, not a quote.
+fn unquote_after(chars: &[char], from: usize) -> Option<usize> {
+    let mut words_between = false;
+    for index in from..chars.len() {
+        let word_start = index == 0 || !chars[index - 1].is_alphanumeric();
+        if word_start && word_at(chars, index, "unquote").is_some() {
+            return words_between.then_some(index);
+        }
+        words_between |= chars[index].is_alphanumeric();
+    }
+    None
 }
 
 fn is_space(c: char) -> bool {
@@ -170,6 +217,27 @@ mod tests {
             "He said, \"hello\", and left."
         );
         assert_eq!(apply("open quote yes close quote then"), "\"yes\" then");
+    }
+
+    #[test]
+    fn quote_unquote_becomes_quotation_marks() {
+        assert_eq!(apply("He said quote hello unquote."), "He said \"hello\".");
+        assert_eq!(
+            apply("Quote, something, unquote, and more"),
+            "\"something\", and more"
+        );
+        assert_eq!(
+            apply("open quote a close quote and quote b unquote"),
+            "\"a\" and \"b\""
+        );
+        for text in [
+            "Can I get a quote for this",
+            "quote unquote experts",
+            "an unquote alone",
+            "quotes and quoted text unquoted",
+        ] {
+            assert_eq!(apply(text), text);
+        }
     }
 
     #[test]
