@@ -61,7 +61,7 @@ pub(super) struct Again {
 
 impl Again {
     /// A finished run, as if its worker had answered.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(super) fn finished(id: u64, model: &str, result: Result<String, String>) -> Self {
         Self {
             id,
