@@ -468,13 +468,21 @@ fn numbers_only(transcript: &str) -> bool {
     any_number
 }
 
+/// One generation's text and the model that wrote it, when Hex named one
+/// (`None` when OpenCode's own default model answered).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Generated {
+    pub text: String,
+    pub model: Option<Model>,
+}
+
 /// One generation from OpenCode's default ranked models, for work outside
 /// dictation such as meeting notes.
 pub(crate) fn generate_text(
     prompt: &str,
     deadline: Duration,
     cancelled: &AtomicBool,
-) -> Result<String> {
+) -> Result<Generated> {
     generate_cancellable(prompt, None, deadline, cancelled)
 }
 
@@ -485,7 +493,7 @@ pub(crate) fn generate_text_with(
     model: &Model,
     deadline: Duration,
     cancelled: &AtomicBool,
-) -> Result<String> {
+) -> Result<Generated> {
     generate_cancellable(prompt, Some(model), deadline, cancelled)
 }
 
@@ -500,7 +508,8 @@ fn generate_observed(
     profile_name: &str,
     started: Instant,
 ) -> (Option<String>, ProcessingObservation) {
-    let (text, fallback) = match generate_cancellable(prompt, model, deadline, cancelled) {
+    let result = generate_cancellable(prompt, model, deadline, cancelled);
+    let (text, fallback) = match result.map(|generated| generated.text) {
         Ok(text) if !text.trim().is_empty() => (Some(text.trim().into()), None),
         Ok(_) => (None, Some("processor returned empty text".into())),
         Err(error) => (None, Some(error.to_string())),
@@ -886,6 +895,7 @@ struct ResponseData {
 #[cfg(test)]
 fn generate(prompt: &str, model: Option<&Model>, deadline: Duration) -> Result<String> {
     generate_cancellable(prompt, model, deadline, &AtomicBool::new(false))
+        .map(|generated| generated.text)
 }
 
 fn generate_cancellable(
@@ -893,7 +903,7 @@ fn generate_cancellable(
     model: Option<&Model>,
     deadline: Duration,
     cancelled: &AtomicBool,
-) -> Result<String> {
+) -> Result<Generated> {
     let started = Instant::now();
     let lock = crate::policy::Lock::OpenCodeProcessing;
     if crate::policy::Policy::current().locks(lock) {
@@ -920,7 +930,7 @@ fn generate_with_candidates(
     deadline: Duration,
     cancelled: &AtomicBool,
     post: impl FnMut(&str, Duration, &AtomicBool) -> Result<Response>,
-) -> Result<String> {
+) -> Result<Generated> {
     if model.is_none() {
         let candidates = candidates();
         if !candidates.is_empty() {
@@ -934,7 +944,11 @@ fn generate_with_candidates(
             );
         }
     }
-    generate_single_model(prompt, model, started, deadline, cancelled, post)
+    let text = generate_single_model(prompt, model, started, deadline, cancelled, post)?;
+    Ok(Generated {
+        text,
+        model: model.cloned(),
+    })
 }
 
 fn remaining_generation_deadline(started: Instant, deadline: Duration) -> Result<Duration> {
@@ -956,7 +970,7 @@ fn generate_with_ranked_candidates(
     deadline: Duration,
     cancelled: &AtomicBool,
     mut post: impl FnMut(&str, Duration, &AtomicBool) -> Result<Response>,
-) -> Result<String> {
+) -> Result<Generated> {
     let mut last_error = None;
     for (index, candidate) in candidates.iter().enumerate() {
         let remaining = remaining_generation_deadline(started, deadline)?;
@@ -965,7 +979,12 @@ fn generate_with_ranked_candidates(
             model: Some(candidate),
         })?;
         match post(&data, remaining, cancelled)? {
-            Response::Success { data } => return Ok(data.text),
+            Response::Success { data } => {
+                return Ok(Generated {
+                    text: data.text,
+                    model: Some(candidate.clone()),
+                });
+            }
             Response::Error { message } => {
                 if index + 1 < candidates.len() {
                     tracing::warn!(
@@ -1670,7 +1689,8 @@ mod tests {
             |data, remaining, cancelled| post_generation(&service, data, remaining, cancelled),
         )
         .unwrap();
-        assert_eq!(output, "resolved from second ranked model");
+        assert_eq!(output.text, "resolved from second ranked model");
+        assert_eq!(output.model.as_ref(), Some(&candidates[1]));
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 2);
         let first: serde_json::Value = serde_json::from_slice(&requests[0]).unwrap();

@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use serde::Deserialize;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::dictation::processor::Model;
@@ -20,6 +21,24 @@ pub struct GeneratedNotes {
     pub title: String,
     #[serde(default)]
     pub summary: String,
+    /// Who wrote these notes; set by `generate_notes`, never by the model.
+    #[serde(skip)]
+    pub written_by: Option<NotesWriter>,
+}
+
+/// The writer that produced a meeting's notes, kept with them in the
+/// manifest and named in the exported Markdown.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "writer", rename_all = "snake_case")]
+pub enum NotesWriter {
+    AppleIntelligence,
+    #[serde(rename = "opencode")]
+    OpenCode {
+        /// `provider/model`, when Hex named the model; `None` when
+        /// OpenCode's own default answered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
 }
 
 /// One live chapter pass: what the new lines are about, and whether that is
@@ -133,14 +152,26 @@ pub(crate) fn generate_notes(
     match writer().map_err(GenerationError::Failed)? {
         #[cfg(target_os = "macos")]
         Writer::AppleIntelligence => {
-            crate::apple_intelligence::generate_notes(instructions, prompt, timeout)
+            let notes = crate::apple_intelligence::generate_notes(instructions, prompt, timeout)?;
+            Ok(GeneratedNotes {
+                written_by: Some(NotesWriter::AppleIntelligence),
+                ..notes
+            })
         }
-        Writer::OpenCode => opencode(
-            instructions,
-            prompt,
-            r#"{"title": "...", "summary": "..."}"#,
-            timeout,
-        ),
+        Writer::OpenCode => {
+            let (notes, model) = opencode_reporting::<GeneratedNotes>(
+                instructions,
+                prompt,
+                r#"{"title": "...", "summary": "..."}"#,
+                timeout,
+            )?;
+            Ok(GeneratedNotes {
+                written_by: Some(NotesWriter::OpenCode {
+                    model: model.map(|model| format!("{}/{}", model.provider, model.id)),
+                }),
+                ..notes
+            })
+        }
     }
 }
 
@@ -210,6 +241,16 @@ fn opencode<T: DeserializeOwned>(
     shape: &str,
     timeout: Duration,
 ) -> Result<T, GenerationError> {
+    opencode_reporting(instructions, prompt, shape, timeout).map(|(answer, _)| answer)
+}
+
+/// [`opencode`], with the model that answered when Hex named one.
+fn opencode_reporting<T: DeserializeOwned>(
+    instructions: &str,
+    prompt: &str,
+    shape: &str,
+    timeout: Duration,
+) -> Result<(T, Option<Model>), GenerationError> {
     let request = format!(
         "{instructions}\n\n{prompt}\n\nAnswer with only a JSON object shaped like {shape}, \
          without code fences or any other text."
@@ -217,7 +258,7 @@ fn opencode<T: DeserializeOwned>(
     let cancelled = AtomicBool::new(false);
     // Labs › Choose meeting summary model: exactly the chosen model, whose
     // failure is the meeting's notes error; otherwise the ranked models.
-    let text = match summary_model() {
+    let generated = match summary_model() {
         Some(model) => {
             crate::dictation::processor::generate_text_with(&request, &model, timeout, &cancelled)
                 .map_err(|error| {
@@ -227,7 +268,7 @@ fn opencode<T: DeserializeOwned>(
         None => crate::dictation::processor::generate_text(&request, timeout, &cancelled)
             .map_err(|error| GenerationError::Failed(format!("{error:#}")))?,
     };
-    parse_json(&text)
+    Ok((parse_json(&generated.text)?, generated.model))
 }
 
 /// The saved `meetings.opencode_model`, as settings last applied it.

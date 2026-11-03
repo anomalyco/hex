@@ -987,10 +987,17 @@ Final publication complete                               // meetings.notes
      └── Context exceeded -> retried once with half the excerpt
   -> 90 s total deadline; the call ≤60 s
   -> Manifest: notes { title ≤8 words, summary ≤2 sentences / 400 chars,
-     excerpt_chars, transcript_chars }
+     excerpt_chars, transcript_chars, written_by }
+     └── written_by: {"writer": "apple_intelligence"} or {"writer": "opencode",
+         "model": "provider/model"} (no model when OpenCode's default answered);
+         absent on notes written before #1125
   -> Markdown copy, same file name, atomic replace
      ├── Heading -> final title, only while it still reads Hex's last title
      ├── <!-- hex:notes --> ## Summary (one paragraph) above ## Transcript
+     │   └── Footer names the writer: "Written on this Mac by Apple
+     │       Intelligence", "Written by <provider/model> through OpenCode", or,
+     │       for older notes without written_by, no writer at all (#1125;
+     │       check: the_notes_footer_names_the_writer_that_wrote_them)
      ├── Text outside the block is preserved; changed mid-write -> not written
      └── Missing file -> manifest only
   -> Failure / timeout -> notes_error; Markdown untouched; recording stays Complete
