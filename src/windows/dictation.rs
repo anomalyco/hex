@@ -21,6 +21,10 @@ use crate::windows::input::{HotkeyAction, WindowsHotkeyMonitor};
 use crate::windows::paste::WindowsPaster;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(5);
+/// The longest wait while idle with the microphone streaming. Its chunks
+/// (about every 10 ms) wake the loop, which then takes shortcut events and
+/// commands, so it needs no wakeup of its own between them.
+const IDLE_STREAM_WAIT: Duration = Duration::from_millis(50);
 
 struct Job {
     transcript: PendingTranscript,
@@ -679,8 +683,19 @@ pub fn run(
             emit_current_state(&mut events, recording, pending, &device_label)?;
         }
 
+        let idle_streaming = audio_ready
+            && input.is_open()
+            && !recording
+            && !start_pending
+            && finishing.is_none()
+            && pending == 0
+            && !timeline.wants_audio();
         match input.recv_timeout(
-            UPDATE_INTERVAL,
+            if idle_streaming {
+                IDLE_STREAM_WAIT
+            } else {
+                UPDATE_INTERVAL
+            },
             crate::audio::capture_idle(
                 recording || timeline.wants_audio(),
                 start_pending,
