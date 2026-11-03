@@ -1763,7 +1763,6 @@ fn neutral_keyboard_rebuilds_modifier_history_after_a_missed_release() {
     assert_eq!(hotkey.process(option, now + Duration::from_secs(1)), None);
     let repaired = recover_after_neutral_window(&mut hotkey, now + Duration::from_secs(2), 0);
     assert_eq!(hotkey.modifier_history.flags, NO_FLAGS);
-    assert_eq!(hotkey.modifier_history.neutral_at, Some(repaired));
     assert_eq!(
         hotkey.process(option, repaired + Duration::from_secs(1)),
         Some(HotkeyAction::Start)
@@ -2517,7 +2516,12 @@ fn the_cancel_shortcut_discards_only_a_toggled_recording() {
     // Hold mode: no cancel, even with a binding.
     let mut hotkey = test_hotkey(true, now);
     hotkey.set_cancel(cancel);
-    assert_eq!(hotkey.process(escape(true), ms(500)), None);
+    let held_escape = InputEvent::Key {
+        code: ESCAPE_KEY_CODE,
+        down: true,
+        flags: OPTION_KEY_MASK,
+    };
+    assert_eq!(hotkey.process(held_escape, ms(500)), None);
     assert!(hotkey.is_recording());
 }
 

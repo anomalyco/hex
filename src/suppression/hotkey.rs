@@ -365,12 +365,10 @@ impl DictationHotkey {
         );
         self.pressed_keys.clear();
         self.key_down_at.clear();
-        self.modifier_history = ModifierHistory {
-            flags: sampled_flags,
-            flags_at: sampled_through,
-            since_neutral: 0,
-            neutral_at: Some(sampled_through),
-        };
+        // The scan is not atomic, so it rebuilds the held modifiers but is no
+        // neutral evidence for keys whose delayed edges may still arrive.
+        self.modifier_history.flags = sampled_flags;
+        self.modifier_history.flags_at = sampled_through;
         self.side_down_at
             .retain(|&mask, _| sampled_flags & mask != 0);
         // Repair bookkeeping only: a lock keeps capturing until a fresh press.
