@@ -680,6 +680,8 @@ Model advertises streaming, GPU device             // dictate.streaming
     -> Finalize -> Final text
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
+       ├── ≥ 300 ms of speech the stream heard lies > 400 ms past its text's end
+       │   -> Transcribe the whole clip offline (source=fallback)   // #1101
        ├── No final text within 1.5 s -> Abort the stream -> Whole clip
        └── Model switched during the capture -> Stream closed -> Whole clip
   Short tap, chord discard, microphone failure -> Drop the stream
@@ -847,7 +849,7 @@ only about 8 dB louder than the room missed the meeting detector's 12 dB
 speech margin, so the whole dictation counted as one pause and the stream
 heard only its first 2.5 s ("This in a test on the" for a 17 s clip over
 −35 dBFS noise). `PauseCap` now cuts only frames within 4 dB of the noise
-floor (or under −70 dBFS since #841) (`SpeechFrames::is_quiet`); anything louder is
+floor (or under −70 dBFS since #841) (`FrameLevel::quiet`); anything louder is
 kept. Noisier rooms keep more pause audio rather than lose speech. Check:
 `quiet_speech_over_steady_noise_is_never_cut_as_a_pause` (synthetic noise
 bursts, a fake stream; no real-model or microphone run).
@@ -874,6 +876,28 @@ pause cap and the meeting pause detector alike. Check:
 speech over −58 dBFS noise on a −26 dBFS DC offset; synthetic, a fake
 stream). The DC offset is inferred from the reporter's logs (clips that pass
 the −50 dBFS silence gate yet read as quiet), not measured on the device.
+
+**Fixed November 3, 2026 (issue 1101):** a short last phrase after a pause of
+about 1 s could be missing from the paste while the clip held it: the stream
+finalized without it, and a stream with text was never retranscribed.
+`PauseCap` now records where each speech frame (the meeting detector's 12 dB
+margin) the stream heard ends, and after finalizing compares that with the
+end of the stream's last token. At least 300 ms of speech more than 400 ms
+past the text makes the stream unusable, so the whole clip is transcribed
+offline (`source=fallback`, reason "the stream's text ends at … ms but … ms
+of speech follows"). A key click or stop tone in the 200 ms tail is shorter
+than that. Checks:
+`a_stream_that_dropped_a_phrase_after_a_pause_falls_back_to_the_whole_clip`
+and `a_short_sound_after_the_text_does_not_discard_the_stream` (synthetic
+tones, a fake stream). **Observed November 3, 2026, apollo (Radeon 8060S,
+Vulkan), Unified English Q8, an ad hoc probe through `PauseCap` and the real
+stream:** a FLEURS clip cut to speech, 1 s of digital silence, and a 1.2 s
+phrase from the same speaker lost the phrase in the stream (with or without
+the macOS 400 ms trailing silence) while the whole clip kept it ("…channels
+25 to 30 years"); the check flagged it. Seven ordinary clips (JFK, FLEURS,
+product names, 1.7–15 s) finished from the stream; an 84 s speech ending in
+applause fell back. Nemotron 3.5 ASR (the reporter's model), macOS, and a
+microphone were not run; the stream's own loss is not fixed upstream.
 
 ### Ongoing Jobs And Output
 

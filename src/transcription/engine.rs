@@ -1318,6 +1318,8 @@ mod tests {
         /// Fail every feed once this many samples are in, as a native
         /// stream error would.
         fail_after: Option<usize>,
+        /// Where its finalized text ends, in milliseconds.
+        text_end_ms: Option<u64>,
     }
 
     impl StreamFeed for FakeStream {
@@ -1338,6 +1340,10 @@ mod tests {
                 stable: format!("heard {}", self.fed.len()),
                 tentative: String::new(),
             }
+        }
+
+        fn text_end_ms(&self) -> Option<u64> {
+            self.text_end_ms
         }
     }
 
@@ -1453,6 +1459,60 @@ mod tests {
         let result = finish_stream(&mut capped, &clip, 0);
         assert!(capped.dropped > 0);
         assert!(result.is_err(), "{result:?}");
+    }
+
+    /// Quiet pre-roll, 2 s of speech, a 1 s pause, `phrase` samples of
+    /// speech, then the 200 ms tail after the stop.
+    fn speech_pause_phrase(phrase: usize) -> Vec<f32> {
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(32_000));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(phrase));
+        clip.extend(vec![0.0; 3_200]);
+        clip
+    }
+
+    fn finish_with_text_end(clip: &[f32], text_end_ms: u64) -> Result<String, String> {
+        let mut fake = FakeStream {
+            text_end_ms: Some(text_end_ms),
+            ..FakeStream::default()
+        };
+        let mut capped = PauseCap::new(&mut fake, 0);
+        for chunk in clip.chunks(1_600) {
+            capped.feed(chunk).unwrap();
+        }
+        let result = finish_stream(&mut capped, clip, clip.len());
+        assert_eq!(fake.fed, clip);
+        result
+    }
+
+    #[test]
+    fn a_stream_that_dropped_a_phrase_after_a_pause_falls_back_to_the_whole_clip() {
+        // #1101: speech, a 1 s pause, a short last phrase, then stop. The
+        // stream heard it all, but its text ended with the first speech.
+        let clip = speech_pause_phrase(12_800);
+        let result = finish_with_text_end(&clip, 2_500);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|reason| reason.contains("speech follows")),
+            "{result:?}"
+        );
+        // Text that reaches the phrase is the stream's to keep.
+        assert_eq!(
+            finish_with_text_end(&clip, 4_200),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_short_sound_after_the_text_does_not_discard_the_stream() {
+        // A key click or the stop tone in the tail is not a dropped phrase.
+        let clip = speech_pause_phrase(2_400);
+        assert_eq!(
+            finish_with_text_end(&clip, 2_500),
+            Ok(format!("streamed {}", clip.len()))
+        );
     }
 
     #[test]
