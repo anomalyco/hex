@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Hona/strobe/main/schema/strobe.v1.json",
+  "build": {
+    "command": "cargo build --locked --profile strobe --features strobe --bin hex",
+    "output": "{cache}/cargo-target/strobe/hex.exe",
+    "env": {
+      "CARGO_TARGET_DIR": "{cache}/cargo-target",
+      "TRANSCRIBE_CMAKE_ARGS": "-DGGML_NATIVE=OFF"
+    }
+  },
+  "apps": {
+    "hex": {
+      "kind": "native",
+      "exe": {
+        "windows": "target/strobe/hex.exe",
+        "macos": "/Applications/Hex.app/Contents/MacOS/hex",
+        "linux": "~/.local/share/hex/current/hex"
+      },
+      "args": ["app"],
+      "env": {
+        "HEX_APPLICATION_SUPPORT_DIR": "{home}/hex-data",
+        "HEX_DISABLE_UPDATES": "1",
+        "HF_HUB_CACHE": "{home}/.cache/huggingface/hub"
+      },
+      "unset": ["HEX_*", "WGPU_*", "RUNE_*", "HF_HOME", "RUST_LOG"],
+      "files": {
+        "hex-data/onboarding-complete": "",
+        "hex-data/settings.json": {
+          "enable_on_launch": false,
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+        }
+      },
+      "guard": [
+        { "file": "%APPDATA%/hex/local-api.json", "pid": "pid" },
+        { "file": "%APPDATA%/hex/settings.json" },
+        { "file": "~/Library/Application Support/hex/local-api.json", "pid": "pid" },
+        { "file": "~/Library/Application Support/hex/settings.json" },
+        { "file": "~/.local/share/hex/local-api.json", "pid": "pid" },
+        { "file": "~/.local/share/hex/settings.json" }
+      ]
+    }
+  },
+  "benches": ["perf/**/*.bench.ts"],
+  "metrics": { "equivalence": "2%" }
+}

@@ -252,95 +252,102 @@ pub fn preload() -> Result<()> {
     }
     let (sender, receiver) = mpsc::sync_channel::<Request>(32);
     let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        let sounds = match Sounds::load() {
-            Ok(sounds) => sounds,
-            Err(error) => {
-                let _ = ready_sender.send(Err(error));
-                LOADER_STARTED.store(false, Ordering::Release);
-                return;
-            }
-        };
-        let mut output = FeedbackOutput::new();
-        // The device opens for the first tone, not at startup, so an idle app
-        // holds no output stream. Publish before any tone arrives.
-        publish_player(&DICTATION_PLAYER, sender, ready_sender, Ok(()));
-        let mut start_tone = ProvisionalStart::default();
-        let mut audition = Auditioning::default();
-        loop {
-            let timeout = start_tone.wait(Instant::now(), OBSERVATION_INTERVAL);
-            let request = match receiver.recv_timeout(timeout) {
-                Ok(request) => Some(request),
-                Err(mpsc::RecvTimeoutError::Timeout) => None,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+    let spawned = thread::Builder::new()
+        .name("feedback".into())
+        .spawn(move || {
+            let sounds = match Sounds::load() {
+                Ok(sounds) => sounds,
+                Err(error) => {
+                    let _ = ready_sender.send(Err(error));
+                    LOADER_STARTED.store(false, Ordering::Release);
+                    return;
+                }
             };
-            let received_at = Instant::now();
-            let timed_out = request.is_none();
-            let enabled = sounds_enabled();
-            output.release_when_idle(enabled, received_at);
-            if !enabled {
-                start_tone.retract();
-                audition.stop();
-                continue;
-            }
-            let tone = match request {
-                Some(Request::Play(tone)) => {
-                    if tone == Tone::DictationStart {
-                        start_tone.cancel_pending();
-                    }
-                    Some(tone)
-                }
-                Some(Request::ProvisionalStart) => {
-                    start_tone.request(received_at);
-                    // Opening during the chord grace keeps a cold device off
-                    // the path to the audible tone.
-                    output.prepare(received_at);
-                    None
-                }
-                Some(Request::RetractStart) => {
+            let mut output = FeedbackOutput::new();
+            // The device opens for the first tone, not at startup, so an idle app
+            // holds no output stream. Publish before any tone arrives.
+            publish_player(&DICTATION_PLAYER, sender, ready_sender, Ok(()));
+            let mut start_tone = ProvisionalStart::default();
+            let mut audition = Auditioning::default();
+            loop {
+                let timeout = start_tone.wait(Instant::now(), OBSERVATION_INTERVAL);
+                let request = match receiver.recv_timeout(timeout) {
+                    Ok(request) => Some(request),
+                    Err(mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                };
+                let received_at = Instant::now();
+                let timed_out = request.is_none();
+                let enabled = sounds_enabled();
+                output.release_when_idle(enabled, received_at);
+                if !enabled {
                     start_tone.retract();
-                    None
-                }
-                Some(Request::Prepare) => {
-                    output.prepare(received_at);
-                    None
-                }
-                Some(Request::Audition(set, what)) => {
                     audition.stop();
-                    let stopped = audition.begin();
-                    for (sound, at, cue) in sounds.audition(set, what) {
-                        let (sound, _) = Retractable::with_flag(sound.delay(at), stopped.clone());
-                        output.play(sound, (set, cue));
+                    continue;
+                }
+                let tone = match request {
+                    Some(Request::Play(tone)) => {
+                        if tone == Tone::DictationStart {
+                            start_tone.cancel_pending();
+                        }
+                        Some(tone)
                     }
-                    #[cfg(target_os = "macos")]
-                    if what == Audition::Cue(Cue::Error) && !set.has_own_error() {
-                        audition.system = spawn_system_sound("Basso");
+                    Some(Request::ProvisionalStart) => {
+                        start_tone.request(received_at);
+                        // Opening during the chord grace keeps a cold device off
+                        // the path to the audible tone.
+                        output.prepare(received_at);
+                        None
                     }
-                    None
-                }
-                Some(Request::StopAudition) => {
-                    audition.stop();
-                    None
-                }
-                None => None,
-            };
-            if let Some(tone) = tone {
-                if let Some(sound) = sounds.get(sound_set(), tone) {
-                    output.play(sound.clone(), tone);
-                }
-            } else if timed_out && start_tone.is_due(Instant::now()) {
-                // Only an empty queue reaches here, so a retraction sent while
-                // the device opened always wins over the tone.
-                let start = sounds.set(sound_set()).start.clone();
-                let (sound, retracted) = Retractable::new(start);
-                if output.play(sound, Tone::DictationStart) {
-                    start_tone.sounding(retracted);
-                } else {
-                    start_tone.retract();
+                    Some(Request::RetractStart) => {
+                        start_tone.retract();
+                        None
+                    }
+                    Some(Request::Prepare) => {
+                        output.prepare(received_at);
+                        None
+                    }
+                    Some(Request::Audition(set, what)) => {
+                        audition.stop();
+                        let stopped = audition.begin();
+                        for (sound, at, cue) in sounds.audition(set, what) {
+                            let (sound, _) =
+                                Retractable::with_flag(sound.delay(at), stopped.clone());
+                            output.play(sound, (set, cue));
+                        }
+                        #[cfg(target_os = "macos")]
+                        if what == Audition::Cue(Cue::Error) && !set.has_own_error() {
+                            audition.system = spawn_system_sound("Basso");
+                        }
+                        None
+                    }
+                    Some(Request::StopAudition) => {
+                        audition.stop();
+                        None
+                    }
+                    None => None,
+                };
+                if let Some(tone) = tone {
+                    if let Some(sound) = sounds.get(sound_set(), tone) {
+                        output.play(sound.clone(), tone);
+                    }
+                } else if timed_out && start_tone.is_due(Instant::now()) {
+                    // Only an empty queue reaches here, so a retraction sent while
+                    // the device opened always wins over the tone.
+                    let start = sounds.set(sound_set()).start.clone();
+                    let (sound, retracted) = Retractable::new(start);
+                    if output.play(sound, Tone::DictationStart) {
+                        start_tone.sounding(retracted);
+                    } else {
+                        start_tone.retract();
+                    }
                 }
             }
-        }
-    });
+        });
+    if let Err(error) = spawned {
+        LOADER_STARTED.store(false, Ordering::Release);
+        return Err(eyre!("could not start feedback audio: {error}"));
+    }
     let outcome = ready_receiver.recv_timeout(Duration::from_secs(2));
     admission_error(outcome)?;
     Ok(())

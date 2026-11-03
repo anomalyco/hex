@@ -106,8 +106,20 @@ pub fn personal_commands_workspace() -> Result<PathBuf> {
 
 /// The per-user config folder holding `hex.config.ts` on every OS: `~/.config/hex`, or `~/.config/hex-test` for `Hex Test.app`.
 fn user_config_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| eyre!("home directory is unavailable"))?;
+    let home = home_dir().ok_or_else(|| eyre!("home directory is unavailable"))?;
     Ok(user_config_dir_in(&home, is_macos_test_build()))
+}
+
+/// The home folder. On Windows `USERPROFILE` names it, as `HOME` does
+/// elsewhere, so a copy of Hex launched with another profile folder (an
+/// isolated benchmark) reads that folder's config; `dirs::home_dir` asks the
+/// shell for the signed-in user's own folder instead.
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    if let Some(profile) = std::env::var_os("USERPROFILE").filter(|profile| !profile.is_empty()) {
+        return Some(profile.into());
+    }
+    dirs::home_dir()
 }
 
 fn user_config_dir_in(home: &std::path::Path, test_build: bool) -> PathBuf {

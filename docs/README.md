@@ -22,6 +22,8 @@ override shipped behavior.
   components, Hex pieces, copy rules, and `--snap` scene verification.
 - [`features/README.md`](features/README.md): existing user-facing capabilities,
   entry points, available verification, and gaps; detailed dictation and recovery maps.
+- [`perf.md`](perf.md): strobe benchmarks, the `strobe` build profile, and
+  how a benchmarked copy of Hex stays isolated.
 - [`downloads.md`](downloads.md): public download paths, R2 custom domains,
   GitHub release mirrors, and network recovery.
 - [`opencode-compatibility.md`](opencode-compatibility.md): audited OpenCode V2

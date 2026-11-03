@@ -162,6 +162,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let Some(instance) = crate::windows::app::AppInstance::claim(start_hidden)? else {
         return Ok(());
     };
+    name_ui_thread();
     crate::labs::log_launch();
     shutdown.store(false, Ordering::Relaxed);
     let (settings, settings_error) = AppSettings::load_for_launch();
@@ -266,6 +267,17 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     drop(local_api);
     drop(tray);
     Ok(())
+}
+
+/// Names the main thread, which runs Rune's event loop and draws, so
+/// profilers and debuggers tell it from Hex's other threads (which the
+/// standard library names when they start).
+fn name_ui_thread() {
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadDescription};
+    let name: Vec<u16> = "hex-ui".encode_utf16().chain([0]).collect();
+    // SAFETY: `name` is a NUL-terminated UTF-16 string that outlives the
+    // call, and the pseudo handle names the calling thread.
+    unsafe { SetThreadDescription(GetCurrentThread(), name.as_ptr()) };
 }
 
 // ---------------------------------------------------------------------------

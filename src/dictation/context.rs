@@ -72,31 +72,37 @@ impl ContextMonitor {
         let (sender, updates) = mpsc::sync_channel(1);
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
-        thread::spawn(move || {
-            let mut previous = None;
-            let mut previous_error = None;
-            while !worker_stop.load(Ordering::Acquire) {
-                match capture() {
-                    Ok(context) => {
-                        previous_error = None;
-                        if !publish_context(&sender, &mut previous, context) {
-                            break;
+        let spawned = thread::Builder::new()
+            .name("foreground-context".into())
+            .spawn(move || {
+                let mut previous = None;
+                let mut previous_error = None;
+                while !worker_stop.load(Ordering::Acquire) {
+                    match capture() {
+                        Ok(context) => {
+                            previous_error = None;
+                            if !publish_context(&sender, &mut previous, context) {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            let error = error.to_string();
+                            if previous_error.as_ref() != Some(&error) {
+                                tracing::warn!(%error, "could not capture foreground context");
+                                previous_error = Some(error);
+                            }
+                            if !publish_context(&sender, &mut previous, ContextSnapshot::default())
+                            {
+                                break;
+                            }
                         }
                     }
-                    Err(error) => {
-                        let error = error.to_string();
-                        if previous_error.as_ref() != Some(&error) {
-                            tracing::warn!(%error, "could not capture foreground context");
-                            previous_error = Some(error);
-                        }
-                        if !publish_context(&sender, &mut previous, ContextSnapshot::default()) {
-                            break;
-                        }
-                    }
+                    thread::sleep(poll_interval);
                 }
-                thread::sleep(poll_interval);
-            }
-        });
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(%error, "could not start the foreground context monitor");
+        }
         Self { updates, stop }
     }
 }

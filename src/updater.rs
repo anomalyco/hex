@@ -249,7 +249,7 @@ pub struct Updater {
 impl Updater {
     pub fn start() -> Self {
         let method = platform::method();
-        let disabled = if option_env!("HEX_TEST_BUILD") == Some("1") {
+        let disabled = if option_env!("HEX_TEST_BUILD") == Some("1") || updates_off_by_env() {
             Some(DesktopUpdateStatus::Unavailable)
         } else if crate::app_paths::is_local_build() {
             Some(DesktopUpdateStatus::SourceBuild)
@@ -461,6 +461,13 @@ impl Updater {
             *state = State::Applied;
         }
     }
+}
+
+/// `HEX_DISABLE_UPDATES=1` turns this launch's updater off, as a test build
+/// has it: no checks, no network, nothing offered. For copies of Hex that
+/// must stay quiet, such as benchmarks (docs/perf.md).
+fn updates_off_by_env() -> bool {
+    std::env::var_os("HEX_DISABLE_UPDATES").is_some_and(|value| value == "1")
 }
 
 /// Whether an administrator turned updates off (`DisableUpdates`), read
