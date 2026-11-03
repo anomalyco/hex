@@ -232,7 +232,8 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                     Vec::new(),
                     Vec::new(),
                 ))
-                .child(super::scroll_body(p.k, 
+                .child(super::scroll_body(
+                    p.k,
                     "activity-detail-scroll",
                     col()
                         .key("body")

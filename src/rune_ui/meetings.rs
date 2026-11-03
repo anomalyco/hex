@@ -550,7 +550,10 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     if ui.meetings.view == View::Settings {
         let content =
             page("content").children(super::platform_settings::meetings_settings(ui, p, layer));
-        return (vec![action], super::scroll_body(p.k, "settings-scroll", content));
+        return (
+            vec![action],
+            super::scroll_body(p.k, "settings-scroll", content),
+        );
     }
     recordings(ui, p, layer, action)
 }

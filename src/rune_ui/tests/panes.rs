@@ -2003,3 +2003,32 @@ fn fun_driver_installed(rt: &rune::Runtime<Ui>) -> bool {
         .as_ref()
         .is_some_and(|status| status.driver_bundle_installed)
 }
+
+/// A pane longer than the window shows a scroll bar to drag, for a pointer
+/// without a wheel (#1209).
+#[test]
+fn a_long_transcript_scrolls_by_dragging_its_scroll_bar() {
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    settle(&mut rt);
+    let at = |rt: &Runtime<Ui>, path: &str| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.path.ends_with(path))
+            .unwrap_or_else(|| panic!("no {path}"))
+            .rect
+    };
+    let thumb = at(&rt, "meeting-transcript-area/scroll-bar/thumb");
+    assert!(thumb[3] > 0.0, "the transcript overflows, so its bar shows");
+    let top = at(&rt, "meeting-transcript/inset")[1];
+    let (x, y) = (thumb[0] + thumb[2] / 2.0, thumb[1] + 4.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_move(x, y + 60.0);
+    rt.pointer_up(x, y + 60.0);
+    settle(&mut rt);
+    assert!(
+        at(&rt, "meeting-transcript/inset")[1] < top - 60.0,
+        "dragging the thumb scrolled the transcript"
+    );
+    assert!(at(&rt, "meeting-transcript-area/scroll-bar/thumb")[1] > thumb[1] + 59.0);
+}

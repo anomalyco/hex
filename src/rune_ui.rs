@@ -1472,7 +1472,10 @@ fn faded_body(k: &rune_kit::Kit, key: &str, content: El, (top, bottom): (f32, f3
         })
         .child(col().key("inset").pt(top).pb(bottom).child(content));
     let area = format!("{key}-area");
-    rune_kit::scroll_bar(k, &area, key, viewport).grow(1.0).shrink().min_h(0.0)
+    rune_kit::scroll_bar(k, &area, key, viewport)
+        .grow(1.0)
+        .shrink()
+        .min_h(0.0)
 }
 
 #[cfg(all(test, target_os = "linux"))]
