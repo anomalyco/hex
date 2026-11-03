@@ -16,6 +16,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("Transcribe", "Transcrever"),
+    ("Hex is up to date", "O Hex está atualizado"),
+    ("Couldn't check for updates", "Não foi possível verificar atualizações"),
     ("{model} · Language: {language}", "{model} · Idioma: {language}"),
     ("Hide menu bar icon", "Ocultar ícone da barra de menus"),
     ("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings", "Oculta o ícone do Hex na barra de menus. Os atalhos continuam funcionando; abra o Hex de novo pelo Finder ou Spotlight para ver os Ajustes"),

@@ -975,6 +975,12 @@ fn show(window: &rune::AppHandle<Ui>, destination: Destination) {
     bring_forward(window);
 }
 
+/// Opens the window where its footer shows the update check's outcome.
+fn show_update_check(window: &rune::AppHandle<Ui>) {
+    window.update(|ui, _| crate::rune_ui::update_check_asked(ui));
+    show(window, Destination::Settings);
+}
+
 /// Opens the window in front, from the main thread.
 pub(crate) fn bring_window_forward() {
     with_window(bring_forward);
@@ -1105,9 +1111,16 @@ impl Pump {
                 }
             }
             StatusItemAction::Update => {
-                if let Some(updater) = UPDATER.get()
-                    && let Err(error) = update_action(&updater.menu_action())
-                {
+                let Some(updater) = UPDATER.get() else {
+                    return;
+                };
+                let action = updater.menu_action();
+                // A check from the menu bar opens the window, whose footer
+                // says how it went: up to date or couldn't check (#1120).
+                if action == DesktopAction::CheckForUpdates {
+                    show_update_check(&self.window);
+                }
+                if let Err(error) = update_action(&action) {
                     tracing::warn!(error = %format!("{error:#}"), "the update menu item failed");
                 }
             }
@@ -1297,6 +1310,7 @@ objc2::define_class!(
 
         #[unsafe(method(checkForUpdates:))]
         fn check_for_updates(&self, _sender: Option<&AnyObject>) {
+            with_window(show_update_check);
             let _ = update_action(&crate::desktop::host::DesktopAction::CheckForUpdates);
         }
 

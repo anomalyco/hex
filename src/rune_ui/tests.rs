@@ -203,6 +203,44 @@ fn an_unconfirmed_portal_shortcut_is_not_called_refused() {
     assert!(rt.find("basics/refused").is_none());
 }
 
+/// #1120: a check the person asked for says how it went; the hourly check
+/// alone keeps the footer's words.
+#[test]
+fn an_asked_update_check_says_how_it_went() {
+    fn status(rt: &mut Runtime<Ui>, status: DesktopUpdateStatus) {
+        rt.state
+            .view
+            .as_mut()
+            .expect("a service view")
+            .update_status = status;
+        rt.invalidate();
+        rt.frame(0.0);
+    }
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    status(&mut rt, DesktopUpdateStatus::Current);
+    assert!(texts(&rt).iter().any(|text| text == "Check for updates"));
+    tap(&mut rt, "update-status");
+    assert!(
+        sent(&rt)
+            .iter()
+            .any(|request| matches!(request, Request::Desktop(DesktopAction::CheckForUpdates)))
+    );
+    status(&mut rt, DesktopUpdateStatus::Checking);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Checking for updates…")
+    );
+    status(&mut rt, DesktopUpdateStatus::Current);
+    assert!(texts(&rt).iter().any(|text| text == "Hex is up to date"));
+    status(&mut rt, DesktopUpdateStatus::Failed);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Couldn't check for updates")
+    );
+}
+
 #[test]
 fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);

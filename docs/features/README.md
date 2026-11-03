@@ -1186,7 +1186,9 @@ Menu bar and Settings                    // maintenance
 │       way; shortcuts keep working; Finder or Spotlight reopen -> Settings (labs.md)
 ├── Settings / Paste Last -> Reachable with Dock icon hidden
 ├── Launch at Login -> macOS owns registration state
-├── Check for Updates -> The updater (maintain.updates)
+├── Check for Updates -> The updater (maintain.updates); opens the window, whose
+│   footer then says "Checking for updates…", "Hex is up to date", or
+│   "Couldn't check for updates" (#1120)
 └── Quit -> Orderly shutdown
 ```
 
@@ -1323,6 +1325,12 @@ Hex checks the release service            // maintain.updates
 ├── Package manager (pacman, Nix) -> its command, once it serves another version
 ├── Source build, test build -> never checks
 └── Failure -> keep the running version, back off, Check for updates retries
+
+Check for updates pressed (footer, menu bar, app menu)   // maintain.update-feedback (#1120)
+├── The menu bar's and app menu's open the window at General
+└── Footer -> "Checking for updates…" -> "Hex is up to date" | "Couldn't check for updates"
+    // the hourly check alone keeps "Check for updates"; check:
+    // an_asked_update_check_says_how_it_went (fixture; not run on a Mac)
 
 DisableUpdates at launch                 // maintain.managed-updates
 ├── No checks, downloads, or installs; sidebar: Managed by your organization

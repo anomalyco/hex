@@ -238,21 +238,40 @@ fn footer(ui: &Ui, p: Paint) -> El {
             | DesktopUpdateStatus::ReadyToRestart
             | DesktopUpdateStatus::SwitchAvailable { .. },
         ) => None,
-        Some(DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed) => Some(
-            line("update-status", tr("Check for updates"), c.text_muted)
-                .role("button")
-                .label(tr("Check for updates"))
-                .hover(c.hover)
-                .press(c.pressed)
-                .focusable(true)
-                .focus_ring(2.0, -2.0, c.border_focus)
-                .on_press(|ui: &mut Ui| ui.send(Request::Desktop(DesktopAction::CheckForUpdates))),
-        ),
-        // The same words, quieter, while it checks: the hourly check and a
-        // pressed one read the same and never swap the line's words.
+        // After a check the person asked for, the line says how it went
+        // (#1120); the hourly check alone never changes its words.
+        Some(status @ (DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed)) => {
+            let words = match status {
+                DesktopUpdateStatus::Current if ui.update_asked => tr("Hex is up to date"),
+                DesktopUpdateStatus::Failed if ui.update_asked => tr("Couldn't check for updates"),
+                _ => tr("Check for updates"),
+            };
+            Some(
+                line("update-status", words, c.text_muted)
+                    .role("button")
+                    .label(tr("Check for updates"))
+                    .hover(c.hover)
+                    .press(c.pressed)
+                    .focusable(true)
+                    .focus_ring(2.0, -2.0, c.border_focus)
+                    .on_press(|ui: &mut Ui| {
+                        ui.update_asked = true;
+                        ui.send(Request::Desktop(DesktopAction::CheckForUpdates));
+                    }),
+            )
+        }
+        // Quieter while it checks; the hourly check keeps the line's words.
         Some(DesktopUpdateStatus::Checking) => Some(
-            line("update-status", tr("Check for updates"), p.faint())
-                .label(tr("Checking for updates…")),
+            line(
+                "update-status",
+                if ui.update_asked {
+                    tr("Checking for updates…")
+                } else {
+                    tr("Check for updates")
+                },
+                p.faint(),
+            )
+            .label(tr("Checking for updates…")),
         ),
         Some(DesktopUpdateStatus::Managed) => Some(line(
             "update-status",
