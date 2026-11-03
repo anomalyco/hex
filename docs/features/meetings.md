@@ -29,7 +29,10 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   ├── Advanced -> Show recording indicator (on by default; corner-snapping capsule),
 │   │   Transcript folder (~/Documents/Hex Meetings; Reveal / choose; an error opens
 │   │   Advanced), Summarize with Apple Intelligence (on by default), Summarize
-│   │   with OpenCode (off by default; when Apple Intelligence is off or missing)
+│   │   with OpenCode (off by default; when Apple Intelligence is off or missing),
+│   │   then with Labs › Choose meeting summary model on, Summary model: the
+│   │   provider/model OpenCode notes use, no fallback; empty -> the ranked fast
+│   │   models (meetings.opencode_model; see labs.md, #1107)
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,

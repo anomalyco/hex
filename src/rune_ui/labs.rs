@@ -241,6 +241,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Movable meeting capsules"),
                 tr("Drag meeting capsules out of the way; they come back in the corner you left them"),
             ));
+            // Meeting notes run on macOS's meeting controller.
+            rows.push(row(
+                Feature::MeetingSummaryModel,
+                &SPARKLES,
+                tr("Choose meeting summary model"),
+                tr("Pick the OpenCode provider and model that write meeting titles and summaries, in Meetings › Settings › Advanced"),
+            ));
         }
     }
     rows.push(row(
@@ -506,6 +513,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
+        Feature::MeetingSummaryModel => "lab-meeting-summary-model",
     }
 }
 

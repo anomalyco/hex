@@ -422,6 +422,17 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             },
         )
         });
+        // Labs › Choose meeting summary model, for OpenCode's notes only.
+        let summary_model = crate::labs::Feature::MeetingSummaryModel;
+        if cfg!(target_os = "macos")
+            && meetings.summarize_with_opencode
+            && !opencode_managed()
+            && summary_model.managed().is_none()
+            && summary_model.shipped()
+            && summary_model.on(&ui.settings)
+        {
+            more.push(summary_model_row(ui, p));
+        }
         if let Some(error) = &ui.platform.meeting_folder_error {
             // A failed folder change shows where it happened, opening the fold.
             more.push(note("meeting-folder-error", error, p.danger()));
@@ -476,6 +487,91 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         },
         control,
     )
+}
+
+/// Labs › Choose meeting summary model: the OpenCode `provider/model` that
+/// writes meeting titles and summaries, saved on Return or Save.
+fn summary_model_row(ui: &Ui, p: Paint) -> El {
+    let saved = ui
+        .settings
+        .meetings
+        .opencode_model
+        .as_deref()
+        .unwrap_or_default();
+    let fallback;
+    let edit = match &ui.meetings.summary_model {
+        Some(edit) => edit,
+        None => {
+            fallback = rune::TextEdit::new(saved.to_owned());
+            &fallback
+        }
+    };
+    let edited = edit.text.trim() != saved.trim();
+    let about = match crate::meeting::generator::parse_model(saved) {
+        Some((provider, model)) => tr_named(
+            "Summaries use {model}. If it isn't available, the meeting shows the error instead of trying another model",
+            &[("model", &format!("{provider}/{model}"))],
+        ),
+        None if saved.trim().is_empty() => tr(
+            "Empty: Hex tries its list of fast models in order and uses the first one OpenCode has",
+        )
+        .to_owned(),
+        None => tr(
+            "Write it as provider/model, such as openai/gpt-5.4-mini. Until then, Hex tries its list of fast models",
+        )
+        .to_owned(),
+    };
+    let input = rune_kit::TextInput::new(edit)
+        .placeholder("provider/model")
+        .width(Some(220.0))
+        .on_edit(|ui: &mut Ui| {
+            let saved = ui
+                .settings
+                .meetings
+                .opencode_model
+                .clone()
+                .unwrap_or_default();
+            ui.meetings
+                .summary_model
+                .get_or_insert_with(|| rune::TextEdit::new(saved))
+        })
+        .on_submit(|ui: &mut Ui, _| save_summary_model(ui))
+        .build(p.k)
+        .key("meeting-summary-model-field");
+    let controls = row()
+        .key("controls")
+        .gap(8.0)
+        .center_y()
+        .child(input)
+        .children(edited.then(|| {
+            button(
+                p,
+                "meeting-summary-model-save",
+                tr("Save"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| save_summary_model(ui),
+            )
+        }));
+    icon_row(
+        p,
+        "meeting-summary-model",
+        &icons::SPARKLES,
+        tr("Summary model"),
+        Some(about.as_str()),
+        controls,
+    )
+}
+
+/// Saves the summary model field: its trimmed text, or none when empty.
+fn save_summary_model(ui: &mut Ui) {
+    let Some(edit) = ui.meetings.summary_model.take() else {
+        return;
+    };
+    let typed = edit.text.trim();
+    let model = (!typed.is_empty()).then(|| typed.to_owned());
+    if model != ui.settings.meetings.opencode_model {
+        ui.update(|settings| settings.meetings.opencode_model = model);
+    }
 }
 
 static ZOOM_ICON: Icon = Icon {
