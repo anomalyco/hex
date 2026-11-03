@@ -121,6 +121,11 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
             tour.flow.hold_download(held);
         }
     }
+    // Without a tour there is nothing to feed: the model and permission
+    // reads below touch the disk, and this runs before every frame.
+    if ui.tour.is_none() {
+        return false;
+    }
     let (installed, model) = progress(ui);
     let status = ui.platform.setup_status(installed);
     let accessibility_stale = ui

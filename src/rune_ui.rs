@@ -881,17 +881,21 @@ impl Ui {
 
     /// Which editors hold typing the saved settings don't have yet.
     fn drafts(&self) -> Drafts {
-        let settings = &self.settings;
-        let mut modes = settings.clone();
-        self.modes.project(&mut modes);
         Drafts {
-            modes: modes.dictation_processing != settings.dictation_processing,
-            vocabulary: self.vocabulary.project() != settings.vocabulary,
+            modes: self.modes.has_draft(&self.settings),
+            vocabulary: self.vocabulary.project() != self.settings.vocabulary,
         }
     }
 
-    /// Saves text-field edits once typing pauses for [`DRAFT_DELAY`].
+    /// Saves text-field edits once typing pauses for [`DRAFT_DELAY`]. It
+    /// runs before every frame, so it compares only the edited fields until
+    /// there is a draft to save.
     fn save_drafts(&mut self, now: Instant) -> bool {
+        let drafts = self.drafts();
+        if !drafts.modes && !drafts.vocabulary {
+            self.draft_since = None;
+            return false;
+        }
         let candidate = self.drafted();
         if candidate == self.settings {
             self.draft_since = None;

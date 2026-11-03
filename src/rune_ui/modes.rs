@@ -221,8 +221,26 @@ impl ModesPane {
         {
             return;
         }
+        self.apply(mode_mut(settings, selection));
+    }
+
+    /// Whether the selected mode's editor holds typing `settings` don't have.
+    pub(super) fn has_draft(&self, settings: &AppSettings) -> bool {
+        if let Selection::Custom(index) = self.selected
+            && index >= settings.dictation_processing.modes.len()
+        {
+            return false;
+        }
+        let saved = mode(settings, self.selected);
+        let mut drafted = saved.clone();
+        self.apply(&mut drafted);
+        drafted != *saved
+    }
+
+    /// The editor's text applied to the selected mode.
+    fn apply(&self, mode: &mut DictationMode) {
+        let selection = self.selected;
         let editor = &self.editor;
-        let mode = mode_mut(settings, selection);
         if selection != Selection::Default {
             mode.name = editor.name.text.trim().to_string();
         }
