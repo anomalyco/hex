@@ -358,20 +358,18 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   Unanswered, it goes back to recording after 4 s (never while hovered, and
 │   1.5 s after the pointer leaves). Esc never discards
 ├── Routing (Scrawl's routing.md) -> `last.route` once its answer arrives; the
-│   capsule shows a rule's and a pick's send as sent itself, and follows
-│   only the send going (its tone), Queued (then Sent), how an Undo ended,
-│   and a failed send
-│   ├── A rule Kit saved -> the only send that goes by itself, at once, with
-│   │   no countdown: "Sent to X" and the same quiet Undo (click only, no key)
-│   │   for 5 s that a
-│   │   pick gets, no ring or drain; ✕ closes. The Sent tone plays when the
-│   │   router says it went. No runner-up chip, since the router names none
-│   │   beside a saved rule; when the Undo window ends the capsule leaves by
+│   capsule follows refinements and delivery separately, including Queued
+│   (then Sent), how an Undo ended, and a failed send
+│   ├── A saved rule -> "Sending to X", a 3–2–1 second countdown and Undo.
+│   │   A repository awaiting its session shows the repository name. Undo
+│   │   cancels before posting. The capsule remains visible until delivery;
+│   │   then it reads "Sent to X" and plays the Sent tone. A picked send still
+│   │   goes immediately with its plain Undo. No runner-up chip for a rule;
+│   │   when the Undo window ends the capsule leaves by
 │   │   itself (with the list open it stays; the pointer on it holds it, and a
 │   │   folded list gives it a brief hold). Picking the rule's own session there (without
 │   │   "Always") only closes the list; nothing is sent again
-│   ├── The Undo chip counts nothing down: the capsule reads the same for the
-│   │   whole window and wakes once, when it ends
+│   ├── A rule's countdown wakes each second; a pick's Undo wakes only at its end
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
 │   │   answer) -> macOS: "Copied", then Search with the capture shortcut's
 │   │   keycaps (as Settings draws them) and ✕, the suggestions open under
@@ -662,22 +660,25 @@ What a send carries                      // capture.send (router opencode::send_
 │   server on another machine reads it; the text only names where it was recorded
 ├── Every request goes to the running local service over HTTP
 │   (service.json); a service that isn't up is never started
-├── With an agent host (routing's agentHost) the bundle is synced there and
-│   the contact sheet goes as a `file://` part instead; SSH can't carry the
-│   images
+├── With an agent host (routing's agentHost), the request body travels on SSH
+│   stdin to a Python 3 standard-library HTTP client. The contact sheet stays
+│   inline; the bundle copy follows the accepted prompt in the background
+│   (the prompt says the folder may still be arriving). Credentials stay remote.
+│   An explicitly configured agentOpencode keeps the CLI and synchronous copy;
+│   without Python 3, the default path falls back to the CLI before any HTTP send
 │   └── macOS/Linux reuse the SSH connection for 60 s after its last use,
 │       through an owner-only control socket; Windows opens each connection.
 │       API reads now honor their caller's deadline over SSH too, including
 │       the optional 600 ms idle-status check before a prompt. A failed idle
-│       check records unknown status and still sends. Copying light bundle
-│       files and launching the remote CLI still cost time
+│       check records unknown status and still sends. Neither CLI startup nor
+│       the light-bundle copy is on the default prompt's critical path
 ├── No video: a capture's movie is too large for a prompt
 └── Check: router opencode tests; a send from apollo to a throwaway session
     on OpenCode V2 stored the contact sheet and keyframe as inline image/png (before one-sheet)
     (2026-10-29)
 
 Where it goes                            // capture.route; capture.routing's autoSend on
-├── At the stop, beside the writing -> a capture-look thread reads the tab,
+├── Once recording starts -> a capture-look thread reads the tab,
 │   terminal, and sessions in front (Scrawl's router, in Hex's process, with
 │   Scrawl's own router folders, so `scrawl router undo` and its evals see Hex's
 │   sends as Scrawl's). The whole look has 15 s: steps not begun by then are
@@ -685,8 +686,9 @@ Where it goes                            // capture.route; capture.routing's aut
 │   without it. The newest-session list starts beside local sensing; exact
 │   folders are read in the other lane as soon as the clues name them (at most
 │   two API reads in flight, one shared 10 s session budget). Results merge in
-│   the same order; missing session IDs are read afterward. Session-ID rules
-│   still read the list: spoken session names take precedence over saved rules.
+│   the same order; missing session IDs are read afterward. Saved rules match
+│   locally from the captured bundle ID or observed URL; suggestions read the
+│   list afterward. A saved rule takes precedence over a spoken session name.
 │   An app rule's folder is read with the sessions, and a failed
 │   page of sessions keeps what was read and still reads the folders and
 │   sessions that rules name
@@ -695,11 +697,14 @@ Where it goes                            // capture.route; capture.routing's aut
 │       Fake-dependency benchmarks and their proof limits:
 │       [Annotate routing latency](../../perf/annotate-routing.md)
 ├── Written -> the one capture-route thread (queue 16) decides; the snapshot's
-│   `last.route` follows: Looking -> Rule | Guess | Nothing | NoAnswer |
-│   Unreachable
+│   `last.route` follows: Looking -> Rule | ResolvingRule | Guess | Nothing |
+│   NoAnswer | Unreachable. Background refinements preserve an open search and
+│   selected session; a pick or Undo cancels them
 │   ├── Rule -> only a rule the person saved (`routing.sites`, `routing.apps`,
-│   │   a Shift pick's): sent at once, Sending -> Sent, or Queued
-│   │   when OpenCode didn't take it; Undo takes it back as it does a pick. Whatever
+│   │   a Shift pick's): a three-second countdown begins at Written. A folder
+│   │   rule shows its repository while its session resolves; it sends once both
+│   │   the countdown and resolution finish. Undo during the countdown posts
+│   │   nothing. Sending -> Sent, or Queued when OpenCode didn't take it. Whatever
 │   │   autoSend, smartRouting, or jevRouting say, a saved rule sends and
 │   │   nothing else sends on its own. smartRouting off decides with the port
 │   │   ladder, after rules and addresses, on the same look
@@ -711,6 +716,9 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   reason as the row's word ("dev server", "same page", "mentioned"; none
 │   │   for Jev's pick or fallback), then
 │   │   the runners-up and recent sessions; nothing sent until one is picked.
+│   │   The deterministic guess publishes first. Model refinement has one
+│   │   three-second budget including recent messages and credential lookup;
+│   │   a timeout keeps the first guess. A later result cannot override a pick or Undo.
 │   │   `site` names what a Shift pick (Shift+click, ⇧⏎ in the list,
 │   │   or `send --always`) would save, after which that site's captures are Rules;
 │   │   ⇧⏎ in a Rule's list saves the rule for the session picked instead
@@ -732,6 +740,8 @@ Where it goes                            // capture.route; capture.routing's aut
 │           so that setup isn't supported
 ├── An answer for a capsule already closed (dismissed, or past its hold)
 │   leaves it closed; `hex capture list` and `send` still offer the capture
+├── Starting another capture preserves an older rule's accepted pending send;
+│   its eventual answer does not replace the newest capsule
 ├── The capsule's commands act only on `last`, the newest routed capture:
 │   ├── Send{to} -> the Rule's own session, already sent, does nothing; any
 │   │   other pick sends there (taking back a send already elsewhere first) and logs

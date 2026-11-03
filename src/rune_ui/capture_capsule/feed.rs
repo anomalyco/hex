@@ -140,6 +140,11 @@ impl Follow {
         };
         if answered(Some(&route)) && !answered(before.as_ref()) {
             inputs.extend(capsule_route(&route.answer).map(Input::Routed));
+        } else if before
+            .as_ref()
+            .is_some_and(|before| before.answer != route.answer)
+        {
+            inputs.extend(capsule_route(&route.answer).map(Input::Refined));
         }
         let was = before.and_then(|before| before.delivery);
         if route.delivery == was {
@@ -242,6 +247,7 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
     };
     Some(match answer {
         RouteAnswer::Looking => return None,
+        RouteAnswer::ResolvingRule { name } => Route::ResolvingRule { name: name.clone() },
         RouteAnswer::Rule {
             to,
             suggested,

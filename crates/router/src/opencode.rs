@@ -128,6 +128,16 @@ fn system_tool(name: &str) -> PathBuf {
 }
 
 pub fn ssh(host: &str) -> Command {
+    #[cfg(test)]
+    if let Some(root) = &crate::env::get().remote_fixture {
+        let mut command = Command::new(root.join("ssh"));
+        command
+            .env_clear()
+            .env("PATH", "/opt/homebrew/bin:/usr/bin:/bin")
+            .env("HOME", root)
+            .env("XDG_STATE_HOME", root);
+        return command;
+    }
     let mut command = Command::new(system_tool("ssh"));
     remote::reuse_connection(&mut command);
     command.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host]);
@@ -291,6 +301,15 @@ fn opencode_api_within(
             timeout,
         );
     };
+    let started = std::time::Instant::now();
+    if crate::env::get().config.agent_opencode.is_none() {
+        match remote::request(&host, method, path, data, timeout) {
+            Err(error) if error.is::<remote::MissingClient>() => {}
+            result => return result,
+        }
+    }
+    let timeout = timeout.saturating_sub(started.elapsed());
+    ensure!(!timeout.is_zero(), "Agent host request timed out");
     let command = {
         let mut remote = format!(
             "PATH=\"$HOME/bin:$HOME/.opencode/bin:/opt/homebrew/bin:$PATH\" {} api {} {}",
@@ -333,7 +352,9 @@ const SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const CLI_STDERR_LIMIT: u64 = 64 * 1024;
 
 use remote::bounded_output;
-mod remote;
+pub(crate) mod remote;
+#[cfg(all(test, unix))]
+mod remote_fixture;
 
 /// The status in `opencode api`'s `HTTP 409 Conflict` line.
 fn cli_status(stderr: &str) -> Option<u16> {
@@ -886,7 +907,7 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
         "Invalid OpenCode session ID"
     );
-    if let Some(host) = agent_host() {
+    if let Some(host) = agent_host().filter(|_| crate::env::get().config.agent_opencode.is_some()) {
         let started = std::time::Instant::now();
         sync_bundle_to(&host, &directory)?;
         crate::env::log(format!(
@@ -899,7 +920,7 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
     // A capture with no screen (`no_screen`) sends its words alone: its sheet is blank.
     let files = if bundle.keyframes.is_empty() {
         Vec::new()
-    } else if agent_host().is_some() {
+    } else if agent_host().is_some() && crate::env::get().config.agent_opencode.is_some() {
         vec![serde_json::json!({
             "uri": file_uri(&directory.join(&bundle.contact_sheet)),
             "name": "contact-sheet.png",
@@ -913,13 +934,32 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
     } else {
         "Attached: the contact sheet (every keyframe in order). Full-size keyframes are in frames/ and frames-full/ in that folder if you need a closer look."
     };
+    let availability = if agent_host().is_some()
+        && crate::env::get().config.agent_opencode.is_none()
+    {
+        " Folder files are copied in the background and may not have arrived yet; the attached image is ready now."
+    } else {
+        ""
+    };
     let text = format!(
-        "{}\n\n{attached}\nRecorded at {}.\nThis capture is {} ms long.",
+        "{}\n\n{attached}{availability}\nRecorded at {}.\nThis capture is {} ms long.",
         summary.trim_end(),
         directory.display(),
         bundle.duration_ms,
     );
-    post_prompt(session, serde_json::json!({ "text": text, "files": files }))
+    let posted = post_prompt(session, serde_json::json!({ "text": text, "files": files }))?;
+    if let Some(host) = agent_host().filter(|_| crate::env::get().config.agent_opencode.is_none()) {
+        crate::env::spawn(move || {
+            let started = std::time::Instant::now();
+            let result = sync_bundle_to(&host, &directory);
+            crate::env::log(format!(
+                "routing time: background sync_ms={} ok={}",
+                started.elapsed().as_millis(),
+                result.is_ok()
+            ));
+        });
+    }
+    Ok(posted)
 }
 
 /// A `file://` URL for an absolute path, percent-encoding everything but unreserved

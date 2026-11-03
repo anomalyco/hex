@@ -295,6 +295,10 @@ pub enum CaptureCommand {
 
 /// A started capture.
 trait Recording: Send {
+    /// Preparation belongs to this recording, never to a later foreground app.
+    fn route_context(&self) -> Option<scrawl_capture::capture::RouteContext> {
+        None
+    }
     /// Stops recording and removes the bundle.
     fn cancel(self: Box<Self>);
     /// Stops recording the screen, its windows, and input now, keeping what
@@ -343,6 +347,9 @@ impl CaptureEngine for scrawl_capture::capture::Engine {
 }
 
 impl Recording for scrawl_capture::capture::Capture {
+    fn route_context(&self) -> Option<scrawl_capture::capture::RouteContext> {
+        Some(scrawl_capture::capture::Capture::route_context(self))
+    }
     fn cancel(self: Box<Self>) {
         scrawl_capture::capture::Capture::cancel(*self);
     }
@@ -3295,6 +3302,7 @@ fn collect(
         }
     };
     let mut timeline = Timeline::new(t0);
+    let prepared = capture.route_context().and_then(routing::look);
     let mut checked = Instant::now();
     loop {
         let chunk = match chunks.recv_timeout(SCREEN_CHECK) {
@@ -3349,7 +3357,7 @@ fn collect(
                 Ok(()) => {
                     // Only a queued capture is looked at, so a refused one
                     // leaves no look running.
-                    if let Some(look) = context.and_then(routing::look) {
+                    if let Some(look) = prepared.or_else(|| context.and_then(routing::look)) {
                         let _ = give_look.send(look);
                     }
                     return;

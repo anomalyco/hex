@@ -101,6 +101,18 @@ pub fn look_live_by(
     deadline: Instant,
     senses: &Senses,
 ) -> Live {
+    look_live_observed(front, target, pid, deadline, senses, |_| {})
+}
+
+/// Publishes the locally read URL before any session or page result is needed.
+pub fn look_live_observed(
+    front: Option<&str>,
+    target: Option<&str>,
+    pid: Option<i32>,
+    deadline: Instant,
+    senses: &Senses,
+    observed: impl FnOnce(Option<&str>),
+) -> Live {
     let started = Instant::now();
     let left = || deadline.saturating_duration_since(Instant::now());
     let mut url = None;
@@ -111,6 +123,7 @@ pub fn look_live_by(
         error,
     } = read::while_looking(senses.hooks.api, left().min(super::LOOK_BUDGET), || {
         url = (senses.tab)(front, target);
+        observed(url.as_deref());
         clues = url
             .as_deref()
             .filter(|_| !left().is_zero())
