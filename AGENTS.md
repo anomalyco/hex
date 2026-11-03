@@ -746,7 +746,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   receives the capture's 16 kHz audio with each pause cut to its first 2.5 s
   and last 0.3 s (Parakeet drops words after pauses past its left context),
   the finish always carries the complete clip, and a failed, empty, overfed, late, or interrupted stream
-  falls back to the whole clip. Nothing pastes or reaches the focused app
+  falls back to the whole clip, as does one whose text ends well before the
+  speech it heard (a dropped late phrase, #1101). Nothing pastes or reaches the focused app
   before the final text. With Labs › Live text on, a hotkey capture's
   stream publishes its provisional text for Hex's own HUD only; it is never
   pasted, copied, or kept in History or Paste Last. One engine thread runs every inference because a live
