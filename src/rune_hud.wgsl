@@ -96,7 +96,9 @@ struct DotUniforms {
     // The island's half width, height, top edge, and bottom radius, pt.
     island: vec4f,
     // The field's corner radius, pt: half its height on a plate, the
-    // island's corners less its padding in an island.
+    // island's corners less its padding in an island. With the notch
+    // indicator's ears (y 1): the notch's half width, the mode, the voice's
+    // 0–1 level, and seconds into the stage.
     field: vec4f,
 }
 
@@ -116,6 +118,57 @@ fn island_distance(point: vec2f, island: vec4f) -> f32 {
     let square = rounded_box(q - square_center, vec2f(fillet * 0.5 + 0.5, fillet * 0.5), 0.0);
     let hollow = fillet - length(q - vec2f(half_width + fillet, top + fillet));
     return min(body, max(square, hollow));
+}
+
+// `hud_placement::EAR_WIDTH`: how far each ear reaches past the notch, pt.
+const EAR_WIDTH: f32 = 34.0;
+const TAU: f32 = 6.2831853;
+
+// Labs' notch indicator: the notch widened sideways at its own height, a
+// glyph either side of the camera. Left, a red dot that swells with the
+// voice, becoming a spinner while Hex works; right, three dots that light
+// with the voice, then pulse in turn while Hex works. A failure turns both
+// coral (the palette's core).
+fn ears(window_point: vec2f, island_shape: f32) -> vec4f {
+    let notch_half = u.field.x;
+    let level = clamp(u.field.z, 0.0, 1.0);
+    let clock = u.field.w;
+    let ear = max(u.island.x - notch_half, 0.0);
+    let room = sstep(0.4, 1.0, ear / EAR_WIDTH);
+    let s = mix(0.6, 1.0, room);
+    let aa = 0.75 / u.backing_scale;
+    let live = clamp(u.live, 0.0, 1.0);
+    let working = clamp(u.cool, 0.0, 1.0);
+    let middle_y = u.island.z + u.island.y * 0.5;
+    let inset = notch_half + EAR_WIDTH * 0.47;
+    var result = vec4f(0.0);
+
+    let red = vec3f(1.0, 0.27, 0.23);
+    let q = window_point - vec2f(-inset, middle_y);
+    let from_center = length(q);
+    let dot_radius = (3.4 + 1.4 * level * live) * s;
+    composite(&result, red, 0.55 * level * live * (1.0 - working)
+        * exp(-max(from_center - dot_radius, 0.0) / 2.6));
+    composite(&result, mix(u.core.rgb, red, live),
+        (1.0 - working) * coverage(from_center - dot_radius, aa));
+    let ring = abs(from_center - 4.3 * s) - 0.85 * s;
+    let turn = fract(atan2(q.y, q.x) / TAU + clock * 1.15);
+    composite(&result, u.core.rgb, working * 0.16 * coverage(ring, aa));
+    composite(&result, u.core.rgb, working * sstep(0.05, 1.0, turn) * coverage(ring, aa));
+
+    for (var i = 0; i < 3; i++) {
+        let n = f32(i);
+        let center = vec2f(inset + (n - 1.0) * 6.0 * s, middle_y);
+        let heard = 0.25 + 0.75 * sstep(0.06 + n * 0.22, 0.28 + n * 0.22, level);
+        let pulse = 0.25 + 0.75 * pow(0.5 + 0.5 * cos(TAU * (clock * 1.3 - n * 0.17)), 4.0);
+        let bright = mix(heard, pulse, working);
+        let radius = (1.5 + 0.5 * bright) * s;
+        composite(&result, u.core.rgb, bright * coverage(length(window_point - center) - radius, aa));
+    }
+
+    result *= u.opacity * room * island_shape;
+    result.a += island_shape * (1.0 - result.a);
+    return result;
 }
 
 // `var<immediate> u: DotUniforms;` on a device with immediates
@@ -149,6 +202,9 @@ fn dot_scope_fragment(in: Varyings) -> @location(0) vec4f {
     if (in_island) {
         let island_aa = 0.75 / u.backing_scale;
         island_shape = coverage(island_distance(window_point, u.island), island_aa);
+        if (u.field.y > 0.5) {
+            return for_target(dithered(ears(window_point, island_shape), position));
+        }
     }
 
     // A soft drop shadow 3 pt below, as the prototype's 16 pt canvas blur.

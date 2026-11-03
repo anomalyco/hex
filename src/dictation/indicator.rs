@@ -201,9 +201,10 @@ fn field_edge(tuning: &Tuning) -> f32 {
 /// its padding, recording and processing alike, at the same dot spacing.
 /// The width snaps to whole columns, with the outer columns as far in from
 /// the ends as the outermost rows that show are from the top and bottom,
-/// so the island (which follows the field) is even all round.
+/// so the island (which follows the field) is even all round. The notch
+/// indicator's ears draw no field, so they leave the tuning alone.
 fn fill_island(tuning: Tuning, island: Option<Island>) -> Tuning {
-    let Some(island) = island else {
+    let Some(island) = island.filter(|island| !island.ears) else {
         return tuning;
     };
     let pitch = tuning.spacing;
@@ -460,6 +461,7 @@ mod tests {
             notch: [185.0, 32.0],
             width: 241.0,
             top: -64.0,
+            ears: false,
         };
         let filled = fill_island(tuning, Some(island)).clamped();
         assert_eq!((filled.columns, filled.rows), (84.0, tuning.rows));
