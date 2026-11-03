@@ -402,7 +402,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     tap(&mut rt, "lab-copy-only");
     assert!(rt.state.settings.labs.copy_only);
 
-    let mut rt = runtime("windows-settings", true, (980.0, 1600.0));
+    // Tall enough that the last Labs rows (Share shortcut, Terminal paste)
+    // sit inside the window, where a tap reaches them.
+    let mut rt = runtime("windows-settings", true, (980.0, 2400.0));
     open_advanced(&mut rt, Pane::General);
     assert!(rt.find("share-dictation-shortcut").is_none());
     tap(&mut rt, "nav-labs");
@@ -412,6 +414,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
     assert!(rt.find("lab-spoken-symbols").is_some(), "every OS");
+    assert!(!rt.state.settings.share_dictation_shortcut);
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);
 }
