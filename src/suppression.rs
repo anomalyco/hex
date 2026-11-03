@@ -1345,11 +1345,21 @@ impl DictationHotkey {
         mut flags: impl FnMut() -> u64,
         mut key_down: impl FnMut(u16) -> bool,
     ) {
+        // Arrow key metadata can leave SecondaryFn set after release. Only ignore
+        // it when modifier-change events independently say Fn is not held.
+        let modifiers_mask = if self.function_modifier.1 == Some(false) {
+            HOTKEY_MODIFIERS_MASK & !crate::app_settings::FUNCTION_KEY_MASK
+        } else {
+            HOTKEY_MODIFIERS_MASK
+        };
+        // A missed modifier release would make the next real press of it
+        // read as no change.
+        let stale_modifiers = self.modifier_history.flags & modifiers_mask != 0;
         let recoverable = match self.state {
             State::Dirty => true,
             // A lock captures while the keyboard sits idle. A missed key-up would
             // otherwise block the fresh shortcut press that finishes it.
-            State::Idle { .. } | State::Locked => !self.pressed_keys.is_empty(),
+            State::Idle { .. } | State::Locked => !self.pressed_keys.is_empty() || stale_modifiers,
             _ => false,
         };
         if !recoverable {
@@ -1358,14 +1368,8 @@ impl DictationHotkey {
         }
         // A missing modifier release can leave Dirty with no ordinary keys tracked.
         // Avoid a full scan when a tracked key is still physically held.
-        // Arrow key metadata can leave SecondaryFn set after release. Only ignore
-        // it when modifier-change events independently say Fn is not held.
-        let modifiers_mask = if self.function_modifier.1 == Some(false) {
-            HOTKEY_MODIFIERS_MASK & !crate::app_settings::FUNCTION_KEY_MASK
-        } else {
-            HOTKEY_MODIFIERS_MASK
-        };
-        if flags() & modifiers_mask != 0
+        let sampled_flags = flags();
+        if sampled_flags & modifiers_mask != 0
             || (!self.pressed_keys.is_empty()
                 && self.pressed_keys.iter().all(|&code| key_down(code)))
             || (0..128).any(&mut key_down)
@@ -1397,6 +1401,14 @@ impl DictationHotkey {
         );
         self.pressed_keys.clear();
         self.key_down_at.clear();
+        self.modifier_history = ModifierHistory {
+            flags: sampled_flags,
+            flags_at: sampled_through,
+            since_neutral: 0,
+            neutral_at: Some(sampled_through),
+        };
+        self.side_down_at
+            .retain(|&mask, _| sampled_flags & mask != 0);
         // Repair bookkeeping only: a lock keeps capturing until a fresh press.
         if !locked {
             self.state = State::IDLE;
@@ -1668,7 +1680,7 @@ impl DictationHotkey {
         let ignored_because = binding_press
             .then(|| self.resync_stale_press(now))
             .flatten();
-        let trigger_pressed = self.trigger_pressed(event, fresh_key_down);
+        let trigger_pressed = self.trigger_pressed(event, fresh_key_down, prior.flags);
         if let InputEvent::PhysicalKeyDown { code, timing } = event
             && self.binding.key_code != Some(code)
         {
@@ -1895,14 +1907,19 @@ impl DictationHotkey {
     /// A down edge of the binding, whether or not tracked keys block it.
     fn binding_press(&self, event: InputEvent, fresh_key_down: bool, prior_flags: u64) -> bool {
         match self.binding.key_code {
-            Some(_) => self.trigger_pressed(event, fresh_key_down),
-            None => {
-                matches!(event, InputEvent::Flags(flags) if self.binding.exact_modifiers(flags))
-                    && !self.binding.modifiers.is_empty()
-                    && !self.binding.required_modifiers_down(prior_flags)
-                    && self.both_sides_went_down_together()
-            }
+            Some(_) => self.trigger_pressed(event, fresh_key_down, prior_flags),
+            None => self.modifiers_went_down(event, prior_flags),
         }
+    }
+
+    /// The modifier-only binding's modifiers went down, from up, to exactly
+    /// themselves. Releasing Shift off a held Shift-Option is no Option press,
+    /// nor is Caps Lock or the other Option changing while Option is held.
+    fn modifiers_went_down(&self, event: InputEvent, prior_flags: u64) -> bool {
+        matches!(event, InputEvent::Flags(flags) if self.binding.exact_modifiers(flags))
+            && !self.binding.modifiers.is_empty()
+            && !self.binding.required_modifiers_down(prior_flags)
+            && self.both_sides_went_down_together()
     }
 
     /// A system shortcut such as Command-Tab swallows its key's release, and
@@ -2005,7 +2022,7 @@ impl DictationHotkey {
         );
     }
 
-    fn trigger_pressed(&self, event: InputEvent, fresh_key_down: bool) -> bool {
+    fn trigger_pressed(&self, event: InputEvent, fresh_key_down: bool, prior_flags: u64) -> bool {
         match self.binding.key_code {
             Some(key_code) => {
                 fresh_key_down
@@ -2018,12 +2035,7 @@ impl DictationHotkey {
                         } if code == key_code && self.binding.exact_modifiers(flags)
                     )
             }
-            None => {
-                matches!(event, InputEvent::Flags(flags) if self.binding.exact_modifiers(flags))
-                    && !self.binding.modifiers.is_empty()
-                    && self.pressed_keys.is_empty()
-                    && self.both_sides_went_down_together()
-            }
+            None => self.pressed_keys.is_empty() && self.modifiers_went_down(event, prior_flags),
         }
     }
 
@@ -3707,6 +3719,171 @@ mod tests {
                 Some(HotkeyAction::Finish)
             );
         }
+    }
+
+    #[test]
+    fn lifting_shift_off_shift_option_is_not_an_option_press() {
+        // A key or macro sends Shift-Option-Left and lifts Shift just before
+        // Option (#1076). Two bursts inside the double-tap window must not lock.
+        let shift_option = OPTION_KEY_MASK | SHIFT_KEY_MASK;
+        let left = |down| InputEvent::Key {
+            code: 123,
+            down,
+            flags: shift_option,
+        };
+        for option_first in [false, true] {
+            let now = capture_time();
+            let mut hotkey = test_hotkey(false, now);
+            let at = |ms: u64| now + Duration::from_millis(ms);
+            for burst in [0, 70] {
+                let first = if option_first {
+                    OPTION_KEY_MASK
+                } else {
+                    SHIFT_KEY_MASK
+                };
+                let mut actions = Vec::new();
+                for (offset, event) in [
+                    (0, InputEvent::Flags(first)),
+                    (2, InputEvent::Flags(shift_option)),
+                    (4, left(true)),
+                    (6, left(false)),
+                    (8, InputEvent::Flags(OPTION_KEY_MASK)),
+                    (10, InputEvent::Flags(NO_FLAGS)),
+                ] {
+                    actions.extend(hotkey.process(event, at(burst + offset)));
+                }
+                let expected: &[HotkeyAction] = if option_first {
+                    &[
+                        HotkeyAction::Start,
+                        HotkeyAction::Discard(DiscardCause::ExtraModifier),
+                    ]
+                } else {
+                    &[]
+                };
+                assert_eq!(actions, expected, "option_first={option_first}");
+                assert!(!hotkey.is_recording(), "option_first={option_first}");
+            }
+            // A real Option press still starts and finishes.
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), at(1_000)),
+                Some(HotkeyAction::Start)
+            );
+            assert_eq!(
+                hotkey.process(InputEvent::Flags(NO_FLAGS), at(2_000)),
+                Some(HotkeyAction::Finish)
+            );
+        }
+    }
+
+    #[test]
+    fn caps_lock_while_option_is_held_is_not_an_option_press() {
+        const CAPS_LOCK_MASK: u64 = 1 << 16;
+        let now = capture_time();
+        let at = |ms: u64| now + Duration::from_millis(ms);
+        let mut hotkey = test_hotkey(false, now);
+        for (ms, flags) in [
+            (0, SHIFT_KEY_MASK),
+            (10, SHIFT_KEY_MASK | OPTION_KEY_MASK),
+            (20, OPTION_KEY_MASK),
+            (30, OPTION_KEY_MASK | CAPS_LOCK_MASK),
+            (40, OPTION_KEY_MASK),
+            (50, OPTION_KEY_MASK | CAPS_LOCK_MASK),
+            (60, CAPS_LOCK_MASK),
+        ] {
+            assert_eq!(hotkey.process(InputEvent::Flags(flags), at(ms)), None);
+            assert!(!hotkey.is_recording());
+        }
+        // Option pressed with Caps Lock on is a press.
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(OPTION_KEY_MASK | CAPS_LOCK_MASK),
+                at(1_000)
+            ),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), at(1_200)),
+            None
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), at(2_000)),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn the_other_option_key_is_not_a_fresh_press_of_an_either_binding() {
+        use crate::app_settings::{LEFT_OPTION_MASK, LEFT_SHIFT_MASK, RIGHT_OPTION_MASK};
+        let left_option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+        let right_option = OPTION_KEY_MASK | RIGHT_OPTION_MASK;
+        let both_options = left_option | right_option;
+        let shift = SHIFT_KEY_MASK | LEFT_SHIFT_MASK;
+        let now = capture_time();
+        let at = |ms: u64| now + Duration::from_millis(ms);
+        let mut hotkey = test_hotkey(false, now);
+        for (ms, flags) in [
+            (0, shift),
+            (10, shift | left_option),
+            (20, left_option),
+            (30, both_options),
+            (40, right_option),
+            (50, NO_FLAGS),
+        ] {
+            assert_eq!(hotkey.process(InputEvent::Flags(flags), at(ms)), None);
+            assert!(!hotkey.is_recording());
+        }
+        // Either Option alone presses, and the other joining it changes nothing.
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(right_option), at(1_000)),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(both_options), at(1_400)),
+            None
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(left_option), at(1_500)),
+            None
+        );
+        assert!(hotkey.is_recording());
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), at(2_000)),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn option_double_tap_still_locks() {
+        let now = capture_time();
+        let at = |ms: u64| now + Duration::from_millis(ms);
+        let press = InputEvent::Flags(OPTION_KEY_MASK);
+        let release = InputEvent::Flags(NO_FLAGS);
+        let mut hotkey = test_hotkey(false, now);
+        assert_eq!(hotkey.process(press, at(0)), Some(HotkeyAction::Start));
+        assert_eq!(hotkey.process(release, at(80)), Some(HotkeyAction::Finish));
+        assert_eq!(hotkey.process(press, at(150)), Some(HotkeyAction::Start));
+        assert_eq!(hotkey.process(release, at(230)), None);
+        assert!(hotkey.is_locked());
+        assert_eq!(hotkey.process(press, at(1_000)), Some(HotkeyAction::Finish));
+        assert_eq!(hotkey.process(release, at(1_080)), None);
+        assert!(!hotkey.is_recording());
+    }
+
+    #[test]
+    fn neutral_keyboard_rebuilds_modifier_history_after_a_missed_release() {
+        let now = capture_time();
+        let option = InputEvent::Flags(OPTION_KEY_MASK);
+        let mut hotkey = test_hotkey(false, now);
+        // Option went down while matching was suspended; its release never came.
+        hotkey.track_key_state(option, now);
+        assert_eq!(hotkey.process(option, now + Duration::from_secs(1)), None);
+        let repaired = recover_after_neutral_window(&mut hotkey, now + Duration::from_secs(2), 0);
+        assert_eq!(hotkey.modifier_history.flags, NO_FLAGS);
+        assert_eq!(hotkey.modifier_history.neutral_at, Some(repaired));
+        assert_eq!(
+            hotkey.process(option, repaired + Duration::from_secs(1)),
+            Some(HotkeyAction::Start)
+        );
     }
 
     #[test]
