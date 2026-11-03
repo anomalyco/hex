@@ -281,9 +281,16 @@ impl LocalTranscriber {
                     "could not load the transcription model on the GPU; loading it on the CPU"
                 );
                 let loaded = Self::load_on(selection, Backend::Cpu, None, preference)?;
-                // The CPU loads the same model, so the GPU failed.
+                // The CPU loads the same model, so the GPU failed, unless it
+                // only ran out of memory (another copy can fill it, #1165).
                 if let Some(gpu) = &expected {
-                    gpu_health::record(gpu, &format!("{error:#}"));
+                    if gpu_health::out_of_memory(&error) {
+                        tracing::info!(
+                            "the GPU ran out of memory; not remembering it as failed, Auto tries it again next load"
+                        );
+                    } else {
+                        gpu_health::record(gpu, &format!("{error:#}"));
+                    }
                 }
                 Ok(loaded)
             }
@@ -541,7 +548,9 @@ impl LocalTranscriber {
         );
         let gpu = self.gpu.take();
         let cpu = Self::load_on(&self.selection, Backend::Cpu, None, self.preference)?;
-        if let Some(gpu) = &gpu {
+        if let Some(gpu) = &gpu
+            && !gpu_health::out_of_memory(error)
+        {
             gpu_health::record(gpu, &format!("{error:#}"));
         }
         gpu_health::set_auto_on_cpu(self.preference == TranscriptionDevice::Auto);
