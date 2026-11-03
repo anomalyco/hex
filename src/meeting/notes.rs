@@ -303,7 +303,7 @@ pub(super) fn summarize_with_calendar(
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err(eyre!("Apple Intelligence did not finish in time"));
+            return Err(eyre!("the notes writer did not finish in time"));
         }
         calls += 1;
         let prompt = format!("{preamble}Meeting transcript:\n\n{}", excerpt.text);
@@ -626,7 +626,7 @@ pub(super) fn provisional_title(
     let title =
         clean_title(&generate(TITLE_INSTRUCTIONS, &prompt, timeout).map_err(|e| eyre!("{e}"))?);
     if title.is_empty() {
-        return Err(eyre!("Apple Intelligence returned an empty title"));
+        return Err(eyre!("the notes writer returned an empty title"));
     }
     Ok(title)
 }
@@ -823,11 +823,18 @@ pub fn summarize(id: &str) -> Result<MeetingManifest> {
 
 /// Generates and records notes while holding this meeting's claim.
 fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
-    generator::available().map_err(|reason| eyre!("{reason}"))?;
     let directory = root()?.join(id);
-    let manifest = read_manifest(&directory)?;
+    let mut manifest = read_manifest(&directory)?;
     if manifest.status != MeetingStatus::Complete {
         return Err(eyre!("only completed meetings can be summarized"));
+    }
+    // A writer that isn't there (OpenCode not running, Apple Intelligence
+    // off) is the meeting's notes error, so the pane says why.
+    if let Err(reason) = generator::available() {
+        tracing::warn!(%reason, meeting = id, "could not generate meeting notes");
+        manifest.notes_error = Some(reason.clone());
+        write_manifest(&directory, &manifest)?;
+        return Err(eyre!("{reason}"));
     }
     let entries = super::read_ndjson(&directory.join("transcript.ndjson"))?;
     let never = AtomicBool::new(false);

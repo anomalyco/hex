@@ -93,6 +93,10 @@ Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> Summarize with OpenCode (off by default); it sends
     the transcript excerpt to the OpenCode model
+    ├── Summarize -> "Writing a title and summary with OpenCode…" (never
+    │   Apple Intelligence off a Mac that has it)
+    └── No writer (OpenCode not running) -> "Notes could not be written." with
+        the reason, recorded as notes_error (#1151: it was dropped silently)
 Idle sleep -> systemd-inhibit idle:sleep (Linux),
     SetThreadExecutionState (Windows) while recording
 Tray -> Record meeting, Stop & transcribe, Copy last meeting transcript

@@ -330,6 +330,7 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Transcribe", ["Transkrybuj", "转写", "文字起こし", "Transkribieren", "Transcribir", "Розпізнати"]),
+    ("Writing a title and summary with OpenCode…", ["Piszę tytuł i podsumowanie za pomocą OpenCode…", "正在用 OpenCode 撰写标题和摘要…", "OpenCode でタイトルと要約を作成中…", "Titel und Zusammenfassung werden mit OpenCode geschrieben…", "Escribiendo un título y un resumen con OpenCode…", "Пишемо назву та підсумок за допомогою OpenCode…"]),
     ("Hex is up to date", ["Hex jest aktualny", "Hex 已是最新版本", "Hex は最新です", "Hex ist auf dem neuesten Stand", "Hex está actualizado", "Hex має останню версію"]),
     ("Couldn't check for updates", ["Nie udało się sprawdzić aktualizacji", "无法检查更新", "アップデートを確認できませんでした", "Updates konnten nicht gesucht werden", "No se pudieron buscar actualizaciones", "Не вдалося перевірити оновлення"]),
     ("{model} · Language: {language}", ["{model} · Język: {language}", "{model} · 语言：{language}", "{model} · 言語: {language}", "{model} · Sprache: {language}", "{model} · Idioma: {language}", "{model} · Мова: {language}"]),
