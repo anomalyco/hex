@@ -107,9 +107,17 @@ On Linux                                 // capture.linux
 │   tried in order, so a hybrid laptop whose first node is a GPU the VA
 │   driver can't use encodes on the next (#853). No VA-API -> frames copied
 │   and encoded with x264 through ffmpeg (slow on DMA-BUF-only compositors);
-│   a first frame neither path can read (a DMA-BUF the CPU can't map) fails
-│   the capture with why, never a capture without a picture. Check: vaapi
-│   render_nodes_in_order; not observed on a hybrid laptop
+│   VA-API refusing the first frame's buffer (#1179: Intel Arc on the xe
+│   driver) -> the same CPU path instead of failing. The negotiated DRM
+│   modifier goes to the import and the log; the CPU never reads a tiled
+│   buffer as rows. A first frame neither path can read (a DMA-BUF the CPU
+│   can't map, or tiled) fails the capture with why, never a capture without
+│   a picture or a crash. Buffers PipeWire removes mid-stream (a
+│   renegotiation) are never queued again, and Hex maps buffers itself and
+│   unmaps a removed one only after the recorder's copy, so a renegotiation
+│   can't crash Hex. Check: vaapi render_nodes_in_order, pipewire
+│   a_negotiated_tiled_modifier_is_read; not observed on a hybrid laptop or
+│   an Intel Arc laptop
 ├── Candidates -> a small copy from the video engine (at most 4× smaller per
 │   pass: radeonsi crashes past it)
 ├── Reading movies back (keyframes, probe, audio) -> `ffmpeg`/`ffprobe`

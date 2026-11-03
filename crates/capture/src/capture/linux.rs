@@ -359,16 +359,17 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
     let small_edge = (CANDIDATE_EDGE as u32).max(out.0.max(out.1).div_ceil(4));
     let small = fit(out.0, out.1, small_edge, 2);
     scrawl_log(format!(
-        "Recording {}x{} of {}x{} ({:?}, {})",
+        "Recording {}x{} of {}x{} ({:?}, {:?}, {})",
         out.0,
         out.1,
         format.width,
         format.height,
         source,
+        format.pixel,
         if format.dmabuf {
-            "DMA-BUF"
+            format!("DMA-BUF, modifier {:#x}", format.modifier)
         } else {
-            "shared memory"
+            "shared memory".to_owned()
         }
     ));
     let path = sampler.video_output_path.clone();
@@ -387,7 +388,32 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
             break;
         }
         if let Some(frame) = stream.newest() {
-            match load(&mut encoding, &frame, &format) {
+            let mut loaded = load(&mut encoding, &frame, &format);
+            // The GPU can encode but refused this screen's buffers (some drivers won't import
+            // the producer's layout): copy the frames on the CPU instead of failing.
+            let refused = match (&loaded, &encoding) {
+                (Err(error), Encoding::Hardware { .. }) if !have_frame => {
+                    Some(format!("{error:#}"))
+                }
+                _ => None,
+            };
+            if let Some(why) = refused {
+                scrawl_log(format!(
+                    "Hardware encoding refused the screen buffer, encoding on the CPU: {why}"
+                ));
+                // The muxer ends before x264 writes the same movie.
+                drop(std::mem::replace(
+                    &mut encoding,
+                    Encoding::Software {
+                        pixels: Vec::new(),
+                        movie: None,
+                        hardware: None,
+                    },
+                ));
+                encoding = software_encoding(&format, out, path.as_deref(), Some(why));
+                loaded = load(&mut encoding, &frame, &format);
+            }
+            match loaded {
                 Ok(()) => have_frame = true,
                 // Nothing of the screen recorded yet: end the capture with why rather than
                 // write one with no picture.
@@ -478,6 +504,7 @@ fn record_x11(sampler: &Sampler) -> Result<Option<super::Movie>> {
         width: u32::from(rect.width),
         height: u32::from(rect.height),
         dmabuf: false,
+        modifier: pipewire::MODIFIER_LINEAR,
     };
     if area.is_none() {
         *RECORDED
@@ -564,8 +591,13 @@ fn start_encoding(
     if format.dmabuf
         && let Some(path) = path
     {
-        let hardware = Encoder::new((format.width, format.height), format.pixel, out, small)
-            .and_then(|encoder| Ok((encoder, Writer::h264(path)?)));
+        let hardware = Encoder::new(
+            (format.width, format.height),
+            (format.pixel, format.modifier),
+            out,
+            small,
+        )
+        .and_then(|encoder| Ok((encoder, Writer::h264(path)?)));
         match hardware {
             Ok((encoder, movie)) => {
                 return Encoding::Hardware {
@@ -579,6 +611,17 @@ fn start_encoding(
             }
         }
     }
+    software_encoding(format, out, path, unavailable)
+}
+
+/// x264 on the CPU, from frames copied out of the stream; `hardware` says why the GPU
+/// isn't encoding, when it was tried.
+fn software_encoding(
+    format: &VideoFormat,
+    out: (u32, u32),
+    path: Option<&std::path::Path>,
+    hardware: Option<String>,
+) -> Encoding {
     let pixel = match format.pixel {
         PixelFormat::Bgrx => "bgr0",
         PixelFormat::Rgbx => "rgb0",
@@ -593,7 +636,7 @@ fn start_encoding(
     Encoding::Software {
         pixels: Vec::new(),
         movie,
-        hardware: unavailable,
+        hardware,
     }
 }
 
@@ -605,7 +648,16 @@ fn load(encoding: &mut Encoding, frame: &Frame, format: &VideoFormat) -> Result<
         } => {
             let row = format.width as usize * 4;
             pixels.resize(row * format.height as usize, 0);
-            let rows = match (frame.rows(row, format.height as usize), hardware.as_deref()) {
+            // A tiled GPU buffer's bytes aren't rows; the CPU must not read it as if they were.
+            let readable = if frame.dmabuf && format.modifier != pipewire::MODIFIER_LINEAR {
+                Err(anyhow::anyhow!(
+                    "the screen's GPU buffers are tiled (modifier {:#x}), which the CPU can't read",
+                    format.modifier
+                ))
+            } else {
+                frame.rows(row, format.height as usize)
+            };
+            let rows = match (readable, hardware.as_deref()) {
                 (Ok(rows), _) => rows,
                 (Err(error), None) => return Err(error),
                 (Err(error), Some(why)) => {
