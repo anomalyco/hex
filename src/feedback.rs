@@ -197,6 +197,11 @@ impl<S> FeedbackOutput<S> {
         Ok(())
     }
 
+    /// A device is open, which the worker releases once idle.
+    fn is_open(&self) -> bool {
+        self.sink.is_some()
+    }
+
     fn mark_playing(&mut self, now: Instant, duration: Duration) {
         let until = now + duration;
         self.playing_until = Some(self.playing_until.unwrap_or(until).max(until));
@@ -270,8 +275,17 @@ pub fn preload() -> Result<()> {
             let mut start_tone = ProvisionalStart::default();
             let mut audition = Auditioning::default();
             loop {
-                let timeout = start_tone.wait(Instant::now(), OBSERVATION_INTERVAL);
-                let request = match receiver.recv_timeout(timeout) {
+                // With no device open and no tone due, nothing changes until
+                // a request comes, so the worker sleeps until then instead of
+                // waking every observation interval.
+                let received = if !output.is_open() && !start_tone.is_pending() {
+                    receiver
+                        .recv()
+                        .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
+                } else {
+                    receiver.recv_timeout(start_tone.wait(Instant::now(), OBSERVATION_INTERVAL))
+                };
+                let request = match received {
                     Ok(request) => Some(request),
                     Err(mpsc::RecvTimeoutError::Timeout) => None,
                     Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -928,6 +942,10 @@ impl ProvisionalStart {
             .min(observation)
     }
 
+    fn is_pending(&self) -> bool {
+        self.due.is_some()
+    }
+
     fn is_due(&self, now: Instant) -> bool {
         self.due.is_some_and(|due| now >= due)
     }
@@ -1222,12 +1240,6 @@ fn decode(bytes: &'static [u8]) -> Result<SamplesBuffer> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    impl<S> FeedbackOutput<S> {
-        fn is_open(&self) -> bool {
-            self.sink.is_some()
-        }
-    }
 
     /// Every bundled sound of `set` with the longest it may run. The
     /// classic sounds keep their original lengths.
@@ -1541,6 +1553,21 @@ mod tests {
         assert!(!output.is_open());
         drop(output);
         assert_eq!(live.get(), 0);
+    }
+
+    #[test]
+    fn the_worker_waits_for_requests_only_with_nothing_to_release_or_sound() {
+        let mut output = FeedbackOutput::new();
+        let now = Instant::now();
+        let mut start = ProvisionalStart::default();
+        assert!(!start.is_pending());
+        start.request(now);
+        assert!(start.is_pending());
+        start.sounding(Arc::new(AtomicBool::new(false)));
+        assert!(!start.is_pending());
+        assert!(!output.is_open());
+        output.open_for_tone(now, 0, || Ok(())).unwrap();
+        assert!(output.is_open());
     }
 
     #[test]
