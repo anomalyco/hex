@@ -70,6 +70,9 @@ pub struct MeetingStart {
     pub title: Option<String>,
     /// The detected call application, such as `Zoom`.
     pub app: Option<String>,
+    /// The call app's canonical bundle identifier, whose input the
+    /// microphone follows where the OS reports it.
+    pub application: Option<String>,
     /// The calendar event the recording was started for.
     pub calendar: Option<MeetingCalendar>,
     /// Where `title` came from; ignored without a title.
@@ -468,10 +471,10 @@ pub fn record(
         };
         // Each source recovers on its own: losing system audio (for example
         // when ScreenCaptureKit loses its display) never stops the microphone.
-        let microphone_capture = capture::SourceSupervisor::microphone(sink(
-            MeetingSource::Microphone,
-            &microphone_drops,
-        ));
+        let microphone_capture = capture::SourceSupervisor::microphone(
+            sink(MeetingSource::Microphone, &microphone_drops),
+            start.application.clone(),
+        );
         let system_capture =
             capture::SourceSupervisor::system(sink(MeetingSource::System, &system_drops));
         manifest.status = MeetingStatus::Recording;

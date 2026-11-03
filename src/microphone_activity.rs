@@ -20,11 +20,12 @@ use objc2_app_kit::NSRunningApplication;
 #[cfg(target_os = "macos")]
 use objc2_core_audio::{
     AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
-    AudioObjectPropertyAddress, AudioObjectPropertySelector,
-    kAudioHardwarePropertyProcessObjectList, kAudioObjectPropertyElementMain,
-    kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioProcessPropertyBundleID,
-    kAudioProcessPropertyIsRunningInput, kAudioProcessPropertyIsRunningOutput,
-    kAudioProcessPropertyPID,
+    AudioObjectPropertyAddress, AudioObjectPropertyScope, AudioObjectPropertySelector,
+    kAudioDevicePropertyDeviceUID, kAudioHardwarePropertyProcessObjectList,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
+    kAudioObjectPropertyScopeInput, kAudioObjectSystemObject, kAudioProcessPropertyBundleID,
+    kAudioProcessPropertyDevices, kAudioProcessPropertyIsRunningInput,
+    kAudioProcessPropertyIsRunningOutput, kAudioProcessPropertyPID,
 };
 #[cfg(target_os = "macos")]
 use objc2_core_foundation::{CFRetained, CFString};
@@ -176,6 +177,47 @@ pub(crate) fn application_running_output(canonical_bundle_id: &str) -> Result<bo
                     },
                 )
         }))
+    })
+}
+
+#[cfg(target_os = "macos")]
+/// The UIDs of the input devices the app `canonical_bundle_id` (its helpers
+/// included) records from, read from each of its processes running input.
+/// macOS 14 and later report them; earlier systems report none.
+pub(crate) fn application_input_devices(canonical_bundle_id: &str) -> Result<Vec<String>> {
+    objc2::rc::autoreleasepool(|_| {
+        let process_objects = property_vec::<AudioObjectID>(
+            kAudioObjectSystemObject as AudioObjectID,
+            kAudioHardwarePropertyProcessObjectList,
+        )?;
+        let mut uids = Vec::new();
+        for process_object in process_objects {
+            let recording =
+                property_value::<u32>(process_object, kAudioProcessPropertyIsRunningInput)
+                    .is_ok_and(|running| running != 0)
+                    && property_cf_string(process_object, kAudioProcessPropertyBundleID)
+                        .is_some_and(|bundle_id| {
+                            canonical_bundle_id_for(&bundle_id, None) == Some(canonical_bundle_id)
+                        });
+            if !recording {
+                continue;
+            }
+            let Ok(devices) = property_vec_in::<AudioObjectID>(
+                process_object,
+                kAudioProcessPropertyDevices,
+                kAudioObjectPropertyScopeInput,
+            ) else {
+                continue;
+            };
+            for device in devices {
+                if let Some(uid) = property_cf_string(device, kAudioDevicePropertyDeviceUID)
+                    && !uids.contains(&uid)
+                {
+                    uids.push(uid);
+                }
+            }
+        }
+        Ok(uids)
     })
 }
 
@@ -481,9 +523,17 @@ fn inspect_microphone_applications() -> Result<Vec<ActiveMicrophoneApplication>>
 
 #[cfg(target_os = "macos")]
 fn property_address(selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+    property_address_in(selector, kAudioObjectPropertyScopeGlobal)
+}
+
+#[cfg(target_os = "macos")]
+fn property_address_in(
+    selector: AudioObjectPropertySelector,
+    scope: AudioObjectPropertyScope,
+) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress {
         mSelector: selector,
-        mScope: kAudioObjectPropertyScopeGlobal,
+        mScope: scope,
         mElement: kAudioObjectPropertyElementMain,
     }
 }
@@ -520,7 +570,16 @@ fn property_vec<T: Copy + Default>(
     object: AudioObjectID,
     selector: AudioObjectPropertySelector,
 ) -> Result<Vec<T>> {
-    let mut address = property_address(selector);
+    property_vec_in(object, selector, kAudioObjectPropertyScopeGlobal)
+}
+
+#[cfg(target_os = "macos")]
+fn property_vec_in<T: Copy + Default>(
+    object: AudioObjectID,
+    selector: AudioObjectPropertySelector,
+    scope: AudioObjectPropertyScope,
+) -> Result<Vec<T>> {
+    let mut address = property_address_in(selector, scope);
     let mut size = 0;
     let status = unsafe {
         AudioObjectGetPropertyDataSize(
