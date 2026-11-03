@@ -17,6 +17,9 @@
 //! The recording capsule rests as a compact pill in its corner and springs
 //! open to show its actions while the pointer is over it. Dragging it moves
 //! the window; on release it snaps to the nearest corner, which is saved.
+//! With Labs › Movable meeting capsules on, the panel capsules (offer,
+//! reminder, call ended, ready, recording automatically) show in that same
+//! saved corner and drag the same way; off, they stay in the top right.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::SyncSender;
@@ -144,9 +147,13 @@ struct Capsule {
     choose: Choose,
     /// The recording capsule: the pointer is over the pill (or holding it).
     hovered: bool,
-    /// Where the recording capsule rests.
+    /// Where the recording capsule rests, and the panel while
+    /// [`Capsule::movable`].
     corner: MeetingIndicatorCorner,
-    /// Moves the recording capsule's window by a drag's travel from `corner`.
+    /// The panel capsule can be dragged to another corner (Labs › Movable
+    /// meeting capsules); the recording capsule always can.
+    movable: bool,
+    /// Moves the capsule's window by a drag's travel from `corner`.
     shift: Option<Shift>,
     save_corner: SaveCorner,
     /// Reads a recording's transcript through now off the main thread, then
@@ -249,9 +256,19 @@ impl Capsule {
         }
     }
 
-    /// The recording pill follows the pointer and snaps to the nearest
-    /// corner on release. A cancelled drag (Escape, window blur) returns to
-    /// the corner it started from and saves nothing.
+    /// The capsule's window size, for snapping a drag.
+    fn window_size(&self) -> (f32, f32) {
+        match &self.kind {
+            Some(Kind::Recording { .. }) => (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT),
+            Some(Kind::Offer(_)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
+            Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
+            None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
+        }
+    }
+
+    /// The recording pill (and a movable panel) follows the pointer and
+    /// snaps to the nearest corner on release. A cancelled drag (Escape,
+    /// window blur) returns to the corner it started from and saves nothing.
     fn drag(&mut self, drag: &Drag, tx: &mut Tx) {
         let Some(shift) = self.shift.clone() else {
             return;
@@ -261,12 +278,13 @@ impl Capsule {
             Phase::Move => shift(self.corner, drag.dx, drag.dy),
             Phase::Up if drag.cancelled() => shift(self.corner, 0.0, 0.0),
             Phase::Up => {
+                let size = self.window_size();
                 let corner = primary_screen_size().map_or(self.corner, |screen| {
-                    nearest_corner(self.corner, drag.dx, drag.dy, screen)
+                    nearest_corner(self.corner, drag.dx, drag.dy, screen, size)
                 });
                 shift(corner, 0.0, 0.0);
                 if corner != self.corner {
-                    tracing::info!(?corner, "recording capsule moved");
+                    tracing::info!(?corner, "meeting capsule moved");
                     self.corner = corner;
                     (self.save_corner)(corner);
                     // The pill changes sides with the window; it must not
@@ -298,15 +316,16 @@ fn corner_placement(
     (edge, margin, align, inset)
 }
 
-/// The corner nearest the capsule window's centre after a drag of
-/// (dx, dy) points from `from`, on a screen of `screen` points.
+/// The corner nearest the centre of a capsule window of `size` points after
+/// a drag of (dx, dy) points from `from`, on a screen of `screen` points.
 fn nearest_corner(
     from: MeetingIndicatorCorner,
     dx: f32,
     dy: f32,
     screen: (f32, f32),
+    size: (f32, f32),
 ) -> MeetingIndicatorCorner {
-    let (w, h) = (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT);
+    let (w, h) = size;
     let (_, margin, _, inset) = corner_placement(from, dx, dy);
     let x = if from.is_right() {
         screen.0 - inset - w / 2.0
@@ -341,7 +360,7 @@ fn primary_screen_size() -> Option<(f32, f32)> {
     None
 }
 
-fn place_recording(
+fn place_capsule(
     handle: &OverlayHandle<Capsule>,
     corner: MeetingIndicatorCorner,
     dx: f32,
@@ -398,6 +417,7 @@ impl MeetingCapsules {
                     choose: choose.clone(),
                     hovered: false,
                     corner: MeetingIndicatorCorner::default(),
+                    movable: false,
                     shift: None,
                     save_corner: save_corner.clone(),
                     copy_new: None,
@@ -421,7 +441,7 @@ impl MeetingCapsules {
                     resize.resize((width, MEETING_PANEL_HEIGHT));
                 }));
                 capsule.shift = Some(Arc::new(move |corner, dx, dy| {
-                    place_recording(&shift, corner, dx, dy);
+                    place_capsule(&shift, corner, dx, dy);
                 }));
             });
             handle
@@ -546,12 +566,23 @@ impl MeetingCapsules {
     fn show_panel(&self, kind: Kind, timeout: Option<Duration>) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
+        // With Labs › Movable meeting capsules the panel shows in the saved
+        // capsule corner; otherwise in the top right, as it always has.
+        let movable = crate::labs::movable_meeting_capsules();
+        let corner = if movable {
+            crate::app_settings::meeting_indicator_corner()
+        } else {
+            MeetingIndicatorCorner::TopRight
+        };
+        place_capsule(&self.panel, corner, 0.0, 0.0);
         self.panel
             .resize((panel_width(&kind), MEETING_PANEL_HEIGHT));
         self.panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
             capsule.more_open = false;
             capsule.copied = false;
+            capsule.movable = movable;
+            capsule.corner = corner;
             tx.instant();
         });
         self.panel.show();
@@ -602,7 +633,7 @@ impl MeetingCapsules {
 
     fn show_recording(&self, id: String, title: String, automatic: bool) {
         let corner = crate::app_settings::meeting_indicator_corner();
-        place_recording(&self.recording, corner, 0.0, 0.0);
+        place_capsule(&self.recording, corner, 0.0, 0.0);
         let started = Instant::now();
         let ticker_id = id.clone();
         self.recording.update(move |capsule, tx| {
@@ -787,7 +818,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         ),
         Kind::Ready(manifest) => ready(p, manifest, capsule.copied),
     };
-    pill(p, dot, &title, &subtitle, actions)
+    pill(p, dot, &title, &subtitle, actions, capsule.movable)
 }
 
 /// The panel capsule's width for `kind`, room for its title beside its
@@ -1081,19 +1112,32 @@ fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automat
 }
 
 /// The panel capsule (reminder, offer, call ended, ready): status dot, two
-/// truncated lines, and its actions, in a rounded rectangle.
-fn pill(p: Paint, dot: rune::Color, title: &str, subtitle: &str, actions: Vec<El>) -> El {
+/// truncated lines, and its actions, in a rounded rectangle. A `movable`
+/// one drags to another corner like the recording capsule.
+fn pill(
+    p: Paint,
+    dot: rune::Color,
+    title: &str,
+    subtitle: &str,
+    actions: Vec<El>,
+    movable: bool,
+) -> El {
+    let body = pill_body(p, status_dot(dot), title, subtitle, panel_radius(p))
+        .w_full()
+        .child(row().key("actions").gap(8.0).children(actions));
+    let body = if movable {
+        body.cursor(Cursor::Grab)
+            .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
+    } else {
+        body
+    };
     row()
         .key("capsule")
         .w_full()
         .h_full()
         .px(4.0)
         .py(4.0)
-        .child(
-            pill_body(p, status_dot(dot), title, subtitle, panel_radius(p))
-                .w_full()
-                .child(row().key("actions").gap(8.0).children(actions)),
-        )
+        .child(body)
 }
 
 /// The panel capsule's corners, concentric with its buttons' (`radius.md`)
@@ -1224,6 +1268,7 @@ mod tests {
             choose: Arc::new(move |choice| saved.lock().unwrap().push(choice)),
             hovered: false,
             corner: MeetingIndicatorCorner::TopRight,
+            movable: false,
             shift: None,
             save_corner: Arc::new(|_| {}),
             copy_new: None,
@@ -1620,17 +1665,120 @@ mod tests {
     fn a_released_capsule_snaps_to_the_corner_nearest_its_centre() {
         use MeetingIndicatorCorner::*;
         let screen = (1512.0, 982.0);
-        assert_eq!(nearest_corner(TopRight, -100.0, 40.0, screen), TopRight);
-        assert_eq!(nearest_corner(TopRight, -600.0, 0.0, screen), TopLeft);
-        assert_eq!(nearest_corner(TopRight, 0.0, 700.0, screen), BottomRight);
-        assert_eq!(nearest_corner(BottomLeft, 500.0, -600.0, screen), TopRight);
-        assert_eq!(nearest_corner(BottomLeft, 10.0, -10.0, screen), BottomLeft);
+        let nearest = |from, dx, dy| nearest_corner(from, dx, dy, screen, RECORDING);
+        assert_eq!(nearest(TopRight, -100.0, 40.0), TopRight);
+        assert_eq!(nearest(TopRight, -600.0, 0.0), TopLeft);
+        assert_eq!(nearest(TopRight, 0.0, 700.0), BottomRight);
+        assert_eq!(nearest(BottomLeft, 500.0, -600.0), TopRight);
+        assert_eq!(nearest(BottomLeft, 10.0, -10.0), BottomLeft);
         let (edge, margin, align, inset) = corner_placement(BottomLeft, 10.0, -10.0);
         assert!(matches!((edge, align), (ScreenEdge::Bottom, Align::Start)));
         assert_eq!(
             (margin, inset),
             (WINDOW_MARGIN + DOCK + 10.0, WINDOW_MARGIN + 10.0)
         );
+    }
+
+    #[test]
+    fn a_released_panel_snaps_by_its_own_size() {
+        use MeetingIndicatorCorner::*;
+        let screen = (1512.0, 982.0);
+        // The panel's centre sits 222 pt in from the right edge, the
+        // recording capsule's 332 pt: the same drag crosses the middle
+        // only for the wider window.
+        assert_eq!(
+            nearest_corner(TopRight, -500.0, 0.0, screen, PANEL),
+            TopRight
+        );
+        assert_eq!(
+            nearest_corner(TopRight, -500.0, 0.0, screen, RECORDING),
+            TopLeft
+        );
+        assert_eq!(
+            nearest_corner(TopRight, -600.0, 0.0, screen, PANEL),
+            TopLeft
+        );
+        assert_eq!(
+            nearest_corner(TopLeft, 0.0, 500.0, screen, PANEL),
+            BottomLeft
+        );
+        assert_eq!(
+            nearest_corner(BottomRight, 0.0, -400.0, screen, PANEL),
+            BottomRight
+        );
+        assert_eq!(
+            nearest_corner(BottomRight, 0.0, -500.0, screen, PANEL),
+            TopRight
+        );
+    }
+
+    #[test]
+    fn each_corner_places_the_panel_at_its_edges() {
+        use MeetingIndicatorCorner::*;
+        let top = WINDOW_MARGIN + MENU_BAR;
+        let bottom = WINDOW_MARGIN + DOCK;
+        for (corner, margin) in [
+            (TopRight, top),
+            (TopLeft, top),
+            (BottomRight, bottom),
+            (BottomLeft, bottom),
+        ] {
+            let (edge, placed_margin, align, inset) = corner_placement(corner, 0.0, 0.0);
+            assert_eq!(
+                matches!(edge, ScreenEdge::Top),
+                corner.is_top(),
+                "{corner:?}"
+            );
+            assert_eq!(matches!(align, Align::End), corner.is_right(), "{corner:?}");
+            assert_eq!(
+                (placed_margin, inset),
+                (margin, WINDOW_MARGIN),
+                "{corner:?}"
+            );
+        }
+        // Off, the panel keeps the top-right spot its overlay opens at.
+        let (edge, margin, align, inset) = corner_placement(TopRight, 0.0, 0.0);
+        assert!(matches!((edge, align), (ScreenEdge::Top, Align::End)));
+        assert_eq!((margin, inset), (WINDOW_MARGIN + MENU_BAR, WINDOW_MARGIN));
+    }
+
+    #[test]
+    fn only_a_movable_panel_drags() {
+        type Moves = Arc<Mutex<Vec<(MeetingIndicatorCorner, f32, f32)>>>;
+        for movable in [false, true] {
+            let (mut rt, _, _) = runtime(ready_transcript(), false, true, PANEL);
+            let moves: Moves = Moves::default();
+            let record = moves.clone();
+            rt.update(move |capsule, _| {
+                capsule.movable = movable;
+                capsule.shift = Some(Arc::new(move |corner, dx, dy| {
+                    record.lock().unwrap().push((corner, dx, dy));
+                }));
+            });
+            rt.frame(0.0);
+            let (x, y) = rt.find("lines").unwrap();
+            rt.pointer_move(x, y);
+            rt.pointer_down(x, y);
+            rt.pointer_move(x - 20.0, y + 30.0);
+            rt.frame(0.0);
+            rt.pointer_up(x - 20.0, y + 30.0);
+            rt.frame(0.0);
+            let moves = moves.lock().unwrap();
+            if movable {
+                assert!(
+                    moves.contains(&(MeetingIndicatorCorner::TopRight, -20.0, 30.0)),
+                    "{moves:?}"
+                );
+                assert_eq!(
+                    moves.last(),
+                    Some(&(MeetingIndicatorCorner::TopRight, 0.0, 0.0))
+                );
+            } else {
+                assert!(moves.is_empty(), "{moves:?}");
+            }
+            // The drag pressed nothing.
+            assert!(rt.state.kind.is_some());
+        }
     }
 
     fn call_ended() -> Kind {

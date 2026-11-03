@@ -409,6 +409,11 @@ const KEYS: &[Key] = &[
         "Labs: a meeting recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet, unless you keep recording (macOS)",
     ),
     key(
+        "labs.movable_meeting_capsules",
+        Kind::Bool,
+        "Labs: drag meeting capsules such as Meeting transcript ready out of the way; they show in the corner you left them, shared with the recording capsule (macOS)",
+    ),
+    key(
         "labs.output_fixes",
         Kind::Bool,
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
@@ -627,6 +632,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.live_chapters", "meetings"),
     ("labs.subtitle_export", "meetings"),
     ("labs.stop_when_call_ends", "meetings"),
+    ("labs.movable_meeting_capsules", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),

@@ -234,6 +234,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Stop when the call ends"),
                 tr("Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"),
             ));
+            // Only macOS's capsules know the screen to snap a drag against.
+            rows.push(row(
+                Feature::MovableMeetingCapsules,
+                &HINTS,
+                tr("Movable meeting capsules"),
+                tr("Drag meeting capsules out of the way; they come back in the corner you left them"),
+            ));
         }
     }
     rows.push(row(
@@ -498,6 +505,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SectionKeyAlone => "lab-section-key",
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
+        Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
     }
 }
 

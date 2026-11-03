@@ -58,6 +58,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
+├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page
@@ -781,6 +782,29 @@ only); `hide_menu_bar_icon_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: the icon hiding on a real
 Mac, or macOS restoring an item's remembered visibility; the row renders
 only in macOS builds, so no golden changes.
+
+Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
+like Meetings; its row shows wherever Meetings does, in macOS builds): for
+panel capsules that sit over another app's window controls or toolbar. The
+gate, `labs::movable_meeting_capsules()`, is read each time a panel capsule
+shows (`MeetingCapsules::show_panel` in
+[rune_ui/meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs)). While
+on, the panel (offer, reminder, left the call, Meeting transcript ready,
+Recording automatically) opens in the saved
+`meetings.recording_indicator_corner` and its body drags like the recording
+capsule's: it follows the pointer, snaps to the corner nearest its centre
+(measured with its own width) on release, and saves that corner, which the
+recording capsule then uses too. A press on a button still presses it, and a
+cancelled drag (Escape) goes back without saving. Off, the panel opens in
+the top right and doesn't drag, exactly as before. Not built: clicks passing
+through the panel outside its buttons. Checks:
+`a_released_panel_snaps_by_its_own_size`,
+`each_corner_places_the_panel_at_its_edges`, and
+`only_a_movable_panel_drags` in
+[rune_ui/meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs);
+`movable_meeting_capsules_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a drag on a real Mac; the
+row renders only in macOS builds, so no golden changes.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

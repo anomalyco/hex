@@ -437,6 +437,21 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
   -> "Zoom left the call" capsule: Keep recording / Stop & transcribe
   -> No timeout; nothing stops automatically
 
+Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.panel-drag
+  The panel capsules: offer, reminder, left the call, Meeting transcript
+  ready, Recording automatically
+  -> On: each opens in the saved recording_indicator_corner (read as it shows)
+     ├── Drag its body -> follows the pointer; release -> snaps to the corner
+     │   nearest its centre (by its own width) and saves it, so the recording
+     │   capsule moves there too
+     ├── Press on a button -> the button, as before
+     └── Escape mid-drag -> back where it was, nothing saved
+  -> Off: top right below the menu bar, no drag, exactly as before
+  Checks: a_released_panel_snaps_by_its_own_size,
+  each_corner_places_the_panel_at_its_edges, only_a_movable_panel_drags
+  (rune_ui/meeting_capsules.rs); not observed on a real Mac. Not built:
+  clicks passing through the panel outside its buttons
+
 Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-stop
   Only a recording Hex started on its own (Always record); manual, offered,
   and calendar recordings are never stopped
