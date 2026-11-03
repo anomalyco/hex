@@ -150,6 +150,20 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   ├── Accepted only because app/Info.plist keeps the old SUPublicEDKey;
 │   │   scripts/validate-app.sh requires it. Feed items: docs/plans/swift-app-handoff.md
 │   └── No automated check; a clean-Mac install from each old app is the proof
+├── 2.3.1 Linux or Windows updates into this build     // setup.legacy-adopt
+│   ├── It lands in <data>/voice-control/versions/<version>; its first app or
+│   │   `service` launch from there moves it into the managed layout, then
+│   │   relaunches from it (Linux: exec, so the old unit keeps its process)
+│   ├── Linux -> 2.3.1's marked unit, ~/.local/bin/hex link, and hex.desktop
+│   │   entries move aside -> the built-in .github/release/install-linux.sh
+│   │   installs this executable -> session.env copied; failure puts them back
+│   ├── Windows -> %APPDATA%\hex\versions, receipt, Hex.lnk recreated,
+│   │   Launch at login repointed, 2.3.1's Apps & Features entry removed
+│   ├── Failure -> logged, runs in place; the next launch tries again
+│   ├── Settings, history, and models in voice-control are not carried over
+│   └── Check: `a_legacy_linux_install_moves_into_the_installers_layout`,
+│       `a_failed_move_puts_the_legacy_files_back`; Windows and a real 2.3.1
+│       feed update are unverified
 ├── Upgrading from 2.3.1 or earlier (same `hex` folder)     // setup.upgrade; macOS
 │   ├── `anomaly.hex` is a new identity: macOS kept none of the old grants
 │   ├── Settings without `anomaly-hex-identity` in `migrations` -> checked once at launch

@@ -89,6 +89,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ../assets
       ../packaging
       ../macos/HexMicrophoneDriver/Info.plist
+      # Built in: a 2.3.1 install moves itself into this installer's layout.
+      ../.github/release/install-linux.sh
     ];
   };
 

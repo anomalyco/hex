@@ -14,6 +14,8 @@
 //! manifest's SHA-256, and (macOS, Windows) the code signature are the
 //! integrity checks.
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod legacy;
 mod notes;
 #[cfg_attr(target_os = "linux", path = "updater/linux.rs")]
 #[cfg_attr(target_os = "macos", path = "updater/macos.rs")]
