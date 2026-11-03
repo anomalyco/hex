@@ -1009,7 +1009,8 @@ fn generate_single_model(
 }
 
 /// Posts to the newest generation route and falls back to the older name only
-/// when the server reports that route missing. Every attempt shares one deadline.
+/// when the server reports that route missing (a 404 that isn't OpenCode's
+/// own error). Every attempt shares one deadline.
 fn post_generation(
     service: &Service,
     data: &str,
@@ -1027,18 +1028,30 @@ fn post_generation(
             deadline.saturating_sub(started.elapsed()),
             cancelled,
         )?;
-        let missing = attempt.status == 404;
+        let missing = route_missing(&attempt);
         response = Some(attempt);
         if !missing {
             break;
         }
     }
     let response = response.expect("at least one generation route");
-    if response.status == 404 {
+    if route_missing(&response) {
         return Err(eyre!("OpenCode does not serve a generation route"));
     }
     serde_json::from_slice(&response.body)
         .wrap_err("OpenCode returned an invalid generation response")
+}
+
+/// A 404 means the route is missing only when it isn't OpenCode's own tagged
+/// error (such as "Model not found"), which the route answered.
+fn route_missing(response: &crate::desktop::opencode_service::Response) -> bool {
+    response.status == 404
+        && !serde_json::from_slice::<serde_json::Value>(&response.body).is_ok_and(|value| {
+            value.get("_tag").is_some()
+                && value
+                    .get("message")
+                    .is_some_and(serde_json::Value::is_string)
+        })
 }
 
 fn retryable_generation_error(message: &str) -> bool {
@@ -1488,6 +1501,14 @@ mod tests {
             (
                 vec![("/api/experimental/generate", 400, unavailable)],
                 Err("Model unavailable: x"),
+            ),
+            (
+                vec![(
+                    "/api/experimental/generate",
+                    404,
+                    r#"{"_tag":"NotFoundError","message":"Model not found: github-copilot/gpt-5.4-nano"}"#,
+                )],
+                Err("Model not found: github-copilot/gpt-5.4-nano"),
             ),
             (
                 vec![
