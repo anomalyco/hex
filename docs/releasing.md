@@ -327,7 +327,11 @@ app (new updater, and on macOS a new bundle ID), so:
   https://anoma.ly/hex (no enclosure, so Sparkle installs nothing). The item
   is prepared with the macOS client work; upload it with the Legacy appcast
   workflow (`.github/workflows/legacy-appcast.yml`, dispatch from `production`),
-  which replaces only `appcast.xml`.
+  which replaces only `appcast.xml`. Superseded (Kit, 2026-11-02): the 2.3.1
+  and Swift feeds offer the released ZIP itself, signed with their old Sparkle
+  key, so Install Update moves those Macs onto the new Hex
+  (docs/plans/swift-app-handoff.md, "Legacy Update"). Keep `SUPublicEDKey` in
+  `app/Info.plist`.
 - **Windows signer:** the updater accepts only a Valid Authenticode signature
   whose signer is `AUTHENTICODE_SIGNER` in `src/updater/windows.rs` (OpenCode's
   Artifact Signing subject). Check the first Azure-signed Hex build's subject

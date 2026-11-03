@@ -49,5 +49,7 @@
   <string>Hex reads your calendar on this Mac to remind you before meetings and title their recordings. Nothing leaves your Mac.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Hex uses your microphone for private local dictation and does not store the captured audio.</string>
+  <key>SUPublicEDKey</key>
+  <string>mIek27lttJe8cIBqVZFhh6reRKjpTx1h9ZY9OKWPtuM=</string>
 </dict>
 </plist>

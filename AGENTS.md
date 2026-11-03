@@ -1499,15 +1499,17 @@ and notarizes an unpublished candidate once the Apple secrets are in the
 `scripts/release-app.sh prepare` leaves `hex-<version>-macos-arm64.dmg` and
 `hex-<version>-macos-arm64.zip` (root `Hex.app`, the updater's archive); both
 contain the same signed, stapled app. Do not reuse a released version for
-changed code. Macs on 2.3.1 or earlier (Sparkle, `com.kitlangton.hex2`) get
-one informational appcast item, `packaging/macos/legacy-appcast.xml`, that
-links to the new app; they never auto-update into it.
-There is no Swift migration: never import Swift preferences or data, adopt its
-bundle identifier, publish Rust artifacts to its S3 feed, or automatically
-delete or replace the Swift app. The one automatic step: once setup is ready,
-Hex asks a running old Hex (2.3.1 or Swift) to quit, leaving it installed. Prefer a website-only informational item in
-the legacy Sparkle feed, with no enclosure, pointing to the new app for manual
-installation and fresh setup. Publish it only after the new artifact is live. See
+changed code. Macs on 2.3.1 or earlier and Swift Hex (Sparkle 2.9.4,
+`com.kitlangton.hex2` and `com.kitlangton.Hex`, one shared EdDSA key) update
+straight into the new app (Kit, 2026-11-02): their feeds offer the released
+`Hex.app` ZIP, signed with that old key, and Sparkle's Install Update
+replaces the old app with it. Sparkle accepts it only because `app/Info.plist`
+keeps the old `SUPublicEDKey` (`validate-app.sh` requires it; nothing reads it
+otherwise, and there is still no `SUFeedURL` or Sparkle framework). Users
+click Install Update; nothing installs by itself.
+There is no Swift migration: never import Swift preferences or data or adopt
+its bundle identifier. Once setup is ready, Hex asks a running old Hex (2.3.1
+or Swift) to quit, leaving it installed. See
 `docs/plans/swift-app-handoff.md`. The Rust data root remains unchanged, but the
 new app identity requires fresh macOS permission grants. Validate signed
 distribution with the selected signing team before publishing an app update.

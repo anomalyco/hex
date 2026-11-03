@@ -34,6 +34,8 @@ plist_value() {
 [ "$(plist_value CFBundleURLTypes:0:CFBundleURLSchemes:0)" = hex ] || fail "wrong URL scheme"
 # Hex updates itself through the Anomaly release service; Sparkle is gone.
 ! plist_value SUFeedURL >/dev/null 2>&1 || fail "a Sparkle feed is still configured"
+# 2.3.1 and Swift Hex's Sparkle installs this app only if it keeps their update key.
+[ "$(plist_value SUPublicEDKey)" = mIek27lttJe8cIBqVZFhh6reRKjpTx1h9ZY9OKWPtuM= ] || fail "the legacy Sparkle key is missing"
 [ ! -e "$bundle/Contents/Frameworks/Sparkle.framework" ] || fail "Sparkle.framework is still bundled"
 [ "$(plist_value LSUIElement)" = true ] || fail "menu-bar application policy is disabled"
 [ -x "$bundle/Contents/MacOS/hex" ] || fail "packaged executable is missing"
