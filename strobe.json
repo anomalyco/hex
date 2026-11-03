@@ -27,6 +27,7 @@
         "hex-data/onboarding-complete": "",
         "hex-data/settings.json": {
           "enable_on_launch": false,
+          "history_retention": "forever",
           "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
         }
       },

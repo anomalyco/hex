@@ -44,7 +44,8 @@ own Hex:
   in your Hugging Face cache (on Windows that scan otherwise reads your real
   profile).
 - The seeded `settings.json` keeps the listener off (`enable_on_launch: false`):
-  no keyboard hook, no microphone, and no model load. The seeded
+  no keyboard hook, no microphone, and no model load. History is kept
+  forever, so a seeded `history.json` never expires mid-run. The seeded
   `onboarding-complete` marker skips first-run setup. The two `scrawl-*`
   migrations skip importing Scrawl's settings from your home.
 - `guard` stops a run if your own `settings.json` or `local-api.json`
