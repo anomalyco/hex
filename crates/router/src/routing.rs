@@ -623,6 +623,16 @@ pub fn judge_capture(
     bundle: &ScrawlBundle,
     live: look::Live,
 ) -> (smart::Judgement, Option<String>) {
+    judge_capture_with(dir, bundle, live, &jev::Hooks::default())
+}
+
+/// As `judge_capture`, with a replaceable model boundary for latency tests.
+pub fn judge_capture_with(
+    dir: &Path,
+    bundle: &ScrawlBundle,
+    live: look::Live,
+    hooks: &jev::Hooks,
+) -> (smart::Judgement, Option<String>) {
     let url = live.url.clone();
     if let Some(error) = &live.error {
         scrawl_log(format!("routing: {error}"));
@@ -641,7 +651,7 @@ pub fn judge_capture(
             &jev::capture_state(bundle, url.as_deref()),
             &jev::capture_asking(bundle, &evidence.candidates),
             None,
-            &jev::Hooks::default(),
+            hooks,
             &jev::Thresholds::configured(),
         );
         let mut record = record;

@@ -164,6 +164,12 @@ fn stills() -> Vec<(&'static str, Pres)> {
             ))]),
         ),
         ("rule-sent", after(&routed(rule()))),
+        (
+            "rule-resolving",
+            after(&routed(Route::ResolvingRule {
+                name: "board".into(),
+            })),
+        ),
         ("rule-final", {
             let mut flow = Flow::new();
             flow.input(Input::Routed(rule()), 0.0);
@@ -544,6 +550,7 @@ const GOLDENS: &[&str] = &[
     "processing",
     "saved",
     "rule-sent",
+    "rule-resolving",
     "rule-final",
     "guess",
     "shift",
@@ -577,13 +584,26 @@ fn capture_capsule_goldens() {
                 rune::render::write_png(&path, w, h, &pixels).unwrap();
                 continue;
             }
-            assert!(
-                path.exists(),
-                "{} is missing; run with HEX_UPDATE_GOLDENS=1",
-                path.display()
-            );
+            let actual = std::env::temp_dir().join(format!(
+                "rune-settings-capture-capsule-{name}-{theme}-actual.png"
+            ));
+            if !path.exists() {
+                rune::render::write_png(&actual, w, h, &pixels).unwrap();
+                misses.push(format!(
+                    "{name}-{theme}: missing golden; actual at {}",
+                    actual.display()
+                ));
+                continue;
+            }
             let (golden_w, golden_h, golden) = read_png(&path);
-            assert_eq!((golden_w, golden_h), (w, h), "{name}-{theme} size changed");
+            if (golden_w, golden_h) != (w, h) {
+                rune::render::write_png(&actual, w, h, &pixels).unwrap();
+                misses.push(format!(
+                    "{name}-{theme}: size changed; actual at {}",
+                    actual.display()
+                ));
+                continue;
+            }
             // GPUs differ in the last bit of blending and glyph coverage; a
             // layout or colour change moves far more.
             let differing = pixels
@@ -592,8 +612,6 @@ fn capture_capsule_goldens() {
                 .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 12))
                 .count();
             if differing > (w * h) as usize / 500 {
-                let actual =
-                    std::env::temp_dir().join(format!("capture-capsule-{name}-{theme}-actual.png"));
                 rune::render::write_png(&actual, w, h, &pixels).unwrap();
                 misses.push(format!(
                     "{name}-{theme}: {differing} pixels differ; actual at {}",
