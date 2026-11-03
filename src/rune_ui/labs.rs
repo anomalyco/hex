@@ -15,7 +15,6 @@ pub(super) use self::category::Category;
 pub(super) use self::drawer::drawer;
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
-use super::deep_link::LabsLink;
 use super::icons::{BOOK, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
@@ -170,6 +169,23 @@ impl Store {
     fn query(&self) -> String {
         self.search.text.trim().to_lowercase()
     }
+}
+
+/// What a `hex://labs` link asks the store to show.
+#[cfg_attr(
+    not(any(target_os = "macos", all(test, target_os = "linux"))),
+    allow(dead_code)
+)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LabsLink {
+    /// The lab whose drawer opens, by its id.
+    pub(crate) lab: Option<String>,
+    /// Turned on instead of Discover (`?tab=on`).
+    pub(crate) turned_on: bool,
+    /// The chip selected (`?category=<id>`).
+    pub(crate) category: Option<String>,
+    /// The search typed in (`?search=<words>`).
+    pub(crate) search: Option<String>,
 }
 
 /// A deep link: the Labs store on its tab, chip, and search, with a lab's

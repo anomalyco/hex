@@ -8,6 +8,7 @@
 
 use rune::Tx;
 
+use super::labs::LabsLink;
 use super::story_link::{MAX_LINK, percent_decode};
 use super::{Pane, Ui};
 
@@ -19,19 +20,6 @@ pub(crate) enum Target {
     Labs(LabsLink),
     /// A main pane, by its link name.
     Settings(String),
-}
-
-/// What a `hex://labs` link asks the store to show.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct LabsLink {
-    /// The lab whose drawer opens, by its id.
-    pub(crate) lab: Option<String>,
-    /// Turned on instead of Discover (`?tab=on`).
-    pub(crate) turned_on: bool,
-    /// The chip selected (`?category=<id>`).
-    pub(crate) category: Option<String>,
-    /// The search typed in (`?search=<words>`).
-    pub(crate) search: Option<String>,
 }
 
 impl LabsLink {

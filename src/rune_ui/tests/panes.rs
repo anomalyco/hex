@@ -1775,8 +1775,8 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
 
 #[test]
 fn a_labs_link_opens_its_labs_drawer_and_leaves_it_off() {
-    use super::super::deep_link::LabsLink;
     use super::super::labs::Lab;
+    use super::super::labs::LabsLink;
     use crate::labs::Feature;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
     let feature = Feature::VocabularyBiasing;
@@ -1801,7 +1801,7 @@ fn a_labs_link_opens_its_labs_drawer_and_leaves_it_off() {
 
 #[test]
 fn a_labs_link_to_an_unknown_name_opens_labs_without_a_drawer() {
-    use super::super::deep_link::LabsLink;
+    use super::super::labs::LabsLink;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
     let link = LabsLink {
         lab: Some("no-such-lab".into()),
@@ -1817,7 +1817,7 @@ fn a_labs_link_to_an_unknown_name_opens_labs_without_a_drawer() {
 
 #[test]
 fn a_labs_link_sets_the_stores_tab_chip_and_search() {
-    use super::super::deep_link::LabsLink;
+    use super::super::labs::LabsLink;
     use super::super::labs::Tab;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
     let link = LabsLink {
