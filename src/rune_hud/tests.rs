@@ -14,6 +14,18 @@ fn dot_uniform_layout_matches_wgsl() {
 }
 
 #[test]
+fn only_gnome_and_kde_on_wayland_keep_the_primary_display() {
+    for desktops in ["GNOME", "ubuntu:GNOME", "KDE"] {
+        assert!(keeps_primary_display(Some(desktops), true), "{desktops}");
+        assert!(!keeps_primary_display(Some(desktops), false), "{desktops}");
+    }
+    for desktops in [None, Some("sway"), Some("XFCE")] {
+        assert!(!keeps_primary_display(desktops, true));
+        assert!(!keeps_primary_display(desktops, false));
+    }
+}
+
+#[test]
 fn dot_scope_window_fits_the_largest_plate() {
     let largest = |key| {
         dot_scope::KNOBS
