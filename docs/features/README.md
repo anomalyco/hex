@@ -1580,7 +1580,11 @@ Linux beta                               // not macOS feature parity
 ├── General > Launch at login -> writes or removes ~/.config/autostart/anomaly.hex.desktop (X-Hex-Managed; linux/login_item)
 │   ├── Background portal (GNOME, KDE; xdg-desktop-portal 1.20+) -> the portal writes it (X-XDP-Autostart=anomaly.hex; linux/background)
 │   ├── Installed by mise or asdf -> starts the version manager's shim, if it runs Hex from home
-│   └── An entry without the mark -> error beside the row; Hex never replaces it
+│   ├── An entry without the mark -> error beside the row; Hex never replaces it
+│   └── A user target wants hex.service (~/.config/systemd/user/*.wants/hex.service:
+│       Home Manager's programs.hex.autostart, `systemctl --user enable`) -> on;
+│       turning it off errors, naming where to disable it; no entry is written (#1164)
+│       // check: an_enabled_systemd_unit_starts_hex_at_login (the link scan only)
 ├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
 │   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
 │   ├── Startup open fails -> Retry with backoff; the listener keeps running
