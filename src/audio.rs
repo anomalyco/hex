@@ -896,7 +896,8 @@ enum InputTarget {
     /// A real input standing in for a default that is Hex Microphone, the
     /// built-in microphone with the lid closed, a passed-over Bluetooth
     /// headset, or missing: the built-in microphone while the lid is open,
-    /// else the first usable one listed.
+    /// else the first usable one listed, never a virtual input or an
+    /// iPhone's Continuity microphone.
     StandIn(usize),
 }
 
@@ -927,8 +928,8 @@ struct InputPlan {
 /// default is passed over for the built-in microphone, else the first other
 /// real input, and kept only when nothing else is usable. Saved microphones
 /// and `--device` are never passed over for being Bluetooth. A virtual or
-/// aggregate input never stands in, though a virtual default, saved
-/// microphone, or `--device` is used as named.
+/// aggregate input, or an iPhone's Continuity microphone, never stands in,
+/// though such a default, saved microphone, or `--device` is used as named.
 fn resolve_input(
     device_override: Option<&str>,
     selected: Option<&str>,
@@ -978,11 +979,14 @@ fn resolve_input(
             selection,
         });
     }
-    // A virtual device is used only as the default or by name, never as a
-    // stand-in: it can record silence while its app is idle.
+    // A virtual device or an iPhone's Continuity microphone is used only as
+    // the default or by name, never as a stand-in: a virtual one can record
+    // silence while its app is idle, and the iPhone prompts and can fail.
     let usable = || {
         (0..names.len()).filter(|&index| {
-            !is_hex(&names[index]) && !off(index) && transport(index) != Transport::Virtual
+            !is_hex(&names[index])
+                && !off(index)
+                && !matches!(transport(index), Transport::Virtual | Transport::Continuity)
         })
     };
     usable()
@@ -1723,6 +1727,80 @@ mod tests {
         assert_eq!(
             resolve_input(
                 Some("Microsoft Teams Audio"),
+                None,
+                &headset,
+                Some("AirPods Pro"),
+                headset_transports,
+                OPEN
+            ),
+            found(Named(0), Selection::InUse)
+        );
+    }
+
+    #[test]
+    fn an_iphone_microphone_never_stands_in() {
+        use InputTarget::{Named, SystemDefault};
+        use Transport::{Bluetooth, BuiltIn, Continuity};
+        let found = |target, selection| Ok(InputPlan { target, selection });
+
+        // Lid closed, only the built-in microphone and the iPhone: say why.
+        let lid = listed(&["MacBook Pro Microphone", "iPhone Microphone"]);
+        let lid_transports = |index: usize| [BuiltIn, Continuity][index];
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &lid,
+                Some("MacBook Pro Microphone"),
+                lid_transports,
+                CLOSED
+            ),
+            Err(LID_CLOSED_ERROR.into())
+        );
+        // A Bluetooth default is kept rather than passed over for the iPhone.
+        let headset = listed(&["iPhone Microphone", "AirPods Pro"]);
+        let headset_transports = |index: usize| [Continuity, Bluetooth][index];
+        let avoid = Route {
+            lid_closed: false,
+            avoid_bluetooth: true,
+        };
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &headset,
+                Some("AirPods Pro"),
+                headset_transports,
+                avoid
+            ),
+            found(SystemDefault, Selection::InUse)
+        );
+        // An iPhone default, saved microphone, or `--device` is used as named.
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &headset,
+                Some("iPhone Microphone"),
+                headset_transports,
+                OPEN
+            ),
+            found(SystemDefault, Selection::InUse)
+        );
+        assert_eq!(
+            resolve_input(
+                None,
+                Some("iPhone Microphone"),
+                &headset,
+                Some("AirPods Pro"),
+                headset_transports,
+                OPEN
+            ),
+            found(Named(0), Selection::InUse)
+        );
+        assert_eq!(
+            resolve_input(
+                Some("iPhone Microphone"),
                 None,
                 &headset,
                 Some("AirPods Pro"),

@@ -17,7 +17,25 @@ pub(super) enum Transport {
     /// A virtual or aggregate device, such as Microsoft Teams Audio, which
     /// may record silence outside its own app, so it never stands in.
     Virtual,
+    /// An iPhone microphone offered through Continuity, wired or wireless.
+    /// Opening it prompts on the phone and can fail, so it never stands in,
+    /// though a Continuity default, saved microphone, or `--device` is used.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Continuity,
     Other,
+}
+
+/// CoreAudio's Continuity Capture transport types,
+/// `kAudioDeviceTransportTypeContinuityCaptureWired` and `…Wireless`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const CONTINUITY_CAPTURE_WIRED: u32 = u32::from_be_bytes(*b"ccwd");
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const CONTINUITY_CAPTURE_WIRELESS: u32 = u32::from_be_bytes(*b"ccwl");
+
+/// Whether a CoreAudio transport type is an iPhone's Continuity microphone.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn is_continuity_capture(kind: u32) -> bool {
+    kind == CONTINUITY_CAPTURE_WIRED || kind == CONTINUITY_CAPTURE_WIRELESS
 }
 
 /// ALSA devices carry no transport; Linux passes over a Bluetooth default
@@ -162,6 +180,7 @@ pub(super) fn transport(device: &Device) -> Transport {
         {
             Transport::Virtual
         }
+        Some(kind) if is_continuity_capture(kind) => Transport::Continuity,
         _ => Transport::Other,
     }
 }
@@ -190,5 +209,15 @@ mod tests {
             "AppleHDAEngineInput:1B,0,1,0:1",
             source(b"line")
         ));
+    }
+
+    #[test]
+    fn continuity_capture_transports_are_recognised() {
+        assert_eq!(CONTINUITY_CAPTURE_WIRED, 0x6363_7764);
+        assert_eq!(CONTINUITY_CAPTURE_WIRELESS, 0x6363_776c);
+        assert!(is_continuity_capture(u32::from_be_bytes(*b"ccwd")));
+        assert!(is_continuity_capture(u32::from_be_bytes(*b"ccwl")));
+        assert!(!is_continuity_capture(u32::from_be_bytes(*b"bltn")));
+        assert!(!is_continuity_capture(u32::from_be_bytes(*b"virt")));
     }
 }
