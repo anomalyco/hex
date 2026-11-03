@@ -106,8 +106,10 @@ mod tests {
     use crate::history::{HistoryDraft, HistoryKind, HistoryRetention, HistoryStore};
 
     fn store(name: &str) -> (std::path::PathBuf, HistoryStore) {
-        let directory =
-            std::env::temp_dir().join(format!("hex-history-versions-{}-{name}", std::process::id()));
+        let directory = std::env::temp_dir().join(format!(
+            "hex-history-versions-{}-{name}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join("history.json");
@@ -142,7 +144,10 @@ mod tests {
     fn replacing_keeps_the_earlier_transcript_with_its_model_newest_first() {
         let (path, mut store) = store("replace");
         let id = store.record(draft("first"), 1_000).unwrap().unwrap();
-        assert_eq!(store.entry(id).unwrap().model.as_deref(), Some("Parakeet v3"));
+        assert_eq!(
+            store.entry(id).unwrap().model.as_deref(),
+            Some("Parakeet v3")
+        );
         store
             .replace_text(id, again("second", "Whisper", Some("es")), 2_000)
             .unwrap();
@@ -206,7 +211,11 @@ mod tests {
         let id = store.record(draft("v0"), 1_000).unwrap().unwrap();
         for n in 1..=MAX_VERSIONS + 2 {
             store
-                .replace_text(id, again(&format!("v{n}"), "Whisper", None), 1_000 + n as u64)
+                .replace_text(
+                    id,
+                    again(&format!("v{n}"), "Whisper", None),
+                    1_000 + n as u64,
+                )
                 .unwrap();
         }
         let entry = store.entry(id).unwrap();

@@ -196,7 +196,11 @@ pub fn dictation_model() -> Option<String> {
     let selection = crate::transcription::engine::TranscriptionEngine::shared()
         .and_then(|engine| engine.held_selection())
         .unwrap_or_else(|| crate::app_settings::transcription_selection().1);
-    Some(crate::transcription::models::definition(selection.model).name.to_string())
+    Some(
+        crate::transcription::models::definition(selection.model)
+            .name
+            .to_string(),
+    )
 }
 
 #[derive(Serialize)]
@@ -371,9 +375,7 @@ impl HistoryStore {
             inference_ms: draft.inference_ms,
             total_ms: draft.total_ms,
             recording_bytes,
-            model: draft
-                .model
-                .map(|model| truncated(&model, MAX_LABEL_BYTES)),
+            model: draft.model.map(|model| truncated(&model, MAX_LABEL_BYTES)),
             language: None,
             text_ms: None,
             versions: Vec::new(),
@@ -419,7 +421,11 @@ impl HistoryStore {
     }
 
     /// Changes entry `id` and saves; a failed save keeps it as it was.
-    fn change(&mut self, id: u64, change: impl FnOnce(&mut HistoryEntry) -> bool) -> io::Result<bool> {
+    fn change(
+        &mut self,
+        id: u64,
+        change: impl FnOnce(&mut HistoryEntry) -> bool,
+    ) -> io::Result<bool> {
         let Some(index) = self.entries.iter().position(|entry| entry.id == id) else {
             return Ok(false);
         };

@@ -920,10 +920,11 @@ fn model_label(model: Option<&str>, language: Option<&str>) -> Option<String> {
 /// its model and age, Copy, and Use this version.
 fn versions_section(ui: &Ui, p: Paint, entry: &HistoryEntry) -> El {
     let id = entry.id;
-    let mut section = col()
-        .key("versions")
-        .gap(12.0)
-        .child(section_label(p, "label", tr("Earlier versions")));
+    let mut section =
+        col()
+            .key("versions")
+            .gap(12.0)
+            .child(section_label(p, "label", tr("Earlier versions")));
     for (index, version) in entry.versions.iter().enumerate() {
         let mut meta = model_label(version.model.as_deref(), version.language.as_deref())
             .unwrap_or_else(|| tr("Unknown model").to_owned());
