@@ -99,10 +99,11 @@ pub enum Feature {
     HideMenuBarIcon,
     MovableMeetingCapsules,
     MeetingSummaryModel,
+    GnomeClipboardRestore,
 }
 
 impl Feature {
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 41] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -143,6 +144,7 @@ impl Feature {
         Self::HideMenuBarIcon,
         Self::MovableMeetingCapsules,
         Self::MeetingSummaryModel,
+        Self::GnomeClipboardRestore,
     ];
 
     /// The features this OS and build have.
@@ -205,7 +207,8 @@ impl Feature {
             | Self::KeepRecordings
             | Self::HideMenuBarIcon
             | Self::MovableMeetingCapsules
-            | Self::MeetingSummaryModel => Audience::Everyone,
+            | Self::MeetingSummaryModel
+            | Self::GnomeClipboardRestore => Audience::Everyone,
         }
     }
 
@@ -241,7 +244,7 @@ impl Feature {
             | Self::MeetingSummaryModel => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
-            Self::SectionKeyAlone => cfg!(target_os = "linux"),
+            Self::SectionKeyAlone | Self::GnomeClipboardRestore => cfg!(target_os = "linux"),
             Self::StandaloneSpecialKeys | Self::SkipPauses => {
                 cfg!(any(target_os = "linux", target_os = "windows"))
             }
@@ -319,6 +322,7 @@ impl Feature {
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
             Self::MovableMeetingCapsules => "movable-meeting-capsules",
             Self::MeetingSummaryModel => "meeting-summary-model",
+            Self::GnomeClipboardRestore => "gnome-clipboard-restore",
         }
     }
 
@@ -365,6 +369,7 @@ impl Feature {
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
             Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
             Self::MeetingSummaryModel => "labs.meeting_summary_model",
+            Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
         }
     }
 
@@ -473,6 +478,9 @@ impl Feature {
             Self::MeetingSummaryModel => {
                 "Choose the OpenCode provider and model that write meeting notes (meetings.opencode_model, provider/model)"
             }
+            Self::GnomeClipboardRestore => {
+                "Put the previous clipboard back after a paste on GNOME Wayland, through the XWayland clipboard while XWayland is running"
+            }
         }
     }
 
@@ -523,6 +531,7 @@ impl Feature {
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
             Self::MeetingSummaryModel => settings.labs.meeting_summary_model,
+            Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
         }
     }
 
@@ -571,6 +580,7 @@ impl Feature {
             &mut labs.hide_menu_bar_icon,
             &mut labs.movable_meeting_capsules,
             &mut labs.meeting_summary_model,
+            &mut labs.gnome_clipboard_restore,
         ]
     }
 
@@ -619,6 +629,7 @@ impl Feature {
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
             Self::MeetingSummaryModel => settings.labs.meeting_summary_model = on,
+            Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -658,6 +669,7 @@ const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
 const MEETING_SUMMARY_MODEL: u64 = 1 << 24;
+const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -827,6 +839,14 @@ pub fn meeting_summary_model() -> bool {
     on(MEETING_SUMMARY_MODEL) && Feature::MeetingSummaryModel.on_this_os()
 }
 
+/// A paste on a Wayland desktop without data-control (GNOME) snapshots and
+/// restores the clipboard through an already running XWayland (Linux; read
+/// as each paste starts).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn gnome_clipboard_restore() -> bool {
+    on(GNOME_CLIPBOARD_RESTORE) && Feature::GnomeClipboardRestore.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -931,6 +951,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MeetingSummaryModel,
             settings.meeting_summary_model,
             MEETING_SUMMARY_MODEL,
+        ),
+        (
+            Feature::GnomeClipboardRestore,
+            settings.gnome_clipboard_restore,
+            GNOME_CLIPBOARD_RESTORE,
         ),
     ]
     .into_iter()
@@ -1365,6 +1390,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & MOVABLE_MEETING_CAPSULES, 0);
         assert_eq!(state & HIDE_MENU_BAR_ICON, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn gnome_clipboard_restore_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & GNOME_CLIPBOARD_RESTORE, 0);
+        labs.gnome_clipboard_restore = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & GNOME_CLIPBOARD_RESTORE, 0);
+        assert_eq!(state & MEETING_SUMMARY_MODEL, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

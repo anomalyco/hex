@@ -1569,6 +1569,12 @@ Linux beta                               // not macOS feature parity
 │   ├── Over the cap or unreadable -> transcript stays; the log says why
 │   ├── Paste only reached the clipboard -> transcript stays for Ctrl+V
 │   └── Wayland without ext- or wlr-data-control -> transcript stays (KWin offers ext, #719)
+│       ├── Settings › Output -> note pointing to Labs › Restore clipboard on GNOME while it is off
+│       └── Labs `gnome-clipboard-restore` on and this user's Xwayland already running
+│           -> snapshot, check, and restore through XWayland's CLIPBOARD (#1111)
+│           // never connects first, so never starts XWayland; checks: xwayland_* in
+│           // linux/clipboard.rs, gnome_desktops_point_to_the_clipboard_lab_until_it_is_on;
+│           // not run on GNOME
 │   └── Wayland: wl-copy, then the shortcut, chosen at the first paste  // linux.wayland-paste
 │       ├── Asked by a modifier shortcut -> wait for its portal release + 250 ms
 │       │   (2 s cap without a release); after a hex command -> 250 ms

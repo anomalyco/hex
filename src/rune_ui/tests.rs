@@ -262,6 +262,26 @@ fn toggles_save_through_the_host() {
 }
 
 #[test]
+fn gnome_desktops_point_to_the_clipboard_lab_until_it_is_on() {
+    let mut rt = runtime("portal", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
+    assert!(
+        rt.find("clipboard-restore-note").is_none(),
+        "only desktops without data-control"
+    );
+    rt.state.platform.clipboard_unrestorable = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("clipboard-restore-note").is_some());
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-gnome-clipboard-restore");
+    assert!(rt.state.settings.labs.gnome_clipboard_restore);
+    tap(&mut rt, "nav-labs");
+    assert!(rt.find("terminal-paste").is_some(), "back on General");
+    assert!(rt.find("clipboard-restore-note").is_none());
+}
+
+#[test]
 fn restore_default_brings_back_paste_last_only_with_its_lab_on() {
     use crate::app_settings::HotkeyBinding;
     let default = HotkeyBinding::paste_last_default();

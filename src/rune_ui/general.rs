@@ -1009,7 +1009,24 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             .into(),
         );
     }
+    if clipboard_note_shown(ui) {
+        rows.push(
+            note(
+                "clipboard-restore-note",
+                tr("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it."),
+                p.muted(),
+            )
+            .into(),
+        );
+    }
     rows
+}
+
+/// Output's note on a Wayland desktop without data-control (GNOME) while
+/// Labs › Restore clipboard on GNOME is off.
+fn clipboard_note_shown(ui: &Ui) -> bool {
+    ui.platform.clipboard_unrestorable
+        && !crate::labs::Feature::GnomeClipboardRestore.on(&ui.settings)
 }
 
 /// Enable on launch (Linux and Windows), the Dock icon, sounds, the
