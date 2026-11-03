@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use super::generator::{self, GeneratedNotes, GenerationError};
+use super::generator::{self, GeneratedNotes, GenerationError, NotesWriter};
 use super::{
     MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptReader, coalesce_transcript,
     format_duration, read_manifest, root, sync_directory, write_manifest,
@@ -85,6 +85,10 @@ pub struct MeetingNotes {
     pub excerpt_chars: usize,
     #[serde(default)]
     pub transcript_chars: usize,
+    /// The writer, and for OpenCode its `provider/model`. Notes written
+    /// before Hex recorded it have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_by: Option<NotesWriter>,
 }
 
 impl MeetingNotes {
@@ -309,6 +313,7 @@ pub(super) fn summarize_with_calendar(
                     notes: GeneratedNotes {
                         title: clean_title(&notes.title),
                         summary: clean_summary(&notes.summary),
+                        written_by: notes.written_by,
                     },
                     excerpt_chars: excerpt.text.len(),
                     transcript_chars: excerpt.transcript_chars,
@@ -377,6 +382,7 @@ impl MeetingNotes {
             elapsed_ms: elapsed.as_millis() as u64,
             excerpt_chars: summary.excerpt_chars,
             transcript_chars: summary.transcript_chars,
+            written_by: summary.notes.written_by,
         }
     }
 }
@@ -422,13 +428,31 @@ fn base_title(manifest: &MeetingManifest) -> String {
 pub(super) fn render_notes_block(notes: &MeetingNotes) -> String {
     let summary = notes.summary.trim();
     format!(
-        "{NOTES_START}\n## Summary\n\n{}\n\n_Written on this Mac by Apple Intelligence; the transcript below has the details._\n{NOTES_END}\n",
+        "{NOTES_START}\n## Summary\n\n{}\n\n_{}_\n{NOTES_END}\n",
         if summary.is_empty() {
             "_Nothing to summarize._"
         } else {
             summary
-        }
+        },
+        notes_footer(notes.written_by.as_ref()),
     )
+}
+
+/// The line under the summary, naming the writer that actually wrote it.
+fn notes_footer(writer: Option<&NotesWriter>) -> String {
+    const DETAILS: &str = "the transcript below has the details.";
+    match writer {
+        Some(NotesWriter::AppleIntelligence) => {
+            format!("Written on this Mac by Apple Intelligence; {DETAILS}")
+        }
+        Some(NotesWriter::OpenCode { model: Some(model) }) => {
+            format!("Written by {model} through OpenCode; {DETAILS}")
+        }
+        Some(NotesWriter::OpenCode { model: None }) => {
+            format!("Written by OpenCode's default model; {DETAILS}")
+        }
+        None => "The transcript below has the details.".into(),
+    }
 }
 
 /// How far a recording has come, for deciding when to name it.
@@ -1032,6 +1056,7 @@ mod tests {
         GeneratedNotes {
             title: title.into(),
             summary: summary.into(),
+            ..Default::default()
         }
     }
 
@@ -1340,6 +1365,34 @@ mod tests {
         assert!(!regenerated.contains("Friday"));
         assert_eq!(regenerated.matches(NOTES_START).count(), 1);
         assert_eq!(regenerated.matches("## Transcript").count(), 1);
+    }
+
+    #[test]
+    fn the_notes_footer_names_the_writer_that_wrote_them() {
+        let mut notes = meeting_notes();
+        assert!(!render_notes_block(&notes).contains("Apple Intelligence"));
+
+        notes.written_by = Some(NotesWriter::AppleIntelligence);
+        assert!(render_notes_block(&notes).contains("Written on this Mac by Apple Intelligence"));
+
+        notes.written_by = Some(NotesWriter::OpenCode {
+            model: Some("openai/gpt-5".into()),
+        });
+        let block = render_notes_block(&notes);
+        assert!(block.contains("Written by openai/gpt-5 through OpenCode"));
+        assert!(!block.contains("Apple Intelligence") && !block.contains("this Mac"));
+
+        // The manifest keeps the writer and model, and older notes still read.
+        let json = serde_json::to_value(&notes).unwrap();
+        assert_eq!(
+            json["written_by"],
+            serde_json::json!({"writer": "opencode", "model": "openai/gpt-5"})
+        );
+        let read: MeetingNotes = serde_json::from_value(json).unwrap();
+        assert_eq!(read.written_by, notes.written_by);
+        let older: MeetingNotes =
+            serde_json::from_value(serde_json::json!({"title": "Launch"})).unwrap();
+        assert_eq!(older.written_by, None);
     }
 
     #[test]
