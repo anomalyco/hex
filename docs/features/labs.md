@@ -67,21 +67,33 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
-Settings › Labs                          // labs.page
-├── "Try unfinished features. They may change or break." + Send feedback -> https://github.com/anomalyco/hex/issues/new
-├── Opened by a link (macOS) -> hex://labs opens this page; hex://labs/<feature> also scrolls to the
-│   feature's row (centred) and pulses it for ~1.4 s (layer_02 fill, then back); it never turns the
-│   feature on. An unknown or absent name -> the page opens and process.log notes it. hex://settings/<pane>
+Settings › Labs                          // labs.page, a store (labs/store.rs, labs/drawer.rs)
+├── Header -> "Labs", Search N labs (⌘F focuses it), Discover | Turned on · N
+├── Category chips with counts -> All, Dictation, Shortcuts, Clipboard, Meetings, Models, App
+│   (labs/category.rs; a category this OS has no lab in hides)
+├── Discover, no chip or search -> New in Labs: the two newest labs, washed in their category's colour,
+│   then All labs; a lab added on the newest date among those shown carries New
+├── A chip, a search (name, description, category), or Turned on -> only the matching cards;
+│   none -> "No labs match" / "Nothing turned on yet"
+├── Card -> coloured tile, name, New / Dev tags, two lines of description, Try / On
+│   ├── Try / On (key lab-<id>) -> flips the lab, saved at once
+│   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
+│   └── Voice Filter while its driver is installed, or a managed or locked lab -> its button is disabled
+├── Card body -> a drawer from the right over a dim: big tile, name, category, description,
+│   a preview placeholder, "Shows up in …" (a link when it's a pane), Send feedback, Try it / Turn off;
+│   Unload model when idle also shows Unload after. Escape, ✕ or the dim closes it
+├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<id> and ?search=<text>
+│   set the store; hex://labs/<lab> also opens that lab's drawer. It never turns a lab on. An unknown
+│   or absent name -> the page opens and process.log notes it. hex://settings/<pane>
 │   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
 │   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
-├── One row per feature this OS has -> press flips it, saved at once
-│   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
-│   └── Voice Filter while its driver is installed -> on, disabled, "Uninstall the driver in Voice Filter to turn it off."
-└── Run setup again -> replays the onboarding (below)
+├── Annotate is listed as a lab (App) wherever Hex has the Annotate pane; its button flips capture.enabled
+└── Footer -> "Unfinished features. They may change or break.", Run setup again (replays the onboarding,
+    below), Send feedback -> https://github.com/anomalyco/hex/issues/new
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature this build has: name, on/off, audience, description, its hex settings key
-├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build); no Copy link on the rows, 20 of them would only add noise
+├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build), which opens its drawer
 ├── on <feature> | off <feature> -> a running Hex saves and applies it (hex settings set); otherwise settings.json
 ├── off voice-filter with the driver installed -> refused: uninstall the driver
 └── hex experiments … -> points at hex labs
@@ -89,8 +101,12 @@ hex labs                                 // labs.cli; edits settings.json, no ru
 hex settings set labs.live_text true     // macOS: through the running Hex
 ```
 
-Checks: `rune_ui::deep_link` tests (parser, every feature's link reads back);
-`a_labs_link_*` in tests/panes.rs and the `mac-labs-link` golden (Linux).
+Checks: `rune_ui::deep_link` tests (parser, query, every feature's link reads
+back); the labs store tests in tests/panes.rs (links, card and drawer toggles,
+filters, ⌘F, a lone card's width) and the `mac-labs-link` golden (Linux). Scenes:
+`mac-labs`, `mac-labs-on`, `mac-labs-category`, `mac-labs-search`,
+`mac-labs-drawer`, `mac-labs-link`. Not yet observed: the store in a running
+Hex.
 
 Settings saved before this model may carry `labs.enabled`; it is read and
 ignored, and every feature keeps its own toggle. `hex status` lists the
@@ -878,7 +894,7 @@ and `without_its_labs_toggle_no_summary_model_is_used` in
 `a_chosen_model_is_asked_alone_and_never_falls_back` in
 [dictation/processor.rs](../../src/dictation/processor.rs). Not yet
 observed: a real meeting summarized with a chosen model, on any OS. The
-`rune-mac-labs-link` goldens show the row; the Meetings Advanced field shows
+`mac-labs` scene shows its card; the Meetings Advanced field shows
 only with the toggle on, so its goldens are unchanged.
 
 Vocabulary in meeting notes (`meeting-notes-vocabulary`, issue 1154; every

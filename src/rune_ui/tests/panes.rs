@@ -1774,29 +1774,139 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
 }
 
 #[test]
-fn a_labs_link_opens_labs_pulses_its_row_and_leaves_it_off() {
+fn a_labs_link_opens_its_labs_drawer_and_leaves_it_off() {
+    use super::super::deep_link::LabsLink;
+    use super::super::labs::Lab;
     use crate::labs::Feature;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
     let feature = Feature::VocabularyBiasing;
     assert!(!feature.on(&rt.state.settings));
-    rt.update(|ui, tx| super::super::labs::reveal(ui, Some(feature.name()), tx));
+    let link = LabsLink {
+        lab: Some(feature.name().into()),
+        ..LabsLink::default()
+    };
+    rt.update(|ui, tx| super::super::labs::reveal(ui, &link, tx));
     settle(&mut rt);
     assert!(rt.state.labs_open);
-    assert_eq!(rt.state.lab_flash.map(|(f, _)| f), Some(feature));
-    assert!(rt.find("lab-vocabulary-biasing").is_some());
+    assert_eq!(rt.state.lab_store.drawer, Some(Lab::Feature(feature)));
+    assert!(rt.find("lab-drawer").is_some());
     assert!(!feature.on(&rt.state.settings), "a link never flips it");
-    let later = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    assert!(super::super::labs::poll_flash(&mut rt.state, later));
-    assert!(rt.state.lab_flash.is_none());
+    key(&mut rt, Key::Escape, Mods::default());
+    assert!(
+        rt.state.lab_store.drawer.is_none(),
+        "Escape closes the drawer"
+    );
+    assert!(rt.state.labs_open, "and leaves Labs open");
 }
 
 #[test]
-fn a_labs_link_to_an_unknown_name_opens_labs_without_a_pulse() {
+fn a_labs_link_to_an_unknown_name_opens_labs_without_a_drawer() {
+    use super::super::deep_link::LabsLink;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
-    rt.update(|ui, tx| super::super::labs::reveal(ui, Some("no-such-lab"), tx));
+    let link = LabsLink {
+        lab: Some("no-such-lab".into()),
+        category: Some("no-such-category".into()),
+        ..LabsLink::default()
+    };
+    rt.update(|ui, tx| super::super::labs::reveal(ui, &link, tx));
     settle(&mut rt);
     assert!(rt.state.labs_open);
-    assert!(rt.state.lab_flash.is_none());
+    assert!(rt.state.lab_store.drawer.is_none());
+    assert!(rt.state.lab_store.category.is_none());
+}
+
+#[test]
+fn a_labs_link_sets_the_stores_tab_chip_and_search() {
+    use super::super::deep_link::LabsLink;
+    use super::super::labs::Tab;
+    let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
+    let link = LabsLink {
+        turned_on: true,
+        category: Some("shortcuts".into()),
+        search: Some("tap".into()),
+        ..LabsLink::default()
+    };
+    rt.update(|ui, tx| super::super::labs::reveal(ui, &link, tx));
+    settle(&mut rt);
+    let store = &rt.state.lab_store;
+    assert_eq!(store.tab, Tab::On);
+    assert_eq!(
+        store.category.map(|category| category.id()),
+        Some("shortcuts")
+    );
+    assert_eq!(store.search.text, "tap");
+}
+
+#[test]
+fn a_labs_card_opens_its_drawer_and_its_button_turns_it_on() {
+    use super::super::labs::Lab;
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
+    let feature = Feature::LiveText;
+    tap(&mut rt, "lab-card-live-text");
+    assert_eq!(rt.state.lab_store.drawer, Some(Lab::Feature(feature)));
+    assert!(
+        !feature.on(&rt.state.settings),
+        "opening a card flips nothing"
+    );
+    tap(&mut rt, "lab-drawer-toggle");
+    assert!(feature.on(&rt.state.settings), "Try it turns it on");
+    tap(&mut rt, "lab-drawer-close");
+    assert!(rt.state.lab_store.drawer.is_none());
+    tap(&mut rt, "lab-live-text");
+    assert!(
+        !feature.on(&rt.state.settings),
+        "the card's On turns it off"
+    );
+}
+
+#[test]
+fn the_labs_store_filters_by_tab_chip_and_search() {
+    let mut rt = runtime("mac-labs-on", true, (980.0, 2000.0));
+    assert!(rt.find("lab-card-live-text").is_some());
+    assert!(
+        rt.find("lab-card-vocabulary-biasing").is_none(),
+        "Turned on lists only what's on"
+    );
+    rt.update(|ui, _| ui.lab_store.tab = super::super::labs::Tab::Discover);
+    settle(&mut rt);
+    assert!(
+        rt.find("featured").is_some(),
+        "Discover leads with what's new"
+    );
+    tap(&mut rt, "chip-shortcuts");
+    assert!(rt.find("featured").is_none());
+    assert!(rt.find("lab-card-tap-or-hold").is_some());
+    assert!(rt.find("lab-card-live-text").is_none());
+    tap(&mut rt, "chip-all");
+    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("no such words".to_string()));
+    settle(&mut rt);
+    assert!(rt.find("empty-copy").is_some());
+    assert!(rt.find("lab-card-live-text").is_none());
+}
+
+#[test]
+fn a_lone_lab_card_keeps_half_the_row() {
+    let rt = runtime("mac-labs-search", true, (980.0, 760.0));
+    let widths: Vec<f32> = rt
+        .elements()
+        .into_iter()
+        .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
+        .map(|e| e.rect[2])
+        .collect();
+    assert_eq!(widths.len(), 3, "the search finds three labs");
+    assert!(
+        widths.iter().all(|w| (w - widths[0]).abs() < 0.5),
+        "every card is as wide: {widths:?}"
+    );
+}
+
+#[test]
+fn command_f_searches_labs() {
+    let mut rt = runtime("mac-labs", true, PANE_SIZE);
+    assert!(!rt.state.lab_store.search.focused);
+    key(&mut rt, Key::Command('f'), Mods::default());
+    assert!(rt.state.lab_store.search.focused);
 }
 
 #[test]

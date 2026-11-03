@@ -215,6 +215,54 @@ impl Feature {
         }
     }
 
+    /// The day it joined Labs, as `yyyymmdd`. Labs marks the newest as New.
+    pub const fn added(self) -> u32 {
+        match self {
+            Self::Meetings
+            | Self::VoiceFilter
+            | Self::Playground
+            | Self::LiveText
+            | Self::LiveChapters
+            | Self::VocabularyBiasing
+            | Self::TerminalPaste
+            | Self::KeyboardModelSwitching
+            | Self::MouseShortcuts
+            | Self::PauseBrowser
+            | Self::ShareShortcut => 20261030,
+            Self::UnloadIdle
+            | Self::RestoreShortcutDefault
+            | Self::KeepOnClipboard
+            | Self::CopyOnly
+            | Self::SpokenFormatting
+            | Self::FillerWords
+            | Self::SubtitleExport
+            | Self::SecondDictationShortcut
+            | Self::SmartSpacing
+            | Self::SpokenSymbols
+            | Self::PickerSortFilter
+            | Self::SidedChords
+            | Self::TapOrHold
+            | Self::BenchmarkDetails => 20261031,
+            Self::ParakeetUltra
+            | Self::StandaloneSpecialKeys
+            | Self::HistoryStats
+            | Self::RecentDictations
+            | Self::SkipPauses => 20261101,
+            Self::StopWhenCallEnds
+            | Self::OutputFixes
+            | Self::PickerActiveFirst
+            | Self::ModelInPlace
+            | Self::PickerDownloaded
+            | Self::SectionKeyAlone
+            | Self::KeepRecordings
+            | Self::HideMenuBarIcon => 20261102,
+            Self::MovableMeetingCapsules
+            | Self::MeetingSummaryModel
+            | Self::GnomeClipboardRestore
+            | Self::MeetingNotesVocabulary => 20261103,
+        }
+    }
+
     /// Why turning this feature off is refused now: Parakeet Ultra stays on
     /// while it is the dictation model, until a switch to another succeeds.
     pub fn off_refusal(self, settings: &AppSettings) -> Option<&'static str> {

@@ -667,8 +667,8 @@ pub(crate) struct Ui {
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
-    /// The Labs row a link just opened, pulsing until it is cleared.
-    lab_flash: Option<(crate::labs::Feature, Instant)>,
+    /// The Labs store's search, tab, chip, and open drawer.
+    lab_store: labs::Store,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
     capture: Capture,
@@ -784,7 +784,7 @@ impl Ui {
             mic_level: general::MicLevel::default(),
             advanced: Vec::new(),
             labs_open: false,
-            lab_flash: None,
+            lab_store: labs::Store::default(),
             build_preview: None,
             capture: Capture::Idle,
             vocabulary,
@@ -1131,6 +1131,11 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         ui.quit();
         return true;
     }
+    // ⌘F (Ctrl+F off macOS) searches Labs.
+    if event.key == rune::Key::Command('f') && ui.labs_open && !event.mods.shift {
+        labs::focus_search(ui);
+        return true;
+    }
     if let rune::Key::Command(digit @ '1'..='9') = event.key
         && !event.mods.alt
         && !ui.picker.open
@@ -1160,6 +1165,9 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         true
     } else if ui.picker.open {
         picker::close(ui);
+        true
+    } else if ui.labs_open && ui.lab_store.drawer.is_some() {
+        labs::close_drawer(ui);
         true
     } else if ui.open.is_some() {
         ui.open = None;
@@ -1229,7 +1237,6 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
     changed |= paste_access::poll(ui);
-    changed |= labs::poll_flash(ui, now);
     // The OpenCode catalog is read only while the pane that uses it shows.
     changed |= ui.models.poll(
         ui.live()
@@ -1349,7 +1356,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {
-        _ if ui.labs_open => (Vec::new(), labs::page(ui, p)),
+        _ if ui.labs_open => (vec![labs::tabs(ui, p)], labs::page(ui, p)),
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
@@ -1381,9 +1388,13 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
             } else {
                 ui.pane.title()
             },
-            (ui.pane == Pane::Meetings && !ui.labs_open)
-                .then(|| meetings::view_switch(ui, p))
-                .flatten(),
+            if ui.labs_open {
+                Some(labs::search_field(ui, p))
+            } else {
+                (ui.pane == Pane::Meetings)
+                    .then(|| meetings::view_switch(ui, p))
+                    .flatten()
+            },
             actions,
         ))
         .child(body);
@@ -1405,6 +1416,9 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     }
     if let Some(modal) = vocabulary::modal(ui, p) {
         layer.extend(modal);
+    }
+    if let Some(drawer) = labs::drawer(ui, p) {
+        layer.extend(drawer);
     }
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
