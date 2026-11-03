@@ -52,17 +52,40 @@ own Hex:
 - `guard` stops a run if your own `settings.json` or `local-api.json`
   changes, or your Hex exits.
 
-The copy loads no model. A future case that dictates must seed one into
-`hex-data/models`.
+The copy loads no model, except in the listening cases below.
 
 ## Cases
 
-| File | Case | Primary | Measures |
-| --- | --- | --- | --- |
-| `perf/idle.bench.ts` | `window-open` | `cpu.work` | 8 s at rest with the window on General |
-| `perf/idle.bench.ts` | `window-closed` | `cpu.work` | 8 s at rest, tray only (`app --hidden`) |
-| `perf/launch.bench.ts` | `cold-launch` | `launch.ready` | Process start to the first painted window |
+| File | Case | Primary | Measures | Locked session |
+| --- | --- | --- | --- | --- |
+| `perf/idle.bench.ts` | `window-open` | `cpu.work` | 8 s at rest with the window on General | waits for an unlock |
+| `perf/idle.bench.ts` | `window-closed` | `cpu.work` | 8 s at rest, tray only (`app --hidden`) | runs |
+| `perf/launch.bench.ts` | `cold-launch` | `launch.ready` | Process start to the first painted window | waits for an unlock |
+| `perf/launch.bench.ts` | `hidden-launch` | `launch.ready` | Process start to `local API started`, tray only | runs |
+| `perf/listening.bench.ts` | `listening-at-rest` | `cpu.work` | 8 s listening at rest, microphone released and open | runs |
 
 Secondary metrics are thread wakeups (`cpu.wakes`), GPU use, and private
 memory. `strobe query <rec> threads` names the threads; Hex names every
 long-lived thread, and the window's thread is `hex-ui` on Windows.
+
+Tray cases use `window: false`: strobe neither waits for nor checks a window,
+so they also run while the session is locked. Cases with a window, or with
+presented frames, wait for an unlock.
+
+To see where one case spends its time, record it once:
+
+```sh
+strobe record --bench perf/idle.bench.ts#window-closed --head .
+strobe query <rec> threads
+```
+
+## Listening cases
+
+`perf/listening.bench.ts` runs Hex with its listener on: the
+`hex-listening` profile (microphone released while idle) and
+`hex-listening-warm` (microphone open, the default). The copy installs its
+keyboard hook and loads the default English model, which
+`perf/seeds/listening.ts` copies from this machine's own Hex install into
+`perf/seeds/.generated` (read only; strobe copies the seed into each private
+home). The warm profile opens the machine's real microphone; neither records.
+Leave the dictation shortcut alone while it runs.

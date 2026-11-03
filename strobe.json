@@ -39,6 +39,28 @@
         { "file": "~/.local/share/hex/local-api.json", "pid": "pid" },
         { "file": "~/.local/share/hex/settings.json" }
       ]
+    },
+    "hex-listening": {
+      "extends": "hex",
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": true,
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+        }
+      }
+    },
+    "hex-listening-warm": {
+      "extends": "hex",
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": false,
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+        }
+      }
     }
   },
   "benches": ["perf/**/*.bench.ts"],
