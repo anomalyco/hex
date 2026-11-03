@@ -94,7 +94,9 @@ fn check_windows_split() {
                 block
                     .lines()
                     .map(|line| line.trim().trim_end_matches(',').trim_matches('"'))
-                    .find(|dependency| *dependency == "windows" || dependency.starts_with("windows "))
+                    .find(|dependency| {
+                        *dependency == "windows" || dependency.starts_with("windows ")
+                    })
                     .map(str::to_owned)
             })
     };
