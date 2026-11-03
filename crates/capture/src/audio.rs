@@ -498,10 +498,19 @@ fn wav_16k_reader(wav_bytes: &[u8]) -> Result<hound::WavReader<Cursor<&[u8]>>> {
 
 const ISLAND_WINDOW_MS: u64 = 50;
 const ISLAND_MERGE_SILENCE_MS: u64 = 350;
+/// The lowest speech threshold (about -56 dBFS): a quiet microphone's speech can sit well under
+/// the old 0.005 floor while still being clearly above its own silence.
+const ISLAND_MIN_THRESHOLD: f64 = 0.0015;
+const ISLAND_MAX_THRESHOLD: f64 = 0.02;
+/// Never speech, whatever the recording's levels (about -66 dBFS): keeps a recording that is
+/// mostly digital silence (padded gaps) from counting faint hiss as speech.
+const ISLAND_SILENCE_RMS: f64 = 0.0005;
 
 /// Energy-based speech spans in milliseconds, quantized to 50 ms. These are not recognizer
 /// timestamps. The speech threshold follows the recording's own noise floor (10th percentile of
-/// window energy) so a quiet microphone and a noisy room both find their speech.
+/// window energy) so a quiet microphone and a noisy room both find their speech, and never sits
+/// above half the recording's speech level (90th percentile), so quiet speech is not dropped,
+/// while staying at least twice the floor.
 pub fn speech_islands(samples_16k: &[f32]) -> Vec<(u64, u64)> {
     let window = (u64::from(SAMPLE_RATE) * ISLAND_WINDOW_MS / 1_000) as usize;
     let rms: Vec<f64> = samples_16k
@@ -527,7 +536,12 @@ pub fn speech_islands(samples_16k: &[f32]) -> Vec<(u64, u64)> {
     let mut sorted = rms.clone();
     sorted.sort_by(f64::total_cmp);
     let floor = sorted[sorted.len() / 10];
-    let threshold = (floor * 3.0).clamp(0.005, 0.02);
+    let speech = sorted[sorted.len() * 9 / 10];
+    let threshold = (floor * 3.0)
+        .clamp(ISLAND_MIN_THRESHOLD, ISLAND_MAX_THRESHOLD)
+        .min(speech * 0.5)
+        .max(floor * 2.0)
+        .max(ISLAND_SILENCE_RMS);
     let mut islands: Vec<(u64, u64)> = Vec::new();
     for (index, &level) in rms.iter().enumerate() {
         if level <= threshold {
@@ -669,6 +683,22 @@ mod tests {
             .iter_mut()
             .for_each(|s| *s = if *s > 0.0 { 0.15 } else { -0.15 });
         assert_eq!(speech_islands(&samples), vec![(500, 1_000)]);
+    }
+
+    #[test]
+    fn speech_islands_keep_quiet_speech() {
+        // A quiet microphone: hiss at 0.0003, speech at 0.003, under the old 0.005 minimum.
+        let mut samples: Vec<f32> = (0..32_000)
+            .map(|i| if i % 2 == 0 { 0.0003 } else { -0.0003 })
+            .collect();
+        samples[8_000..16_000]
+            .iter_mut()
+            .for_each(|s| *s = if *s > 0.0 { 0.003 } else { -0.003 });
+        assert_eq!(speech_islands(&samples), vec![(500, 1_000)]);
+        // Mostly digital silence with faint hiss is still not speech.
+        let mut padded = vec![0.0_f32; 32_000];
+        padded[8_000..9_600].fill(0.0002);
+        assert!(speech_islands(&padded).is_empty());
     }
 
     #[test]
