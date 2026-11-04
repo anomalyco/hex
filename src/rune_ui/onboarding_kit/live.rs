@@ -360,7 +360,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui) -> Option<Page> {
     Some(match ui.first_run.as_ref()?.step {
         Step::Pick | Step::Started => Page::Download,
         Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard | Step::Done => Page::Demo,
-        Step::Permissions => Page::Permissions,
+        Step::Microphone | Step::Accessibility => Page::Permissions,
         Step::Waiting => Page::Waiting,
         Step::Try | Step::TryHearing | Step::TryHeard => Page::Try,
         Step::Ready => Page::Ready,
