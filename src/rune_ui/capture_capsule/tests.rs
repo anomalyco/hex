@@ -739,6 +739,19 @@ fn scripts() -> Vec<Script> {
             ],
             end: 4.4,
         },
+        // The capsule's whole life, nothing routed: it comes in recording,
+        // narrows to processing, widens to "Copied", and leaves.
+        Script {
+            name: "lifecycle",
+            beats: vec![
+                (0.2, stage(Stage::Recording)),
+                (1.6, stage(Stage::Stopping)),
+                (1.8, stage(Stage::Transcribing)),
+                (3.0, stage(Stage::Done)),
+                (4.4, In(Input::Dismiss)),
+            ],
+            end: 5.4,
+        },
         Script {
             name: "chips-close",
             beats: vec![(0.2, stage(Stage::Recording)), (1.0, In(Input::Chips))],
