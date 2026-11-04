@@ -16,6 +16,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex picks a fast model", "Hex выбирает быструю модель"),
+    ("Follow live transcript", "Следить за расшифровкой в реальном времени"),
+    ("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again.", "Пока встреча записывается, расшифровка прокручивается к самой новой строке. Прокрутите вверх, чтобы прочитать предыдущий текст; прокрутите обратно вниз, чтобы снова следить."),
     ("Summary models show once Hex connects to OpenCode.", "Модели для сводок появятся, когда Hex подключится к OpenCode."),
     ("Start OpenCode to choose a summary model. Hex keeps the saved one.", "Запустите OpenCode, чтобы выбрать модель для сводок. Hex сохранит выбранную ранее."),
     ("Your answer", "Ваш ответ"),
@@ -1075,6 +1077,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("In the background", "В фоне"),
     ("Dictation indicator", "Индикатор диктовки"),
     ("Record your screen, draw on it, and talk over it with a shortcut", "Записывайте экран, рисуйте на нём и комментируйте голосом с помощью сочетания клавиш"),
+    ("Screenshots", "Снимки экрана"),
+    ("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder", "Нажмите ⌘⇧4, чтобы снять область, или пробел, чтобы снять окно. Снимок попадает в буфер обмена и в папку"),
+    ("Screenshot shortcut", "Сочетание для снимка экрана"),
+    ("Saves to", "Сохраняет в"),
+    ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "macOS перехватывает это сочетание первой. Выключите её сочетания для снимков в разделе Сочетания клавиш › Снимки экрана или выберите другое"),
+    ("Open Keyboard Settings", "Открыть настройки клавиатуры"),
+    ("Full screen · Click to capture", "Весь экран · Нажмите, чтобы снять"),
 ];
 
 #[cfg(test)]

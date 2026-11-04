@@ -7,6 +7,8 @@
 
 mod category;
 mod drawer;
+#[cfg(all(target_os = "macos", hex_capture))]
+mod screenshots;
 mod store;
 
 use rune::{El, Icon, TextEdit, Tx, row, text};
@@ -15,7 +17,7 @@ pub(super) use self::category::Category;
 pub(super) use self::drawer::drawer;
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
-use super::icons::{BOOK, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
+use super::icons::{BOOK, CAMERA, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
 use crate::desktop::i18n::{tr, tr_fill};
@@ -413,6 +415,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Meeting platform icons"),
             tr("Show a small icon for the app or website each meeting was recorded from, beside its name"),
         ));
+        rows.push(row(
+            Feature::FollowLiveTranscript,
+            None,
+            tr("Follow live transcript"),
+            tr("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."),
+        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -502,6 +510,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 Some(&WAVE),
                 tr("Notch indicator"),
                 tr("On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"),
+            ));
+            // Hex's session tap takes the shortcut; ScreenCaptureKit shoots.
+            #[cfg(hex_capture)]
+            rows.push(row(
+                Feature::Screenshots,
+                Some(&CAMERA),
+                tr("Screenshots"),
+                tr("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder"),
             ));
         }
     }
@@ -732,6 +748,8 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingFinishedEvent => "lab-meeting-finished-event",
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
         Feature::MeetingPlatformIcons => "lab-meeting-platform-icons",
+        Feature::Screenshots => "lab-screenshots",
+        Feature::FollowLiveTranscript => "lab-follow-live-transcript",
     }
 }
 

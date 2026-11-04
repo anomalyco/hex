@@ -84,6 +84,7 @@ impl Category {
             | Feature::MeetingNotesVocabulary
             | Feature::MeetingFinishedEvent
             | Feature::MeetingPlatformIcons
+            | Feature::FollowLiveTranscript
             | Feature::GnomeMeetingCapsules => Self::Meetings,
             Feature::LiveText
             | Feature::NotchIndicator
@@ -118,7 +119,10 @@ impl Category {
             | Feature::ModelInPlace
             | Feature::PickerDownloaded
             | Feature::ParakeetUltra => Self::Models,
-            Feature::HideMenuBarIcon | Feature::VoiceFilter | Feature::Playground => Self::App,
+            Feature::HideMenuBarIcon
+            | Feature::VoiceFilter
+            | Feature::Playground
+            | Feature::Screenshots => Self::App,
         }
     }
 }
@@ -147,7 +151,8 @@ impl Place {
             | Feature::MeetingSummaryModel
             | Feature::MeetingNotesVocabulary
             | Feature::MeetingFinishedEvent
-            | Feature::MeetingPlatformIcons => Self::Pane(Pane::Meetings),
+            | Feature::MeetingPlatformIcons
+            | Feature::FollowLiveTranscript => Self::Pane(Pane::Meetings),
             Feature::StopWhenCallEnds
             | Feature::MovableMeetingCapsules
             | Feature::GnomeMeetingCapsules => Self::Elsewhere(tr("Meeting capsules")),
@@ -188,6 +193,7 @@ impl Place {
             Feature::UnloadIdle => Self::Elsewhere(tr("In the background")),
             Feature::VoiceFilter => Self::Pane(Pane::VoiceFilter),
             Feature::Playground => Self::Playground,
+            Feature::Screenshots => Self::Elsewhere(tr("Screenshot shortcut")),
         }
     }
 

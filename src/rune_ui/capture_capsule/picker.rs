@@ -309,7 +309,13 @@ impl Aim {
 
 impl Scene {
     /// What shows for `aim`; an empty target closes onto `rest`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn at(aim: &Aim, rest: [f32; 2]) -> Self {
+        Self::labelled(aim, rest, FULL_SCREEN)
+    }
+
+    /// [`Self::at`], labelling the whole display `screen`.
+    fn labelled(aim: &Aim, rest: [f32; 2], screen_label: &str) -> Self {
         let size = aim.size();
         let empty = [rest[0], rest[1], 0.0, 0.0];
         let screen = || (Kind::Screen, [0.0, 0.0, size[0], size[1]]);
@@ -332,7 +338,7 @@ impl Scene {
             Kind::None => None,
             Kind::Window => aim.hovered().map(|w| w.label.clone()),
             Kind::Area => Some(size_label(target[2], target[3])),
-            Kind::Screen => Some(FULL_SCREEN.to_owned()),
+            Kind::Screen => Some(screen_label.to_owned()),
         };
         let badge = label.map(|label| {
             let max = (size[0] - 2.0 * (BADGE_MARGIN + BADGE_PX) - 2.0).min(BADGE_MAX);
@@ -406,6 +412,8 @@ pub(crate) struct PickerState {
     /// Draws a plain desktop with its windows under the picker (stills and
     /// clips).
     backdrop: bool,
+    /// The whole display's badge.
+    screen_label: &'static str,
 }
 
 impl PickerState {
@@ -430,6 +438,7 @@ impl PickerState {
             overlay: None,
             shown: false,
             backdrop: false,
+            screen_label: FULL_SCREEN,
         }
     }
 
@@ -479,11 +488,11 @@ impl PickerState {
             return false;
         };
         *self.shortcut.lock().unwrap_or_else(|e| e.into_inner()) = aim.shortcut();
-        let mut scene = Scene::at(aim, self.rest);
+        let mut scene = Scene::labelled(aim, self.rest, self.screen_label);
         if scene.kind == Kind::None && self.scene.kind != Kind::None {
             // The target closes onto the pointer, and grows from it next.
             self.rest = aim.pointer.unwrap_or(self.rest);
-            scene = Scene::at(aim, self.rest);
+            scene = Scene::labelled(aim, self.rest, self.screen_label);
         }
         scene.on = self.scene.on;
         match &scene.badge {
@@ -853,6 +862,17 @@ pub(super) fn placement(display: [f32; 4]) -> rune::OverlayPlacement {
     }
 }
 
+/// Which picker an overlay is: its window's name, whether recordings see
+/// it, whether it's made at launch, and who learns its window number.
+pub(crate) struct PickerRole {
+    pub(crate) name: &'static str,
+    /// The whole display's badge.
+    pub(crate) screen_label: &'static str,
+    pub(crate) exclude_from_capture: bool,
+    pub(crate) prewarm: bool,
+    pub(crate) created: fn(u32),
+}
+
 /// The picker overlay, as the app and the capsule hold it.
 #[derive(Clone)]
 pub(crate) struct PickerOverlay {
@@ -864,36 +884,60 @@ pub(crate) struct PickerOverlay {
 }
 
 impl PickerOverlay {
-    /// Adds the overlay, prewarmed and hidden, holding no GPU surface while
-    /// hidden (Windows and Linux). `act` starts what it picks; it runs on
+    /// Adds the overlay, hidden, holding no GPU surface while hidden, nor on
+    /// macOS and Windows a window. `act` starts what it picks; it runs on
     /// the main thread, so it must only hand the action on.
     pub(crate) fn install<S: 'static>(
         app: &mut rune::App<S>,
         act: impl Fn(Action) + Send + Sync + 'static,
     ) -> Self {
+        Self::install_as(
+            app,
+            act,
+            PickerRole {
+                name: "Hex capture picker",
+                screen_label: FULL_SCREEN,
+                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
+                prewarm: true,
+                created: |window| {
+                    crate::capture_host::exclude_window(
+                        crate::capture_host::OwnWindow::Picker,
+                        window,
+                    );
+                },
+            },
+        )
+    }
+
+    /// [`Self::install`] as another picker: the screenshot one has its own
+    /// window, kept out of every capture.
+    pub(crate) fn install_as<S: 'static>(
+        app: &mut rune::App<S>,
+        act: impl Fn(Action) + Send + Sync + 'static,
+        role: PickerRole,
+    ) -> Self {
         use rune::{OverlayLevel, OverlayOptions, OverlayPlacement, OverlaySpec};
-        let spec = OverlaySpec::new("Hex capture picker", (1440.0, 900.0), view)
+        let created = role.created;
+        let spec = OverlaySpec::new(role.name, (1440.0, 900.0), view)
             .options(OverlayOptions {
                 placement: Some(OverlayPlacement::FullScreen),
                 display: DISPLAY,
                 // Under the capsule, so its chips still take clicks.
                 level: OverlayLevel::AboveStatus,
-                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
+                exclude_from_capture: role.exclude_from_capture,
                 input: OverlayInput::All,
-                prewarm: true,
+                prewarm: role.prewarm,
                 ..Default::default()
             })
             .release_gpu_when_hidden()
             .poll(poll)
-            .on_created(|c| {
+            .on_created(move |c| {
                 if let Some(window) = c.window_number {
-                    crate::capture_host::exclude_window(
-                        crate::capture_host::OwnWindow::Picker,
-                        window,
-                    );
+                    created(window);
                 }
             });
         let mut state = PickerState::new();
+        state.screen_label = role.screen_label;
         let act: super::Act = Arc::new(act);
         state.act = Some(act.clone());
         let shortcut = state.shortcut.clone();

@@ -60,6 +60,12 @@ Recordings list icons                               // Labs › Meeting platform
         Slack, or Webex when the meeting's app names it, else a neutral call
         icon (FaceTime, Discord, WhatsApp, manual recordings); off -> rows as before
         (platform_icon in rune_ui/meetings.rs; labs.md)
+Live transcript scrolling                           // Labs › Follow live transcript, off by default (#1332)
+        on -> while the selected meeting is Starting or Recording (no Stop
+        pending), the detail card's scroll sticks to the bottom: new turns
+        stay in view; scrolling up stops following, scrolling back to the
+        bottom follows again. Finished meetings and off -> scroll by hand as before
+        (follows_live_transcript in rune_ui/meetings.rs; not observed on a real call)
 ```
 
 Requires the selected local dictation model, Microphone, and System Audio

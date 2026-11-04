@@ -16,6 +16,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex picks a fast model", "O Hex escolhe um modelo rápido"),
+    ("Follow live transcript", "Acompanhar a transcrição ao vivo"),
+    ("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again.", "Enquanto uma reunião é gravada, a transcrição rola até a linha mais recente. Role para cima para ler o texto anterior; volte ao final para acompanhar de novo."),
     ("Summary models show once Hex connects to OpenCode.", "Os modelos de resumo aparecem quando o Hex se conecta ao OpenCode."),
     ("Start OpenCode to choose a summary model. Hex keeps the saved one.", "Inicie o OpenCode para escolher um modelo de resumo. O Hex mantém o salvo."),
     ("Your answer", "Sua resposta"),
@@ -1072,6 +1074,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("In the background", "Em segundo plano"),
     ("Dictation indicator", "Indicador de ditado"),
     ("Record your screen, draw on it, and talk over it with a shortcut", "Grave a tela, desenhe nela e narre com um atalho"),
+    ("Screenshots", "Capturas de tela"),
+    ("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder", "Pressione ⌘⇧4 para capturar uma área ou Espaço para uma janela. A captura vai para a área de transferência e para uma pasta"),
+    ("Screenshot shortcut", "Atalho de captura de tela"),
+    ("Saves to", "Salva em"),
+    ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "O macOS usa este atalho primeiro. Desative os atalhos de captura dele em Atalhos de Teclado › Capturas de tela ou escolha outro"),
+    ("Open Keyboard Settings", "Abrir Ajustes de Teclado"),
+    ("Full screen · Click to capture", "Tela inteira · Clique para capturar"),
 ];
 
 #[cfg(test)]

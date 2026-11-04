@@ -543,11 +543,18 @@ unsafe extern "C" fn event_callback(
         };
     }
     #[cfg(hex_capture)]
-    let list_swallows = match list_tap(event_type, event) {
-        ListSwallow::No => false,
-        ListSwallow::Only => return ptr::null_mut(),
-        ListSwallow::AfterListener => true,
+    let screenshot_swallows = match screenshot_tap(event_type, event) {
+        crate::screenshots::Take::No => false,
+        crate::screenshots::Take::Only => return ptr::null_mut(),
+        crate::screenshots::Take::AfterListener => true,
     };
+    #[cfg(hex_capture)]
+    let list_swallows = screenshot_swallows
+        || match list_tap(event_type, event) {
+            ListSwallow::No => false,
+            ListSwallow::Only => return ptr::null_mut(),
+            ListSwallow::AfterListener => true,
+        };
     #[cfg(not(hex_capture))]
     let list_swallows = false;
     #[cfg(hex_capture)]
@@ -702,6 +709,29 @@ enum ListSwallow {
 #[cfg(hex_capture)]
 fn list_takes_keys(capture_on: bool, open: bool, recording_shortcut: bool) -> bool {
     capture_on && open && !recording_shortcut
+}
+
+/// Hands Labs › Screenshots its keys (`screenshots::key`): its shortcut,
+/// and Escape and Space while its picker shows.
+#[cfg(hex_capture)]
+fn screenshot_tap(event_type: u32, event: EventRef) -> crate::screenshots::Take {
+    if !matches!(event_type, EVENT_KEY_DOWN | EVENT_KEY_UP) {
+        return crate::screenshots::Take::No;
+    }
+    // SAFETY: CoreGraphics supplied a valid keyboard event.
+    let (code, repeat, flags) = unsafe {
+        (
+            CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) as u16,
+            CGEventGetIntegerValueField(event, KEYBOARD_EVENT_AUTOREPEAT) != 0,
+            CGEventGetFlags(event),
+        )
+    };
+    crate::screenshots::key(crate::screenshots::Key {
+        code,
+        down: event_type == EVENT_KEY_DOWN,
+        repeat,
+        flags,
+    })
 }
 
 /// Hands the open list its keys (`capture_host::list_key`) on the tap's

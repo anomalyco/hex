@@ -74,6 +74,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Meeting platform icons no labs.meeting_platform_icons (every OS with Meetings)
 │                                        each recording in the Meetings list shows its call service's icon (Zoom, Google Meet, Teams, Slack, Webex)
 │                                        before its title, a neutral call icon otherwise (#1290)
+├── Follow live transcript no labs.follow_live_transcript (every OS with Meetings)
+│                                        a recording meeting's transcript card keeps its newest line in view while scrolled to
+│                                        the bottom; scroll up to read, back to the bottom to follow again (#1332)
+│                                        // check: only_a_recording_transcript_follows_and_only_with_its_lab (rune_ui/meetings.rs,
+│                                        // Linux and Windows); not observed on a real call; Labs page goldens need regenerating
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
@@ -82,6 +87,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the Meetings pane (#1271), whose note names the lab (#1274)
 │                                        // checks: floats_only_by_opt_in_*, looks_for_nothing_while_the_lab_is_off (linux/meeting_capsules.rs),
 │                                        // gnome_meeting_capsules_is_its_own_bit_*; Rune's xwayland pointer tests; not run on a GNOME session
+├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
+│                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page, a store (labs/store.rs, labs/drawer.rs)
@@ -908,6 +915,68 @@ with `HEX_HUD_EARS=1` and `rune_hud_frames`. Not yet observed: a real
 dictation through the ears on a Mac with the lab on (`hex dev hud` drives
 them in a debug build), and the failure glyph, which no render covers yet; the
 row renders only in macOS builds, so no golden changes.
+
+Screenshots (`screenshots`, macOS only, category App): for people who
+miss CleanShot's ⌘⇧4. While on, the shortcut (`screenshots.hotkey`,
+default ⌘⇧4; the drawer's recorder changes it and refuses one another Hex
+shortcut uses) opens a second copy of Annotate's capture picker
+(`PickerOverlay::install_as` in
+[capture_capsule/picker.rs](../../src/rune_ui/capture_capsule/picker.rs)):
+
+```ts
+⌘⇧4            -> the screen dims under a crosshair; a drag draws the area with its W × H
+├── Space      -> window mode: the window under the pointer highlights; Space again -> area
+├── Click      -> the whole display ("Full screen · Click to capture")
+├── Escape     -> closes it, nothing shot; Escape reaches no other app or Hex shortcut
+└── Release    -> shot at the display's own pixels (ScreenCaptureKit), Hex's overlays,
+                  the picker, and the pointer left out
+                  ├── PNG (pHYs at the display's scale) -> "Hex Screenshot 2026-11-04 at 14.03.22.png"
+                  │   in screenshots.folder (the Desktop when unset); a second shot that second gets " (2)"
+                  ├── clipboard -> the PNG and the file's URL, one pasteboard item
+                  └── thumbnail bottom right for 5 s (held while the pointer is on it):
+                      click -> opens it in Preview, drag -> the file, ✕ -> closes
+                      a failure -> the error tone; there is no success sound (Hex has no shutter cue)
+```
+
+The shortcut is taken in Hex's session tap (`screenshots::key`, called
+from [suppression.rs](../../src/suppression.rs) before the listener's
+own handling), never by the listener, and its press and release stay with
+it. With the lab off the tap returns at once and nothing is made: no
+picker window, no thumbnail, no work. Screen Recording is Annotate's: a
+press without it shows Annotate's permission helper instead of the
+picker.
+
+macOS matches its own screenshot shortcuts (Keyboard Shortcuts ›
+Screenshots, ⌘⇧4 among them) in the window server before any app's event
+tap, so while that system shortcut is on, Hex never sees the press. Hex
+reads `com.apple.symbolichotkeys` (`screenshots::system_shortcut`) and,
+when the system takes Hex's chord, the drawer says so with Open Keyboard
+Settings, which opens that pane; turning macOS's shortcut off, or
+choosing another chord, hands it to Hex.
+
+`hex screenshot` shoots the whole display under the pointer and prints the
+file's path; `hex screenshot --pick` opens the picker instead
+([cli.md](../cli.md)). With the lab off it answers `disabled`; Linux and
+Windows answer `unsupported`.
+
+Checks: `the_shortcut_opens_the_picker_and_its_release_stays_with_it`,
+`a_held_shortcut_opens_one_picker`,
+`escape_and_space_belong_to_the_open_picker_only`,
+`other_keys_and_other_chords_pass`, `recording_a_shortcut_takes_nothing`
+and `a_large_shot_shrinks_for_its_thumbnail` in
+[screenshots.rs](../../src/screenshots.rs); the file name, the second
+file in one second, and the PNG's density in
+[screenshots/save.rs](../../src/screenshots/save.rs); the system shortcut
+read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
+`thumbnail_goldens` (rest and hover, light and dark) and the thumbnail's
+timer in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
+`screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
+the drawer renders as `--scene mac-labs-screenshots`. Not yet observed: a
+real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
+clipboard paste, the thumbnail's drag and Preview, and whether a session
+tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
+symbolic hotkeys are dispatched, not tested). The row renders only in
+macOS builds, so the settings goldens don't change.
 
 Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
 like Meetings; its row shows wherever Meetings does, in macOS builds): for

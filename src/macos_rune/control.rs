@@ -169,6 +169,7 @@ impl Pump {
             ControlCommand::Dictation { .. } | ControlCommand::PasteLast => {
                 unreachable!("listener_command answers it")
             }
+            ControlCommand::Screenshot { pick } => screenshot(pick, reply),
             ControlCommand::MeetingRecord { title } => self.meeting(false, title, reply),
             ControlCommand::MeetingStop => self.meeting(true, None, reply),
             ControlCommand::MeetingCopyLast => Some(
@@ -596,6 +597,41 @@ fn listener_command(
 }
 
 /// Answers `reply` from a thread; a dropped reply reads as `control-unavailable`.
+/// `hex screenshot`: the display under the pointer, saved and copied as
+/// the shortcut's shots are, or with `pick` the picker.
+fn screenshot(pick: bool, reply: &SyncSender<ControlResponse>) -> Option<ControlReply> {
+    #[cfg(hex_capture)]
+    {
+        if !crate::labs::screenshots() {
+            return Some(ControlReply::error(
+                "disabled",
+                "Labs › Screenshots is off; turn it on with `hex settings set labs.screenshots on`",
+            ));
+        }
+        if pick {
+            return Some(if crate::screenshots::begin() {
+                ControlReply::done("Opened the screenshot picker")
+            } else {
+                ControlReply::unchanged("The screenshot picker is already open")
+            });
+        }
+        background(reply, || {
+            crate::screenshots::shoot_display()
+                .map(|path| ControlReply::done(path.display().to_string()))
+                .map_err(|error| ControlError::new("failed", format!("{error:#}")))
+        });
+        None
+    }
+    #[cfg(not(hex_capture))]
+    {
+        let _ = (pick, reply);
+        Some(ControlReply::error(
+            "unsupported",
+            "this build has no screenshots",
+        ))
+    }
+}
+
 fn background(
     reply: &SyncSender<ControlResponse>,
     work: impl FnOnce() -> Result<ControlReply, ControlError> + Send + 'static,

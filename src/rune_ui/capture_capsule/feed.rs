@@ -298,9 +298,11 @@ pub(crate) struct CaptureOverlays {
 }
 
 impl CaptureOverlays {
-    /// Adds the three overlays, prewarmed and hidden, and starts following
-    /// captures. Away from macOS they make their GPU surfaces only to show,
-    /// so a Hex that never annotates holds none.
+    /// Adds the three overlays, hidden, and starts following captures. They
+    /// make their GPU surfaces only to show, and on macOS and Windows their
+    /// windows too, so a Hex that never annotates holds none: idle
+    /// screen-sized panels emptied macOS 27's Mission Control Space
+    /// thumbnails (#1315).
     pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
         let picker = PickerOverlay::install(app, act);
         let aim = picker.clone();
@@ -480,6 +482,7 @@ pub(crate) fn act(action: Action) {
             always: always.is_some(),
         })],
         Action::Undo { .. } => vec![command(CaptureCommand::Undo)],
+        Action::Hold(on) => vec![command(CaptureCommand::Hold(on))],
         Action::Pen => {
             crate::capture_host::toggle_pen();
             return;

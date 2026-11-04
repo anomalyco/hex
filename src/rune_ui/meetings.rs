@@ -1037,7 +1037,22 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         .shrink()
         .child(ld::card_header(title, meta, actions))
         .children(confirm)
-        .child(ld::card_scroll(p, "meeting-transcript", body))
+        .child(ld::card_scroll_sticky(
+            p,
+            "meeting-transcript",
+            body,
+            follows_live_transcript(ui, meeting),
+        ))
+}
+
+/// Labs › Follow live transcript: a recording meeting's transcript keeps
+/// its newest line in view while scrolled to the bottom. Off, and for any
+/// meeting not recording, the card scrolls only by hand, as before.
+fn follows_live_transcript(ui: &Ui, meeting: &Meeting) -> bool {
+    ui.settings.labs.follow_live_transcript
+        && crate::labs::Feature::FollowLiveTranscript.shipped()
+        && matches!(meeting.status, Status::Starting | Status::Recording)
+        && !ui.meetings.stop_pending
 }
 
 /// The meeting's chapters, each with its start, name, line, and Copy
@@ -1330,6 +1345,25 @@ mod tests {
         assert_eq!(name("preview-huddle"), Some("hex-provider-slack"));
         assert_eq!(name("preview-design"), Some("hex-row-call"));
         assert_eq!(name("preview-failed"), Some("hex-row-call"));
+    }
+
+    /// Labs › Follow live transcript: only a recording meeting's transcript
+    /// follows its newest line, and only with the lab on (#1332).
+    #[test]
+    fn only_a_recording_transcript_follows_and_only_with_its_lab() {
+        let mut settings = crate::app_settings::AppSettings::default();
+        let pane = MeetingsPane::fixture();
+        let live = pane.meeting("preview-live").unwrap();
+        let finished = pane.meeting("preview-notes").unwrap();
+        let ui = Ui::with(settings.clone(), Service::Fixture(Vec::new()));
+        assert!(!follows_live_transcript(&ui, live));
+        assert!(!follows_live_transcript(&ui, finished));
+        settings.labs.follow_live_transcript = true;
+        let mut ui = Ui::with(settings, Service::Fixture(Vec::new()));
+        assert!(follows_live_transcript(&ui, live));
+        assert!(!follows_live_transcript(&ui, finished));
+        ui.meetings.stop_pending = true;
+        assert!(!follows_live_transcript(&ui, live));
     }
 
     /// Off a Mac the notes are written by OpenCode, so the progress line

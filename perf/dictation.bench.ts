@@ -176,23 +176,26 @@ export default bench({
     },
     // Start to capture with the microphone released: the start command
     // reaching the idle listener, the microphone opening, and its first
-    // chunk recorded.
-    start: {
-      targets: ["released"],
-      primary: "phase.start",
-      metrics: ["cpu.work", "cpu.wakes"],
-      async run(ctx) {
-        // The listener settles into its idle wait after the last dictation.
-        await ctx.page.wait(1_000)
-        const from = statSync(events(ctx)).size
-        await ctx.phase("start", async () => {
-          await start(ctx)
-          await recordingBegan(ctx, from)
-        })
-        await ctx.page.wait(STOP_AFTER_MS)
-        await printed(await stop(ctx))
+    // chunk recorded. Not on macOS: its log reports `dictating` once per
+    // start, so the log doesn't say when the first chunk arrived.
+    ...(process.platform !== "darwin" && {
+      start: {
+        targets: ["released"],
+        primary: "phase.start",
+        metrics: ["cpu.work", "cpu.wakes"],
+        async run(ctx) {
+          // The listener settles into its idle wait after the last dictation.
+          await ctx.page.wait(1_000)
+          const from = statSync(events(ctx)).size
+          await ctx.phase("start", async () => {
+            await start(ctx)
+            await recordingBegan(ctx, from)
+          })
+          await ctx.page.wait(STOP_AFTER_MS)
+          await printed(await stop(ctx))
+        },
       },
-    },
+    }),
     // Release to text: the stop's wait for the transcript (the 200 ms
     // release tail, the live stream's finish, processing, and History).
     dictation: {

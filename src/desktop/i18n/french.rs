@@ -16,6 +16,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex picks a fast model", "Hex choisit un modèle rapide"),
+    ("Follow live transcript", "Suivre la transcription en direct"),
+    ("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again.", "Pendant l'enregistrement d'une réunion, la transcription défile jusqu'à la ligne la plus récente. Faites défiler vers le haut pour lire le texte précédent ; revenez tout en bas pour la suivre à nouveau."),
     ("Summary models show once Hex connects to OpenCode.", "Les modèles de résumé s'affichent dès que Hex se connecte à OpenCode."),
     ("Start OpenCode to choose a summary model. Hex keeps the saved one.", "Lancez OpenCode pour choisir un modèle de résumé. Hex garde celui enregistré."),
     ("Your answer", "Votre réponse"),
@@ -1075,6 +1077,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("In the background", "En arrière-plan"),
     ("Dictation indicator", "Indicateur de dictée"),
     ("Record your screen, draw on it, and talk over it with a shortcut", "Enregistrez l’écran, dessinez dessus et commentez-le avec un raccourci"),
+    ("Screenshots", "Captures d'écran"),
+    ("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder", "Appuyez sur ⌘⇧4 pour capturer une zone, ou sur Espace pour une fenêtre. La capture va dans le presse-papiers et dans un dossier"),
+    ("Screenshot shortcut", "Raccourci de capture d'écran"),
+    ("Saves to", "Enregistre dans"),
+    ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "macOS prend ce raccourci en premier. Désactivez ses raccourcis de capture dans Raccourcis clavier › Captures d'écran, ou choisissez-en un autre"),
+    ("Open Keyboard Settings", "Ouvrir les réglages Clavier"),
+    ("Full screen · Click to capture", "Plein écran · Cliquez pour capturer"),
 ];
 
 #[cfg(test)]

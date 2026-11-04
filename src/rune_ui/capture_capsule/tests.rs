@@ -362,8 +362,9 @@ fn every_state_draws_its_pieces() {
         ("processing", &["processing"]),
         ("saved", &["done", "paste", "inspect", "close"]),
         ("failed", &["done", "close"]),
-        ("rule-sent", &["done", "why", "undo", "close"]),
-        ("rule-final", &["done", "why", "paste", "inspect", "close"]),
+        // A rule's send counts down on the Undo chip, with no words.
+        ("rule-sent", &["done", "undo", "close"]),
+        ("rule-final", &["done", "paste", "inspect", "close"]),
         ("guess", &["done", "ask", "list", "row-SEER", "remembers"]),
         ("guess-five", &["done", "ask", "list", "row-SEER"]),
         ("no-answer", &["done", "why", "ask", "list"]),
@@ -389,7 +390,7 @@ fn every_state_draws_its_pieces() {
         ("list-guess", &["paste", "inspect"]),
         // Trimmed to Search and ✕: the capture is already copied.
         ("guess", &["field", "paste", "inspect", "footer"]),
-        ("rule-sent", &["paste", "ask", "inspect"]),
+        ("rule-sent", &["why", "paste", "ask", "inspect"]),
         ("rule-final", &["ask"]),
         ("sent", &["paste", "inspect"]),
     ];
@@ -1193,18 +1194,20 @@ fn clicks_on_the_capsule_do_what_they_say() {
         click_on(&mut rt, "ask", 0);
         assert!(keys(&rt).iter().any(|k| k == "field"), "{:?}", keys(&rt));
 
-        // A rule's send: Undo takes it back and offers the list again, where
-        // a click redirects it.
+        // A rule's send: pointing at Undo holds it, Undo takes it back and
+        // offers the list again, where a click redirects it.
         let (mut rt, actions) = live(routed(rule()));
         click_on(&mut rt, "undo", 0);
-        assert_eq!(
-            *actions.lock().unwrap(),
-            vec![Action::Undo { to: "SEER".into() }]
-        );
+        let undo = [
+            Action::Hold(true),
+            Action::Undo { to: "SEER".into() },
+            Action::Hold(false),
+        ];
+        assert_eq!(*actions.lock().unwrap(), undo);
         click_on(&mut rt, "row-HOME", 0);
         assert_eq!(
             *actions.lock().unwrap(),
-            vec![Action::Undo { to: "SEER".into() }, send("HOME")]
+            [undo.as_slice(), &[send("HOME")]].concat()
         );
 
         // ✕ closes.
