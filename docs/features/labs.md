@@ -933,8 +933,10 @@ shortcut uses) opens a second copy of Annotate's capture picker
 [capture_capsule/picker.rs](../../src/rune_ui/capture_capsule/picker.rs)):
 
 ```ts
-⌘⇧4            -> the screen dims under a crosshair; a drag draws the area with its W × H
-├── Space      -> window mode: the window under the pointer highlights; Space again -> area
+⌘⇧4            -> the screen dims under a crosshair cursor, even while another app is frontmost;
+│                 a drag draws the area with its W × H beside the pointer, outside the area
+├── Space      -> window mode: a camera replaces the pointer and the window under it highlights;
+│                 Space again -> area
 ├── Click      -> the whole display ("Full screen · Click to capture")
 ├── Escape     -> closes it, nothing shot; Escape reaches no other app or Hex shortcut
 └── Release    -> shot at the display's own pixels (ScreenCaptureKit), Hex's overlays,
@@ -954,6 +956,17 @@ it. With the lab off the tap returns at once and nothing is made: no
 picker window, no thumbnail, no work. Screen Recording is Annotate's: a
 press without it shows Annotate's permission helper instead of the
 picker.
+
+The picker is a non-key overlay, so Hex is usually not the frontmost app
+while it shows, and macOS ignores a background app's cursor. Hex builds
+Rune with `macos-background-cursor`, which sets WindowServer's private
+`SetsCursorInBackground` property so the picker's crosshair (and Window
+mode's hidden arrow under the drawn camera) shows over any app. It is a
+private API, acceptable because Hex isn't sold through the App Store; if a
+macOS release drops the property, Rune skips it and the cursor shows only
+while Hex is frontmost. Checks: `the_badge_stays_on_the_display` in
+[capture_capsule/picker.rs](../../src/rune_ui/capture_capsule/picker.rs).
+Not yet observed: the cursor over another frontmost app on a real Mac.
 
 macOS matches its own screenshot shortcuts (Keyboard Shortcuts ›
 Screenshots, ⌘⇧4 among them) in the window server before any app's event
