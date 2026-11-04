@@ -71,11 +71,11 @@ Settings › Labs                          // labs.page, a store (labs/store.rs,
 ├── Header -> "Labs", Search N labs (⌘F focuses it), Discover | Turned on · N
 ├── Category chips with counts -> All, Dictation, Shortcuts, Clipboard, Meetings, Models, App
 │   (labs/category.rs; a category this OS has no lab in hides)
-├── Discover, no chip or search -> New in Labs: the two newest labs, washed in their category's colour,
+├── Discover, no chip or search -> New in Labs: the two newest labs,
 │   then All labs without them; a lab added on the newest date among those shown carries New
 ├── A chip, a search (name, description, category), or Turned on -> only the matching cards;
 │   none -> "No labs match" / "Nothing turned on yet"
-├── Card -> coloured tile, name with New / Dev tags on one line, up to two lines of description, a switch
+├── Card -> neutral icon tile, name with New / Dev tags on one line, up to two lines of description, a switch
 │   ├── The switch (key lab-<id>) -> flips the lab, saved at once
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
 │   └── Voice Filter while its driver is installed, or a managed or locked lab -> its switch is disabled

@@ -81,7 +81,7 @@ fn header(p: Paint, entry: &Row, new: bool) -> El {
         .px(PADDING)
         .gap(12.0)
         .center_y()
-        .child(tile(p, entry.category, entry.icon, 44.0))
+        .child(tile(p, entry.icon, 44.0))
         .child(
             col()
                 .key("names")
@@ -112,8 +112,8 @@ fn body(ui: &Ui, p: Paint, entry: &Row) -> El {
         .h(160.0)
         .center()
         .radius(p.k.radius.md)
-        .fill(entry.category.wash(p).0)
-        .border(p.hair, entry.category.wash(p).1)
+        .fill(p.k.c.layer_01)
+        .border(p.hair, p.k.c.border_weak)
         .child(
             text(tr("A short preview goes here"))
                 .key("preview-copy")

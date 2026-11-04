@@ -1,10 +1,9 @@
-//! What each lab is about: its category (the store's chips and icon
-//! colours) and where it shows up once on.
+//! What each lab is about: its category (the store's chips and default
+//! icons) and where it shows up once on.
 
-use rune::{Color, Icon};
+use rune::Icon;
 
 use super::super::Pane;
-use super::super::controls::Paint;
 use super::super::icons::{KEYBOARD, MIC, PASTE, SPARKLES, ZAP};
 use super::Lab;
 use crate::desktop::i18n::tr;
@@ -67,31 +66,6 @@ impl Category {
             Self::Models => &ZAP,
             Self::App => &SPARKLES,
         }
-    }
-
-    /// The theme's colour scale its icon tiles take.
-    const fn scale(self) -> &'static str {
-        match self {
-            Self::Dictation => "cobalt",
-            Self::Shortcuts => "lilac",
-            Self::Clipboard => "mint",
-            Self::Meetings => "amber",
-            Self::Models => "coral",
-            Self::App => "smoke",
-        }
-    }
-
-    /// An icon tile's fill, edge, and glyph: a tint of the category's scale,
-    /// so every hue reads in both themes.
-    pub(super) fn tile(self, p: Paint) -> (Color, Color, Color) {
-        let step = |step| rune_theme_opencode::scale(self.scale(), p.k.dark, step);
-        (step(4), step(6), step(11))
-    }
-
-    /// A featured card's wash and edge.
-    pub(super) fn wash(self, p: Paint) -> (Color, Color) {
-        let step = |step| rune_theme_opencode::scale(self.scale(), p.k.dark, step);
-        (step(2), step(5))
     }
 
     pub(super) fn of(lab: Lab) -> Self {

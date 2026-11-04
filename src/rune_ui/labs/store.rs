@@ -233,9 +233,8 @@ fn chip(
     }
 }
 
-/// A rounded square in the category's tint with the lab's icon.
-pub(super) fn tile(p: Paint, category: Category, icon: &'static Icon, size: f32) -> El {
-    let (fill, edge, glyph) = category.tile(p);
+/// A rounded neutral square with the lab's icon.
+pub(super) fn tile(p: Paint, icon: &'static Icon, size: f32) -> El {
     el().key("tile")
         .size(size, size)
         .center()
@@ -244,18 +243,18 @@ pub(super) fn tile(p: Paint, category: Category, icon: &'static Icon, size: f32)
         } else {
             p.k.radius.md
         })
-        .fill(fill)
-        .border(p.hair, edge)
+        .fill(p.k.c.layer_02)
+        .border(p.hair, p.k.c.border_weak)
         .child(
             rune::icon(icon, (size * 0.5).round())
                 .key("glyph")
-                .color(glyph),
+                .color(p.k.c.icon_base),
         )
 }
 
 /// One lab as a card: tile, name and tags on one line, up to two lines of
-/// description, and its switch. `featured` cards take their category's
-/// tint; they sit under New in Labs, so they carry no New tag.
+/// description, and its switch. `featured` cards sit under New in Labs, so
+/// they carry no New tag.
 fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
     let c = &p.k.c;
     let lab = entry.lab;
@@ -303,7 +302,7 @@ fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
     } else {
         format!("lab-card-{}", lab.id())
     };
-    let card = row()
+    row()
         .key(key)
         .role("button")
         .label(entry.title)
@@ -313,15 +312,11 @@ fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
         .radius(p.k.radius.lg)
         .hover(c.hover)
         .press(c.pressed)
-        .child(tile(p, entry.category, entry.icon, TILE))
+        .child(tile(p, entry.icon, TILE))
         .child(copy)
-        .on_press(move |ui: &mut Ui| open_drawer(ui, lab));
-    if featured {
-        let (wash, edge) = entry.category.wash(p);
-        card.fill(wash).border(p.hair, edge)
-    } else {
-        card.fill(c.bg_base).border(p.hair, c.border_weak)
-    }
+        .on_press(move |ui: &mut Ui| open_drawer(ui, lab))
+        .fill(c.bg_base)
+        .border(p.hair, c.border_weak)
 }
 
 const CARD_PADDING: f32 = 12.0;
