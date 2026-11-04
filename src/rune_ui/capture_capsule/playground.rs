@@ -448,6 +448,8 @@ fn terminal_guess() -> Route {
 }
 
 impl Keys {
+    /// Each state by the name its stills take.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) const ALL: [(&'static str, Keys); 10] = [
         ("site", Keys::Site),
         ("ghostty", Keys::Ghostty),
