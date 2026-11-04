@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    check_windows_split();
     build_version();
     test_build_commit();
     // `hex_dev_onboarding`: the first run's replay strip and its swearing
@@ -32,15 +33,19 @@ fn main() {
         if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
             // transcribe-cpp's Vulkan backend links the vulkan-1 import
             // library by name without its search path. The DLL itself ships
-            // with the GPU driver.
+            // with the GPU driver, so it is delay-loaded: a missing or
+            // Vulkan 1.0 loader must not stop Hex at launch (#1240;
+            // `windows::vulkan` keeps ggml off it then).
             println!("cargo:rerun-if-env-changed=VULKAN_SDK");
-            if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("x86_64")
-                && let Some(sdk) = std::env::var_os("VULKAN_SDK")
-            {
-                println!(
-                    "cargo:rustc-link-search=native={}",
-                    PathBuf::from(sdk).join("Lib").display()
-                );
+            if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("x86_64") {
+                if let Some(sdk) = std::env::var_os("VULKAN_SDK") {
+                    println!(
+                        "cargo:rustc-link-search=native={}",
+                        PathBuf::from(sdk).join("Lib").display()
+                    );
+                }
+                println!("cargo:rustc-link-arg=/DELAYLOAD:vulkan-1.dll");
+                println!("cargo:rustc-link-lib=delayimp");
             }
             #[cfg(windows)]
             embed_windows_resources();
@@ -83,6 +88,37 @@ fn main() {
 /// other build of the unstamped `0.0.0`, `0.0.0-dev-local-<commit>` with
 /// `-dirty` for uncommitted changes (`0.0.0-dev-local` without git, as in Nix).
 /// It counts as a dev build, so it follows the dev channel's current release.
+/// Fails every OS's build when Cargo.lock puts gpu-allocator and wgpu-hal on
+/// different `windows` crates. wgpu-hal passes D3D12 types into
+/// gpu-allocator, so the split only breaks the Windows build, and
+/// `cargo update -p rune` has re-resolved gpu-allocator onto an older
+/// `windows` twice (#997, #1085). Fix it by setting gpu-allocator's `windows`
+/// (and iana-time-zone's `windows-core`) back to wgpu-hal's version.
+fn check_windows_split() {
+    println!("cargo:rerun-if-changed=Cargo.lock");
+    let Ok(lock) = std::fs::read_to_string("Cargo.lock") else {
+        return;
+    };
+    let windows = |name: &str| {
+        lock.split("[[package]]")
+            .find(|block| block.contains(&format!("\nname = \"{name}\"\n")))
+            .and_then(|block| {
+                block
+                    .lines()
+                    .map(|line| line.trim().trim_end_matches(',').trim_matches('"'))
+                    .find(|dependency| {
+                        *dependency == "windows" || dependency.starts_with("windows ")
+                    })
+                    .map(str::to_owned)
+            })
+    };
+    let (allocator, hal) = (windows("gpu-allocator"), windows("wgpu-hal"));
+    assert_eq!(
+        allocator, hal,
+        "Cargo.lock: gpu-allocator must use wgpu-hal's `windows` crate, or the Windows build breaks"
+    );
+}
+
 fn build_version() {
     println!("cargo:rerun-if-env-changed=HEX_VERSION");
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();

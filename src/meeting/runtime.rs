@@ -74,6 +74,11 @@ impl Meetings {
             .spawn(move || {
                 for event in events {
                     capsules.event(&event);
+                    #[cfg(target_os = "linux")]
+                    if matches!(event, ControllerEvent::Offer(_)) {
+                        let window = window.clone();
+                        capsules.when_offer_unshown(move |reason| offer_unshown(&window, reason));
+                    }
                     follow(&event, &window);
                 }
             })?;
@@ -93,6 +98,9 @@ impl Meetings {
 
 /// Asks the controller to start, stop, or summarize a meeting.
 pub(crate) fn request(request: MeetingRequest) -> Result<(), String> {
+    if let Some(lock) = crate::labs::Feature::Meetings.managed() {
+        return Err(lock.refusal().into());
+    }
     REQUESTS
         .get()
         .ok_or("meetings are not running")?
@@ -129,6 +137,26 @@ pub(crate) fn copy_last_transcript() -> Result<(), String> {
         .ok_or("the window is not running")?
         .update(move |_, tx| tx.copy(markdown));
     Ok(())
+}
+
+/// The offer capsule could not open (GNOME on Wayland, #1271): the
+/// Meetings pane says so and its Record starts the recording instead.
+#[cfg(target_os = "linux")]
+fn offer_unshown(window: &rune::AppHandle<Ui>, reason: String) {
+    tracing::warn!(%reason, "meeting recording offer could not show; opening the Meetings pane");
+    let mut message = format!(
+        "Hex detected a call but couldn't show its recording offer on this desktop ({reason}). Record it from here."
+    );
+    if !crate::labs::gnome_meeting_capsules() {
+        message.push_str(
+            " On GNOME, Labs › Floating meeting capsules on GNOME can show it over your call.",
+        );
+    }
+    window.update(move |ui, tx| {
+        crate::rune_ui::meeting_failed(ui, message);
+        crate::rune_ui::show(ui, Destination::Meetings(None), tx);
+    });
+    window.open();
 }
 
 /// Mirrors an event into the recording state and the window.
@@ -179,7 +207,7 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
             });
             window.open();
         }
-        ControllerEvent::CallEnded { app } => {
+        ControllerEvent::CallEnded { app, .. } => {
             tracing::info!(%app, "the call ended; the recording continues until Stop");
         }
         ControllerEvent::Offer(_)

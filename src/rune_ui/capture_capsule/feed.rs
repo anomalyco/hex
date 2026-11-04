@@ -114,8 +114,7 @@ impl Follow {
     }
 
     /// What the router's news for the shown capture tells the capsule. The
-    /// capsule shows a rule's or a chip's send as sent itself, so only what
-    /// it can't know moves it: the answer, the send going (for its sound),
+    /// capsule follows the answer and its refinements, the send going,
     /// a send OpenCode didn't take (and its later retry), how an Undo
     /// ended, and a failed send.
     fn routed(&mut self, snapshot: &CaptureSnapshot) -> Vec<Input> {
@@ -140,6 +139,11 @@ impl Follow {
         };
         if answered(Some(&route)) && !answered(before.as_ref()) {
             inputs.extend(capsule_route(&route.answer).map(Input::Routed));
+        } else if before
+            .as_ref()
+            .is_some_and(|before| before.answer != route.answer)
+        {
+            inputs.extend(capsule_route(&route.answer).map(Input::Refined));
         }
         let was = before.and_then(|before| before.delivery);
         if route.delivery == was {
@@ -242,6 +246,7 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
     };
     Some(match answer {
         RouteAnswer::Looking => return None,
+        RouteAnswer::ResolvingRule { name } => Route::ResolvingRule { name: name.clone() },
         RouteAnswer::Rule {
             to,
             suggested,
@@ -287,7 +292,8 @@ pub(crate) struct CaptureOverlays {
 
 impl CaptureOverlays {
     /// Adds the three overlays, prewarmed and hidden, and starts following
-    /// captures.
+    /// captures. Away from macOS they make their GPU surfaces only to show,
+    /// so a Hex that never annotates holds none.
     pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
         let picker = PickerOverlay::install(app, act);
         let aim = picker.clone();

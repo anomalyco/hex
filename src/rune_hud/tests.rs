@@ -14,6 +14,18 @@ fn dot_uniform_layout_matches_wgsl() {
 }
 
 #[test]
+fn only_gnome_and_kde_on_wayland_keep_the_primary_display() {
+    for desktops in ["GNOME", "ubuntu:GNOME", "KDE"] {
+        assert!(keeps_primary_display(Some(desktops), true), "{desktops}");
+        assert!(!keeps_primary_display(Some(desktops), false), "{desktops}");
+    }
+    for desktops in [None, Some("sway"), Some("XFCE")] {
+        assert!(!keeps_primary_display(desktops, true));
+        assert!(!keeps_primary_display(desktops, false));
+    }
+}
+
+#[test]
 fn dot_scope_window_fits_the_largest_plate() {
     let largest = |key| {
         dot_scope::KNOBS
@@ -113,16 +125,18 @@ fn place_on(
     tuning: Tuning,
 ) -> crate::rune_hud::hud_placement::Placed {
     let (width, height) = CAPTURE_DOT_WINDOW;
-    crate::rune_hud::hud_placement::place(
-        tuning.placement,
-        screen,
-        crate::rune_hud::hud_placement::Content {
-            window: (f64::from(width), f64::from(height)),
-            plate: (f64::from(width) - 24.0, f64::from(dot_scope::PLATE_HEIGHT)),
-            island_spread: f64::from(tuning.island_spread),
-        },
-        false,
-    )
+    let content = crate::rune_hud::hud_placement::Content {
+        window: (f64::from(width), f64::from(height)),
+        plate: (f64::from(width) - 24.0, f64::from(dot_scope::PLATE_HEIGHT)),
+        island_spread: f64::from(tuning.island_spread),
+    };
+    // `HEX_HUD_EARS=1` places Labs' notch indicator instead.
+    if std::env::var("HEX_HUD_EARS").as_deref() == Ok("1")
+        && let Some(placed) = crate::rune_hud::hud_placement::ears(screen, content)
+    {
+        return placed;
+    }
+    crate::rune_hud::hud_placement::place(tuning.placement, screen, content, false)
 }
 
 /// What the screen shows behind the window.
@@ -159,7 +173,7 @@ fn backdrop(
 /// `HEX_HUD_TUNING` overrides Dot scope's tuning as JSON, such as
 /// `{"processing": "pulse", "placement": "notch"}`, placed on a 14-inch
 /// MacBook Pro, or with `HEX_HUD_SCREEN=studio` on a Studio Display (no
-/// notch); `HEX_HUD_THEME=light` draws over a light desktop. `HEX_HUD_DUMP=<file>` also writes
+/// notch); `HEX_HUD_EARS=1` draws Labs' notch indicator; `HEX_HUD_THEME=light` draws over a light desktop. `HEX_HUD_DUMP=<file>` also writes
 /// every frame's shader inputs, for rendering the same frames elsewhere.
 #[test]
 #[ignore = "writes frames for a review clip"]

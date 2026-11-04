@@ -2,7 +2,11 @@
 //! CLIPBOARD selection, read within a size cap and deadline, then served
 //! again from Hex until another client takes the clipboard. Wayland reads
 //! and serves through ext-data-control or wlr-data-control. X11 uses its own selection owner,
-//! because `x11-clipboard` serves a single target.
+//! because `x11-clipboard` serves a single target. A Wayland desktop with
+//! neither protocol (GNOME's Mutter) restores nothing unless Labs › Restore
+//! clipboard on GNOME is on and XWayland already runs: then the paste reads
+//! and restores the CLIPBOARD selection through XWayland, which Mutter
+//! bridges to Wayland apps both ways (#1111). Hex never starts XWayland.
 
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -34,9 +38,12 @@ pub(crate) struct X11Format {
 }
 
 /// The session's clipboard.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Selection {
     Wayland,
+    /// A Wayland session restoring through XWayland's selection, by the
+    /// explicit Labs opt-in ([`Selection::current`]).
+    XWayland,
     /// `transcript_owner` is the window `x11-clipboard` pastes from.
     X11 {
         transcript_owner: u32,
@@ -44,9 +51,29 @@ pub(crate) enum Selection {
 }
 
 impl Selection {
+    /// The selection a paste uses now: a Wayland session switches to
+    /// XWayland's only while [`uses_xwayland`] says so.
+    pub(crate) fn current(self) -> Self {
+        match self {
+            Self::Wayland | Self::XWayland => {
+                if uses_xwayland(
+                    wayland::offers_data_control(),
+                    crate::labs::gnome_clipboard_restore(),
+                    xwayland_running,
+                ) {
+                    Self::XWayland
+                } else {
+                    Self::Wayland
+                }
+            }
+            x11 @ Self::X11 { .. } => x11,
+        }
+    }
+
     pub(crate) fn snapshot(self) -> Result<Snapshot> {
         match self {
             Self::Wayland => wayland::snapshot(None),
+            Self::XWayland => x11::snapshot().wrap_err("could not read the XWayland clipboard"),
             Self::X11 { .. } => x11::snapshot(),
         }
     }
@@ -59,6 +86,12 @@ impl Selection {
                 wayland::snapshot(Some(mime)),
                 Ok(Snapshot::Wayland(formats)) if formats.first().is_some_and(|(_, data)| data == bytes)
             ),
+            // XWayland names a Wayland client's MIME types as X11 targets,
+            // and Mutter adds UTF8_STRING for text.
+            Self::XWayland => {
+                x11::holds(mime, bytes)
+                    || (mime.starts_with("text/plain") && x11::holds("UTF8_STRING", bytes))
+            }
             Self::X11 { transcript_owner } => {
                 x11::owner().is_ok_and(|owner| owner == transcript_owner)
             }
@@ -69,12 +102,52 @@ impl Selection {
         match snapshot {
             Snapshot::Empty => match self {
                 Self::Wayland => wayland::serve(Vec::new()),
-                Self::X11 { .. } => x11::serve(Vec::new()),
+                Self::XWayland | Self::X11 { .. } => x11::serve(Vec::new()),
             },
             Snapshot::Wayland(formats) => wayland::serve(formats),
             Snapshot::X11(formats) => x11::serve(formats),
         }
     }
+}
+
+/// Whether this is a Wayland session whose compositor offers no
+/// data-control protocol (GNOME), so pastes restore the clipboard only
+/// through Labs › Restore clipboard on GNOME.
+pub(crate) fn wayland_without_data_control() -> bool {
+    crate::linux::session::LinuxSession::detect().is_wayland() && !wayland::offers_data_control()
+}
+
+/// Whether a Wayland paste restores through XWayland: only when the
+/// compositor offers no data-control protocol, the person turned on Labs ›
+/// Restore clipboard on GNOME, and XWayland already runs. `running` is
+/// asked last, so other sessions never look for XWayland.
+fn uses_xwayland(data_control: bool, opted_in: bool, running: impl FnOnce() -> bool) -> bool {
+    !data_control && opted_in && running()
+}
+
+/// Whether this user's XWayland is up for `DISPLAY`. GNOME starts XWayland
+/// when a client connects to its socket, so this looks for the process
+/// rather than connecting.
+pub(crate) fn xwayland_running() -> bool {
+    std::env::var_os("DISPLAY").is_some_and(|display| !display.is_empty())
+        && std::fs::read_dir("/proc").is_ok_and(|entries| {
+            let uid = unsafe { libc::getuid() };
+            xwayland_listed(
+                uid,
+                entries.filter_map(|entry| {
+                    use std::os::unix::fs::MetadataExt;
+                    let entry = entry.ok()?;
+                    let owner = entry.metadata().ok()?.uid();
+                    let comm = std::fs::read_to_string(entry.path().join("comm")).ok()?;
+                    Some((owner, comm))
+                }),
+            )
+        })
+}
+
+/// Whether `processes` (owner and `/proc/<pid>/comm`) hold `uid`'s XWayland.
+fn xwayland_listed(uid: u32, mut processes: impl Iterator<Item = (u32, String)>) -> bool {
+    processes.any(|(owner, comm)| owner == uid && comm.trim_end() == "Xwayland")
 }
 
 fn too_large() -> color_eyre::eyre::Report {
@@ -423,6 +496,11 @@ mod wayland {
         }
     }
 
+    /// Whether the compositor offers either data-control protocol.
+    pub(super) fn offers_data_control() -> bool {
+        offers(ext::GLOBAL) || offers(wlr::GLOBAL)
+    }
+
     pub(super) fn serve(formats: Vec<(String, Vec<u8>)>) -> Result<()> {
         if offers(ext::GLOBAL) {
             ext::serve(formats)
@@ -438,7 +516,9 @@ mod wayland {
     }
 
     fn missing() -> color_eyre::eyre::Report {
-        eyre!("the compositor offers no ext-data-control or wlr-data-control clipboard access")
+        eyre!(
+            "the compositor offers no ext-data-control or wlr-data-control clipboard access; Labs › Restore clipboard on GNOME restores it through XWayland while XWayland runs"
+        )
     }
 
     mod ext {
@@ -536,6 +616,25 @@ mod x11 {
             .get_selection_owner(atoms.CLIPBOARD)?
             .reply()?
             .owner)
+    }
+
+    /// Whether the clipboard's `target` (a MIME type or X11 target name)
+    /// holds exactly `bytes`, reading no more than that.
+    pub(super) fn holds(target: &str, bytes: &[u8]) -> bool {
+        let read = || -> Result<bool> {
+            let deadline = Instant::now() + READ_DEADLINE;
+            let (connection, screen, atoms) = connect()?;
+            let target = connection
+                .intern_atom(false, target.as_bytes())?
+                .reply()?
+                .atom;
+            let window = window(&connection, screen)?;
+            let format = convert(&connection, &atoms, window, target, bytes.len(), deadline);
+            let _ = connection.destroy_window(window);
+            let _ = connection.flush();
+            Ok(format?.is_some_and(|format| format.data == bytes))
+        };
+        read().unwrap_or(false)
     }
 
     fn next_event(connection: &RustConnection, deadline: Instant) -> Result<Event> {
@@ -856,6 +955,47 @@ mod tests {
         let data = read_bounded(read, 1024, Instant::now() + Duration::from_secs(2)).unwrap();
         writer.join().unwrap();
         assert_eq!(data, b"original");
+    }
+
+    #[test]
+    fn xwayland_restores_only_by_opt_in_without_data_control() {
+        let running = || true;
+        assert!(uses_xwayland(false, true, running));
+        assert!(!uses_xwayland(true, true, running), "data-control wins");
+        assert!(!uses_xwayland(false, false, running), "off by default");
+        assert!(
+            !uses_xwayland(false, true, || false),
+            "never starts XWayland"
+        );
+    }
+
+    #[test]
+    fn xwayland_is_looked_for_only_when_it_could_be_used() {
+        let looked = std::cell::Cell::new(false);
+        let running = || {
+            looked.set(true);
+            true
+        };
+        assert!(!uses_xwayland(true, true, running));
+        assert!(!uses_xwayland(false, false, running));
+        assert!(!looked.get());
+    }
+
+    #[test]
+    fn xwayland_counts_only_this_users_process() {
+        let processes = || {
+            [
+                (1000, "gnome-shell\n".to_owned()),
+                (1001, "Xwayland\n".to_owned()),
+            ]
+            .into_iter()
+        };
+        assert!(!xwayland_listed(1000, processes()));
+        assert!(xwayland_listed(1001, processes()));
+        assert!(!xwayland_listed(
+            1000,
+            std::iter::once((1000, "Xwayland-helper\n".to_owned()))
+        ));
     }
 
     #[test]

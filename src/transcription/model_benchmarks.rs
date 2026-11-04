@@ -178,6 +178,31 @@ const GIGAAM_V3_RECORD: BenchmarkRecord = BenchmarkRecord {
     hardware: Some("Radeon 8060S (Vulkan)"),
 };
 
+/// Hex's run of the same harness over the full FLEURS Norwegian (Bokmål)
+/// test split on apollo, with the `no` hint (#1150). On the same run Whisper
+/// large-v3-turbo scored 8.94%, NB-Whisper's distilled turbo beta 8.65%,
+/// its Medium converted to Q8_0 6.75%, and its Large (Q8_0, twice the size
+/// and half the speed) 5.62%.
+const NB_WHISPER_MEDIUM_RECORD: BenchmarkRecord = BenchmarkRecord {
+    value: 6.68,
+    language: "no",
+    utterances: Some(357),
+    ..GIGAAM_V3_RECORD
+};
+
+/// Hex's run of the same harness over the full FLEURS English test split on
+/// apollo (#1252). On the same run Parakeet Unified English scored 4.01%,
+/// Whisper large-v3-turbo 4.38%, Parakeet v3 4.88%, and Cohere 5.08%; in
+/// French, German, Spanish, Portuguese, and Italian Granite trailed Parakeet
+/// v3 (7.08, 5.51, 4.69, 8.21, and 4.24% against 5.35, 5.17, 3.78, 4.91, and
+/// 3.06%), and in Japanese it tied Whisper turbo (5.04% CER against 5.02%).
+const GRANITE_SPEECH_5_RECORD: BenchmarkRecord = BenchmarkRecord {
+    value: 4.77,
+    language: "en",
+    utterances: Some(647),
+    ..GIGAAM_V3_RECORD
+};
+
 /// `model`'s benchmark record, or `None` when the system manages the model
 /// and publishes no figure (Apple Speech).
 pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
@@ -189,6 +214,8 @@ pub fn benchmark(model: &ModelDefinition) -> Option<BenchmarkRecord> {
         TranscriptionModelId::ParakeetUltra => Some(PARAKEET_ULTRA_RECORD),
         TranscriptionModelId::Nemotron35Asr => Some(NEMOTRON_3_5_ASR_RECORD),
         TranscriptionModelId::GigaAmV3 => Some(GIGAAM_V3_RECORD),
+        TranscriptionModelId::NbWhisperMedium => Some(NB_WHISPER_MEDIUM_RECORD),
+        TranscriptionModelId::GraniteSpeech5 => Some(GRANITE_SPEECH_5_RECORD),
         // The catalog's English figures: their dataset, source, and
         // conditions were not recorded.
         _ => model

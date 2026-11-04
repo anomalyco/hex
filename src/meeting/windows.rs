@@ -1,10 +1,13 @@
-//! The Windows side of meetings: system audio through WASAPI loopback of the
-//! default output, and Explorer and the Recycle Bin.
+//! The Windows side of meetings: system audio through WASAPI loopback of
+//! every active output, and Explorer and the Recycle Bin.
 //!
 //! cpal opens an input stream on an output device in loopback mode. Loopback
 //! delivers nothing while nothing plays, so silence is not a failure here:
-//! the track writer pads the gap once audio resumes. A change of the default
-//! output reopens the source on the new one.
+//! the track writer pads the gap once audio resumes. A call app often plays
+//! on a device other than the default output (a headset set as the default
+//! communication device, or the speaker chosen in the app; #1221), so every
+//! active output is heard and mixed into the one system track. A change in
+//! the list of outputs reopens the source.
 
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -18,10 +21,13 @@ use super::SAMPLE_RATE;
 use super::capture::{LiveSource, POLL_INTERVAL, PacketSink, To16k};
 
 const QUEUE_CAPACITY: usize = 256;
-/// How often the source checks that the default output has not changed.
+/// How often the source checks that the list of outputs has not changed.
 const ROUTE_CHECK: Duration = Duration::from_secs(2);
+/// 16 kHz samples each output's audio is held back before mixing, so two
+/// outputs playing at once line up instead of following each other.
+const MIX_HOLD: usize = SAMPLE_RATE as usize / 20;
 
-/// Windows needs no consent to hear the default output.
+/// Windows needs no consent to hear the outputs.
 pub(super) fn ensure_system_audio() -> Result<()> {
     Ok(())
 }
@@ -30,71 +36,171 @@ pub(super) fn open_system_audio(_sink: &PacketSink) -> Result<Box<dyn LiveSource
     LoopbackSource::start().map(|source| Box::new(source) as Box<dyn LiveSource>)
 }
 
-fn default_output() -> Result<(cpal::Device, String)> {
-    let device = cpal::default_host()
-        .default_output_device()
-        .ok_or_else(|| eyre!("no audio output device is available"))?;
-    let name = device
+fn device_name(device: &cpal::Device) -> String {
+    device
         .description()
         .map(|description| description.name().to_owned())
-        .unwrap_or_default();
-    Ok((device, name))
+        .unwrap_or_default()
 }
 
-/// The default output through WASAPI loopback, downmixed to mono.
-struct LoopbackSource {
-    _stream: cpal::Stream,
-    buffers: Receiver<Vec<f32>>,
-    errors: Receiver<String>,
+/// Every active output with its name, the default first.
+fn outputs() -> Result<Vec<(cpal::Device, String)>> {
+    let host = cpal::default_host();
+    let default = host
+        .default_output_device()
+        .map(|device| device_name(&device));
+    let mut outputs = host
+        .output_devices()
+        .wrap_err("could not list the audio outputs")?
+        .map(|device| {
+            let name = device_name(&device);
+            (device, name)
+        })
+        .collect::<Vec<_>>();
+    if let Some(default) = default
+        && let Some(at) = outputs.iter().position(|(_, name)| *name == default)
+    {
+        outputs[..=at].rotate_right(1);
+    }
+    if outputs.is_empty() {
+        return Err(eyre!("no audio output device is available"));
+    }
+    Ok(outputs)
+}
+
+fn output_names() -> Option<Vec<String>> {
+    let mut names = outputs()
+        .ok()?
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect::<Vec<_>>();
+    names.sort();
+    Some(names)
+}
+
+/// One output's loopback stream and its 16 kHz audio not yet mixed.
+struct Output {
+    name: String,
+    stream: Option<cpal::Stream>,
     resample: To16k,
-    device_name: String,
+    pending: Vec<f32>,
+}
+
+/// Every active output through WASAPI loopback, downmixed to mono and mixed.
+struct LoopbackSource {
+    outputs: Vec<Output>,
+    buffers: Receiver<(usize, Vec<f32>)>,
+    errors: Receiver<(usize, String)>,
+    names: Vec<String>,
     route_checked: Instant,
 }
 
 impl LoopbackSource {
     fn start() -> Result<Self> {
-        let (device, device_name) = default_output()?;
-        let supported = device
-            .default_output_config()
-            .wrap_err("could not read the output device configuration")?;
-        let sample_format = supported.sample_format();
-        let config: StreamConfig = supported.into();
+        let devices = outputs()?;
         let (sender, buffers) = mpsc::sync_channel(QUEUE_CAPACITY);
-        let (error_sender, errors) = mpsc::sync_channel(1);
-        let stream = match sample_format {
-            SampleFormat::F32 => loopback(&device, &config, sender, error_sender, |s: f32| s)?,
-            SampleFormat::I16 => loopback(&device, &config, sender, error_sender, |s: i16| {
-                f32::from(s) / f32::from(i16::MAX)
-            })?,
-            SampleFormat::I32 => loopback(&device, &config, sender, error_sender, |s: i32| {
-                s as f32 / i32::MAX as f32
-            })?,
-            format => return Err(eyre!("unsupported output sample format: {format:?}")),
-        };
-        stream
-            .play()
-            .wrap_err("could not start system audio loopback")?;
-        tracing::info!(
-            device = device_name,
-            rate = config.sample_rate,
-            "system audio loopback started"
-        );
+        let (error_sender, errors) = mpsc::sync_channel(devices.len().max(1));
+        let mut opened = Vec::new();
+        let mut first_error = None;
+        for (device, name) in &devices {
+            let index = opened.len();
+            match open_output(device, index, sender.clone(), error_sender.clone()) {
+                Ok((stream, rate)) => {
+                    tracing::info!(device = %name, rate, "system audio loopback started");
+                    opened.push(Output {
+                        name: name.clone(),
+                        stream: Some(stream),
+                        resample: To16k::new(rate)?,
+                        pending: Vec::new(),
+                    });
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        device = %name,
+                        error = %format!("{error:#}"),
+                        "could not hear an audio output"
+                    );
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        if opened.is_empty() {
+            return Err(first_error.unwrap_or_else(|| eyre!("no audio output device is available")));
+        }
+        let mut names = devices
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<_>>();
+        names.sort();
         Ok(Self {
-            _stream: stream,
+            outputs: opened,
             buffers,
             errors,
-            resample: To16k::new(config.sample_rate)?,
-            device_name,
+            names,
             route_checked: Instant::now(),
         })
     }
 }
 
+/// Opens and starts `device`'s loopback, sending its audio tagged `index`.
+fn open_output(
+    device: &cpal::Device,
+    index: usize,
+    sender: SyncSender<(usize, Vec<f32>)>,
+    errors: SyncSender<(usize, String)>,
+) -> Result<(cpal::Stream, u32)> {
+    let supported = device
+        .default_output_config()
+        .wrap_err("could not read the output device configuration")?;
+    let sample_format = supported.sample_format();
+    let config: StreamConfig = supported.into();
+    let stream = match sample_format {
+        SampleFormat::F32 => loopback(device, &config, index, sender, errors, |s: f32| s)?,
+        SampleFormat::I16 => loopback(device, &config, index, sender, errors, |s: i16| {
+            f32::from(s) / f32::from(i16::MAX)
+        })?,
+        SampleFormat::I32 => loopback(device, &config, index, sender, errors, |s: i32| {
+            s as f32 / i32::MAX as f32
+        })?,
+        format => return Err(eyre!("unsupported output sample format: {format:?}")),
+    };
+    stream
+        .play()
+        .wrap_err("could not start system audio loopback")?;
+    Ok((stream, config.sample_rate))
+}
+
+/// Mixes each output's pending audio up to the latest output's position less
+/// `hold`, leaving the rest for the next call. An output that delivered
+/// nothing (nothing plays on it) adds nothing.
+fn mix(pending: &mut [&mut Vec<f32>], hold: usize) -> Vec<f32> {
+    let length = pending
+        .iter()
+        .map(|samples| samples.len())
+        .max()
+        .unwrap_or(0)
+        .saturating_sub(hold);
+    let mut mixed = vec![0.0f32; length];
+    for samples in pending.iter_mut() {
+        let take = samples.len().min(length);
+        for (out, sample) in mixed.iter_mut().zip(samples.drain(..take)) {
+            *out += sample;
+        }
+    }
+    for sample in &mut mixed {
+        *sample = sample.clamp(-1.0, 1.0);
+    }
+    mixed
+}
+
 fn loopback<T: SizedSample + Send + 'static>(
     device: &cpal::Device,
     config: &StreamConfig,
-    sender: SyncSender<Vec<f32>>,
-    errors: SyncSender<String>,
+    index: usize,
+    sender: SyncSender<(usize, Vec<f32>)>,
+    errors: SyncSender<(usize, String)>,
     convert: impl Fn(T) -> f32 + Send + 'static,
 ) -> Result<cpal::Stream> {
     let channels = usize::from(config.channels).max(1);
@@ -106,35 +212,75 @@ fn loopback<T: SizedSample + Send + 'static>(
                     .chunks_exact(channels)
                     .map(|frame| frame.iter().map(|&s| convert(s)).sum::<f32>() / channels as f32)
                     .collect();
-                let _ = sender.try_send(mono);
+                let _ = sender.try_send((index, mono));
             },
-            move |error| {
-                let _ = errors.try_send(error.to_string());
+            move |error: cpal::Error| {
+                // A buffer discontinuity (WASAPI's data-discontinuity flag)
+                // is reported while the stream keeps delivering audio, so
+                // it must not end the source: reopening on each one left
+                // the system track empty (#1035).
+                if matches!(
+                    error.kind(),
+                    cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied
+                ) {
+                    tracing::debug!(%error, "system audio loopback glitched; continuing");
+                    return;
+                }
+                let _ = errors.try_send((index, error.to_string()));
             },
             None,
         )
         .wrap_err("could not open system audio loopback")
 }
 
+impl LoopbackSource {
+    fn take(&mut self, (index, samples): (usize, Vec<f32>)) {
+        if let Some(output) = self.outputs.get_mut(index)
+            && output.stream.is_some()
+        {
+            let resampled = output.resample.push(&samples);
+            output.pending.extend(resampled);
+        }
+    }
+}
+
 impl LiveSource for LoopbackSource {
     fn poll(&mut self, sink: &PacketSink) -> std::result::Result<(), String> {
-        if let Ok(error) = self.errors.try_recv() {
-            return Err(error);
+        // A failing output stops alone; the others keep the track going.
+        while let Ok((index, error)) = self.errors.try_recv() {
+            if let Some(output) = self.outputs.get_mut(index)
+                && output.stream.take().is_some()
+            {
+                tracing::warn!(
+                    device = %output.name,
+                    %error,
+                    "system audio loopback stopped for one output"
+                );
+            }
+        }
+        if self.outputs.iter().all(|output| output.stream.is_none()) {
+            return Err("every system audio loopback stopped".into());
         }
         if self.route_checked.elapsed() >= ROUTE_CHECK {
             self.route_checked = Instant::now();
-            if let Ok((_, name)) = default_output()
-                && name != self.device_name
+            if let Some(names) = output_names()
+                && names != self.names
             {
-                return Err(format!("the default output changed to {name}"));
+                return Err("the audio outputs changed".into());
             }
         }
         match self.buffers.recv_timeout(POLL_INTERVAL) {
-            Ok(mut samples) => {
+            Ok(first) => {
+                self.take(first);
                 while let Ok(next) = self.buffers.try_recv() {
-                    samples.extend(next);
+                    self.take(next);
                 }
-                sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
+                let mut pending = self
+                    .outputs
+                    .iter_mut()
+                    .map(|output| &mut output.pending)
+                    .collect::<Vec<_>>();
+                sink.send(SAMPLE_RATE, mix(&mut pending, MIX_HOLD), None);
                 Ok(())
             }
             Err(mpsc::RecvTimeoutError::Timeout) => Ok(()),
@@ -191,4 +337,30 @@ pub(super) fn move_to_trash(path: &Path) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mix;
+
+    #[test]
+    fn audio_on_any_output_reaches_the_system_track() {
+        // Only the headset plays (#1221): its audio is kept, less the hold.
+        let mut speakers = Vec::new();
+        let mut headset = vec![0.25; 10];
+        let mixed = mix(&mut [&mut speakers, &mut headset], 4);
+        assert_eq!(mixed, vec![0.25; 6]);
+        assert_eq!(headset.len(), 4);
+
+        // Both play: their audio adds up sample by sample, clamped.
+        let mut speakers = vec![0.5; 8];
+        let mut headset = vec![0.75; 6];
+        let mixed = mix(&mut [&mut speakers, &mut headset], 2);
+        assert_eq!(mixed, vec![1.0; 6]);
+        assert_eq!((speakers.len(), headset.len()), (2, 0));
+
+        // Nothing plays: nothing is sent.
+        let mut idle = Vec::new();
+        assert!(mix(&mut [&mut idle], 2).is_empty());
+    }
 }

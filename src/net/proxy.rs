@@ -168,6 +168,34 @@ fn wildcard(pattern: &str, text: &str) -> bool {
     }
 }
 
+/// One entry of macOS' proxy list for a URL, in the order it would be tried.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) enum SystemEntry {
+    /// An HTTP or HTTPS proxy, with its `host:port` when it has one.
+    Http(Option<String>),
+    /// Any other kind, by its type name: `kCFProxyTypeNone` (connect
+    /// directly), a PAC file, SOCKS, or FTP.
+    Other(String),
+}
+
+/// The first entry Hex can use (#1235): a direct entry ends the search, and
+/// kinds Hex can't use (a PAC file it doesn't evaluate, SOCKS) are passed
+/// over for the next one, as a manual proxy listed after a PAC.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn first_usable(entries: &[SystemEntry]) -> Option<String> {
+    for entry in entries {
+        match entry {
+            SystemEntry::Http(Some(address)) => return Some(address.clone()),
+            SystemEntry::Http(None) => {}
+            SystemEntry::Other(kind) if kind == "kCFProxyTypeNone" => return None,
+            SystemEntry::Other(kind) => {
+                tracing::info!(kind, "passing over a system proxy entry Hex can't use");
+            }
+        }
+    }
+    None
+}
+
 /// From a Windows proxy list (`host:port`, or `http=a:80;https=b:443`, `;` or
 /// space separated), the proxy for `scheme`.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -242,6 +270,30 @@ mod tests {
             Some("p1.corp:3128")
         );
         assert_eq!(pick_from_list("DIRECT", "https"), None);
+    }
+
+    #[test]
+    fn system_proxy_lists_pass_over_a_pac_entry() {
+        let pac = || SystemEntry::Other("kCFProxyTypeAutoConfigurationURL".into());
+        let direct = || SystemEntry::Other("kCFProxyTypeNone".into());
+        assert_eq!(
+            first_usable(&[pac(), SystemEntry::Http(Some("127.0.0.1:8080".into()))]).as_deref(),
+            Some("127.0.0.1:8080")
+        );
+        assert_eq!(first_usable(&[pac()]), None);
+        assert_eq!(
+            first_usable(&[direct(), SystemEntry::Http(Some("p:1".into()))]),
+            None
+        );
+        assert_eq!(
+            first_usable(&[
+                SystemEntry::Http(None),
+                SystemEntry::Other("kCFProxyTypeSOCKS".into()),
+                SystemEntry::Http(Some("p:3128".into())),
+            ])
+            .as_deref(),
+            Some("p:3128")
+        );
     }
 
     #[test]

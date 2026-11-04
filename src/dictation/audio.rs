@@ -11,7 +11,9 @@ use color_eyre::eyre::{Result, eyre};
 
 use crate::audio::recording_environment::{CaptureMarker, RecordingEnvironmentController};
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
-use crate::dictation::{ClipSource, DictationCapture, DictationClip, Finish};
+use crate::dictation::{
+    ClipSource, DictationCapture, DictationClip, Finish, POST_RELEASE_TAIL, ReleaseTail,
+};
 use crate::feedback::{self, Tone};
 use crate::suppression::PendingInputEvents;
 use crate::transcription::engine::TranscriptionEngine;
@@ -635,7 +637,11 @@ impl Owner {
                     self.capture
                         .end_recording_environment_then(|| feedback::play(Tone::DictationStop));
                 }
-                let deferred = announced.then(|| self.drain_tail(at, tail)).flatten();
+                let (tail, deferred) = if announced {
+                    self.drain_tail(at, feedback::stop_tone_length())
+                } else {
+                    (tail, None)
+                };
                 let mut finish = if self.pending_capture.take().is_some() {
                     if !self.capture_sink_open() {
                         self.input.cancel_open();
@@ -646,6 +652,9 @@ impl Owner {
                 };
                 if let Finish::Transcribe(clip) = &mut finish {
                     clip.set_source(self.clip_source());
+                    if clip.is_digital_silence() {
+                        self.reopen_silent_stream();
+                    }
                 }
                 self.state.recording.store(false, Ordering::Release);
                 let _ = reply.send(finish);
@@ -710,21 +719,34 @@ impl Owner {
         }
     }
 
-    /// Waits a bounded time for audio through `ended_at + tail`. A stream
-    /// failure or discontinuity inside the tail must not discard the finishing
-    /// capture, so the first such event is returned for handling afterwards.
+    /// Waits a bounded time for the release tail
+    /// ([`DictationCapture::release_tail`]): the base tail plus
+    /// [`TAIL_DELIVERY_GRACE`], or the longest tail plus the grace once
+    /// speech grows it. Returns the tail to keep. A stream failure or
+    /// discontinuity inside the tail must not discard the finishing capture,
+    /// so the first such event is returned for handling afterwards.
     fn drain_tail(
         &mut self,
         ended_at: CaptureInstant,
-        tail: Duration,
-    ) -> Option<RecoveringAudioInputEvent> {
-        let boundary = ended_at + tail;
-        let deadline = Instant::now() + tail + TAIL_DELIVERY_GRACE;
-        while self.state.captured_through.load(Ordering::Acquire) < boundary.as_nanos() {
+        tone: Duration,
+    ) -> (Duration, Option<RecoveringAudioInputEvent>) {
+        let started = Instant::now();
+        loop {
+            let state = self.capture.release_tail(ended_at, tone);
+            if let ReleaseTail::Through(tail) = state {
+                if tail > POST_RELEASE_TAIL {
+                    tracing::debug!(
+                        tail_ms = tail.as_millis() as u64,
+                        "speech carried past the release; kept a longer tail"
+                    );
+                }
+                return (tail, None);
+            }
+            let deadline = started + state.bound() + TAIL_DELIVERY_GRACE;
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() || !self.input.is_open() {
                 tracing::debug!("finished before the post-release tail arrived");
-                break;
+                return (state.bound(), None);
             }
             let capture_idle = self.input_idle();
             let event = self
@@ -744,11 +766,10 @@ impl Owner {
                 tracing::warn!(
                     "microphone stream changed during the post-release tail; finishing with the audio already captured"
                 );
-                return Some(event);
+                return (state.bound(), Some(event));
             }
             self.handle_input(event);
         }
-        None
     }
 
     fn chunk_gap(&self, frames: usize, captured_through: CaptureInstant) -> Option<Duration> {
@@ -1022,7 +1043,10 @@ impl Owner {
 
     fn start_capture_at(&mut self, kind: CaptureKind, at: CaptureInstant) {
         match kind {
-            CaptureKind::Hotkey => self.capture.start_at(at),
+            CaptureKind::Hotkey => self.capture.start_hotkey_at(
+                at,
+                crate::dictation::hotkey_pre_roll(crate::app_settings::recording_audio_behavior()),
+            ),
             CaptureKind::Programmatic => self.capture.start_programmatic_at(at),
         }
         // Only hotkey captures stream; programmatic ones need no speed-up.
@@ -1058,6 +1082,24 @@ impl Owner {
             since_discontinuity: self.discontinuity_at.map(|at| at.elapsed()),
             since_glitch: crate::audio::since_last_stream_glitch(),
         }
+    }
+
+    /// A finished dictation's audio was exactly zero: the stream runs but
+    /// delivers digital silence, as after some call apps release the device
+    /// (#1122), and stays that way until reopened. Reopen it now, as after a
+    /// stream failure. A cold microphone closes once idle and opens fresh
+    /// for the next press anyway.
+    fn reopen_silent_stream(&mut self) {
+        if self.release_while_idle || !self.input.is_open() || self.input.is_recovering() {
+            return;
+        }
+        tracing::warn!(
+            device = %self.input.device_name(),
+            "dictation audio was digital silence; reopening the microphone"
+        );
+        self.discontinuity_at = Some(Instant::now());
+        self.input.request_recovery();
+        self.state.recovering.store(true, Ordering::Release);
     }
 
     fn close_input(&mut self) {
@@ -1501,6 +1543,34 @@ mod tests {
                     })
                 ));
             }
+        }
+    }
+
+    #[test]
+    fn a_dictation_of_digital_silence_reopens_the_microphone() {
+        // #1122: after a call, the stream kept running but delivered only zeros.
+        for (value, reopens) in [(0.0, true), (0.25, false)] {
+            let (mut owner, input, _samples) = owner_for_test(true);
+            let at = capture_time();
+            owner.handle_input(RecoveringAudioInputEvent::Chunk {
+                samples: vec![value; 480],
+                captured_through: at,
+            });
+            start(&mut owner, at);
+            let released = at + Duration::from_millis(400);
+            owner.handle_input(RecoveringAudioInputEvent::Chunk {
+                samples: vec![value; 19_200],
+                captured_through: released,
+            });
+            control(&mut owner, |reply| Command::BecomeIntentional {
+                at: at + crate::dictation::MINIMUM_HOLD_DURATION,
+                reply,
+            });
+            let Finish::Transcribe(_) = finish_after(&mut owner, released, Duration::ZERO) else {
+                panic!("expected transcription");
+            };
+            assert_eq!(owner.input.is_recovering(), reopens, "{value}");
+            assert_eq!(input.is_recovering(), reopens, "{value}");
         }
     }
 

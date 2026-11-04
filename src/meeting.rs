@@ -17,7 +17,8 @@ use crate::durable::{sync_directory, sync_file};
 
 const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
-/// Beside the manifest of a meeting Hex quit while recording: its audio is
+/// Beside the manifest of a meeting Hex quit while recording or during its
+/// final transcription: its audio is
 /// saved and its final transcript runs at the next launch.
 const FINAL_PENDING_FILE: &str = "final.pending";
 
@@ -43,6 +44,7 @@ pub(crate) use os::{
 };
 mod delta;
 mod echo;
+pub(crate) mod finished_events;
 pub(crate) mod generator;
 pub(crate) mod mcp;
 mod notes;
@@ -70,6 +72,9 @@ pub struct MeetingStart {
     pub title: Option<String>,
     /// The detected call application, such as `Zoom`.
     pub app: Option<String>,
+    /// The call app's canonical bundle identifier, whose input the
+    /// microphone follows where the OS reports it.
+    pub application: Option<String>,
     /// The calendar event the recording was started for.
     pub calendar: Option<MeetingCalendar>,
     /// Where `title` came from; ignored without a title.
@@ -468,10 +473,10 @@ pub fn record(
         };
         // Each source recovers on its own: losing system audio (for example
         // when ScreenCaptureKit loses its display) never stops the microphone.
-        let microphone_capture = capture::SourceSupervisor::microphone(sink(
-            MeetingSource::Microphone,
-            &microphone_drops,
-        ));
+        let microphone_capture = capture::SourceSupervisor::microphone(
+            sink(MeetingSource::Microphone, &microphone_drops),
+            start.application.clone(),
+        );
         let system_capture =
             capture::SourceSupervisor::system(sink(MeetingSource::System, &system_drops));
         manifest.status = MeetingStatus::Recording;
@@ -555,6 +560,21 @@ pub fn record(
             rolling,
         ) {
             Ok(()) => manifest.status = MeetingStatus::Complete,
+            Err(error) if crate::desktop::process_exit::quitting() => {
+                // Quitting cut the final pass short: like quitting while
+                // recording, the transcript finishes at the next launch.
+                keep_rename(&meeting_dir, &mut manifest);
+                fs::write(meeting_dir.join(FINAL_PENDING_FILE), b"")?;
+                manifest.status = MeetingStatus::Interrupted;
+                manifest.error = None;
+                write_manifest(&meeting_dir, &manifest)?;
+                tracing::info!(
+                    meeting = manifest.id,
+                    %error,
+                    "Hex quit during final transcription; the transcript finishes at the next launch"
+                );
+                return Ok(manifest);
+            }
             Err(error) => {
                 keep_rename(&meeting_dir, &mut manifest);
                 manifest.status = MeetingStatus::Failed;
@@ -565,6 +585,7 @@ pub fn record(
         }
         keep_rename(&meeting_dir, &mut manifest);
         write_manifest(&meeting_dir, &manifest)?;
+        finished_events::publish(&manifest.id);
         println!("Saved meeting {}", meeting_dir.display());
         Ok(manifest)
     })();
@@ -918,6 +939,7 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
             manifest.status = MeetingStatus::Complete;
             manifest.error = None;
             write_manifest(&directory, &manifest)?;
+            finished_events::publish(&manifest.id);
             Ok(Some(manifest))
         }
         Err(error) if crate::desktop::process_exit::quitting() => Err(error),

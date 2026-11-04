@@ -1,6 +1,6 @@
 [package]
 name = "hex"
-version = "3.2.0"
+version = "3.3.0"
 edition = "2024"
 default-run = "hex"
 license = "MIT"
@@ -36,12 +36,14 @@ onnx-benchmark = ["dep:transcribe-rs"]
 strip = true
 
 # transcribe.cpp 0.4.1 plus one ggml patch that builds only the Vulkan
-# shaders Hex's models use (see `CMAKE_ARGS` in .cargo/config.toml) and
-# Parakeet's vocabulary rescoring (branch hex/parakeet-vocabulary). Drop this
-# once a transcribe.cpp release carries both.
+# shaders Hex's models use (see `CMAKE_ARGS` in .cargo/config.toml),
+# Parakeet's vocabulary rescoring (branch hex/parakeet-vocabulary), and a Metal
+# residency heartbeat that sleeps once its keep-alive runs out (branch
+# hex/metal-idle-residency). Drop this once a transcribe.cpp release carries
+# them.
 [patch.crates-io]
-transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
-transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "7045d1c0fe7cee37747b2792977421d435e75fca" }
+transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "2778ae4bf5ca5f394d129a39467f4ad9552dc34f" }
+transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "2778ae4bf5ca5f394d129a39467f4ad9552dc34f" }
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
@@ -116,14 +118,14 @@ rmcp = { version = "3.5.1", default-features = false, features = ["server", "mac
 tokio = { version = "1.53.1", features = ["rt", "io-std"] }
 anyhow = "1.0.104"
 # The capture capsule's motion-lint trace.
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "e6371c483905b8a39557d5b0442e0612b68f37ee" }
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "7897b035218b2d8f43b4fb4d40cbdf7e753f071d" }
 scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"] }
 pollster = "1.0.1"
 # The local API's `/profile/vitals`; it reports nothing off macOS.
-procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "e6371c483905b8a39557d5b0442e0612b68f37ee" }
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "e6371c483905b8a39557d5b0442e0612b68f37ee", features = ["native-file-dialog"] }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "e6371c483905b8a39557d5b0442e0612b68f37ee" }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "e6371c483905b8a39557d5b0442e0612b68f37ee" }
+procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "7897b035218b2d8f43b4fb4d40cbdf7e753f071d" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "7897b035218b2d8f43b4fb4d40cbdf7e753f071d", features = ["native-file-dialog"] }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "7897b035218b2d8f43b4fb4d40cbdf7e753f071d" }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "7897b035218b2d8f43b4fb4d40cbdf7e753f071d" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 
@@ -139,6 +141,7 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
   "Win32_Networking_WinHttp",
+  "Win32_Networking_WinSock",
   "Win32_Security",
   "Win32_Storage_FileSystem",
   "Win32_System_Console",
@@ -153,7 +156,8 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
-windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Accessibility"] }
+windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_Foundation", "Win32_Media_Audio", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Ole", "Win32_System_Threading", "Win32_System_Variant", "Win32_UI_Accessibility"] }
+windows-core = "0.62.2"
 windows-future = "0.3.2"
 
 # x64 Windows decodes on the GPU through Vulkan. ARM64 Windows stays CPU-only,

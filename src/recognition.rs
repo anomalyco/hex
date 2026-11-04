@@ -13,17 +13,17 @@ use crate::desktop::events::{DictationPhase, EventLog, VoiceEvent, VoiceState, n
 use crate::dictation::audio::{DictationAudio, DictationAudioEvent, LostCapture};
 use crate::dictation::context::{ContextMonitor, ContextSnapshot};
 use crate::dictation::indicator::{DictationIndicatorEvent, DictationIndicatorSender};
+use crate::dictation::service::{
+    Completion, DictationAudioChunk, DictationControl, DictationLevel, LEASE, MICROPHONE_LOST,
+    ProgrammaticDictationResult, ProgrammaticDictationStart, TerminalOutcome, finish_with_result,
+    lease_expired, level_for, remember_completion,
+};
 use crate::dictation::{DictationClip, Finish, POST_RELEASE_TAIL};
 use crate::feedback::{self, Tone};
 use crate::parakeet::{
     DictationJobId, DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,
 };
 use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputEvent, InputMonitor};
-
-const PROGRAMMATIC_LEASE: Duration = Duration::from_secs(10);
-const PROGRAMMATIC_COMPLETION_LIMIT: usize = 16;
-/// `/finish` on a programmatic capture the microphone ended before any audio.
-const MICROPHONE_LOST: &str = "microphone-lost";
 
 enum FinishResult {
     Discarded,
@@ -64,56 +64,14 @@ pub enum RecognitionControl {
         command: crate::capture_host::CaptureCommand,
         reply: SyncSender<ControlReply>,
     },
-    StartDictation {
-        source: String,
-        owner_token: String,
-        levels: SyncSender<DictationLevel>,
-        reply: SyncSender<Result<ProgrammaticDictationStart, String>>,
-    },
-    AttachDictationAudio {
-        id: u64,
-        owner_token: String,
-        audio: SyncSender<DictationAudioChunk>,
-        reply: SyncSender<Result<(), String>>,
-    },
-    FinishDictation {
-        id: u64,
-        owner_token: String,
-        reply: SyncSender<Result<ProgrammaticDictationResult, String>>,
-    },
-    CancelDictation {
-        id: u64,
-        owner_token: String,
-        reply: SyncSender<Result<(), String>>,
-    },
-    HeartbeatDictation {
-        id: u64,
-        owner_token: String,
-        reply: SyncSender<Result<(), String>>,
-    },
+    /// `/dictations`, which a local API client owns.
+    Dictation(DictationControl),
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct DictationLevel {
-    pub rms_db: f32,
-    pub peak_db: f32,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProgrammaticDictationResult {
-    pub transcript: String,
-    pub duration_ms: u64,
-}
-
-#[derive(Debug)]
-pub struct ProgrammaticDictationStart {
-    pub id: u64,
-    pub sample_rate: u32,
-}
-
-#[derive(Debug)]
-pub struct DictationAudioChunk {
-    pub samples: Vec<f32>,
+impl From<DictationControl> for RecognitionControl {
+    fn from(control: DictationControl) -> Self {
+        Self::Dictation(control)
+    }
 }
 
 struct ProgrammaticDictation {
@@ -158,25 +116,6 @@ struct FinishingProgrammaticDictation {
 }
 
 impl FinishingProgrammaticDictation {
-    fn matches_owner(&self, id: u64, owner_token: &str) -> bool {
-        self.id == id && self.owner_token == owner_token
-    }
-}
-
-#[derive(Clone)]
-enum ProgrammaticTerminalOutcome {
-    Finished(Result<ProgrammaticDictationResult, String>),
-    Cancelled,
-}
-
-#[derive(Clone)]
-struct ProgrammaticCompletion {
-    id: u64,
-    owner_token: String,
-    outcome: ProgrammaticTerminalOutcome,
-}
-
-impl ProgrammaticCompletion {
     fn matches_owner(&self, id: u64, owner_token: &str) -> bool {
         self.id == id && self.owner_token == owner_token
     }
@@ -304,6 +243,7 @@ impl Hotkeys {
             machine.set_double_tap_enabled(crate::app_settings::double_tap_lock());
             machine.set_double_tap_only(crate::app_settings::double_tap_only());
             machine.set_toggle(crate::app_settings::shortcut_toggle());
+            machine.set_cancel(hotkeys.cancel);
         }
         raw_cancelled || second_cancelled
     }
@@ -431,7 +371,7 @@ pub fn listen(
     let mut programmatic_lost = None::<LostProgrammaticDictation>;
     let mut programmatic_results =
         BTreeMap::<crate::parakeet::DictationJobId, FinishingProgrammaticDictation>::new();
-    let mut programmatic_completions = VecDeque::<ProgrammaticCompletion>::new();
+    let mut programmatic_completions = VecDeque::<Completion>::new();
 
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
@@ -541,12 +481,12 @@ pub fn listen(
                         )?;
                         let _ = reply.send(outcome);
                     }
-                    RecognitionControl::StartDictation {
+                    RecognitionControl::Dictation(DictationControl::Start {
                         source,
                         owner_token,
                         levels,
                         reply,
-                    } => {
+                    }) => {
                         if programmatic.is_some() || input.is_recording() || hotkeys.any_recording()
                         {
                             let _ = reply.send(Err("dictation-busy".into()));
@@ -571,7 +511,7 @@ pub fn listen(
                                     levels,
                                     audio: None,
                                     last_level: Instant::now() - Duration::from_millis(30),
-                                    lease_deadline: Instant::now() + PROGRAMMATIC_LEASE,
+                                    lease_deadline: Instant::now() + LEASE,
                                 });
                                 let _ = reply.send(Ok(ProgrammaticDictationStart {
                                     id,
@@ -583,12 +523,12 @@ pub fn listen(
                             }
                         }
                     }
-                    RecognitionControl::AttachDictationAudio {
+                    RecognitionControl::Dictation(DictationControl::AttachAudio {
                         id,
                         owner_token,
                         audio,
                         reply,
-                    } => {
+                    }) => {
                         let Some(active) = programmatic
                             .as_mut()
                             .filter(|active| active.matches_owner(id, &owner_token))
@@ -603,11 +543,11 @@ pub fn listen(
                         active.audio = Some(audio);
                         let _ = reply.send(Ok(()));
                     }
-                    RecognitionControl::FinishDictation {
+                    RecognitionControl::Dictation(DictationControl::Finish {
                         id,
                         owner_token,
                         reply,
-                    } => {
+                    }) => {
                         if let Some(finishing) = programmatic_results
                             .values_mut()
                             .find(|finishing| finishing.matches_owner(id, &owner_token))
@@ -621,8 +561,8 @@ pub fn listen(
                             .find(|completion| completion.matches_owner(id, &owner_token))
                         {
                             let result = match &completion.outcome {
-                                ProgrammaticTerminalOutcome::Finished(result) => result.clone(),
-                                ProgrammaticTerminalOutcome::Cancelled => Err("cancelled".into()),
+                                TerminalOutcome::Finished(result) => result.clone(),
+                                TerminalOutcome::Cancelled => Err("cancelled".into()),
                             };
                             let _ = reply.send(result);
                             continue;
@@ -646,7 +586,7 @@ pub fn listen(
                                     Some(LostCapture::Kept(clip)) => Finish::Transcribe(clip),
                                     Some(LostCapture::Empty) => {
                                         log_programmatic_ended(Some(active), "mic-lost");
-                                        finish_programmatic_with_result(
+                                        finish_with_result(
                                             id,
                                             owner_token,
                                             vec![reply],
@@ -697,7 +637,7 @@ pub fn listen(
                                             error = %error,
                                             "programmatic dictation ended"
                                         );
-                                        finish_programmatic_with_result(
+                                        finish_with_result(
                                             id,
                                             owner_token,
                                             vec![reply],
@@ -714,7 +654,7 @@ pub fn listen(
                                     outcome = "discarded",
                                     "programmatic dictation ended"
                                 );
-                                finish_programmatic_with_result(
+                                finish_with_result(
                                     id,
                                     owner_token,
                                     vec![reply],
@@ -724,16 +664,16 @@ pub fn listen(
                             }
                         }
                     }
-                    RecognitionControl::CancelDictation {
+                    RecognitionControl::Dictation(DictationControl::Cancel {
                         id,
                         owner_token,
                         reply,
-                    } => {
+                    }) => {
                         if let Some(completion) = programmatic_completions
                             .iter()
                             .rev()
                             .find(|completion| completion.matches_owner(id, &owner_token))
-                            && matches!(completion.outcome, ProgrammaticTerminalOutcome::Cancelled)
+                            && matches!(completion.outcome, TerminalOutcome::Cancelled)
                         {
                             let _ = reply.send(Ok(()));
                             continue;
@@ -753,12 +693,12 @@ pub fn listen(
                                 source = lost.source,
                                 "programmatic dictation cancelled"
                             );
-                            remember_programmatic_completion(
+                            remember_completion(
                                 &mut programmatic_completions,
-                                ProgrammaticCompletion {
+                                Completion {
                                     id,
                                     owner_token,
-                                    outcome: ProgrammaticTerminalOutcome::Cancelled,
+                                    outcome: TerminalOutcome::Cancelled,
                                 },
                             );
                             let _ = reply.send(Ok(()));
@@ -780,11 +720,11 @@ pub fn listen(
                         cancel_programmatic_capture(active, &input, &mut programmatic_completions)?;
                         let _ = reply.send(Ok(()));
                     }
-                    RecognitionControl::HeartbeatDictation {
+                    RecognitionControl::Dictation(DictationControl::Heartbeat {
                         id,
                         owner_token,
                         reply,
-                    } => {
+                    }) => {
                         let lease_deadline = if let Some(active) = programmatic
                             .as_mut()
                             .filter(|active| active.matches_owner(id, &owner_token))
@@ -799,7 +739,7 @@ pub fn listen(
                             let _ = reply.send(Err("dictation-not-active".into()));
                             continue;
                         };
-                        *lease_deadline = Instant::now() + PROGRAMMATIC_LEASE;
+                        *lease_deadline = Instant::now() + LEASE;
                         let _ = reply.send(Ok(()));
                     }
                 }
@@ -807,7 +747,7 @@ pub fn listen(
         }
         if programmatic
             .as_ref()
-            .is_some_and(|active| programmatic_lease_expired(active.lease_deadline, Instant::now()))
+            .is_some_and(|active| lease_expired(active.lease_deadline, Instant::now()))
         {
             let expired = programmatic.take().expect("expired dictation was checked");
             tracing::warn!(
@@ -817,20 +757,20 @@ pub fn listen(
             );
             cancel_programmatic_capture(expired, &input, &mut programmatic_completions)?;
         }
-        if let Some(expired) = programmatic_lost
-            .take_if(|lost| programmatic_lease_expired(lost.lease_deadline, Instant::now()))
+        if let Some(expired) =
+            programmatic_lost.take_if(|lost| lease_expired(lost.lease_deadline, Instant::now()))
         {
             tracing::warn!(
                 dictation_id = expired.id,
                 source = expired.source,
                 "programmatic dictation lease expired"
             );
-            remember_programmatic_completion(
+            remember_completion(
                 &mut programmatic_completions,
-                ProgrammaticCompletion {
+                Completion {
                     id: expired.id,
                     owner_token: expired.owner_token,
-                    outcome: ProgrammaticTerminalOutcome::Cancelled,
+                    outcome: TerminalOutcome::Cancelled,
                 },
             );
         }
@@ -1029,7 +969,7 @@ pub fn listen(
                             transcript,
                             duration_ms: finishing.duration_ms,
                         });
-                        finish_programmatic_with_result(
+                        finish_with_result(
                             finishing.id,
                             finishing.owner_token,
                             finishing.replies,
@@ -1041,7 +981,7 @@ pub fn listen(
                 }
                 WorkerEvent::Cancelled { job_id } => {
                     if let Some(finishing) = programmatic_results.remove(&job_id) {
-                        finish_programmatic_with_result(
+                        finish_with_result(
                             finishing.id,
                             finishing.owner_token,
                             finishing.replies,
@@ -1068,6 +1008,9 @@ pub fn listen(
         #[cfg(not(hex_capture))]
         let capture_escape = false;
         input_monitor.set_takes_escape(claims_escape(programmatic.is_some(), capture_escape));
+        // Toggle's cancel key is Hex's only while one of its shortcuts'
+        // recordings runs; the listener ignores keys during a programmatic one.
+        input_monitor.set_takes_cancel(programmatic.is_none() && hotkeys.any_recording());
         if received_worker_event {
             emit_engine_state(
                 &mut events,
@@ -1202,27 +1145,6 @@ pub fn listen(
     Ok(())
 }
 
-fn level_for(samples: &[f32]) -> DictationLevel {
-    let (sum_squares, peak) = samples
-        .iter()
-        .fold((0.0_f64, 0.0_f32), |(sum, peak), sample| {
-            let magnitude = sample.abs();
-            (
-                sum + f64::from(*sample) * f64::from(*sample),
-                peak.max(magnitude),
-            )
-        });
-    let rms = if samples.is_empty() {
-        0.0
-    } else {
-        (sum_squares / samples.len() as f64).sqrt() as f32
-    };
-    DictationLevel {
-        rms_db: amplitude_db(rms),
-        peak_db: amplitude_db(peak),
-    }
-}
-
 fn log_programmatic_ended(active: Option<ProgrammaticDictation>, outcome: &str) {
     if let Some(active) = active {
         tracing::warn!(
@@ -1242,18 +1164,18 @@ fn programmatic_microphone_lost(
     kept: Option<DictationClip>,
     outcome: &str,
     lost: &mut Option<LostProgrammaticDictation>,
-    completions: &mut VecDeque<ProgrammaticCompletion>,
+    completions: &mut VecDeque<Completion>,
 ) {
     let Some(active) = active else {
         return;
     };
     let Some(mut clip) = kept else {
-        remember_programmatic_completion(
+        remember_completion(
             completions,
-            ProgrammaticCompletion {
+            Completion {
                 id: active.id,
                 owner_token: active.owner_token.clone(),
-                outcome: ProgrammaticTerminalOutcome::Finished(Err(MICROPHONE_LOST.into())),
+                outcome: TerminalOutcome::Finished(Err(MICROPHONE_LOST.into())),
             },
         );
         log_programmatic_ended(Some(active), outcome);
@@ -1282,70 +1204,32 @@ fn programmatic_microphone_lost(
             outcome = "superseded",
             "programmatic dictation ended"
         );
-        remember_programmatic_completion(
+        remember_completion(
             completions,
-            ProgrammaticCompletion {
+            Completion {
                 id: previous.id,
                 owner_token: previous.owner_token,
-                outcome: ProgrammaticTerminalOutcome::Finished(Err(MICROPHONE_LOST.into())),
+                outcome: TerminalOutcome::Finished(Err(MICROPHONE_LOST.into())),
             },
         );
     }
 }
 
-fn remember_programmatic_completion(
-    completions: &mut VecDeque<ProgrammaticCompletion>,
-    completion: ProgrammaticCompletion,
-) {
-    completions.push_back(completion);
-    while completions.len() > PROGRAMMATIC_COMPLETION_LIMIT {
-        completions.pop_front();
-    }
-}
-
-fn finish_programmatic_with_result(
-    id: u64,
-    owner_token: String,
-    replies: Vec<SyncSender<Result<ProgrammaticDictationResult, String>>>,
-    result: Result<ProgrammaticDictationResult, String>,
-    completions: &mut VecDeque<ProgrammaticCompletion>,
-) {
-    for reply in replies {
-        let _ = reply.send(result.clone());
-    }
-    remember_programmatic_completion(
-        completions,
-        ProgrammaticCompletion {
-            id,
-            owner_token,
-            outcome: ProgrammaticTerminalOutcome::Finished(result),
-        },
-    );
-}
-
 fn cancel_programmatic_capture(
     active: ProgrammaticDictation,
     input: &DictationAudio,
-    completions: &mut VecDeque<ProgrammaticCompletion>,
+    completions: &mut VecDeque<Completion>,
 ) -> Result<()> {
     input.cancel()?;
-    remember_programmatic_completion(
+    remember_completion(
         completions,
-        ProgrammaticCompletion {
+        Completion {
             id: active.id,
             owner_token: active.owner_token,
-            outcome: ProgrammaticTerminalOutcome::Cancelled,
+            outcome: TerminalOutcome::Cancelled,
         },
     );
     Ok(())
-}
-
-fn programmatic_lease_expired(deadline: Instant, now: Instant) -> bool {
-    now >= deadline
-}
-
-fn amplitude_db(amplitude: f32) -> f32 {
-    (20.0 * amplitude.max(0.000_001).log10()).max(-120.0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1393,10 +1277,13 @@ fn handle_hotkey_action(
             raw,
         )
         .map(drop),
-        HotkeyAction::Discard(_) | HotkeyAction::Cancel => {
+        HotkeyAction::Discard(_) | HotkeyAction::Cancel | HotkeyAction::CancelShortcut => {
             feedback::retract_start();
+            if action == HotkeyAction::CancelShortcut {
+                feedback::play(Tone::Cancel);
+            }
             end_capture(
-                if matches!(action, HotkeyAction::Cancel) {
+                if matches!(action, HotkeyAction::Cancel | HotkeyAction::CancelShortcut) {
                     CaptureEnd::Cancelled
                 } else {
                     CaptureEnd::Discarded(action.discard_cause())
@@ -1555,6 +1442,23 @@ fn control_dictation(
         CaptureAction::Start => true,
         CaptureAction::Stop => false,
         CaptureAction::Toggle => !recording,
+        CaptureAction::Cancel if recording => {
+            hotkeys.suspend_recording();
+            handle_hotkey_action(
+                HotkeyAction::CancelShortcut,
+                false,
+                input.captured_through(),
+                input,
+                worker,
+                context,
+                &device,
+                events,
+                indicator,
+                release_while_idle,
+            )?;
+            return Ok(ControlReply::done("Cancelled the recording"));
+        }
+        CaptureAction::Cancel => return Ok(ControlReply::unchanged("Dictation isn't recording")),
     };
     Ok(match start {
         true if recording => ControlReply::unchanged("Dictation is already recording"),
@@ -1686,8 +1590,8 @@ fn fail_capture(
 enum CaptureEnd {
     /// The capture never became a dictation; no feedback tone.
     Discarded(Option<DiscardCause>),
-    /// Hex ended an intentional capture itself: its shortcuts were
-    /// suspended or the event tap was lost.
+    /// The capture ended unfinished: the cancel shortcut, or Hex itself
+    /// when its shortcuts were suspended or the event tap was lost.
     Cancelled,
 }
 
@@ -1988,14 +1892,6 @@ mod tests {
     }
 
     #[test]
-    fn programmatic_meter_reports_rms_and_peak_in_decibels() {
-        let level = level_for(&[0.5, -0.5, 0.0, 0.0]);
-        assert!((level.rms_db - -9.0309).abs() < 0.001);
-        assert!((level.peak_db - -6.0206).abs() < 0.001);
-        assert_eq!(level_for(&[]).rms_db, -120.0);
-    }
-
-    #[test]
     fn control_stops_reply_from_what_the_finish_did() {
         let code = |finished| match finish_reply(finished, "ok") {
             ControlReply::Done { changed: true, .. } => "done".to_owned(),
@@ -2014,34 +1910,6 @@ mod tests {
         let busy = |reply: Option<ControlReply>| matches!(reply, Some(ControlReply::Error { code, .. }) if code == "busy");
         assert!(busy(paste_last_refusal(true)));
         assert!(paste_last_refusal(false).is_none());
-    }
-
-    #[test]
-    fn programmatic_lease_expires_at_its_deadline() {
-        let now = Instant::now();
-        let deadline = now + PROGRAMMATIC_LEASE;
-        assert!(!programmatic_lease_expired(
-            deadline,
-            deadline - Duration::from_millis(1)
-        ));
-        assert!(programmatic_lease_expired(deadline, deadline));
-    }
-
-    #[test]
-    fn programmatic_completion_cache_is_bounded() {
-        let mut completions = VecDeque::new();
-        for id in 0..PROGRAMMATIC_COMPLETION_LIMIT as u64 + 2 {
-            remember_programmatic_completion(
-                &mut completions,
-                ProgrammaticCompletion {
-                    id,
-                    owner_token: format!("owner-{id}"),
-                    outcome: ProgrammaticTerminalOutcome::Cancelled,
-                },
-            );
-        }
-        assert_eq!(completions.len(), PROGRAMMATIC_COMPLETION_LIMIT);
-        assert_eq!(completions.front().map(|completion| completion.id), Some(2));
     }
 
     #[test]
@@ -2064,14 +1932,14 @@ mod tests {
             levels: levels.clone(),
             audio: None,
             last_level: Instant::now(),
-            lease_deadline: Instant::now() + PROGRAMMATIC_LEASE,
+            lease_deadline: Instant::now() + LEASE,
         };
-        let finished_error = |completions: &VecDeque<ProgrammaticCompletion>, id: u64| {
+        let finished_error = |completions: &VecDeque<Completion>, id: u64| {
             completions
                 .iter()
                 .find(|completion| completion.matches_owner(id, &format!("owner-{id}")))
                 .and_then(|completion| match &completion.outcome {
-                    ProgrammaticTerminalOutcome::Finished(Err(code)) => Some(code.clone()),
+                    TerminalOutcome::Finished(Err(code)) => Some(code.clone()),
                     _ => None,
                 })
         };

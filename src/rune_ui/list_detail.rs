@@ -16,6 +16,8 @@ pub(super) const HANG: f32 = METRICS.gutter - METRICS.row_px;
 const LIST_W: f32 = 316.0;
 /// How far a list fades as rows slide under the search field.
 const LIST_FADE: (f32, f32) = (18.0, 28.0);
+/// Room the card's text leaves for its scroll bar.
+const SCROLL_BAR: f32 = 12.0;
 
 pub(super) static COPY_ICON: &Icon = &rune_theme_opencode::icons::OUTLINE_COPY;
 pub(super) static TRASH_ICON: &Icon = &rune_theme_opencode::icons::TRASH;
@@ -43,7 +45,7 @@ pub(super) fn body(p: Paint, key: &str, list: El, detail: El) -> El {
 }
 
 /// The search field over the scrolling list, both on the title's edge.
-pub(super) fn list_column(search: El, scroll_key: &str, list: El) -> El {
+pub(super) fn list_column(p: Paint, search: El, scroll_key: &str, list: El) -> El {
     col()
         .key("list-column")
         .w(LIST_W)
@@ -51,6 +53,7 @@ pub(super) fn list_column(search: El, scroll_key: &str, list: El) -> El {
         .pl(HANG)
         .child(search)
         .child(super::faded_body(
+            p.k,
             scroll_key,
             super::lists::source_list(list),
             LIST_FADE,
@@ -71,6 +74,8 @@ pub(super) fn notices(children: Vec<El>) -> El {
 pub(super) fn group(p: Paint, key: &str, label: &str, first: bool) -> El {
     text(label)
         .key(key)
+        .role("heading")
+        .level(3)
         .font(p.k.ty.small_medium)
         .color(p.faint())
         .px(METRICS.row_px)
@@ -96,12 +101,34 @@ pub(super) struct Item {
 /// action in the time's place), a quiet fill when selected. Nothing on it
 /// animates.
 pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> El {
+    item_with_icon(p, item, None, select)
+}
+
+/// The size of a row's leading icon, about the meta line's height.
+const LEADING_ICON: f32 = 14.0;
+
+/// [`item`] with a small faint icon before its title when `leading` is
+/// set; assistive technology hears the title alone.
+pub(super) fn item_with_icon(
+    p: Paint,
+    item: Item,
+    leading: Option<&'static Icon>,
+    select: impl Fn(&mut Ui) + 'static,
+) -> El {
     let c = &p.k.c;
+    // A row of the list: its title names it and its meta and time describe
+    // it, so their texts stay out of the tree.
+    let described = [item.meta.as_str(), item.time.as_str()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
     let time = text(item.time)
         .key("time")
         .font(p.k.ty.small)
         .color(p.faint())
-        .align(Align::End);
+        .align(Align::End)
+        .a11y_hidden();
     let end = if item.hover.is_empty() {
         time
     } else {
@@ -117,8 +144,9 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
     };
     let mut row_el = col()
         .key(item.key)
-        .role("button")
+        .role("listitem")
         .label(item.title.clone())
+        .description(described)
         .px(METRICS.row_px)
         .py(9.0)
         .gap(2.0)
@@ -130,6 +158,13 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
                 .key("top")
                 .gap(12.0)
                 .center_y()
+                .children(leading.map(|glyph| {
+                    icon(glyph, LEADING_ICON)
+                        .key("leading-icon")
+                        .color(c.icon_faint)
+                        .mr(-6.0)
+                        .a11y_hidden()
+                }))
                 .child(
                     text(item.title)
                         .key("title")
@@ -137,7 +172,8 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
                         .color(p.text())
                         .grow(1.0)
                         .shrink()
-                        .truncate(),
+                        .truncate()
+                        .a11y_hidden(),
                 )
                 .child(end),
         )
@@ -146,7 +182,8 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
                 .key("meta")
                 .font(p.k.ty.small)
                 .color(item.meta_ink.unwrap_or(p.muted()))
-                .truncate(),
+                .truncate()
+                .a11y_hidden(),
         );
     if item.selected {
         row_el = row_el.fill(c.layer_02);
@@ -185,6 +222,8 @@ pub(super) fn card_header(title: El, meta: Vec<El>, actions: Vec<El>) -> El {
 pub(super) fn card_title(p: Paint, title: &str) -> El {
     text(title)
         .key("detail-title")
+        .role("heading")
+        .level(2)
         .font(p.k.ty.body_medium)
         .color(p.text())
         .wrap()
@@ -198,9 +237,9 @@ pub(super) fn meta_text(p: Paint, meta: &str) -> El {
         .truncate()
 }
 
-/// The card's scrolling content under its header.
-pub(super) fn card_scroll(key: &str, content: El) -> El {
-    super::faded_body(key, content, LIST_FADE)
+/// The card's scrolling content under its header, clear of the scroll bar.
+pub(super) fn card_scroll(p: Paint, key: &str, content: El) -> El {
+    super::faded_body(p.k, key, content.pr(SCROLL_BAR), LIST_FADE)
 }
 
 /// A quiet empty state: an icon, a short title, and at most one line.
@@ -225,7 +264,8 @@ pub(super) fn empty_state(
                 .radius(p.k.radius.lg)
                 .fill(p.k.c.layer_01)
                 .center()
-                .child(icon(glyph, 20.0).key("icon").color(p.k.c.icon_faint)),
+                .child(icon(glyph, 20.0).key("icon").color(p.k.c.icon_faint))
+                .a11y_hidden(),
         )
         .child(
             text(title)
@@ -252,7 +292,8 @@ pub(super) fn facts(p: Paint, facts: Vec<(&str, String)>) -> El {
             list = list.child(
                 el().key(format!("sep{index}"))
                     .h(p.hair)
-                    .fill(p.k.c.border_weak),
+                    .fill(p.k.c.border_weak)
+                    .a11y_hidden(),
             );
         }
         list = list.child(

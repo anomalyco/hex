@@ -16,6 +16,7 @@ use rune::{Spring, TextStyle};
 use super::flow::{Done, Lead, Mode, Pen, Pres};
 use super::notch;
 use super::tuning::{self, CapsuleFlow, TopLine};
+use crate::rune_hud::spring::REDUCED_FADE;
 
 /// The overlay's panel: wide enough for the open list, and tall enough for
 /// it and the shadow under it.
@@ -110,11 +111,18 @@ pub(crate) enum Anchor {
     Cursor,
 }
 
-pub(crate) const MEDIUM: TextStyle = TextStyle::new(13.0, 530.0);
-pub(crate) const STRONG: TextStyle = TextStyle::new(13.0, 600.0);
+/// The kit's type, the same in either appearance: its labels in
+/// `ui_medium`, its notes and hints in `small_medium`.
+pub(crate) fn medium() -> TextStyle {
+    rune_theme_opencode::kit(false).ty.ui_medium
+}
+pub(crate) fn small() -> TextStyle {
+    rune_theme_opencode::kit(false).ty.small_medium
+}
 /// Tabular digits, so a new second never changes the timer's width.
-pub(crate) const TIMER: TextStyle = STRONG.features("'tnum' 1");
-pub(crate) const SMALL: TextStyle = TextStyle::new(11.5, 530.0);
+pub(crate) fn clock_style() -> TextStyle {
+    medium().features("'tnum' 1")
+}
 pub(crate) const PROCESSING: &str = "Processing…";
 /// The hairline between the recording's tools and its stop and cancel.
 pub(crate) const DIVIDER_W: f32 = 1.0;
@@ -134,12 +142,9 @@ pub(crate) fn chord<S: AsRef<str>>(keys: &[S]) -> String {
     out
 }
 
-/// The finished capsule's label: quieter in [`TopLine::Quiet`].
+/// The finished capsule's label: [`TopLine::Quiet`] only inks it fainter.
 pub(crate) fn done_style() -> TextStyle {
-    match tuning::get().top_line {
-        TopLine::Quiet => MEDIUM,
-        TopLine::Icons => STRONG,
-    }
+    medium()
 }
 
 /// [`TopLine::Icons`] says nothing for a plain copy: the check is enough.
@@ -331,7 +336,7 @@ pub(crate) struct Item {
 }
 
 fn mode_width(mode: Mode) -> f32 {
-    measure(mode.label(), MEDIUM) + 2.0 * SEG_PX + SEG_ICON + SEG_ICON_GAP
+    measure(mode.label(), medium()) + 2.0 * SEG_PX + SEG_ICON + SEG_ICON_GAP
 }
 
 fn chip_width(label: f32) -> f32 {
@@ -369,11 +374,11 @@ pub(crate) fn keyed_width(keys: &[&str], label: &str, style: TextStyle) -> f32 {
     if keys.is_empty() {
         return chip_width(measure(label, style));
     }
-    chip_width(measure(label, style) + HINT_GAP + measure(&chord(keys), SMALL))
+    chip_width(measure(label, style) + HINT_GAP + measure(&chord(keys), small()))
 }
 
 pub(crate) fn clock_width(clock: &str) -> f32 {
-    measure(clock, TIMER)
+    measure(clock, clock_style())
 }
 
 /// The widest a row gets: the panel, less room for the shadow.
@@ -426,7 +431,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Why,
             format!("{why}{NOTE_OF}{text}"),
-            measure(why, SMALL) + LEAD_TRAIL * 0.5,
+            measure(why, small()) + LEAD_TRAIL * 0.5,
             false,
         ));
     }
@@ -449,7 +454,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Next,
             String::new(),
-            keyed_width(&["⇥"], "Next", MEDIUM),
+            keyed_width(&["⇥"], "Next", medium()),
             false,
         ));
     }
@@ -458,7 +463,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             raw.push((
                 Id::Pick(row),
                 name.clone(),
-                keyed_width(&[], name, MEDIUM),
+                keyed_width(&[], name, medium()),
                 false,
             ));
         }
@@ -467,7 +472,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Undo,
             String::new(),
-            keyed_width(&[], UNDO_LABEL, MEDIUM),
+            keyed_width(&[], UNDO_LABEL, medium()),
             false,
         ));
     } else {
@@ -480,9 +485,9 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         // opens it.
         if let Some(ask) = done.ask.as_ref().filter(|_| !listed || done.ask_keys) {
             let width = if done.ask_keys {
-                keycaps_chip_width(ask, MEDIUM)
+                keycaps_chip_width(ask, medium())
             } else {
-                keyed_width(&[], ask, MEDIUM)
+                keyed_width(&[], ask, medium())
             };
             raw.push((Id::Ask, ask.clone(), width, false));
         }
@@ -588,7 +593,7 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
                 raw.push((
                     Id::Record,
                     String::new(),
-                    chip_width(measure("Record", STRONG)),
+                    chip_width(measure("Record", medium())),
                     false,
                 ));
             }
@@ -608,13 +613,13 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
                 raw.push((
                     Id::Keep,
                     String::new(),
-                    chip_width(measure(KEEP_LABEL, MEDIUM)),
+                    chip_width(measure(KEEP_LABEL, medium())),
                     false,
                 ));
                 raw.push((
                     Id::Discard,
                     String::new(),
-                    chip_width(measure(DISCARD_LABEL, STRONG)),
+                    chip_width(measure(DISCARD_LABEL, medium())),
                     false,
                 ));
             } else if *chips {
@@ -633,7 +638,7 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
             }
         }
         Pres::Processing => {
-            let w = PROCESSING_TEXT_X + measure(PROCESSING, STRONG) + PROCESSING_TRAIL;
+            let w = PROCESSING_TEXT_X + measure(PROCESSING, medium()) + PROCESSING_TRAIL;
             raw.push((Id::Processing, String::new(), w, false));
         }
         Pres::Done(done) => done_items(done, &mut raw),
@@ -886,25 +891,23 @@ impl Surface {
         if matches!(next, Pres::Hidden) {
             // Exit in place: the capsule settles back to its origin pose as
             // it fades, and every item leaves with it. In the menu-bar flow
-            // a finished capture folds up into the menu bar instead.
-            let exit = Spring::new(tuning::get().island_scale.duration * 0.9, 0.0);
-            let fold = tuning::get().flow == CapsuleFlow::MenuBar && matches!(prev, Pres::Done(_));
-            self.shell = if fold {
-                MENU_FOLD
+            // a finished capture folds up into the menu bar instead. Under
+            // Reduce Motion it stays where it is and only fades.
+            let fold = !self.reduced
+                && tuning::get().flow == CapsuleFlow::MenuBar
+                && matches!(prev, Pres::Done(_));
+            let motion = if fold {
+                self.shell = MENU_FOLD;
+                tuning::get().island
             } else {
-                pose(self.shell, self.anchor)
+                if !self.reduced {
+                    self.shell = pose(self.shell, self.anchor);
+                }
+                tuning::get().island_scale
             };
-            if fold {
-                self.shell_motion = tuning::get().island;
-                self.shell_fade = Spring::new(tuning::get().island.duration, 0.0);
-                self.shell_on = false;
-                self.items.clear();
-                self.highlight = None;
-                return;
-            }
             self.shell_on = false;
-            self.shell_motion = exit;
-            self.shell_fade = exit;
+            self.shell_motion = motion;
+            self.shell_fade = self.fade(motion);
             self.items.clear();
             self.highlight = None;
             return;
@@ -914,7 +917,12 @@ impl Surface {
         if !self.shell_on || moved || matches!(prev, Pres::Hidden) {
             // Entry: this commit puts the capsule at its origin pose,
             // invisibly and instantly; the next frame springs it to rest.
-            self.shell = pose(rest, self.anchor);
+            // Under Reduce Motion it starts at rest and only fades in.
+            self.shell = if self.reduced {
+                rest
+            } else {
+                pose(rest, self.anchor)
+            };
             self.shell_on = false;
             self.instant = true;
             self.items.clear();
@@ -938,11 +946,11 @@ impl Surface {
                 self.morph_settle = island.duration;
             }
             self.shell_motion = island;
-            self.shell_fade = island;
+            self.shell_fade = self.fade(island);
         } else {
             let entry = tuning::get().island_scale;
             self.shell_motion = entry;
-            self.shell_fade = Spring::new(entry.duration * 0.9, 0.0);
+            self.shell_fade = self.fade(entry);
         }
         self.shell = rest;
         self.shell_on = true;
@@ -978,6 +986,16 @@ impl Surface {
             }
         }
         self.items.sort_by_key(|s| s.id.order());
+    }
+
+    /// The shell's fade beside `motion`: its time with no bounce, as the
+    /// HUD fades, or under Reduce Motion the HUD's short fade.
+    fn fade(&self, motion: Spring) -> Spring {
+        if self.reduced {
+            tuning::spring(REDUCED_FADE)
+        } else {
+            Spring::new(motion.duration, 0.0)
+        }
     }
 
     /// Runs an entry's second frame when it's due. True when something
@@ -1161,6 +1179,33 @@ mod tests {
         });
     }
 
+    /// Under Reduce Motion the capsule never travels: it comes in at rest,
+    /// goes out where it is, and only fades, on the HUD's short fade. No
+    /// change of width lights the edge glow.
+    #[test]
+    fn reduce_motion_only_fades_the_capsule() {
+        for flow in [CapsuleFlow::List, CapsuleFlow::MenuBar, CapsuleFlow::Notch] {
+            tuning::with_flow(flow, || {
+                let mut s = Surface::new();
+                s.reduced = true;
+                s.set(recording(false), 0.0);
+                let (rest, _) = layout_at(&s.pres, &s.clock, s.anchor);
+                assert_eq!(s.shell, rest, "{flow:?} enters at rest");
+                let now = run(&mut s, 0.0, 1.0);
+                assert!(s.shell_on);
+                assert_eq!(s.shell_fade, tuning::spring(REDUCED_FADE));
+                s.set(Pres::Processing, now);
+                s.set(Pres::Done(Done::plain(Lead::Check, "Copied")), now + 1.0);
+                assert_eq!(s.morphs, 0, "{flow:?} lights no glow");
+                let shown = s.shell;
+                s.set(Pres::Hidden, now + 2.0);
+                assert_eq!(s.shell, shown, "{flow:?} leaves where it is");
+                assert!(!s.shell_on);
+                assert_eq!(s.shell_fade, tuning::spring(REDUCED_FADE));
+            });
+        }
+    }
+
     #[test]
     fn switching_to_area_keeps_every_chip_still() {
         let (_, rec) = layout(&recording(true), "0:00");
@@ -1217,15 +1262,15 @@ mod tests {
     }
 
     /// The Undo chip is laid out as wide as it's drawn: its label in
-    /// MEDIUM, with no shortcut beside it.
+    /// the kit's `ui_medium`, with no shortcut beside it.
     #[test]
     fn the_undo_chip_is_as_wide_as_its_label_is_drawn() {
         let (_, items) = layout(&ruled(true), "0:00");
         let undo = items.iter().find(|i| i.id == Id::Undo).unwrap();
-        assert_eq!(undo.rect[2], keyed_width(&[], UNDO_LABEL, MEDIUM));
+        assert_eq!(undo.rect[2], keyed_width(&[], UNDO_LABEL, medium()));
         assert_ne!(
-            keyed_width(&[], UNDO_LABEL, MEDIUM),
-            keyed_width(&[], UNDO_LABEL, STRONG)
+            keyed_width(&[], UNDO_LABEL, medium()),
+            keyed_width(&[], UNDO_LABEL, small())
         );
     }
 
@@ -1348,11 +1393,11 @@ mod tests {
 
     #[test]
     fn long_names_end_in_an_ellipsis() {
-        let cut = ellipsize("OpenCode Desktop · Problems board rewrite", MEDIUM, 120.0);
+        let cut = ellipsize("OpenCode Desktop · Problems board rewrite", medium(), 120.0);
         assert!(
-            cut.ends_with('…') && measure(&cut, MEDIUM) <= 120.0,
+            cut.ends_with('…') && measure(&cut, medium()) <= 120.0,
             "{cut}"
         );
-        assert_eq!(ellipsize("HEX", MEDIUM, 120.0), "HEX");
+        assert_eq!(ellipsize("HEX", medium(), 120.0), "HEX");
     }
 }

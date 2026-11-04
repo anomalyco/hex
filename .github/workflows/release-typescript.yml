@@ -66,5 +66,6 @@ jobs:
             git push origin "refs/tags/$tag"
             awk -v heading="## ${tag##*@}" '$0 == heading { on = 1; next } /^## / && on { exit } on' \
               typescript/CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-            gh release create "$tag" --verify-tag --title "$tag" --notes-file "$RUNNER_TEMP/notes.md"
+            # The app's stable release is Latest; an SDK release never takes it.
+            gh release create "$tag" --verify-tag --title "$tag" --notes-file "$RUNNER_TEMP/notes.md" --latest=false
           done

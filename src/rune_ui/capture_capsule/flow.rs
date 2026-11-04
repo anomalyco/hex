@@ -9,6 +9,8 @@ use scrawl_capture::capture::Stage;
 use crate::capture_host::CaptureNeed;
 
 use super::tuning::{self, CapsuleFlow};
+mod routes;
+use routes::{sections, sent_to, short};
 
 /// A send, a rule's or a pick's, can be taken back with the Undo button for this
 /// long (Scrawl's `SMART_SEND_UNDO`).
@@ -108,7 +110,10 @@ impl Dest {
 /// rule ever sends; a guess suggests).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Route {
-    /// A rule matched, so it was sent to `to`. `site` is what the rule
+    ResolvingRule {
+        name: String,
+    },
+    /// A rule matched and will send to `to`. `site` is what the rule
     /// matches, for an always-rule sending it elsewhere instead.
     Rule {
         to: Dest,
@@ -124,12 +129,18 @@ pub(crate) enum Route {
         site: Option<String>,
     },
     /// Nothing fits: recent sessions only.
-    Nothing { recent: Vec<Dest> },
+    Nothing {
+        recent: Vec<Dest>,
+    },
     /// The router never answered.
-    NoAnswer { recent: Vec<Dest> },
+    NoAnswer {
+        recent: Vec<Dest>,
+    },
     /// OpenCode's sessions couldn't be read, so there's no list: `why` in
     /// a few words.
-    Unreachable { why: String },
+    Unreachable {
+        why: String,
+    },
 }
 
 /// What the capture engine says became of the bundle
@@ -190,6 +201,7 @@ pub(crate) enum Input {
     Stage(Stage),
     Delivered(Delivered),
     Routed(Route),
+    Refined(Route),
     /// Something failed, and why, when the host knows.
     Failed(Failure, Option<String>),
     /// An iPhone was cabled (true) or unplugged.
@@ -304,8 +316,10 @@ pub(crate) enum Cue {
     Stop,
     /// A send went: a pick at once, a rule's once the router says so.
     Sent,
-    /// A send was taken back, or a recording cancelled.
+    /// A send was taken back.
     TakenBack,
+    /// A recording was discarded.
+    Discarded,
     Failed,
 }
 
@@ -695,7 +709,7 @@ impl Flow {
             (Phase::Recording { .. } | Phase::Selecting(_), Phase::Hidden)
                 if actions.contains(&Action::Cancel) =>
             {
-                Some(Cue::TakenBack)
+                Some(Cue::Discarded)
             }
             _ => None,
         };
@@ -842,6 +856,7 @@ impl Flow {
             self.waiting = None;
             if input == Input::Settled {
                 self.settled = true;
+                self.hold_floor = self.hold_floor.max(now + tuning::get().brief_hold_s);
                 // A rule's send went: it sounds Sent, once.
                 if let Phase::Routed(routed) = &mut self.phase
                     && matches!(routed.route, Route::Rule { .. })
@@ -1000,11 +1015,17 @@ impl Flow {
                 }),
                 Delivered::Queued { why, .. } => Phase::Queued { why, at: now },
             },
-            // Only a rule Kit saved sends by itself; anything else opens on
-            // its suggestions, and nothing goes until he picks.
+            (Phase::Routed(routed), Input::Refined(route)) if !routed.taken_back => {
+                Phase::Routed(routes::refine(routed, route, now, self.suggest_on_route))
+            }
             (_, Input::Routed(route)) => {
                 let suggests = self.suggest_on_route
-                    && !matches!(route, Route::Rule { .. } | Route::Unreachable { .. })
+                    && !matches!(
+                        route,
+                        Route::Rule { .. }
+                            | Route::ResolvingRule { .. }
+                            | Route::Unreachable { .. }
+                    )
                     && sections(&route) != (&[][..], &[][..]);
                 Phase::Routed(Routed {
                     route,
@@ -1154,6 +1175,13 @@ impl Flow {
                 Phase::Routed(routed)
             }
             (Phase::Routed(routed), Input::Undo) => {
+                if let Route::ResolvingRule { name } = &routed.route {
+                    actions.push(Action::Undo { to: name.clone() });
+                    return {
+                        self.phase = Phase::TakenBack { at: now };
+                        actions
+                    };
+                }
                 // The chip is only there while the window runs; a click that
                 // lands as it ends still counts, and the router answers too
                 // late if it was.
@@ -1412,21 +1440,7 @@ impl Flow {
 
     /// The take-back for a send still waiting out its Undo.
     fn undoable(&self, now: f64) -> Option<Action> {
-        let (to, at) = match &self.phase {
-            Phase::Routed(Routed {
-                route: Route::Rule { to, .. },
-                at,
-                ..
-            }) => (&to.name, *at),
-            Phase::Sent(Sent {
-                to,
-                at,
-                undoable: true,
-                ..
-            }) => (to, *at),
-            _ => return None,
-        };
-        (now - at < undo_s()).then(|| Action::Undo { to: to.clone() })
+        routes::undoable(&self.phase, now)
     }
 
     /// Runs what time decides: the chips closing, the Undo window ending,
@@ -1461,7 +1475,7 @@ impl Flow {
                         };
                     }
                 }
-                due
+                due || matches!(&self.phase, Phase::Routed(r) if !r.delivered && matches!(r.route, Route::Rule { .. } | Route::ResolvingRule { .. }) && now - r.at <= 3.0)
             }
         }
     }
@@ -1480,6 +1494,13 @@ impl Flow {
             (end > now).then_some(end)
         };
         let due = match &self.phase {
+            Phase::Routed(r)
+                if !r.delivered
+                    && matches!(r.route, Route::Rule { .. } | Route::ResolvingRule { .. })
+                    && now - r.at < 3.0 =>
+            {
+                Some(r.at + (now - r.at).floor() + 1.0)
+            }
             Phase::Recording {
                 chips_until,
                 discard_until,
@@ -1574,7 +1595,7 @@ impl Flow {
                 hand_off: true,
                 ..Done::plain(Lead::Check, sent_to(&sent.to))
             }),
-            Phase::Routed(routed) => Pres::Done(routed_done(routed, undo_left(routed.at))),
+            Phase::Routed(routed) => Pres::Done(routed_done(routed, now)),
         }
     }
 }
@@ -1635,6 +1656,13 @@ fn waits(routed: Routed) -> Option<Routed> {
 
 fn hold_until(phase: &Phase) -> Option<f64> {
     match phase {
+        Phase::Routed(r)
+            if !r.delivered
+                && !r.taken_back
+                && matches!(r.route, Route::Rule { .. } | Route::ResolvingRule { .. }) =>
+        {
+            None
+        }
         Phase::Saved { at } => Some(at + tuning::get().done_hold_s),
         Phase::Queued { at, .. } | Phase::TooLate { at, .. } => {
             Some(at + tuning::get().brief_hold_s)
@@ -1689,19 +1717,6 @@ fn hold_until(phase: &Phase) -> Option<f64> {
         // Waiting on Kit: it stays a good while, and ✕ closes it.
         Phase::Permission { at, .. } => Some(at + PERMISSION_HOLD_S),
         _ => None,
-    }
-}
-
-fn sections(route: &Route) -> (&[Dest], &[Dest]) {
-    match route {
-        Route::Rule {
-            suggested, recent, ..
-        }
-        | Route::Guess {
-            suggested, recent, ..
-        } => (suggested, recent),
-        Route::Nothing { recent } | Route::NoAnswer { recent } => (&[], recent),
-        Route::Unreachable { .. } => (&[], &[]),
     }
 }
 
@@ -1825,7 +1840,7 @@ fn offered_again(route: Route, from: &Dest, too_late: bool, now: f64) -> Option<
             site,
         } => (suggested, recent, site),
         Route::Nothing { recent } | Route::NoAnswer { recent } => (Vec::new(), recent, None),
-        Route::Unreachable { .. } => return None,
+        Route::Unreachable { .. } | Route::ResolvingRule { .. } => return None,
     };
     // A rule's session leads its suggestions and may be among the recent
     // ones too: it is listed once, at the end of the whole list.
@@ -1877,21 +1892,8 @@ fn taking_back(route: Option<Route>, from: &Dest, now: f64) -> Phase {
         .map_or(Phase::TakenBack { at: now }, Phase::Routed)
 }
 
-fn sent_to(to: &str) -> String {
-    format!("Sent to {}", short(to))
-}
-
-/// A session's name cut to [`ROUTE_NAME_MAX`] characters, so the
-/// capsule's widest state stays inside its panel.
-fn short(name: &str) -> String {
-    if name.chars().count() <= ROUTE_NAME_MAX {
-        return name.to_owned();
-    }
-    let cut: String = name.chars().take(ROUTE_NAME_MAX - 1).collect();
-    format!("{}…", cut.trim_end())
-}
-
-fn routed_done(routed: &Routed, undo: bool) -> Done {
+fn routed_done(routed: &Routed, now: f64) -> Done {
+    let undo = now - routed.at < undo_s();
     let base = match &routed.route {
         // Sent nowhere, it waits for a pick: a click on Send to… reopens the list.
         _ if routed.taken_back => Done {
@@ -1906,12 +1908,22 @@ fn routed_done(routed: &Routed, undo: bool) -> Done {
                 },
             )
         },
-        // Sent at once, with a pick's plain Undo while it can be taken
-        // back.
         Route::Rule { to, .. } => Done {
-            why: Some("rule".into()),
-            undo,
-            ..Done::plain(Lead::Check, sent_to(&to.name))
+            why: routes::countdown(routed, now).or_else(|| Some("rule".into())),
+            undo: undo || !routed.delivered,
+            ..Done::plain(
+                Lead::Check,
+                if routed.delivered {
+                    sent_to(&to.name)
+                } else {
+                    format!("Sending to {}", short(&to.name))
+                },
+            )
+        },
+        Route::ResolvingRule { name } => Done {
+            why: routes::countdown(routed, now),
+            undo: true,
+            ..Done::plain(Lead::Check, format!("Sending to {}", short(name)))
         },
         // The suggestions are the ask (closed, Send to… opens them).
         Route::Guess { .. } => Done {
@@ -2343,17 +2355,19 @@ mod tests {
     }
 
     #[test]
-    fn a_rule_sends_at_once_with_a_plain_undo_and_leaves_when_its_window_ends() {
+    fn a_rule_counts_down_and_stays_cancellable_until_delivered() {
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 10.0);
         let at = |t| done(&flow, t).undo;
         assert!(at(10.0) && at(11.2) && at(14.5));
-        assert!(!at(15.0));
-        assert_eq!(done(&flow, 10.0).text, "Sent to SEER");
+        assert!(at(15.0), "a delayed send is still cancellable");
+        assert_eq!(done(&flow, 10.0).text, "Sending to SEER");
         assert_eq!(done(&flow, 10.0).lead, Lead::Check);
         assert_eq!(done(&flow, 10.0).ask, None, "Undo, as a pick has");
         assert_eq!(done(&flow, 15.0).ask, None, "nothing after the window");
-        assert_eq!(done(&flow, 10.0).why.as_deref(), Some("rule"));
+        assert_eq!(done(&flow, 10.0).why.as_deref(), Some("3 s"));
+        assert_eq!(done(&flow, 11.0).why.as_deref(), Some("2 s"));
+        assert_eq!(done(&flow, 12.0).why.as_deref(), Some("1 s"));
         let actions = flow.input(Input::Undo, 11.0);
         assert_eq!(actions, vec![Action::Undo { to: "SEER".into() }]);
         flow.input(Input::Undone(Undone::TakenBack), 11.4);
@@ -2373,10 +2387,12 @@ mod tests {
         // Time alone takes it away once the Undo window ends.
         let mut late = Flow::new();
         late.input(Input::Routed(rule()), 0.0);
+        late.input(Input::Settled, 3.0);
         assert!(!late.tick(undo_s() - 0.1));
-        assert_eq!(late.next_due(0.0), Some(undo_s()));
-        assert!(late.tick(undo_s()));
-        assert_eq!(late.pres(undo_s()), Pres::Hidden);
+        assert_eq!(late.next_due(3.0), Some(undo_s()));
+        let leaves = undo_s().max(3.0 + tuning::get().brief_hold_s);
+        assert!(late.tick(leaves));
+        assert_eq!(late.pres(leaves), Pres::Hidden);
     }
 
     /// The pointer on a finished capsule holds it; leaving gives it a moment.
@@ -2386,6 +2402,7 @@ mod tests {
     fn hover_and_folding_hold_a_finished_capsule_and_a_late_undo_counts() {
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 0.0);
+        flow.input(Input::Settled, 3.0);
         flow.hover(true, 4.0);
         assert!(!flow.tick(undo_s() + 10.0));
         assert_eq!(flow.next_due(undo_s() + 10.0), None);
@@ -2403,6 +2420,7 @@ mod tests {
         let brief = tuning::get().brief_hold_s;
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 0.0);
+        flow.input(Input::Settled, 3.0);
         flow.input(Input::OpenList, 4.0);
         flow.input(Input::Escape, 9.0);
         assert!(!flow.tick(9.0 + brief - 0.1));
@@ -2779,33 +2797,30 @@ mod tests {
         );
     }
 
-    /// The router sends a rule's answer at once: the capsule reads "Sent"
-    /// as it shows it, and sounds Sent when the router says it went.
+    /// A rule reads Sending until the router acknowledges its delivery.
     #[test]
-    fn a_rule_reads_sent_at_once_and_sounds_when_it_went() {
+    fn a_rule_reads_sending_and_sounds_only_when_it_went() {
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 10.0);
         let sent = done(&flow, 10.0);
-        assert_eq!(sent.text, "Sent to SEER");
+        assert_eq!(sent.text, "Sending to SEER");
         assert_eq!(sent.lead, Lead::Check);
         assert!(flow.take_cues().is_empty(), "not until the router says so");
         flow.input(Input::Settled, 10.2);
-        assert_eq!(done(&flow, 10.2), sent, "it reads the same");
+        assert_eq!(done(&flow, 10.2).text, "Sent to SEER");
         assert_eq!(flow.take_cues(), [Cue::Sent]);
         flow.input(Input::Settled, 10.4);
         assert!(flow.take_cues().is_empty(), "once");
     }
 
-    /// The Undo chip counts nothing down: the capsule reads the same
-    /// through the window and wakes once, when it ends, so nothing
-    /// interrupts a list folding back into "Sent to X".
+    /// Rule countdowns wake each second; a picked send keeps its plain Undo.
     #[test]
-    fn the_undo_window_wakes_the_capsule_once_at_its_end() {
+    fn the_rule_countdown_wakes_each_second() {
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 10.0);
-        assert_eq!(flow.pres(10.5), flow.pres(10.0 + undo_s() - 0.5));
-        assert_eq!(flow.next_due(10.0), Some(10.0 + undo_s()));
-        assert_eq!(flow.next_due(12.0), Some(10.0 + undo_s()));
+        assert_ne!(flow.pres(10.5), flow.pres(10.0 + undo_s() - 0.5));
+        assert_eq!(flow.next_due(10.0), Some(11.0));
+        assert_eq!(flow.next_due(12.0), Some(13.0));
         assert_ne!(flow.pres(10.0), flow.pres(10.0 + undo_s()));
 
         let mut flow = Flow::new();
@@ -2939,7 +2954,7 @@ mod tests {
 
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 0.0);
-        assert_eq!(done(&flow, 1.0).text, "Sent to SEER");
+        assert_eq!(done(&flow, 1.0).text, "Sending to SEER");
     }
 
     /// A switch that can't start settles the recording it discarded as
@@ -3393,6 +3408,7 @@ mod tests {
         flow.input(Input::Stage(Stage::Done), 5.0);
         assert_eq!(flow.keys(), None);
         flow.input(Input::Routed(rule()), 5.0);
+        flow.input(Input::Settled, 8.0);
         flow.tick(5.0 + hold + 1.0);
         assert_eq!(flow.pres(5.0 + hold + 1.0), Pres::Hidden);
         assert_eq!(flow.keys(), None);
@@ -3470,7 +3486,7 @@ mod tests {
         flow.click(super::super::surface::Id::Cancel, 0.8);
         assert_eq!(flow.take_cues(), [Cue::Start]);
         flow.click(super::super::surface::Id::Discard, 1.0);
-        assert_eq!(flow.take_cues(), [Cue::TakenBack]);
+        assert_eq!(flow.take_cues(), [Cue::Discarded]);
         flow.input(Input::Failed(Failure::Start, None), 2.0);
         assert_eq!(flow.take_cues(), [Cue::Failed]);
     }
@@ -3589,7 +3605,7 @@ mod tests {
         assert!(!flow.tick(1.0 + DISCARD_ASK_S - 0.1));
         assert!(flow.tick(1.0 + DISCARD_ASK_S));
         assert!(!discarding(&flow, 1.0 + DISCARD_ASK_S));
-        assert!(flow.cues.iter().all(|cue| *cue != Cue::TakenBack));
+        assert!(flow.cues.iter().all(|cue| *cue != Cue::Discarded));
 
         // Never under the pointer, and a moment after it leaves; the
         // chips' ✕ asks too.

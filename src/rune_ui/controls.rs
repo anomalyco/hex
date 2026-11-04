@@ -82,10 +82,13 @@ impl Paint {
             hair: 1.0 / scale,
         }
     }
-    /// A section label: above its card, on the page's text edge.
+    /// A section label: above its card, on the page's text edge. Screen
+    /// readers move between sections by it.
     pub(super) fn section_label(self, title: &str) -> El {
         text(title)
             .key("header")
+            .role("heading")
+            .level(2)
             .font(self.k.ty.ui_medium.lh(SECTION_LABEL_LINE))
             .color(self.k.c.text_muted)
     }
@@ -237,6 +240,7 @@ fn separator(p: Paint, key: String) -> El {
         .ml(METRICS.row_px)
         .mr(METRICS.row_px)
         .fill(p.k.c.border_muted)
+        .a11y_hidden()
 }
 
 /// A setting: title and optional description on the left, its control on
@@ -265,14 +269,32 @@ pub(super) fn described_row(
     description: Option<(String, Color)>,
     control: El,
 ) -> El {
-    let description = description.map(|(copy, color)| {
-        text(copy)
-            .key("description")
-            .font(DESCRIPTION)
-            .color(color)
-            .wrap()
-    });
-    copy_row(p, key, None, title, description, control, false)
+    let said = description.as_ref().map(|(copy, _)| copy.clone());
+    let description = description.map(|(copy, color)| described_copy(copy, color));
+    described(
+        copy_row(p, key, None, title, description, control, false),
+        said,
+    )
+}
+
+/// A row's description line. The row reads it to assistive technology as
+/// its description ([`described`]), so the line itself stays out of the
+/// tree.
+fn described_copy(copy: impl Into<String>, color: Color) -> El {
+    text(copy.into())
+        .key("description")
+        .font(DESCRIPTION)
+        .color(color)
+        .wrap()
+        .a11y_hidden()
+}
+
+/// `row` with `description` as its accessible description.
+fn described(row: El, description: Option<String>) -> El {
+    match description {
+        Some(description) => row.description(description),
+        None => row,
+    }
 }
 
 /// A [`setting_row`] led by an icon in the icon colour.
@@ -297,14 +319,12 @@ pub(super) fn icon_row_tagged(
     description: Option<&str>,
     control: El,
 ) -> El {
-    let description = description.map(|copy| {
-        text(copy)
-            .key("description")
-            .font(DESCRIPTION)
-            .color(p.muted())
-            .wrap()
-    });
-    copy_row_tagged(p, key, Some(glyph), title, tag, description, control, false)
+    let said = description.map(str::to_owned);
+    let description = description.map(|copy| described_copy(copy, p.muted()));
+    described(
+        copy_row_tagged(p, key, Some(glyph), title, tag, description, control, false),
+        said,
+    )
 }
 
 /// An [`icon_row`] whose description has its own colour (errors, progress).
@@ -316,18 +336,16 @@ pub(super) fn icon_described_row(
     description: Option<(String, Color)>,
     control: El,
 ) -> El {
-    let description = description.map(|(copy, color)| {
-        text(copy)
-            .key("description")
-            .font(DESCRIPTION)
-            .color(color)
-            .wrap()
-    });
-    copy_row(p, key, Some(glyph), title, description, control, false)
+    let said = description.as_ref().map(|(copy, _)| copy.clone());
+    let description = description.map(|(copy, color)| described_copy(copy, color));
+    described(
+        copy_row(p, key, Some(glyph), title, description, control, false),
+        said,
+    )
 }
 
 /// A [`select`]'s field showing its one choice, disabled.
-pub(super) fn fixed_select(p: Paint, key: &str, label: &str) -> El {
+pub(super) fn fixed_select(p: Paint, key: &str, name: &str, label: &str) -> El {
     Select::new::<&str>(format!("{key}-field"), &[])
         .appearance(SelectAppearance::Field)
         .width(SELECT_WIDTH)
@@ -335,6 +353,34 @@ pub(super) fn fixed_select(p: Paint, key: &str, label: &str) -> El {
         .disabled(true)
         .trigger(p.k)
         .key(key)
+        .label(name)
+        .a11y_value(label)
+        .disabled(true)
+}
+
+/// A switch an organization holds off (`crate::policy`): shown off and
+/// disabled with the managed note; pressing it does nothing.
+pub(super) fn managed_row(
+    p: Paint,
+    key: &str,
+    glyph: Option<&'static rune::Icon>,
+    title: &str,
+) -> El {
+    let switch = managed_switch(p).a11y_hidden();
+    let row = match glyph {
+        Some(glyph) => icon_row(p, key, glyph, title, Some(super::managed_note()), switch),
+        None => setting_row(p, key, title, Some(super::managed_note()), switch),
+    };
+    row.role("switch").checked(false).disabled(true)
+}
+
+/// An off switch that can't be turned on.
+pub(super) fn managed_switch(p: Paint) -> El {
+    rune_kit::Switch::new(false)
+        .disabled(true)
+        .build(p.k)
+        .key("switch")
+        .focusable(false)
 }
 
 /// A whole-row switch led by an icon.
@@ -347,14 +393,10 @@ pub(super) fn icon_toggle_row<'a>(
     on: bool,
     flip: impl Fn(&mut Ui) + 'static,
 ) -> El {
-    pressable_row(icon_row(
-        p,
-        key,
-        glyph,
-        title,
-        description.into(),
-        row_switch(p, on),
-    ))
+    pressable_row(
+        icon_row(p, key, glyph, title, description.into(), row_switch(p, on)),
+        on,
+    )
     .on_press(flip)
 }
 
@@ -388,6 +430,15 @@ pub(super) fn copy_row_tagged(
     } else {
         m.row_h
     };
+    // The row is named by its title, so the title's text stays out of the
+    // accessibility tree.
+    let title_text = || {
+        text(title)
+            .key("label")
+            .font(p.k.ty.ui)
+            .color(p.text())
+            .a11y_hidden()
+    };
     let copy = col()
         .key("copy")
         .w(COPY_MIN_WIDTH)
@@ -395,12 +446,12 @@ pub(super) fn copy_row_tagged(
         .grow(1.0)
         .gap(if compact { 0.0 } else { 2.0 })
         .child(match tag {
-            None => text(title).key("label").font(p.k.ty.ui).color(p.text()),
+            None => title_text(),
             Some(tag) => row()
                 .key("title")
                 .gap(6.0)
                 .center_y()
-                .child(text(title).key("label").font(p.k.ty.ui).color(p.text()))
+                .child(title_text())
                 .child(tag),
         })
         .children(description);
@@ -424,16 +475,27 @@ pub(super) fn copy_row_tagged(
                 .grow(1.0)
                 .gap(ICON_LEAD - 16.0)
                 .center_y()
-                .child(rune::icon(glyph, 16.0).key("icon").color(p.k.c.icon_base))
+                .child(
+                    rune::icon(glyph, 16.0)
+                        .key("icon")
+                        .color(p.k.c.icon_base)
+                        .a11y_hidden(),
+                )
                 .child(copy),
         })
         .child(control)
 }
 
 /// The switch of a row that toggles: the row takes focus and presses, and
-/// the switch shows its state and the focus ring.
+/// the switch shows its state and the focus ring. The row is the switch
+/// assistive technology reads ([`pressable_row`]), so this one stays out of
+/// the tree.
 pub(super) fn row_switch(p: Paint, on: bool) -> El {
-    Switch::new(on).build(p.k).key("switch").focusable(false)
+    Switch::new(on)
+        .build(p.k)
+        .key("switch")
+        .focusable(false)
+        .a11y_hidden()
 }
 
 /// A whole-row switch: the row presses, the switch shows the state.
@@ -445,21 +507,18 @@ pub(super) fn toggle_row<'a>(
     on: bool,
     flip: impl Fn(&mut Ui) + 'static,
 ) -> El {
-    pressable_row(setting_row(
-        p,
-        key,
-        title,
-        description.into(),
-        row_switch(p, on),
-    ))
+    pressable_row(
+        setting_row(p, key, title, description.into(), row_switch(p, on)),
+        on,
+    )
     .on_press(flip)
 }
 
-/// A settings row that toggles when pressed anywhere. Only its switch
-/// reacts to the pointer; the row itself never paints a hover or press
-/// fill.
-pub(super) fn pressable_row(row: El) -> El {
-    row.role("toggle").focusable(true)
+/// A settings row that toggles when pressed anywhere: a switch, named by
+/// its title and on while `on`. Only its switch reacts to the pointer; the
+/// row itself never paints a hover or press fill.
+pub(super) fn pressable_row(row: El, on: bool) -> El {
+    row.role("switch").checked(on).focusable(true)
 }
 
 /// A few exclusive choices: equal segments sized for the longest label.
@@ -502,9 +561,13 @@ pub(super) struct Choice {
 }
 
 /// A select field whose choices open in an anchored menu above the page.
+/// Assistive technology reads it as `name` (what it chooses), with `label`,
+/// the current choice, as its value.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn select(
     p: Paint,
     key: &str,
+    name: &str,
     label: &str,
     open: bool,
     choices: Vec<Choice>,
@@ -514,6 +577,7 @@ pub(super) fn select(
     select_sized(
         p,
         key,
+        name,
         label,
         None,
         open,
@@ -531,6 +595,7 @@ pub(super) fn select(
 pub(super) fn select_sized(
     p: Paint,
     key: &str,
+    name: &str,
     label: &str,
     detail: Option<&str>,
     open: bool,
@@ -546,8 +611,12 @@ pub(super) fn select_sized(
             .current(Some(label))
             .open(open)
             .on_toggle(toggle)
-            .trigger(p.k),
-        Some(detail) => detailed_field(p, key, label, detail, open, width).on_press(toggle),
+            .trigger(p.k)
+            .label(name)
+            .a11y_value(label),
+        Some(detail) => detailed_field(p, key, label, detail, open, width)
+            .label(name)
+            .on_press(toggle),
     };
     let mut menu = Menu::new(key)
         .trigger(trigger)
@@ -578,7 +647,8 @@ fn detailed_field(p: Paint, key: &str, label: &str, detail: &str, open: bool, wi
     let mut field = row()
         .key(format!("{key}-field-trigger"))
         .role("combobox")
-        .label(format!("{label}, {detail}"))
+        .a11y_value(format!("{label}, {detail}"))
+        .expanded(open)
         .center_y()
         .focusable(true)
         .focus_ring(1.0, 0.0, c.border_focus)
@@ -615,12 +685,15 @@ fn detailed_field(p: Paint, key: &str, label: &str, detail: &str, open: bool, wi
                         .color(p.faint())
                         .shrink()
                         .truncate(),
-                ),
+                )
+                // The field's value says the same.
+                .a11y_hidden(),
         )
         .child(
             el().size(20.0, 20.0)
                 .center()
-                .child(rune::icon(chevron, 16.0).key("chevron").color(c.icon_muted)),
+                .child(rune::icon(chevron, 16.0).key("chevron").color(c.icon_muted))
+                .a11y_hidden(),
         );
     for shadow in p.k.shadow_layers(&p.k.elevation.button_neutral) {
         field = field.box_shadow(shadow);
@@ -714,6 +787,55 @@ pub(super) fn icon_button(
         .on_press(press)
         .build(p.k)
         .key(key)
+}
+
+/// The type of a row's value: a borderless select's, a [`value_button`]'s.
+pub(super) fn value_font(p: Paint) -> TextStyle {
+    p.k.ty.ui_medium.lh(16.0)
+}
+
+/// A value that opens something, drawn like the kit's borderless select.
+/// Assistive technology reads it as `name` with `label` as its value.
+pub(super) fn value_button(
+    p: Paint,
+    key: &str,
+    name: &str,
+    label: &str,
+    glyph: &'static rune::Icon,
+    press: impl Fn(&mut Ui) + 'static,
+) -> El {
+    let c = &p.k.c;
+    row()
+        .key(key)
+        .role("button")
+        .label(name)
+        .a11y_value(label)
+        .focusable(true)
+        .focus_ring(2.0, 0.0, c.border_focus)
+        .h(24.0)
+        .pl(8.0)
+        .pr(4.0)
+        .mr(-9.0)
+        .gap(4.0)
+        .center_y()
+        .radius(p.k.radius.sm)
+        .hover(c.hover)
+        .press(c.pressed)
+        .on_press(press)
+        .child(
+            text(label.to_string())
+                .key("value")
+                .font(value_font(p))
+                .color(c.text_base)
+                .truncate()
+                .a11y_hidden(),
+        )
+        .child(
+            rune::icon(glyph, 16.0)
+                .key("chevron")
+                .color(c.icon_muted)
+                .a11y_hidden(),
+        )
 }
 
 /// How a modal's surface enters and leaves: scaled from 0.96 about its
@@ -986,8 +1108,13 @@ pub(super) fn keycap(p: Paint, index: usize, label: &str, size: KeySize, down: b
         .child(cap)
 }
 
+/// Decoration: the text beside it says what it means.
 pub(super) fn status_dot(color: Color) -> El {
-    el().key("dot").size(8.0, 8.0).radius(4.0).fill(color)
+    el().key("dot")
+        .size(8.0, 8.0)
+        .radius(4.0)
+        .fill(color)
+        .a11y_hidden()
 }
 
 /// Breathes between full and this opacity every two seconds; full under

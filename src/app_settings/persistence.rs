@@ -1,6 +1,7 @@
 //! Settings recovery is in memory. The first write preserves unreadable bytes
 //! beside the original, including when a migration is the first writer.
 
+use std::borrow::Cow;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -13,6 +14,7 @@ use serde_path_to_error::Segment;
 use sha2::{Digest, Sha256};
 
 use super::AppSettings;
+use crate::policy::Policy;
 
 // A settings editor and a background migration may save at the same time.
 static WRITER: Mutex<()> = Mutex::new(());
@@ -44,8 +46,19 @@ impl AppSettings {
     }
 
     /// What `load_from` loads, without writing anything back: true when
-    /// `load_from` would persist a migration.
+    /// `load_from` would persist a migration. Switches a managed lock holds
+    /// read off (`crate::policy`).
     pub(crate) fn read_from(path: &Path) -> Result<(Self, bool)> {
+        Self::read_managed_from(path, Policy::current())
+    }
+
+    pub(super) fn read_managed_from(path: &Path, policy: Policy) -> Result<(Self, bool)> {
+        let (mut settings, migrated) = Self::read_saved_from(path)?;
+        policy.enforce(&mut settings);
+        Ok((settings, migrated))
+    }
+
+    fn read_saved_from(path: &Path) -> Result<(Self, bool)> {
         let data = match fs::read(path) {
             Ok(data) => data,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -70,6 +83,8 @@ impl AppSettings {
         settings.repair_mouse_shortcuts();
         #[cfg(target_os = "linux")]
         settings.repair_special_keys();
+        #[cfg(target_os = "linux")]
+        settings.repair_section_key();
         settings.normalize_double_tap_settings();
         settings.migrate_legacy_replacements();
         settings.normalize_mode_application_names();
@@ -97,25 +112,46 @@ impl AppSettings {
     }
 
     pub(super) fn write_to(&self, path: &Path) -> Result<()> {
+        self.write_managed_to(path, Policy::current())
+    }
+
+    pub(super) fn write_managed_to(&self, path: &Path, policy: Policy) -> Result<()> {
         self.validate_recording_duck_volume()?;
-        let bytes = serde_json::to_vec_pretty(self)?;
         let _writer = WRITER.lock().unwrap_or_else(|error| error.into_inner());
         let parent = path
             .parent()
             .ok_or_else(|| eyre!("settings path has no parent"))?;
         fs::create_dir_all(parent)?;
-        match fs::read(path) {
-            Ok(original) if needs_backup(&original) => backup(path, &original)?,
-            Ok(_) => {}
+        let original = match fs::read(path) {
+            Ok(original) => {
+                if needs_backup(&original) {
+                    backup(path, &original)?;
+                }
+                Some(original)
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 #[cfg(target_os = "macos")]
                 crate::desktop::onboarding::record_pending_at(parent)?;
+                None
             }
             // Never overwrite something we could not read and preserve.
             Err(error) => return Err(error.into()),
-        }
+        };
+        let bytes = serde_json::to_vec_pretty(&*self.as_saved(policy, original.as_deref()))?;
         crate::durable::write(path, &bytes)?;
         Ok(())
+    }
+
+    /// What a save writes: these settings, with the switches a managed lock
+    /// holds off kept as the file (`saved`) has them.
+    fn as_saved(&self, policy: Policy, saved: Option<&[u8]>) -> Cow<'_, Self> {
+        if !policy.any() {
+            return Cow::Borrowed(self);
+        }
+        let saved = saved.map_or_else(Self::default, |data| decode(data).0);
+        let mut written = self.clone();
+        policy.keep_saved(&mut written, &saved);
+        Cow::Owned(written)
     }
 }
 

@@ -43,7 +43,7 @@ pub fn hex_support_dir() -> PathBuf {
         .map(PathBuf::from)
         .filter(|dir| !dir.as_os_str().is_empty())
         .unwrap_or_else(|| {
-            dirs::data_dir()
+            scrawl_router::user_dirs::data_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("hex")
         })

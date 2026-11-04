@@ -348,6 +348,8 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         let _: () = msg_send![&*menu, setDelegate: &*target];
     }
     item.setMenu(Some(&menu));
+    // Labs › Hide menu bar icon: the item stays installed, only hidden.
+    item.setVisible(icon_shown(crate::labs::hide_menu_bar_icon(), false));
 
     STATUS_ITEM.with(|status_item| {
         *status_item.borrow_mut() = Some(StatusItemController {
@@ -535,6 +537,12 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
     }
 }
 
+/// Whether the menu-bar icon shows: always, unless Labs › Hide menu bar
+/// icon is on and no meeting is under way.
+fn icon_shown(hide: bool, meeting_active: bool) -> bool {
+    !hide || meeting_active
+}
+
 /// A meeting title short enough for one menu line.
 fn menu_title(title: &str) -> String {
     const MAX_CHARS: usize = 48;
@@ -649,6 +657,12 @@ pub fn update_meeting(state: &crate::meeting::watcher::MeetingMenuState, enabled
             return;
         };
         let menu = meeting_menu(state, enabled);
+        // A meeting starting, recording, or transcribing keeps the icon shown
+        // so it stays visible and stoppable.
+        let shown = icon_shown(crate::labs::hide_menu_bar_icon(), menu.status.is_some());
+        if controller.item.isVisible() != shown {
+            controller.item.setVisible(shown);
+        }
         let visible = enabled || menu.status.is_some();
         controller.meeting_separator.setHidden(!visible);
         controller.meeting_copy_last.setHidden(!visible);
@@ -754,6 +768,14 @@ mod tests {
             transcribing.status.as_deref(),
             Some("Transcribing meeting…")
         );
+    }
+
+    #[test]
+    fn a_hidden_icon_comes_back_while_a_meeting_is_under_way() {
+        assert!(icon_shown(false, false));
+        assert!(icon_shown(false, true));
+        assert!(!icon_shown(true, false));
+        assert!(icon_shown(true, true));
     }
 
     #[test]

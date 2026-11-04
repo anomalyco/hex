@@ -15,6 +15,7 @@ pub(crate) mod live_text;
 pub(crate) mod modes;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod processor;
+pub(crate) mod service;
 pub(crate) mod spoken_formatting;
 pub(crate) mod spoken_symbols;
 pub(crate) mod text_replacements;
@@ -37,10 +38,37 @@ use crate::audio::recording_environment::{
 
 const TIMELINE_BUFFER_DURATION: Duration = Duration::from_secs(10);
 const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
+
+/// How much audio a shortcut capture keeps from before its press. Muting or
+/// pausing other audio while dictating takes effect only after the press, so
+/// the audio before it holds whatever was playing (#1309): those captures
+/// keep none. Ducking and doing nothing keep [`PRE_ROLL_DURATION`].
+pub fn hotkey_pre_roll(behavior: crate::app_settings::RecordingAudioBehavior) -> Duration {
+    use crate::app_settings::RecordingAudioBehavior::{DoNothing, Duck, Mute, PauseMedia};
+    match behavior {
+        Mute | PauseMedia => Duration::ZERO,
+        Duck | DoNothing => PRE_ROLL_DURATION,
+    }
+}
 pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
 /// Audio kept after a shortcut release that finishes a capture, because a
 /// release often lands while the last word is still sounding.
 pub const POST_RELEASE_TAIL: Duration = Duration::from_millis(200);
+/// The longest a release tail grows while speech carries on past
+/// [`POST_RELEASE_TAIL`] (a word still being said as the shortcut goes up).
+pub const MAX_RELEASE_TAIL: Duration = Duration::from_millis(600);
+/// Speech frames in a row (20 ms each) that count as still talking: a key
+/// click is far shorter.
+const TAIL_SPEECH_FRAMES: usize = 5;
+/// Quiet frames in a row that end a growing tail (160 ms).
+const TAIL_QUIET_FRAMES: usize = 8;
+/// Quiet frames a run of speech may skip over, as between syllables.
+const TAIL_SPEECH_GAP_FRAMES: usize = 2;
+/// How long after its own length the stop tone may still reach the
+/// microphone (output and input latency).
+const STOP_TONE_MARGIN: Duration = Duration::from_millis(60);
+/// 20 ms frames of recent speech flags kept for the release tail.
+const VOICE_HISTORY_FRAMES: usize = 150;
 /// How far apart the two keys of a both-sides chord (both Options) may go
 /// down and still count as one press. Karabiner-Elements' simultaneous
 /// keys default to 50 ms, tuned against typing rollover on letter keys;
@@ -65,6 +93,178 @@ const STREAM_FEED_SAMPLES: usize = 2_560;
 pub enum Finish {
     Discard,
     Transcribe(DictationClip),
+}
+
+/// Where a shortcut finish's tail stands, from the audio recorded so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReleaseTail {
+    /// More audio is needed. `growing` once speech has carried past
+    /// [`POST_RELEASE_TAIL`], so the wait is bounded by
+    /// [`MAX_RELEASE_TAIL`] rather than the base tail.
+    Waiting { growing: bool },
+    /// Finish keeping this much audio after the release.
+    Through(Duration),
+}
+
+impl ReleaseTail {
+    /// The longest tail a wait in this state may still end with.
+    pub fn bound(self) -> Duration {
+        match self {
+            Self::Waiting { growing: true } => MAX_RELEASE_TAIL,
+            Self::Waiting { growing: false } => POST_RELEASE_TAIL,
+            Self::Through(tail) => tail,
+        }
+    }
+}
+
+/// A shortcut release waiting for its tail, for capture loops that poll
+/// between microphone chunks (Linux and Windows; the macOS audio owner
+/// drains its tail directly).
+#[cfg(not(target_os = "macos"))]
+pub struct ReleaseWait {
+    ended_at: CaptureInstant,
+    started: std::time::Instant,
+    tone: Duration,
+    waits: bool,
+}
+
+#[cfg(not(target_os = "macos"))]
+impl ReleaseWait {
+    /// How long past a tail itself the loop waits for its audio.
+    const GRACE: Duration = Duration::from_millis(100);
+
+    /// A release at `ended_at`. Only one that will transcribe waits; its
+    /// stop tone (sounding from now) is never taken for speech.
+    pub fn new(capture: &DictationCapture, ended_at: CaptureInstant) -> Self {
+        let waits = capture.would_transcribe(ended_at);
+        Self {
+            ended_at,
+            started: std::time::Instant::now(),
+            tone: if waits {
+                crate::feedback::stop_tone_length()
+            } else {
+                Duration::ZERO
+            },
+            waits,
+        }
+    }
+
+    pub fn ended_at(&self) -> CaptureInstant {
+        self.ended_at
+    }
+
+    pub fn waits(&self) -> bool {
+        self.waits
+    }
+
+    /// Finishes with the audio already captured, as after a lost microphone.
+    pub fn stop_waiting(&mut self) {
+        self.waits = false;
+    }
+
+    /// The tail to finish with once it is decided, or once the wait for it
+    /// is over (the base tail plus the grace, or the longest tail plus the
+    /// grace while speech grows it); `None` while it is still coming.
+    pub fn tail(&self, capture: &DictationCapture, now: std::time::Instant) -> Option<Duration> {
+        if !self.waits {
+            return Some(POST_RELEASE_TAIL);
+        }
+        match capture.release_tail(self.ended_at, self.tone) {
+            ReleaseTail::Through(tail) => Some(tail),
+            waiting if now >= self.started + waiting.bound() + Self::GRACE => Some(waiting.bound()),
+            ReleaseTail::Waiting { .. } => None,
+        }
+    }
+}
+
+/// Speech flags of a recording's 16 kHz audio, one per 20 ms frame, against
+/// the meeting detector's adaptive noise floor. Only recent frames are kept.
+#[derive(Default)]
+struct VoiceTrack {
+    speech: crate::transcription::pause_segmenter::SpeechFrames,
+    frame: Vec<f32>,
+    /// Clip samples classified or waiting in `frame`.
+    consumed: usize,
+    flags: VecDeque<bool>,
+    /// The frame index of `flags[0]`.
+    first: usize,
+}
+
+impl VoiceTrack {
+    const FRAME: usize = crate::transcription::pause_segmenter::FRAME_SAMPLES;
+
+    fn extend(&mut self, mut samples: &[f32]) {
+        self.consumed += samples.len();
+        while !samples.is_empty() {
+            let take = samples.len().min(Self::FRAME - self.frame.len());
+            self.frame.extend_from_slice(&samples[..take]);
+            samples = &samples[take..];
+            if self.frame.len() == Self::FRAME {
+                self.flags.push_back(self.speech.is_speech(&self.frame));
+                self.frame.clear();
+                if self.flags.len() > VOICE_HISTORY_FRAMES {
+                    self.flags.pop_front();
+                    self.first += 1;
+                }
+            }
+        }
+    }
+
+    /// Frames classified so far.
+    fn frames(&self) -> usize {
+        self.first + self.flags.len()
+    }
+
+    fn is_speech(&self, frame: usize) -> bool {
+        frame
+            .checked_sub(self.first)
+            .and_then(|index| self.flags.get(index))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Whether speech runs up to frame `end` (exclusive): its last speech
+    /// frame is within a syllable gap of `end`, and at least
+    /// [`TAIL_SPEECH_FRAMES`] speech frames, none before `from`, lead up to
+    /// it with no gap longer than a syllable's.
+    fn talking_until(&self, end: usize, from: usize) -> bool {
+        let mut speech = 0;
+        let mut gap = 0;
+        let mut frame = end;
+        while frame > from.max(self.first) {
+            frame -= 1;
+            if self.is_speech(frame) {
+                speech += 1;
+                gap = 0;
+                if speech >= TAIL_SPEECH_FRAMES {
+                    return true;
+                }
+            } else {
+                gap += 1;
+                if gap > TAIL_SPEECH_GAP_FRAMES {
+                    return false;
+                }
+            }
+        }
+        false
+    }
+
+    /// The first frame at or after `from`, before `end`, that ends
+    /// [`TAIL_QUIET_FRAMES`] quiet frames in a row.
+    fn quiet_end(&self, from: usize, end: usize) -> Option<usize> {
+        let mut quiet = 0;
+        for frame in from..end {
+            if self.is_speech(frame) {
+                quiet = 0;
+            } else {
+                quiet += 1;
+                if quiet == TAIL_QUIET_FRAMES {
+                    return Some(frame + 1);
+                }
+            }
+        }
+        None
+    }
 }
 
 /// How the dictation shortcut controls a capture.
@@ -204,6 +404,15 @@ impl DictationClip {
             pre_press_dbfs: loudest_window_dbfs(pre_press),
             post_press_dbfs: loudest_window_dbfs(post_press),
         }
+    }
+
+    /// Whether every sample through the release is exactly zero. A real
+    /// microphone always carries some noise, so this is a stream still
+    /// running but delivering digital silence (#1122), not a quiet room.
+    #[cfg(target_os = "macos")]
+    pub fn is_digital_silence(&self) -> bool {
+        let released = self.released();
+        !released.is_empty() && released.iter().all(|&sample| sample == 0.0)
     }
 
     /// Whether the capture holds no speech worth transcribing: its level
@@ -415,11 +624,15 @@ struct Recording {
     recorded_through: Option<CaptureInstant>,
     /// How much of the recording precedes the press.
     pre_press: Duration,
+    /// Source samples still to arrive that precede the pre-roll, dropped as
+    /// they come (a press ahead of the newest audio).
+    skip_samples: usize,
     press_lead_ms: Option<i64>,
     max_chunk_gap: Duration,
     input_buffer: Vec<f32>,
     resampler: Option<Fft<f32>>,
     stream: Option<LiveStream>,
+    voice: VoiceTrack,
     /// This recording's hold on the HUDs' live text, from its first text;
     /// dropping the recording clears it.
     live_text: Option<crate::dictation::live_text::Publisher>,
@@ -486,11 +699,13 @@ impl Recording {
             source_rate,
             recorded_through: None,
             pre_press: Duration::ZERO,
+            skip_samples: 0,
             press_lead_ms: None,
             max_chunk_gap: Duration::ZERO,
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
             resampler,
             stream: None,
+            voice: VoiceTrack::default(),
             live_text: None,
             #[cfg(target_os = "macos")]
             environment: RecordingEnvironmentState::Disabled,
@@ -529,8 +744,34 @@ impl Recording {
                 .max_chunk_gap
                 .max(captured_from.duration_since(previous));
         }
-        self.push(samples);
+        let skip = self.skip_samples.min(samples.len());
+        self.skip_samples -= skip;
+        self.push(&samples[skip..]);
+        self.track_voice();
         self.recorded_through = Some(captured_through);
+    }
+
+    /// Classifies the 16 kHz audio the voice track has not seen, in
+    /// final-clip coordinates.
+    fn track_voice(&mut self) {
+        let delay = self.resampler.as_ref().map_or(0, Fft::output_delay);
+        let recorded = &self.samples[delay.min(self.samples.len())..];
+        let fresh = &recorded[self.voice.consumed.min(recorded.len())..];
+        self.voice.extend(fresh);
+    }
+
+    /// The 20 ms clip frame `at` falls in.
+    fn frame_at(&self, at: CaptureInstant) -> usize {
+        let from_start = self.pre_press + at.duration_since(self.started_at);
+        samples_for(from_start, PARAKEET_SAMPLE_RATE) / VoiceTrack::FRAME
+    }
+
+    /// How far past `ended_at` clip frame `frame` begins.
+    fn after(&self, ended_at: CaptureInstant, frame: usize) -> Duration {
+        let offset = Duration::from_secs_f64(
+            (frame * VoiceTrack::FRAME) as f64 / f64::from(PARAKEET_SAMPLE_RATE),
+        );
+        offset.saturating_sub(self.pre_press + ended_at.duration_since(self.started_at))
     }
 
     /// Hands the stream every complete block of audio it has not seen, in
@@ -641,8 +882,38 @@ impl DictationCapture {
         self.start_with_pre_roll(now, PRE_ROLL_DURATION, false);
     }
 
+    #[cfg(test)]
     pub fn start_at(&mut self, occurred_at: CaptureInstant) {
-        self.start_from_timeline(occurred_at, PRE_ROLL_DURATION, false)
+        self.start_hotkey_at(occurred_at, PRE_ROLL_DURATION)
+    }
+
+    /// Starts a shortcut recording at `occurred_at`, keeping `pre_roll` of
+    /// the audio before it (see [`hotkey_pre_roll`]).
+    pub fn start_hotkey_at(&mut self, occurred_at: CaptureInstant, pre_roll: Duration) {
+        self.start_from_timeline(occurred_at, pre_roll, false)
+    }
+
+    /// Starts a shortcut recording at `pressed_at`, which may lie past the
+    /// newest audio: a microphone that delivers large chunks has not yet
+    /// handed over what it captured before the press (#1309). Exactly
+    /// `pre_roll` before the press is kept, however large the chunks; what
+    /// precedes it in audio still to arrive is dropped as it comes.
+    #[cfg(any(test, target_os = "linux"))]
+    pub fn start_at_press(&mut self, pressed_at: CaptureInstant, pre_roll: Duration) {
+        let Some(through) = self.ring_captured_through else {
+            return self.start(pressed_at);
+        };
+        let Some(ahead) = pressed_at.checked_duration_since(through) else {
+            return self.start_hotkey_at(pressed_at, pre_roll);
+        };
+        self.start_with_pre_roll(pressed_at, pre_roll.saturating_sub(ahead), false);
+        let skip = samples_for(ahead.saturating_sub(pre_roll), self.sample_rate);
+        if let Some(recording) = &mut self.recording {
+            recording.pre_press += ahead.min(pre_roll);
+            recording.skip_samples = skip;
+            recording.recorded_through = Some(through);
+            recording.press_lead_ms = Some(signed_ms(through, pressed_at));
+        }
     }
 
     pub fn start_programmatic_at(&mut self, occurred_at: CaptureInstant) {
@@ -704,6 +975,7 @@ impl DictationCapture {
         } else {
             recording.push(&back[skip - front.len()..]);
         }
+        recording.track_voice();
         self.recording = Some(recording);
     }
 
@@ -903,6 +1175,60 @@ impl DictationCapture {
             recording.intentional
                 || ended_at.duration_since(recording.started_at) >= MINIMUM_HOLD_DURATION
         })
+    }
+
+    /// The tail a shortcut finish at `ended_at` keeps, judged on the audio
+    /// recorded so far: [`POST_RELEASE_TAIL`], or, while speech carries on
+    /// past it, until [`TAIL_QUIET_FRAMES`] of quiet or [`MAX_RELEASE_TAIL`].
+    /// Only sustained speech grows it, never a key click, and never the
+    /// stop tone of `tone` length that sounds from the release: speech must
+    /// also be heard after the tone could have reached the microphone.
+    pub fn release_tail(&self, ended_at: CaptureInstant, tone: Duration) -> ReleaseTail {
+        let Some(recording) = &self.recording else {
+            return ReleaseTail::Through(POST_RELEASE_TAIL);
+        };
+        let through = recording.recorded_through.unwrap_or(ended_at);
+        if through < ended_at + POST_RELEASE_TAIL {
+            return ReleaseTail::Waiting { growing: false };
+        }
+        let voice = &recording.voice;
+        let heard = voice.frames();
+        let capped = through >= ended_at + MAX_RELEASE_TAIL;
+        let base = recording.frame_at(ended_at + POST_RELEASE_TAIL).min(heard);
+        if !voice.talking_until(base, 0) {
+            return ReleaseTail::Through(POST_RELEASE_TAIL);
+        }
+        // What runs into the base tail's end may be the tone; speech must
+        // carry on once it is over.
+        let after_tone = if tone.is_zero() {
+            0
+        } else {
+            recording.frame_at(ended_at + tone + STOP_TONE_MARGIN)
+        };
+        let decision = base.max(after_tone + TAIL_SPEECH_FRAMES);
+        if decision > recording.frame_at(ended_at + MAX_RELEASE_TAIL) {
+            return ReleaseTail::Through(POST_RELEASE_TAIL);
+        }
+        if heard < decision {
+            return if capped {
+                ReleaseTail::Through(POST_RELEASE_TAIL)
+            } else {
+                ReleaseTail::Waiting { growing: true }
+            };
+        }
+        if !voice.talking_until(decision, after_tone) {
+            return ReleaseTail::Through(POST_RELEASE_TAIL);
+        }
+        let tail = |frame| {
+            recording
+                .after(ended_at, frame)
+                .clamp(POST_RELEASE_TAIL, MAX_RELEASE_TAIL)
+        };
+        match voice.quiet_end(decision, heard) {
+            Some(end) => ReleaseTail::Through(tail(end)),
+            None if capped => ReleaseTail::Through(MAX_RELEASE_TAIL),
+            None => ReleaseTail::Waiting { growing: true },
+        }
     }
 
     /// Finishes at the exact `ended_at` event, keeping audio through
@@ -1154,6 +1480,115 @@ mod tests {
         assert_eq!(clip.samples.first(), Some(&6.0));
     }
 
+    /// Ingests `count` chunks of `chunk` length after `from`, chunk `n`
+    /// filled with `first + n`; returns the end of the last.
+    fn ingest_chunks(
+        capture: &mut DictationCapture,
+        from: CaptureInstant,
+        chunk: Duration,
+        first: usize,
+        count: usize,
+    ) -> CaptureInstant {
+        let mut through = from;
+        for index in 0..count {
+            through = through + chunk;
+            let samples = samples_for(chunk, 16_000);
+            capture.ingest(&vec![(first + index) as f32; samples], through);
+        }
+        through
+    }
+
+    #[test]
+    fn a_press_inside_a_large_chunk_keeps_exactly_the_pre_roll() {
+        // 500 ms chunks: the press is 300 ms past the newest audio, so 150 ms
+        // of it is kept and the rest of the pre-roll arrives next.
+        let chunk = Duration::from_millis(500);
+        let mut capture = DictationCapture::new(16_000);
+        let through = ingest_chunks(&mut capture, capture_time(), chunk, 1, 2);
+        let pressed = through + Duration::from_millis(300);
+        capture.start_at_press(pressed, PRE_ROLL_DURATION);
+        assert_eq!(capture.recorded_from(0), [2.0; 2_400]);
+        let through = ingest_chunks(&mut capture, through, chunk, 3, 2);
+        let Finish::Transcribe(clip) = capture.finish(through) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 450 + 700);
+        assert_eq!(clip.press_samples, 7_200);
+        assert_eq!(clip.samples.iter().filter(|&&s| s == 2.0).count(), 2_400);
+
+        // 1 s chunks: the press is 800 ms past the newest audio, so nothing
+        // buffered is kept and the next chunk loses its first 350 ms.
+        let chunk = Duration::from_secs(1);
+        let mut capture = DictationCapture::new(16_000);
+        let through = ingest_chunks(&mut capture, capture_time(), chunk, 1, 1);
+        let pressed = through + Duration::from_millis(800);
+        capture.start_at_press(pressed, PRE_ROLL_DURATION);
+        assert!(capture.recorded_from(0).is_empty());
+        ingest_chunks(&mut capture, through, chunk, 2, 2);
+        let Finish::Transcribe(clip) = capture.finish(pressed + Duration::from_secs(1)) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 450 + 1_000);
+        assert_eq!(clip.samples.first(), Some(&2.0));
+        assert_eq!(clip.samples.iter().filter(|&&s| s == 2.0).count(), 10_400);
+    }
+
+    #[test]
+    fn a_press_ahead_of_large_chunks_measures_the_hold_from_the_press() {
+        let chunk = Duration::from_secs(1);
+        let mut tap = DictationCapture::new(16_000);
+        let through = ingest_chunks(&mut tap, capture_time(), chunk, 1, 1);
+        let pressed = through + Duration::from_millis(800);
+        tap.start_at_press(pressed, PRE_ROLL_DURATION);
+        // The next chunk ends 200 ms after the press: not yet a hold.
+        let through = ingest_chunks(&mut tap, through, chunk, 2, 1);
+        assert!(!tap.become_intentional(through));
+        assert!(matches!(
+            tap.finish(pressed + Duration::from_millis(299)),
+            Finish::Discard
+        ));
+
+        let mut held = DictationCapture::new(16_000);
+        let through = ingest_chunks(&mut held, capture_time(), chunk, 1, 1);
+        held.start_at_press(pressed, PRE_ROLL_DURATION);
+        // Released before the next chunk arrives, yet held long enough.
+        assert!(held.would_transcribe(pressed + MINIMUM_HOLD_DURATION));
+        let through = ingest_chunks(&mut held, through, chunk, 2, 1);
+        assert!(!held.become_intentional(through));
+        assert!(held.become_intentional(pressed + MINIMUM_HOLD_DURATION));
+    }
+
+    #[test]
+    fn muting_or_pausing_while_dictating_keeps_no_pre_roll() {
+        use crate::app_settings::RecordingAudioBehavior::{DoNothing, Duck, Mute, PauseMedia};
+        for (behavior, kept) in [
+            (Mute, 0),
+            (PauseMedia, 0),
+            (Duck, 7_200),
+            (DoNothing, 7_200),
+        ] {
+            let pre_roll = hotkey_pre_roll(behavior);
+            let origin = capture_time();
+            let mut warm = DictationCapture::new(16_000);
+            warm.ingest(&[0.25; 16_000], origin);
+            warm.start_hotkey_at(origin, pre_roll);
+            assert_eq!(warm.recorded_from(0).len(), kept, "{behavior:?}");
+
+            // A press 200 ms past the newest audio: with no pre-roll, the
+            // audio still to arrive before the press is dropped too.
+            let mut ahead = DictationCapture::new(16_000);
+            ahead.ingest(&[0.25; 16_000], origin);
+            let pressed = origin + Duration::from_millis(200);
+            ahead.start_at_press(pressed, pre_roll);
+            ahead.ingest(&[0.5; 8_000], origin + Duration::from_millis(500));
+            let Finish::Transcribe(clip) = ahead.finish(origin + Duration::from_millis(500)) else {
+                panic!("expected transcription")
+            };
+            assert_eq!(clip.press_samples, kept, "{behavior:?}");
+            assert_eq!(clip.samples.len(), kept + 4_800, "{behavior:?}");
+        }
+    }
+
     #[test]
     fn delayed_release_removes_audio_captured_after_the_physical_release() {
         let mut capture = DictationCapture::new(16_000);
@@ -1197,6 +1632,131 @@ mod tests {
         assert_eq!(clip.samples.last(), Some(&12.0));
         assert!(!clip.samples.contains(&13.0));
         assert_eq!(clip.tail_samples, 3_200);
+    }
+
+    /// Records `sound(ms)` (milliseconds from the release, which is 1 s after
+    /// the press) in 20 ms chunks and asks for the release tail after each
+    /// one, as a capture loop does. Returns the tail it settled on, where the
+    /// audio had reached when it did, and the finished clip.
+    fn release_tail_for(
+        sound: impl Fn(f64) -> f32,
+        stop_tone: Duration,
+    ) -> (Duration, Duration, DictationClip) {
+        let mut capture = DictationCapture::new(16_000);
+        let origin = capture_time();
+        capture.ingest(&vec![0.0; 16_000], origin);
+        capture.start_at(origin);
+        let released = origin + Duration::from_secs(1);
+        for chunk in 1..=100_u64 {
+            let start = (chunk - 1) * 320;
+            let samples = (start..start + 320)
+                .map(|index| sound(index as f64 / 16.0 - 1_000.0))
+                .collect::<Vec<_>>();
+            let through = origin + Duration::from_millis(chunk * 20);
+            capture.ingest(&samples, through);
+            if through < released {
+                continue;
+            }
+            match capture.release_tail(released, stop_tone) {
+                ReleaseTail::Waiting { growing } => {
+                    assert!(
+                        growing || through < released + POST_RELEASE_TAIL,
+                        "the base tail waits for its own audio only"
+                    );
+                }
+                ReleaseTail::Through(tail) => {
+                    let Finish::Transcribe(clip) = capture.finish_with_tail(released, tail) else {
+                        panic!("expected transcription");
+                    };
+                    return (tail, through.duration_since(released), clip);
+                }
+            }
+        }
+        panic!("the tail never settled");
+    }
+
+    /// A 180 Hz voice at -13 dBFS between `from` and `to` ms.
+    fn voice(from: f64, to: f64) -> impl Fn(f64) -> f32 {
+        move |ms| {
+            if (from..to).contains(&ms) {
+                0.3 * (2.0 * std::f64::consts::PI * 180.0 * ms / 1_000.0).sin() as f32
+            } else {
+                0.0
+            }
+        }
+    }
+
+    #[test]
+    fn a_word_said_through_the_release_keeps_the_tail_open_until_it_ends() {
+        // #1101: the last word ran 350 ms past the release.
+        let (tail, waited, clip) = release_tail_for(voice(-800.0, 350.0), Duration::ZERO);
+        assert!(
+            (Duration::from_millis(500)..=Duration::from_millis(540)).contains(&tail),
+            "{tail:?}"
+        );
+        assert!(waited <= tail + Duration::from_millis(40), "{waited:?}");
+        // The whole word is in the clip: 450 ms pre-roll, 1 s, then the tail.
+        let word_end = (450 + 1_000 + 340) * 16;
+        assert!(clip.samples.len() > word_end);
+        assert!(
+            clip.samples[word_end - 320..word_end]
+                .iter()
+                .any(|sample| sample.abs() > 0.1)
+        );
+    }
+
+    #[test]
+    fn a_release_after_the_speech_keeps_the_base_tail_without_waiting_longer() {
+        let (tail, waited, clip) = release_tail_for(voice(-800.0, -60.0), Duration::ZERO);
+        assert_eq!(tail, POST_RELEASE_TAIL);
+        assert_eq!(waited, POST_RELEASE_TAIL);
+        assert_eq!(clip.duration_ms(), 1_650);
+    }
+
+    #[test]
+    fn speech_that_carries_on_stops_the_tail_at_its_cap() {
+        let (tail, waited, clip) = release_tail_for(voice(-800.0, 5_000.0), Duration::ZERO);
+        assert_eq!(tail, MAX_RELEASE_TAIL);
+        assert_eq!(waited, MAX_RELEASE_TAIL);
+        assert_eq!(clip.duration_ms(), 2_050);
+    }
+
+    #[test]
+    fn the_stop_tone_or_a_key_click_never_grows_the_tail() {
+        let speech = voice(-800.0, -60.0);
+        // The wood stop sound (225 ms), loud and late through the output.
+        let stop_tone = Duration::from_millis(225);
+        let with_tone = |ms: f64| {
+            let tone = if (30.0..255.0).contains(&ms) {
+                let decay = 1.0 - (ms - 30.0) / 225.0;
+                (0.4 * decay * (2.0 * std::f64::consts::PI * 880.0 * ms / 1_000.0).sin()) as f32
+            } else {
+                0.0
+            };
+            speech(ms) + tone
+        };
+        let (tail, _, _) = release_tail_for(with_tone, stop_tone);
+        assert_eq!(tail, POST_RELEASE_TAIL);
+        // A key click: 15 ms of noise right at the end of the base tail.
+        let with_click = |ms: f64| {
+            let click = if (185.0..200.0).contains(&ms) {
+                if (ms * 16.0) as i64 % 2 == 0 {
+                    0.8
+                } else {
+                    -0.8
+                }
+            } else {
+                0.0
+            };
+            speech(ms) + click
+        };
+        let (tail, waited, _) = release_tail_for(with_click, stop_tone);
+        assert_eq!(tail, POST_RELEASE_TAIL);
+        assert_eq!(waited, POST_RELEASE_TAIL);
+        // Speech still going once the tone is over does grow the tail.
+        let (tail, _, _) =
+            release_tail_for(|ms| with_tone(ms) + voice(150.0, 450.0)(ms), stop_tone);
+        assert!(tail > Duration::from_millis(450), "{tail:?}");
     }
 
     #[test]

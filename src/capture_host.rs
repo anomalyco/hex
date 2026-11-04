@@ -295,6 +295,10 @@ pub enum CaptureCommand {
 
 /// A started capture.
 trait Recording: Send {
+    /// Preparation belongs to this recording, never to a later foreground app.
+    fn route_context(&self) -> Option<scrawl_capture::capture::RouteContext> {
+        None
+    }
     /// Stops recording and removes the bundle.
     fn cancel(self: Box<Self>);
     /// Stops recording the screen, its windows, and input now, keeping what
@@ -343,6 +347,9 @@ impl CaptureEngine for scrawl_capture::capture::Engine {
 }
 
 impl Recording for scrawl_capture::capture::Capture {
+    fn route_context(&self) -> Option<scrawl_capture::capture::RouteContext> {
+        Some(scrawl_capture::capture::Capture::route_context(self))
+    }
     fn cancel(self: Box<Self>) {
         scrawl_capture::capture::Capture::cancel(*self);
     }
@@ -1578,10 +1585,7 @@ impl CaptureHost {
             if code == "permission" {
                 return reply;
             }
-            #[cfg(target_os = "macos")]
             crate::feedback::play(crate::feedback::Tone::Error);
-            #[cfg(not(target_os = "macos"))]
-            crate::feedback::play(crate::feedback::Tone::CaptureFailed);
         }
         reply
     }
@@ -2336,7 +2340,10 @@ fn as_pen(event: scrawl_capture::capture::InputEvent) -> scrawl_capture::capture
 
 /// A pointer move on the drawing overlay, at `x`, `y` in its points;
 /// `scale` is its pixels per point (Linux). The capture's target becomes
-/// the recorded screen in points, so strokes land where they were drawn.
+/// the recorded screen in points, so strokes land where they were drawn:
+/// the portal's logical size when it gives one, since a fractional scale
+/// (1.5, 1.33) reaches the overlay rounded up to a whole number, which
+/// would shrink the target and pin strokes past it to its edge.
 #[cfg(target_os = "linux")]
 pub fn draw(x: f32, y: f32, scale: f32) {
     if !drawing() {
@@ -2346,7 +2353,10 @@ pub fn draw(x: f32, y: f32, scale: f32) {
         && scale > 0.0
         && let Some(source) = ink_source()
     {
-        let area = [width as f32 / scale, height as f32 / scale];
+        let area = scrawl_capture::capture::recorded_screen_points().map_or(
+            [width as f32 / scale, height as f32 / scale],
+            |(width, height)| [width as f32, height as f32],
+        );
         let mut frame = source
             .telemetry
             .target_frame
@@ -3289,6 +3299,7 @@ fn collect(
         }
     };
     let mut timeline = Timeline::new(t0);
+    let prepared = capture.route_context().and_then(routing::look);
     let mut checked = Instant::now();
     loop {
         let chunk = match chunks.recv_timeout(SCREEN_CHECK) {
@@ -3341,9 +3352,9 @@ fn collect(
             };
             match jobs.try_send(job) {
                 Ok(()) => {
-                    // Only a queued capture is looked at, so a refused one
-                    // leaves no look running.
-                    if let Some(look) = context.and_then(routing::look) {
+                    // Reuse recording-time preparation; adapters without an
+                    // early context start their look once the capture queues.
+                    if let Some(look) = prepared.or_else(|| context.and_then(routing::look)) {
                         let _ = give_look.send(look);
                     }
                     return;

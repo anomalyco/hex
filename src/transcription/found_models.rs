@@ -78,7 +78,8 @@ pub fn hub_dir() -> Option<PathBuf> {
     let directory = from_env("HF_HUB_CACHE")
         .or_else(|| from_env("HF_HOME").map(|home| home.join("hub")))
         .or_else(|| {
-            dirs::home_dir().map(|home| home.join(".cache").join("huggingface").join("hub"))
+            crate::app_paths::home_dir()
+                .map(|home| home.join(".cache").join("huggingface").join("hub"))
         })?;
     directory.is_dir().then_some(directory)
 }
@@ -179,6 +180,22 @@ pub(crate) fn file_id(metadata: &std::fs::Metadata) -> Option<u64> {
     {
         use std::os::unix::fs::MetadataExt;
         Some(metadata.ino() ^ metadata.dev().rotate_left(32))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        None
+    }
+}
+
+/// The file's inode on Unix, without the volume's device number: macOS can
+/// number a volume differently at each mount, so a saved receipt keeps only
+/// what survives a restart. `None` on Windows.
+pub(crate) fn inode(metadata: &std::fs::Metadata) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(metadata.ino())
     }
     #[cfg(not(unix))]
     {

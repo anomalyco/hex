@@ -21,12 +21,13 @@ pub(crate) mod spring;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rune::compose::{Compositor, Frame};
-use rune::{Cx, El, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
+use rune::{Cx, El, LiveRegion, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
 
 use crate::app_settings::IndicatorPosition;
+use crate::desktop::i18n::tr;
 use crate::dictation::indicator::{DictationIndicatorEvent, DotFrame, IndicatorModel};
 use crate::rune_hud::dot_scope::MAX_DOTS;
 #[cfg(not(target_os = "macos"))]
@@ -52,6 +53,8 @@ pub(crate) const WINDOW: (f32, f32) = (304.0, 80.0);
 const NOTCH_RADIUS: f32 = 8.0;
 /// The open island's bottom corner radius.
 const ISLAND_RADIUS: f32 = 18.0;
+/// The notch indicator's bottom corner radius once its ears are out.
+const EARS_RADIUS: f32 = 14.0;
 
 /// The live text's gap from the HUD's plate.
 const LIVE_TEXT_GAP: f32 = 6.0;
@@ -131,12 +134,6 @@ impl HudSender {
         }
         self.overlay
             .update(move |hud, _| hud.set_position(position));
-    }
-
-    /// Whether the HUD ever presented a frame.
-    #[cfg(target_os = "windows")]
-    pub(crate) fn presented(&self) -> bool {
-        self.overlay.surface_stats().totals.presents > 0
     }
 
     /// Why Windows could not show the HUD, for Settings: Rune's reason, or a
@@ -224,7 +221,8 @@ impl Hud {
     /// While shown, every `FOLLOW_EVERY`: the HUD and the live text move to
     /// the display under the pointer when it moved to another, at once and
     /// without focus. Windows and X11; a layer-shell surface stays on the
-    /// compositor's focused output, and GNOME and KDE on the primary.
+    /// compositor's focused output, and GNOME and KDE on Wayland on the
+    /// primary.
     #[cfg(not(target_os = "macos"))]
     fn follow_pointer(&mut self, now: Instant) {
         if !self.shown || self.followed.is_some_and(|at| now < at + FOLLOW_EVERY) {
@@ -327,6 +325,56 @@ impl Hud {
     }
 }
 
+/// How long the hidden HUD keeps its GPU surface: the device it holds costs
+/// about 150 MB and the GPU driver's threads waking some 65 times a second.
+/// Windows gives it back, window included, as soon as the HUD hides: a hidden
+/// topmost window that presented with DXGI let NVIDIA's Instant Replay take
+/// Hex for the running game (#1308).
+#[cfg(not(target_os = "windows"))]
+const GPU_IDLE: Duration = Duration::from_secs(5 * 60);
+#[cfg(target_os = "windows")]
+const GPU_IDLE: Duration = Duration::ZERO;
+
+/// The format the HUD draws in on Windows and Linux (Rune drops the
+/// surface's sRGB suffix for `srgb_blend`).
+const HUD_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
+
+/// A painter made ahead of the HUD's first frame on a device `prepare_gpu`
+/// was given.
+static PREBUILT: Mutex<Option<(wgpu::Device, Painter)>> = Mutex::new(None);
+
+/// Makes the HUD's pipeline on `device` off the UI thread, for the HUD's next
+/// first frame: compiling it there takes 75 to 115 ms on Windows. Unclaimed,
+/// it goes after a while, since it keeps the device alive.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn prepare_gpu(device: &wgpu::Device) {
+    let lock = || PREBUILT.lock().unwrap_or_else(|error| error.into_inner());
+    if lock().as_ref().is_some_and(|(made, _)| made == device) {
+        return;
+    }
+    let painter = Painter::new(device, HUD_FORMAT);
+    *lock() = Some((device.clone(), painter));
+    let device = device.clone();
+    let _ = std::thread::Builder::new()
+        .name("hud-prepared".into())
+        .spawn(move || {
+            std::thread::sleep(Duration::from_secs(70));
+            let mut slot = lock();
+            if slot.as_ref().is_some_and(|(made, _)| *made == device) {
+                slot.take();
+            }
+        });
+}
+
+/// `prepare_gpu`'s painter, when it was made on `device` for `format`.
+fn prebuilt(device: &wgpu::Device, format: wgpu::TextureFormat) -> Option<Painter> {
+    let mut slot = PREBUILT.lock().unwrap_or_else(|error| error.into_inner());
+    slot.as_ref()
+        .is_some_and(|(made, painter)| made == device && painter.format == format)
+        .then(|| slot.take().map(|(_, painter)| painter))
+        .flatten()
+}
+
 /// Adds the HUD's overlay to the app; send its events through the returned
 /// sender.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
@@ -345,14 +393,19 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             view,
         }
         .options(OverlayOptions {
-            // The first press never waits on the panel or its pipeline.
-            prewarm: cfg!(target_os = "macos"),
+            // The first press never waits on the window: macOS keeps the
+            // panel drawn at alpha zero; elsewhere only the window waits,
+            // and its GPU surface comes with the show (`release_gpu_after`).
+            prewarm: true,
             #[cfg(not(target_os = "macos"))]
             display: display(),
             ..OverlayOptions::default()
         })
         // The shaders write display (sRGB-encoded) values.
         .srgb_blend(true)
+        // On Linux a burst of dictations keeps the GPU surface, so each HUD
+        // shows at once; a Hex at rest gives the GPU device back.
+        .release_gpu_after(GPU_IDLE)
         .compositor(HudCompositor {
             gpu: None,
             animating: animating.clone(),
@@ -390,24 +443,45 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
 /// the pointer and pick its monitor; a layer-shell surface pins no output, so
 /// the compositor puts it on the focused one. GNOME (whose HUD runs on
 /// XWayland, blind to the pointer over Wayland windows) and KDE keep the
-/// primary display.
+/// primary display on Wayland; their X11 sessions follow the pointer (#1200).
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn display() -> rune::DisplayTarget {
     #[cfg(target_os = "linux")]
-    if std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| {
-        desktops.split(':').any(|desktop| {
-            ["GNOME", "KDE"]
-                .iter()
-                .any(|d| desktop.eq_ignore_ascii_case(d))
-        })
-    }) {
+    if keeps_primary_display(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        crate::linux::session::LinuxSession::detect().is_wayland(),
+    ) {
         return rune::DisplayTarget::Primary;
     }
     rune::DisplayTarget::UnderPointer
 }
 
-fn view(_: &Hud, _: &mut Cx<Hud>) -> El {
-    el().key("hud").w_full().h_full()
+/// Whether the HUD stays on the primary display: GNOME and KDE on Wayland
+/// only. On X11 the pointer is readable on every desktop.
+#[cfg(any(target_os = "linux", test))]
+fn keeps_primary_display(desktops: Option<&str>, wayland: bool) -> bool {
+    wayland
+        && desktops.is_some_and(|desktops| {
+            desktops.split(':').any(|desktop| {
+                ["GNOME", "KDE"]
+                    .iter()
+                    .any(|d| desktop.eq_ignore_ascii_case(d))
+            })
+        })
+}
+
+/// The HUD's one element, which the compositor draws over. Screen readers
+/// read it as a status that announces Recording and Transcribing as they
+/// begin; it takes no input, as the overlay is click-through.
+fn view(hud: &Hud, _: &mut Cx<Hud>) -> El {
+    let status = hud.model.status().map_or("", tr);
+    el().key("hud")
+        .w_full()
+        .h_full()
+        .role("status")
+        .label(status)
+        .description(tr("Dictation"))
+        .live_region(LiveRegion::Polite)
 }
 
 /// `DotUniforms` in `rune_hud.wgsl`.
@@ -437,9 +511,11 @@ pub(crate) struct DotUniforms {
     plate_layout: [f32; 4],
     island: [f32; 4],
     field: [f32; 4],
+    /// The notch indicator's done and failed, 0 to 1.
+    ears: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<DotUniforms>() == 192);
+const _: () = assert!(std::mem::size_of::<DotUniforms>() == 208);
 const DOT_UNIFORM_BYTES: u32 = std::mem::size_of::<DotUniforms>() as u32;
 const DOT_BYTES: u64 = (MAX_DOTS * 4) as u64;
 /// How `rune_hud.wgsl` declares `u` as a uniform buffer; with immediates it
@@ -492,7 +568,13 @@ impl DotUniforms {
             island: layout
                 .island
                 .map_or([0.0; 4], |island| island_shape(island, pose)),
-            field: [field_radius(layout, pose), 0.0, 0.0, 0.0],
+            // The ears draw glyphs, not the field: the notch's half width,
+            // the mode, the voice, and the stage's clock.
+            field: match layout.island {
+                Some(island) if island.ears => [island.notch[0] / 2.0, 1.0, pose.level, pose.clock],
+                _ => [field_radius(layout, pose), 0.0, 0.0, 0.0],
+            },
+            ears: [pose.done, pose.fail, 0.0, 0.0],
         }
     }
 }
@@ -501,6 +583,17 @@ impl DotUniforms {
 /// the plate as it shows, bouncing with it.
 fn island_shape(island: Island, pose: &dot_scope::Pose) -> [f32; 4] {
     let [notch_width, notch_height] = island.notch;
+    if island.ears {
+        // The notch's height throughout, widening to the island's width.
+        let half_width = notch_width / 2.0;
+        let grow = pose.reveal;
+        return [
+            half_width + (island.width / 2.0 - half_width) * grow,
+            notch_height,
+            island.top,
+            (NOTCH_RADIUS + (EARS_RADIUS - NOTCH_RADIUS) * grow.min(1.0)).min(notch_height / 2.0),
+        ];
+    }
     let pad = ISLAND_PAD as f32;
     let grow = pose.reveal;
     let half_width = notch_width / 2.0;
@@ -567,7 +660,10 @@ impl Target {
 }
 
 struct HudCompositor {
-    gpu: Option<Painter>,
+    /// The painter and the device its buffers live on: an overlay shown
+    /// again can draw on another device (#982). Keyed by Rune's device key,
+    /// since wgpu compares a new Rune GPU's device equal to the old one.
+    gpu: Option<(rune::compose::DeviceKey, Painter)>,
     animating: Arc<AtomicBool>,
 }
 
@@ -605,10 +701,16 @@ impl Compositor<Hud> for HudCompositor {
             drop(clear_pass(f.encoder, f.target));
             return;
         };
-        if self.gpu.as_ref().is_none_or(|gpu| gpu.format != f.format) {
-            self.gpu = Some(Painter::new(f.device, f.format));
+        if self
+            .gpu
+            .as_ref()
+            .is_none_or(|(device, gpu)| *device != f.device_key() || gpu.format != f.format)
+        {
+            let painter =
+                prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
+            self.gpu = Some((f.device_key(), painter));
         }
-        let gpu = self.gpu.as_ref().expect("created above");
+        let (_, gpu) = self.gpu.as_ref().expect("created above");
         let uniforms = gpu.write(&drawn, layout, target, |buffer, data| {
             f.write_buffer(buffer, 0, data)
         });

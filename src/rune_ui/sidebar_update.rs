@@ -1,6 +1,7 @@
 //! The sidebar's update: Restart to update, Download update, or a channel
 //! switch, and under Restart to update what the staged dev build changed.
 
+use super::sidebar::FOOTER_LINE;
 use super::*;
 
 const SHOWN: usize = 3;

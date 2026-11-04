@@ -25,6 +25,8 @@ pub type Pages = fn(&str) -> Option<Registration>;
 
 #[derive(Clone, Default)]
 pub struct Env {
+    #[cfg(test)]
+    pub remote_fixture: Option<std::path::PathBuf>,
     pub config: RouterConfig,
     pub dirs: RouterDirs,
     pub log: Option<Log>,

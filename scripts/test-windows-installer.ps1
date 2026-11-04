@@ -30,7 +30,7 @@ function Check([bool]$condition, [string]$message) {
 
 function Run-Setup([string]$name) {
     $process = Start-Process $Installer -Wait -PassThru -ArgumentList @(
-        '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SKIPVULKANCHECK=1', "/LOG=$logs\$name.log"
+        '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$logs\$name.log"
     )
     $process.ExitCode
 }
@@ -56,12 +56,9 @@ $uninstaller = ($entry.UninstallString -replace '"', '')
 Check ($uninstaller -like "$support\uninstall\*") 'the uninstaller lives outside versions\, which updates prune'
 Check (Test-Path $uninstaller) 'the uninstaller exists'
 
-if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or (Test-Path "$env:SystemRoot\System32\vulkan-1.dll")) {
-    $reported = (& $installed --version) -split '\s+' | Select-Object -Last 1
-    Check ($reported -eq $Version) "installed hex.exe reports $Version"
-} else {
-    Write-Output 'skip - hex.exe --version needs vulkan-1.dll, which this runner lacks'
-}
+# Starts without a Vulkan loader too (#1240), which some runners lack.
+$reported = (& $installed --version) -split '\s+' | Select-Object -Last 1
+Check ($reported -eq $Version) "installed hex.exe reports $Version"
 
 Check ((Run-Setup 'reinstall') -eq 0) 'reinstalling the same version exits 0'
 Check ((Get-FileHash -Algorithm SHA256 $installed).Hash -eq $expected) 'reinstall keeps the release bytes'

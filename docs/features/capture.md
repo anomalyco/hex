@@ -67,13 +67,26 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
 │   the bundle (keyframes, contact sheet, scrawl.json)
+├── Linux: strokes are placed on the recorded screen in its logical points,
+│   from the ScreenCast portal's stream size when it reports one smaller
+│   than the frames, so a fractional scale (1.5, 1.33), which reaches the
+│   overlay rounded up to 2, no longer pins strokes to a top-left part of
+│   the screen; without that size it divides the pixels by the overlay's
+│   scale. Check: scrawl-capture capture::platform::tests
+│   a_fractionally_scaled_screen_keeps_its_logical_size; not observed on a
+│   fractionally scaled monitor. Known gap: the overlay starts below a
+│   desktop bar's reserved area, so saved ink sits that bar's height off
+│   the live ink
 └── Linux recordings show the overlay itself (Wayland can't leave it out)
 
 On Linux                                 // capture.linux
 ├── X11 session (DISPLAY set, WAYLAND_DISPLAY empty; never XWayland) ->
 │   Screen and Area are read from the X server itself (scrawl_capture::
-│   linux::x11): MIT-SHM GetImage each frame (plain GetImage without SHM),
-│   the pointer blended in from XFixes, 30 fps to x264 through ffmpeg. No
+│   linux::x11): MIT-SHM GetImage each frame borrowed in place (plain GetImage
+│   without SHM), the pointer cached from XFixes on XFixesCursorNotify and
+│   placed each frame from QueryPointer, 60 fps to x264 (`superfast` up to
+│   1440p, `ultrafast` above, wall-clock stamped into `fps=60`) through
+│   ffmpeg. No
 │   portal and no dialog, so i3 and other desktops without a ScreenCast
 │   backend record (#690, @nefthy). Screen is the RandR monitor under the
 │   pointer; Area is `hex annotate start --area X,Y,W,H` (pixels), clipped to
@@ -81,27 +94,50 @@ On Linux                                 // capture.linux
 │   the portal's picker and, without one, fails saying to record the screen
 │   or an area. Can't open the display, an unusual pixel depth, or no
 │   ffmpeg/x264 -> the capture fails at once with why in the capsule, never
-│   a capture without a picture. Check: x11 areas_are_clipped…; a headless
-│   Xvnc + i3 session on apollo with no ScreenCast portal recorded an
-│   800x500 Area (154 frames, 5.1 s) and the 1920x1080 screen (153 frames)
+│   a capture without a picture. Check: x11 areas_are_clipped…,
+│   cursor_blends_premultiplied_argb_in_place; on hex-linux-nvidia (T4, Ubuntu
+│   24.04) native Xorg + i3 recorded 1920x1080 at 60/1 fps (598 frames in
+│   9.97 s, 597 grabs) and a 1280x720 Area (298 frames in 4.97 s, 297 grabs),
+│   and rootful Xwayland at 3840x2160 recorded 2560x1440 at 60/1 fps (598
+│   frames in 9.97 s from 282 raw 4K grabs; raw 4K pipe readback is CPU-bound)
 ├── Wayland -> the ScreenCast portal (zbus): Screen asks the desktop once and
 │   keeps its restore token (<support>/screencast-token), so later captures
 │   start without a dialog; Window shows the desktop's picker every time (the
 │   capsule's Window chip goes straight to it); the cursor is embedded
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
-│   time; 32-bit RGB as a linear DMA-BUF (niri, GNOME, KDE) or shared memory
+│   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
+│   KDE) or shared memory
 ├── Encoding -> VA-API (libva loaded at run time): each DMA-BUF imported, scaled
-│   to a 2560 px long edge (1920 for a window) and converted on the video
-│   engine, H.264 High at a constant QP with Hex-written headers, 30 fps;
-│   `ffmpeg -c copy` muxes recording.mp4. Every /dev/dri render node is
+│   to a 2560 px long edge (1920 for a window, exact even sides padded to 16 px
+│   macroblocks and cropped in SPS) and converted on the video engine, H.264
+│   High at a constant QP and computed level (4.2 at 1080p60, 5.1 at 1440p60,
+│   5.2 at 4K60) with Hex-written headers, 60 fps; `ffmpeg -c copy` muxes
+│   recording.mp4. Every /dev/dri render node is
 │   tried in order, so a hybrid laptop whose first node is a GPU the VA
 │   driver can't use encodes on the next (#853). No VA-API -> frames copied
-│   and encoded with x264 through ffmpeg (slow on DMA-BUF-only compositors);
-│   a first frame neither path can read (a DMA-BUF the CPU can't map) fails
-│   the capture with why, never a capture without a picture. Check: vaapi
-│   render_nodes_in_order; not observed on a hybrid laptop
-├── Candidates -> a small copy from the video engine (at most 4× smaller per
-│   pass: radeonsi crashes past it)
+│   and encoded at 60 fps with x264 (`superfast` up to 1440p, `ultrafast`
+│   above) through ffmpeg (slow on DMA-BUF-only compositors; on NVIDIA GBM +
+│   xdg-desktop-portal-wlr without DONT_FIXATE, linear DMA-BUF allocation is
+│   refused by the compositor and delivers no frames);
+│   VA-API refusing the first frame's buffer (#1179: Intel Arc on the xe
+│   driver) -> the same CPU path instead of failing. The negotiated DRM
+│   modifier goes to the import and the log; the CPU never reads a tiled
+│   buffer as rows. A first frame neither path can read (a DMA-BUF the CPU
+│   can't map, or tiled) fails the capture with why, never a capture without
+│   a picture or a crash. Buffers PipeWire removes mid-stream (a
+│   renegotiation) are never queued again, and Hex maps buffers itself and
+│   unmaps a removed one only after the recorder's copy, so a renegotiation
+│   can't crash Hex. Check: vaapi render_nodes_in_order,
+│   level_and_sps_crop_match_resolution_and_60fps, pipewire
+│   offered_formats_parse_back, a_negotiated_tiled_modifier_is_read,
+│   capture::platform output_sizes_stay_exact_even_dimensions… and
+│   cpu_x264_uses_superfast…; PipeWire 1920x1080 SHM -> x264 recorded 60/1 fps
+│   (598 frames in 9.97 s, 594 delivered) on hex-linux-nvidia; VA-API 60 fps
+│   encoding not observed on Intel/AMD hardware (T4 has no VA-API encoder), nor
+│   on a hybrid laptop or an Intel Arc laptop
+├── Candidates -> a small copy from the video engine on demand every
+│   FRAME_SAMPLE_INTERVAL (at most 4× smaller per pass: radeonsi crashes past
+│   it)
 ├── Reading movies back (keyframes, probe, audio) -> `ffmpeg`/`ffprobe`
 ├── Missing PipeWire, ffmpeg, or a picker answer -> that capture fails with why
 │   └── The screen-share picker cancelled (or the stream never starting) after
@@ -290,8 +326,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   Some (the bundle's t0; timer, meter, ✓ finish, ✕ cancel) -> Processing ->
 │   done (the lead alone, no word), Failed, or Cancelled, then leaves on its
 │   own; a written capture whose transcript has no words reads "no speech"
-├── Tones (`feedback::Tone::Capture*`, at the dictation volume; zero is
-│   silent): start, stop, a rule's send going, an Undo, a failure
+├── Tones (`capture_capsule::tone`, at the dictation volume; zero is
+│   silent), from the chosen sound set: start and stop are the set's start
+│   and stop, a send going its done (Annotate's own sent sound when the set
+│   has none), a discarded recording its cancel, a failure its error (Basso
+│   for Classic on macOS); a taken-back send keeps Annotate's own undo sound
 ├── Failed -> "Couldn't start" until the engine reports it
 │   recording (`screen`), then "Couldn't save"; a failed send ->
 │   "Couldn't send to X". Each keeps its `error`; a start or save that fails
@@ -340,20 +379,18 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   Unanswered, it goes back to recording after 4 s (never while hovered, and
 │   1.5 s after the pointer leaves). Esc never discards
 ├── Routing (Scrawl's routing.md) -> `last.route` once its answer arrives; the
-│   capsule shows a rule's and a pick's send as sent itself, and follows
-│   only the send going (its tone), Queued (then Sent), how an Undo ended,
-│   and a failed send
-│   ├── A rule Kit saved -> the only send that goes by itself, at once, with
-│   │   no countdown: "Sent to X" and the same quiet Undo (click only, no key)
-│   │   for 5 s that a
-│   │   pick gets, no ring or drain; ✕ closes. The Sent tone plays when the
-│   │   router says it went. No runner-up chip, since the router names none
-│   │   beside a saved rule; when the Undo window ends the capsule leaves by
+│   capsule follows refinements and delivery separately, including Queued
+│   (then Sent), how an Undo ended, and a failed send
+│   ├── A saved rule -> "Sending to X", a 3–2–1 second countdown and Undo.
+│   │   A repository awaiting its session shows the repository name. Undo
+│   │   cancels before posting. The capsule remains visible until delivery;
+│   │   then it reads "Sent to X" and plays the Sent tone. A picked send still
+│   │   goes immediately with its plain Undo. No runner-up chip for a rule;
+│   │   after delivery and the Undo window, the capsule leaves by
 │   │   itself (with the list open it stays; the pointer on it holds it, and a
 │   │   folded list gives it a brief hold). Picking the rule's own session there (without
 │   │   "Always") only closes the list; nothing is sent again
-│   ├── The Undo chip counts nothing down: the capsule reads the same for the
-│   │   whole window and wakes once, when it ends
+│   ├── A rule's countdown wakes each second; a pick's Undo wakes only at its end
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
 │   │   answer) -> macOS: "Copied", then Search with the capture shortcut's
 │   │   keycaps (as Settings draws them) and ✕, the suggestions open under
@@ -469,14 +506,19 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   ListFooter::Well, a rounded well inset like the rows
 │   └── Long names give way together so the widest row stays inside the panel
 ├── Every change moves at once, as Dynamic Island's: the walls and what stays
-│   travel on `island` (0.30 s, bounce 0.12), while everything leaving and
+│   travel on `island`, the dictation HUD's morph (`rune_hud::spring::MORPH`,
+│   0.30 s, bounce 0.15; the entry's rise and exit's fall too, with the
+│   shell fading over the same time unbounced), while everything leaving and
 │   everything arriving blurs (`content_blur` 3 pt), scales toward the
 │   capsule's middle (`content_scale` 0.92), and fades over that same move
 │   (`content_in` 0.30 s, `content_out` 0.24 s). Nothing staggers, and nothing
 │   waits for a wall or for other content; only an entry takes two frames
 │   (the origin pose, then rest). The list under the capsule comes and goes
 │   on the same springs. The playground's Transition card tunes all of it
-├── Reduce Motion -> travel jumps, nothing blurs or scales; opacity still fades
+├── Reduce Motion -> the capsule enters at rest and leaves where it is (no
+│   origin pose, menu-bar fold, or edge glow), changes jump, nothing blurs
+│   or scales; the shell, at the notch too, fades on the HUD's short fade
+│   (`reduce_motion_only_fades_the_capsule`)
 └── After a capture, one of five flows (`capture.capsule_flow`, the
     playground's "Flow after a capture"; prototypes to compare, clips in
     r22-flows). Only the guesses' look changes; rules, Undo, ✕ and the
@@ -512,6 +554,10 @@ The on-screen picker                     // capture.picker (capture_capsule/pick
 ├── A full-screen Rune overlay on the pointer's display, under the capsule,
 │   left out of recordings (`OwnWindow::Picker`); it takes the pointer only while
 │   picking and never takes focus; it follows the pointer to another display
+├── Made at launch, hidden; away from macOS its window holds no GPU surface
+│   while hidden (`release_gpu_when_hidden`), so a Hex that never annotates
+│   holds no GPU memory for it (`perf/idle.bench.ts#window-closed-memory`,
+│   `gpu.vram`)
 ├── Everything but the target dims; the dim moves with the target as one piece
 ├── Window -> the window under the pointer: tinted, ringed, its title in a badge;
 │   the cursor becomes Scrawl's camera; no window under it -> the display
@@ -532,16 +578,24 @@ Hex's own windows                        // capture.own-windows
 │   ├── Other recorders -> the capsule, picker, and ink are left out
 │   │   (sharingType none) while shown; the dictation HUD and meeting
 │   │   capsules show
-│   │   └── Hidden (prewarmed, alpha zero on every Space) -> sharingType
-│   │       readOnly once the hide finishes, so Mission Control's Space
-│   │       thumbnails stay drawn (Rune's prewarmed panels do this)
+│   │   └── Hidden -> ordered out of every Space once the hide finishes,
+│   │       before sharingType returns to readOnly; prewarming keeps the
+│   │       surface ready but leaves no invisible panel ordered in. This
+│   │       avoids relying on macOS restoring sharing after exclusion
 │   ├── Show in screen recordings on -> every recorder, Hex's captures
 │   │   included, shows all of it (sharingType readOnly, no SCK exclusions);
 │   │   still never in the window log or the target. Rune's
 │   │   OverlayHandle::set_exclude_from_capture flips open windows, and the
 │   │   sampler rebuilds its filter mid-recording (OwnWindows::recorded) and
 │   │   the recording's (capture-core's Recording::set_exclusions)
-│   └── Not proven natively end to end yet
+│   └── Rune's presence tests check ordering and sharing together, including
+│       stale fade completions and setting changes. Its native `spaces_probe`
+│       checks this process's WindowServer ordering. A native Hex smoke on
+│       2026-11-02 failed before the pin bump and passed after it: capsule,
+│       Screen/Area picker, ink, dictation HUD and meeting capsule show and
+│       leave no onscreen window after hiding. This used isolated test state,
+│       without recording. Mission Control's actual thumbnail report and
+│       third-party recording exclusion remain unverified
 │   └── Click-through chrome (the full-screen ink overlay, the capsule's
 │       640×424 panel outside its pill) -> clicks there count for the app
 │       beneath; only the pill's (capture_host::set_capsule_pill) are Hex's
@@ -618,6 +672,11 @@ hex capture stop                         // capture.stop
     ├── Keyframes decoded from recording.mp4 by scrawl-helper (beside `hex`: in
     │   Hex.app's Contents/MacOS or target/<profile>; or $SCRAWL_HELPER); helper
     │   missing -> the 480 px sampled frames
+    ├── Spoken cues (look, now, here, this…) pick the keyframe the screen
+    │   changes to; they also count in Spanish (mira, ahora, aquí, esto…),
+    │   French, German, Portuguese, and Italian, whatever the dictation
+    │   language. Check: scrawl-capture keyframes
+    │   spoken_cues_count_in_other_languages
     ├── Transcription fails -> logged; the bundle has no words, and the outcome says why
     ├── Written -> image and text copied to the clipboard (Scrawl's handoff)
     └── Sent -> the capture-route thread (capture.route)
@@ -631,29 +690,51 @@ What a send carries                      // capture.send (router opencode::send_
 │   server on another machine reads it; the text only names where it was recorded
 ├── Every request goes to the running local service over HTTP
 │   (service.json); a service that isn't up is never started
-├── With an agent host (routing's agentHost) the bundle is synced there and
-│   the contact sheet goes as a `file://` part instead; SSH can't carry the
-│   images
+├── With an agent host (routing's agentHost), the request body travels on SSH
+│   stdin to a Python 3 standard-library HTTP client. The contact sheet stays
+│   inline; the bundle copy follows the accepted prompt in the background
+│   (the prompt says the folder may still be arriving). Credentials stay remote.
+│   An explicitly configured agentOpencode keeps the CLI and synchronous copy;
+│   without Python 3, the default path falls back to the CLI before any HTTP send
+│   └── macOS/Linux reuse the SSH connection for 60 s after its last use,
+│       through an owner-only control socket; Windows opens each connection.
+│       API reads now honor their caller's deadline over SSH too, including
+│       the optional 600 ms idle-status check before a prompt. A failed idle
+│       check records unknown status and still sends. Neither CLI startup nor
+│       the light-bundle copy is on the default prompt's critical path
 ├── No video: a capture's movie is too large for a prompt
 └── Check: router opencode tests; a send from apollo to a throwaway session
     on OpenCode V2 stored the contact sheet and keyframe as inline image/png (before one-sheet)
     (2026-10-29)
 
 Where it goes                            // capture.route; capture.routing's autoSend on
-├── At the stop, beside the writing -> a capture-look thread reads the tab,
+├── Once recording starts -> a capture-look thread reads the tab,
 │   terminal, and sessions in front (Scrawl's router, in Hex's process, with
 │   Scrawl's own router folders, so `scrawl router undo` and its evals see Hex's
 │   sends as Scrawl's). The whole look has 15 s: steps not begun by then are
 │   skipped, and routing waits 1 s more for the one under way, then goes on
-│   without it. An app rule's folder is read with the sessions, and a failed
+│   without it. The newest-session list starts beside local sensing; exact
+│   folders are read in the other lane as soon as the clues name them (at most
+│   two API reads in flight, one shared 10 s session budget). Results merge in
+│   the same order; missing session IDs are read afterward. Saved rules match
+│   locally from the captured bundle ID or observed URL; suggestions read the
+│   list afterward. A saved rule takes precedence over a spoken session name.
+│   An app rule's folder is read with the sessions, and a failed
 │   page of sessions keeps what was read and still reads the folders and
 │   sessions that rules name
+│   └── Timings in process.log: local sensing, total lookup, page publisher,
+│       written-to-look wait, judging, and sending (sync, idle check, post).
+│       Fake-dependency benchmarks and their proof limits:
+│       [Annotate routing latency](../../perf/annotate-routing.md)
 ├── Written -> the one capture-route thread (queue 16) decides; the snapshot's
-│   `last.route` follows: Looking -> Rule | Guess | Nothing | NoAnswer |
-│   Unreachable
+│   `last.route` follows: Looking -> Rule | ResolvingRule | Guess | Nothing |
+│   NoAnswer | Unreachable. Background refinements preserve an open search and
+│   selected session; a pick or Undo cancels them
 │   ├── Rule -> only a rule the person saved (`routing.sites`, `routing.apps`,
-│   │   a Shift pick's): sent at once, Sending -> Sent, or Queued
-│   │   when OpenCode didn't take it; Undo takes it back as it does a pick. Whatever
+│   │   a Shift pick's): a three-second countdown begins at Written. A folder
+│   │   rule shows its repository while its session resolves; it sends once both
+│   │   the countdown and resolution finish. Undo during the countdown posts
+│   │   nothing. Sending -> Sent, or Queued when OpenCode didn't take it. Whatever
 │   │   autoSend, smartRouting, or jevRouting say, a saved rule sends and
 │   │   nothing else sends on its own. smartRouting off decides with the port
 │   │   ladder, after rules and addresses, on the same look
@@ -665,6 +746,9 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   reason as the row's word ("dev server", "same page", "mentioned"; none
 │   │   for Jev's pick or fallback), then
 │   │   the runners-up and recent sessions; nothing sent until one is picked.
+│   │   The deterministic guess publishes first. Model refinement has one
+│   │   three-second budget including recent messages and credential lookup;
+│   │   a timeout keeps the first guess. A later result cannot override a pick or Undo.
 │   │   `site` names what a Shift pick (Shift+click, ⇧⏎ in the list,
 │   │   or `send --always`) would save, after which that site's captures are Rules;
 │   │   ⇧⏎ in a Rule's list saves the rule for the session picked instead
@@ -675,8 +759,19 @@ Where it goes                            // capture.route; capture.routing's aut
 │       deadline, down, or refusing); a warning in process.log with the error, and
 │       the capsule reads "Couldn't reach OpenCode" with why ("didn't answer in
 │       time"), keeping Paste
+│       └── OpenCode refusing Hex's password (HTTP 401/403) -> "OpenCode needs a
+│           password Hex doesn't have", for the look and for a send, and
+│           process.log says where Hex reads it (service.json under this user's
+│           ~/.local/state/opencode, or OPENCODE_PASSWORD), never the password.
+│           The capture stays saved and copied. Check: capture_host::routing
+│           a_look_that_read_no_sessions_answers_unreachable,
+│           a_failed_send_says_what_went_wrong. Known gap (#1131): Hex on
+│           Windows can't read the registration of an OpenCode running in WSL,
+│           so that setup isn't supported
 ├── An answer for a capsule already closed (dismissed, or past its hold)
 │   leaves it closed; `hex capture list` and `send` still offer the capture
+├── Starting another capture preserves an older rule's accepted pending send;
+│   its eventual answer does not replace the newest capsule
 ├── The capsule's commands act only on `last`, the newest routed capture:
 │   ├── Send{to} -> the Rule's own session, already sent, does nothing; any
 │   │   other pick sends there (taking back a send already elsewhere first) and logs
@@ -772,7 +867,7 @@ Checks:
   `the_shortcut_records_once_its_keys_come_up`,
   `a_failed_start_ends_before_escape_or_the_shortcut_sees_it`;
   `the_capture_shortcut_is_suppressed_and_never_chord_evidence` and
-  `a_capture_logs_only_keys_that_reach_the_app` in suppression.rs;
+  `a_capture_logs_only_keys_that_reach_the_app` in suppression/tests.rs;
   `only_the_capsules_pill_and_not_its_panel_takes_clicks` in capture_host.rs;
   `a_paste_goes_to_an_external_app_never_the_host` in capture/macos.rs;
   `the_hosts_normal_windows_count_and_its_chrome_does_not` in

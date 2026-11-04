@@ -164,6 +164,12 @@ fn stills() -> Vec<(&'static str, Pres)> {
             ))]),
         ),
         ("rule-sent", after(&routed(rule()))),
+        (
+            "rule-resolving",
+            after(&routed(Route::ResolvingRule {
+                name: "board".into(),
+            })),
+        ),
         ("rule-final", {
             let mut flow = Flow::new();
             flow.input(Input::Routed(rule()), 0.0);
@@ -465,11 +471,11 @@ fn the_widest_states_fit_the_panel() {
     }
 }
 
-/// The capsule says its shortcuts in quiet text ("⏎", "esc"), a hint's
-/// keys in one small rect at most. The one keycap tray is Search's: the
-/// capture shortcut that opens it, drawn as Settings draws it.
+/// Keycaps, as Settings draws a shortcut, are for Search's chip and the
+/// hints under the list; a chip on the top line says its shortcut in quiet
+/// text ("Next ⇥").
 #[test]
-fn the_capsule_draws_keycaps_only_on_search() {
+fn the_capsule_draws_keycaps_only_on_search_and_hints() {
     for (name, pres) in stills() {
         let rt = runtime(pres, false);
         for e in rt.elements() {
@@ -478,7 +484,10 @@ fn the_capsule_draws_keycaps_only_on_search() {
                 .as_deref()
                 .is_some_and(|k| k == "keys" || k.starts_with("keycap"));
             assert!(
-                !keycap || e.path.contains("ask-keys"),
+                !keycap
+                    || ["ask-keys", "footer", "card-hints"]
+                        .iter()
+                        .any(|at| e.path.contains(at)),
                 "{name}: {} is a keycap",
                 e.path
             );
@@ -544,6 +553,7 @@ const GOLDENS: &[&str] = &[
     "processing",
     "saved",
     "rule-sent",
+    "rule-resolving",
     "rule-final",
     "guess",
     "shift",
@@ -577,13 +587,26 @@ fn capture_capsule_goldens() {
                 rune::render::write_png(&path, w, h, &pixels).unwrap();
                 continue;
             }
-            assert!(
-                path.exists(),
-                "{} is missing; run with HEX_UPDATE_GOLDENS=1",
-                path.display()
-            );
+            let actual = std::env::temp_dir().join(format!(
+                "rune-settings-capture-capsule-{name}-{theme}-actual.png"
+            ));
+            if !path.exists() {
+                rune::render::write_png(&actual, w, h, &pixels).unwrap();
+                misses.push(format!(
+                    "{name}-{theme}: missing golden; actual at {}",
+                    actual.display()
+                ));
+                continue;
+            }
             let (golden_w, golden_h, golden) = read_png(&path);
-            assert_eq!((golden_w, golden_h), (w, h), "{name}-{theme} size changed");
+            if (golden_w, golden_h) != (w, h) {
+                rune::render::write_png(&actual, w, h, &pixels).unwrap();
+                misses.push(format!(
+                    "{name}-{theme}: size changed; actual at {}",
+                    actual.display()
+                ));
+                continue;
+            }
             // GPUs differ in the last bit of blending and glyph coverage; a
             // layout or colour change moves far more.
             let differing = pixels
@@ -592,8 +615,6 @@ fn capture_capsule_goldens() {
                 .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 12))
                 .count();
             if differing > (w * h) as usize / 500 {
-                let actual =
-                    std::env::temp_dir().join(format!("capture-capsule-{name}-{theme}-actual.png"));
                 rune::render::write_png(&actual, w, h, &pixels).unwrap();
                 misses.push(format!(
                     "{name}-{theme}: {differing} pixels differ; actual at {}",
@@ -720,6 +741,19 @@ fn scripts() -> Vec<Script> {
                 (3.2, stage(Stage::Stopping)),
             ],
             end: 4.4,
+        },
+        // The capsule's whole life, nothing routed: it comes in recording,
+        // narrows to processing, widens to "Copied", and leaves.
+        Script {
+            name: "lifecycle",
+            beats: vec![
+                (0.2, stage(Stage::Recording)),
+                (1.6, stage(Stage::Stopping)),
+                (1.8, stage(Stage::Transcribing)),
+                (3.0, stage(Stage::Done)),
+                (4.4, In(Input::Dismiss)),
+            ],
+            end: 5.4,
         },
         Script {
             name: "chips-close",

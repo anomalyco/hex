@@ -864,8 +864,9 @@ pub(crate) struct PickerOverlay {
 }
 
 impl PickerOverlay {
-    /// Adds the overlay, prewarmed and hidden. `act` starts what it picks;
-    /// it runs on the main thread, so it must only hand the action on.
+    /// Adds the overlay, prewarmed and hidden, holding no GPU surface while
+    /// hidden (Windows and Linux). `act` starts what it picks; it runs on
+    /// the main thread, so it must only hand the action on.
     pub(crate) fn install<S: 'static>(
         app: &mut rune::App<S>,
         act: impl Fn(Action) + Send + Sync + 'static,
@@ -882,6 +883,7 @@ impl PickerOverlay {
                 prewarm: true,
                 ..Default::default()
             })
+            .release_gpu_when_hidden()
             .poll(poll)
             .on_created(|c| {
                 if let Some(window) = c.window_number {

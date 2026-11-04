@@ -115,7 +115,10 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
         #[cfg(not(target_os = "macos"))]
         display: crate::rune_hud::display(),
         ..Default::default()
-    });
+    })
+    // Hidden, it holds no GPU surface (nor, on Windows, a window), so it
+    // never passes for a game to capture tools (#1308).
+    .release_gpu_when_hidden();
     let overlay = app.overlay(spec, Plate::default());
     let _ = LIVE.set(overlay.clone());
     let shown = Arc::new(AtomicBool::new(false));

@@ -93,6 +93,8 @@ pub(super) fn section(ui: &Ui, p: Paint, model: &ModelDefinition) -> Option<El> 
     };
     let mut section = col()
         .key("details")
+        // Only a press guard: assistive technology reads its lines.
+        .role("none")
         .gap(6.0)
         .pt(4.0)
         // Reading the details never chooses the card's model.

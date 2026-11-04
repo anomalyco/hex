@@ -183,6 +183,10 @@ and `exec`/`execFile` call back with an error saying so, and the transform
 falls back. A config can't approve itself; the approval is stored in Hex's
 own data folder.
 
+On a managed Mac, an organization can turn transforms off
+(`DisableTransforms`) or keep `fetch` on this computer with no programs
+(`RestrictTransformsToLoopback`); see https://anoma.ly/hex/docs/admin.
+
 ## Timeouts, limits, and fallback
 
 - Each transform has `timeout` milliseconds: 1000 by default, 30000 when the

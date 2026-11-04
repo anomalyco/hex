@@ -93,14 +93,6 @@ fn session_options(device_type: transcribe_cpp::DeviceType) -> transcribe_cpp::S
     }
 }
 
-/// How much of the vocabulary a context prompt carries, in characters.
-/// Whisper's prompt slot holds 223 tokens and its engine trims an overlong
-/// one from the front, dropping the first (most important) terms, so the list
-/// stays well inside it. Qwen3-ASR's system message has far more room; the
-/// bound keeps a long list from crowding out the audio or being echoed.
-const WHISPER_PROMPT_CHARS: usize = 500;
-const QWEN3_ASR_PROMPT_CHARS: usize = 1_000;
-
 /// How a session feeds its model the vocabulary.
 #[derive(Clone, Copy)]
 enum VocabularySlot {
@@ -125,11 +117,7 @@ impl VocabularySlot {
         if !model.supports(transcribe_cpp::Feature::ContextPrompt) {
             return Self::None;
         }
-        match architecture.as_str() {
-            "whisper" => Self::Prompt(WHISPER_PROMPT_CHARS),
-            "qwen3_asr" => Self::Prompt(QWEN3_ASR_PROMPT_CHARS),
-            _ => Self::None,
-        }
+        crate::dictation::vocabulary::prompt_chars(&architecture).map_or(Self::None, Self::Prompt)
     }
 }
 
@@ -333,6 +321,7 @@ impl OfflineGgufSession {
                 if let Some(prompt) = &options.prompt {
                     drop_prompt_echo(&mut transcript, prompt);
                 }
+                drop_subtitle_credit(&mut transcript);
                 transcript
             });
         drop(session);
@@ -370,6 +359,13 @@ impl OfflineGgufSession {
             if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
                 return Err(eyre!("transcription was cancelled"));
             }
+            if !chunk_may_hold_speech(samples) {
+                tracing::info!(
+                    chunk_ms = samples.len() / 16,
+                    "skipped a chunk of a long clip with no speech"
+                );
+                continue;
+            }
             let mut chunk = samples.to_vec();
             crate::dictation::pad_for_parakeet(&mut chunk);
             let transcript = self.run(&chunk, options).wrap_err("transcription failed")?;
@@ -380,6 +376,14 @@ impl OfflineGgufSession {
         }
         Ok(output.join(" "))
     }
+}
+
+/// Whether one chunk of a long clip goes to the model. The clip as a whole
+/// held speech, but a chunk of it can be only silence (a locked dictation
+/// left waiting before the words), and models such as Cohere invent long,
+/// repeating text for that (#1194). Without the detector every chunk runs.
+fn chunk_may_hold_speech(samples: &[f32]) -> bool {
+    crate::transcription::speech_detector::contains_speech(samples) != Some(false)
 }
 
 /// transcribe-cpp 0.4 stops a decoder that starts looping and reports the text
@@ -484,6 +488,61 @@ fn drop_prompt_echo(transcript: &mut transcribe_cpp::Transcript, prompt: &str) {
     transcript.segments = segments;
 }
 
+/// Removes a subtitle credit the model appended to the end of the clip
+/// (`subtitle_credits`, #1141) from the text, the last segments, and their
+/// words.
+fn drop_subtitle_credit(transcript: &mut transcribe_cpp::Transcript) {
+    use crate::transcription::subtitle_credits::{strip, token_count};
+    let Some((text, removed_from_text)) = strip(&transcript.text) else {
+        return;
+    };
+    transcript.text = text;
+    let mut removed = if transcript.segments.is_empty() {
+        removed_from_text
+    } else {
+        0
+    };
+    while let Some(segment) = transcript.segments.last_mut() {
+        let Some((kept, tokens)) = strip(&segment.text) else {
+            break;
+        };
+        if kept.is_empty() {
+            let first = (segment.first_word.max(0) as usize).min(transcript.words.len());
+            transcript.words.truncate(first);
+            transcript.segments.pop();
+            continue;
+        }
+        segment.text = kept;
+        removed = tokens;
+        break;
+    }
+    if transcript.segments.is_empty() && transcript.text.is_empty() {
+        transcript.words.clear();
+        return;
+    }
+    // Words of a segment that kept some speech, or of an unsegmented run.
+    let last_segment = transcript.segments.last_mut();
+    let floor = last_segment
+        .as_ref()
+        .map_or(0, |segment| segment.first_word.max(0) as usize);
+    let mut popped = 0;
+    while removed > 0 && transcript.words.len() > floor {
+        let Some(word) = transcript.words.last() else {
+            break;
+        };
+        let tokens = token_count(&word.text);
+        if tokens > removed {
+            break;
+        }
+        removed -= tokens;
+        transcript.words.pop();
+        popped += 1;
+    }
+    if let Some(segment) = last_segment {
+        segment.n_words = (segment.n_words - popped).max(0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -529,6 +588,25 @@ mod tests {
             truncated,
             Err(transcribe_cpp::Error::OutputTruncated { .. })
         ));
+    }
+
+    #[test]
+    fn a_long_clip_skips_only_chunks_the_detector_hears_no_speech_in() {
+        use crate::transcription::speech_detector::override_for_test;
+        let chunk = [0.0; 16_000];
+        {
+            let _silent = override_for_test(Some(false));
+            assert!(!chunk_may_hold_speech(&chunk));
+        }
+        {
+            let _speech = override_for_test(Some(true));
+            assert!(chunk_may_hold_speech(&chunk));
+        }
+        let _unavailable = override_for_test(None);
+        assert!(
+            chunk_may_hold_speech(&chunk),
+            "no detector keeps every chunk"
+        );
     }
 
     #[test]
@@ -639,6 +717,27 @@ mod tests {
         let mut joined = transcript(&["T3 Code;Ottobit"]);
         drop_prompt_echo(&mut joined, "T3 Code\nOttobit");
         assert_eq!(joined.text, "");
+    }
+
+    #[test]
+    fn a_trailing_subtitle_credit_is_dropped_from_text_segments_and_words() {
+        let mut own = transcript(&["On se voit demain.", "Sous-titrage Société Radio-Canada"]);
+        drop_subtitle_credit(&mut own);
+        assert_eq!(own.text, "On se voit demain.");
+        assert_eq!(own.segments.len(), 1);
+        assert_eq!(words(&own), ["On", "se", "voit", "demain."]);
+
+        let mut joined = transcript(&["On se voit demain. Sous-titrage Société Radio-Canada"]);
+        drop_subtitle_credit(&mut joined);
+        assert_eq!(joined.text, "On se voit demain.");
+        assert_eq!(joined.segments[0].text, "On se voit demain.");
+        assert_eq!(joined.segments[0].n_words, 4);
+        assert_eq!(words(&joined), ["On", "se", "voit", "demain."]);
+
+        let mut speech = transcript(&["Sous-titrage Société Radio-Canada, c'est la fin."]);
+        let before = speech.clone();
+        drop_subtitle_credit(&mut speech);
+        assert_eq!(speech, before);
     }
 
     #[test]

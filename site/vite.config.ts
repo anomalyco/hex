@@ -8,4 +8,6 @@ import { BASE_PATH } from "./src/base.ts"
 export default defineConfig(({ command, isSsrBuild }) => ({
   plugins: [react(), ...(command === "build" && !isSsrBuild ? [cloudflare()] : [])],
   base: `${BASE_PATH}/`,
+  // strobe builds with STROBE_SOURCEMAP=hidden: maps beside the scripts for its profiles, the scripts unchanged.
+  build: { sourcemap: (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.STROBE_SOURCEMAP as "hidden" | undefined },
 }))

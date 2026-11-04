@@ -68,7 +68,10 @@ which replacements fired is not tracked.
 `meetings list` defaults to 20 entries (maximum 200). It accepts `--since` and
 `--until`, using the same time syntax as history. Meetings qualify when their
 duration overlaps the range; they sort newest first. Active recordings are
-included and labeled. Unreadable folders are reported, not repaired.
+included and labeled. Unreadable folders are reported, not repaired. To
+catch up on meetings that finished while a companion app was offline, list
+from a saved cursor and deduplicate by id
+([streams.md](streams.md#catching-up-after-being-offline)).
 
 `meetings show` accepts an exact ID, an unambiguous prefix of at least six
 characters, or `latest` (the newest readable meeting, including one in progress).
@@ -246,8 +249,9 @@ History reads one file descriptor, so an atomic replacement yields a complete
 old or new snapshot. Malformed history produces an error without recovery writes.
 
 Data comes from `~/Library/Application Support/hex`. `HEX_APPLICATION_SUPPORT_DIR` overrides the
-root for fixtures or a mirrored copy. These CLI commands currently target macOS;
-Linux and Windows retain their existing command surfaces.
+root for fixtures or a mirrored copy (`%APPDATA%\hex` on Windows,
+`~/.local/share/hex` or `$XDG_DATA_HOME/hex` on Linux). These commands are
+available on every OS.
 
 ## Retention stays bounded in one store
 

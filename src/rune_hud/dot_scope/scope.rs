@@ -89,6 +89,13 @@ pub struct Pose {
     /// How far the plate has grown in, 0 hidden to 1 shown, past 1 as it
     /// bounces: what an island grows by.
     pub reveal: f32,
+    /// The voice's smoothed 0–1 level while recording, else 0.
+    pub level: f32,
+    /// Seconds into the current stage, held at 0 with Reduce Motion: what
+    /// the notch indicator's glyphs animate by.
+    pub clock: f32,
+    /// 1 once the dictation is done, else 0.
+    pub done: f32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -514,6 +521,13 @@ impl Scope {
             grid: self.grid,
             live: self.live,
             reveal: ((self.scale.x - HIDDEN_SCALE) / (1.0 - HIDDEN_SCALE)).max(0.0),
+            level: self.voices[0].level.clamp(0.0, 1.0),
+            clock: if self.reduce_motion {
+                0.0
+            } else {
+                self.elapsed
+            },
+            done: if self.stage == Stage::Done { 1.0 } else { 0.0 },
         }
     }
 

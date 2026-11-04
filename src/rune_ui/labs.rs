@@ -1,16 +1,23 @@
-//! Labs: one flat sidebar item listing every Labs feature (`crate::labs`)
-//! as a row with a toggle, each off by default, plus Send feedback and Run
-//! setup again. A feature with its own pane (Meetings, Voice Filter,
-//! Playground) joins the main sidebar while on and is hidden while off.
+//! Labs: one sidebar item that opens a store of every Labs feature
+//! (`crate::labs`), each off by default. Discover shows what's new and
+//! every lab as a card, Turned on what's on, and a card opens a drawer that
+//! says where the lab shows up. A feature with its own pane (Meetings,
+//! Voice Filter, Playground) joins the main sidebar while on and is hidden
+//! while off.
 
-use rune::{El, Icon, Tx, row, text};
+mod category;
+mod drawer;
+mod store;
 
-use super::controls::{
-    self, CardRow, Paint, card, icon_row, icon_row_tagged, pressable_row, row_switch,
-};
-use super::icons::{BOOK, GLOBE, HINTS, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
-use super::lists::{Tone, tone_tag};
-use super::{NAV_ROW_GAP, NAV_ROW_HEIGHT, Pane, Ui, VOICE_FILTER_ICON};
+use rune::{El, Icon, TextEdit, Tx, row, text};
+
+pub(super) use self::category::Category;
+pub(super) use self::drawer::drawer;
+pub(super) use self::store::{page, search_field, tabs};
+use super::controls::{self, Paint};
+use super::icons::{BOOK, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
+use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
+use super::{Pane, Ui};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::labs::Feature;
 
@@ -38,13 +45,25 @@ pub(super) fn order(ui: &Ui) -> Vec<Pane> {
     main_panes(ui)
 }
 
-/// A sidebar item that isn't a pane: Labs, or the playground.
-fn nav_row(p: Paint, key: &'static str, icon: &'static Icon, label: &'static str, on: bool) -> El {
+/// A sidebar item that isn't a pane: Labs, or the playground. Its slot
+/// takes presses in the gaps around it too; assistive technology sees the
+/// item alone, selected while `on`.
+fn nav_row(
+    p: Paint,
+    key: &'static str,
+    icon: &'static Icon,
+    label: &'static str,
+    on: bool,
+    press: impl Fn(&mut Ui, &mut Tx) + 'static,
+) -> El {
     let c = &p.k.c;
+    let press = std::rc::Rc::new(press);
+    let in_slot = press.clone();
     let mut item = row()
         .key(key)
-        .role("button")
+        .role("listitem")
         .label(label)
+        .focus_selected(on)
         .h(NAV_ROW_HEIGHT)
         .px(6.0)
         .gap(8.0)
@@ -52,38 +71,55 @@ fn nav_row(p: Paint, key: &'static str, icon: &'static Icon, label: &'static str
         .radius(p.k.radius.sm)
         .hover(c.hover)
         .press(c.pressed)
-        .child(rune::icon(icon, 16.0).key("icon").color(if on {
-            c.icon_base
-        } else {
-            c.icon_muted
-        }))
-        .child(text(label).key("label").font(p.k.ty.ui).color(if on {
-            c.text_base
-        } else {
-            c.text_muted
-        }));
+        .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| press(ui, tx))
+        .child(
+            rune::icon(icon, 16.0)
+                .key("icon")
+                .color(if on { c.icon_base } else { c.icon_muted })
+                .a11y_hidden(),
+        )
+        .child(
+            text(label)
+                .key("label")
+                .font(p.k.ty.ui)
+                .color(if on { c.text_base } else { c.text_muted })
+                .a11y_hidden(),
+        );
     if on {
         item = item.fill(c.layer_02);
     }
     row()
         .key(format!("{key}-slot"))
+        .role("none")
         .pt(NAV_ROW_GAP / 2.0)
         .pb(NAV_ROW_GAP / 2.0)
+        .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| in_slot(ui, tx))
         .child(item.grow(1.0))
 }
 
 /// The Playground item while Labs › Playground is on: it opens it.
 pub(super) fn playground_nav(ui: &Ui, p: Paint) -> Option<El> {
     ui.settings.labs.playground.then(|| {
-        nav_row(p, "nav-playground", &SPARKLES, "Playground", false)
-            .on_press_tx(|_: &mut Ui, tx: &mut Tx| tx.open_playground())
+        nav_row(
+            p,
+            "nav-playground",
+            &SPARKLES,
+            "Playground",
+            false,
+            |_: &mut Ui, tx: &mut Tx| tx.open_playground(),
+        )
     })
 }
 
 /// The Labs item: opens the Labs page, or goes back to General.
 pub(super) fn nav(ui: &Ui, p: Paint) -> El {
     let on = ui.labs_open;
-    nav_row(p, "nav-labs", &LABS_ICON, tr("Labs"), on).on_press_tx(
+    nav_row(
+        p,
+        "nav-labs",
+        &LABS_ICON,
+        tr("Labs"),
+        on,
         move |ui: &mut Ui, tx: &mut Tx| {
             if on {
                 ui.select_pane(Pane::General, tx);
@@ -94,81 +130,210 @@ pub(super) fn nav(ui: &Ui, p: Paint) -> El {
     )
 }
 
-/// How long a link's row pulses.
-const FLASH: std::time::Duration = std::time::Duration::from_millis(1400);
+/// One lab: a Labs feature, or Annotate in capture builds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Lab {
+    Feature(Feature),
+    #[cfg(hex_capture)]
+    Annotate,
+}
 
-/// A deep link: the Labs page, scrolled to `name`'s row with a pulse. It
-/// never turns the feature on. An unknown name, or one this OS has no row
-/// for, opens the page and is logged.
+impl Lab {
+    /// Its stable id, in `hex://labs/<id>`.
+    pub(super) fn id(self) -> &'static str {
+        match self {
+            Self::Feature(feature) => feature.name(),
+            #[cfg(hex_capture)]
+            Self::Annotate => "annotate",
+        }
+    }
+
+    /// The day it joined Labs, `yyyymmdd`; 0 when it never counts as new.
+    fn added(self) -> u32 {
+        match self {
+            Self::Feature(feature) => feature.added(),
+            #[cfg(hex_capture)]
+            Self::Annotate => 0,
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Self::Feature(feature) => Feature::ALL
+                .iter()
+                .position(|known| *known == feature)
+                .unwrap_or(0),
+            #[cfg(hex_capture)]
+            Self::Annotate => 0,
+        }
+    }
+
+    fn audience(self) -> crate::labs::Audience {
+        match self {
+            Self::Feature(feature) => feature.audience(),
+            #[cfg(hex_capture)]
+            Self::Annotate => crate::labs::Audience::Everyone,
+        }
+    }
+}
+
+/// Discover lists every lab; Turned on only those that are on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Tab {
+    #[default]
+    Discover,
+    On,
+}
+
+/// What the Labs store shows: its search, tab, chip, and open drawer.
+#[derive(Default)]
+pub(super) struct Store {
+    pub(super) search: TextEdit,
+    pub(super) tab: Tab,
+    pub(super) category: Option<Category>,
+    pub(super) drawer: Option<Lab>,
+}
+
+impl Store {
+    fn query(&self) -> String {
+        self.search.text.trim().to_lowercase()
+    }
+}
+
+/// What a `hex://labs` link asks the store to show.
 #[cfg_attr(
     not(any(target_os = "macos", all(test, target_os = "linux"))),
     allow(dead_code)
 )]
-pub(super) fn reveal(ui: &mut Ui, name: Option<&str>, tx: &mut Tx) {
-    super::show(ui, super::Destination::Settings, tx);
-    open(ui, tx);
-    ui.lab_flash = None;
-    let Some(name) = name else { return };
-    match Feature::from_name(name).filter(|feature| rows(ui).iter().any(|r| r.feature == *feature))
-    {
-        Some(feature) => {
-            ui.lab_flash = Some((feature, std::time::Instant::now()));
-            tx.scroll_center(row_key(feature));
-            tx.wake_after(FLASH);
-        }
-        None => tracing::warn!(feature = name, "a Labs link named no feature this Hex has"),
-    }
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LabsLink {
+    /// The lab whose drawer opens, by its id.
+    pub(crate) lab: Option<String>,
+    /// Turned on instead of Discover (`?tab=on`).
+    pub(crate) turned_on: bool,
+    /// The chip selected (`?category=<id>`).
+    pub(crate) category: Option<String>,
+    /// The search typed in (`?search=<words>`).
+    pub(crate) search: Option<String>,
 }
 
-/// Ends the pulse once it has run; true when the row changes back.
-pub(super) fn poll_flash(ui: &mut Ui, now: std::time::Instant) -> bool {
-    match ui.lab_flash {
-        Some((_, since)) if now.duration_since(since) >= FLASH => {
-            ui.lab_flash = None;
-            true
+/// A deep link: the Labs store on its tab, chip, and search, with a lab's
+/// drawer open when it names one. It never turns a lab on. An unknown lab
+/// or category, or a lab this OS has no card for, is logged and skipped.
+#[cfg_attr(
+    not(any(target_os = "macos", all(test, target_os = "linux"))),
+    allow(dead_code)
+)]
+pub(super) fn reveal(ui: &mut Ui, link: &LabsLink, tx: &mut Tx) {
+    super::show(ui, super::Destination::Settings, tx);
+    open(ui, tx);
+    let store = &mut ui.lab_store;
+    store.tab = if link.turned_on {
+        Tab::On
+    } else {
+        Tab::Discover
+    };
+    if let Some(id) = &link.category {
+        match Category::from_id(id) {
+            Some(category) => store.category = Some(category),
+            None => tracing::warn!(category = %id, "a Labs link named no category"),
         }
-        _ => false,
+    }
+    if let Some(search) = &link.search {
+        store.search = TextEdit::new(search.clone());
+    }
+    let Some(id) = &link.lab else { return };
+    match shown(ui).into_iter().find(|row| row.lab.id() == id) {
+        Some(row) => ui.lab_store.drawer = Some(row.lab),
+        None => tracing::warn!(feature = %id, "a Labs link named no feature this Hex has"),
     }
 }
 
 fn open(ui: &mut Ui, tx: &mut Tx) {
     ui.select_pane(Pane::General, tx);
     ui.labs_open = true;
+    ui.lab_store = Store::default();
     tx.settle();
 }
 
-/// One Labs row.
+fn open_drawer(ui: &mut Ui, lab: Lab) {
+    ui.lab_store.drawer = Some(lab);
+}
+
+pub(super) fn close_drawer(ui: &mut Ui) {
+    ui.lab_store.drawer = None;
+}
+
+/// ⌘F (Ctrl+F off macOS) on the Labs page puts the caret in its search.
+pub(super) fn focus_search(ui: &mut Ui) {
+    ui.lab_store.drawer = None;
+    ui.lab_store.search.focused = true;
+}
+
+/// One lab's card.
 struct Row {
-    feature: Feature,
+    lab: Lab,
     icon: &'static Icon,
     title: &'static str,
     about: &'static str,
     on: bool,
-    /// Shown on and can't be turned off (an installed Hex Microphone driver).
+    /// Can't be switched: on while an installed Hex Microphone driver or
+    /// the dictation model needs it, off under an organization's lock.
     locked: bool,
+    category: Category,
+}
+
+/// The labs this OS and build show, in the store's order.
+fn shown(ui: &Ui) -> Vec<Row> {
+    rows(ui)
+        .into_iter()
+        .filter(|row| row.lab.audience().reaches(crate::dev_build::is_dev_build()))
+        .collect()
 }
 
 fn rows(ui: &Ui) -> Vec<Row> {
     let caps = ui.platform.caps;
     let settings = &ui.settings;
-    let row = |feature: Feature, icon, title, about| Row {
-        feature,
-        icon,
-        title,
-        about,
-        on: feature.on(settings),
-        locked: false,
+    let row = |feature: Feature, icon: Option<&'static Icon>, title, about| {
+        let lab = Lab::Feature(feature);
+        let category = Category::of(lab);
+        Row {
+            lab,
+            icon: icon.unwrap_or_else(|| category.icon()),
+            title,
+            about,
+            on: feature.on(settings),
+            locked: false,
+            category,
+        }
+    };
+    // An organization's lock shows the row off, disabled, and says why.
+    let row = |feature: Feature, icon, title, about| match feature.managed() {
+        Some(_) => Row {
+            on: false,
+            locked: true,
+            about: super::managed_note(),
+            ..row(feature, icon, title, about)
+        },
+        None => row(feature, icon, title, about),
     };
     let mut rows = Vec::new();
     if caps.meetings {
         rows.push(row(
             Feature::Meetings,
-            Pane::Meetings.icon(),
+            Some(Pane::Meetings.icon()),
             tr("Meetings (beta)"),
             tr("Record calls and keep transcripts"),
         ));
     }
-    if caps.fun {
+    if caps.fun && Feature::VoiceFilter.managed().is_some() {
+        rows.push(row(
+            Feature::VoiceFilter,
+            Some(&VOICE_FILTER_ICON),
+            tr("Voice Filter"),
+            "",
+        ));
+    } else if caps.fun {
         let locked = super::fun::driver_installed(ui);
         rows.push(Row {
             on: super::fun::running(ui),
@@ -178,45 +343,87 @@ fn rows(ui: &Ui) -> Vec<Row> {
             } else {
                 tr("Hex Microphone virtual input and real-time voice filters")
             },
-            ..row(Feature::VoiceFilter, &VOICE_FILTER_ICON, tr("Voice Filter"), "")
+            ..row(Feature::VoiceFilter, Some(&VOICE_FILTER_ICON), tr("Voice Filter"), "")
         });
     }
     rows.push(row(
         Feature::Playground,
-        &SPARKLES,
+        Some(&SPARKLES),
         "Playground",
         tr("Scene and story browser in the window"),
     ));
     rows.push(row(
         Feature::LiveText,
-        &WAVE,
+        Some(&WAVE),
         tr("Live text"),
         tr("Show provisional words beside the HUD while dictating"),
     ));
     if caps.meetings {
         rows.push(row(
             Feature::LiveChapters,
-            &HINTS,
+            None,
             tr("Live chapters"),
             tr("Break meeting transcripts into chapters while recording"),
         ));
         rows.push(row(
             Feature::SubtitleExport,
-            &HINTS,
+            None,
             tr("Subtitle export"),
             tr("Export meeting transcripts as SRT or VTT subtitles with hex meetings show"),
+        ));
+        // macOS's meeting controller reads the call app's audio output, so
+        // Linux renders of macOS scenes leave it out.
+        if cfg!(target_os = "macos") {
+            rows.push(row(
+                Feature::StopWhenCallEnds,
+                Some(&TIMER),
+                tr("Stop when the call ends"),
+                tr("Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"),
+            ));
+            // Only macOS's capsules know the screen to snap a drag against.
+            rows.push(row(
+                Feature::MovableMeetingCapsules,
+                None,
+                tr("Movable meeting capsules"),
+                tr("Drag meeting capsules out of the way; they come back in the corner you left them"),
+            ));
+        }
+        // Every OS's meeting controller writes notes with OpenCode.
+        rows.push(row(
+            Feature::MeetingSummaryModel,
+            Some(&SPARKLES),
+            tr("Choose meeting summary model"),
+            tr("Pick the OpenCode provider and model that write meeting titles and summaries, in Meetings › Settings › Advanced"),
+        ));
+        rows.push(row(
+            Feature::MeetingNotesVocabulary,
+            Some(&BOOK),
+            tr("Vocabulary in meeting notes"),
+            tr("Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"),
+        ));
+        rows.push(row(
+            Feature::MeetingFinishedEvent,
+            Some(&GLOBE),
+            tr("Meeting finished event"),
+            tr("Tell apps on this computer when a meeting's transcript is ready. They get only the meeting's ID, through Hex's local API"),
+        ));
+        rows.push(row(
+            Feature::MeetingPlatformIcons,
+            None,
+            tr("Meeting platform icons"),
+            tr("Show a small icon for the app or website each meeting was recorded from, beside its name"),
         ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
-        &BOOK,
+        Some(&BOOK),
         tr("Vocabulary biasing"),
         tr("Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"),
     ));
     if caps.keyboard_model_switching {
         rows.push(row(
             Feature::KeyboardModelSwitching,
-            &KEYBOARD,
+            Some(&KEYBOARD),
             tr("Switch model with keyboard language"),
             tr("Changing input source selects its mapped model and language; manual choices still work"),
         ));
@@ -224,25 +431,25 @@ fn rows(ui: &Ui) -> Vec<Row> {
     if caps.os == super::platform::Os::Macos {
         rows.push(row(
             Feature::MouseShortcuts,
-            &MOUSE,
+            Some(&MOUSE),
             tr("Mouse shortcuts"),
             tr("Record mouse buttons as shortcuts"),
         ));
         rows.push(row(
             Feature::PauseBrowser,
-            &GLOBE,
+            Some(&GLOBE),
             tr("Also pause the browser"),
             tr("While dictating with Pause media: YouTube and other tabs, resumed only if Hex paused them"),
         ));
         rows.push(row(
             Feature::KeepOnClipboard,
-            &HINTS,
+            None,
             tr("Keep dictation on clipboard"),
             tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
         ));
         rows.push(row(
             Feature::CopyOnly,
-            &HINTS,
+            None,
             tr("Copy dictation only"),
             tr("Put the dictation on the clipboard instead of pasting it"),
         ));
@@ -250,37 +457,51 @@ fn rows(ui: &Ui) -> Vec<Row> {
         if cfg!(target_os = "macos") {
             rows.push(row(
                 Feature::SecondDictationShortcut,
-                &KEYBOARD,
+                Some(&KEYBOARD),
                 tr("Second dictation shortcut"),
                 tr("Another shortcut that dictates like the main one, such as a key on an external keyboard"),
             ));
             // Reads the text before the cursor through macOS Accessibility.
             rows.push(row(
                 Feature::SmartSpacing,
-                &HINTS,
+                None,
                 tr("Smart spacing"),
                 tr("Add a space before a dictation pasted right after a word"),
             ));
             // macOS's recorder reads each modifier key's side.
             rows.push(row(
                 Feature::SidedChords,
-                &KEYBOARD,
+                Some(&KEYBOARD),
                 tr("Sided modifier chords"),
                 tr("Record which side each modifier of a shortcut is on, such as Right ⌘ + Right ⌥"),
             ));
             // macOS's shortcut machine reads it at each Toggle release.
             rows.push(row(
                 Feature::TapOrHold,
-                &KEYBOARD,
+                Some(&KEYBOARD),
                 tr("Tap or hold"),
                 tr("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"),
             ));
             // macOS's menu-bar menu lists them.
             rows.push(row(
                 Feature::RecentDictations,
-                &HINTS,
+                None,
                 tr("Copy recent dictations"),
                 tr("Copy one of your last five dictations from the menu bar, under Paste Last Dictation"),
+            ));
+            // macOS's status item hides itself while nothing records.
+            rows.push(row(
+                Feature::HideMenuBarIcon,
+                None,
+                tr("Hide menu bar icon"),
+                tr("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings"),
+            ));
+            // macOS's HUD reads the screen's notch from NSScreen.
+            rows.push(row(
+                Feature::NotchIndicator,
+                Some(&WAVE),
+                tr("Notch indicator"),
+                tr("On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"),
             ));
         }
     }
@@ -288,82 +509,144 @@ fn rows(ui: &Ui) -> Vec<Row> {
     if caps.os == super::platform::Os::Linux {
         rows.push(row(
             Feature::StandaloneSpecialKeys,
-            &KEYBOARD,
+            Some(&KEYBOARD),
             tr("Special keys alone"),
             tr("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"),
+        ));
+        rows.push(row(
+            Feature::SectionKeyAlone,
+            Some(&KEYBOARD),
+            tr("Section key alone"),
+            tr("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound"),
+        ));
+        // Linux's shortcut machine reads it with the listener's options.
+        rows.push(row(
+            Feature::TapOrHold,
+            Some(&KEYBOARD),
+            tr("Tap or hold"),
+            tr("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"),
+        ));
+        rows.push(row(
+            Feature::GnomeClipboardRestore,
+            None,
+            tr("Restore clipboard on GNOME"),
+            tr("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running"),
+        ));
+        rows.push(row(
+            Feature::GnomeMeetingCapsules,
+            None,
+            tr("Floating meeting capsules on GNOME"),
+            tr("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running"),
         ));
     }
     // Linux's and Windows' engines transcribe a whole clip on the CPU.
     if caps.os != super::platform::Os::Macos {
         rows.push(row(
             Feature::SkipPauses,
-            &TIMER,
+            Some(&TIMER),
             tr("Skip long pauses"),
             tr("Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"),
         ));
     }
     rows.push(row(
         Feature::UnloadIdle,
-        &TIMER,
+        Some(&TIMER),
         tr("Unload model when idle"),
         tr("Frees the speech model's memory after a while unused; the next dictation reloads it"),
     ));
     rows.push(row(
         Feature::RestoreShortcutDefault,
-        &KEYBOARD,
+        Some(&KEYBOARD),
         tr("Restore shortcut default"),
         tr("Offer Restore default next to Paste last dictation's shortcut"),
     ));
     rows.push(row(
         Feature::SpokenFormatting,
-        &HINTS,
+        None,
         tr("Spoken formatting"),
         tr("Say \"new line\", \"new paragraph\", \"open quote\", or \"close quote\" to insert line breaks and quotation marks"),
     ));
     rows.push(row(
         Feature::SpokenSymbols,
-        &HINTS,
+        None,
         tr("Spoken symbols"),
         tr("Say \"comma\", \"colon\", \"hashtag\", \"underscore\", or \"slash\" to insert the symbol joined to its words"),
     ));
     rows.push(row(
         Feature::FillerWords,
-        &HINTS,
+        None,
         tr("Remove filler words"),
         tr("Remove filler words such as um and uh from dictations, without an AI model"),
     ));
     rows.push(row(
         Feature::HistoryStats,
-        &HINTS,
+        None,
         tr("Dictation stats"),
         tr("Show a summary of your retained dictations at the top of History, with hex history stats"),
     ));
     rows.push(row(
+        Feature::KeepRecordings,
+        None,
+        tr("Keep recordings"),
+        tr("Keep the audio of dictations saved to History, so you can transcribe them again with another model"),
+    ));
+    rows.push(row(
+        Feature::OutputFixes,
+        Some(&BOOK),
+        tr("Fix results in Output"),
+        tr("Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"),
+    ));
+    rows.push(row(
         Feature::PickerSortFilter,
-        &HINTS,
+        None,
         tr("Sort and filter models"),
         tr("Sort the Local transcription picker by size or name and show only models for the saved language"),
     ));
     rows.push(row(
         Feature::BenchmarkDetails,
-        &HINTS,
+        None,
         tr("Benchmark details"),
         tr("Show each model's raw error rate, benchmark, and source in the Local transcription picker"),
     ));
-    let ultra_locked = Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
-    rows.push(Row {
-        locked: ultra_locked,
-        about: if ultra_locked {
-            tr("On while it is the dictation model. Choose another model to turn it off.")
-        } else {
-            tr("Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker")
-        },
-        ..row(Feature::ParakeetUltra, &HINTS, tr("Parakeet Ultra"), "")
+    rows.push(row(
+        Feature::PickerActiveFirst,
+        None,
+        tr("Model in use first"),
+        tr("The speech model picker lists the model you're using first"),
+    ));
+    rows.push(row(
+        Feature::ModelInPlace,
+        None,
+        tr("Use model files where they are"),
+        tr("Add a speech model file without copying it, so several accounts can share one file"),
+    ));
+    rows.push(row(
+        Feature::PickerDownloaded,
+        None,
+        tr("Downloaded models only"),
+        tr("Show only downloaded speech models in the picker, with the space they take"),
+    ));
+    let ultra_locked = Feature::ParakeetUltra.managed().is_none()
+        && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
+    let ultra = row(Feature::ParakeetUltra, None, tr("Parakeet Ultra"), "");
+    // A managed row already says so.
+    rows.push(if ultra.locked {
+        ultra
+    } else {
+        Row {
+            locked: ultra_locked,
+            about: if ultra_locked {
+                tr("On while it is the dictation model. Choose another model to turn it off.")
+            } else {
+                tr("Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker")
+            },
+            ..ultra
+        }
     });
     if caps.share_shortcut {
         rows.push(row(
             Feature::ShareShortcut,
-            &KEYBOARD,
+            Some(&KEYBOARD),
             tr("Share dictation shortcut with other apps"),
             tr("Lets apps such as Discord detect the same key"),
         ));
@@ -371,15 +654,37 @@ fn rows(ui: &Ui) -> Vec<Row> {
     if caps.os == super::platform::Os::Windows {
         rows.push(row(
             Feature::TerminalPaste,
-            &TERMINAL,
+            Some(&TERMINAL),
             tr("Terminal paste"),
             tr("Paste with Ctrl+Shift+V so terminals accept it"),
         ));
     }
+    #[cfg(hex_capture)]
+    if ui.platform.scrawl.is_some() {
+        let locked = crate::policy::Policy::current().locks(crate::policy::Lock::Annotate);
+        rows.push(Row {
+            lab: Lab::Annotate,
+            icon: Pane::Annotate.icon(),
+            title: tr("Annotate"),
+            about: if locked {
+                super::managed_note()
+            } else {
+                tr("Record your screen, draw on it, and talk over it with a shortcut")
+            },
+            on: !locked && ui.settings.capture.enabled,
+            locked,
+            category: Category::of(Lab::Annotate),
+        });
+    }
     rows
 }
 
-fn row_key(feature: Feature) -> &'static str {
+fn row_key(lab: Lab) -> &'static str {
+    let feature = match lab {
+        Lab::Feature(feature) => feature,
+        #[cfg(hex_capture)]
+        Lab::Annotate => return "lab-annotate",
+    };
     match feature {
         Feature::Meetings => "lab-meetings",
         Feature::VoiceFilter => "lab-voice-filter",
@@ -411,15 +716,39 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::HistoryStats => "lab-history-stats",
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::SkipPauses => "lab-skip-pauses",
+        Feature::StopWhenCallEnds => "lab-stop-when-call-ends",
+        Feature::OutputFixes => "lab-output-fixes",
+        Feature::PickerActiveFirst => "lab-picker-active-first",
+        Feature::ModelInPlace => "lab-model-in-place",
+        Feature::PickerDownloaded => "lab-picker-downloaded",
+        Feature::SectionKeyAlone => "lab-section-key",
+        Feature::KeepRecordings => "lab-keep-recordings",
+        Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
+        Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
+        Feature::MeetingSummaryModel => "lab-meeting-summary-model",
+        Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
+        Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
+        Feature::NotchIndicator => "lab-notch-indicator",
+        Feature::MeetingFinishedEvent => "lab-meeting-finished-event",
+        Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
+        Feature::MeetingPlatformIcons => "lab-meeting-platform-icons",
     }
 }
 
-fn flip(ui: &mut Ui, feature: Feature) {
+fn flip(ui: &mut Ui, lab: Lab) {
+    let feature = match lab {
+        Lab::Feature(feature) => feature,
+        #[cfg(hex_capture)]
+        Lab::Annotate => return super::scrawl::toggle(ui),
+    };
+    if feature.managed().is_some() {
+        return;
+    }
     if feature == Feature::VoiceFilter && super::fun::driver_installed(ui) {
         return;
     }
     let on = !feature.on(&ui.settings);
-    // Parakeet Ultra stays on while it dictates; its row says why.
+    // Parakeet Ultra stays on while it dictates; its card says why.
     if !on && feature.off_refusal(&ui.settings).is_some() {
         return;
     }
@@ -434,91 +763,9 @@ fn flip(ui: &mut Ui, feature: Feature) {
     }
 }
 
-/// The Labs page: what Labs is with Send feedback, every feature's row,
-/// then Run setup again.
-pub(super) fn page(ui: &Ui, p: Paint) -> El {
-    let feedback = rune_kit::Button::new(tr("Send feedback"))
-        .variant(rune_kit::ButtonVariant::Ghost)
-        .control_size(rune_kit::ControlSize::Small)
-        .on_press(|ui: &mut Ui| {
-            if ui.live()
-                && let Err(error) =
-                    crate::desktop::opencode_catalog::open_url(crate::labs::FEEDBACK_URL)
-            {
-                ui.error = Some(format!("{error:#}"));
-            }
-        })
-        .build(p.k)
-        .key("send-feedback");
-    let lede = row()
-        .key("lede-row")
-        .gap(8.0)
-        .center_y()
-        .mx(controls::METRICS.row_px)
-        .child(
-            text(tr("Try unfinished features. They may change or break."))
-                .key("lede")
-                .font(p.k.ty.ui)
-                .color(p.muted())
-                .wrap()
-                .grow(1.0),
-        )
-        .child(feedback);
-    let mut cards: Vec<CardRow> = Vec::new();
-    for row in rows(ui).into_iter().filter(|row| row.feature.shipped()) {
-        let unload_idle = row.feature == Feature::UnloadIdle && row.on;
-        let flashing = ui
-            .lab_flash
-            .is_some_and(|(feature, _)| feature == row.feature);
-        cards.push(feature_row(p, row, flashing));
-        if unload_idle {
-            cards.push(unload_after_row(ui, p));
-        }
-    }
-    let rows = cards;
-    let content = controls::page("content")
-        .child(lede)
-        .child(card(p, "labs", rows))
-        .child(card(p, "labs-setup", vec![run_setup_row(p)]));
-    super::scroll_body("scroll", content)
-}
-
-fn feature_row(p: Paint, row: Row, flashing: bool) -> CardRow {
-    let switch = if row.locked {
-        rune_kit::Switch::new(true)
-            .disabled(true)
-            .build(p.k)
-            .key("switch")
-            .focusable(false)
-    } else {
-        row_switch(p, row.on)
-    };
-    let tag = (row.feature.audience() == crate::labs::Audience::Dev)
-        .then(|| tone_tag(p, "dev-tag", tr("Dev"), Tone::Neutral));
-    let mut item = icon_row_tagged(
-        p,
-        row_key(row.feature),
-        row.icon,
-        row.title,
-        tag,
-        Some(row.about),
-        switch,
-    );
-    if flashing {
-        item = item.fill(p.k.c.layer_02);
-    }
-    if row.locked {
-        return item.into();
-    }
-    let feature = row.feature;
-    pressable_row(item)
-        .hover(p.k.c.hover)
-        .on_press(move |ui: &mut Ui| flip(ui, feature))
-        .into()
-}
-
-/// How long the model sits unused before it unloads, under its row while on.
-fn unload_after_row(ui: &Ui, p: Paint) -> CardRow {
+/// How long the model sits unused before it unloads, in its drawer while
+/// on.
+fn unload_after(ui: &Ui, p: Paint) -> El {
     use crate::app_settings::UNLOAD_IDLE_MINUTES;
     let labels: Vec<String> = UNLOAD_IDLE_MINUTES
         .iter()
@@ -529,40 +776,8 @@ fn unload_after_row(ui: &Ui, p: Paint) -> CardRow {
         .iter()
         .position(|minutes| *minutes == ui.settings.labs.unload_idle_minutes)
         .unwrap_or(1);
-    controls::setting_row(
-        p,
-        "lab-unload-idle-minutes",
-        tr("Unload after"),
-        None,
-        controls::segmented(p, "unload-idle-minutes", &labels, selected, |ui, index| {
-            let minutes = UNLOAD_IDLE_MINUTES[index];
-            ui.update(|settings| settings.labs.unload_idle_minutes = minutes);
-        }),
-    )
-    .into()
-}
-
-/// Runs the first run again (`onboarding_kit::live::restart`).
-fn run_setup_row(p: Paint) -> CardRow {
-    let run = rune_kit::Button::new(tr("Run"))
-        .variant(rune_kit::ButtonVariant::Ghost)
-        .control_size(rune_kit::ControlSize::Small)
-        .on_press_tx(|ui: &mut Ui, tx: &mut Tx| {
-            if let Err(error) = super::onboarding_kit::live::restart(ui, tx) {
-                ui.error = Some(error);
-            }
-        })
-        .build(p.k)
-        .key("restart-onboarding");
-    icon_row(
-        p,
-        "lab-restart-onboarding",
-        &SPARKLES,
-        tr("Run setup again"),
-        Some(tr(
-            "Play the first run again. Settings, models, and permissions stay",
-        )),
-        run,
-    )
-    .into()
+    controls::segmented(p, "unload-idle-minutes", &labels, selected, |ui, index| {
+        let minutes = UNLOAD_IDLE_MINUTES[index];
+        ui.update(|settings| settings.labs.unload_idle_minutes = minutes);
+    })
 }

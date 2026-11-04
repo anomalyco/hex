@@ -931,6 +931,7 @@ fn tuning(p: Paint, pg: &Playground, w: f32, standalone: bool) -> El {
         ("Stop", Cue::Stop),
         ("Sent", Cue::Sent),
         ("Undo", Cue::TakenBack),
+        ("Discard", Cue::Discarded),
         ("Failed", Cue::Failed),
     ];
     // Standalone, the playground switches Hex's sounds and sets their

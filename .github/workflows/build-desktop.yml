@@ -48,11 +48,11 @@ permissions:
   contents: read
 
 jobs:
-  # Both architectures build natively on Ubuntu 24.04, so the executable and
-  # packages need glibc 2.39 (Ubuntu 24.04, Debian 13, Fedora 40, Arch) rather
-  # than a rolling distribution's newest. ARM64 decodes on the GPU through
-  # Vulkan like x64 (Mesa's drivers on ARM boards and Asahi), falling back to
-  # the CPU without a Vulkan device.
+  # Both architectures build natively in a Debian 12 container
+  # (scripts/build-linux-release.sh), so the executable and packages need only
+  # glibc 2.36 (Debian 12, Ubuntu 23.04, Fedora 37, and newer; issue #1026).
+  # ARM64 decodes on the GPU through Vulkan like x64 (Mesa's drivers on ARM
+  # boards and Asahi), falling back to the CPU without a Vulkan device.
   linux-x64:
     name: Linux x86_64
     runs-on: ubuntu-24.04
@@ -77,18 +77,12 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: inputs.test-build
         with:
-          key: test-build
+          key: test-build-${{ hashFiles('packaging/linux/build.Dockerfile') }}
           cache-on-failure: true
-      - name: Install build dependencies
-        # libopenblas-dev only satisfies build.rs's -lopenblas, which
-        # --as-needed drops: the release links no system BLAS
-        # (scripts/build-linux.sh).
+      - name: Install nfpm
+        # The build dependencies live in the build image
+        # (packaging/linux/build.Dockerfile).
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake pkg-config python3 file jq libasound2-dev \
-            libssl-dev libxkbcommon-x11-dev libx11-xcb-dev libfontconfig1-dev \
-            libfreetype-dev libxcursor-dev libxi-dev libxrandr-dev libopenblas-dev \
-            libvulkan-dev glslc libshaderc-dev
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/nfpm.tar.gz" \
             "https://github.com/goreleaser/nfpm/releases/download/v2.48.0/$NFPM_ARCHIVE"
           echo "$NFPM_SHA256  $RUNNER_TEMP/nfpm.tar.gz" | sha256sum -c -
@@ -103,12 +97,18 @@ jobs:
           CC: clang
           CXX: clang++
         run: |
-          executable=$(scripts/build-linux.sh)
+          executable=$(scripts/build-linux-release.sh)
           scripts/package-linux.sh "$executable" "$HEX_VERSION" "$HEX_LINUX_LABEL" "$HEX_RELEASE_DIST"
-      - name: Install the .deb here and the .rpm on Fedora
+      - name: Check the glibc floor
+        shell: bash
+        run: |
+          bash .github/release/check-glibc-floor.sh "$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Install the .deb here and on Debian 12, and the .rpm on Fedora
         run: |
           base="$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL"
           dpkg-deb --info "$base.deb"
+          sudo apt-get update
           sudo apt-get install -y "$base.deb"
           test "$(/usr/bin/hex --version | awk 'NF { value=$NF } END { print value }')" = "$HEX_VERSION"
           dpkg-query -S /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/anomaly.hex.desktop /usr/share/icons/hicolor/256x256/apps/anomaly.hex.png
@@ -117,15 +117,22 @@ jobs:
             dnf install -y -q "/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL.rpm"
             test "$(hex --version | awk "NF { value=\$NF } END { print value }")" = "$HEX_VERSION"
             rpm -qf /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/anomaly.hex.desktop /usr/share/icons/hicolor/256x256/apps/anomaly.hex.png'
+          # The oldest supported distribution: the packaged and bare
+          # executables start and answer model-free commands.
+          docker run --rm -v "$RUNNER_TEMP/dist:/dist:ro" -e HEX_VERSION -e HEX_LINUX_LABEL debian:12 sh -euc '
+            apt-get update -qq
+            apt-get install -y -qq "/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL.deb" > /dev/null
+            for hex in /usr/bin/hex "/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL"; do
+              test "$("$hex" --version | awk "NF { value=\$NF } END { print value }")" = "$HEX_VERSION"
+              "$hex" history > /dev/null
+              status=0; "$hex" status > /dev/null 2>&1 || status=$?
+              test "$status" = 3
+            done'
       - name: Check the x86_64 CPU floor
         if: env.HEX_LINUX_ARCH == 'x86_64'
         run: |
           bash .github/release/check-x86-baseline.sh "$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL" \
             target/release/build/transcribe-cpp-sys-*/out/lib/libggml*.a
-      - name: Report the glibc floor
-        run: |
-          floor=$(objdump -T "$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          echo "Linux $HEX_LINUX_LABEL artifact requires $floor." | tee -a "$GITHUB_STEP_SUMMARY"
       - id: upload
         uses: ./.github/release/upload
         with:
@@ -222,7 +229,7 @@ jobs:
             bash source/.github/release/check-x86-baseline.sh \
             "$(cygpath -u "$RUNNER_TEMP")/dist/hex-$HEX_VERSION-windows-$HEX_WINDOWS_LABEL.exe" \
             source/target/x86_64-pc-windows-msvc/release/build/transcribe-cpp-sys-*/out/lib/ggml*.lib
-      - name: Check the executable needs no Visual C++ Redistributable
+      - name: Check the executable needs no Visual C++ Redistributable or Vulkan loader
         shell: pwsh
         run: |
           $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
@@ -232,6 +239,10 @@ jobs:
           $imports
           $redist = $imports | Select-String -Pattern 'VCRUNTIME|MSVCP|vcomp'
           if ($redist) { throw "hex.exe imports Visual C++ runtime DLLs: $redist" }
+          # The Vulkan loader comes with the graphics driver: imported at load
+          # time, a missing or Vulkan 1.0 one stops Hex before main (#1240).
+          $static = ($imports -join "`n") -split 'delay load dependencies' | Select-Object -First 1
+          if ($static -match 'vulkan-1\.dll') { throw "hex.exe imports vulkan-1.dll at load time instead of delay-loading it" }
       - id: upload
         uses: ./source/.github/release/upload
         with:

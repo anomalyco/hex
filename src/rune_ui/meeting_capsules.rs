@@ -4,7 +4,8 @@
 //! interactive Rune overlay, which on macOS is a non-activating `NSPanel`:
 //! its buttons take clicks while the call app keeps focus and Hex never
 //! activates. An offer that times out only closes; nothing starts or stops
-//! on a timeout.
+//! on a timeout, and the call is offered again once its app releases and
+//! retakes the microphone.
 //!
 //! `macos_rune` and `meeting_runtime` forward controller events; buttons
 //! send `ControllerCommand`s back to the controller.
@@ -17,6 +18,13 @@
 //! The recording capsule rests as a compact pill in its corner and springs
 //! open to show its actions while the pointer is over it. Dragging it moves
 //! the window; on release it snaps to the nearest corner, which is saved.
+//! With Labs › Movable meeting capsules on, the panel capsules (offer,
+//! reminder, call ended, ready, recording automatically) show in that same
+//! saved corner and drag the same way; off, they stay in the top right.
+//!
+//! On a Linux Wayland compositor without layer-shell (GNOME) the capsules
+//! float on XWayland only with Labs › Floating meeting capsules on GNOME
+//! (`linux::meeting_capsules`); otherwise an offer opens the Meetings pane.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::SyncSender;
@@ -24,10 +32,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rune::{
-    Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlaySpec, Phase, ScreenEdge, Spring, Tx,
-    col, row, text,
+    Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlayInput, OverlaySpec, Phase, ScreenEdge,
+    Spring, Tx, col, row, text,
 };
-use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant};
+use rune_kit::{
+    Badge, BadgeVariant, Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant,
+};
 
 use super::controls::{Paint, PushSize, pulsing_dot, status_dot};
 use crate::app_settings::{MeetingIndicatorCorner, MeetingPolicy, MeetingProviderChoice};
@@ -48,6 +58,9 @@ const ACTIONS_INSET: f32 = 8.0;
 const PILL_RADIUS: f32 = 999.0;
 /// The reminder: the meeting's title beside up to three buttons.
 const REMINDER_PANEL_WIDTH: f32 = 520.0;
+/// "Microsoft Teams left the call" beside Keep recording and Stop &
+/// transcribe (#835).
+const CALL_ENDED_PANEL_WIDTH: f32 = 520.0;
 /// How often an open reminder recounts "Starts in N min".
 const REMINDER_TICK: Duration = Duration::from_secs(5);
 /// The recording capsule's window, as wide as the open pill.
@@ -66,6 +79,9 @@ const COPIED_FEEDBACK: Duration = Duration::from_millis(1_500);
 const RECORDING_PANEL_HEIGHT: f32 = 48.0;
 const OFFER_TIMEOUT: Duration = Duration::from_secs(20);
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long after an offer Linux checks that its overlay opened.
+#[cfg(target_os = "linux")]
+const OFFER_CHECK: Duration = Duration::from_secs(2);
 /// How long an automatic recording says so before showing its elapsed time.
 const AUTOMATIC_LABEL: Duration = Duration::from_secs(10);
 const WINDOW_MARGIN: f32 = 12.0;
@@ -83,8 +99,11 @@ enum Kind {
         automatic: bool,
     },
     Offer(MeetingCandidate),
+    /// `auto_stop` when the recording stops on its own after a grace (Labs
+    /// › Stop when the call ends); Keep recording then cancels that.
     CallEnded {
         app: String,
+        auto_stop: bool,
     },
     Ready(Box<MeetingManifest>),
     /// An automatic recording while the recording indicator is off.
@@ -136,9 +155,13 @@ struct Capsule {
     choose: Choose,
     /// The recording capsule: the pointer is over the pill (or holding it).
     hovered: bool,
-    /// Where the recording capsule rests.
+    /// Where the recording capsule rests, and the panel while
+    /// [`Capsule::movable`].
     corner: MeetingIndicatorCorner,
-    /// Moves the recording capsule's window by a drag's travel from `corner`.
+    /// The panel capsule can be dragged to another corner (Labs › Movable
+    /// meeting capsules); the recording capsule always can.
+    movable: bool,
+    /// Moves the capsule's window by a drag's travel from `corner`.
     shift: Option<Shift>,
     save_corner: SaveCorner,
     /// Reads a recording's transcript through now off the main thread, then
@@ -241,9 +264,19 @@ impl Capsule {
         }
     }
 
-    /// The recording pill follows the pointer and snaps to the nearest
-    /// corner on release. A cancelled drag (Escape, window blur) returns to
-    /// the corner it started from and saves nothing.
+    /// The capsule's window size, for snapping a drag.
+    fn window_size(&self) -> (f32, f32) {
+        match &self.kind {
+            Some(Kind::Recording { .. }) => (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT),
+            Some(Kind::Offer(_)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
+            Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
+            None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
+        }
+    }
+
+    /// The recording pill (and a movable panel) follows the pointer and
+    /// snaps to the nearest corner on release. A cancelled drag (Escape,
+    /// window blur) returns to the corner it started from and saves nothing.
     fn drag(&mut self, drag: &Drag, tx: &mut Tx) {
         let Some(shift) = self.shift.clone() else {
             return;
@@ -253,12 +286,13 @@ impl Capsule {
             Phase::Move => shift(self.corner, drag.dx, drag.dy),
             Phase::Up if drag.cancelled() => shift(self.corner, 0.0, 0.0),
             Phase::Up => {
+                let size = self.window_size();
                 let corner = primary_screen_size().map_or(self.corner, |screen| {
-                    nearest_corner(self.corner, drag.dx, drag.dy, screen)
+                    nearest_corner(self.corner, drag.dx, drag.dy, screen, size)
                 });
                 shift(corner, 0.0, 0.0);
                 if corner != self.corner {
-                    tracing::info!(?corner, "recording capsule moved");
+                    tracing::info!(?corner, "meeting capsule moved");
                     self.corner = corner;
                     (self.save_corner)(corner);
                     // The pill changes sides with the window; it must not
@@ -290,15 +324,16 @@ fn corner_placement(
     (edge, margin, align, inset)
 }
 
-/// The corner nearest the capsule window's centre after a drag of
-/// (dx, dy) points from `from`, on a screen of `screen` points.
+/// The corner nearest the centre of a capsule window of `size` points after
+/// a drag of (dx, dy) points from `from`, on a screen of `screen` points.
 fn nearest_corner(
     from: MeetingIndicatorCorner,
     dx: f32,
     dy: f32,
     screen: (f32, f32),
+    size: (f32, f32),
 ) -> MeetingIndicatorCorner {
-    let (w, h) = (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT);
+    let (w, h) = size;
     let (_, margin, _, inset) = corner_placement(from, dx, dy);
     let x = if from.is_right() {
         screen.0 - inset - w / 2.0
@@ -333,7 +368,7 @@ fn primary_screen_size() -> Option<(f32, f32)> {
     None
 }
 
-fn place_recording(
+fn place_capsule(
     handle: &OverlayHandle<Capsule>,
     corner: MeetingIndicatorCorner,
     dx: f32,
@@ -342,6 +377,16 @@ fn place_recording(
     let (edge, margin, align, inset) = corner_placement(corner, dx, dy);
     handle.place(edge, margin);
     handle.set_align(align, inset);
+}
+
+/// Linux: lets the capsule's next show float on XWayland where Wayland has
+/// no layer-shell, only by Labs › Floating meeting capsules on GNOME (#1274).
+/// Off, Rune can't open it there and the Meetings pane stands in (#1271).
+fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
+    #[cfg(target_os = "linux")]
+    capsule.set_xwayland_input(crate::linux::meeting_capsules::on_xwayland());
+    #[cfg(not(target_os = "linux"))]
+    let _ = capsule;
 }
 
 /// The two capsules: the timed panel (offer, call ended, ready) and the
@@ -390,11 +435,15 @@ impl MeetingCapsules {
                     choose: choose.clone(),
                     hovered: false,
                     corner: MeetingIndicatorCorner::default(),
+                    movable: false,
                     shift: None,
                     save_corner: save_corner.clone(),
                     copy_new: None,
                 },
             );
+            // Only the drawn capsule (its `.hit()` body) takes clicks; the
+            // window's transparent rest passes them to the app beneath.
+            handle.set_input(OverlayInput::Regions);
             let (hide, resize, shift) = (handle.clone(), handle.clone(), handle.clone());
             let copied = handle.clone();
             let copy_new: CopyNew = Arc::new(move |id: String| {
@@ -413,7 +462,7 @@ impl MeetingCapsules {
                     resize.resize((width, MEETING_PANEL_HEIGHT));
                 }));
                 capsule.shift = Some(Arc::new(move |corner, dx, dy| {
-                    place_recording(&shift, corner, dx, dy);
+                    place_capsule(&shift, corner, dx, dy);
                 }));
             });
             handle
@@ -504,9 +553,15 @@ impl MeetingCapsules {
                     }
                 });
             }
-            ControllerEvent::CallEnded { app } => {
+            ControllerEvent::CallEnded { app, auto_stop } => {
                 self.close_recording();
-                self.show_panel(Kind::CallEnded { app: app.clone() }, None);
+                self.show_panel(
+                    Kind::CallEnded {
+                        app: app.clone(),
+                        auto_stop: *auto_stop,
+                    },
+                    None,
+                );
             }
             ControllerEvent::Finished(manifest) => {
                 self.close_recording();
@@ -532,20 +587,26 @@ impl MeetingCapsules {
     fn show_panel(&self, kind: Kind, timeout: Option<Duration>) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
-        self.panel.resize((
-            if reminder {
-                REMINDER_PANEL_WIDTH
-            } else {
-                MEETING_PANEL_WIDTH
-            },
-            MEETING_PANEL_HEIGHT,
-        ));
+        // With Labs › Movable meeting capsules the panel shows in the saved
+        // capsule corner; otherwise in the top right, as it always has.
+        let movable = crate::labs::movable_meeting_capsules();
+        let corner = if movable {
+            crate::app_settings::meeting_indicator_corner()
+        } else {
+            MeetingIndicatorCorner::TopRight
+        };
+        place_capsule(&self.panel, corner, 0.0, 0.0);
+        self.panel
+            .resize((panel_width(&kind), MEETING_PANEL_HEIGHT));
         self.panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
             capsule.more_open = false;
             capsule.copied = false;
+            capsule.movable = movable;
+            capsule.corner = corner;
             tx.instant();
         });
+        float_on_xwayland(&self.panel);
         self.panel.show();
         if reminder && let Some(timeout) = timeout {
             // Recount "Starts in N min" while this reminder may show.
@@ -575,12 +636,39 @@ impl MeetingCapsules {
                                 title = %candidate.title,
                                 "meeting recording offer timed out"
                             );
+                            // Unanswered: offered again when the call app
+                            // retakes the microphone (#1267).
+                            if candidate.key != "preview" {
+                                capsule.send(ControllerCommand::OfferTimedOut);
+                            }
                         }
                         capsule.close();
                     });
                 }
             });
         }
+    }
+
+    /// Linux: calls `unshown` with Rune's reason when the offer just shown
+    /// could not open its overlay (GNOME on Wayland has no layer-shell for
+    /// interactive overlays, #1271), unless a newer capsule replaced it.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn when_offer_unshown(&self, unshown: impl FnOnce(String) + Send + 'static) {
+        let (panel, current) = (self.panel.clone(), self.generation.clone());
+        let generation = current.load(Ordering::SeqCst);
+        std::thread::spawn(move || {
+            std::thread::sleep(OFFER_CHECK);
+            if current.load(Ordering::SeqCst) != generation
+                || panel.availability() != rune::Availability::Unavailable
+            {
+                return;
+            }
+            unshown(
+                panel
+                    .failure()
+                    .unwrap_or_else(|| "no reason given".to_owned()),
+            );
+        });
     }
 
     // Hide through the handle, not `Capsule::close`: a hide requested inside
@@ -594,7 +682,7 @@ impl MeetingCapsules {
 
     fn show_recording(&self, id: String, title: String, automatic: bool) {
         let corner = crate::app_settings::meeting_indicator_corner();
-        place_recording(&self.recording, corner, 0.0, 0.0);
+        place_capsule(&self.recording, corner, 0.0, 0.0);
         let started = Instant::now();
         let ticker_id = id.clone();
         self.recording.update(move |capsule, tx| {
@@ -609,6 +697,7 @@ impl MeetingCapsules {
             capsule.corner = corner;
             tx.instant();
         });
+        float_on_xwayland(&self.recording);
         self.recording.show();
         *self.ticking.lock().unwrap() = Some(ticker_id.clone());
         let (recording, ticking) = (self.recording.clone(), self.ticking.clone());
@@ -664,6 +753,20 @@ fn button(
         .key(key)
 }
 
+static CLOSE: &rune::Icon = &rune_theme_opencode::icons::CLOSE;
+
+/// The ✕ that closes a capsule whose actions have no way to. It only hides
+/// the capsule: nothing is sent to the controller (#996).
+fn dismiss_button(p: Paint) -> El {
+    IconButton::new(CLOSE)
+        .variant(IconButtonVariant::Ghost)
+        .control_size(ControlSize::Large)
+        .label(tr("Close"))
+        .on_press(|c: &mut Capsule| c.close())
+        .build(p.k)
+        .key("dismiss")
+}
+
 fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
     view_body(capsule, cx).hover_motion_within(Anim::INSTANT, Anim::INSTANT)
 }
@@ -686,11 +789,16 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
             p.danger(),
             tr("Recording automatically").to_owned(),
             title.clone(),
-            vec![button(p, "stop", tr("Stop"), true, |c| {
-                if c.send(ControllerCommand::Stop) {
-                    c.close();
-                }
-            })],
+            // Dismissing leaves the recording going; the menu bar still
+            // shows it.
+            vec![
+                button(p, "stop", tr("Stop"), true, |c| {
+                    if c.send(ControllerCommand::Stop) {
+                        c.close();
+                    }
+                }),
+                dismiss_button(p),
+            ],
         ),
         Kind::Reminder { meeting, automatic } => {
             reminder(p, meeting, *automatic, crate::calendar::wall_clock_ms())
@@ -699,9 +807,12 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Kind::Offer(candidate) => {
             let mut actions = Vec::new();
             if candidate.provider().is_some() {
-                actions.push(button(p, "offer-more", "…", false, |c| {
-                    c.set_more_open(true);
-                }));
+                actions.push(
+                    button(p, "offer-more", "…", false, |c| {
+                        c.set_more_open(true);
+                    })
+                    .label(tr("More")),
+                );
             }
             actions.push(button(p, "not-now", tr("Not now"), false, |c| {
                 if let Some(Kind::Offer(candidate)) = &c.kind {
@@ -729,12 +840,26 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
             }));
             (p.muted(), candidate.offer_title(), String::new(), actions)
         }
-        Kind::CallEnded { app } => (
+        Kind::CallEnded { app, auto_stop } => (
             p.danger(),
             tr_fill("{} left the call", app),
-            tr("Hex is still recording.").to_owned(),
+            if *auto_stop {
+                tr("Hex stops recording in 30 s unless you keep recording.")
+            } else {
+                tr("Hex is still recording.")
+            }
+            .to_owned(),
             vec![
                 button(p, "keep-recording", tr("Keep recording"), false, |c| {
+                    if matches!(
+                        c.kind,
+                        Some(Kind::CallEnded {
+                            auto_stop: true,
+                            ..
+                        })
+                    ) {
+                        c.send(ControllerCommand::KeepRecording);
+                    }
                     c.close();
                 }),
                 button(p, "stop-meeting", tr("Stop & transcribe"), true, |c| {
@@ -746,7 +871,17 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         ),
         Kind::Ready(manifest) => ready(p, manifest, capsule.copied),
     };
-    pill(p, dot, &title, &subtitle, actions)
+    pill(p, dot, &title, &subtitle, actions, capsule.movable)
+}
+
+/// The panel capsule's width for `kind`, room for its title beside its
+/// buttons.
+fn panel_width(kind: &Kind) -> f32 {
+    match kind {
+        Kind::Reminder { .. } => REMINDER_PANEL_WIDTH,
+        Kind::CallEnded { .. } => CALL_ENDED_PANEL_WIDTH,
+        _ => MEETING_PANEL_WIDTH,
+    }
 }
 
 /// "Starts in 1 min", "Starting now", or "Started 2 min ago".
@@ -941,6 +1076,7 @@ fn ready(
             c.close();
         }));
     }
+    actions.push(dismiss_button(p));
     (p.success(), title, subtitle, actions)
 }
 
@@ -1013,7 +1149,10 @@ fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automat
             RECORDING_CLOSE
         })
         .on_hover_change(|c: &mut Capsule, inside, _| c.hovered = inside)
-        .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx));
+        .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
+        // Only the drawn pill takes the pointer; the rest of the window,
+        // as wide as the open pill, lets clicks through.
+        .hit();
     let pill = if open {
         pill.w_full()
     } else {
@@ -1029,19 +1168,34 @@ fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automat
 }
 
 /// The panel capsule (reminder, offer, call ended, ready): status dot, two
-/// truncated lines, and its actions, in a rounded rectangle.
-fn pill(p: Paint, dot: rune::Color, title: &str, subtitle: &str, actions: Vec<El>) -> El {
+/// truncated lines, and its actions, in a rounded rectangle. A `movable`
+/// one drags to another corner like the recording capsule.
+fn pill(
+    p: Paint,
+    dot: rune::Color,
+    title: &str,
+    subtitle: &str,
+    actions: Vec<El>,
+    movable: bool,
+) -> El {
+    // Only the body takes the pointer, not the window's margin around it.
+    let body = pill_body(p, status_dot(dot), title, subtitle, panel_radius(p))
+        .w_full()
+        .child(row().key("actions").gap(8.0).children(actions))
+        .hit();
+    let body = if movable {
+        body.cursor(Cursor::Grab)
+            .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
+    } else {
+        body
+    };
     row()
         .key("capsule")
         .w_full()
         .h_full()
         .px(4.0)
         .py(4.0)
-        .child(
-            pill_body(p, status_dot(dot), title, subtitle, panel_radius(p))
-                .w_full()
-                .child(row().key("actions").gap(8.0).children(actions)),
-        )
+        .child(body)
 }
 
 /// The panel capsule's corners, concentric with its buttons' (`radius.md`)
@@ -1054,8 +1208,12 @@ fn panel_radius(p: Paint) -> f32 {
 /// rectangle for the panel capsules, a full pill for the recording capsule.
 fn pill_body(p: Paint, dot: El, title: &str, subtitle: &str, radius: f32) -> El {
     let c = &p.k.c;
+    // A status named by its title, announced when the capsule's title
+    // changes; the subtitle stays readable inside it.
     row()
         .key("pill")
+        .role("status")
+        .label(title)
         .h_full()
         .gap(12.0)
         .pl(16.0)
@@ -1075,7 +1233,8 @@ fn pill_body(p: Paint, dot: El, title: &str, subtitle: &str, radius: f32) -> El 
                         .key("title")
                         .truncate()
                         .font(p.k.ty.ui_medium)
-                        .color(p.text()),
+                        .color(p.text())
+                        .a11y_hidden(),
                 )
                 .children((!subtitle.is_empty()).then(|| {
                     text(subtitle.to_owned())
@@ -1103,6 +1262,7 @@ mod tests {
     const MENU: (f32, f32) = (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT);
     const RECORDING: (f32, f32) = (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT);
     const REMINDER: (f32, f32) = (REMINDER_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
+    const CALL_ENDED: (f32, f32) = (CALL_ENDED_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
 
     /// "Design sync" a minute from now, with a Zoom link or none.
     fn design_sync(link: bool) -> CalendarMeeting {
@@ -1136,6 +1296,7 @@ mod tests {
             named: false,
             site: None,
             application_name: Some("Slack".into()),
+            call: None,
         }
     }
 
@@ -1148,6 +1309,7 @@ mod tests {
             named: false,
             site: None,
             application_name: Some("Brave Browser".into()),
+            call: None,
         }
     }
 
@@ -1171,6 +1333,7 @@ mod tests {
             choose: Arc::new(move |choice| saved.lock().unwrap().push(choice)),
             hovered: false,
             corner: MeetingIndicatorCorner::TopRight,
+            movable: false,
             shift: None,
             save_corner: Arc::new(|_| {}),
             copy_new: None,
@@ -1567,16 +1730,216 @@ mod tests {
     fn a_released_capsule_snaps_to_the_corner_nearest_its_centre() {
         use MeetingIndicatorCorner::*;
         let screen = (1512.0, 982.0);
-        assert_eq!(nearest_corner(TopRight, -100.0, 40.0, screen), TopRight);
-        assert_eq!(nearest_corner(TopRight, -600.0, 0.0, screen), TopLeft);
-        assert_eq!(nearest_corner(TopRight, 0.0, 700.0, screen), BottomRight);
-        assert_eq!(nearest_corner(BottomLeft, 500.0, -600.0, screen), TopRight);
-        assert_eq!(nearest_corner(BottomLeft, 10.0, -10.0, screen), BottomLeft);
+        let nearest = |from, dx, dy| nearest_corner(from, dx, dy, screen, RECORDING);
+        assert_eq!(nearest(TopRight, -100.0, 40.0), TopRight);
+        assert_eq!(nearest(TopRight, -600.0, 0.0), TopLeft);
+        assert_eq!(nearest(TopRight, 0.0, 700.0), BottomRight);
+        assert_eq!(nearest(BottomLeft, 500.0, -600.0), TopRight);
+        assert_eq!(nearest(BottomLeft, 10.0, -10.0), BottomLeft);
         let (edge, margin, align, inset) = corner_placement(BottomLeft, 10.0, -10.0);
         assert!(matches!((edge, align), (ScreenEdge::Bottom, Align::Start)));
         assert_eq!(
             (margin, inset),
             (WINDOW_MARGIN + DOCK + 10.0, WINDOW_MARGIN + 10.0)
+        );
+    }
+
+    #[test]
+    fn a_released_panel_snaps_by_its_own_size() {
+        use MeetingIndicatorCorner::*;
+        let screen = (1512.0, 982.0);
+        // The panel's centre sits 222 pt in from the right edge, the
+        // recording capsule's 332 pt: the same drag crosses the middle
+        // only for the wider window.
+        assert_eq!(
+            nearest_corner(TopRight, -500.0, 0.0, screen, PANEL),
+            TopRight
+        );
+        assert_eq!(
+            nearest_corner(TopRight, -500.0, 0.0, screen, RECORDING),
+            TopLeft
+        );
+        assert_eq!(
+            nearest_corner(TopRight, -600.0, 0.0, screen, PANEL),
+            TopLeft
+        );
+        assert_eq!(
+            nearest_corner(TopLeft, 0.0, 500.0, screen, PANEL),
+            BottomLeft
+        );
+        assert_eq!(
+            nearest_corner(BottomRight, 0.0, -400.0, screen, PANEL),
+            BottomRight
+        );
+        assert_eq!(
+            nearest_corner(BottomRight, 0.0, -500.0, screen, PANEL),
+            TopRight
+        );
+    }
+
+    #[test]
+    fn each_corner_places_the_panel_at_its_edges() {
+        use MeetingIndicatorCorner::*;
+        let top = WINDOW_MARGIN + MENU_BAR;
+        let bottom = WINDOW_MARGIN + DOCK;
+        for (corner, margin) in [
+            (TopRight, top),
+            (TopLeft, top),
+            (BottomRight, bottom),
+            (BottomLeft, bottom),
+        ] {
+            let (edge, placed_margin, align, inset) = corner_placement(corner, 0.0, 0.0);
+            assert_eq!(
+                matches!(edge, ScreenEdge::Top),
+                corner.is_top(),
+                "{corner:?}"
+            );
+            assert_eq!(matches!(align, Align::End), corner.is_right(), "{corner:?}");
+            assert_eq!(
+                (placed_margin, inset),
+                (margin, WINDOW_MARGIN),
+                "{corner:?}"
+            );
+        }
+        // Off, the panel keeps the top-right spot its overlay opens at.
+        let (edge, margin, align, inset) = corner_placement(TopRight, 0.0, 0.0);
+        assert!(matches!((edge, align), (ScreenEdge::Top, Align::End)));
+        assert_eq!((margin, inset), (WINDOW_MARGIN + MENU_BAR, WINDOW_MARGIN));
+    }
+
+    #[test]
+    fn only_a_movable_panel_drags() {
+        type Moves = Arc<Mutex<Vec<(MeetingIndicatorCorner, f32, f32)>>>;
+        for movable in [false, true] {
+            let (mut rt, _, _) = runtime(ready_transcript(), false, true, PANEL);
+            let moves: Moves = Moves::default();
+            let record = moves.clone();
+            rt.update(move |capsule, _| {
+                capsule.movable = movable;
+                capsule.shift = Some(Arc::new(move |corner, dx, dy| {
+                    record.lock().unwrap().push((corner, dx, dy));
+                }));
+            });
+            rt.frame(0.0);
+            let (x, y) = rt.find("lines").unwrap();
+            rt.pointer_move(x, y);
+            rt.pointer_down(x, y);
+            rt.pointer_move(x - 20.0, y + 30.0);
+            rt.frame(0.0);
+            rt.pointer_up(x - 20.0, y + 30.0);
+            rt.frame(0.0);
+            let moves = moves.lock().unwrap();
+            if movable {
+                assert!(
+                    moves.contains(&(MeetingIndicatorCorner::TopRight, -20.0, 30.0)),
+                    "{moves:?}"
+                );
+                assert_eq!(
+                    moves.last(),
+                    Some(&(MeetingIndicatorCorner::TopRight, 0.0, 0.0))
+                );
+            } else {
+                assert!(moves.is_empty(), "{moves:?}");
+            }
+            // The drag pressed nothing.
+            assert!(rt.state.kind.is_some());
+        }
+    }
+
+    fn call_ended() -> Kind {
+        Kind::CallEnded {
+            app: MeetingSource::Teams.label().into(),
+            auto_stop: false,
+        }
+    }
+
+    fn ready_transcript() -> Kind {
+        Kind::Ready(Box::new(
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 1,
+                "id": "ready-snap",
+                "title": "Design sync",
+                "status": "complete",
+                "created_at_ms": 1_760_000_000_000_u64,
+                "ended_at_ms": null,
+                "duration_ms": 1_000,
+                "system": {"file": "system.wav", "samples": 0, "dropped_packets": 0},
+                "microphone": {"file": "microphone.wav", "samples": 0, "dropped_packets": 0},
+                "error": null,
+                "export_path": "/Users/kit/Documents/Hex Meetings/Design sync.md"
+            }))
+            .unwrap(),
+        ))
+    }
+
+    fn auto_started() -> Kind {
+        Kind::AutoStarted {
+            title: "Slack Huddle call — 2:30 PM".into(),
+        }
+    }
+
+    #[test]
+    fn dismissing_a_ready_transcript_only_closes_it() {
+        let (mut rt, commands, _) = runtime(ready_transcript(), false, true, PANEL);
+        assert!(rt.find("copy-transcript").is_some());
+        assert!(rt.find("reveal-transcript").is_some());
+        tap(&mut rt, "dismiss");
+        assert!(commands.try_recv().is_err());
+        assert!(rt.state.kind.is_none());
+    }
+
+    #[test]
+    fn dismissing_an_automatic_recording_never_stops_it() {
+        let (mut rt, commands, _) = runtime(auto_started(), false, true, PANEL);
+        tap(&mut rt, "dismiss");
+        assert!(commands.try_recv().is_err());
+        assert!(rt.state.kind.is_none());
+    }
+
+    #[test]
+    fn an_automatic_stop_says_so_and_keep_recording_cancels_it() {
+        let auto = Kind::CallEnded {
+            app: MeetingSource::WhatsApp.label().into(),
+            auto_stop: true,
+        };
+        let (mut rt, commands, _) = runtime(auto, false, true, CALL_ENDED);
+        assert!(
+            texts(&rt)
+                .contains(&"Hex stops recording in 30 s unless you keep recording.".to_string())
+        );
+        tap(&mut rt, "keep-recording");
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(ControllerCommand::KeepRecording)
+        ));
+        assert!(rt.state.kind.is_none());
+
+        // Without the lab, Keep recording only closes the capsule.
+        let (mut rt, commands, _) = runtime(call_ended(), false, true, CALL_ENDED);
+        assert!(texts(&rt).contains(&"Hex is still recording.".to_string()));
+        tap(&mut rt, "keep-recording");
+        assert!(commands.try_recv().is_err());
+    }
+
+    #[test]
+    fn the_call_ended_title_fits_beside_its_buttons() {
+        let kind = call_ended();
+        assert_eq!(panel_width(&kind), CALL_ENDED.0);
+        let (mut rt, _, _) = runtime(kind, false, false, CALL_ENDED);
+        rt.settle_all();
+        rt.frame(0.0);
+        let title = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("title"))
+            .unwrap();
+        assert_eq!(title.text.as_deref(), Some("Microsoft Teams left the call"));
+        let style = rune_theme_opencode::kit(false).ty.ui_medium;
+        let (width, _) = rt.text.measure("Microsoft Teams left the call", style, 2.0);
+        assert!(
+            width <= title.rect[2] + 0.5,
+            "title needs {width} pt, has {}",
+            title.rect[2]
         );
     }
 
@@ -1606,6 +1969,7 @@ mod tests {
             ("reminder", reminder(true, false), false, REMINDER),
             ("reminder-no-link", reminder(false, false), false, REMINDER),
             ("reminder-automatic", reminder(true, true), false, REMINDER),
+            ("call-ended", call_ended(), false, CALL_ENDED),
             (
                 "recording-automatic",
                 Kind::Recording {
@@ -1617,14 +1981,8 @@ mod tests {
                 false,
                 RECORDING,
             ),
-            (
-                "auto-started",
-                Kind::AutoStarted {
-                    title: "Slack Huddle call — 2:30 PM".into(),
-                },
-                false,
-                PANEL,
-            ),
+            ("auto-started", auto_started(), false, PANEL),
+            ("ready", ready_transcript(), false, PANEL),
         ];
         type Setup = fn(&mut Capsule);
         let nothing: Setup = |_| {};
@@ -1695,27 +2053,87 @@ mod tests {
             for dark in [false, true] {
                 let (mut rt, _, _) = runtime(kind.clone(), more_open, dark, size);
                 rt.update(move |capsule, _| setup(capsule));
-                rt.settle_all();
-                rt.frame(0.0);
-                let (w, h) = ((size.0 * 2.0) as u32, (size.1 * 2.0) as u32);
-                let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
-                let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
-                renderer.prepare(
-                    &gpu.device,
-                    &gpu.queue,
-                    &mut rt.text.atlas,
-                    &rt.instances,
-                    (w, h),
-                );
-                let mut encoder = gpu.device.create_command_encoder(&Default::default());
-                renderer.draw(&mut encoder, &target.view, rt.clear_color());
-                target.copy(&mut encoder);
-                gpu.queue.submit([encoder.finish()]);
-                let pixels = target.read(&gpu.device);
+                let (w, h, pixels) = render(&gpu, &mut rt, size);
                 let theme = if dark { "dark" } else { "light" };
                 let path = folder.join(format!("capsule-{name}-{theme}.png"));
                 rune::render::write_png(&path, w, h, &pixels).unwrap();
             }
+        }
+    }
+
+    fn render(
+        gpu: &rune::render::Gpu,
+        rt: &mut Runtime<Capsule>,
+        size: (f32, f32),
+    ) -> (u32, u32, Vec<u8>) {
+        rt.settle_all();
+        rt.frame(0.0);
+        let (w, h) = ((size.0 * 2.0) as u32, (size.1 * 2.0) as u32);
+        let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
+        let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
+        renderer.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &mut rt.text.atlas,
+            &rt.instances,
+            (w, h),
+        );
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        renderer.draw(&mut encoder, &target.view, rt.clear_color());
+        target.copy(&mut encoder);
+        gpu.queue.submit([encoder.finish()]);
+        (w, h, target.read(&gpu.device))
+    }
+
+    /// The call-ended, ready, and automatic-recording capsules against
+    /// `tests/golden/meeting-capsule-*.png`; `HEX_UPDATE_GOLDENS=1` rewrites
+    /// them. Without a GPU adapter it skips. Like every golden it is checked
+    /// on Linux only: glyph coverage on Metal differs past the tolerance.
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "goldens are checked on Linux")]
+    fn panel_goldens() {
+        let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+            eprintln!("skipping meeting capsule golden: no GPU adapter");
+            return;
+        };
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+        let states = [
+            ("call-ended", call_ended(), CALL_ENDED),
+            ("ready", ready_transcript(), PANEL),
+            ("auto-started", auto_started(), PANEL),
+        ];
+        for ((name, kind, size), dark) in states
+            .into_iter()
+            .flat_map(|state| [false, true].map(|dark| (state.clone(), dark)))
+        {
+            let theme = if dark { "dark" } else { "light" };
+            let path = folder.join(format!("meeting-capsule-{name}-{theme}.png"));
+            let (mut rt, _, _) = runtime(kind, false, dark, size);
+            let (w, h, pixels) = render(&gpu, &mut rt, size);
+            if std::env::var_os("HEX_UPDATE_GOLDENS").is_some() {
+                rune::render::write_png(&path, w, h, &pixels).unwrap();
+                continue;
+            }
+            let decoder =
+                png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap()));
+            let mut reader = decoder.read_info().unwrap();
+            let mut golden = vec![0; reader.output_buffer_size().unwrap()];
+            let info = reader.next_frame(&mut golden).unwrap();
+            assert_eq!(
+                (info.width, info.height),
+                (w, h),
+                "{name}-{theme} size changed"
+            );
+            // GPUs differ in the last bit of blending and glyph coverage.
+            let differing = pixels
+                .chunks(4)
+                .zip(golden.chunks(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 12))
+                .count();
+            assert!(
+                differing <= (w * h) as usize / 500,
+                "{name}-{theme}: {differing} pixels differ"
+            );
         }
     }
 }

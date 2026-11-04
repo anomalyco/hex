@@ -63,12 +63,6 @@ $target = switch ($machine) {
     'ARM64' { 'windows-arm64' }
     default { throw "Hex supports 64-bit x64 and ARM64 Windows, not $machine." }
 }
-# The x64 build decodes on the GPU through Vulkan, whose loader ships with
-# NVIDIA, AMD, and Intel graphics drivers rather than with Windows itself.
-if ($machine -eq 'AMD64' -and -not (Test-Path (Join-Path $env:SystemRoot 'System32\vulkan-1.dll'))) {
-    throw 'Hex for x64 Windows needs a graphics driver with Vulkan support (vulkan-1.dll was not found). Update the GPU driver, then run this installer again.'
-}
-
 if (-not $channel) {
     try {
         $null = Invoke-WebRequest -Uri "$origin/hex/desktop/stable.json" -UseBasicParsing -TimeoutSec 30

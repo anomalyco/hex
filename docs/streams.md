@@ -216,3 +216,69 @@ has no body.
 
 `model-changed` means the user switched dictation's model during the stream;
 start a new one. `hex-quitting` means Hex quit.
+
+## Meeting finished events (`GET /meetings/events`, Labs)
+
+Not part of `/streams`, but on the same local API with the same discovery
+and bearer token. Only while Labs › Meeting finished event
+(`labs.meeting_finished_event`, `hex labs on meeting-finished-event`) is on;
+off, it answers `404 labs-off`. Code: `src/local_api/meeting_events.rs`
+(route) and `src/meeting/finished_events.rs` (the hub the recorder publishes
+to).
+
+Server-sent events with `: keep-alive` comments every 15 s. Once per meeting,
+after its final transcript and Markdown are written and its manifest reads
+`complete` (a Stop, or the final pass of a meeting Hex quit while recording):
+
+```text
+data: {"type":"meeting.finished","id":"1730700000000-4242"}
+```
+
+Only the id is sent: no title, path, transcript, or audio. Read the rest with
+`hex meetings show <id>` (or `hex mcp`). One subscriber at a time; a
+second answers `409 subscriber-busy`. Nothing is queued while nobody listens,
+so a client that reconnects should list meetings to catch up. A meeting whose
+final transcript fails sends nothing. The stream ends when Hex quits or the
+toggle turns off. `hex service` serves the route but records no meetings, so
+it never sends one.
+
+### Catching up after being offline
+
+The event is a best-effort signal, not a queue. To miss nothing, treat the
+meetings folder as the record and the event as a hint to look now:
+
+1. Keep a cursor: the end time (`timestamp_ms + duration_ms`, Unix ms) of the
+   newest meeting you've handled, and the ids you've handled near it.
+2. On start or reconnect, subscribe to `GET /meetings/events` first, then run
+   `hex meetings list --since <cursor> --limit 200 --json` (or MCP's
+   `list_meetings` with `since`). Subscribing first means a meeting that
+   finishes while you list still arrives as an event.
+3. A meeting is finished when its `status` is `complete` and its
+   `transcript_source` is `final`; read it with `hex meetings show <id> --json`.
+   Leave the cursor before any meeting that is still `recording`,
+   `transcribing`, or `interrupted`, so the next list sees it again.
+4. Delivery is at least once: the same id can come from the list and the
+   event, or from overlapping lists. Deduplicate by meeting `id` (stable for
+   the meeting's life) and keep your own receipts of what you processed.
+
+Limits:
+
+- One list returns at most 200 meetings, newest first, with `truncated` set
+  when there were more; page back with `--until <oldest timestamp_ms>`.
+- `--since`/`--until` include every meeting whose recording overlaps the
+  range, so the meeting at the cursor comes back; the dedupe handles it.
+- A meeting retention already removed is gone and can't be caught up.
+- A meeting Hex quit while recording reads `interrupted` until its final
+  pass on the next launch with Meetings on; then it reads `complete` and the
+  event is sent.
+- There is no separate transcript revision id; the meeting id is the key.
+  The final transcript is published atomically, and the event is sent once
+  per meeting.
+
+Final-transcript readiness is separate from notes. The event and `complete`
+mean the transcript and Markdown are written; notes (Apple Intelligence, or
+OpenCode with Summarize with OpenCode) are written after that, may fail, and
+can be regenerated later. Read them from `notes` in `hex meetings show <id>
+--json` (`null` until written; `generated_at_ms` changes when they're
+rewritten). Subscribing, listing, and showing are read-only: they run no
+command, upload nothing, and write nothing.

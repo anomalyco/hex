@@ -14,6 +14,11 @@ General › Vocabulary   // vocabulary.settings; after Language
 │   Underdog Bark, Whisper, and Qwen3-ASR (QwenCleo too) show none
 ├── Parakeet-based model with Labs › Vocabulary biasing off -> the sheet says
 │   transcription uses the terms only with it on
+├── Selected model reads fewer terms than the list holds -> muted line under
+│   the sheet's description: "This model reads the first 38 of 52 terms"
+│   (dictation::vocabulary::terms_read: Parakeet's 64-term cap or the
+│   prompt's character budget, the same count transcription takes; scene
+│   vocabulary-budget)
 ├── Sheet description -> what the list does, then "Terms with spaces match
 │   only when said in full" (a term is matched whole; "Dax Rad" doesn't help
 │   "Dax" said alone, so a name also said alone gets its own row)
@@ -53,15 +58,18 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too) 
 ├── Left alone: case-only differences, inflections ("Cappuccinos"), and addresses
 │   and paths ("opencode.ai"); rescoring also skips terms under 5 letters
 │   without a spelling, which the RNN-T decoder can still write ("Kip" -> Kit)
-└── SenseVoice, Cohere, GigaAM, Apple Speech -> no vocabulary in transcription
+└── SenseVoice, Cohere, GigaAM, Granite, Apple Speech -> no vocabulary in transcription
 
-Context prompt (Whisper incl. ivrit.ai, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; transcription::gguf_session::with_vocabulary
+Context prompt (Whisper incl. ivrit.ai and NB-Whisper, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; transcription::gguf_session::with_vocabulary
 ├── Always on (not Labs): replaced the per-model Recognition hints box (#129)
 ├── Every whole-clip run reads the list at its start: dictation, meetings,
 │   captures, the local API; live streams run without it
-├── "Term, Term, …": the first terms in list order, at most 64, as many as
-│   fit 500 characters (Whisper: its prompt slot holds 223 tokens and trims
-│   an overlong one from the front) or 1,000 (Qwen3-ASR's system message)
+├── "Term, Term, …": the first terms in list order, as many as fit 500
+│   characters (Whisper: its prompt slot holds 223 tokens and trims an
+│   overlong one from the front) or 1,000 (Qwen3-ASR's system message); the
+│   64-term cap is Parakeet's bias array only (#1246)
+├── The sheet says how many terms the selected model reads when that is
+│   fewer than the list; the 64-term vs full-budget hit rate is unmeasured
 ├── Whisper: transcribe.cpp's generic context prompt in the <|startofprev|>
 │   slot; Qwen3-ASR: the system message
 ├── Output that only repeats the prompt (two or more terms) is dropped, as
@@ -102,6 +110,12 @@ OpenCode rewriting (Modes)               // vocabulary.prompt
 Live meeting chapters (experiment live-chapters)  // vocabulary.chapters
 └── Chapter passes and the boundary pass start with "Names and terms that may
     appear: a, b, …" (first 30 terms, no spellings), read on each call
+
+Meeting notes (Labs › Vocabulary in meeting notes)  // vocabulary.notes
+├── Off (default) -> notes prompts are unchanged
+└── On -> the final title and summary prompt (automatic notes and Regenerate
+    summary) starts with the same line, read at each generation, ahead of the
+    calendar event; it shares the transcript's excerpt budget (#1154)
 
 Search                                   // vocabulary.search
 ├── hex meetings search, MCP search_transcripts, hex history --search
@@ -151,7 +165,9 @@ Sources: [dictation/vocabulary.rs](../../src/dictation/vocabulary.rs),
 
 Checks: `dictation::vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
 comma splitting, reading the saved list without settings, the
-first 64 terms and their spellings reaching transcription, the bounded prompt,
+first 64 terms and their spellings reaching transcription, the prompt bounded
+by characters alone (`the_prompt_keeps_the_first_terms_that_fit`), the
+sheet's count matching both (`terms_read_counts_exactly_what_transcription_takes`),
 folding hints, boost names);
 `loading_folds_saved_recognition_hints_into_the_vocabulary_once` in
 [app_settings.rs](../../src/app_settings.rs);

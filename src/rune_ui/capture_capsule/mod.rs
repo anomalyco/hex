@@ -40,10 +40,10 @@ use rune::{
 
 use self::flow::{Action, Cue, Done, Flow, Footer, Input, Lead, List, Mode, Pres};
 use self::surface::{
-    CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LIST_PAD, LIST_Y, MEDIUM, PANEL_H,
-    PANEL_W, PROCESSING, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, SMALL, STRONG, Shown,
-    Surface, THUMB_H, THUMB_W, THUMB_X, TIMER, UNDO_LABEL, chord, clock_width, corner, done_style,
-    done_text_x, ellipsize, measure,
+    CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LIST_PAD, LIST_Y, PANEL_H, PANEL_W,
+    PROCESSING, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H, THUMB_W,
+    THUMB_X, UNDO_LABEL, chord, clock_style, clock_width, corner, done_style, done_text_x,
+    ellipsize, measure, medium, small,
 };
 use self::tuning::ListFooter;
 use super::controls::Paint;
@@ -81,9 +81,9 @@ fn processing_glyphs() -> [(char, f32, f32); GLYPHS] {
         let x = if at == 0 {
             0.0
         } else {
-            measure(&PROCESSING[..at], STRONG)
+            measure(&PROCESSING[..at], medium())
         };
-        out[k] = (c, x, measure(&PROCESSING[..end], STRONG) - x);
+        out[k] = (c, x, measure(&PROCESSING[..end], medium()) - x);
     }
     out
 }
@@ -142,7 +142,7 @@ impl Meter {
             spin: std::array::from_fn(|_| Live::new(0.18)),
             shimmer: std::array::from_fn(|_| Live::new(1.0)),
             shimmer_at: {
-                let total = measure(PROCESSING, STRONG).max(1.0);
+                let total = measure(PROCESSING, medium()).max(1.0);
                 let glyphs = processing_glyphs();
                 std::array::from_fn(|k| (glyphs[k].1 + glyphs[k].2 * 0.5) / total)
             },
@@ -713,9 +713,10 @@ pub(crate) struct CaptureCapsule {
 pub(crate) const PANEL_MARGIN: f32 = 14.0;
 
 impl CaptureCapsule {
-    /// Adds the capsule's overlay, prewarmed and hidden. `act` carries out
-    /// what a press or key asks for; it runs on the main thread, so it
-    /// must only hand the action on.
+    /// Adds the capsule's overlay, prewarmed and hidden, holding no GPU
+    /// surface while hidden (Windows and Linux). `act` carries out what a
+    /// press or key asks for; it runs on the main thread, so it must only
+    /// hand the action on.
     pub(crate) fn install<S: 'static>(
         app: &mut rune::App<S>,
         act: impl Fn(Action) + Send + Sync + 'static,
@@ -739,6 +740,7 @@ impl CaptureCapsule {
                 prewarm: true,
                 ..Default::default()
             })
+            .release_gpu_when_hidden()
             .poll(poll)
             .compositor(TraceFrames::default())
             .on_created(|c| {
@@ -794,7 +796,7 @@ impl CaptureCapsule {
 
 // ─── View ────────────────────────────────────────────────────────────────────
 
-/// The sound for a cue, in the dictation tones' family.
+/// The sound for a cue, from the chosen sound set.
 fn tone(cue: Cue) -> crate::feedback::Tone {
     use crate::feedback::Tone;
     match cue {
@@ -802,7 +804,8 @@ fn tone(cue: Cue) -> crate::feedback::Tone {
         Cue::Stop => Tone::CaptureStop,
         Cue::Sent => Tone::CaptureSent,
         Cue::TakenBack => Tone::CaptureUndo,
-        Cue::Failed => Tone::CaptureFailed,
+        Cue::Discarded => Tone::Cancel,
+        Cue::Failed => Tone::Error,
     }
 }
 
@@ -990,13 +993,16 @@ fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
         .size(w, h)
         .radius(corner(h));
     // At the notch it's the notch: black, with no edge or shadow, and
-    // tucked into the notch rather than gone when hidden.
+    // tucked into the notch rather than gone when hidden. Under Reduce
+    // Motion it never travels, so it fades at rest instead.
     if surface.anchor == surface::Anchor::Notch {
-        return body
-            .fill(k.c.black)
-            .motion(surface.shell_motion)
-            .role("group")
-            .label("Capture");
+        body = body.fill(k.c.black).motion(surface.shell_motion);
+        if surface.reduced {
+            body = body
+                .opacity(if surface.shell_on { 1.0 } else { 0.0 })
+                .opacity_motion(surface.shell_fade);
+        }
+        return body.role("group").label("Capture");
     }
     body = body.fill(k.c.bg_base);
     for shadow in &k.elevation.overlay {
@@ -1047,8 +1053,8 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             let mut chip = base
                 .radius(surface::CHIP_RADIUS)
                 .gap(SEG_ICON_GAP)
-                .child(canvas(icon(id, SEG_ICON * 2.5 / 24.0, fg)).size(SEG_ICON, SEG_ICON))
-                .child(label(mode.label(), MEDIUM, fg))
+                .child(mark(id, SEG_ICON, fg))
+                .child(label(mode.label(), medium(), fg))
                 .press(c.pressed);
             if !shown.active {
                 chip = chip.hover(c.hover);
@@ -1063,15 +1069,13 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
         Id::Pen => {
             let lit = shown.active;
             let ink = if lit { c.bg_base } else { p.muted() };
-            let button = icon_button(
-                p,
-                canvas(icon(id, 16.0 * 1.75 / 24.0, ink)).size(16.0, 16.0),
-            );
+            let button = icon_button(p, mark(id, 16.0, ink));
             let button = if lit { button.fill(p.accent()) } else { button };
             base.child(
                 button
                     .role("button")
                     .label("Draw")
+                    .checked(lit)
                     .help("Draw")
                     .hit()
                     .on_press_tx(press(id)),
@@ -1095,15 +1099,12 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
         }
         // Cancel: ✕, which asks before discarding.
         Id::Cancel => base.child(
-            icon_button(
-                p,
-                canvas(icon(Id::Close, 12.0 * 2.4 / 24.0, p.muted())).size(12.0, 12.0),
-            )
-            .role("button")
-            .label("Discard")
-            .help("Discard")
-            .hit()
-            .on_press_tx(press(id)),
+            icon_button(p, close_glyph(p))
+                .role("button")
+                .label("Discard")
+                .help("Discard")
+                .hit()
+                .on_press_tx(press(id)),
         ),
         Id::Record => {
             let name = "Record";
@@ -1111,7 +1112,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 .fill(c.bg_contrast)
                 .hover(c.contrast_hover)
                 .press(c.contrast_pressed)
-                .child(label(name, STRONG, c.text_contrast))
+                .child(label(name, medium(), c.text_contrast))
                 .role("button")
                 .label(name)
                 .hit()
@@ -1122,7 +1123,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             base.radius(surface::CHIP_RADIUS)
                 .hover(c.hover)
                 .press(c.pressed)
-                .child(label(name, MEDIUM, p.muted()))
+                .child(label(name, medium(), p.muted()))
                 .role("button")
                 .label(name)
                 .hit()
@@ -1135,7 +1136,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             .fill(c.layer_02)
             .hover(c.hover)
             .press(c.pressed)
-            .child(label(surface::DISCARD_LABEL, STRONG, p.danger()))
+            .child(label(surface::DISCARD_LABEL, medium(), p.danger()))
             .role("button")
             .label(surface::DISCARD_LABEL)
             .hit()
@@ -1147,7 +1148,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 .radius(ICON_BUTTON_RADIUS)
                 .hover(c.hover)
                 .press(c.pressed)
-                .child(canvas(icon(id, 12.0 * 2.4 / 24.0, p.muted())).size(12.0, 12.0))
+                .child(close_glyph(p))
                 .role("button")
                 .label("Close")
                 .hit()
@@ -1201,16 +1202,16 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 shown.ident.clone()
             })
         }
-        Id::Next => keyed(p, base, &["⇥"], "Next", MEDIUM).on_press_tx(press(id)),
+        Id::Next => keyed(p, base, &["⇥"], "Next", medium()).on_press_tx(press(id)),
         // A chip beside the frame in the menu-bar flow.
         Id::Pick(_) if tuning::get().flow == tuning::CapsuleFlow::MenuBar => {
-            keyed(p, base, &[], shown.text(), MEDIUM).on_press_tx(press(id))
+            keyed(p, base, &[], shown.text(), medium()).on_press_tx(press(id))
         }
         Id::Pick(row) => pick_row(p, base, shown, row),
         Id::CardHints => base
             .justify_start()
             .px(ROW_PX)
-            .child(hint(p, "Search", shown.text()))
+            .child(hint(p, "Search", &surface::shortcut_keycaps()))
             .role("text")
             .label(format!("Search {}", shown.text())),
         Id::Why => placed(row().center_y(), shown)
@@ -1218,7 +1219,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             .child(quiet(p, shown.text(), done_style())),
         // The quiet way out of a send that just went.
         // Click only: Escape meant for another app was taking sends back.
-        Id::Undo => keyed(p, base, &[], UNDO_LABEL, MEDIUM).on_press_tx(press(id)),
+        Id::Undo => keyed(p, base, &[], UNDO_LABEL, medium()).on_press_tx(press(id)),
         // Search, with the capture shortcut that opens it as Settings draws it.
         Id::Ask
             if matches!(
@@ -1233,7 +1234,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 .radius(surface::CHIP_RADIUS)
                 .hover(c.hover)
                 .press(c.pressed)
-                .child(label(&shown.ident, MEDIUM, p.muted()))
+                .child(label(&shown.ident, medium(), p.muted()))
                 .child(el().grow(1.0))
                 .child(super::controls::keycaps(
                     p,
@@ -1245,7 +1246,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 .hit()
                 .on_press_tx(press(id))
         }
-        Id::Ask => keyed(p, base, &[], &shown.ident, MEDIUM).on_press_tx(press(id)),
+        Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
         Id::Paste | Id::Inspect => {
             let (name, help) = if id == Id::Paste {
                 ("Paste", "Paste the capture")
@@ -1259,7 +1260,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                     .radius(ICON_BUTTON_RADIUS)
                     .hover(c.hover)
                     .press(c.pressed)
-                    .child(canvas(icon(id, 16.0 * 1.75 / 24.0, p.muted())).size(16.0, 16.0))
+                    .child(mark(id, 16.0, p.muted()))
                     .role("button")
                     .label(name)
                     .help(help)
@@ -1286,19 +1287,23 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
 /// its name and its reason, the best one's in the accent.
 fn pick_row(p: Paint, base: El, shown: &Shown, row: usize) -> El {
     let c = &p.k.c;
-    let room = shown.rect[2] - 4.0 * ROW_PX - measure(shown.text(), MEDIUM);
-    let note = ellipsize(shown.note(), SMALL, room.max(24.0));
+    let room = shown.rect[2] - 4.0 * ROW_PX - measure(shown.text(), medium());
+    let note = ellipsize(shown.note(), small(), room.max(24.0));
     base.justify_start()
         .px(ROW_PX)
         .gap(ROW_PX)
         .radius(ROW_RADIUS + 2.0)
         .hover(c.hover)
         .press(c.pressed)
-        .child(label(shown.text(), MEDIUM, p.text()))
+        .child(label(shown.text(), medium(), p.text()))
         .child(el().grow(1.0))
         .child(
-            label(&note, SMALL, if row == 0 { p.accent() } else { p.muted() })
-                .offset(0.0, (MEDIUM.size - SMALL.size) * BASELINE_DROP),
+            label(
+                &note,
+                small(),
+                if row == 0 { p.accent() } else { p.muted() },
+            )
+            .offset(0.0, (medium().size - small().size) * BASELINE_DROP),
         )
         .role("button")
         .label(shown.text().to_owned())
@@ -1323,55 +1328,44 @@ fn keyed(p: Paint, base: El, keys: &[&str], name: &str, style: rune::TextStyle) 
 /// Small faint text (a shortcut, a note) beside words in `beside`, on
 /// their baseline: centring a smaller line in the same row would lift it.
 fn quiet(p: Paint, content: &str, beside: rune::TextStyle) -> El {
-    label(content, SMALL, p.faint()).offset(0.0, (beside.size - SMALL.size) * BASELINE_DROP)
+    label(content, small(), p.faint()).offset(0.0, (beside.size - small().size) * BASELINE_DROP)
 }
 
 /// A centred line's baseline sits this many ems below its middle: half
 /// the theme face's ascender less its descender (Inter: 0.969, 0.242).
 const BASELINE_DROP: f32 = 0.364;
 
-/// What a hint does, then its keys in one small rounded rect ("Send
-/// [⏎]"), never a keycap per key: the words in the muted ink, the keys
-/// fainter on a quiet fill or inside a hairline.
-fn hint(p: Paint, copy: &str, keys: &str) -> El {
+/// What a hint does in the muted ink, then its keys as Settings draws a
+/// shortcut: keycaps in one small tray ("Send [⏎]").
+fn hint<S: AsRef<str>>(p: Paint, copy: &str, keys: &[S]) -> El {
     let mut hint = row().center_y().gap(HINT_GAP);
     if !copy.is_empty() {
-        hint = hint.child(label(copy, SMALL, p.muted()));
+        hint = hint.child(label(copy, small(), p.muted()));
     }
     if !keys.is_empty() {
-        let k = p.k;
-        hint = hint.child(
-            row()
-                .center()
-                .h(KEY_BOX_H)
-                .px(KEY_BOX_PX)
-                .radius(KEY_BOX_RADIUS)
-                .fill(k.alpha(k.c.text_base, 0.07))
-                .child(label(keys, SMALL, p.muted())),
-        );
+        hint = hint.child(super::controls::keycaps(p, "keys", &key_parts(keys)));
     }
     hint
 }
 
 /// A [`hint`]'s width.
-fn hint_width(copy: &str, keys: &str) -> f32 {
+fn hint_width<S: AsRef<str>>(copy: &str, keys: &[S]) -> f32 {
     let gap = if copy.is_empty() || keys.is_empty() {
         0.0
     } else {
         HINT_GAP
     };
-    let rect = if keys.is_empty() {
+    let tray = if keys.is_empty() {
         0.0
     } else {
-        measure(keys, SMALL) + 2.0 * KEY_BOX_PX
+        super::controls::keycaps_width(&key_parts(keys), measure)
     };
-    measure(copy, SMALL) + gap + rect
+    measure(copy, small()) + gap + tray
 }
 
-/// The rounded rect around a hint's keys.
-const KEY_BOX_H: f32 = 18.0;
-const KEY_BOX_PX: f32 = 5.0;
-const KEY_BOX_RADIUS: f32 = 5.0;
+fn key_parts<S: AsRef<str>>(keys: &[S]) -> Vec<String> {
+    keys.iter().map(|key| key.as_ref().to_owned()).collect()
+}
 
 /// The open capsule's field: what's typed and the caret, or the
 /// placeholder.
@@ -1386,12 +1380,12 @@ fn field(p: Paint, base: El, typed: &str) -> El {
             .center_y()
             .gap(1.0)
             .child(caret)
-            .child(label("Send to…", MEDIUM, p.faint()))
+            .child(label("Send to…", medium(), p.faint()))
     } else {
         row()
             .center_y()
             .gap(1.0)
-            .child(label(typed, MEDIUM, p.text()))
+            .child(label(typed, medium(), p.text()))
             .child(caret)
     };
     base.trace_name("field")
@@ -1406,14 +1400,34 @@ fn field(p: Paint, base: El, typed: &str) -> El {
 /// The finished capsule's check, or its warning: its ink spans 12…20,
 /// where the recording dot's does.
 fn glyph(p: Paint, lead: Lead, thumb: Option<&rune::Pixels>) -> El {
-    let (color, id) = match (lead, thumb) {
+    let glyph = match (lead, thumb) {
         (Lead::Thumbnail, Some(pixels)) => return thumbnail(p, pixels),
-        (Lead::Check | Lead::Thumbnail, _) => (p.success(), Id::Done),
-        (Lead::Warning, _) => (p.k.c.warning.fg, Id::Why),
+        (Lead::Check | Lead::Thumbnail, _) => {
+            rune::icon(p.k.glyph.check_small, CHECK).color(p.success())
+        }
+        (Lead::Warning, _) => mark(Id::Why, CHECK, p.k.c.warning.fg),
     };
-    canvas(icon(id, CHECK * 2.7 / 24.0, color))
-        .absolute(8.0, (CHIP_H - CHECK) * 0.5)
-        .size(CHECK, CHECK)
+    glyph.absolute(8.0, (CHIP_H - CHECK) * 0.5)
+}
+
+/// The kit's ✕, at the size Hex's icon buttons draw it.
+fn close_glyph(p: Paint) -> El {
+    rune::icon(p.k.glyph.close, 16.0).color(p.muted())
+}
+
+/// The capsule's own line marks (the modes, the pen, Paste, Inspect, the
+/// warning, the badges) all draw at this stroke in points, the line of the
+/// kit's ✕ beside them, whatever their size.
+const MARK_STROKE: f32 = 0.8;
+
+/// [`MARK_STROKE`] on the 24 × 24 grid of a mark drawn `size` points.
+fn mark_stroke(size: f32) -> f32 {
+    MARK_STROKE * 24.0 / size
+}
+
+/// One of the capsule's own line marks, `size` points square.
+fn mark(id: Id, size: f32, color: Color) -> El {
+    canvas(icon(id, mark_stroke(size), color)).size(size, size)
 }
 
 const CHECK: f32 = 16.0;
@@ -1441,7 +1455,7 @@ fn thumbnail(p: Paint, pixels: &rune::Pixels) -> El {
 /// as the clock.
 fn timer(p: Paint, surface: &Surface, live: &Animated) -> El {
     row().center_y().absolute(LEAD_TEXT_X, 0.0).h(CHIP_H).child(
-        label(&surface.clock, TIMER, p.text())
+        label(&surface.clock, clock_style(), p.text())
             .live_text(&live.clock)
             .w(clock_width(&surface.clock)),
     )
@@ -1453,7 +1467,7 @@ fn processing_label(p: Paint, meter: &Meter) -> El {
     let mut glyphs = el()
         .absolute(PROCESSING_TEXT_X, 0.0)
         .h(CHIP_H)
-        .w(measure(PROCESSING, STRONG))
+        .w(measure(PROCESSING, medium()))
         .role("text")
         .label(PROCESSING);
     for ((c, x, w), live) in processing_glyphs().into_iter().zip(&meter.shimmer) {
@@ -1463,7 +1477,7 @@ fn processing_label(p: Paint, meter: &Meter) -> El {
                 .absolute(x, 0.0)
                 .h(CHIP_H)
                 .w(w)
-                .child(label(c.encode_utf8(&mut [0; 4]), STRONG, p.text()))
+                .child(label(c.encode_utf8(&mut [0; 4]), medium(), p.text()))
                 .live_opacity(live),
         );
     }
@@ -1561,9 +1575,9 @@ fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
         // The name keeps its width; a long reason is cut first, to no
         // less than two fifths of the row.
         let content = w - 2.0 * LIST_PAD - 2.0 * ROW_PX - 2.0 * ROW_PX;
-        let why_room = (content - measure(&dest.name, MEDIUM)).max(content * 0.4);
-        let why = ellipsize(&dest.why, SMALL, why_room);
-        let max = content - measure(&why, SMALL);
+        let why_room = (content - measure(&dest.name, medium())).max(content * 0.4);
+        let why = ellipsize(&dest.why, small(), why_room);
+        let max = content - measure(&why, small());
         let mut entry = row()
             .key(format!("row-{}", dest.name))
             .trace_name("row")
@@ -1574,21 +1588,25 @@ fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
             .radius(ROW_RADIUS)
             .hover(k.c.hover)
             .press(k.c.pressed)
-            .child(label(&ellipsize(&dest.name, MEDIUM, max), MEDIUM, p.text()))
+            .child(label(
+                &ellipsize(&dest.name, medium(), max),
+                medium(),
+                p.text(),
+            ))
             .child(el().grow(1.0))
             // The best suggestion is marked by its reason, on the
             // name's baseline; Shift down, so is where a rule would send.
             .child(
                 label(
                     &why,
-                    SMALL,
+                    small(),
                     if (suggesting && n == 0) || saving && n == list.selected {
                         p.accent()
                     } else {
                         p.muted()
                     },
                 )
-                .offset(0.0, (MEDIUM.size - SMALL.size) * BASELINE_DROP),
+                .offset(0.0, (medium().size - small().size) * BASELINE_DROP),
             )
             .role("button")
             .label(dest.name.clone())
@@ -1614,13 +1632,15 @@ fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
 /// key ("Send ⏎"); the highlighted row already says where. The capture
 /// shortcut, which records anew from here, sits on the right.
 fn search_hints(p: Paint, remember: bool, w: f32) -> El {
+    const SEND: [&str; 1] = ["⏎"];
+    const REMEMBER: [&str; 2] = ["⇧", "⏎"];
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
-    let shortcut = chord(&surface::shortcut_keycaps());
-    let used = hint_width("Send", "⏎") + HINTS_GAP;
-    let remember = remember && used + hint_width("Remember", "⇧⏎") <= room;
+    let shortcut = surface::shortcut_keycaps();
+    let used = hint_width("Send", &SEND) + HINTS_GAP;
+    let remember = remember && used + hint_width("Remember", &REMEMBER) <= room;
     let used = used
         + if remember {
-            hint_width("Remember", "⇧⏎")
+            hint_width("Remember", &REMEMBER)
         } else {
             0.0
         };
@@ -1628,8 +1648,8 @@ fn search_hints(p: Paint, remember: bool, w: f32) -> El {
     row()
         .center_y()
         .gap(HINTS_GAP)
-        .child(hint(p, "Send", "⏎").key("send"))
-        .children(remember.then(|| hint(p, "Remember", "⇧⏎").key("remember")))
+        .child(hint(p, "Send", &SEND).key("send"))
+        .children(remember.then(|| hint(p, "Remember", &REMEMBER).key("remember")))
         .child(el().grow(1.0))
         .children(capture.then(|| hint(p, "New capture", &shortcut).key("capture")))
 }
@@ -1640,12 +1660,12 @@ fn search_hints(p: Paint, remember: bool, w: f32) -> El {
 fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
     let to = list.selected_dest().map(|dest| dest.name.as_str());
-    let words = measure("Always send", SMALL) + measure("to", SMALL) + 3.0 * BADGE_GAP;
+    let words = measure("Always send", small()) + measure("to", small()) + 3.0 * BADGE_GAP;
     let badges =
         if to.is_some() { 2.0 } else { 1.0 } * (2.0 * BADGE_PX + BADGE_ICON + BADGE_ICON_GAP);
     let left = (room - words - badges).max(0.0);
-    let to_w = to.map_or(0.0, |to| measure(to, SMALL));
-    let site_w = measure(site, SMALL);
+    let to_w = to.map_or(0.0, |to| measure(to, small()));
+    let site_w = measure(site, small());
     let (site_room, to_room) = if site_w + to_w <= left {
         (site_w, to_w)
     } else {
@@ -1656,13 +1676,20 @@ fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
         .center_y()
         .gap(BADGE_GAP)
         .key("saving")
-        .child(label("Always send", SMALL, p.muted()))
-        .child(badge(p, Badge::of_site(site), &ellipsize(site, SMALL, site_room)).key("site"));
+        .child(label("Always send", small(), p.muted()))
+        .child(
+            badge(
+                p,
+                Badge::of_site(site),
+                &ellipsize(site, small(), site_room),
+            )
+            .key("site"),
+        );
     hint = match to {
         Some(to) => hint
-            .child(label("to", SMALL, p.muted()))
-            .child(badge(p, Badge::Chat, &ellipsize(to, SMALL, to_room)).key("to")),
-        None => hint.child(label("to…", SMALL, p.muted())),
+            .child(label("to", small(), p.muted()))
+            .child(badge(p, Badge::Chat, &ellipsize(to, small(), to_room)).key("to")),
+        None => hint.child(label("to…", small(), p.muted())),
     };
     hint.child(el().grow(1.0))
 }
@@ -1705,10 +1732,10 @@ fn badge(p: Paint, kind: Badge, name: &str) -> El {
         .radius(BADGE_RADIUS)
         .fill(k.alpha(k.c.text_base, 0.09))
         .child(
-            canvas(badge_icon(kind, BADGE_ICON * 2.2 / 24.0, p.muted()))
+            canvas(badge_icon(kind, mark_stroke(BADGE_ICON), p.muted()))
                 .size(BADGE_ICON, BADGE_ICON),
         )
-        .child(label(name, SMALL, p.text()))
+        .child(label(name, small(), p.text()))
 }
 
 /// A badge's line icon on the 24 × 24 grid: a globe, an app window, or a
@@ -1920,16 +1947,6 @@ fn icon(id: Id, width: f32, color: Color) -> Shape {
             paths.push(rounded(6.5, 2.0, 11.0, 20.0, 3.0));
             paths.push(line([10.5, 18.5], [13.5, 18.5]));
         }
-        Id::Close => {
-            paths.push(line([6.5, 6.5], [17.5, 17.5]));
-            paths.push(line([17.5, 6.5], [6.5, 17.5]));
-        }
-        Id::Done => paths.push(
-            Path::new()
-                .move_to([5.5, 12.5])
-                .line_to([10.0, 17.0])
-                .line_to([18.5, 7.5]),
-        ),
         Id::Why => {
             paths.push(line([12.0, 4.0], [12.0, 14.0]));
             paths.push(line([12.0, 19.5], [12.0, 19.6]));

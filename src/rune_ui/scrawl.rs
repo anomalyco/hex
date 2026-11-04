@@ -42,6 +42,9 @@ fn set_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static
 }
 
 pub(super) fn toggle(ui: &mut Ui) {
+    if crate::policy::Policy::current().locks(crate::policy::Lock::Annotate) {
+        return;
+    }
     cancel_capture(ui);
     let enabled = !ui.settings.capture.enabled;
     let mut candidate = ui.drafted();
@@ -97,7 +100,7 @@ fn retention_description(policy: Policy) -> String {
 /// The captures folder, with the home folder as `~`.
 fn folder_label(ui: &Ui) -> String {
     let folder = ui.settings.capture.captures_dir();
-    dirs::home_dir()
+    crate::app_paths::home_dir()
         .and_then(|home| {
             folder
                 .strip_prefix(home)
@@ -361,6 +364,7 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
             select(
                 p,
                 "capture-retention-menu",
+                tr("Keep"),
                 &retention_label(policy),
                 ui.open == Some(Menu::CaptureRetention),
                 choices,
@@ -386,14 +390,18 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         p,
         "enable",
         vec![
-            toggle_row(
-                p,
-                "capture-enabled",
-                tr("Annotate"),
-                description(enabled),
-                enabled,
-                toggle,
-            )
+            if crate::policy::Policy::current().locks(crate::policy::Lock::Annotate) {
+                super::controls::managed_row(p, "capture-enabled", None, tr("Annotate"))
+            } else {
+                toggle_row(
+                    p,
+                    "capture-enabled",
+                    tr("Annotate"),
+                    description(enabled),
+                    enabled,
+                    toggle,
+                )
+            }
             .into(),
             folding(
                 "capture-error-fold",
@@ -436,7 +444,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             storage_rows(ui, p, &view, layer),
         ));
     }
-    super::scroll_body("scroll", content)
+    super::scroll_body(p.k, "scroll", content)
 }
 
 #[cfg(test)]

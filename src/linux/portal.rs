@@ -146,6 +146,26 @@ fn unknown(error: &zbus::Error) -> bool {
     name.starts_with("org.freedesktop.DBus.Error.Unknown")
 }
 
+/// The portal's backend failed a request: it answered Response code 2, or
+/// the call itself failed on the bus. Unlike a dismissal (code 1), the
+/// desktop never asked the person; on niri with the GNOME backend and no
+/// GNOME Shell, BindShortcuts always fails this way (#1014).
+#[derive(Debug)]
+pub(crate) struct BackendFailure(String);
+
+impl std::fmt::Display for BackendFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for BackendFailure {}
+
+/// Whether `error` is the portal's backend failing, not a refusal.
+pub(crate) fn is_backend_failure(error: &color_eyre::eyre::Report) -> bool {
+    error.downcast_ref::<BackendFailure>().is_some()
+}
+
 /// A private session-bus connection registered with the portal as Hex.
 pub(crate) struct PortalBus {
     runtime: tokio::runtime::Runtime,
@@ -343,8 +363,13 @@ impl PortalBus {
         let token = self.token();
         let path = format!("{DESKTOP_PATH}/request/{}/{token}", self.sender);
         let interface = self.interface;
-        self.call::<_, OwnedObjectPath>(DESKTOP_PATH, interface, method, &body(&token))
-            .wrap_err_with(|| format!("the {interface} portal refused {method}"))?;
+        if let Err(error) =
+            self.call::<_, OwnedObjectPath>(DESKTOP_PATH, interface, method, &body(&token))
+        {
+            return Err(color_eyre::eyre::Report::new(BackendFailure(format!(
+                "the {interface} portal refused {method}: {error}"
+            ))));
+        }
         let deadline = Instant::now() + timeout;
         loop {
             match self.signals.recv_timeout(STOP_POLL) {
@@ -352,7 +377,9 @@ impl PortalBus {
                     return match code {
                         0 => Ok(results),
                         1 => Err(eyre!("the {interface} request {method} was dismissed")),
-                        _ => Err(eyre!("the {interface} portal could not complete {method}")),
+                        _ => Err(color_eyre::eyre::Report::new(BackendFailure(format!(
+                            "the {interface} portal could not complete {method}"
+                        )))),
                     };
                 }
                 Ok(Signal::Session(session, event)) => self.pending.push_back((session, event)),
@@ -773,6 +800,8 @@ impl Portal {
                     kde_unapproved::clear();
                 }
                 Ok(_) => {}
+                // The backend failed: no dialog was shown.
+                Err(error) if is_backend_failure(error) => {}
                 // Dismissed, canceled, or abandoned: KDE keeps these ids
                 // with no key and never asks for them again (#898).
                 Err(_) => kde_unapproved::remember(shortcuts),
@@ -1183,6 +1212,20 @@ mod tests {
         )));
         assert!(gone(zbus::fdo::Error::UnknownObject("gone".into())));
         assert!(!gone(zbus::fdo::Error::AccessDenied("no".into())));
+    }
+
+    /// A bind the backend failed falls back to the `hex` commands; one the
+    /// person dismissed or Hex canceled stays a refusal (#1014).
+    #[test]
+    fn only_backend_failures_count_as_a_missing_portal() {
+        let failed = color_eyre::eyre::Report::new(BackendFailure(
+            "the org.freedesktop.portal.GlobalShortcuts portal could not complete BindShortcuts"
+                .into(),
+        ));
+        assert!(is_backend_failure(&failed));
+        assert!(!is_backend_failure(&eyre!(
+            "the org.freedesktop.portal.GlobalShortcuts request BindShortcuts was dismissed"
+        )));
     }
 
     #[test]

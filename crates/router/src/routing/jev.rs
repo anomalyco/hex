@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, bail};
@@ -1105,7 +1105,7 @@ fn sentence(note: &str) -> String {
 }
 
 fn tilde(text: &str) -> String {
-    match dirs::home_dir() {
+    match crate::user_dirs::home_dir() {
         Some(home) => text.replace(&home.display().to_string(), "~"),
         None => text.to_owned(),
     }
@@ -1421,9 +1421,14 @@ pub fn parse_answer(body: &[u8]) -> Result<Answer> {
 /// POSTs `body` to Jev with `/usr/bin/curl`. The key reaches curl through a config on stdin, so
 /// it's never in an argument list or a log.
 pub fn gateway(body: &[u8], timeout: Duration) -> Result<Vec<u8>> {
-    let key = api_key()?;
+    let deadline = Instant::now() + timeout;
+    let key = api_key(deadline)?;
     let body = std::str::from_utf8(body).context("request isn't UTF-8")?;
-    with_retry(timeout, |left| post(&key, body, left), std::thread::sleep)
+    with_retry(
+        deadline.saturating_duration_since(Instant::now()),
+        |left| post(&key, body, left),
+        std::thread::sleep,
+    )
 }
 
 /// One HTTP answer: its status, a `Retry-After` in seconds, and its body.
@@ -1475,34 +1480,26 @@ fn post(key: &str, body: &str, timeout: Duration) -> Result<Reply> {
         quote(key),
         quote(body)
     );
-    let mut child = Command::new("/usr/bin/curl")
-        .args([
-            "-sS",
-            "-K",
-            "-",
-            "--max-time",
-            &format!("{:.2}", timeout.as_secs_f64()),
-            "-X",
-            "POST",
-            "-H",
-            "Content-Type: application/json",
-            "-H",
-            &format!("User-Agent: {USER_AGENT}"),
-            "-w",
-            "\n%{http_code} %header{retry-after}",
-            ENDPOINT,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("couldn't start curl")?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(config.as_bytes())
-            .context("couldn't hand curl the request")?;
-    }
-    let output = child.wait_with_output().context("curl didn't finish")?;
+    let mut command = Command::new("/usr/bin/curl");
+    command.args([
+        "-sS",
+        "-K",
+        "-",
+        "--max-time",
+        &format!("{:.2}", timeout.as_secs_f64()),
+        "-X",
+        "POST",
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        &format!("User-Agent: {USER_AGENT}"),
+        "-w",
+        "\n%{http_code} %header{retry-after}",
+        ENDPOINT,
+    ]);
+    let output =
+        crate::opencode::remote::bounded_input(&mut command, Some(config.into_bytes()), timeout)
+            .context("routing model request timed out or failed")?;
     // 28: curl's "operation timed out".
     if output.status.code() == Some(28) {
         bail!("{TIMED_OUT}: no answer within {} ms", timeout.as_millis());
@@ -1531,7 +1528,7 @@ fn post(key: &str, body: &str, timeout: Duration) -> Result<Reply> {
 
 /// The OpenCode key: the host's `jev_api_key`, `$OPENCODE_API_KEY`, or the active `opencode`
 /// credential in OpenCode's database (read-only). Never printed or logged.
-fn api_key() -> Result<String> {
+fn api_key(deadline: Instant) -> Result<String> {
     if let Some(key) = crate::env::get()
         .config
         .jev_api_key
@@ -1546,9 +1543,10 @@ fn api_key() -> Result<String> {
         return Ok(key.trim().to_owned());
     }
     let db = opencode_db().context("no OpenCode database found for a key")?;
-    let rows = sqlite_json(
+    let rows = sqlite_json_within(
         &db,
         "select value from credential where integration_id='opencode' and active=1 limit 1",
+        deadline.saturating_duration_since(Instant::now()),
     )
     .context("couldn't read OpenCode's credentials")?;
     let value = rows
@@ -1587,17 +1585,27 @@ fn opencode_db() -> Option<PathBuf> {
     if let Some(db) = super::served::opencode_db() {
         return Some(db);
     }
-    Some(dirs::home_dir()?.join(".local/share/opencode/opencode.db")).filter(|p| p.is_file())
+    Some(crate::user_dirs::home_dir()?.join(".local/share/opencode/opencode.db"))
+        .filter(|p| p.is_file())
 }
 
 fn sqlite_json(db: &Path, sql: &str) -> Option<Vec<Value>> {
-    let output = super::run_with_timeout(
+    sqlite_json_within(db, sql, TIMEOUT)
+}
+
+fn sqlite_json_within(db: &Path, sql: &str, timeout: Duration) -> Option<Vec<Value>> {
+    if timeout.is_zero() {
+        return None;
+    }
+    let output = crate::opencode::remote::bounded_input(
         Command::new("/usr/bin/sqlite3")
             .args(["-readonly", "-json"])
             .arg(db)
             .arg(sql),
-        Duration::from_secs(3),
-    )?;
+        None,
+        timeout,
+    )
+    .ok()?;
     if !output.status.success() {
         return None;
     }

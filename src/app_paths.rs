@@ -106,8 +106,46 @@ pub fn personal_commands_workspace() -> Result<PathBuf> {
 
 /// The per-user config folder holding `hex.config.ts` on every OS: `~/.config/hex`, or `~/.config/hex-test` for `Hex Test.app`.
 fn user_config_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| eyre!("home directory is unavailable"))?;
+    let home = home_dir().ok_or_else(|| eyre!("home directory is unavailable"))?;
     Ok(user_config_dir_in(&home, is_macos_test_build()))
+}
+
+/// The home folder. On Windows `USERPROFILE` names it, as `HOME` does
+/// elsewhere, so a copy of Hex launched with another profile folder (an
+/// isolated benchmark) reads that folder's config; `dirs::home_dir` asks the
+/// shell for the signed-in user's own folder instead. Every path Hex derives
+/// from the user's folders goes through these, as Annotate's engine does
+/// (`scrawl_router::user_dirs`).
+pub fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    if let Some(profile) = std::env::var_os("USERPROFILE").filter(|profile| !profile.is_empty()) {
+        return Some(profile.into());
+    }
+    dirs::home_dir()
+}
+
+/// The roaming data folder: `APPDATA` on Windows, else `dirs::data_dir`.
+pub fn data_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    if let Some(roaming) = std::env::var_os("APPDATA").filter(|value| !value.is_empty()) {
+        return Some(roaming.into());
+    }
+    dirs::data_dir()
+}
+
+/// The Documents folder: `dirs::document_dir`, or `Documents` in a Windows
+/// profile `USERPROFILE` points to that is not the signed-in user's own.
+pub fn document_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    if let (Some(profile), Some(own)) = (home_dir(), dirs::home_dir())
+        && !profile
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .eq_ignore_ascii_case(own.to_string_lossy().trim_end_matches(['\\', '/']))
+    {
+        return Some(profile.join("Documents"));
+    }
+    dirs::document_dir()
 }
 
 fn user_config_dir_in(home: &std::path::Path, test_build: bool) -> PathBuf {

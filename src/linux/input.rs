@@ -21,128 +21,9 @@ use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSid
 use crate::desktop::host::{DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts};
 use crate::linux::session::LinuxSession;
 
-/// Temporary pointer grab while Settings records a shortcut. Keyboard input
-/// stays with Rune; Escape, focus loss, saving and closing all drop the grab.
-pub(crate) struct MouseCapture {
-    connection: RustConnection,
-    window: Window,
-    grabbed: bool,
-    modifiers: [u16; 4],
-}
-
-impl MouseCapture {
-    pub(crate) fn start() -> Result<Self> {
-        let (connection, root, keymap) = connect_x11()?;
-        let window = connection.get_input_focus()?.reply()?.focus;
-        let pid_atom = connection.intern_atom(false, b"_NET_WM_PID")?.reply()?.atom;
-        let mut ancestor = window;
-        loop {
-            if ancestor == root || ancestor <= 1 {
-                return Err(eyre!("Hex must be focused to record a mouse shortcut"));
-            }
-            let property = connection
-                .get_property(
-                    false,
-                    ancestor,
-                    pid_atom,
-                    x11rb::protocol::xproto::AtomEnum::CARDINAL,
-                    0,
-                    1,
-                )?
-                .reply()?;
-            if let Some(pid) = property.value32().and_then(|mut values| values.next()) {
-                if pid != std::process::id() {
-                    return Err(eyre!("Hex must be focused to record a mouse shortcut"));
-                }
-                break;
-            }
-            ancestor = connection.query_tree(ancestor)?.reply()?.parent;
-        }
-        let mut modifiers = [0; 4];
-        for (slot, symbols) in modifiers.iter_mut().zip([
-            &[XK_CONTROL_L, XK_CONTROL_R][..],
-            &[XK_ALT_L, XK_ALT_R][..],
-            &[XK_SHIFT_L, XK_SHIFT_R][..],
-            &[XK_SUPER_L, XK_SUPER_R][..],
-        ]) {
-            *slot = u16::from(keymap.modifier_for(&connection, symbols)?);
-        }
-        Ok(Self {
-            connection,
-            window,
-            grabbed: false,
-            modifiers,
-        })
-    }
-
-    pub(crate) fn poll(&mut self) -> Result<Option<LinuxHotkey>> {
-        if self.connection.get_input_focus()?.reply()?.focus != self.window {
-            return Err(eyre!("Shortcut recording lost focus"));
-        }
-        if !self.grabbed {
-            // Wait for the click that opened Record to be released.
-            if u16::from(self.connection.query_pointer(self.window)?.reply()?.mask) & 0x1f00 != 0 {
-                return Ok(None);
-            }
-            let status = self
-                .connection
-                .grab_pointer(
-                    false,
-                    self.window,
-                    EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE,
-                    GrabMode::ASYNC,
-                    GrabMode::ASYNC,
-                    x11rb::NONE,
-                    x11rb::NONE,
-                    x11rb::CURRENT_TIME,
-                )?
-                .reply()?
-                .status;
-            if status == x11rb::protocol::xproto::GrabStatus::ALREADY_GRABBED {
-                return Ok(None);
-            }
-            if status != x11rb::protocol::xproto::GrabStatus::SUCCESS {
-                return Err(eyre!("Could not record mouse input: {status:?}"));
-            }
-            self.grabbed = true;
-        }
-        while let Some(event) = self.connection.poll_for_event()? {
-            if let Event::ButtonPress(event) = event {
-                let size = self.connection.get_geometry(self.window)?.reply()?;
-                if !event.same_screen
-                    || event.event_x < 0
-                    || event.event_y < 0
-                    || event.event_x as u16 >= size.width
-                    || event.event_y as u16 >= size.height
-                {
-                    return Err(eyre!("Shortcut recording clicked outside Hex"));
-                }
-                let Some(key) = mouse_name(event.detail) else {
-                    continue;
-                }; // wheel scrolling is not a button binding
-                let state = u16::from(event.state);
-                let [control, alt, shift, super_key] = self.modifiers.map(|mask| state & mask != 0);
-                return Ok(Some(LinuxHotkey {
-                    control,
-                    alt,
-                    shift,
-                    super_key,
-                    key,
-                }));
-            }
-        }
-        Ok(None)
-    }
-}
-
-impl Drop for MouseCapture {
-    fn drop(&mut self) {
-        if self.grabbed {
-            let _ = self.connection.ungrab_pointer(x11rb::CURRENT_TIME);
-            let _ = self.connection.flush();
-        }
-    }
-}
+#[path = "input/x11.rs"]
+mod x11;
+pub(crate) use x11::{Keymap, MouseCapture, connect_x11};
 
 /// A shortcut as X11 grabs and the portal see it: held modifiers and a
 /// named key. Settings store it as a portable `HotkeyBinding`.
@@ -323,6 +204,8 @@ fn keysym_name(key: &str) -> Result<String> {
         "menu" => "Menu",
         "pause" => "Pause",
         "scroll lock" | "scrolllock" | "scroll_lock" => "Scroll_Lock",
+        // The ISO key left of 1; alone only with Labs › Section key alone.
+        "§" | "section" => "section",
         key if key.len() == 1 && key.as_bytes()[0].is_ascii_alphanumeric() => key,
         key if key.starts_with('f')
             && key[1..]
@@ -363,20 +246,15 @@ pub(crate) const KEY_PRESS: u8 = 2;
 pub(crate) const KEY_RELEASE: u8 = 3;
 const RELEASE_GRACE: Duration = Duration::from_millis(50);
 pub(crate) const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
+/// Labs › Tap or hold: a Toggle press held this long is a hold, as macOS's
+/// hold threshold.
+const TAP_OR_HOLD_THRESHOLD: Duration = Duration::from_millis(300);
 /// Desktops that repeat a held shortcut's press (KWin) repeat it sooner
 /// than this, so a press after a longer gap is a new press.
 const KEY_REPEAT_GAP: Duration = Duration::from_secs(1);
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// Binding through the portal can wait for the user to approve a dialog.
 const PORTAL_READY_TIMEOUT: Duration = Duration::from_secs(65);
-
-pub(crate) fn connect_x11() -> Result<(RustConnection, Window, Keymap)> {
-    let (connection, screen) =
-        RustConnection::connect(None).wrap_err("could not connect to X11")?;
-    let root = connection.setup().roots[screen].root;
-    let keymap = Keymap::read(&connection)?;
-    Ok((connection, root, keymap))
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum HotkeyEvent {
@@ -404,6 +282,8 @@ pub(crate) enum ShortcutCommand {
     DictationStart,
     DictationStop,
     DictationToggle,
+    /// `hex dictation cancel`: discards whatever records, in any mode.
+    DictationCancel,
     PasteLast,
     /// `hex dictation start --raw` and `toggle --raw`.
     DictationStartRaw,
@@ -432,12 +312,18 @@ pub(crate) struct HotkeyOptions {
     /// Only a double-tap starts recording, which then stays locked.
     pub(crate) double_tap_only: bool,
     pub(crate) toggle: bool,
+    /// Labs › Tap or hold, in Toggle mode: a press held at least
+    /// [`TAP_OR_HOLD_THRESHOLD`] finishes its capture when it lifts.
+    pub(crate) tap_or_hold: bool,
     pub(crate) paste_last: Option<LinuxHotkey>,
     /// Dictate without processing, while it is bound.
     pub(crate) raw_dictation: Option<LinuxHotkey>,
     /// Annotate's one key, while Annotate is on: tap to start and stop,
     /// hold to draw.
     pub(crate) capture: Option<LinuxHotkey>,
+    /// Toggle mode's cancel shortcut, which Hex takes only while a
+    /// recording runs; `None` in Hold mode, which has no cancel.
+    pub(crate) cancel: Option<LinuxHotkey>,
 }
 
 /// Whether Annotate draws now, so Escape is Hex's (it stops drawing).
@@ -684,6 +570,8 @@ enum Input {
     Released(Shortcut),
     /// Escape, which only stops Annotate's drawing (#786).
     Escape,
+    /// The cancel shortcut, pressed while Hex held it.
+    Cancel,
     /// The backend can no longer tell which keys are down.
     Lost,
     Command(ShortcutCommand),
@@ -701,17 +589,27 @@ enum Capture {
 }
 
 /// The shortcut rules every input shares: hold, double-tap lock, toggle,
-/// double-tap only, Paste Last, and commands.
+/// double-tap only, Toggle's cancel, Paste Last, and commands.
 struct ShortcutState {
     double_tap: bool,
     double_tap_only: bool,
     /// Every press acts as the second tap of a double-tap: releasing locks.
     toggle: bool,
+    /// Labs › Tap or hold in Toggle mode: a long press finishes on release.
+    tap_or_hold: bool,
+    /// Toggle mode has a cancel shortcut.
+    cancels: bool,
     capture: Capture,
     last_release: Option<Instant>,
     last_press: Option<Instant>,
+    /// When the press that started the held capture went down (its
+    /// repeats don't move it).
+    held_since: Option<Instant>,
     /// The dictation shortcut was pressed and its release hasn't arrived.
     down: bool,
+    /// The desktop repeated the held press (GNOME, KWin), so repeats that
+    /// stop mean its keys came up.
+    repeating: bool,
     /// Dictate without processing, not the dictation shortcut, owns the
     /// capture (or the last one).
     raw: bool,
@@ -723,10 +621,14 @@ impl ShortcutState {
             double_tap: options.double_tap,
             double_tap_only: options.double_tap_only,
             toggle: options.toggle,
+            tap_or_hold: options.toggle && options.tap_or_hold,
+            cancels: options.toggle && options.cancel.is_some(),
             capture: Capture::Idle,
             last_release: None,
             last_press: None,
+            held_since: None,
             down: false,
+            repeating: false,
             raw: false,
         }
     }
@@ -735,7 +637,15 @@ impl ShortcutState {
         matches!(self.capture, Capture::Idle | Capture::Armed)
     }
 
-    /// The backend lost track of the keys: whatever recorded ends.
+    /// Whether the cancel shortcut is Hex's now: only in Toggle mode, and
+    /// only while something records, so the key stays with every app
+    /// otherwise.
+    fn wants_cancel(&self) -> bool {
+        self.cancels && matches!(self.capture, Capture::Held { .. } | Capture::Locked)
+    }
+
+    /// Whatever records ends unfinished: the backend lost track of the
+    /// keys, or the person cancelled it.
     fn cancel(&mut self) -> Option<HotkeyEvent> {
         let active = matches!(self.capture, Capture::Held { .. } | Capture::Locked);
         self.capture = Capture::Idle;
@@ -769,7 +679,32 @@ impl ShortcutState {
         self.last_release = None;
         self.last_press = None;
         self.down = false;
+        self.repeating = false;
         true
+    }
+
+    /// A held press the desktop was repeating whose repeats stopped for
+    /// longer than any repeat interval, with no release: GNOME's portal sends
+    /// no deactivation when a modifier comes up before the key, so the keys
+    /// are up and this counts as the release. Never the first tap of a
+    /// double tap, since the release itself wasn't seen.
+    fn expire(&mut self, now: Instant) -> Option<HotkeyEvent> {
+        let stopped = self.down
+            && self.repeating
+            && self
+                .last_press
+                .is_some_and(|pressed| now.saturating_duration_since(pressed) >= KEY_REPEAT_GAP);
+        if !stopped {
+            return None;
+        }
+        let shortcut = if self.raw {
+            Shortcut::RawDictation
+        } else {
+            Shortcut::Dictation
+        };
+        let event = self.update(Input::Released(shortcut), now);
+        self.last_release = None;
+        event
     }
 
     fn stop_dictation(&mut self) -> Option<HotkeyEvent> {
@@ -792,8 +727,11 @@ impl ShortcutState {
             }
             Input::Lost => {
                 self.down = false;
+                self.repeating = false;
                 self.cancel()
             }
+            Input::Cancel if self.wants_cancel() => self.cancel(),
+            Input::Cancel => None,
             Input::Pressed(shortcut @ (Shortcut::Dictation | Shortcut::RawDictation)) => {
                 if !self.claim(shortcut == Shortcut::RawDictation) {
                     return None;
@@ -806,6 +744,7 @@ impl ShortcutState {
                     });
                 self.last_press = Some(now);
                 self.down = true;
+                self.repeating = repeat;
                 if repeat {
                     return None;
                 }
@@ -826,6 +765,7 @@ impl ShortcutState {
                             return None;
                         }
                         self.capture = Capture::Held { second_tap };
+                        self.held_since = Some(now);
                         Some(HotkeyEvent::Start { raw: self.raw })
                     }
                     // The desktop never sent the release that would have
@@ -845,11 +785,24 @@ impl ShortcutState {
                     return None;
                 }
                 self.down = false;
+                self.repeating = false;
                 match self.capture {
                     Capture::Armed => {
                         self.capture = Capture::Idle;
                         self.last_release = Some(now);
                         None
+                    }
+                    // Labs › Tap or hold: a Toggle press held long enough
+                    // dictates only while held, as Hold does.
+                    Capture::Held { second_tap: true }
+                        if self.tap_or_hold
+                            && self.held_since.is_some_and(|pressed| {
+                                now.saturating_duration_since(pressed) >= TAP_OR_HOLD_THRESHOLD
+                            }) =>
+                    {
+                        self.capture = Capture::Idle;
+                        self.last_release = None;
+                        Some(HotkeyEvent::Finish)
                     }
                     Capture::Held { second_tap: true } => {
                         self.capture = Capture::Locked;
@@ -880,6 +833,7 @@ impl ShortcutState {
                 ShortcutCommand::DictationToggleRaw => {
                     self.stop_dictation().or_else(|| self.start_dictation(true))
                 }
+                ShortcutCommand::DictationCancel => self.cancel(),
                 ShortcutCommand::PasteLast => unreachable!("handled above"),
             },
         }
@@ -926,6 +880,25 @@ impl Dispatcher {
     fn input(&mut self, input: Input) {
         self.pending
             .extend(self.state.update(input, Instant::now()));
+    }
+
+    /// Releases a held dictation shortcut whose desktop stopped repeating it
+    /// without sending its release (see [`ShortcutState::expire`]).
+    fn expire(&mut self) {
+        let raw = self.state.raw;
+        let was_down = self.state.down;
+        let event = self.state.expire(Instant::now());
+        if was_down && !self.state.down {
+            tracing::info!(
+                "the held dictation shortcut stopped repeating without a release; treating it as released"
+            );
+            self.keys.released(if raw {
+                Shortcut::RawDictation
+            } else {
+                Shortcut::Dictation
+            });
+        }
+        self.pending.extend(event);
     }
 
     /// Feeds every queued `hex` command.
@@ -1077,7 +1050,7 @@ impl Backend {
                     "{}",
                     crate::linux::portal::MISSING_SHORTCUTS_PORTAL
                 );
-                match self.wait_for_portal(&mut dispatcher)? {
+                match self.wait_for_portal(&mut dispatcher, true)? {
                     Some(portal) => portal,
                     None => return Ok(()),
                 }
@@ -1086,22 +1059,25 @@ impl Backend {
         self.run_portal(portal, dispatcher, binding, options)
     }
 
-    /// Serves `hex` commands while looking for the shortcuts portal again
-    /// from time to time: a portal started before the desktop's session
-    /// environment exposes none until it is restarted (#875). Returns the
-    /// portal once it appears, or `None` when the listener stops.
+    /// Serves `hex` commands, and with `probe` looks for the shortcuts
+    /// portal again from time to time: a portal started before the desktop's
+    /// session environment exposes none until it is restarted (#875).
+    /// Returns the portal once it appears, or `None` when the listener stops.
     fn wait_for_portal(
         &self,
         dispatcher: &mut Dispatcher,
+        probe: bool,
     ) -> Result<Option<crate::linux::portal::Portal>> {
         self.mark_ready(DesktopShortcuts::Commands);
-        let mut probe = crate::linux::portal::PortalProbe::new(self.stop.clone());
+        let mut probe = probe.then(|| crate::linux::portal::PortalProbe::new(self.stop.clone()));
         while !self.stopping() {
             dispatcher.commands();
             if !dispatcher.flush()? {
                 return Ok(None);
             }
-            if let Some(portal) = probe.poll()? {
+            if let Some(probe) = probe.as_mut()
+                && let Some(portal) = probe.poll()?
+            {
                 return Ok(Some(portal));
             }
             thread::sleep(POLL_INTERVAL);
@@ -1166,6 +1142,21 @@ impl Backend {
         let granted = match portal.bind(&shortcuts, &self.stop) {
             Ok(granted) => granted,
             Err(error) if self.stopping() => return Err(error),
+            // The backend failed the bind rather than the person refusing it
+            // (niri with the GNOME backend and no GNOME Shell, #1014): treat
+            // the desktop as having no usable shortcuts portal. Binding again
+            // would fail the same way, so this run doesn't look for it again;
+            // a listener restart (Enable, a settings change) tries once more.
+            Err(error) if crate::linux::portal::is_backend_failure(&error) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
+                    "the shortcuts portal's backend could not bind Hex's shortcuts; dictation follows the hex commands"
+                );
+                drop(portal);
+                self.wait_for_portal(&mut dispatcher, false)?;
+                return Ok(());
+            }
             Err(error) => {
                 return Err(error.wrap_err(
                     "the desktop did not approve Hex's shortcuts; choose Enable to ask again",
@@ -1249,6 +1240,7 @@ impl Backend {
                 };
                 dispatcher.input(input);
             }
+            dispatcher.expire();
             dispatcher.commands();
             if self.status.configure.swap(false, Ordering::AcqRel)
                 && let Err(error) = portal.configure()
@@ -1278,353 +1270,7 @@ impl Backend {
         }
         Ok(())
     }
-
-    fn run_x11(
-        self,
-        mut dispatcher: Dispatcher,
-        binding: LinuxHotkey,
-        options: HotkeyOptions,
-    ) -> Result<()> {
-        let (connection, root, keymap) = connect_x11()?;
-        // A shortcut held while the previous monitor stopped never sends
-        // its release here.
-        dispatcher.keys.released_all();
-        let mut grabs = X11Grabs {
-            connection: &connection,
-            root,
-            num_lock: keymap
-                .modifier_for(&connection, &[XK_NUM_LOCK])
-                .unwrap_or(ModMask::M2),
-            escape: keymap.keycode(XK_ESCAPE)?,
-            keys: Vec::new(),
-            escape_grabbed: Vec::new(),
-        };
-        let requested = [
-            Some((Shortcut::Dictation, binding)),
-            options.paste_last.map(|key| (Shortcut::PasteLast, key)),
-            options.capture.map(|key| (Shortcut::Capture, key)),
-            options
-                .raw_dictation
-                .map(|key| (Shortcut::RawDictation, key)),
-        ];
-        for (shortcut, key) in requested.into_iter().flatten() {
-            let mouse = mouse_button(&key.key);
-            let code = match mouse {
-                Some(button) => button,
-                None => keymap.keycode(keysym(&key.key)?)?,
-            };
-            let mask = key.modifier_mask(&connection, &keymap)?;
-            grabs
-                .grab(shortcut, code, mask, mouse.is_some())
-                .wrap_err_with(|| {
-                    format!("{} is already in use by another X11 client", key.label())
-                })?;
-        }
-        connection.flush()?;
-        self.mark_ready(DesktopShortcuts::Registered);
-
-        let lock_bits = u16::from(ModMask::LOCK) | u16::from(grabs.num_lock);
-        let mut keys = X11Keys {
-            detectable_repeat: enable_detectable_auto_repeat(&connection),
-            ..X11Keys::default()
-        };
-        let mut escape_down = false;
-        // Another client held Escape at the last try; warn once per episode.
-        let mut escape_taken = false;
-        while !self.stopping() {
-            let mut inputs = keys.expire(Instant::now());
-            if let Some(event) = connection.poll_for_event()? {
-                match event {
-                    Event::KeyPress(event) if event.detail == grabs.escape => {
-                        escape_down = true;
-                        inputs.push(Input::Escape);
-                    }
-                    Event::KeyRelease(event) if event.detail == grabs.escape => {
-                        escape_down = false;
-                    }
-                    Event::KeyPress(event) => {
-                        let mask = u16::from(event.state) & 0xff & !lock_bits;
-                        let shortcut = grabs
-                            .keys
-                            .iter()
-                            .find(|grab| {
-                                !grab.mouse && grab.code == event.detail && grab.mask == mask
-                            })
-                            .or_else(|| {
-                                grabs.keys.iter().find(|grab| {
-                                    !grab.mouse
-                                        && grab.code == event.detail
-                                        && keys.held(grab.shortcut)
-                                })
-                            })
-                            .map(|grab| grab.shortcut);
-                        inputs.extend(shortcut.and_then(|shortcut| keys.press(shortcut)));
-                    }
-                    Event::KeyRelease(event) => {
-                        for grab in grabs
-                            .keys
-                            .iter()
-                            .filter(|grab| !grab.mouse && grab.code == event.detail)
-                        {
-                            inputs.extend(keys.release(grab.shortcut, Instant::now()));
-                        }
-                    }
-                    Event::ButtonPress(event) => {
-                        let mask = u16::from(event.state) & 0xff & !lock_bits;
-                        if let Some(grab) = grabs.keys.iter().find(|grab| {
-                            grab.mouse && grab.code == event.detail && grab.mask == mask
-                        }) {
-                            inputs.extend(keys.press(grab.shortcut));
-                        }
-                    }
-                    Event::ButtonRelease(event) => {
-                        for grab in grabs
-                            .keys
-                            .iter()
-                            .filter(|grab| grab.mouse && grab.code == event.detail)
-                        {
-                            // Buttons do not autorepeat: preserve the release boundary.
-                            if keys.held[grab.shortcut.index()] {
-                                keys.held[grab.shortcut.index()] = false;
-                                inputs.push(Input::Released(grab.shortcut));
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            } else if inputs.is_empty() {
-                thread::sleep(POLL_INTERVAL);
-            }
-            for input in inputs {
-                // The X11 paste waits on held modifiers only while one of
-                // Hex's shortcuts is down; see `wait_for_modifiers`.
-                match input {
-                    Input::Pressed(shortcut) => dispatcher.keys.pressed(shortcut),
-                    Input::Released(shortcut) => dispatcher.keys.released(shortcut),
-                    _ => {}
-                }
-                dispatcher.input(input);
-            }
-            dispatcher.commands();
-            // Escape is Hex's only while Annotate draws, and until its
-            // release so the release never reaches the app.
-            let wants_escape = annotate_drawing() || escape_down;
-            if wants_escape && grabs.escape_grabbed.is_empty() {
-                let available = grabs.grab_escape()?;
-                if !available && !escape_taken {
-                    tracing::warn!("another application holds Escape; it can't stop drawing");
-                }
-                escape_taken = !available;
-            } else if !wants_escape && !grabs.escape_grabbed.is_empty() {
-                grabs.release_escape()?;
-            }
-            if !dispatcher.flush()? {
-                return Ok(());
-            }
-        }
-        Ok(())
-    }
 }
-
-/// Asks the X server to report a held key's auto-repeat as repeated presses
-/// with one release at the end (XKB detectable auto-repeat), so a release is
-/// always physical. Returns whether the server granted it.
-fn enable_detectable_auto_repeat(connection: &RustConnection) -> bool {
-    use x11rb::protocol::xkb::{self, ConnectionExt as _};
-    const CORE_KEYBOARD: xkb::DeviceSpec = 0x0100;
-    let result = (|| -> Result<bool> {
-        if !connection.xkb_use_extension(1, 0)?.reply()?.supported {
-            return Ok(false);
-        }
-        let flag = xkb::PerClientFlag::DETECTABLE_AUTO_REPEAT;
-        let reply = connection
-            .xkb_per_client_flags(
-                CORE_KEYBOARD,
-                flag,
-                flag,
-                xkb::BoolCtrl::from(0u32),
-                xkb::BoolCtrl::from(0u32),
-                xkb::BoolCtrl::from(0u32),
-            )?
-            .reply()?;
-        Ok(u32::from(reply.value) & u32::from(flag) != 0)
-    })();
-    match result {
-        Ok(granted) => granted,
-        Err(error) => {
-            tracing::debug!(
-                error = format!("{error:#}"),
-                "no XKB detectable auto-repeat"
-            );
-            false
-        }
-    }
-}
-
-/// Turns X11 key events into presses and releases. With detectable
-/// auto-repeat a held key repeats only its press, so a release counts at
-/// once. Without it, auto-repeat sends a release before every repeated
-/// press, so a release counts only once [`RELEASE_GRACE`] passes without a
-/// new press.
-#[derive(Default)]
-struct X11Keys {
-    held: [bool; Shortcut::ALL.len()],
-    releasing: [Option<Instant>; Shortcut::ALL.len()],
-    detectable_repeat: bool,
-}
-
-impl X11Keys {
-    fn held(&self, shortcut: Shortcut) -> bool {
-        self.held[shortcut.index()]
-    }
-
-    fn press(&mut self, shortcut: Shortcut) -> Option<Input> {
-        let index = shortcut.index();
-        if self.releasing[index].take().is_some() || self.held[index] {
-            return None;
-        }
-        self.held[index] = true;
-        Some(Input::Pressed(shortcut))
-    }
-
-    fn release(&mut self, shortcut: Shortcut, now: Instant) -> Option<Input> {
-        let index = shortcut.index();
-        if !self.held[index] {
-            return None;
-        }
-        if self.detectable_repeat {
-            self.held[index] = false;
-            self.releasing[index] = None;
-            return Some(Input::Released(shortcut));
-        }
-        self.releasing[index] = Some(now);
-        None
-    }
-
-    fn expire(&mut self, now: Instant) -> Vec<Input> {
-        let mut released = Vec::new();
-        for shortcut in Shortcut::ALL {
-            let index = shortcut.index();
-            if self.releasing[index]
-                .is_some_and(|at| now.saturating_duration_since(at) >= RELEASE_GRACE)
-            {
-                self.releasing[index] = None;
-                self.held[index] = false;
-                released.push(Input::Released(shortcut));
-            }
-        }
-        released
-    }
-}
-
-struct X11Grab {
-    mouse: bool,
-    shortcut: Shortcut,
-    code: u8,
-    mask: u16,
-    variants: [ModMask; 4],
-}
-
-/// Passive grabs on the root window, released on drop.
-struct X11Grabs<'a> {
-    connection: &'a RustConnection,
-    root: Window,
-    num_lock: ModMask,
-    escape: u8,
-    keys: Vec<X11Grab>,
-    escape_grabbed: Vec<ModMask>,
-}
-
-impl X11Grabs<'_> {
-    fn grab(
-        &mut self,
-        shortcut: Shortcut,
-        code: u8,
-        mask: ModMask,
-        mouse: bool,
-    ) -> Result<(), ReplyError> {
-        let variants = lock_variants(mask, self.num_lock);
-        if mouse {
-            for (index, modifiers) in variants.iter().copied().enumerate() {
-                let result = self
-                    .connection
-                    .grab_button(
-                        false,
-                        self.root,
-                        EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE,
-                        GrabMode::ASYNC,
-                        GrabMode::ASYNC,
-                        x11rb::NONE,
-                        x11rb::NONE,
-                        ButtonIndex::from(code),
-                        modifiers,
-                    )?
-                    .check();
-                if let Err(error) = result {
-                    for previous in &variants[..index] {
-                        self.connection
-                            .ungrab_button(ButtonIndex::from(code), self.root, *previous)?
-                            .check()?;
-                    }
-                    return Err(error);
-                }
-            }
-        } else {
-            grab_variants(self.connection, self.root, code, &variants)?;
-        }
-        self.keys.push(X11Grab {
-            mouse,
-            shortcut,
-            code,
-            mask: u16::from(mask),
-            variants,
-        });
-        Ok(())
-    }
-
-    /// Returns false when another client holds Escape.
-    fn grab_escape(&mut self) -> Result<bool> {
-        let bare = lock_variants(ModMask::default(), self.num_lock);
-        self.escape_grabbed = grab_escape(self.connection, self.root, self.escape, &bare)?;
-        self.connection.flush()?;
-        Ok(!self.escape_grabbed.is_empty())
-    }
-
-    fn release_escape(&mut self) -> Result<()> {
-        for modifiers in self.escape_grabbed.drain(..) {
-            self.connection
-                .ungrab_key(self.escape, self.root, modifiers)?
-                .check()?;
-        }
-        self.connection.flush()?;
-        Ok(())
-    }
-}
-
-impl Drop for X11Grabs<'_> {
-    fn drop(&mut self) {
-        for &modifiers in &self.escape_grabbed {
-            let _ = self
-                .connection
-                .ungrab_key(self.escape, self.root, modifiers);
-        }
-        for grab in &self.keys {
-            for modifiers in grab.variants {
-                if grab.mouse {
-                    let _ = self.connection.ungrab_button(
-                        ButtonIndex::from(grab.code),
-                        self.root,
-                        modifiers,
-                    );
-                } else {
-                    let _ = self.connection.ungrab_key(grab.code, self.root, modifiers);
-                }
-            }
-        }
-        let _ = self.connection.flush();
-    }
-}
-
 pub(crate) fn send_event(sender: &SyncSender<HotkeyEvent>, event: HotkeyEvent) -> Result<bool> {
     match sender.try_send(event) {
         Ok(()) => Ok(true),
@@ -1633,151 +1279,9 @@ pub(crate) fn send_event(sender: &SyncSender<HotkeyEvent>, event: HotkeyEvent) -
     }
 }
 
-/// True when the server refused a passive grab because another client holds it.
-/// `GrabKey` with a conflicting grab fails with `BadAccess` (`Access`); any
-/// other error (connection loss, bad value) must stay fatal.
-fn is_grab_conflict(error: &ReplyError) -> bool {
-    matches!(
-        error,
-        ReplyError::X11Error(error) if error.error_kind == ErrorKind::Access
-    )
-}
-
-fn grab_escape(
-    connection: &RustConnection,
-    root: Window,
-    escape: u8,
-    bare_modifiers: &[ModMask],
-) -> Result<Vec<ModMask>> {
-    match grab_variants(connection, root, escape, &[ModMask::ANY]) {
-        Ok(()) => Ok(vec![ModMask::ANY]),
-        Err(error) if is_grab_conflict(&error) => {
-            // A modified Escape shortcut must not prevent grabbing plain Escape.
-            match grab_variants(connection, root, escape, bare_modifiers) {
-                Ok(()) => Ok(bare_modifiers.to_vec()),
-                Err(error) if is_grab_conflict(&error) => Ok(Vec::new()),
-                Err(error) => Err(error).wrap_err("could not grab the Escape key"),
-            }
-        }
-        Err(error) => Err(error).wrap_err("could not grab the Escape key"),
-    }
-}
-
-fn keysym(key: &str) -> Result<u32> {
-    let key = key.to_ascii_lowercase();
-    match key.as_str() {
-        "space" => Ok(XK_SPACE),
-        "enter" | "return" => Ok(0xff0d),
-        "tab" => Ok(0xff09),
-        "backspace" => Ok(0xff08),
-        "menu" => Ok(0xff67),
-        "pause" => Ok(0xff13),
-        "scroll lock" | "scrolllock" | "scroll_lock" => Ok(0xff14),
-        key if key.len() == 1 && key.as_bytes()[0].is_ascii_graphic() => {
-            Ok(u32::from(key.as_bytes()[0]))
-        }
-        key if key.starts_with('f') => key[1..]
-            .parse::<u32>()
-            .ok()
-            .filter(|number| (1..=24).contains(number))
-            .map(|number| 0xffbd + number)
-            .ok_or_else(|| eyre!("unsupported X11 function key: {key}")),
-        _ => Err(eyre!("unsupported X11 hotkey key: {key}")),
-    }
-}
-
-fn grab_variants(
-    connection: &RustConnection,
-    root: Window,
-    key: u8,
-    modifiers: &[ModMask],
-) -> Result<(), ReplyError> {
-    let mut grabbed = Vec::new();
-    for &modifiers in modifiers {
-        let result = connection
-            .grab_key(
-                false,
-                root,
-                modifiers,
-                key,
-                GrabMode::ASYNC,
-                GrabMode::ASYNC,
-            )
-            .map_err(ReplyError::from)
-            .and_then(|cookie| cookie.check());
-        if let Err(error) = result {
-            // Wait for each release: another client may grab the same key
-            // right after this returns, and must not race the ungrab.
-            for modifiers in grabbed {
-                if let Ok(cookie) = connection.ungrab_key(key, root, modifiers) {
-                    let _ = cookie.check();
-                }
-            }
-            return Err(error);
-        }
-        grabbed.push(modifiers);
-    }
-    Ok(())
-}
-
-fn lock_variants(base: ModMask, num_lock: ModMask) -> [ModMask; 4] {
-    [
-        base,
-        base | ModMask::LOCK,
-        base | num_lock,
-        base | ModMask::LOCK | num_lock,
-    ]
-}
-
-pub(crate) struct Keymap {
-    min: u8,
-    symbols_per_keycode: usize,
-    symbols: Vec<u32>,
-}
-
-impl Keymap {
-    pub(crate) fn read(connection: &RustConnection) -> Result<Self> {
-        let setup = connection.setup();
-        let min = setup.min_keycode;
-        let count = setup.max_keycode - min + 1;
-        let mapping = connection.get_keyboard_mapping(min, count)?.reply()?;
-        Ok(Self {
-            min,
-            symbols_per_keycode: usize::from(mapping.keysyms_per_keycode),
-            symbols: mapping.keysyms,
-        })
-    }
-
-    pub(crate) fn keycode(&self, keysym: u32) -> Result<u8> {
-        self.symbols
-            .chunks(self.symbols_per_keycode)
-            .position(|symbols| symbols.contains(&keysym))
-            .map(|index| self.min + index as u8)
-            .ok_or_else(|| eyre!("active X11 keymap has no key for keysym {keysym:#x}"))
-    }
-
-    pub(crate) fn modifier_for(
-        &self,
-        connection: &RustConnection,
-        keysyms: &[u32],
-    ) -> Result<ModMask> {
-        let keycodes = keysyms
-            .iter()
-            .filter_map(|keysym| self.keycode(*keysym).ok())
-            .collect::<Vec<_>>();
-        let mapping = connection.get_modifier_mapping()?.reply()?;
-        let width = usize::from(mapping.keycodes_per_modifier());
-        mapping
-            .keycodes
-            .chunks(width)
-            .position(|codes| codes.iter().any(|code| keycodes.contains(code)))
-            .map(|index| ModMask::from(1_u16 << index))
-            .ok_or_else(|| eyre!("active X11 keymap does not map the requested modifier"))
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::x11::*;
     use super::*;
     use HotkeyEvent::{Cancel, Finish, PasteLast};
     const START: HotkeyEvent = HotkeyEvent::Start { raw: false };
@@ -1821,6 +1325,12 @@ mod tests {
 
         fn command(&mut self, command: ShortcutCommand) {
             self.input(Input::Command(command));
+        }
+
+        fn expire(&mut self) {
+            if let Some(event) = self.state.expire(self.now) {
+                self.events.push(event);
+            }
         }
 
         fn tap(&mut self) {
@@ -2099,6 +1609,24 @@ mod tests {
         }
     }
 
+    /// Issue 1050: the § key, saved as `§` or named `section`, reaches the
+    /// portal as `section` and X11 as XK_section, and shows as §.
+    #[test]
+    fn the_section_key_has_portal_and_x11_names() {
+        for name in ["§", "section"] {
+            let saved = HotkeyBinding {
+                modifiers: HotkeyModifiers::default(),
+                key: Some(HotkeyKey::named(name)),
+            };
+            let hotkey = LinuxHotkey::from(&saved);
+            assert!(hotkey.validate().is_ok());
+            assert_eq!(hotkey.label(), "§");
+            assert_eq!(hotkey.portal_trigger().unwrap(), "section");
+            assert_eq!(keysym(&hotkey.key).unwrap(), 0xa7);
+            assert_eq!(HotkeyBinding::from(&hotkey), saved);
+        }
+    }
+
     /// #846: navigation and editing keys GNOME's accelerators accept reach
     /// the portal under the same xkb names, alone or with modifiers.
     #[test]
@@ -2360,6 +1888,44 @@ mod tests {
         }
     }
 
+    /// #1227: GNOME sends no release when a modifier comes up first, so a
+    /// hold whose repeats stop finishes by itself, and a press right after
+    /// starts a fresh capture rather than locking a double tap.
+    #[test]
+    fn a_hold_whose_repeats_stop_without_a_release_finishes_by_itself() {
+        for double_tap in [false, true] {
+            let mut test = Test::new(double_tap);
+            test.press(Shortcut::Dictation);
+            for _ in 0..20 {
+                test.now += Duration::from_millis(33);
+                test.press(Shortcut::Dictation);
+            }
+            test.now += Duration::from_millis(500);
+            test.expire();
+            assert_eq!(test.events, [START], "repeats may still come");
+            test.now += Duration::from_millis(500);
+            test.expire();
+            assert_eq!(test.events, [START, Finish]);
+            assert_eq!(test.state.capture, Capture::Idle);
+            test.expire();
+            assert_eq!(test.events, [START, Finish]);
+            // A quick press after it is a new capture, never a lock.
+            test.now += Duration::from_millis(100);
+            test.tap();
+            assert_eq!(test.events, [START, Finish, START, Finish]);
+            assert_eq!(test.state.capture, Capture::Idle);
+            // A hold that never repeated has nothing to go on: it waits for
+            // its release or the next press.
+            test.now += Duration::from_secs(1);
+            test.press(Shortcut::Dictation);
+            test.now += Duration::from_secs(5);
+            test.expire();
+            assert_eq!(test.events, [START, Finish, START, Finish, START]);
+            test.release(Shortcut::Dictation);
+            assert_eq!(test.events, [START, Finish, START, Finish, START, Finish]);
+        }
+    }
+
     #[test]
     fn a_balanced_release_finishes_a_repeating_hold() {
         // Space first, or both together: the desktop sends the release.
@@ -2395,6 +1961,115 @@ mod tests {
         assert_eq!(test.state.capture, Capture::Locked);
     }
 
+    fn tap_or_hold() -> HotkeyOptions {
+        HotkeyOptions {
+            toggle: true,
+            tap_or_hold: true,
+            ..HotkeyOptions::default()
+        }
+    }
+
+    /// #1144: with Labs › Tap or hold, a held Toggle press dictates until it
+    /// lifts, and a short tap still locks until the next press.
+    #[test]
+    fn tap_or_hold_finishes_a_held_press_and_locks_a_tap() {
+        let mut test = Test::with(tap_or_hold());
+        test.press(Shortcut::Dictation);
+        test.now += Duration::from_millis(600);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish]);
+        assert_eq!(test.state.capture, Capture::Idle);
+
+        test.now += Duration::from_secs(1);
+        test.press(Shortcut::Dictation);
+        test.now += Duration::from_millis(299);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish, START]);
+        assert_eq!(test.state.capture, Capture::Locked);
+        test.now += Duration::from_secs(2);
+        test.press(Shortcut::Dictation);
+        test.now += Duration::from_millis(600);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish, START, Finish]);
+        assert_eq!(test.state.capture, Capture::Idle);
+    }
+
+    /// Off, or in Hold mode, a held Toggle press still locks as before.
+    #[test]
+    fn without_tap_or_hold_a_held_toggle_press_locks() {
+        for options in [
+            HotkeyOptions {
+                tap_or_hold: false,
+                ..tap_or_hold()
+            },
+            HotkeyOptions {
+                toggle: false,
+                double_tap: true,
+                ..tap_or_hold()
+            },
+        ] {
+            let toggle = options.toggle;
+            let mut test = Test::with(options);
+            if !toggle {
+                test.tap();
+                test.now += Duration::from_millis(20);
+            }
+            test.events.clear();
+            test.press(Shortcut::Dictation);
+            test.now += Duration::from_millis(600);
+            test.release(Shortcut::Dictation);
+            assert_eq!(test.events, [START]);
+            assert_eq!(test.state.capture, Capture::Locked);
+        }
+    }
+
+    /// Repeats of a held press neither finish early nor restart the hold,
+    /// and a dropped release leaves the capture recording until a new press.
+    #[test]
+    fn tap_or_hold_survives_repeats_and_dropped_releases() {
+        let mut test = Test::with(tap_or_hold());
+        test.press(Shortcut::Dictation);
+        for _ in 0..20 {
+            test.now += Duration::from_millis(33);
+            test.press(Shortcut::Dictation);
+        }
+        assert_eq!(test.events, [START]);
+        test.release(Shortcut::Dictation);
+        assert_eq!(
+            test.events,
+            [START, Finish],
+            "held 660 ms from the first press"
+        );
+
+        test.now += Duration::from_secs(1);
+        test.press(Shortcut::Dictation);
+        test.now += Duration::from_secs(5);
+        assert_eq!(test.state.capture, Capture::Held { second_tap: true });
+        test.press(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish, START, Finish]);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish, START, Finish]);
+        assert_eq!(test.state.capture, Capture::Idle);
+    }
+
+    /// Dictate without processing follows Tap or hold for its own capture,
+    /// and commands are unchanged.
+    #[test]
+    fn tap_or_hold_applies_to_raw_dictation_but_not_commands() {
+        const RAW: HotkeyEvent = HotkeyEvent::Start { raw: true };
+        let mut test = Test::with(tap_or_hold());
+        test.press(Shortcut::RawDictation);
+        test.now += Duration::from_millis(500);
+        test.tap();
+        test.release(Shortcut::RawDictation);
+        assert_eq!(test.events, [RAW, Finish]);
+        test.now += Duration::from_secs(1);
+        test.command(Command::DictationStart);
+        test.now += Duration::from_secs(1);
+        test.command(Command::DictationStop);
+        assert_eq!(test.events, [RAW, Finish, START, Finish]);
+    }
+
     /// #786: Escape ends no dictation, held, locked, or idle.
     #[test]
     fn escape_never_ends_a_dictation() {
@@ -2412,6 +2087,84 @@ mod tests {
         assert_eq!(test.state.capture, Capture::Locked);
         test.tap();
         assert_eq!(test.events, [Finish]);
+    }
+
+    fn toggle_with_cancel() -> HotkeyOptions {
+        HotkeyOptions {
+            toggle: true,
+            cancel: Some(LinuxHotkey {
+                alt: false,
+                key: "escape".into(),
+                ..LinuxHotkey::default()
+            }),
+            ..HotkeyOptions::default()
+        }
+    }
+
+    /// Toggle's cancel discards the recording, while the shortcut is still
+    /// down or after it locked, and the next press starts afresh.
+    #[test]
+    fn cancel_discards_a_toggled_recording() {
+        let mut test = Test::with(toggle_with_cancel());
+        test.press(Shortcut::Dictation);
+        assert!(test.state.wants_cancel());
+        test.input(Input::Cancel);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Cancel]);
+        assert_eq!(test.state.capture, Capture::Idle);
+        assert!(!test.state.wants_cancel());
+
+        test.tap();
+        assert_eq!(test.state.capture, Capture::Locked);
+        test.input(Input::Cancel);
+        test.input(Input::Cancel);
+        assert_eq!(test.events, [START, Cancel, START, Cancel]);
+        test.tap();
+        test.tap();
+        assert_eq!(test.events, [START, Cancel, START, Cancel, START, Finish]);
+    }
+
+    /// Hold mode has no cancel: the key is never Hex's, even while a
+    /// recording runs, and a press of it ends nothing.
+    #[test]
+    fn cancel_is_ignored_in_hold_mode() {
+        let mut test = Test::with(HotkeyOptions {
+            toggle: false,
+            double_tap: true,
+            ..toggle_with_cancel()
+        });
+        test.press(Shortcut::Dictation);
+        assert!(!test.state.wants_cancel());
+        test.input(Input::Cancel);
+        test.release(Shortcut::Dictation);
+        assert_eq!(test.events, [START, Finish]);
+        test.events.clear();
+        test.now += Duration::from_millis(20);
+        test.tap();
+        test.input(Input::Cancel);
+        assert_eq!(test.state.capture, Capture::Locked);
+        assert!(test.events.iter().all(|event| *event != Cancel));
+    }
+
+    /// While nothing records, Hex doesn't take the cancel key, so it stays
+    /// with the app in front.
+    #[test]
+    fn cancel_is_not_taken_while_idle() {
+        let mut test = Test::with(toggle_with_cancel());
+        assert!(!test.state.wants_cancel());
+        test.input(Input::Cancel);
+        assert!(test.events.is_empty());
+        test.tap();
+        test.tap();
+        assert!(!test.state.wants_cancel());
+        assert_eq!(test.events, [START, Finish]);
+        // Toggle without a cancel shortcut never takes one either.
+        let mut test = Test::with(HotkeyOptions {
+            cancel: None,
+            ..toggle_with_cancel()
+        });
+        test.tap();
+        assert!(!test.state.wants_cancel());
     }
 
     #[test]
@@ -2473,7 +2226,9 @@ mod tests {
         test.command(Command::DictationToggle);
         test.command(Command::DictationToggle);
         test.command(Command::DictationToggle);
-        assert_eq!(test.events, [START, Finish, START]);
+        test.command(Command::DictationCancel);
+        test.command(Command::DictationCancel);
+        assert_eq!(test.events, [START, Finish, START, Cancel]);
     }
 
     #[test]
@@ -2831,12 +2586,15 @@ mod tests {
         let worker = thread::spawn(move || {
             // Stopped well before its first portal check.
             backend
-                .wait_for_portal(&mut Dispatcher::new(
-                    &HotkeyOptions::default(),
-                    sender,
-                    receiver.into(),
-                    ShortcutKeys::default(),
-                ))
+                .wait_for_portal(
+                    &mut Dispatcher::new(
+                        &HotkeyOptions::default(),
+                        sender,
+                        receiver.into(),
+                        ShortcutKeys::default(),
+                    ),
+                    true,
+                )
                 .map(|portal| assert!(portal.is_none()))
         });
         readiness.recv().unwrap().unwrap();

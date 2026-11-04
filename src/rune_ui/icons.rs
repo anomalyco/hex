@@ -110,11 +110,6 @@ line_icon!(
     ]
 );
 line_icon!(
-    HINTS,
-    "hex-row-hints",
-    ["M4 7V4h16v3", "M9 20h6", "M12 4v16"]
-);
-line_icon!(
     PASTE,
     "hex-row-paste",
     [
@@ -250,5 +245,22 @@ line_icon!(
     [
         "M12 2a6 6 0 0 1 6 6v8a6 6 0 0 1-12 0V8a6 6 0 0 1 6-6z",
         "M12 6v4"
+    ]
+);
+line_icon!(
+    CALL,
+    "hex-row-call",
+    [
+        "m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5",
+        "M4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z",
+    ]
+);
+line_icon!(
+    CIRCLE_X,
+    "hex-row-circle-x",
+    [
+        "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0",
+        "m15 9-6 6",
+        "m9 9 6 6"
     ]
 );

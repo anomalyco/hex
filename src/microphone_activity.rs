@@ -20,11 +20,12 @@ use objc2_app_kit::NSRunningApplication;
 #[cfg(target_os = "macos")]
 use objc2_core_audio::{
     AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
-    AudioObjectPropertyAddress, AudioObjectPropertySelector,
-    kAudioHardwarePropertyProcessObjectList, kAudioObjectPropertyElementMain,
-    kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioProcessPropertyBundleID,
-    kAudioProcessPropertyIsRunningInput, kAudioProcessPropertyIsRunningOutput,
-    kAudioProcessPropertyPID,
+    AudioObjectPropertyAddress, AudioObjectPropertyScope, AudioObjectPropertySelector,
+    kAudioDevicePropertyDeviceUID, kAudioHardwarePropertyProcessObjectList,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
+    kAudioObjectPropertyScopeInput, kAudioObjectSystemObject, kAudioProcessPropertyBundleID,
+    kAudioProcessPropertyDevices, kAudioProcessPropertyIsRunningInput,
+    kAudioProcessPropertyIsRunningOutput, kAudioProcessPropertyPID,
 };
 #[cfg(target_os = "macos")]
 use objc2_core_foundation::{CFRetained, CFString};
@@ -89,6 +90,7 @@ fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
                 | "org.mozilla.firefox"
                 | "com.microsoft.edgemac"
                 | "company.thebrowser.Browser"
+                | "com.vivaldi.Vivaldi"
         )
     )
 }
@@ -157,9 +159,83 @@ pub(crate) fn browser_process_objects(which: BrowserProcesses) -> Result<Vec<Aud
     })
 }
 
+#[cfg(target_os = "macos")]
+/// Whether any Core Audio process of the app `canonical_bundle_id` (its
+/// helpers included) is playing output: a call keeps it open, muted or not,
+/// and a hung-up WhatsApp call closes it with the microphone (#835).
+pub(crate) fn application_running_output(canonical_bundle_id: &str) -> Result<bool> {
+    objc2::rc::autoreleasepool(|_| {
+        let process_objects = property_vec::<AudioObjectID>(
+            kAudioObjectSystemObject as AudioObjectID,
+            kAudioHardwarePropertyProcessObjectList,
+        )?;
+        Ok(process_objects.into_iter().any(|process_object| {
+            property_value::<u32>(process_object, kAudioProcessPropertyIsRunningOutput)
+                .is_ok_and(|running| running != 0)
+                && property_cf_string(process_object, kAudioProcessPropertyBundleID)
+                    .is_some_and(|bundle_id| is_process_of(&bundle_id, canonical_bundle_id))
+        }))
+    })
+}
+
+#[cfg(target_os = "macos")]
+/// The UIDs of the input devices the app `canonical_bundle_id` (its helpers
+/// included) records from, read from each of its processes running input.
+/// macOS 14 and later report them; earlier systems report none.
+pub(crate) fn application_input_devices(canonical_bundle_id: &str) -> Result<Vec<String>> {
+    objc2::rc::autoreleasepool(|_| {
+        let process_objects = property_vec::<AudioObjectID>(
+            kAudioObjectSystemObject as AudioObjectID,
+            kAudioHardwarePropertyProcessObjectList,
+        )?;
+        let mut uids = Vec::new();
+        for process_object in process_objects {
+            let recording =
+                property_value::<u32>(process_object, kAudioProcessPropertyIsRunningInput)
+                    .is_ok_and(|running| running != 0)
+                    && property_cf_string(process_object, kAudioProcessPropertyBundleID)
+                        .is_some_and(|bundle_id| is_process_of(&bundle_id, canonical_bundle_id));
+            if !recording {
+                continue;
+            }
+            let Ok(devices) = property_vec_in::<AudioObjectID>(
+                process_object,
+                kAudioProcessPropertyDevices,
+                kAudioObjectPropertyScopeInput,
+            ) else {
+                continue;
+            };
+            for device in devices {
+                if let Some(uid) = property_cf_string(device, kAudioDevicePropertyDeviceUID)
+                    && !uids.contains(&uid)
+                {
+                    uids.push(uid);
+                }
+            }
+        }
+        Ok(uids)
+    })
+}
+
+/// Whether the Core Audio process `bundle_id` belongs to the app
+/// `canonical_bundle_id`: the app itself or one of its helpers, such as the
+/// browser helper that holds the microphone for a Meet tab.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn is_process_of(bundle_id: &str, canonical_bundle_id: &str) -> bool {
+    canonical_bundle_id_for(bundle_id, None) == Some(canonical_bundle_id)
+}
+
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
-const EXECUTABLES: [(&str, &str); 22] = [
+const EXECUTABLES: [(&str, &str); 32] = [
+    // Discord and its Canary and PTB builds, on Windows and Linux (the
+    // Flatpak runs the same binary).
+    ("discord", "com.hnc.Discord"),
+    ("discordcanary", "com.hnc.Discord"),
+    ("discordptb", "com.hnc.Discord"),
+    ("discord-canary", "com.hnc.Discord"),
+    ("discord-ptb", "com.hnc.Discord"),
+    ("com.discordapp.discord", "com.hnc.Discord"),
     // Gather for Windows.
     ("gather", "com.gather.GatherV2"),
     ("gatherv2", "com.gather.GatherV2"),
@@ -184,6 +260,11 @@ const EXECUTABLES: [(&str, &str); 22] = [
     ("msedge", "com.microsoft.edgemac"),
     ("microsoft-edge", "com.microsoft.edgemac"),
     ("microsoft-edge-stable", "com.microsoft.edgemac"),
+    // Vivaldi, its web apps (PWAs) included: they run in the same process.
+    ("vivaldi", "com.vivaldi.Vivaldi"),
+    ("vivaldi-bin", "com.vivaldi.Vivaldi"),
+    ("vivaldi-stable", "com.vivaldi.Vivaldi"),
+    ("vivaldi-snapshot", "com.vivaldi.Vivaldi"),
 ];
 
 fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'static str> {
@@ -216,6 +297,10 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         // Gather V2 and its Electron helpers, and Gather V1.
         ("com.gather.gatherv2", "com.gather.GatherV2"),
         ("com.gather.gather", "com.gather.GatherV2"),
+        // Discord and its helpers, and its Canary and PTB builds.
+        ("com.hnc.discord", "com.hnc.Discord"),
+        ("com.hnc.discordcanary", "com.hnc.Discord"),
+        ("com.hnc.discordptb", "com.hnc.Discord"),
         ("com.google.chrome", "com.google.Chrome"),
         ("com.brave.browser", "com.brave.Browser"),
         ("com.apple.safari", "com.apple.Safari"),
@@ -223,6 +308,7 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         ("org.mozilla.plugincontainer", "org.mozilla.firefox"),
         ("com.microsoft.edgemac", "com.microsoft.edgemac"),
         ("company.thebrowser.browser", "company.thebrowser.Browser"),
+        ("com.vivaldi.vivaldi", "com.vivaldi.Vivaldi"),
     ]
     .iter()
     .find_map(|(prefix, canonical)| {
@@ -241,12 +327,14 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "com.apple.FaceTime" => Some("FaceTime"),
         "net.whatsapp.WhatsApp" => Some("WhatsApp"),
         "com.gather.GatherV2" => Some("Gather"),
+        "com.hnc.Discord" => Some("Discord"),
         "com.google.Chrome" => Some("Google Chrome"),
         "com.brave.Browser" => Some("Brave Browser"),
         "com.apple.Safari" => Some("Safari"),
         "org.mozilla.firefox" => Some("Firefox"),
         "com.microsoft.edgemac" => Some("Microsoft Edge"),
         "company.thebrowser.Browser" => Some("Arc"),
+        "com.vivaldi.Vivaldi" => Some("Vivaldi"),
         _ => None,
     }
 }
@@ -459,9 +547,17 @@ fn inspect_microphone_applications() -> Result<Vec<ActiveMicrophoneApplication>>
 
 #[cfg(target_os = "macos")]
 fn property_address(selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+    property_address_in(selector, kAudioObjectPropertyScopeGlobal)
+}
+
+#[cfg(target_os = "macos")]
+fn property_address_in(
+    selector: AudioObjectPropertySelector,
+    scope: AudioObjectPropertyScope,
+) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress {
         mSelector: selector,
-        mScope: kAudioObjectPropertyScopeGlobal,
+        mScope: scope,
         mElement: kAudioObjectPropertyElementMain,
     }
 }
@@ -498,7 +594,16 @@ fn property_vec<T: Copy + Default>(
     object: AudioObjectID,
     selector: AudioObjectPropertySelector,
 ) -> Result<Vec<T>> {
-    let mut address = property_address(selector);
+    property_vec_in(object, selector, kAudioObjectPropertyScopeGlobal)
+}
+
+#[cfg(target_os = "macos")]
+fn property_vec_in<T: Copy + Default>(
+    object: AudioObjectID,
+    selector: AudioObjectPropertySelector,
+    scope: AudioObjectPropertyScope,
+) -> Result<Vec<T>> {
+    let mut address = property_address_in(selector, scope);
     let mut size = 0;
     let status = unsafe {
         AudioObjectGetPropertyDataSize(
@@ -776,6 +881,33 @@ mod tests {
     }
 
     #[test]
+    fn a_call_apps_helper_processes_belong_to_it() {
+        // The processes that held the microphone in Google Meet calls (#1086).
+        assert!(is_process_of(
+            "company.thebrowser.browser.helper",
+            "company.thebrowser.Browser"
+        ));
+        assert!(is_process_of(
+            "com.google.Chrome.helper",
+            "com.google.Chrome"
+        ));
+        assert!(is_process_of(
+            "com.google.Chrome.helper.Renderer",
+            "com.google.Chrome"
+        ));
+        assert!(is_process_of("com.google.Chrome", "com.google.Chrome"));
+        assert!(!is_process_of(
+            "com.google.Chrome.helper",
+            "company.thebrowser.Browser"
+        ));
+        assert!(!is_process_of(
+            "company.thebrowser.dia",
+            "company.thebrowser.Browser"
+        ));
+        assert!(!is_process_of("com.google.Chromecast", "com.google.Chrome"));
+    }
+
+    #[test]
     fn browser_bundles_include_helpers() {
         assert!(browser_bundle("com.brave.Browser.helper", None));
         assert!(browser_bundle("com.google.Chrome.helper", None));
@@ -871,6 +1003,14 @@ mod tests {
                 "msedge.exe",
                 "Microsoft Edge",
                 Some("com.microsoft.edgemac"),
+                true,
+            ),
+            ("vivaldi-bin", "Vivaldi", Some("com.vivaldi.Vivaldi"), true),
+            ("vivaldi.exe", "Vivaldi", Some("com.vivaldi.Vivaldi"), true),
+            (
+                "com.vivaldi.Vivaldi.helper",
+                "Vivaldi Helper",
+                Some("com.vivaldi.Vivaldi"),
                 true,
             ),
             ("spotify", "Spotify", None, false),

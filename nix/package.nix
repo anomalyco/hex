@@ -12,12 +12,15 @@
   alsa-lib,
   alsa-plugins,
   pipewire,
+  libva,
+  ffmpeg-headless,
   openssl,
   libxkbcommon,
   wayland,
   fontconfig,
   freetype,
   curl,
+  util-linux,
   wl-clipboard,
   wtype,
   makeWrapper,
@@ -47,6 +50,10 @@ let
       wayland
       libxkbcommon
       fontconfig
+      # Linux Annotate dlopens libpipewire-0.3, libva and libva-drm. libva finds VA-API
+      # drivers through its built-in /run/opengl-driver path or LIBVA_DRIVERS_PATH.
+      pipewire
+      libva
     ];
     ALSA_PLUGIN_DIR = symlinkJoin {
       name = "hex-alsa-plugins";
@@ -60,6 +67,8 @@ let
     curl
     wl-clipboard
     wtype
+    # Annotate runs ffmpeg and ffprobe; the headless build includes libx264.
+    ffmpeg-headless
   ];
 in
 rustPlatform.buildRustPackage (finalAttrs: {
@@ -81,6 +90,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ../assets
       ../packaging
       ../macos/HexMicrophoneDriver/Info.plist
+      # Built in: a 2.3.1 install moves itself into this installer's layout.
+      ../.github/release/install-linux.sh
     ];
   };
 
@@ -88,8 +99,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
     lockFile = ../Cargo.lock;
     outputHashes = {
       "transcribe-rs-0.3.11" = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
-      "rune-0.0.1" = "sha256-u/rEwNv8P3ApHoo4xiSYpjeTAW6La5rKU0VuQyktsT4=";
-      "transcribe-cpp-sys-0.4.1" = "sha256-AP8+t4baAzjOVJo76vodPoWv8lrFLR2tsXvsrbMFeSk=";
+      "rune-0.0.1" = "sha256-mUrn+AJ4M2dHGZseybw/0mAO+mgIVNSMXMwyj/51En0=";
+      "transcribe-cpp-sys-0.4.1" = "sha256-BAc2qKUMBZ5D6+Bq12NaZ1+ntWxHv95TYcAMTt3a5X8=";
     };
   };
 
@@ -119,8 +130,12 @@ rustPlatform.buildRustPackage (finalAttrs: {
     libxi
   ];
 
-  # OpenCode HTTP requests run through curl, including in the tests.
-  nativeCheckInputs = [ curl ];
+  # OpenCode HTTP requests run through curl, including in the tests; the
+  # 2.3.1 adoption test runs the Linux installer, which needs flock.
+  nativeCheckInputs = [
+    curl
+    util-linux
+  ];
 
   dontUseCmakeConfigure = true;
   env = buildEnv;
@@ -161,6 +176,9 @@ rustPlatform.buildRustPackage (finalAttrs: {
     homepage = "https://anoma.ly/hex/";
     license = lib.licenses.mit;
     mainProgram = "hex";
-    platforms = [ "x86_64-linux" ];
+    platforms = [
+      "x86_64-linux"
+      "aarch64-linux"
+    ];
   };
 })

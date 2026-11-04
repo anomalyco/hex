@@ -1,16 +1,49 @@
 <!doctype html>
 <!-- The installer window's background, 660×400 pt. render.sh draws it at 1×
      and 2× into background.tiff. Finder draws the icons and their labels on
-     top: Hex at (170, 178), Applications at (490, 178), 128 pt. -->
+     top: Hex at (170, 178), Applications at (490, 178), 128 pt.
+     The joke: faint, struck-out mishearings of the instruction fill the
+     window, and the line on the keycap is the one that came out right. The
+     mask keeps the icons, their labels, the arrow and the line clear; the
+     mishearings fill everything else, around the line too. -->
 <html><head><meta charset="utf-8"><style>
   html,body{margin:0;width:660px;height:400px;overflow:hidden}
   body{background:linear-gradient(#f7f7f5,#efefec);font-family:-apple-system,system-ui,sans-serif;position:relative}
   svg{position:absolute;inset:0}
+  .misheard{position:absolute;left:0;top:6px;width:900px;white-space:nowrap;
+    font:12px/23px ui-monospace,"SF Mono",Menlo,monospace;color:#d6d6d9;word-spacing:0;
+    -webkit-mask-image:
+      radial-gradient(ellipse 135px 120px at 170px 196px,transparent 62%,#000 100%),
+      radial-gradient(ellipse 135px 120px at 490px 196px,transparent 62%,#000 100%),
+      radial-gradient(ellipse 100px 34px at 330px 172px,transparent 62%,#000 100%),
+      radial-gradient(ellipse 230px 42px at 330px 322px,transparent 62%,#000 100%);
+    -webkit-mask-composite:source-in;mask-composite:intersect}
+  .misheard p{margin-top:0;margin-bottom:0}
+  .misheard s{text-decoration-thickness:1px;margin-right:2.2em}
   .row{position:absolute;left:0;right:0;top:292px;height:72px;display:flex;justify-content:center;align-items:center;gap:6px}
   /* Hex's own keycap (src/rune_ui/dmg_keycap.rs): a 56×48 pt canvas at 1.5×, the key centred in it. */
   .row img{width:84px;height:72px;display:block;margin:0 -8px 0 -19px}
   .line{font-size:16px;color:#2a2a2e;font-weight:600;letter-spacing:.005em;padding-bottom:2px}
 </style></head><body>
+<div class="misheard">
+  <p style="margin-left:-138px"><s>drag text to vacations</s> <s>drag hex to Appalachians</s> <s>drag hex toe app lick ations</s> <s>brag hex to applications</s></p>
+  <p style="margin-left:-77px"><s>tag Rex in applications</s> <s>drag eggs to applications</s> <s>Drake hex to applications</s> <s>dragon X two applications</s></p>
+  <p style="margin-left:-66px"><s>drag heck's to app locations</s> <s>drag eggs to applications</s> <s>drag hex to Appalachians</s> <s>dragon X two applications</s></p>
+  <p style="margin-left:-178px"><s>dragon X two applications</s> <s>drag eggs to applications</s> <s>drag hex to complications</s> <s>tag Rex in applications</s></p>
+  <p style="margin-left:-105px"><s>drag Rex to a placation</s> <s>drag heck's to app locations</s> <s>drag text to vacations</s> <s>drag hecks to apple cations</s></p>
+  <p style="margin-left:-9px"><s>tag Rex in applications</s> <s>drag text to vacations</s> <s>drag hex to Appalachians</s> <s>drag hex to complications</s></p>
+  <p style="margin-left:-35px"><s>drag hex to complications</s> <s>drag hex to a pickle nation</s> <s>dry gags to applications</s> <s>drag hex to a Pelican's</s></p>
+  <p style="margin-left:-133px"><s>drag hecks to apple cations</s> <s>drag hex, too, applications</s> <s>drag hex to complications</s> <s>drag Rex to a placation</s></p>
+  <p style="margin-left:-155px"><s>drag hex to complications</s> <s>drag eggs to applications</s> <s>dragon X two applications</s> <s>drag hex to Appalachians</s></p>
+  <p style="margin-left:-80px"><s>drag hex two-ply cations</s> <s>tag Rex in applications</s> <s>drag hex to Appalachians</s> <s>dragon X two applications</s></p>
+  <p style="margin-left:-166px"><s>drag hex to complications</s> <s>drag hex, too, applications</s> <s>drag the X to applications</s> <s>dry gags to applications</s></p>
+  <p style="margin-left:-135px"><s>drag text to vacations</s> <s>drag hex toe app lick ations</s> <s>drag hecks to apple cations</s> <s>Drake hex to applications</s></p>
+  <p style="margin-left:-162px"><s>drag hecks to apple cations</s> <s>drag the X to applications</s> <s>tag Rex in applications</s> <s>drag text to vacations</s></p>
+  <p style="margin-left:-8px"><s>dragon X two applications</s> <s>drag text to vacations</s> <s>drag hex to a pickle nation</s> <s>drag heck's to app locations</s></p>
+  <p style="margin-left:-3px"><s>drag Rex to a placation</s> <s>dry gags to applications</s> <s>drag hex to complications</s> <s>drag the X to applications</s></p>
+  <p style="margin-left:-220px"><s>drag hex two-ply cations</s> <s>dragon X two applications</s> <s>drag the X to applications</s> <s>drag Rex to a placation</s></p>
+  <p style="margin-left:-12px"><s>drag hex to complications</s> <s>drag heck's to app locations</s> <s>drag eggs to applications</s> <s>drag hecks to apple cations</s></p>
+</div>
 <svg width="660" height="400" viewBox="0 0 660 400">
   <g fill="none" stroke="#b4b4b9" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M268 178 H392"/>
@@ -19,6 +52,6 @@
 </svg>
 <div class="row">
   <img srcset="keycap@1x.png 1x, keycap@2x.png 2x" alt="">
-  <div class="line">Hold it, say it, done.</div>
+  <div class="line">Drag Hex to Applications.</div>
 </div>
 </body></html>

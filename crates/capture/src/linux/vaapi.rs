@@ -56,13 +56,42 @@ const PICTURE_INVALID: u32 = 0x1;
 const PICTURE_SHORT_TERM: u32 = 0x8;
 const FOURCC_NV12: u32 = u32::from_le_bytes(*b"NV12");
 
-/// Frames from one IDR to the next: two seconds at the recorder's rate.
-pub const GOP: u32 = 60;
+/// Frames from one IDR to the next: one second at the recorder's rate.
+pub const GOP: u32 = super::media::FPS;
 /// Constant quantiser: sharp text at a few Mbit/s for a mostly still screen.
 const QP: u8 = 24;
 /// `log2_max_frame_num_minus4` and `log2_max_pic_order_cnt_lsb_minus4`: 256 each, more
 /// than a GOP's frames and picture order counts.
 const LOG2_MAX_MINUS4: u32 = 4;
+
+fn coded_size(width: u32, height: u32) -> (u32, u32) {
+    (width.next_multiple_of(16), height.next_multiple_of(16))
+}
+
+/// Smallest H.264 level (Table A-1) covering `width_mbs` × `height_mbs` at `fps`.
+fn level_idc(width_mbs: u32, height_mbs: u32, fps: u32) -> u8 {
+    let mbs = u64::from(width_mbs) * u64::from(height_mbs);
+    let mbps = mbs * u64::from(fps);
+    let max_dim = u64::from(width_mbs.max(height_mbs));
+    const LEVELS: &[(u8, u64, u64)] = &[
+        (31, 3_600, 108_000),
+        (32, 5_120, 216_000),
+        (40, 8_192, 245_760),
+        (42, 8_704, 522_240),
+        (50, 22_080, 589_824),
+        (51, 36_864, 983_040),
+        (52, 36_864, 2_073_600),
+        (60, 139_264, 4_177_920),
+        (61, 139_264, 8_355_840),
+        (62, 139_264, 16_711_680),
+    ];
+    LEVELS
+        .iter()
+        .find(|&&(_, max_fs, max_mbps)| {
+            mbs <= max_fs && mbps <= max_mbps && max_dim * max_dim <= max_fs * 8
+        })
+        .map_or(62, |&(idc, _, _)| idc)
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -259,6 +288,7 @@ struct ConfigAttrib {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct ImageFormat {
     fourcc: u32,
     byte_order: u32,
@@ -269,6 +299,7 @@ struct ImageFormat {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct Image {
     image_id: Id,
     format: ImageFormat,
@@ -397,13 +428,16 @@ pub struct Encoder {
     input: Id,
     recon: [Id; 2],
     coded: Id,
-    /// The small RGBX copy for candidate frames, and its image.
+    /// The small copy for candidate frames, and its image; scaled only when sampled.
     small: Option<(Id, Image, Id)>,
-    /// Imported screen buffers, by their fd.
-    imported: HashMap<i64, Id>,
+    small_dirty: bool,
+    /// Imported screen buffers, by their fd, with the size each was imported at.
+    imported: HashMap<i64, (Id, (u32, u32))>,
     width: u32,
     height: u32,
     pixel: PixelFormat,
+    /// The screen buffers' negotiated DRM format modifier.
+    modifier: u64,
     source: (u32, u32),
     frame: u32,
     idr_count: u16,
@@ -413,11 +447,12 @@ unsafe impl Send for Encoder {}
 
 impl Encoder {
     /// Opens the first render node that encodes H.264, scaling `source` frames to `width` ×
-    /// `height` (multiples of 16), with an optional small copy at `small`. Every render node is
-    /// tried in order: on a laptop with two GPUs the first may be one the VA driver can't use.
+    /// `height` (even sides; padded to 16 px macroblocks and cropped in SPS), with an optional
+    /// small copy at `small`. Every render node is tried in order: on a laptop with two GPUs the
+    /// first may be one the VA driver can't use.
     pub fn new(
         source: (u32, u32),
-        pixel: PixelFormat,
+        (pixel, modifier): (PixelFormat, u64),
         output: (u32, u32),
         small: (u32, u32),
     ) -> Result<Self> {
@@ -429,7 +464,8 @@ impl Encoder {
         let mut failures = Vec::new();
         for node in nodes {
             match Self::open(va, drm, &node, source, pixel, output, small) {
-                Ok(encoder) => {
+                Ok(mut encoder) => {
+                    encoder.modifier = modifier;
                     if !failures.is_empty() {
                         crate::log::scrawl_log(format!(
                             "Hardware encoding on {} ({})",
@@ -473,6 +509,7 @@ impl Encoder {
             unsafe { (va.vaTerminate)(display) };
             return Err(error);
         }
+        let (width, height) = (width.max(2) & !1, height.max(2) & !1);
         let mut encoder = Self {
             va,
             display,
@@ -485,10 +522,12 @@ impl Encoder {
             recon: [INVALID; 2],
             coded: INVALID,
             small: None,
+            small_dirty: false,
             imported: HashMap::new(),
             width,
             height,
             pixel,
+            modifier: super::pipewire::MODIFIER_LINEAR,
             source,
             frame: 0,
             idr_count: 0,
@@ -499,6 +538,7 @@ impl Encoder {
 
     fn setup(&mut self, small: (u32, u32)) -> Result<()> {
         let (va, display) = (self.va, self.display);
+        let (coded_width, coded_height) = coded_size(self.width, self.height);
         let mut surfaces = [INVALID; 3];
         check(
             va,
@@ -506,8 +546,8 @@ impl Encoder {
                 (va.vaCreateSurfaces)(
                     display,
                     RT_FORMAT_YUV420,
-                    self.width,
-                    self.height,
+                    coded_width,
+                    coded_height,
                     surfaces.as_mut_ptr(),
                     3,
                     ptr::null_mut(),
@@ -557,8 +597,8 @@ impl Encoder {
                 (va.vaCreateContext)(
                     display,
                     self.enc_config,
-                    self.width as c_int,
-                    self.height as c_int,
+                    coded_width as c_int,
+                    coded_height as c_int,
                     PROGRESSIVE,
                     surfaces.as_mut_ptr(),
                     3,
@@ -587,8 +627,8 @@ impl Encoder {
                 (va.vaCreateContext)(
                     display,
                     self.vpp_config,
-                    self.width as c_int,
-                    self.height as c_int,
+                    coded_width as c_int,
+                    coded_height as c_int,
                     PROGRESSIVE,
                     ptr::null_mut(),
                     0,
@@ -604,7 +644,7 @@ impl Encoder {
                     display,
                     self.enc,
                     BUFFER_CODED,
-                    self.width * self.height * 3 / 2 + (1 << 16),
+                    coded_width * coded_height * 3 / 2 + (1 << 16),
                     1,
                     ptr::null_mut(),
                     &mut self.coded,
@@ -673,12 +713,35 @@ impl Encoder {
         Ok((surface, image, context))
     }
 
-    /// The surface for a screen buffer, imported on first sight.
-    fn import(&mut self, frame: &Frame) -> Result<Id> {
-        if let Some(&surface) = self.imported.get(&frame.fd) {
-            return Ok(surface);
+    /// The surface for a screen buffer and the size it covers, imported on first sight.
+    ///
+    /// Some drivers (Intel's iHD) pad a linear surface's height to a multiple of four rows
+    /// and refuse a buffer that ends before the padding, which a window or a fractionally
+    /// scaled screen of odd size does (1915×1043). Then the buffer is imported again at an
+    /// even width and a height rounded down to four rows, losing at most three edge rows.
+    fn import(&mut self, frame: &Frame) -> Result<(Id, (u32, u32))> {
+        if let Some(&imported) = self.imported.get(&frame.fd) {
+            return Ok(imported);
         }
         let (width, height) = self.source;
+        let imported = match self.import_at(frame, (width, height)) {
+            Ok(surface) => (surface, (width, height)),
+            Err(error) => {
+                let aligned = (width & !1, height & !3);
+                if aligned == (width, height) || aligned.0 == 0 || aligned.1 == 0 {
+                    return Err(error);
+                }
+                let surface = self
+                    .import_at(frame, aligned)
+                    .map_err(|_| error.context(format!("also at {}x{}", aligned.0, aligned.1)))?;
+                (surface, aligned)
+            }
+        };
+        self.imported.insert(frame.fd, imported);
+        Ok(imported)
+    }
+
+    fn import_at(&self, frame: &Frame, (width, height): (u32, u32)) -> Result<Id> {
         let mut descriptor: PrimeDescriptor = unsafe { std::mem::zeroed() };
         descriptor.fourcc = match self.pixel {
             PixelFormat::Bgrx => u32::from_le_bytes(*b"BGRX"),
@@ -692,7 +755,7 @@ impl Encoder {
         descriptor.objects[0] = PrimeObject {
             fd: frame.fd as c_int,
             size: frame.size,
-            drm_format_modifier: 0,
+            drm_format_modifier: self.modifier,
         };
         descriptor.num_layers = 1;
         descriptor.layers[0].drm_format = self.pixel.drm_fourcc();
@@ -730,7 +793,6 @@ impl Encoder {
             },
             "import the screen buffer",
         )?;
-        self.imported.insert(frame.fd, surface);
         Ok(surface)
     }
 
@@ -841,34 +903,35 @@ impl Encoder {
 
     /// Imports `frame` and scales it into the frame to encode.
     pub fn load(&mut self, frame: &Frame) -> Result<()> {
-        let source = self.import(frame)?;
+        let (source, size) = self.import(frame)?;
         let output = (self.width, self.height);
         self.process(
             self.vpp,
-            (source, self.source),
+            (source, size),
             (self.input, output),
             (COLOR_SRGB, COLOR_BT709),
         )?;
-        if let Some((small, image, context)) = &self.small {
-            // From the scaled frame: the video engine shrinks by a bounded factor. Only the
-            // candidate frames read it; a failure there costs nothing else.
-            let size = (u32::from(image.width), u32::from(image.height));
-            let _ = self.process(
-                *context,
-                (self.input, output),
-                (*small, size),
-                (COLOR_BT709, COLOR_BT709),
-            );
-        }
+        self.small_dirty = true;
         Ok(())
     }
 
-    /// The last loaded frame at the small size, as tight RGBA rows.
-    pub fn small_rgba(&self) -> Option<(u32, u32, Vec<u8>)> {
-        let (surface, image, _) = self.small.as_ref()?;
-        let (va, display) = (self.va, self.display);
+    /// The last loaded frame at the small size, as tight RGBA rows. Scales `self.input` on demand
+    /// (the sampler reads candidates every `FRAME_SAMPLE_INTERVAL`, not every 60 fps frame).
+    pub fn small_rgba(&mut self) -> Option<(u32, u32, Vec<u8>)> {
+        let (surface, image, context) = *self.small.as_ref()?;
         let (width, height) = (u32::from(image.width), u32::from(image.height));
-        if unsafe { (va.vaGetImage)(display, *surface, 0, 0, width, height, image.image_id) } != 0 {
+        if self.small_dirty {
+            self.process(
+                context,
+                (self.input, (self.width, self.height)),
+                (surface, (width, height)),
+                (COLOR_BT709, COLOR_BT709),
+            )
+            .ok()?;
+            self.small_dirty = false;
+        }
+        let (va, display) = (self.va, self.display);
+        if unsafe { (va.vaGetImage)(display, surface, 0, 0, width, height, image.image_id) } != 0 {
             return None;
         }
         let mut mapped = ptr::null_mut();
@@ -925,12 +988,22 @@ impl Encoder {
             bottom_field_order_cnt: 0,
             reserved: [0; 4],
         };
-        let (width_mbs, height_mbs) = ((self.width / 16) as u16, (self.height / 16) as u16);
+        let (coded_width, coded_height) = coded_size(self.width, self.height);
+        let (width_mbs, height_mbs) = ((coded_width / 16) as u16, (coded_height / 16) as u16);
+        let (crop_right, crop_bottom) = (
+            (coded_width - self.width) / 2,
+            (coded_height - self.height) / 2,
+        );
+        let level = level_idc(
+            u32::from(width_mbs),
+            u32::from(height_mbs),
+            super::media::FPS,
+        );
 
         let mut buffers = Vec::with_capacity(9);
         if idr {
             let mut sequence: SequenceParams = unsafe { std::mem::zeroed() };
-            sequence.level_idc = 51;
+            sequence.level_idc = level;
             sequence.intra_period = GOP;
             sequence.intra_idr_period = GOP;
             sequence.ip_period = 1;
@@ -941,7 +1014,11 @@ impl Encoder {
             // order count sizes; picture order count type 0.
             sequence.seq_fields =
                 1 | (1 << 2) | (1 << 5) | (LOG2_MAX_MINUS4 << 6) | (LOG2_MAX_MINUS4 << 12);
-            sequence.time_scale = 60;
+            if crop_right > 0 || crop_bottom > 0 {
+                sequence.frame_cropping_flag = 1;
+                sequence.frame_crop = [0, crop_right, 0, crop_bottom];
+            }
+            sequence.time_scale = 2 * super::media::FPS;
             sequence.num_units_in_tick = 1;
             buffers.push(self.buffer(self.enc, BUFFER_SEQUENCE, &mut sequence)?);
         }
@@ -972,6 +1049,9 @@ impl Encoder {
             let headers = Headers {
                 width_mbs: u32::from(width_mbs),
                 height_mbs: u32::from(height_mbs),
+                crop_right,
+                crop_bottom,
+                level_idc: level,
             };
             self.packed(&mut buffers, PACKED_SEQUENCE, &headers.sequence())?;
             self.packed(&mut buffers, PACKED_PICTURE, &headers.picture())?;
@@ -1043,7 +1123,7 @@ impl Drop for Encoder {
     fn drop(&mut self) {
         let (va, display) = (self.va, self.display);
         unsafe {
-            for (_, mut surface) in self.imported.drain() {
+            for (_, (mut surface, _)) in self.imported.drain() {
                 (va.vaDestroySurfaces)(display, &mut surface, 1);
             }
             if let Some((mut surface, image, context)) = self.small.take() {
@@ -1145,15 +1225,18 @@ impl Bits {
 struct Headers {
     width_mbs: u32,
     height_mbs: u32,
+    crop_right: u32,
+    crop_bottom: u32,
+    level_idc: u8,
 }
 
 impl Headers {
-    /// High profile, level 5.1, 4:2:0, frames only, one reference, timing for the muxer.
+    /// High profile, computed level, 4:2:0, frames only, one reference, frame crop, and VUI timing.
     fn sequence(&self) -> (Vec<u8>, u32) {
         let mut b = Bits::default();
         b.u(8, 100);
         b.u(8, 0);
-        b.u(8, 51);
+        b.u(8, u32::from(self.level_idc));
         b.ue(0);
         b.ue(1);
         b.ue(0);
@@ -1169,7 +1252,14 @@ impl Headers {
         b.ue(self.height_mbs - 1);
         b.bit(true);
         b.bit(true);
-        b.bit(false);
+        let cropping = self.crop_right > 0 || self.crop_bottom > 0;
+        b.bit(cropping);
+        if cropping {
+            b.ue(0);
+            b.ue(self.crop_right);
+            b.ue(0);
+            b.ue(self.crop_bottom);
+        }
         // VUI: BT.709 limited range, and the frame rate.
         b.bit(true);
         b.bit(false);
@@ -1280,5 +1370,35 @@ mod tests {
         let (bytes, bits) = b.nal(0x67);
         assert_eq!(bytes, [0, 0, 0, 1, 0x67, 0, 0, 3, 1]);
         assert_eq!(bits, 72);
+    }
+
+    #[test]
+    fn level_and_sps_crop_match_resolution_and_60fps() {
+        assert_eq!(level_idc(80, 45, 60), 32); // 1280×720@60
+        assert_eq!(level_idc(120, 68, 60), 42); // 1920×1080@60 (coded 1920×1088)
+        assert_eq!(level_idc(160, 90, 60), 51); // 2560×1440@60
+        assert_eq!(level_idc(240, 135, 60), 52); // 3840×2160@60
+
+        let (coded_w, coded_h) = coded_size(1920, 1080);
+        assert_eq!((coded_w, coded_h), (1920, 1088));
+        let uncropped = Headers {
+            width_mbs: 160,
+            height_mbs: 90,
+            crop_right: 0,
+            crop_bottom: 0,
+            level_idc: 51,
+        }
+        .sequence();
+        let cropped = Headers {
+            width_mbs: 120,
+            height_mbs: 68,
+            crop_right: 0,
+            crop_bottom: 4,
+            level_idc: 42,
+        }
+        .sequence();
+        assert_eq!(uncropped.0[7], 51);
+        assert_eq!(cropped.0[7], 42);
+        assert!(cropped.1 > uncropped.1);
     }
 }

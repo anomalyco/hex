@@ -137,7 +137,8 @@ pub(super) enum View {
 /// Meetings is on, so the pane lists recordings and settings instead of the
 /// opt-in card (`MeetingSettings::available`; scenes leave `developer` off).
 pub(super) fn available(ui: &Ui) -> bool {
-    ui.settings.meetings.enabled || ui.platform.developer
+    crate::labs::Feature::Meetings.managed().is_none()
+        && (ui.settings.meetings.enabled || ui.platform.developer)
 }
 
 /// Whether something can write a meeting's notes: Apple Intelligence on a
@@ -145,6 +146,16 @@ pub(super) fn available(ui: &Ui) -> bool {
 fn notes_available(ui: &Ui) -> bool {
     (ui.platform.caps.os == super::platform::Os::Macos && ui.platform.notes.is_available())
         || ui.settings.meetings.summarize_with_opencode
+}
+
+/// What writes the notes now, as the generator picks it: Apple Intelligence
+/// on a Mac that has it, otherwise OpenCode.
+fn notes_running_label(ui: &Ui) -> &'static str {
+    if ui.platform.caps.os == super::platform::Os::Macos && ui.platform.notes.is_available() {
+        tr("Writing a title and summary with Apple Intelligence…")
+    } else {
+        tr("Writing a title and summary with OpenCode…")
+    }
 }
 
 #[derive(Default)]
@@ -382,6 +393,27 @@ impl MeetingsPane {
         }
     }
 
+    /// The fixture with recordings from more call services, for Labs ›
+    /// Meeting platform icons: a Zoom call, a Google Meet tab, a Teams
+    /// website call, a Slack huddle, FaceTime, and one started by hand.
+    pub(super) fn platforms_fixture() -> Self {
+        let mut pane = Self::fixture();
+        let mut more = Vec::new();
+        for (id, title, app) in [
+            ("preview-meet", "Weekly sync", "Google Meet"),
+            ("preview-teams", "Vendor check-in", "teams.microsoft.com"),
+            ("preview-huddle", "Release huddle", "Slack Huddle"),
+        ] {
+            let mut meeting = pane.meetings[2].clone();
+            meeting.id = id.into();
+            meeting.title = title.into();
+            meeting.app = Some(app.into());
+            more.push(meeting);
+        }
+        pane.meetings.splice(2..2, more);
+        pane
+    }
+
     /// The fixture with live chapters (Labs) on the
     /// meeting with notes, its title extended by them.
     pub(super) fn chapters_fixture() -> Self {
@@ -530,13 +562,16 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             "enable",
             vec![super::platform_settings::meetings_toggle(ui, p)],
         ));
-        return (Vec::new(), super::scroll_body("scroll", content));
+        return (Vec::new(), super::scroll_body(p.k, "scroll", content));
     }
     let action = recording_action(ui, p);
     if ui.meetings.view == View::Settings {
         let content =
             page("content").children(super::platform_settings::meetings_settings(ui, p, layer));
-        return (vec![action], super::scroll_body("settings-scroll", content));
+        return (
+            vec![action],
+            super::scroll_body(p.k, "settings-scroll", content),
+        );
     }
     recordings(ui, p, layer, action)
 }
@@ -654,6 +689,27 @@ fn row_meta(pane: &MeetingsPane, meeting: &Meeting, p: Paint) -> (String, Option
     (parts.join(" · "), ink)
 }
 
+/// Labs › Meeting platform icons: the icon before a row's title, the call
+/// service's when its app names one and a neutral one otherwise (another
+/// app, or a meeting started by hand). `None` while the lab is off.
+fn platform_icon(ui: &Ui, meeting: &Meeting) -> Option<&'static rune::Icon> {
+    if !ui.settings.labs.meeting_platform_icons
+        || !crate::labs::Feature::MeetingPlatformIcons.shipped()
+    {
+        return None;
+    }
+    Some(
+        match meeting
+            .app
+            .as_deref()
+            .and_then(crate::calendar::CallProvider::from_meeting_app)
+        {
+            Some(provider) => super::platform_settings::provider_icon(provider),
+            None => &super::icons::CALL,
+        },
+    )
+}
+
 /// Copy transcript as an icon: a completed row's hover action, or the
 /// card's.
 fn copy_action(p: Paint, pane: &MeetingsPane, meeting: &Meeting, what: &'static str) -> El {
@@ -716,9 +772,11 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             Some(tr("Record a call to see its notes and transcript here.")),
         )
     } else {
-        let mut list = col().key("meetings-list");
+        let mut list = col().key("meetings-list").label(tr("Meetings"));
         let mut day: Option<&str> = None;
-        for (index, meeting) in pane.visible().into_iter().enumerate() {
+        let visible = pane.visible();
+        let count = visible.len();
+        for (index, meeting) in visible.into_iter().enumerate() {
             if day != Some(meeting.day.as_str()) {
                 list = list.child(ld::group(
                     p,
@@ -731,22 +789,26 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             let (meta, meta_ink) = row_meta(pane, meeting, p);
             let completed = meeting.status == Status::Complete && !meeting.turns().is_empty();
             let id = meeting.id.clone();
-            list = list.child(ld::item(
-                p,
-                Item {
-                    key: format!("meeting-{}", meeting.id),
-                    title: meeting.title.clone(),
-                    meta,
-                    meta_ink,
-                    time: meeting.clock.clone(),
-                    hover: completed
-                        .then(|| copy_action(p, pane, meeting, "row"))
-                        .into_iter()
-                        .collect(),
-                    selected: pane.selected.as_deref() == Some(meeting.id.as_str()),
-                },
-                move |ui: &mut Ui| ui.meetings.select(id.clone()),
-            ));
+            list = list.child(
+                ld::item_with_icon(
+                    p,
+                    Item {
+                        key: format!("meeting-{}", meeting.id),
+                        title: meeting.title.clone(),
+                        meta,
+                        meta_ink,
+                        time: meeting.clock.clone(),
+                        hover: completed
+                            .then(|| copy_action(p, pane, meeting, "row"))
+                            .into_iter()
+                            .collect(),
+                        selected: pane.selected.as_deref() == Some(meeting.id.as_str()),
+                    },
+                    platform_icon(ui, meeting),
+                    move |ui: &mut Ui| ui.meetings.select(id.clone()),
+                )
+                .position_in_set(index + 1, count),
+            );
         }
         let detail = match pane.selected.as_deref().and_then(|id| pane.meeting(id)) {
             Some(meeting) => detail(ui, p, meeting, layer),
@@ -765,7 +827,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                 None,
             ),
         };
-        let column = ld::list_column(search(ui, p), "meetings-scroll", list);
+        let column = ld::list_column(p, search(ui, p), "meetings-scroll", list);
         ld::body(p, "meetings-body", column, detail)
     };
     (
@@ -855,6 +917,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
             .center_y()
             .child(
                 TextInput::new(&pane.rename)
+                    .label(tr("Name"))
                     .width(Some(220.0))
                     .on_edit(|ui: &mut Ui| &mut ui.meetings.rename)
                     .on_submit(|ui: &mut Ui, _| finish_rename(ui))
@@ -946,7 +1009,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         );
     } else if meeting.notes_running {
         body = body.child(
-            text(tr("Writing a title and summary with Apple Intelligence…"))
+            text(notes_running_label(ui))
                 .key("notes-running")
                 .font(DESCRIPTION)
                 .color(p.faint()),
@@ -974,7 +1037,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         .shrink()
         .child(ld::card_header(title, meta, actions))
         .children(confirm)
-        .child(ld::card_scroll("meeting-transcript", body))
+        .child(ld::card_scroll(p, "meeting-transcript", body))
 }
 
 /// The meeting's chapters, each with its start, name, line, and Copy
@@ -1241,5 +1304,44 @@ mod tests {
         stop(&mut ui);
         assert!(!ui.meetings.stop_pending);
         assert!(ui.meetings.action_error.is_some());
+    }
+
+    /// Labs › Meeting platform icons: no icon while off; on, a known call
+    /// service's icon, and the neutral one for any other or no app (#1290).
+    #[test]
+    fn platform_icons_show_only_with_their_lab_and_fall_back_to_a_neutral_one() {
+        let mut settings = crate::app_settings::AppSettings::default();
+        let ui = Ui::with(settings.clone(), Service::Fixture(Vec::new()));
+        let pane = MeetingsPane::platforms_fixture();
+        assert!(
+            pane.meetings
+                .iter()
+                .all(|meeting| platform_icon(&ui, meeting).is_none())
+        );
+        settings.labs.meeting_platform_icons = true;
+        let ui = Ui::with(settings, Service::Fixture(Vec::new()));
+        let name = |id: &str| {
+            let meeting = pane.meeting(id).unwrap();
+            platform_icon(&ui, meeting).map(|icon| icon.name)
+        };
+        assert_eq!(name("preview-live"), Some("hex-provider-zoom"));
+        assert_eq!(name("preview-meet"), Some("hex-provider-meet"));
+        assert_eq!(name("preview-teams"), Some("hex-provider-teams"));
+        assert_eq!(name("preview-huddle"), Some("hex-provider-slack"));
+        assert_eq!(name("preview-design"), Some("hex-row-call"));
+        assert_eq!(name("preview-failed"), Some("hex-row-call"));
+    }
+
+    /// Off a Mac the notes are written by OpenCode, so the progress line
+    /// names it, never Apple Intelligence (#1151).
+    #[test]
+    fn notes_progress_names_opencode_off_a_mac() {
+        let ui = Ui::with(
+            crate::app_settings::AppSettings::default(),
+            Service::Fixture(Vec::new()),
+        );
+        let label = notes_running_label(&ui);
+        assert!(label.contains("OpenCode"), "{label}");
+        assert!(!label.contains("Apple Intelligence"), "{label}");
     }
 }

@@ -91,7 +91,37 @@ pub(crate) struct WindowsDesktopHost {
 /// Names the event that marks the running Hex app in this login session.
 const APP_INSTANCE_EVENT: &str = r"Local\anomaly.hex.app";
 
-/// Ownership of the one Hex app in this login session.
+/// The data root `HEX_APPLICATION_SUPPORT_DIR` names, unless it is the
+/// default one, which keeps the default event.
+fn custom_root() -> Option<std::path::PathBuf> {
+    let canonical = |path: std::path::PathBuf| path.canonicalize().unwrap_or(path);
+    let root = canonical(std::env::var_os("HEX_APPLICATION_SUPPORT_DIR")?.into());
+    let default = dirs::data_dir().map(|data| canonical(data.join("hex")));
+    (default.as_ref() != Some(&root)).then_some(root)
+}
+
+/// The instance event for a data root: [`APP_INSTANCE_EVENT`] for the
+/// default one, and its own event for another root that
+/// `HEX_APPLICATION_SUPPORT_DIR` names, so a copy of Hex with its own data,
+/// such as a benchmark, neither signals nor yields to the person's Hex.
+fn instance_event_name(custom_root: Option<&std::path::Path>) -> String {
+    use sha2::{Digest, Sha256};
+    match custom_root {
+        None => APP_INSTANCE_EVENT.into(),
+        Some(root) => {
+            // Windows paths compare without case.
+            let path = root.to_string_lossy().to_lowercase();
+            let digest = Sha256::digest(path.as_bytes());
+            let hash: String = digest[..8]
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            format!("{APP_INSTANCE_EVENT}.{hash}")
+        }
+    }
+}
+
+/// Ownership of the one Hex app in this login session (per data root).
 ///
 /// Windows does not bring a running app forward when it is launched again, so
 /// a Start menu launch while the login item runs in the tray would start a
@@ -105,7 +135,8 @@ impl AppInstance {
     /// asking it to show its window unless this launch is a hidden (login)
     /// launch, which must never pop up an app that is already running.
     pub(crate) fn claim(start_hidden: bool) -> Result<Option<Self>> {
-        let name: Vec<u16> = APP_INSTANCE_EVENT.encode_utf16().chain([0]).collect();
+        let name = instance_event_name(custom_root().as_deref());
+        let name: Vec<u16> = name.encode_utf16().chain([0]).collect();
         // SAFETY: `name` is a NUL-terminated UTF-16 string that outlives the call.
         let event = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
         if event.is_null() {
@@ -240,9 +271,13 @@ impl WindowsDesktopHost {
             Request::PasteLast => {
                 if let Some(listener) = &self.listener {
                     self.foreground.activate();
-                    let _ = listener
+                    if listener
                         .commands
-                        .send(crate::windows::dictation::ListenerCommand::PasteLast);
+                        .send(crate::windows::dictation::ListenerCommand::PasteLast)
+                        .is_ok()
+                    {
+                        crate::windows::dictation::wake();
+                    }
                 }
             }
             Request::Quit => return true,
@@ -794,6 +829,22 @@ mod tests {
             transcript(5, "  "),
         ];
         assert_eq!(last_completed_at(events.iter()), Some(4));
+    }
+
+    #[test]
+    fn an_isolated_data_root_has_its_own_instance_event() {
+        assert_eq!(instance_event_name(None), APP_INSTANCE_EVENT);
+        let isolated = instance_event_name(Some(std::path::Path::new(r"C:\bench\home\hex")));
+        assert!(isolated.starts_with(r"Local\anomaly.hex.app."));
+        assert_eq!(isolated.len(), APP_INSTANCE_EVENT.len() + 17);
+        assert_eq!(
+            isolated,
+            instance_event_name(Some(std::path::Path::new(r"c:\Bench\Home\HEX")))
+        );
+        assert_ne!(
+            isolated,
+            instance_event_name(Some(std::path::Path::new(r"C:\bench\other\hex")))
+        );
     }
 
     #[test]

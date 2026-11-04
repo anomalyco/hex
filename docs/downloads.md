@@ -39,8 +39,10 @@ and updater routes.
 The release workflow uploads every file to the release service (stored by
 hash, never replaced), then the release, then mirrors the files to the GitHub
 release (verified byte for byte). App tags remain separate from TypeScript SDK
-tags; do not use GitHub's generic `releases/latest` redirect for an app
-download.
+tags. The stable app release is GitHub's Latest release (the repository badge);
+SDK releases are created with `--latest=false` and never take it. Still, do not
+use GitHub's generic `releases/latest` redirect for an app download: links
+name the release service or an explicit `v<version>` tag.
 
 The site reads the stable manifest when it builds, so the production deploy
 that follows a stable release updates every link. Bump the README's explicit
@@ -72,7 +74,8 @@ managed network:
   user's proxy (Settings › Network › Proxy, Internet Options), its PAC file or
   WPAD, then the machine's WinHTTP proxy (`netsh winhttp set proxy`). macOS:
   the network's HTTP and HTTPS proxies and their exceptions; a PAC file isn't
-  evaluated, so set `HTTPS_PROXY`. Linux: the environment only. A proxy that
+  evaluated, so Hex passes over it to the next HTTP or HTTPS proxy in the list
+  (#1235), and a PAC-only network needs `HTTPS_PROXY`. Linux: the environment only. A proxy that
   needs a sign-in (NTLM, Kerberos) fails with "the proxy needs a sign-in".
 - TLS: the platform's own (SChannel, Security.framework, OpenSSL) with the
   system's trusted roots, so a TLS-inspecting firewall whose root certificate

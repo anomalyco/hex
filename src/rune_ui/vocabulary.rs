@@ -12,7 +12,7 @@ use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition, note,
 };
 use super::lists::remove_button;
-use crate::desktop::i18n::{tr, tr_fill};
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::dictation::vocabulary::{self, VocabularyEntry};
 
 const MODAL_WIDTH: f32 = 620.0;
@@ -149,6 +149,24 @@ pub(super) fn unused_note(ui: &Ui) -> Option<String> {
     })
 }
 
+/// How many terms the selected model reads, when that is fewer than the
+/// list holds: Parakeet's bias cap, or Whisper's and Qwen3-ASR's prompt
+/// budget, as transcription applies them.
+fn budget_note(ui: &Ui) -> Option<String> {
+    let entries = ui.vocabulary.project();
+    let read = crate::transcription::models::definition(ui.settings.transcription.model)
+        .vocabulary_terms_read(&entries);
+    (read < entries.len()).then(|| {
+        tr_named(
+            "This model reads the first {read} of {total} terms",
+            &[
+                ("read", &read.to_string()),
+                ("total", &entries.len().to_string()),
+            ],
+        )
+    })
+}
+
 /// Opens the sheet alone, with an empty row to type into when the list is
 /// empty.
 pub(super) fn open(ui: &mut Ui) {
@@ -272,7 +290,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         .key("term-column")
         .h(height.min(ROWS_HEIGHT))
         .mx(-SIDE_ROOM)
-        .child(super::faded_body("term-scroll", rows, FADES));
+        .child(super::faded_body(p.k, "term-scroll", rows, FADES));
     let add = button(
         p,
         "add-term",
@@ -330,6 +348,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .to_string()
         })
     });
+    let unused = unused.or_else(|| budget_note(ui));
     if let Some(unused) = unused {
         heading = heading.child(
             text(unused)
@@ -573,6 +592,38 @@ mod tests {
         assert!(ui.vocabulary.rows.is_empty());
         ui.vocabulary.field(ids[0], true).text = "late".into();
         assert!(ui.vocabulary.project().is_empty());
+    }
+
+    #[test]
+    fn the_sheet_says_how_many_terms_the_model_reads() {
+        use crate::transcription::models::TranscriptionModelId;
+        let mut ui = ui();
+        let entries: Vec<_> = (0..52)
+            .map(|n| VocabularyEntry {
+                term: format!("A longer project name {n}"),
+                sounds_like: Vec::new(),
+            })
+            .collect();
+        ui.vocabulary = VocabularyEditor::new(&entries);
+        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+        let read = vocabulary::terms_read(&entries, "whisper");
+        assert!(read < entries.len());
+        assert_eq!(
+            budget_note(&ui).unwrap(),
+            format!("This model reads the first {read} of 52 terms")
+        );
+        ui.settings.transcription.model = TranscriptionModelId::ParakeetV3;
+        assert_eq!(budget_note(&ui), None);
+        for n in 52..70 {
+            ui.vocabulary
+                .push(TextEdit::new(format!("Extra {n}")), TextEdit::default());
+        }
+        assert_eq!(
+            budget_note(&ui).unwrap(),
+            "This model reads the first 64 of 70 terms"
+        );
+        ui.settings.transcription.model = TranscriptionModelId::SenseVoiceSmall;
+        assert!(unused_note(&ui).is_some());
     }
 
     #[test]

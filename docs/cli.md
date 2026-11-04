@@ -72,15 +72,15 @@ hex
 │   ├── send <capture> [--to <session>] [--always]  send it to an OpenCode session
 │   └── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
 ├── labs [on|off <feature>]       list Labs features or turn one on/off; edits settings.json (features/labs.md)
-│   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens Hex's Labs page at that row
+│   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens that lab's drawer in Hex's Labs page
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (macOS: installed Hex.app only; Windows Run key; Linux XDG autostart)
 └── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
 ```
 
 `dictation start` locks the recording, as a double tap would: `dictation stop`
-or the next shortcut press finishes it. Dictation has no cancel (#786): every
-dictation finishes and pastes. A CLI start has no press to judge, so its recording counts as
+or the next shortcut press finishes it, and `dictation cancel` discards it.
+A CLI start has no press to judge, so its recording counts as
 intentional at once: the start tone plays once the microphone is open, and the
 recording behavior (mute or pause media, idle-sleep prevention) and the live
 stream start as they do after a held shortcut. A `stop` replies `done` only
@@ -107,8 +107,12 @@ processing shortcut (`raw_dictation_hotkey`) does. History keeps it as `raw`,
 and Paste Last pastes it. `--raw` with `stop` is a usage error
 (exit 2); `stop --print` of a raw dictation prints the transcript as heard.
 
-`dictation cancel` was removed (#786); an older `hex` that sends it gets
-`removed`. `meetings cancel` doesn't exist because Hex has no way to discard a
+`dictation cancel` discards the recording in any shortcut mode: nothing is
+transcribed, pasted, or saved to History, and dictations already transcribing
+finish. With nothing recording it answers `unchanged`. In Toggle mode the
+cancel shortcut (`cancel_hotkey`, Escape by default) does the same; on Wayland,
+bind `hex dictation cancel` to a key in the desktop instead (#786, #1022).
+`meetings cancel` doesn't exist because Hex has no way to discard a
 meeting recording.
 
 `onboarding reset` (or `onboarding restart`) opens the window on the
@@ -246,7 +250,7 @@ Requests are flat objects tagged by `command` (kebab-case):
 
 ```ts
 status | quit {force} | restart {force}
-dictation {action, print?}                       action: start | stop | toggle (`cancel` answers `removed`);
+dictation {action, print?}                       action: start | stop | toggle | cancel;
                                                  print (stop only) answers `transcript`
 paste-last
 meeting-record {title?} | meeting-stop | meeting-copy-last
@@ -417,7 +421,7 @@ observe input-source changes or show these controls.
 - `json` settings (modes, meeting providers, excluded calendars) take the JSON
   value the file stores.
 - `ui_language` takes `en`, `pl`, `zh` (Simplified Chinese), `zh-Hant`
-  (Traditional Chinese), `ja`, `de`, `es`, `uk`, `pt`, `fr`, or `none`
+  (Traditional Chinese), `ja`, `de`, `es`, `uk`, `pt`, `fr`, `ru`, or `none`
   (follow the system language), the same languages Settings offers. Following
   the system, a Chinese locale with the Hant script or the TW, HK, or MO
   region shows Traditional Chinese; other Chinese locales show Simplified.

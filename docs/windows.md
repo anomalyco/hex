@@ -13,8 +13,10 @@ or user-defined TypeScript transformations.
 
 The default shortcut is `Ctrl+Space`. In **Hold** mode, hold both keys while
 speaking and release Space to transcribe and paste. In **Toggle** mode, press
-`Ctrl+Space` to start and again to finish. Escape never cancels (every
-dictation finishes and pastes), and holding a modifier on its own does nothing. Hex consumes the chord while it matches, so
+`Ctrl+Space` to start and again to finish, or press the **Cancel** shortcut
+(Escape by default) to throw the recording away; Hex takes that key only while
+a recording runs. Hold mode has no cancel (every dictation finishes and
+pastes), and holding a modifier on its own does nothing. Hex consumes the chord while it matches, so
 applications and input methods no longer see `Ctrl+Space`; rebind it in Settings
 if you rely on that chord elsewhere. To let another app use the same key, such as
 a Discord push-to-talk key, turn on **Share dictation shortcut with other apps**
@@ -48,9 +50,10 @@ Anomaly's Azure Artifact Signing is configured are Authenticode-signed
 publisher builds SmartScreen reputation, SmartScreen may say it protected your
 PC; choose **More info**, then **Run anyway**.
 
-**x64** decodes on the GPU through Vulkan and needs a current NVIDIA, AMD, or
-Intel graphics driver (it supplies `vulkan-1.dll`); the installer stops with an
-explanation when it is missing. **ARM64** decodes on the CPU. Both are
+**x64** decodes on the GPU through Vulkan 1.2, which a current NVIDIA, AMD, or
+Intel graphics driver supplies (`vulkan-1.dll`). With a missing or older
+driver Hex still starts and decodes on the CPU, and Settings › Speech engine
+says so. **ARM64** decodes on the CPU. Both are
 self-contained: no Visual C++ Redistributable is required. Hex then keeps
 itself current through the signed update feed. Uninstalling removes every
 installed version, the shortcut, and Launch at login, and keeps settings, logs,

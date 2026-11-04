@@ -43,6 +43,32 @@ fail() {
   exit 1
 }
 
+# fetch <max bytes> <max seconds> <url> <file> [curl option...]: HTTPS only,
+# and never more than one byte past <max bytes> on disk. Before 8.4.0 (Debian
+# 12 has 7.88), curl enforces --max-filesize only when the server announces
+# the length, so head caps the transfer too; a cut-off transfer fails, and
+# callers check the exact size afterwards.
+fetch() {
+  limit=$1 seconds=$2 url=$3 file=$4
+  shift 4
+  rm -f "$temporary/fetch-failed"
+  {
+    curl --location --proto '=https' --proto-redir '=https' \
+      --silent --show-error --connect-timeout 10 --max-time "$seconds" \
+      --max-filesize "$limit" "$@" "$url" || : > "$temporary/fetch-failed"
+  } | head -c "$((limit + 1))" > "$file"
+  if [ -e "$temporary/fetch-failed" ]; then
+    rm -f "$temporary/fetch-failed"
+    return 1
+  fi
+}
+
+# download <max bytes> <max seconds> <url> <file>: fetch, failing on an HTTP
+# error.
+download() {
+  fetch "$@" --fail
+}
+
 safe_user_directory() {
   path=$1
   if [ -L "$path" ]; then
@@ -195,19 +221,15 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
   for command in curl jq openssl; do
     require "$command"
   done
-  curl_version=$(curl --version | awk 'NR == 1 { print $2 }')
-  oldest=$(printf '%s\n%s\n' 8.4.0 "$curl_version" | sort -V | head -1)
-  test "$oldest" = 8.4.0 || fail "Hex installation requires curl 8.4.0 or newer."
   case "$origin" in
     https://*) ;;
     *) fail "HEX_RELEASE_BASE_URL must be an https:// URL." ;;
   esac
   if [ -z "$channel" ]; then
-    status=$(curl --location --proto '=https' --proto-redir '=https' \
-      --silent --show-error --connect-timeout 10 --max-time 60 \
-      --max-filesize 1048576 --write-out '%{http_code}' \
-      "$origin/hex/desktop/stable.json" -o "$manifest") \
+    fetch 1048576 60 "$origin/hex/desktop/stable.json" "$manifest" \
+      --dump-header "$temporary/stable-headers" \
       || fail "Could not reach $origin."
+    status=$(awk '/^HTTP\// { code = $2 } END { print code }' "$temporary/stable-headers")
     case "$status" in
       200) channel=stable ;;
       404)
@@ -218,9 +240,7 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     esac
   fi
   manifest_url="$origin/hex/desktop/$channel.json"
-  curl --fail --location --proto '=https' --proto-redir '=https' \
-    --silent --show-error --connect-timeout 10 --max-time 60 \
-    --max-filesize 1048576 "$manifest_url" -o "$manifest"
+  download 1048576 60 "$manifest_url" "$manifest" || fail "Could not download $manifest_url."
   test "$(jq -r '"\(.schema) \(.app) \(.artifact) \(.channel)"' "$manifest")" = "1 hex desktop $channel" \
     || fail "$manifest_url is not the Hex desktop $channel manifest."
   version=$(jq -er .release.version "$manifest")
@@ -239,9 +259,7 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     || fail "Linux release names an unexpected file URL."
   host=$(printf '%s\n' "$origin" | sed -E 's#^([a-z]+://[^/]+).*#\1#')
 
-  curl --fail --location --proto '=https' --proto-redir '=https' \
-    --silent --show-error --connect-timeout 10 --max-time 600 \
-    --max-filesize "$bytes" "$host$url" -o "$artifact_path"
+  download "$bytes" 600 "$host$url" "$artifact_path" || fail "Could not download Hex $version."
   test "$(wc -c < "$artifact_path" | tr -d ' ')" = "$bytes" \
     || fail "Downloaded Linux release has the wrong size."
   test "$(sha256sum "$artifact_path" | awk '{ print $1 }')" = "$sha256" \
@@ -256,9 +274,7 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
   test "$signature_bytes" = 64 || fail "Linux release has an invalid signature."
   printf '%s\n' "$signature_url" | grep -Eq '^/([A-Za-z0-9._-]+/)*hex/files/[0-9a-f]{64}/[A-Za-z0-9._-]+$' \
     || fail "Linux release names an unexpected signature URL."
-  curl --fail --location --proto '=https' --proto-redir '=https' \
-    --silent --show-error --connect-timeout 10 --max-time 60 \
-    --max-filesize 64 "$host$signature_url" -o "$temporary/hex.sig"
+  download 64 60 "$host$signature_url" "$temporary/hex.sig" || fail "Could not download the Hex $version signature."
   test "$(sha256sum "$temporary/hex.sig" | awk '{ print $1 }')" = "$signature_sha256" \
     || fail "Downloaded Linux release signature checksum does not match."
   printf -- '-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----\n' "$signing_key" > "$temporary/signing.pem"
@@ -281,7 +297,7 @@ explain_unrunnable() {
   have=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $2 }')
   if [ -n "$needed" ] && [ -n "$have" ] &&
     [ "$(printf '%s\n%s\n' "$needed" "$have" | sort -V | head -1)" != "$needed" ]; then
-    fail "Hex $version needs glibc $needed or newer, and this system has glibc $have. The Linux beta needs Ubuntu 24.04, Debian 13, Fedora 40, or a newer or rolling distribution."
+    fail "Hex $version needs glibc $needed or newer, and this system has glibc $have. The Linux beta needs Debian 12, Ubuntu 23.04, Fedora 37, or a newer or rolling distribution."
   fi
   packages=
   if command -v ldd >/dev/null 2>&1; then
@@ -505,4 +521,9 @@ printf 'Installed Hex %s to %s\n' "$version" "$binary"
 printf 'Install a model: %s model install\n' "$binary"
 printf 'Launch Hex: %s\n' "$binary"
 printf 'Start in the background: %s start (quit with %s quit)\n' "$binary" "$binary"
-printf 'Uninstall: sh install-linux.sh uninstall\n'
+# A piped install leaves no script on disk, so point at the published one.
+if [ "${HEX_INSTALL_SOURCE:-}" = 1 ]; then
+  printf 'Uninstall: scripts/install-linux.sh uninstall (from the Hex checkout)\n'
+else
+  printf 'Uninstall: curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh -s -- uninstall\n'
+fi

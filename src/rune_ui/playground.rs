@@ -25,6 +25,11 @@ const LINUX_WINDOWS: &str = "Linux & Windows";
 const PATHS: &[(&str, &str)] = &[
     ("mac-settings", "Window/General/Settings"),
     ("mac-settings-sides", "Window/General/Left Option shortcut"),
+    ("toggle-cancel", "Window/General/Toggle cancel shortcut"),
+    (
+        "portal-toggle-cancel",
+        "Window/General/Toggle cancel on Wayland",
+    ),
     ("mac-settings-advanced", "Window/General/Advanced"),
     ("mac-settings-mic-level", "Window/General/Microphone level"),
     (
@@ -64,6 +69,10 @@ const PATHS: &[(&str, &str)] = &[
     (
         "vocabulary-unused",
         "Window/General/Vocabulary · not used by the model",
+    ),
+    (
+        "vocabulary-budget",
+        "Window/General/Vocabulary · more terms than the model reads",
     ),
     ("shortcut-row", "Window/General/Shortcut/Left Option"),
     ("shortcut-row-right", "Window/General/Shortcut/Right Option"),
@@ -160,8 +169,14 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-delete", "Window/Meetings/Delete"),
     ("meetings-failed", "Window/Meetings/Failed"),
     ("meetings-empty", "Window/Meetings/Empty"),
+    ("meetings-platform-icons", "Window/Meetings/Platform icons"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
+    ("meetings-summary-model", "Window/Meetings/Summary model"),
+    (
+        "meetings-summary-model-not-running",
+        "Window/Meetings/Summary model without OpenCode",
+    ),
     ("meetings-allow", "Window/Meetings/Allow system audio"),
     ("meetings-calendar", "Window/Meetings/Calendar"),
     (
@@ -195,6 +210,10 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-hud-lab", "Window/HUD Lab/HUD Lab"),
     ("mac-labs", "Window/General/Labs"),
     ("mac-labs-link", "Window/General/Labs link"),
+    ("mac-labs-on", "Window/General/Labs turned on"),
+    ("mac-labs-category", "Window/General/Labs category"),
+    ("mac-labs-search", "Window/General/Labs search"),
+    ("mac-labs-drawer", "Window/General/Labs drawer"),
     ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),
     ("mac-onboarding", "Window/Onboarding/Setting up Hex"),
@@ -242,6 +261,10 @@ const PATHS: &[(&str, &str)] = &[
     (
         "onboarding-download-failed",
         "Linux & Windows/Onboarding · download failed",
+    ),
+    (
+        "onboarding-no-model",
+        "Linux & Windows/Onboarding · continued without a model",
     ),
     (
         "onboarding-model-found",

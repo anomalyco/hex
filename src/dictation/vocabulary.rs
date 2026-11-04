@@ -240,25 +240,63 @@ fn bias_for(
     ))
 }
 
+/// How much of the vocabulary a context prompt carries, in characters, for a
+/// model of this architecture; `None` for one without a prompt. Whisper's
+/// prompt slot holds 223 tokens and its engine trims an overlong one from
+/// the front, dropping the first (most important) terms, so the list stays
+/// well inside it. Qwen3-ASR's system message has far more room; the bound
+/// keeps a long list from crowding out the audio or being echoed.
+pub(crate) fn prompt_chars(architecture: &str) -> Option<usize> {
+    match architecture {
+        "whisper" => Some(500),
+        "qwen3_asr" => Some(1_000),
+        _ => None,
+    }
+}
+
+/// How many of `entries`, first in list order, a model of this
+/// architecture reads: Parakeet's bias cap, or the terms that fit the
+/// prompt. The same budget [`transcription_bias`] and
+/// [`transcription_prompt`] apply.
+pub(crate) fn terms_read(entries: &[VocabularyEntry], architecture: &str) -> usize {
+    if architecture == "parakeet" {
+        return entries.len().min(MAX_BIASED_TERMS);
+    }
+    prompt_chars(architecture).map_or(0, |max_chars| prompt_terms(entries, max_chars))
+}
+
 /// The context prompt Whisper and Qwen3-ASR runs read: the first terms in
-/// list order (at most the bias cap), comma-separated so the echo filter can
-/// recognise the list, and only as many as fit `max_chars`. `None` while the
-/// list is empty. Read at the start of each run, like the bias.
+/// list order, comma-separated so the echo filter can recognise the list,
+/// and as many as fit `max_chars`. The bias's term cap is Parakeet's and
+/// does not apply here; the character budget is the prompt's own limit.
+/// `None` while the list is empty. Read at the start of each run, like the
+/// bias.
 pub(crate) fn transcription_prompt(max_chars: usize) -> Option<String> {
     prompt_for(&transcription_entries(), max_chars)
 }
 
 fn prompt_for(entries: &[VocabularyEntry], max_chars: usize) -> Option<String> {
-    let mut prompt = String::new();
-    for entry in entries.iter().take(MAX_BIASED_TERMS) {
-        let separator = if prompt.is_empty() { "" } else { ", " };
-        if prompt.chars().count() + separator.len() + entry.term.chars().count() > max_chars {
-            break;
+    let terms = &entries[..prompt_terms(entries, max_chars)];
+    (!terms.is_empty()).then(|| {
+        terms
+            .iter()
+            .map(|entry| entry.term.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
+}
+
+/// How many of the first terms fit `max_chars` joined by ", ".
+fn prompt_terms(entries: &[VocabularyEntry], max_chars: usize) -> usize {
+    let mut chars = 0;
+    for (index, entry) in entries.iter().enumerate() {
+        let separator = if index == 0 { 0 } else { 2 };
+        chars += separator + entry.term.chars().count();
+        if chars > max_chars {
+            return index;
         }
-        prompt.push_str(separator);
-        prompt.push_str(&entry.term);
     }
-    (!prompt.is_empty()).then_some(prompt)
+    entries.len()
 }
 
 /// Adds each name in recognition hints saved before they merged into the
@@ -581,8 +619,38 @@ mod tests {
         assert_eq!(prompt_for(&list, 3), None);
         assert_eq!(prompt_for(&[], 100), None);
         let many: Vec<_> = (0..100).map(|n| entry(&format!("T{n}"), &[])).collect();
+        // Only the character budget limits the prompt, not the bias's term cap.
         let prompt = prompt_for(&many, 10_000).unwrap();
-        assert_eq!(prompt.split(", ").count(), MAX_BIASED_TERMS);
+        assert_eq!(prompt.split(", ").count(), 100);
+        let prompt = prompt_for(&many, 1_000).unwrap();
+        assert!(prompt.split(", ").count() > MAX_BIASED_TERMS);
+        assert!(prompt.chars().count() <= 1_000);
+    }
+
+    #[test]
+    fn terms_read_counts_exactly_what_transcription_takes() {
+        let many: Vec<_> = (0..200)
+            .map(|n| entry(&format!("Term number {n}"), &[]))
+            .collect();
+        for count in [0, 1, 20, 40, 64, 65, 200] {
+            let list = &many[..count];
+            for architecture in ["whisper", "qwen3_asr"] {
+                let prompt = prompt_for(list, prompt_chars(architecture).unwrap());
+                let taken = prompt.map_or(0, |prompt| prompt.split(", ").count());
+                assert_eq!(
+                    terms_read(list, architecture),
+                    taken,
+                    "{architecture} {count}"
+                );
+            }
+            let biased =
+                bias_for(list, VocabularyBoost::Normal).map_or(0, |(terms, _)| terms.len());
+            assert_eq!(terms_read(list, "parakeet"), biased);
+            assert_eq!(terms_read(list, "sense_voice"), 0);
+        }
+        assert_eq!(terms_read(&many, "parakeet"), MAX_BIASED_TERMS);
+        assert!(terms_read(&many, "whisper") < terms_read(&many, "qwen3_asr"));
+        assert!(terms_read(&many, "qwen3_asr") < many.len());
     }
 
     #[test]

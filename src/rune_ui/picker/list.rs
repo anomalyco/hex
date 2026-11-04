@@ -20,45 +20,25 @@ const PROGRESS_WIDTH: f32 = 196.0;
 pub(super) fn body(ui: &Ui, p: Paint, entries: &[Entry], language: &str) -> El {
     let mut body = col().key("all-view").px(16.0).pb(16.0);
     // Files other apps downloaded that aren't catalog models; a catalog
-    // one shows on its own row.
-    if let Some(found) = crate::rune_ui::found::section(ui, p) {
+    // one shows on its own row. Labs › Downloaded models only leaves them out.
+    if !picker::downloaded_filter(ui)
+        && let Some(found) = crate::rune_ui::found::section(ui, p)
+    {
         body = body.child(found.pb(16.0));
     }
-    let speaking: Vec<&Entry> = entries
-        .iter()
-        .filter(|entry| entry.supports && !entry.def.id.is_custom())
-        .collect();
-    let imported: Vec<&Entry> = entries
-        .iter()
-        .filter(|entry| entry.def.id.is_custom())
-        .collect();
-    let others: Vec<&Entry> = entries
-        .iter()
-        .filter(|entry| !entry.supports && !entry.def.id.is_custom())
-        .collect();
+    let Groups { leading, others } = groups(entries, picker::list_first(ui));
 
     let mut first = true;
-    if !speaking.is_empty() {
-        let heading = if language == AUTO_LANGUAGE {
-            tr("Detect the language").to_owned()
-        } else {
-            language_name(language).to_owned()
+    for (key, models) in &leading {
+        if models.is_empty() {
+            continue;
+        }
+        let heading = match *key {
+            IMPORTED => tr("Your model files").to_owned(),
+            _ if language == AUTO_LANGUAGE => tr("Detect the language").to_owned(),
+            _ => language_name(language).to_owned(),
         };
-        body = body.child(group(
-            ui, p, "speaking", &heading, first, &speaking, language,
-        ));
-        first = false;
-    }
-    if !imported.is_empty() {
-        body = body.child(group(
-            ui,
-            p,
-            "imported",
-            tr("Your model files"),
-            first,
-            &imported,
-            language,
-        ));
+        body = body.child(group(ui, p, key, &heading, first, models, language));
         first = false;
     }
     if !others.is_empty() {
@@ -72,6 +52,58 @@ pub(super) fn body(ui: &Ui, p: Paint, entries: &[Entry], language: &str) -> El {
     body
 }
 
+const SPEAKING: &str = "speaking";
+const IMPORTED: &str = "imported";
+
+/// The list's groups: the models that speak the language and your own
+/// model files, in the order they show, then the rest.
+struct Groups<'a> {
+    leading: [(&'static str, Vec<&'a Entry>); 2],
+    others: Vec<&'a Entry>,
+}
+
+/// Sorts `entries` into their groups. `first` (Labs › Model in use first)
+/// leads its group, and an imported one puts your model files first.
+fn groups(entries: &[Entry], first: Option<TranscriptionModelId>) -> Groups<'_> {
+    let speaking = lead(
+        entries
+            .iter()
+            .filter(|entry| entry.supports && !entry.def.id.is_custom())
+            .collect(),
+        first,
+    );
+    let imported = lead(
+        entries
+            .iter()
+            .filter(|entry| entry.def.id.is_custom())
+            .collect(),
+        first,
+    );
+    let others = lead(
+        entries
+            .iter()
+            .filter(|entry| !entry.supports && !entry.def.id.is_custom())
+            .collect(),
+        first,
+    );
+    let imported_first = first.is_some_and(|id| imported.iter().any(|entry| entry.def.id == id));
+    let leading = if imported_first {
+        [(IMPORTED, imported), (SPEAKING, speaking)]
+    } else {
+        [(SPEAKING, speaking), (IMPORTED, imported)]
+    };
+    Groups { leading, others }
+}
+
+/// `models` with `first` moved to the top, when it is among them.
+fn lead(mut models: Vec<&Entry>, first: Option<TranscriptionModelId>) -> Vec<&Entry> {
+    if let Some(index) = first.and_then(|id| models.iter().position(|entry| entry.def.id == id)) {
+        let pinned = models.remove(index);
+        models.insert(0, pinned);
+    }
+    models
+}
+
 fn group(
     ui: &Ui,
     p: Paint,
@@ -81,9 +113,11 @@ fn group(
     entries: &[&Entry],
     language: &str,
 ) -> El {
-    let mut group = col().key(key.to_owned());
+    let mut group = col().key(key.to_owned()).role("list");
     if !heading.is_empty() {
-        group = group.child(group_label(p, "heading", heading, first).px(0.0));
+        group = group
+            .label(heading)
+            .child(group_label(p, "heading", heading, first).px(0.0));
     }
     for (index, entry) in entries.iter().enumerate() {
         if index > 0 {
@@ -91,10 +125,12 @@ fn group(
                 el().key(format!("rule{index}"))
                     .h(p.hair)
                     .w_full()
-                    .fill(p.k.c.border_weak),
+                    .fill(p.k.c.border_weak)
+                    .a11y_hidden(),
             );
         }
-        group = group.child(model_row(ui, p, entry, language));
+        group = group
+            .child(model_row(ui, p, entry, language).position_in_set(index + 1, entries.len()));
     }
     group
 }
@@ -186,11 +222,13 @@ fn facts_line(entry: &Entry, language: &str) -> String {
 
 fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
     let def = entry.def;
+    // The row is named by the model; its other lines stay readable inside.
     let mut title = row().key("title").gap(8.0).center_y().child(
         text(def.name)
             .key("name")
             .font(p.k.ty.ui_medium)
-            .color(p.text()),
+            .color(p.text())
+            .a11y_hidden(),
     );
     if let Some((role, first)) = facts::list_role(entry) {
         title = title.child(
@@ -287,6 +325,8 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
 
     row()
         .key(format!("model-{}", def.id.as_str()))
+        .role("listitem")
+        .label(def.name)
         .py(12.0)
         .gap(16.0)
         .center_y()
@@ -339,4 +379,42 @@ fn delete_button(ui: &Ui, p: Paint, entry: &Entry, free: bool) -> Option<El> {
             .build(p.k)
             .key("delete-model"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entries(language: &str) -> Vec<Entry> {
+        transcription_models::picker_models(language)
+            .into_iter()
+            .map(|(def, recommendation)| Entry {
+                def,
+                recommendation,
+                supports: def.supports_language(language),
+                state: State::NotDownloaded,
+            })
+            .collect()
+    }
+
+    fn ids(models: &[&Entry]) -> Vec<TranscriptionModelId> {
+        models.iter().map(|entry| entry.def.id).collect()
+    }
+
+    #[test]
+    fn the_model_in_use_leads_its_group_only_when_pinned() {
+        let entries = entries("en");
+        let unpinned = groups(&entries, None);
+        assert_eq!(unpinned.leading[0].0, SPEAKING);
+        let speaking = ids(&unpinned.leading[0].1);
+        assert!(speaking.len() > 1);
+        let last = *speaking.last().unwrap();
+        let pinned = groups(&entries, Some(last));
+        assert_eq!(pinned.leading[0].0, SPEAKING);
+        let mut expected = vec![last];
+        expected.extend_from_slice(&speaking[..speaking.len() - 1]);
+        assert_eq!(ids(&pinned.leading[0].1), expected);
+        assert_eq!(ids(&pinned.others), ids(&unpinned.others));
+        assert_eq!(ids(&pinned.leading[1].1), ids(&unpinned.leading[1].1));
+    }
 }

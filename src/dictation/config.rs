@@ -17,19 +17,7 @@ pub fn reads_browser() -> bool {
 }
 
 fn uses_browser(settings: &DictationProcessingSettings) -> bool {
-    settings
-        .modes
-        .iter()
-        .any(|mode| !mode.browser_hosts.is_empty())
-        || std::iter::once(&settings.default_mode)
-            .chain(&settings.modes)
-            .any(|mode| {
-                mode.post_processing.enabled
-                    || mode
-                        .transformations
-                        .iter()
-                        .any(|id| !crate::personal_commands::is_builtin_transformation(id))
-            })
+    crate::dictation::modes::uses_page(settings)
 }
 
 pub fn dictation_profiles() -> Profiles {

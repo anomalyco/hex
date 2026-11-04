@@ -28,6 +28,12 @@ impl Spec {
     }
 }
 
+// The HUD family's springs: the dictation HUD and the capture capsule both
+// move on these, so they come, change and go alike.
+
+/// Width, walls and scale, coming in, changing and going: a little bounce.
+/// Opacity, softness and colour fade over the same time with no bounce.
+pub const MORPH: Spec = Spec::new(0.30, 0.15);
 /// Short opacity-only crossfade preserved when Reduce Motion is enabled.
 pub const REDUCED_FADE: Spec = Spec::new(0.16, 0.0);
 
