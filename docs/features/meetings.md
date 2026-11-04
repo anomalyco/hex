@@ -112,7 +112,8 @@ Idle sleep -> systemd-inhibit idle:sleep (Linux),
     SetThreadExecutionState (Windows) while recording
 Tray -> Record meeting, Stop & transcribe, Copy last meeting transcript
     while Meetings is on
-Quit while recording -> audio kept; the transcript finishes at the next launch
+Quit while recording or transcribing -> audio kept; the transcript finishes at
+    the next launch
 Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     overlay there, only the HUD on XWayland, #1271)
     -> 2 s after the offer Rune reports the overlay unavailable -> logged
@@ -672,6 +673,8 @@ Stop & Transcribe
 Hex quits while recording                           // meetings.quit
   -> Capture stops; WAVs and manifest finalized; no chunk starts, no model loads
   -> Interrupted with its rolling draft + final.pending beside the manifest
+Hex quits during Stop & Transcribe's final pass (#1284)
+  -> Same: Interrupted + final.pending, never Failed with "Hex is quitting"
   -> Next launch, Meetings on, no recording, once the dictation engine is up
      (or 30 s without one) -> full-WAV final pass -> Complete + Markdown + notes
      ├── Quit again or model not installed -> stays pending
