@@ -37,7 +37,10 @@ mod tests {
     #[test]
     fn floats_only_by_opt_in_without_layer_shell_while_xwayland_runs() {
         assert!(floats_on_xwayland(true, || true, || true));
-        assert!(!floats_on_xwayland(false, || true, || true), "off by default");
+        assert!(
+            !floats_on_xwayland(false, || true, || true),
+            "off by default"
+        );
         assert!(
             !floats_on_xwayland(true, || false, || true),
             "layer-shell (or X11) keeps its own overlays"

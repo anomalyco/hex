@@ -148,7 +148,9 @@ fn offer_unshown(window: &rune::AppHandle<Ui>, reason: String) {
         "Hex detected a call but couldn't show its recording offer on this desktop ({reason}). Record it from here."
     );
     if !crate::labs::gnome_meeting_capsules() {
-        message.push_str(" On GNOME, Labs › Floating meeting capsules on GNOME can show it over your call.");
+        message.push_str(
+            " On GNOME, Labs › Floating meeting capsules on GNOME can show it over your call.",
+        );
     }
     window.update(move |ui, tx| {
         crate::rune_ui::meeting_failed(ui, message);

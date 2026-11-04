@@ -20,6 +20,13 @@ pub fn active_microphone_applications() -> Result<Vec<ActiveMicrophoneApplicatio
     // already in it gets `S_FALSE`, which is fine.
     let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     let own_pid = std::process::id();
+    static NOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !NOTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        crate::audio::note_wasapi_call(
+            "IMMDevice::Activate(IAudioSessionManager2) and session enumeration on every capture endpoint, repeated each meeting-detection poll",
+            "all",
+        );
+    }
     let mut applications = Vec::new();
     let sessions = (|| -> windows::core::Result<Vec<u32>> {
         // SAFETY: Plain COM calls on interfaces this function owns.
