@@ -1261,6 +1261,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   this user's XWayland process already runs with `DISPLAY` set; Hex never
   connects first, so it never starts XWayland. While it is off there, Settings
   › Output says the clipboard can't be restored and points to the toggle.
+  A second explicit opt-in exception: Labs › Floating meeting capsules on
+  GNOME (`gnome-meeting-capsules`, off by default) lets the meeting capsules
+  (recording offer, recording capsule) open on XWayland through Rune's
+  `OverlayOptions::xwayland_input`, as override-redirect windows that take
+  clicks in their input shape and never keyboard focus, only on a Wayland
+  session without layer-shell and only while this user's XWayland process
+  already runs; Hex decides at each show and never starts XWayland. Off, or
+  when the overlay still can't open, an offer opens the Meetings pane (#1271).
   Everything else stays on Wayland. The desktop may grant a different
   trigger, keep an older one, or refuse one; Settings shows what it granted,
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).

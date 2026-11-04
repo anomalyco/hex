@@ -82,7 +82,8 @@ impl Category {
             | Feature::MovableMeetingCapsules
             | Feature::MeetingSummaryModel
             | Feature::MeetingNotesVocabulary
-            | Feature::MeetingFinishedEvent => Self::Meetings,
+            | Feature::MeetingFinishedEvent
+            | Feature::GnomeMeetingCapsules => Self::Meetings,
             Feature::LiveText
             | Feature::NotchIndicator
             | Feature::SmartSpacing
@@ -145,9 +146,9 @@ impl Place {
             | Feature::MeetingSummaryModel
             | Feature::MeetingNotesVocabulary
             | Feature::MeetingFinishedEvent => Self::Pane(Pane::Meetings),
-            Feature::StopWhenCallEnds | Feature::MovableMeetingCapsules => {
-                Self::Elsewhere(tr("Meeting capsules"))
-            }
+            Feature::StopWhenCallEnds
+            | Feature::MovableMeetingCapsules
+            | Feature::GnomeMeetingCapsules => Self::Elsewhere(tr("Meeting capsules")),
             // A command, so never translated.
             Feature::SubtitleExport => Self::Elsewhere("hex meetings show"),
             Feature::LiveText | Feature::NotchIndicator => {
