@@ -536,7 +536,7 @@ struct Routed {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Open {
-    query: TextEdit,
+    query: Box<TextEdit>,
     selected: usize,
     /// Searching every session (Send to…): the field
     /// takes typing. Otherwise it's the suggestions a capture opens with.
@@ -551,7 +551,7 @@ struct Open {
 impl Open {
     fn suggesting() -> Self {
         Self {
-            query: TextEdit::default(),
+            query: Box::default(),
             selected: 0,
             typing: false,
             back: false,
@@ -1724,11 +1724,9 @@ fn hold_until(phase: &Phase) -> Option<f64> {
 /// before the caret. Keys come through Hex's tap, not Rune's key events.
 fn backspace(edit: &mut TextEdit) {
     let (start, end) = edit.range();
+    let back = edit.text[..start].chars().last().map_or(0, char::len_utf8);
     if start == end {
-        let Some((before, _)) = edit.text[..start].char_indices().next_back() else {
-            return;
-        };
-        edit.set_selection(before, start);
+        edit.set_selection(start - back, start);
     }
     edit.insert("");
 }
@@ -1972,7 +1970,7 @@ fn routed_done(routed: &Routed, now: f64) -> Done {
             why: None,
             undo: false,
             ask: None,
-            open: Some((open.query.clone(), list(&routed.route, open))),
+            open: Some((*open.query.clone(), list(&routed.route, open))),
             ..base
         },
         None => Done {
