@@ -73,7 +73,7 @@ Download Hex                              // setup.download-recovery
 
 Install on Windows                        // setup.windows-installer
 ├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
-│   ├── x64 without vulkan-1.dll -> stop with driver guidance
+│   ├── x64 without a Vulkan 1.2 driver -> installs; speech on the CPU + Settings note (#1240)
 │   ├── another version installed (e.g. self-updated) -> install this one over it
 │   └── finish -> Open Hex -> the first run downloads a model
 └── Settings › Apps -> uninstall every version, shortcut, Launch at login; keep data

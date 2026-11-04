@@ -7,6 +7,7 @@ pub(crate) mod input;
 pub(crate) mod login_item;
 pub(crate) mod paste;
 pub(crate) mod rune;
+pub(crate) mod vulkan;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -129,8 +130,9 @@ impl SelectionArgs {
 /// Loads DLLs only from System32 and Hex's own folder, never the current
 /// folder or PATH. Another app's incompatible `dxcompiler.dll` on PATH
 /// crashed Hex at its first shader compile (#587), and a DLL planted on PATH
-/// must not load into Hex. Hex's own imports (vulkan-1.dll included) loaded
-/// before this; Windows, the GPU drivers, and COM load theirs by full path.
+/// must not load into Hex. Hex's own imports loaded before this, except the
+/// delay-loaded vulkan-1.dll (`vulkan`); Windows, the GPU drivers, and COM
+/// load theirs by full path.
 pub(crate) fn restrict_dll_search() {
     use windows_sys::Win32::System::LibraryLoader::{
         LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,

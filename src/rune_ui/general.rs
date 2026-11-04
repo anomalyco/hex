@@ -1283,7 +1283,16 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
     let failed = (ui.live() && device == TranscriptionDevice::Auto)
         .then(crate::transcription::gpu_health::current)
         .flatten();
-    let note = failed.map(|failure| {
+    // Without a Vulkan 1.2 driver, every choice transcribes on the CPU (#1240).
+    #[cfg(target_os = "windows")]
+    let vulkan_missing = crate::windows::vulkan::missing();
+    #[cfg(target_os = "linux")]
+    let vulkan_missing = false;
+    let vulkan_note = (ui.live() && vulkan_missing).then(|| {
+        tr("Hex uses the CPU because the graphics driver's Vulkan is missing or too old. Update the GPU driver to use the GPU.")
+            .to_owned()
+    });
+    let note = vulkan_note.or_else(|| failed.map(|failure| {
         tr_named(
             if failure.slow {
                 "Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway."
@@ -1292,7 +1301,7 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
             },
             &[("device", failure.device.as_str())],
         )
-    });
+    }));
     icon_row(
         p,
         "speech-engine",
