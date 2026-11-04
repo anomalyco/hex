@@ -78,7 +78,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        a recording meeting's transcript card keeps its newest line in view while scrolled to
 │                                        the bottom; scroll up to read, back to the bottom to follow again (#1332)
 │                                        // check: only_a_recording_transcript_follows_and_only_with_its_lab (rune_ui/meetings.rs,
-│                                        // Linux and Windows); not observed on a real call; Labs page goldens need regenerating
+│                                        // Linux and Windows); mac-labs-link light/dark goldens cover its Labs card; not observed on a real call
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
