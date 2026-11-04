@@ -582,7 +582,7 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
         wake = earliest(wake, Some(leaving));
     }
     // Shown in the same poll as the step that brings the capsule in, so
-    // Rune reveals the prewarmed hidden pose and animates the entry from it.
+    // Rune reveals the hidden pose and animates the entry from it.
     let shown = !hidden || leaving > 0.0;
     if s.shown != shown {
         s.shown = shown;
@@ -728,8 +728,8 @@ pub(crate) struct CaptureCapsule {
 pub(crate) const PANEL_MARGIN: f32 = 14.0;
 
 impl CaptureCapsule {
-    /// Adds the capsule's overlay, prewarmed and hidden, holding no GPU
-    /// surface while hidden (Windows and Linux). `act` carries out what a
+    /// Adds the capsule's overlay, hidden. It holds no GPU surface while
+    /// hidden, nor on macOS and Windows a window (#1315, #1308). `act` carries out what a
     /// press or key asks for; it runs on the main thread, so it must only
     /// hand the action on.
     pub(crate) fn install<S: 'static>(
@@ -756,6 +756,9 @@ impl CaptureCapsule {
                 ..Default::default()
             })
             .release_gpu_when_hidden()
+            // Its panel is made for each show, so the entry plays from the
+            // hidden pose rather than settling.
+            .animate_reveal()
             .poll(poll)
             .compositor(TraceFrames::default())
             .on_created(|c| {
