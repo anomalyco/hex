@@ -21,10 +21,12 @@ use crate::windows::input::{HotkeyAction, WindowsHotkeyMonitor};
 use crate::windows::paste::WindowsPaster;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(5);
-/// The longest wait while idle with the microphone streaming. Its chunks
-/// (about every 10 ms) wake the loop, which then takes shortcut events and
-/// commands, so it needs no wakeup of its own between them.
-const IDLE_STREAM_WAIT: Duration = Duration::from_millis(50);
+/// The longest wait with the microphone streaming, idle or recording. Its
+/// chunks (about every 10 ms) wake the loop, which then takes shortcut
+/// events and commands and ends a release's tail, so it needs no wakeup of
+/// its own between them. A shortcut's audio boundaries come from its
+/// event's own time, so taking it at the next chunk moves nothing.
+const STREAM_WAIT: Duration = Duration::from_millis(50);
 /// The longest wait while idle with the microphone released: a shortcut
 /// event ends it at once; commands, settings, and Annotate's controls are
 /// taken within it.
@@ -704,10 +706,11 @@ pub fn run(
             }
             continue;
         }
-        let idle_streaming = idle && audio_ready && input.is_open();
+        // Only an opening or recovering microphone is polled.
+        let streaming = audio_ready && input.is_open();
         match input.recv_timeout(
-            if idle_streaming {
-                IDLE_STREAM_WAIT
+            if streaming {
+                STREAM_WAIT
             } else {
                 UPDATE_INTERVAL
             },

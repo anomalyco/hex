@@ -19,12 +19,12 @@ function installedModels(): string | null {
   return null
 }
 
-export function listeningSeed(): string | null {
-  const folder = join(import.meta.dir, ".generated", "listening")
+/** Links the installed models into `folder`'s `hex-data/models`; false when there are none. */
+export function seedModels(folder: string): boolean {
   const models = join(folder, "hex-data", "models")
-  if (existsSync(join(models, MODELS[0]))) return folder
+  if (existsSync(join(models, MODELS[0]))) return true
   const source = installedModels()
-  if (!source) return null
+  if (!source) return false
   mkdirSync(models, { recursive: true })
   for (const name of MODELS.flatMap((model) => [model, `${model}.verified.json`])) {
     if (!existsSync(join(source, name))) continue
@@ -36,5 +36,10 @@ export function listeningSeed(): string | null {
       copyFileSync(join(source, name), join(models, name))
     }
   }
-  return folder
+  return true
+}
+
+export function listeningSeed(): string | null {
+  const folder = join(import.meta.dir, ".generated", "listening")
+  return seedModels(folder) ? folder : null
 }
