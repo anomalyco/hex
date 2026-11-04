@@ -1636,12 +1636,19 @@ fn search_hints(p: Paint, remember: bool, w: f32) -> El {
             0.0
         };
     let capture = used + HINTS_GAP + hint_width(tr("New capture"), &shortcut) <= room;
+    // Send and Remember share a growing row, so the gaps drawn are the
+    // gaps measured: no spacer with a gap on each side.
+    let left = row()
+        .key("left")
+        .center_y()
+        .gap(HINTS_GAP)
+        .grow(1.0)
+        .child(hint(p, tr("Send"), &SEND).key("send"))
+        .children(remember.then(|| hint(p, tr("Remember"), &REMEMBER).key("remember")));
     row()
         .center_y()
         .gap(HINTS_GAP)
-        .child(hint(p, tr("Send"), &SEND).key("send"))
-        .children(remember.then(|| hint(p, tr("Remember"), &REMEMBER).key("remember")))
-        .child(el().grow(1.0))
+        .child(left)
         .children(capture.then(|| hint(p, tr("New capture"), &shortcut).key("capture")))
 }
 
