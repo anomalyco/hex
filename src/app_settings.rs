@@ -3,7 +3,7 @@ use std::path::PathBuf;
 #[cfg(test)]
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use color_eyre::eyre::{Result, eyre};
 #[cfg(target_os = "macos")]
@@ -56,9 +56,7 @@ static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
 static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static INDICATOR_POSITION: AtomicU8 = AtomicU8::new(0);
-static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
-#[cfg(target_os = "macos")]
-static PASTE_KEY_CODE: OnceLock<u16> = OnceLock::new();
+static HOTKEYS: OnceLock<RwLock<AppliedHotkeys>> = OnceLock::new();
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]
 /// Distinct names for the tests' settings folders.
@@ -797,7 +795,10 @@ impl AppSettings {
         *HOTKEYS
             .get_or_init(Default::default)
             .write()
-            .unwrap_or_else(|error| error.into_inner()) = self.runtime_hotkeys();
+            .unwrap_or_else(|error| error.into_inner()) = AppliedHotkeys {
+            runtime: self.runtime_hotkeys(),
+            settings: Some(Arc::new(self.clone())),
+        };
         // An import that can't run stays saved; the listener runs the
         // default model until it is fixed.
         set_transcription_selection(&crate::transcription::custom_models::runnable(
@@ -1211,12 +1212,59 @@ pub fn hex_microphone_enabled() -> bool {
         )
 }
 
+/// The shortcuts the input layers match, and the settings they came from,
+/// so a keyboard layout change can resolve their letter keys again.
+#[derive(Default)]
+struct AppliedHotkeys {
+    runtime: RuntimeHotkeys,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    settings: Option<Arc<AppSettings>>,
+}
+
+impl AppliedHotkeys {
+    /// Resolves the shortcuts again from the settings they came from, on the
+    /// layout published now, unless newer settings were applied meanwhile.
+    #[cfg(target_os = "macos")]
+    fn resolve_again(
+        applied: &RwLock<Self>,
+        resolve: impl FnOnce(Option<&AppSettings>) -> RuntimeHotkeys,
+    ) {
+        let settings = applied
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .settings
+            .clone();
+        let runtime = resolve(settings.as_deref());
+        let mut applied = applied.write().unwrap_or_else(|error| error.into_inner());
+        // Settings applied while this resolved carry the new layout already.
+        let same = match (&applied.settings, &settings) {
+            (Some(current), Some(resolved)) => Arc::ptr_eq(current, resolved),
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            applied.runtime = runtime;
+        }
+    }
+}
+
+/// Resolves the shortcuts' letter keys again after the main thread published
+/// a new keyboard layout, from the settings last applied, as a settings
+/// reload does. The listener rebinds each shortcut once it is idle.
+#[cfg(target_os = "macos")]
+pub fn refresh_layout_hotkeys() {
+    AppliedHotkeys::resolve_again(HOTKEYS.get_or_init(Default::default), |settings| {
+        settings.map_or_else(RuntimeHotkeys::default, AppSettings::runtime_hotkeys)
+    });
+}
+
 pub fn runtime_hotkeys() -> RuntimeHotkeys {
     #[cfg_attr(not(hex_capture), allow(unused_mut))]
-    let mut hotkeys = *HOTKEYS
+    let mut hotkeys = HOTKEYS
         .get_or_init(Default::default)
         .read()
-        .unwrap_or_else(|error| error.into_inner());
+        .unwrap_or_else(|error| error.into_inner())
+        .runtime;
     #[cfg(hex_capture)]
     if scrawl_app_running() {
         hotkeys.capture = None;
@@ -2535,6 +2583,68 @@ mod tests {
             opted_in.runtime_hotkeys().paste_meeting,
             Some(HotkeyBinding::paste_meeting_default().runtime())
         );
+    }
+
+    /// Launched on Dvorak, then switched to U.S. (t1304): letter shortcuts,
+    /// saved or default, follow the layout the main thread published; other
+    /// keys keep their recorded code.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn letter_shortcuts_resolve_again_on_a_new_layout() {
+        use super::hotkeys::test_layout;
+        let resolve = |settings: Option<&AppSettings>| {
+            settings.map_or_else(RuntimeHotkeys::default, AppSettings::runtime_hotkeys)
+        };
+        test_layout::set([('v', 47)]);
+        let mut settings = AppSettings::default();
+        settings.meetings.enabled = true;
+        settings.raw_dictation_hotkey = Some(HotkeyBinding {
+            modifiers: HotkeyModifiers::option(),
+            key: Some(HotkeyKey {
+                code: 96,
+                label: "F5".into(),
+            }),
+        });
+        let saved_on_dvorak = settings.paste_last_hotkey.clone().unwrap();
+        assert_eq!(saved_on_dvorak.key.as_ref().unwrap().code, 47);
+        let applied = RwLock::new(AppliedHotkeys {
+            runtime: settings.runtime_hotkeys(),
+            settings: Some(Arc::new(settings)),
+        });
+        let key = |applied: &RwLock<AppliedHotkeys>| {
+            let runtime = applied.read().unwrap().runtime;
+            [
+                runtime.paste_last,
+                runtime.paste_meeting,
+                runtime.raw_dictation,
+            ]
+            .map(|hotkey| hotkey.and_then(|hotkey| hotkey.key_code))
+        };
+        assert_eq!(key(&applied), [Some(47), Some(47), Some(96)]);
+
+        test_layout::set([('v', 9)]);
+        AppliedHotkeys::resolve_again(&applied, resolve);
+        assert_eq!(key(&applied), [Some(9), Some(9), Some(96)]);
+
+        // A layout without the letter keeps the recorded key.
+        test_layout::set([('x', 7)]);
+        assert_eq!(saved_on_dvorak.runtime().key_code, Some(47));
+
+        // Settings applied while it resolved win: they saw the new layout.
+        test_layout::set([('v', 47)]);
+        let newer = AppSettings {
+            paste_last_hotkey: None,
+            ..AppSettings::default()
+        };
+        AppliedHotkeys::resolve_again(&applied, |settings| {
+            let resolved = resolve(settings);
+            *applied.write().unwrap() = AppliedHotkeys {
+                runtime: newer.runtime_hotkeys(),
+                settings: Some(Arc::new(newer.clone())),
+            };
+            resolved
+        });
+        assert_eq!(key(&applied)[0], None);
     }
 
     #[test]

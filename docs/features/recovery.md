@@ -565,10 +565,18 @@ GUI startup -> require OS main thread -> initialize_layout // recover.keyboard-l
      └── Command layer (UCKeyTranslate with cmdKey) -> separate map
                                      // no worker-side TIS/TSM query
 
+Selected input source changes (Dvorak -> U.S.)       // recover.keyboard-layout-change
+  -> observer marks it -> pump on the main thread -> refresh_layout
+  -> rebuild with the same fills -> publish whole       // workers see old or new
+  -> changed -> resolve runtime shortcuts again from the last applied settings
+     ├── letter key -> the key that types the letter now
+     ├── other keys -> recorded key code
+     └── listener rebinds each shortcut once its machine is idle
+
 Synthetic shortcut with Command (⌘V)
   ├── Command layer has the character -> that keycode // "Dvorak – QWERTY ⌘"
   └── otherwise -> plain snapshot as above
-Shortcuts without Command and recorded hotkeys -> plain snapshot only
+Shortcuts without Command -> plain snapshot only
 
 Headless lookup without snapshot -> shared native lock -> current layout query
   -> current layout misses ASCII character -> ASCII-capable fallback
@@ -578,8 +586,17 @@ Sources: [keyboard.rs](../../src/keyboard.rs),
 [macos_rune.rs](../../src/macos_rune.rs).
 The lock alone is not GUI thread safety: successful main-thread prewarming and
 pure cached misses prevent later GUI workers from querying native layout APIs.
-The GUI snapshot remains fixed until restart. CLI lookups without a snapshot
-still query the current layout; this fix does not remove their live resolution.
+Until t1304 the GUI snapshot stayed fixed until restart: launched on Dvorak and
+switched to U.S., ⌘V posted keycode 47 (U.S. `.`), so dictations logged
+"pasted" but nothing appeared. One input-source observer now runs for the
+app's life (keyboard model switching reads the same one while it is on), and
+each change rebuilds the snapshot on the main thread.
+`a_published_layout_replaces_the_one_before`,
+`readers_see_a_whole_layout_while_it_is_replaced`, and
+`letter_shortcuts_resolve_again_on_a_new_layout` cover the swap and the
+shortcut re-resolution; the TIS notification and a real switch followed by a
+paste are unverified on a Mac. CLI lookups without a snapshot still query the
+current layout.
 Non-Latin active layouts (Russian, Hebrew, …) produce no ASCII letters with an
 empty modifier state, so a snapshot built from them alone would miss paste
 shortcuts like ⌘V. macOS resolves such shortcuts against the ASCII-capable

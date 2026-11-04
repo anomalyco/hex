@@ -572,11 +572,13 @@ labeled Not installed and can be cleared; a mapping to a model or language Hex n
 longer offers is dropped when settings load. Removing a source hides its row
 without erasing its saved mapping.
 
-Hex reads input sources only while the setting is on: the macOS main-thread TIS
-distributed-notification observer, the Windows runtime's poll of the foreground
-window's layout, and the Linux host's XKB connection (polled every 250 ms) exist
-only then and work without a Settings window; the window lists enabled sources
-only then. Windows lists the language bar's layouts, named by language and
+Hex reads input sources only while the setting is on: the Windows runtime's poll
+of the foreground window's layout and the Linux host's XKB connection (polled
+every 250 ms) exist only then, and the macOS main-thread TIS
+distributed-notification observer, which always runs to rebuild the keyboard
+layout snapshot ([recovery](recovery.md#keyboard-layout-resolution)), reports
+the selected source only then; all work without a Settings window, and the
+window lists enabled sources only then. Windows lists the language bar's layouts, named by language and
 keyboard. On Linux the row appears only in X11 sessions: Wayland compositors keep
 the active layout to themselves, with no general protocol (IBus and Fcitx report
 input-method engines, not the compositor's layout), so Wayland is unavailable. Source changes cancel
