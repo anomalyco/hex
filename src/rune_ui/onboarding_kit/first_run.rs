@@ -524,13 +524,18 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
                 } else {
                     "download-hud"
                 },
-                1.24,
+                if waiting {
+                    1.24
+                } else {
+                    super::first_screen::hud_scale(s)
+                },
                 s,
             ),
             s,
         ))
         .child(after_flight(head, s))
         .child(progress_capsule)
+        .children(super::first_screen::up_next(p, s).filter(|_| !waiting && retry.is_none()))
         .children(retry)
         .children(without_model(p, s))
 }

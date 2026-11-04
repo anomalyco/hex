@@ -19,6 +19,7 @@ use rune::{Cx, El, Play, Playground, Story, TextEdit, TextStyle, Tx, canvas, col
 use super::super::controls::Paint;
 use super::cards::{self, Caption, Side, TAP_BOX, bubble};
 use super::dictated::Dictated;
+use super::first_screen::FirstScreen;
 use super::fixture::{ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded};
 use super::hex_meter::BUILD_SECS;
 use super::hud_stage::{FlowHud, LiveHud};
@@ -113,6 +114,8 @@ pub(crate) struct Onboard {
     pub(crate) now: f64,
     pub(crate) reduced: Cell<bool>,
     pub(crate) motion: super::landing::Motion,
+    /// What `"Setting up Hex"` adds to its page, while the options are compared.
+    pub(crate) first_screen: FirstScreen,
     download_from: Option<f64>,
     pub(crate) download: Option<Download>,
     /// Whether the download showed in the top bar at the last poll, when it
@@ -262,6 +265,7 @@ impl Onboard {
             now: 0.0,
             reduced: Cell::new(false),
             motion: super::landing::Motion::default(),
+            first_screen: FirstScreen::Today,
             download_from: None,
             download: None,
             pill_up: false,
@@ -844,6 +848,15 @@ fn first_run() -> Story<Onboard> {
         s.autoplay = true;
         s.download_secs = SKETCH_DOWNLOAD_SECS;
     })
+    .variant("First screen · Big HUD", |s| {
+        first_screen(s, FirstScreen::BigHud)
+    })
+    .variant("First screen · Up next", |s| {
+        first_screen(s, FirstScreen::UpNext)
+    })
+    .variant("First screen · Both", |s| {
+        first_screen(s, FirstScreen::Both)
+    })
     .variant("Your turn, keeps tapping", |s| {
         s.rehearsal = Some(Rehearsal::new(true));
         s.taps = TAPS_BEFORE_TOGGLE;
@@ -863,6 +876,14 @@ fn first_run() -> Story<Onboard> {
         s.motion.keyboard = 0.8;
     })
     .side(side::side)
+}
+
+/// The whole run, slowly downloading, with `look` on its first screen.
+fn first_screen(s: &mut Onboard, look: FirstScreen) {
+    s.rehearsal = Some(Rehearsal::new(true));
+    s.autoplay = true;
+    s.download_secs = SKETCH_DOWNLOAD_SECS;
+    s.first_screen = look;
 }
 
 fn finish_download(s: &mut Onboard, _: &mut Play<'_, Onboard>) {
