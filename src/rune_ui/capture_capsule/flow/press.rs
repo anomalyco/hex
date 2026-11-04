@@ -4,7 +4,7 @@ use super::*;
 impl Flow {
     /// What a click on `id` does: the action for the host, after moving
     /// the capsule as the click shows.
-    pub(crate) fn click(&mut self, id: super::surface::Id, now: f64) -> Vec<Action> {
+    pub(crate) fn click(&mut self, id: super::super::surface::Id, now: f64) -> Vec<Action> {
         let before = self.phase.clone();
         let cued = self.cues.len();
         let actions = self.press(id, now);
@@ -19,8 +19,8 @@ impl Flow {
         actions
     }
 
-    pub(super) fn press(&mut self, id: super::surface::Id, now: f64) -> Vec<Action> {
-        use super::surface::Id;
+    pub(super) fn press(&mut self, id: super::super::surface::Id, now: f64) -> Vec<Action> {
+        use super::super::surface::Id;
         match (&self.phase, id) {
             (Phase::Selecting(current), Id::Mode(mode)) => {
                 if *current == mode && mode.shows_record() {

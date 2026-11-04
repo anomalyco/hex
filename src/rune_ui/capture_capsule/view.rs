@@ -444,7 +444,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .press(c.pressed)
                 .child(label(&shown.ident, medium(), p.muted()))
                 .child(el().grow(1.0))
-                .child(super::controls::keycaps(
+                .child(super::super::controls::keycaps(
                     p,
                     "ask-keys",
                     &surface::shortcut_keycaps(),
@@ -551,7 +551,7 @@ pub(super) fn hint<S: AsRef<str>>(p: Paint, copy: &str, keys: &[S]) -> El {
         hint = hint.child(label(copy, small(), p.muted()));
     }
     if !keys.is_empty() {
-        hint = hint.child(super::controls::keycaps(p, "keys", &key_parts(keys)));
+        hint = hint.child(super::super::controls::keycaps(p, "keys", &key_parts(keys)));
     }
     hint
 }
@@ -566,7 +566,7 @@ pub(super) fn hint_width<S: AsRef<str>>(copy: &str, keys: &[S]) -> f32 {
     let tray = if keys.is_empty() {
         0.0
     } else {
-        super::controls::keycaps_width(&key_parts(keys), measure)
+        super::super::controls::keycaps_width(&key_parts(keys), measure)
     };
     measure(copy, small()) + gap + tray
 }
