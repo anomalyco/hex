@@ -60,7 +60,7 @@ info**, then **Run anyway**.
 3. The test build never self-updates. To return to the release, run the
    release installer from <https://anoma.ly/hex>.
 
-## Linux (x86_64 Arch, current glibc)
+## Linux (x86_64)
 
 An installed Hex starts through its systemd user unit, so launching the test
 binary normally would just start the installed one. Run the test binary as the

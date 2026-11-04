@@ -3,11 +3,15 @@
 //! model when the user turned that on. OpenCode receives the transcript
 //! excerpt, so it is opt-in on every OS.
 
+use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use serde::Deserialize;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
+
+use crate::dictation::processor::Model;
 
 /// OpenCode's models take far more than any excerpt Hex sends.
 const OPENCODE_CONTEXT_TOKENS: usize = 32_000;
@@ -17,6 +21,24 @@ pub struct GeneratedNotes {
     pub title: String,
     #[serde(default)]
     pub summary: String,
+    /// Who wrote these notes; set by `generate_notes`, never by the model.
+    #[serde(skip)]
+    pub written_by: Option<NotesWriter>,
+}
+
+/// The writer that produced a meeting's notes, kept with them in the
+/// manifest and named in the exported Markdown.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "writer", rename_all = "snake_case")]
+pub enum NotesWriter {
+    AppleIntelligence,
+    #[serde(rename = "opencode")]
+    OpenCode {
+        /// `provider/model`, when Hex named the model; `None` when
+        /// OpenCode's own default answered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
 }
 
 /// One live chapter pass: what the new lines are about, and whether that is
@@ -130,14 +152,26 @@ pub(crate) fn generate_notes(
     match writer().map_err(GenerationError::Failed)? {
         #[cfg(target_os = "macos")]
         Writer::AppleIntelligence => {
-            crate::apple_intelligence::generate_notes(instructions, prompt, timeout)
+            let notes = crate::apple_intelligence::generate_notes(instructions, prompt, timeout)?;
+            Ok(GeneratedNotes {
+                written_by: Some(NotesWriter::AppleIntelligence),
+                ..notes
+            })
         }
-        Writer::OpenCode => opencode(
-            instructions,
-            prompt,
-            r#"{"title": "...", "summary": "..."}"#,
-            timeout,
-        ),
+        Writer::OpenCode => {
+            let (notes, model) = opencode_reporting::<GeneratedNotes>(
+                instructions,
+                prompt,
+                r#"{"title": "...", "summary": "..."}"#,
+                timeout,
+            )?;
+            Ok(GeneratedNotes {
+                written_by: Some(NotesWriter::OpenCode {
+                    model: model.map(|model| format!("{}/{}", model.provider, model.id)),
+                }),
+                ..notes
+            })
+        }
     }
 }
 
@@ -207,14 +241,70 @@ fn opencode<T: DeserializeOwned>(
     shape: &str,
     timeout: Duration,
 ) -> Result<T, GenerationError> {
+    opencode_reporting(instructions, prompt, shape, timeout).map(|(answer, _)| answer)
+}
+
+/// [`opencode`], with the model that answered when Hex named one.
+fn opencode_reporting<T: DeserializeOwned>(
+    instructions: &str,
+    prompt: &str,
+    shape: &str,
+    timeout: Duration,
+) -> Result<(T, Option<Model>), GenerationError> {
     let request = format!(
         "{instructions}\n\n{prompt}\n\nAnswer with only a JSON object shaped like {shape}, \
          without code fences or any other text."
     );
-    let text =
-        crate::dictation::processor::generate_text(&request, timeout, &AtomicBool::new(false))
-            .map_err(|error| GenerationError::Failed(format!("{error:#}")))?;
-    parse_json(&text)
+    let cancelled = AtomicBool::new(false);
+    // Labs › Choose meeting summary model: exactly the chosen model, whose
+    // failure is the meeting's notes error; otherwise the ranked models.
+    let generated = match summary_model() {
+        Some(model) => {
+            crate::dictation::processor::generate_text_with(&request, &model, timeout, &cancelled)
+                .map_err(|error| {
+                GenerationError::Failed(format!("{}/{}: {error:#}", model.provider, model.id))
+            })?
+        }
+        None => crate::dictation::processor::generate_text(&request, timeout, &cancelled)
+            .map_err(|error| GenerationError::Failed(format!("{error:#}")))?,
+    };
+    Ok((parse_json(&generated.text)?, generated.model))
+}
+
+/// The saved `meetings.opencode_model`, as settings last applied it.
+static SUMMARY_MODEL: RwLock<Option<String>> = RwLock::new(None);
+
+/// Records the saved `meetings.opencode_model` (`AppSettings::apply_runtime`).
+pub(crate) fn set_summary_model(saved: Option<&str>) {
+    *SUMMARY_MODEL
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = saved.map(str::to_owned);
+}
+
+/// A `provider/model` identifier's two halves, or `None` unless both are
+/// there. The model half may itself hold slashes (`openrouter/a/b`).
+pub(crate) fn parse_model(saved: &str) -> Option<(&str, &str)> {
+    let (provider, model) = saved.trim().split_once('/')?;
+    let (provider, model) = (provider.trim(), model.trim());
+    (!provider.is_empty() && !model.is_empty()).then_some((provider, model))
+}
+
+/// The model meeting notes must use: only with Labs › Choose meeting
+/// summary model on and a valid `provider/model` saved.
+fn summary_model() -> Option<Model> {
+    if !crate::labs::meeting_summary_model() {
+        return None;
+    }
+    let saved = SUMMARY_MODEL
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()?;
+    let (provider, id) = parse_model(&saved)?;
+    Some(Model {
+        provider: provider.into(),
+        id: id.into(),
+        variant: None,
+    })
 }
 
 /// The JSON object in a model's answer, ignoring code fences or prose
@@ -250,5 +340,29 @@ mod tests {
         let lines: GeneratedChapterLines = parse_json("{\"lines\": [3, 4]}").unwrap();
         assert_eq!(lines.lines, [3, 4]);
         assert!(parse_json::<GeneratedNotes>("no json here").is_err());
+    }
+
+    #[test]
+    fn a_summary_model_needs_a_provider_and_a_model() {
+        assert_eq!(parse_model(""), None);
+        assert_eq!(parse_model("   "), None);
+        assert_eq!(parse_model("gpt-5"), None);
+        assert_eq!(parse_model("openai/"), None);
+        assert_eq!(parse_model("/gpt-5"), None);
+        assert_eq!(parse_model(" openai/gpt-5 "), Some(("openai", "gpt-5")));
+        assert_eq!(
+            parse_model("openrouter/anthropic/claude"),
+            Some(("openrouter", "anthropic/claude"))
+        );
+    }
+
+    #[test]
+    fn without_its_labs_toggle_no_summary_model_is_used() {
+        // Tests never load settings, so the Labs toggle reads off.
+        if !crate::labs::meeting_summary_model() {
+            set_summary_model(Some("openai/gpt-5"));
+            assert_eq!(summary_model(), None);
+            set_summary_model(None);
+        }
     }
 }

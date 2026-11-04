@@ -18,6 +18,18 @@ impl HotkeyKey {
             || matches!(name.trim().to_ascii_lowercase().as_str(), "menu" | "pause")
     }
 
+    /// The § key, left of 1 on ISO keyboards, which Labs › Section key
+    /// alone lets a Linux shortcut use on its own (issue 1050).
+    pub fn is_section(&self) -> bool {
+        !self.is_mouse() && Self::section_name(&self.label)
+    }
+
+    /// Whether `name` names the § key: `§` or `section`.
+    pub fn section_name(name: &str) -> bool {
+        let name = name.trim();
+        name == "§" || name.eq_ignore_ascii_case("section")
+    }
+
     /// Insert, Home, End, Page Up, or Page Down: keys that type nothing,
     /// which Labs › Special keys alone lets a Windows shortcut use alone
     /// (issue 794).
@@ -44,6 +56,11 @@ impl HotkeyBinding {
     pub fn is_lone_navigation_key(&self) -> bool {
         self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_navigation)
     }
+
+    /// The § key alone (`HotkeyKey::is_section`).
+    pub fn is_lone_section_key(&self) -> bool {
+        self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_section)
+    }
 }
 
 /// `scrolllock`, `scroll_lock`, or `Scroll Lock`.
@@ -61,6 +78,26 @@ impl AppSettings {
         cfg!(any(target_os = "linux", target_os = "windows"))
             && self.labs.standalone_special_keys
             && crate::labs::Feature::StandaloneSpecialKeys.shipped()
+    }
+
+    /// Whether Labs › Section key alone is on: a Linux shortcut may be the
+    /// § key with no modifier.
+    pub fn section_key_allowed(&self) -> bool {
+        cfg!(target_os = "linux")
+            && self.labs.section_key_alone
+            && crate::labs::Feature::SectionKeyAlone.shipped()
+    }
+
+    /// With Labs › Section key alone off, a Linux shortcut on § alone goes
+    /// back to its default (an optional one is unbound), so the listener
+    /// never registers one. § with a modifier is unaffected.
+    pub(crate) fn repair_section_key(&mut self) {
+        if self.section_key_allowed() || !cfg!(target_os = "linux") {
+            return;
+        }
+        if self.reset_shortcuts(HotkeyBinding::is_lone_section_key) {
+            tracing::info!("reset § shortcuts without a modifier: Labs › Section key alone is off");
+        }
     }
 
     /// With Labs › Mouse shortcuts off, a mouse-button shortcut (issue 209)
@@ -179,6 +216,44 @@ mod tests {
             assert_eq!(settings.raw_dictation_hotkey, None);
         } else {
             assert_eq!(settings.dictation_hotkey, menu());
+        }
+    }
+
+    /// Issue 1050: off, a saved § shortcut without a modifier goes back to
+    /// its default on Linux; § with a modifier, and § with the toggle on,
+    /// stay.
+    #[test]
+    fn a_lone_section_key_goes_back_to_its_default_while_its_labs_toggle_is_off() {
+        let section = HotkeyBinding {
+            modifiers: Default::default(),
+            key: Some(HotkeyKey::named("section")),
+        };
+        assert!(section.is_lone_section_key());
+        assert_eq!(HotkeyKey::named("section").label, "§");
+        assert!(HotkeyKey::named("§").is_section());
+        assert!(!HotkeyKey::named("s").is_section());
+        let with_control = HotkeyBinding {
+            modifiers: super::super::HotkeyModifiers::control_option(),
+            key: Some(HotkeyKey::named("§")),
+        };
+        assert!(!with_control.is_lone_section_key());
+        let mut settings = AppSettings {
+            dictation_hotkey: section.clone(),
+            raw_dictation_hotkey: Some(with_control.clone()),
+            ..Default::default()
+        };
+        let mut on = settings.clone();
+        on.labs.section_key_alone = true;
+        on.repair_section_key();
+        assert_eq!(on.dictation_hotkey, section);
+        settings.repair_section_key();
+        assert_eq!(settings.raw_dictation_hotkey, Some(with_control));
+        if cfg!(target_os = "linux") {
+            assert!(on.section_key_allowed());
+            assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
+        } else {
+            assert!(!on.section_key_allowed());
+            assert_eq!(settings.dictation_hotkey, section);
         }
     }
 }

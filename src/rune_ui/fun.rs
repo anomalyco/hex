@@ -439,7 +439,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
         )
         .child(card(p, "card", rows));
     let content = page("content").child(section);
-    super::scroll_body("fun-scroll", content)
+    super::scroll_body(p.k, "fun-scroll", content)
 }
 
 /// Record or pick a clip, see both tracks, and play either one.

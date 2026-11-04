@@ -35,13 +35,20 @@ const DIGITS: usize = 16;
 const MAX_NAME_CHARS: usize = 64;
 
 /// The model families Hex's runtime handles, with the names people know.
-const ARCHITECTURES: [(&str, &str); 5] = [
+const ARCHITECTURES: [(&str, &str); 6] = [
     ("parakeet", "Parakeet"),
     ("whisper", "Whisper"),
     ("qwen3_asr", "Qwen3-ASR"),
     ("cohere_asr", "Cohere Transcribe"),
     ("sensevoice", "SenseVoice"),
+    ("gigaam", "GigaAM"),
 ];
+
+/// Whether a family takes a language prompt: Parakeet and GigaAM heads
+/// don't (their catalog entries are the same); the other families do.
+fn takes_language_hint(architecture: &str) -> bool {
+    !matches!(architecture, "parakeet" | "gigaam")
+}
 
 /// An imported model's stable ID: `custom-` and the first 16 hex digits of
 /// the file's SHA-256.
@@ -163,6 +170,9 @@ pub struct Imported {
     pub license: Option<String>,
     /// A found file used where it is: `owner/name@abcdef1`.
     pub origin: Option<String>,
+    /// Used where it is (a found file, or one added in place), never
+    /// copied: removing it only forgets it.
+    pub in_place: bool,
 }
 
 struct Entry {
@@ -329,10 +339,8 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         streams: false,
         runtime: ModelRuntime::Gguf(artifact),
         languages,
-        // Parakeet heads take no language prompt (Parakeet v3's catalog
-        // entry is the same); the other families do.
-        accepts_language_hint: architecture != "parakeet",
-        supports_language_detection: manifest.detects_language && architecture != "parakeet",
+        accepts_language_hint: takes_language_hint(architecture),
+        supports_language_detection: manifest.detects_language && takes_language_hint(architecture),
     }))
 }
 
@@ -419,6 +427,7 @@ pub fn imported() -> Vec<Imported> {
             source: entry.manifest.source.clone(),
             license: entry.manifest.license.clone(),
             origin: entry.manifest.origin.clone(),
+            in_place: entry.manifest.path.is_some(),
         })
         .collect()
 }
@@ -494,7 +503,7 @@ fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
     if !ARCHITECTURES.iter().any(|(name, _)| *name == architecture) {
         bail!(
             "its architecture is {architecture}; Hex runs Parakeet, Whisper, Qwen3-ASR, \
-             Cohere Transcribe, and SenseVoice models"
+             Cohere Transcribe, SenseVoice, and GigaAM models"
         );
     }
     let Some(variant) = header.string("stt.variant") else {
@@ -785,6 +794,25 @@ pub fn adopt_in_place(
     origin: &str,
     canceled: &AtomicBool,
 ) -> Result<CustomModelId> {
+    record_in_place(path, blob_sha256, Some(origin), canceled)
+}
+
+/// Labs › Use model files where they are: adds a file the person chose
+/// and uses it where it is, as a found file is, so several accounts can
+/// share one file. Its header is checked, it is hashed in full once, and
+/// only Hex's receipt and record are written, in Hex's own folder. An
+/// earlier import of the same file by copy keeps its name, and Hex's copy
+/// goes. Forgetting it later leaves the file.
+pub fn add_in_place(path: &Path, canceled: &AtomicBool) -> Result<CustomModelId> {
+    record_in_place(path, None, None, canceled)
+}
+
+fn record_in_place(
+    path: &Path,
+    blob_sha256: Option<&str>,
+    origin: Option<&str>,
+    canceled: &AtomicBool,
+) -> Result<CustomModelId> {
     let header = gguf_header::read(path)
         .map_err(|error| eyre!("{} can't be used: {error}", display_name(path)))?;
     let profile = profile(&header, &file_stem(path))
@@ -799,6 +827,10 @@ pub fn adopt_in_place(
     let id = CustomModelId::from_sha256(&sha256);
     let directory = directory()?;
     fs::create_dir_all(&directory)?;
+    let existing = fs::read(manifest_file(&directory, id))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Manifest>(&data).ok())
+        .filter(|manifest| manifest.sha256 == sha256);
     super::models::write_json_atomically(
         &receipt_path(&model_file(&directory, id)),
         &Receipt::of(path, sha256.clone())?,
@@ -807,7 +839,9 @@ pub fn adopt_in_place(
         &directory,
         id,
         &Manifest {
-            name: profile.name.clone(),
+            name: existing
+                .as_ref()
+                .map_or_else(|| profile.name.clone(), |existing| existing.name.clone()),
             metadata_name: profile.name,
             architecture: profile.architecture,
             variant: profile.variant,
@@ -822,10 +856,21 @@ pub fn adopt_in_place(
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |elapsed| elapsed.as_secs()),
             path: Some(path.to_path_buf()),
-            origin: Some(origin.to_owned()),
+            origin: origin.map(str::to_owned),
         },
     )?;
-    tracing::info!(id = id.as_str(), path = %path.display(), "using a speech model found on this computer");
+    // The same file imported by copy before: the file in place replaces
+    // Hex's copy, which is never the file chosen.
+    let copy = model_file(&directory, id);
+    if existing.is_some_and(|existing| existing.path.is_none()) && copy != path {
+        match fs::remove_file(&copy) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                tracing::warn!(%error, id = id.as_str(), "could not remove Hex's copy of a model now used in place");
+            }
+            _ => {}
+        }
+    }
+    tracing::info!(id = id.as_str(), path = %path.display(), found = origin.is_some(), "using a speech model file where it is");
     Ok(id)
 }
 
@@ -981,6 +1026,70 @@ mod tests {
     }
 
     #[test]
+    fn a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it() {
+        let models = temporary_models_dir();
+        let source = models.join("shared-primeline.gguf");
+        fs::write(&source, parakeet("Shared primeLine")).unwrap();
+        // An earlier import by copy keeps its name, and its copy goes.
+        let id = import(&source, Some("Mine"), &AtomicBool::new(false)).unwrap();
+        let copy = model_file(&directory().unwrap(), id);
+        assert!(copy.is_file());
+        assert_eq!(add_in_place(&source, &AtomicBool::new(false)).unwrap(), id);
+        assert!(!copy.exists(), "nothing is copied");
+        assert_eq!(status(id), Status::Ready);
+        let model = definition(id);
+        assert_eq!(model.name, "Mine");
+        assert_eq!(super::super::models::model_path(model).unwrap(), source);
+        let added = imported()
+            .into_iter()
+            .find(|import| import.definition.id == TranscriptionModelId::Custom(id))
+            .unwrap();
+        assert!(added.in_place && added.origin.is_none());
+        assert_eq!(added.source, "shared-primeline.gguf");
+        remove(id).unwrap();
+        assert!(!is_registered(id));
+        assert!(source.is_file(), "forgetting leaves the file");
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relinked_copy_reads_as_changed_and_check_again_accepts_only_the_same_contents() {
+        let models = temporary_models_dir();
+        let shared = models.join("shared");
+        fs::create_dir_all(&shared).unwrap();
+        let source = shared.join("primeline.gguf");
+        fs::write(&source, parakeet("Shared primeLine")).unwrap();
+        let id = import(&source, None, &AtomicBool::new(false)).unwrap();
+        assert_eq!(status(id), Status::Ready);
+        let copy = model_file(&directory().unwrap(), id);
+        // Hex's copy swapped for a link to the identical shared file.
+        fs::remove_file(&copy).unwrap();
+        std::os::unix::fs::symlink(&source, &copy).unwrap();
+        invalidate();
+        assert_eq!(status(id), Status::Changed);
+        repair(id, &AtomicBool::new(false)).unwrap();
+        assert_eq!(status(id), Status::Ready);
+        // A link to other contents stays changed.
+        let other = shared.join("other.gguf");
+        fs::write(&other, parakeet("Another primeLine model")).unwrap();
+        fs::remove_file(&copy).unwrap();
+        std::os::unix::fs::symlink(&other, &copy).unwrap();
+        invalidate();
+        assert_eq!(status(id), Status::Changed);
+        assert!(
+            repair(id, &AtomicBool::new(false))
+                .unwrap_err()
+                .to_string()
+                .contains("no longer matches")
+        );
+        assert_eq!(status(id), Status::Changed);
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    #[test]
     fn a_refused_or_canceled_import_leaves_nothing_behind() {
         let models = temporary_models_dir();
         let source = models.join("llama.gguf");
@@ -1048,6 +1157,44 @@ mod tests {
         assert_eq!(profile.languages, ["en", "de"]);
         assert!(profile.detects_language);
         assert_eq!(profile.license.as_deref(), Some("cc-by-4.0"));
+    }
+
+    #[test]
+    fn a_gigaam_header_is_accepted_and_takes_no_language_hint() {
+        let header = gguf_header::tests::read_header(gguf(
+            &[
+                ("general.architecture", "gigaam"),
+                ("general.name", "GigaAM v3"),
+                ("stt.variant", "gigaam-v3-e2e-rnnt"),
+            ],
+            &[("general.languages", &["ru"])],
+            &[("stt.capability.lang_detect", true)],
+            &[("a", 8, 64)],
+        ));
+        let profile = profile(&header, "file").unwrap();
+        assert_eq!(profile.architecture, "gigaam");
+        assert_eq!(family(&profile.architecture), "GigaAM");
+        let manifest = Manifest {
+            name: profile.name.clone(),
+            metadata_name: profile.name,
+            architecture: profile.architecture,
+            variant: profile.variant,
+            languages: profile.languages,
+            detects_language: profile.detects_language,
+            bytes: 1,
+            sha256: "1a".repeat(32),
+            source: "file".into(),
+            license: None,
+            repository: None,
+            imported_at: 0,
+            path: None,
+            origin: None,
+        };
+        let definition = build(CustomModelId::from_sha256(&manifest.sha256), &manifest);
+        assert!(!definition.accepts_language_hint);
+        assert!(!definition.supports_language_detection);
+        assert!(takes_language_hint("whisper"));
+        assert!(!takes_language_hint("parakeet"));
     }
 
     #[test]

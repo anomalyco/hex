@@ -129,6 +129,10 @@ pub(crate) enum Command {
     /// Work that needs the model itself, such as loading or switching it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Run(Box<dyn FnOnce(&mut Model) + Send>),
+    /// Drops the model, then loads `selection` in its place, for a GPU with
+    /// no room for both (#1170).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    Reload(crate::transcription::models::TranscriptionSelection),
     Background {
         /// The dictation generation when the work was submitted.
         generation: u64,
@@ -767,6 +771,19 @@ impl TranscriptionEngine {
             .map_err(|_| eyre!("transcription engine stopped"))
     }
 
+    /// Replaces the model with `selection` after every command already sent:
+    /// the old one is dropped first, so its memory is free for the new one.
+    /// Commands sent meanwhile wait for the load.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn reload(
+        &self,
+        selection: crate::transcription::models::TranscriptionSelection,
+    ) -> Result<()> {
+        self.commands
+            .send(Command::Reload(selection))
+            .map_err(|_| eyre!("transcription engine stopped"))
+    }
+
     /// Drops the engine on its own thread, so replacing the model from the
     /// hotkey loop never waits on a run still in flight.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -994,6 +1011,14 @@ impl Worker {
                     if let Some(model) = self.model() {
                         work(model);
                     }
+                    self.publish_streams();
+                }
+                Command::Reload(selection) => {
+                    tracing::info!(model = ?selection.model, "replacing the speech model in place");
+                    self.model = None;
+                    self.parked = Some(selection);
+                    // A failed load stays parked; the next command tries again.
+                    let _ = self.model();
                     self.publish_streams();
                 }
                 Command::Background { generation, work } => {
@@ -1318,6 +1343,8 @@ mod tests {
         /// Fail every feed once this many samples are in, as a native
         /// stream error would.
         fail_after: Option<usize>,
+        /// Where its finalized text ends, in milliseconds.
+        text_end_ms: Option<u64>,
     }
 
     impl StreamFeed for FakeStream {
@@ -1338,6 +1365,10 @@ mod tests {
                 stable: format!("heard {}", self.fed.len()),
                 tentative: String::new(),
             }
+        }
+
+        fn text_end_ms(&self) -> Option<u64> {
+            self.text_end_ms
         }
     }
 
@@ -1453,6 +1484,79 @@ mod tests {
         let result = finish_stream(&mut capped, &clip, 0);
         assert!(capped.dropped > 0);
         assert!(result.is_err(), "{result:?}");
+    }
+
+    /// Quiet pre-roll, 2 s of speech, a 1 s pause, `phrase` samples of
+    /// speech, then the 200 ms tail after the stop.
+    fn speech_pause_phrase(phrase: usize) -> Vec<f32> {
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(32_000));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(phrase));
+        clip.extend(vec![0.0; 3_200]);
+        clip
+    }
+
+    fn finish_with_text_end(clip: &[f32], text_end_ms: u64) -> Result<String, String> {
+        let mut fake = FakeStream {
+            text_end_ms: Some(text_end_ms),
+            ..FakeStream::default()
+        };
+        let mut capped = PauseCap::new(&mut fake, 0);
+        for chunk in clip.chunks(1_600) {
+            capped.feed(chunk).unwrap();
+        }
+        let result = finish_stream(&mut capped, clip, clip.len());
+        assert_eq!(fake.fed, clip);
+        result
+    }
+
+    #[test]
+    fn a_stream_that_dropped_a_phrase_after_a_pause_falls_back_to_the_whole_clip() {
+        // #1101: speech, a 1 s pause, a short last phrase, then stop. The
+        // stream heard it all, but its text ended with the first speech.
+        let clip = speech_pause_phrase(12_800);
+        let result = finish_with_text_end(&clip, 2_500);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|reason| reason.contains("speech follows")),
+            "{result:?}"
+        );
+        // Text that reaches the phrase is the stream's to keep.
+        assert_eq!(
+            finish_with_text_end(&clip, 4_200),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_closing_full_stop_at_the_clips_end_does_not_cover_a_dropped_phrase() {
+        // Nemotron 3.5 ASR puts its final full stop on the clip's last frame
+        // (apollo, FLEURS: the last word ended at 8.8 s, the stop at 10.16 s).
+        let token = |text: &str, t1_ms| transcribe_cpp::Token {
+            text: text.into(),
+            t1_ms,
+            ..Default::default()
+        };
+        let tokens = [
+            token(" channels", 2_480),
+            token(",", 2_500),
+            token(".", 4_400),
+            token(" ", 4_400),
+        ];
+        assert_eq!(spoken_text_end_ms(&tokens), Some(2_480));
+        assert_eq!(spoken_text_end_ms(&[token(".", 4_400)]), None);
+    }
+
+    #[test]
+    fn a_short_sound_after_the_text_does_not_discard_the_stream() {
+        // A key click or the stop tone in the tail is not a dropped phrase.
+        let clip = speech_pause_phrase(2_400);
+        assert_eq!(
+            finish_with_text_end(&clip, 2_500),
+            Ok(format!("streamed {}", clip.len()))
+        );
     }
 
     #[test]

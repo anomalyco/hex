@@ -1,0 +1,71 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Hona/strobe/main/schema/strobe.v1.json",
+  "build": {
+    "command": "cargo build --locked --release --bin hex",
+    "output": "{cache}/cargo-target/release/hex.exe",
+    "env": {
+      "CARGO_TARGET_DIR": "{cache}/cargo-target",
+      "CARGO_PROFILE_RELEASE_DEBUG": "line-tables-only",
+      "CARGO_PROFILE_RELEASE_STRIP": "false",
+      "CARGO_PROFILE_RELEASE_INCREMENTAL": "false",
+      "TRANSCRIBE_CMAKE_ARGS": "-DGGML_NATIVE=OFF"
+    }
+  },
+  "apps": {
+    "hex": {
+      "kind": "native",
+      "exe": {
+        "windows": "target/release/hex.exe",
+        "macos": "/Applications/Hex.app/Contents/MacOS/hex",
+        "linux": "~/.local/share/hex/current/hex"
+      },
+      "args": ["app"],
+      "env": {
+        "HEX_APPLICATION_SUPPORT_DIR": "{home}/hex-data",
+        "HEX_DISABLE_UPDATES": "1",
+        "HF_HUB_CACHE": "{home}/.cache/huggingface/hub"
+      },
+      "unset": ["HEX_*", "WGPU_*", "RUNE_*", "HF_HOME", "RUST_LOG"],
+      "files": {
+        "hex-data/onboarding-complete": "",
+        "hex-data/settings.json": {
+          "enable_on_launch": false,
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+        }
+      },
+      "guard": [
+        { "file": "%APPDATA%/hex/local-api.json", "pid": "pid" },
+        { "file": "%APPDATA%/hex/settings.json" },
+        { "file": "~/Library/Application Support/hex/local-api.json", "pid": "pid" },
+        { "file": "~/Library/Application Support/hex/settings.json" },
+        { "file": "~/.local/share/hex/local-api.json", "pid": "pid" },
+        { "file": "~/.local/share/hex/settings.json" }
+      ]
+    },
+    "hex-listening": {
+      "extends": "hex",
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": true,
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+        }
+      }
+    },
+    "hex-listening-warm": {
+      "extends": "hex",
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": false,
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+        }
+      }
+    }
+  },
+  "benches": ["perf/**/*.bench.ts"],
+  "metrics": { "equivalence": "2%" }
+}

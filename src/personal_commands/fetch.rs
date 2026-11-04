@@ -43,13 +43,19 @@ impl FetchRequest {
     }
 }
 
-/// Sends `request` and reads the whole response within `timeout`.
-pub fn send(request: FetchRequest, timeout: Duration) -> Result<FetchResponse, String> {
+/// Sends `request` and reads the whole response within `timeout`; with
+/// `loopback_only`, every hop must stay on this computer
+/// (`net::loopback_agent`).
+pub fn send(
+    request: FetchRequest,
+    timeout: Duration,
+    loopback_only: bool,
+) -> Result<FetchResponse, String> {
     let host = request.host()?;
     let started = Instant::now();
     let request_bytes = request.body.as_ref().map_or(0, String::len);
     let method = request.method.clone();
-    let result = exchange(request, timeout);
+    let result = exchange(request, timeout, loopback_only);
     let duration_ms = started.elapsed().as_millis() as u64;
     match &result {
         Ok(response) => tracing::info!(
@@ -75,14 +81,23 @@ pub fn send(request: FetchRequest, timeout: Duration) -> Result<FetchResponse, S
     result
 }
 
-fn exchange(request: FetchRequest, timeout: Duration) -> Result<FetchResponse, String> {
-    // The system's proxy and trusted roots, as model downloads use (`net`).
-    let agent = crate::net::agent(&request.url, |config| {
+fn exchange(
+    request: FetchRequest,
+    timeout: Duration,
+    loopback_only: bool,
+) -> Result<FetchResponse, String> {
+    let configure = |config: crate::net::Config| {
         config
             .http_status_as_error(false)
             .max_redirects(MAX_REDIRECTS)
             .timeout_global(Some(timeout))
-    });
+    };
+    // The system's proxy and trusted roots, as model downloads use (`net`).
+    let agent = if loopback_only {
+        crate::net::loopback_agent(configure)
+    } else {
+        crate::net::agent(&request.url, configure)
+    };
     let mut builder = ureq::http::Request::builder()
         .method(request.method.as_str())
         .uri(request.url.as_str());

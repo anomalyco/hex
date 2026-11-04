@@ -26,13 +26,23 @@ pub(crate) fn mark_streams() {
     if std::env::var_os(STREAM_PROPERTIES).is_some() {
         return;
     }
-    let properties = format!(
-        "{{ state.restore-target = false, {PID_PROPERTY} = {} }}",
-        std::process::id()
-    );
+    let properties = stream_properties(std::process::id());
     // SAFETY: No other thread exists yet to read the environment.
     unsafe { std::env::set_var(STREAM_PROPERTIES, properties) };
 }
+
+/// The stream properties: a stable `hex` application and node name (the
+/// ALSA plugin otherwise names it after the binary with spaces, which
+/// varies by packaging), so tools such as audio idle inhibitors can tell
+/// Hex's microphone stream apart and ignore it.
+fn stream_properties(pid: u32) -> String {
+    format!(
+        "{{ state.restore-target = false, application.name = \"{STREAM_NAME}\", \
+         node.name = \"{STREAM_NAME}\", {PID_PROPERTY} = {pid} }}"
+    )
+}
+
+const STREAM_NAME: &str = "hex";
 
 #[derive(Deserialize)]
 struct Source {
@@ -215,6 +225,15 @@ mod tests {
             ]"#,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn streams_carry_a_stable_name_without_spaces() {
+        let properties = stream_properties(42);
+        assert!(properties.contains("application.name = \"hex\""));
+        assert!(properties.contains("node.name = \"hex\""));
+        assert!(properties.contains("state.restore-target = false"));
+        assert!(properties.contains("hex.process.id = 42"));
     }
 
     #[test]

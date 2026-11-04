@@ -303,6 +303,9 @@ pub(super) struct PlatformState {
     /// The desktop's paste permission where Hex pastes through the
     /// RemoteDesktop portal (GNOME and KDE on Wayland); `None` elsewhere.
     pub(super) paste: Option<super::paste_access::PasteAccess>,
+    /// A Wayland desktop without data-control (GNOME): a paste can't put
+    /// the clipboard back unless Labs › Restore clipboard on GNOME is on.
+    pub(super) clipboard_unrestorable: bool,
     /// A scene's state: [`Self::setup_status`] reports `permissions` on
     /// every OS rather than asking this computer.
     preview: bool,
@@ -379,6 +382,7 @@ impl PlatformState {
             calendar: CalendarView::default(),
             relaunch_failed: false,
             paste: None,
+            clipboard_unrestorable: false,
             preview: false,
             developer: false,
             accessibility_renamed: false,

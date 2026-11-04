@@ -60,10 +60,10 @@ pub enum ControlCli {
         #[command(flatten)]
         output: Output,
     },
-    /// Start, stop, or toggle a dictation, as the shortcut would.
+    /// Start, stop, toggle, or cancel a dictation, as the shortcut would.
     ///
-    /// `start` locks the recording: `stop` or the shortcut finishes it.
-    /// Repeating a command changes nothing.
+    /// `start` locks the recording: `stop` or the shortcut finishes it,
+    /// `cancel` discards it. Repeating a command changes nothing.
     Dictation {
         #[arg(value_enum)]
         action: CaptureAction,
@@ -411,18 +411,11 @@ pub fn run(command: ControlCli) -> u8 {
             raw,
             output,
         } => {
-            if let Err(error) = super::check_flags(action.into(), print, raw) {
+            if let Err(error) = super::check_flags(action, print, raw) {
                 eprintln!("hex: {}", error.message);
                 return 2;
             }
-            send(
-                ControlCommand::Dictation {
-                    action: action.into(),
-                    print,
-                    raw,
-                },
-                output,
-            )
+            send(ControlCommand::Dictation { action, print, raw }, output)
         }
         ControlCli::PasteLast { output } => send(ControlCommand::PasteLast, output),
         ControlCli::Settings { command } => settings(command),

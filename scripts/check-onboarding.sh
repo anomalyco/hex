@@ -5,7 +5,7 @@
 # fixtures, so they render here too.
 #
 #   1. Renders every onboarding scene (Setting up Hex with nothing found, a
-#      stopped download, the model step with found models, with the
+#      stopped download, Settings after Continue without a model, the model step with found models, with the
 #      recommended model already present, ours downloading, Back to it, the
 #      demo, permissions, Windows' microphone switch, the paste permission on
 #      GNOME and KDE Wayland, Almost ready, the
@@ -16,8 +16,12 @@
 #      (HEX_UPDATE_GOLDENS=1 cargo test --bin hex onboarding_goldens). A GPU
 #      adapter is required (Mesa's lavapipe will do), so the check never
 #      passes by skipping.
-#   2. Checks Skip: it shows on every scene but Hex is ready, ends onboarding
-#      at once, and leaves the model downloading.
+#   2. Checks Skip: it shows only on the optional pages (the demo and the
+#      practice) and lands on the next step setup still needs (permissions,
+#      then Almost ready while the model downloads, else Hex is ready),
+#      never closing onboarding. Then Continue without a model: it shows only
+#      on the download step once the download failed or stalled, finishes
+#      onboarding, and Settings says no model is installed.
 #   3. Walks a first run through the real onboarding in a clean temporary
 #      data folder (fresh settings, no models, an empty Hugging Face cache, an
 #      English locale): it downloads and verifies the model onboarding picks,
@@ -55,7 +59,7 @@ run_one() {
 
 scenes=$(awk '/^pub\(super\) const SCENES/,/^\];/' src/rune_ui/tests/onboarding_check.rs | grep -c '^    "')
 expected=$((scenes * 2))
-status=0 goldens=pass skip=pass walkthrough=pass
+status=0 goldens=pass skip=pass without_model=pass walkthrough=pass
 
 echo "== Onboarding scenes against their goldens"
 if ! run_one "$work/goldens.log" rune_ui::tests::onboarding_check::onboarding_goldens \
@@ -69,9 +73,15 @@ if [ "$rendered" != "$expected" ]; then
 fi
 changed=$(grep -oE '^[a-z0-9-]+: [0-9]+ pixels differ|rune-[a-z0-9-]+\.png is missing' "$work/goldens.log" || true)
 
-echo "== Skip on every page"
+echo "== Skip only on the optional pages"
 if ! run_one "$work/skip.log" rune_ui::tests::onboarding_check::onboarding_skip; then
   skip=fail status=1
+fi
+
+echo "== Continue without a model"
+if ! run_one "$work/without-model.log" \
+  rune_ui::tests::onboarding_check::onboarding_continue_without_model; then
+  without_model=fail status=1
 fi
 
 echo "== First run in a clean data folder"
@@ -90,7 +100,8 @@ fi
     echo "- Changed scenes:"
     printf '%s\n' "$changed" | sed 's/^/  - /'
   fi
-  echo "- Skip on every page, model still downloading: $skip"
+  echo "- Skip only on the demo and practice, to the next required step: $skip"
+  echo "- Continue without a model, only after a failed or stalled download: $without_model"
   echo "- First run in a clean data folder: $walkthrough"
   grep -h '^onboarding walkthrough:' "$work/walkthrough.log" | sed 's/^/  - /' || true
 } > "$out/summary.md"

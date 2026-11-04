@@ -80,7 +80,7 @@ pub fn default_output(bundle_dir: &Path) -> PathBuf {
         .file_stem()
         .and_then(|n| n.to_str())
         .unwrap_or("scrawl");
-    dirs::home_dir()
+    scrawl_router::user_dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Movies/Scrawl")
         .join(format!("{name}.mp4"))

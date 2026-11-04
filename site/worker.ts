@@ -60,7 +60,10 @@ export default {
   },
 }
 
-const DOCS = new Map([["/docs/transforms", "/docs/transforms.md"]])
+const DOCS = new Map([
+  ["/docs/transforms", "/docs/transforms.md"],
+  ["/docs/admin", "/docs/admin.md"],
+])
 
 function secure(headers: Headers) {
   headers.set("Strict-Transport-Security", "max-age=31536000")

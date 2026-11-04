@@ -7,7 +7,8 @@
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard or only copying it (macOS), a second dictation shortcut
-//! (macOS), Toggle's tap or hold (macOS), and Terminal paste
+//! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
+//! recording when its call ends (macOS), and Terminal paste
 //! and shortcut sharing on Windows) is just its toggle.
 //!
 //! Each feature has an audience (`Feature::audience`): `Everyone` ships in
@@ -18,7 +19,7 @@
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use clap::Subcommand;
 use color_eyre::Result;
@@ -88,10 +89,23 @@ pub enum Feature {
     HistoryStats,
     RecentDictations,
     SkipPauses,
+    StopWhenCallEnds,
+    OutputFixes,
+    PickerActiveFirst,
+    ModelInPlace,
+    PickerDownloaded,
+    SectionKeyAlone,
+    KeepRecordings,
+    HideMenuBarIcon,
+    MovableMeetingCapsules,
+    MeetingSummaryModel,
+    GnomeClipboardRestore,
+    MeetingNotesVocabulary,
+    NotchIndicator,
 }
 
 impl Feature {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 43] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -122,6 +136,19 @@ impl Feature {
         Self::HistoryStats,
         Self::RecentDictations,
         Self::SkipPauses,
+        Self::StopWhenCallEnds,
+        Self::OutputFixes,
+        Self::PickerActiveFirst,
+        Self::ModelInPlace,
+        Self::PickerDownloaded,
+        Self::SectionKeyAlone,
+        Self::KeepRecordings,
+        Self::HideMenuBarIcon,
+        Self::MovableMeetingCapsules,
+        Self::MeetingSummaryModel,
+        Self::GnomeClipboardRestore,
+        Self::MeetingNotesVocabulary,
+        Self::NotchIndicator,
     ];
 
     /// The features this OS and build have.
@@ -174,7 +201,20 @@ impl Feature {
             | Self::StandaloneSpecialKeys
             | Self::HistoryStats
             | Self::RecentDictations
-            | Self::SkipPauses => Audience::Everyone,
+            | Self::SkipPauses
+            | Self::StopWhenCallEnds
+            | Self::OutputFixes
+            | Self::PickerActiveFirst
+            | Self::ModelInPlace
+            | Self::PickerDownloaded
+            | Self::SectionKeyAlone
+            | Self::KeepRecordings
+            | Self::HideMenuBarIcon
+            | Self::MovableMeetingCapsules
+            | Self::MeetingSummaryModel
+            | Self::GnomeClipboardRestore
+            | Self::MeetingNotesVocabulary
+            | Self::NotchIndicator => Audience::Everyone,
         }
     }
 
@@ -200,13 +240,17 @@ impl Feature {
             .find(|feature| feature.settings_key() == key)
     }
 
-    fn on_this_os(self) -> bool {
+    /// Whether this OS has the feature at all, in any build.
+    pub fn on_this_os(self) -> bool {
         match self {
-            Self::Meetings | Self::LiveChapters | Self::SubtitleExport => {
-                cfg!(target_os = "macos")
-            }
+            Self::Meetings
+            | Self::LiveChapters
+            | Self::SubtitleExport
+            | Self::StopWhenCallEnds
+            | Self::MovableMeetingCapsules => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
+            Self::SectionKeyAlone | Self::GnomeClipboardRestore => cfg!(target_os = "linux"),
             Self::StandaloneSpecialKeys | Self::SkipPauses => {
                 cfg!(any(target_os = "linux", target_os = "windows"))
             }
@@ -217,8 +261,10 @@ impl Feature {
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SidedChords
-            | Self::TapOrHold
-            | Self::RecentDictations => cfg!(target_os = "macos"),
+            | Self::RecentDictations
+            | Self::HideMenuBarIcon
+            | Self::NotchIndicator => cfg!(target_os = "macos"),
+            Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -231,6 +277,13 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::HistoryStats
+            | Self::OutputFixes
+            | Self::PickerActiveFirst
+            | Self::ModelInPlace
+            | Self::PickerDownloaded
+            | Self::KeepRecordings
+            | Self::MeetingSummaryModel
+            | Self::MeetingNotesVocabulary
             | Self::FillerWords => true,
         }
     }
@@ -268,6 +321,19 @@ impl Feature {
             Self::HistoryStats => "history-stats",
             Self::RecentDictations => "recent-dictations",
             Self::SkipPauses => "skip-pauses",
+            Self::StopWhenCallEnds => "stop-when-call-ends",
+            Self::OutputFixes => "output-fixes",
+            Self::PickerActiveFirst => "picker-active-first",
+            Self::ModelInPlace => "model-in-place",
+            Self::PickerDownloaded => "picker-downloaded",
+            Self::SectionKeyAlone => "section-key",
+            Self::KeepRecordings => "keep-recordings",
+            Self::HideMenuBarIcon => "hide-menu-bar-icon",
+            Self::MovableMeetingCapsules => "movable-meeting-capsules",
+            Self::MeetingSummaryModel => "meeting-summary-model",
+            Self::GnomeClipboardRestore => "gnome-clipboard-restore",
+            Self::MeetingNotesVocabulary => "meeting-notes-vocabulary",
+            Self::NotchIndicator => "notch-indicator",
         }
     }
 
@@ -304,6 +370,19 @@ impl Feature {
             Self::HistoryStats => "labs.history_stats",
             Self::RecentDictations => "labs.recent_dictations",
             Self::SkipPauses => "labs.skip_pauses",
+            Self::StopWhenCallEnds => "labs.stop_when_call_ends",
+            Self::OutputFixes => "labs.output_fixes",
+            Self::PickerActiveFirst => "labs.picker_active_first",
+            Self::ModelInPlace => "labs.model_in_place",
+            Self::PickerDownloaded => "labs.picker_downloaded",
+            Self::SectionKeyAlone => "labs.section_key_alone",
+            Self::KeepRecordings => "labs.keep_recordings",
+            Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
+            Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
+            Self::MeetingSummaryModel => "labs.meeting_summary_model",
+            Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
+            Self::MeetingNotesVocabulary => "labs.meeting_notes_vocabulary",
+            Self::NotchIndicator => "labs.notch_indicator",
         }
     }
 
@@ -384,6 +463,43 @@ impl Feature {
             Self::SkipPauses => {
                 "Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"
             }
+            Self::StopWhenCallEnds => {
+                "Stop a meeting recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"
+            }
+            Self::OutputFixes => {
+                "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
+            }
+            Self::PickerActiveFirst => "The speech model picker lists the model you're using first",
+            Self::ModelInPlace => {
+                "Add a speech model file and use it where it is, without copying it, so several accounts can share one file"
+            }
+            Self::PickerDownloaded => {
+                "Show only downloaded speech models in the picker, with the space they take"
+            }
+            Self::SectionKeyAlone => {
+                "Use the § key, left of 1 on ISO keyboards, alone as a shortcut; Hex takes § from every app while it's bound"
+            }
+            Self::KeepRecordings => {
+                "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
+            }
+            Self::HideMenuBarIcon => {
+                "Hide Hex's menu bar icon; shortcuts keep working, and opening Hex again shows Settings"
+            }
+            Self::MovableMeetingCapsules => {
+                "Drag meeting capsules such as Meeting transcript ready out of the way; they come back in the corner you left them"
+            }
+            Self::MeetingSummaryModel => {
+                "Choose the OpenCode provider and model that write meeting notes (meetings.opencode_model, provider/model)"
+            }
+            Self::GnomeClipboardRestore => {
+                "Put the previous clipboard back after a paste on GNOME Wayland, through the XWayland clipboard while XWayland is running"
+            }
+            Self::MeetingNotesVocabulary => {
+                "Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"
+            }
+            Self::NotchIndicator => {
+                "On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"
+            }
         }
     }
 
@@ -424,7 +540,76 @@ impl Feature {
             Self::HistoryStats => settings.labs.history_stats,
             Self::RecentDictations => settings.labs.recent_dictations,
             Self::SkipPauses => settings.labs.skip_pauses,
+            Self::StopWhenCallEnds => settings.labs.stop_when_call_ends,
+            Self::OutputFixes => settings.labs.output_fixes,
+            Self::PickerActiveFirst => settings.labs.picker_active_first,
+            Self::ModelInPlace => settings.labs.model_in_place,
+            Self::PickerDownloaded => settings.labs.picker_downloaded,
+            Self::SectionKeyAlone => settings.labs.section_key_alone,
+            Self::KeepRecordings => settings.labs.keep_recordings,
+            Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
+            Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
+            Self::MeetingSummaryModel => settings.labs.meeting_summary_model,
+            Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
+            Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
+            Self::NotchIndicator => settings.labs.notch_indicator,
         }
+    }
+
+    /// Every feature's switch in `settings`, for the Labs lock
+    /// (`crate::policy`).
+    pub fn switches(settings: &mut AppSettings) -> Vec<&mut bool> {
+        let labs = &mut settings.labs;
+        vec![
+            &mut settings.meetings.enabled,
+            &mut settings.experimental.hex_microphone,
+            &mut settings.paste_with_shift,
+            &mut settings.keyboard_model_switching.enabled,
+            &mut settings.pause_browser_media,
+            &mut settings.share_dictation_shortcut,
+            &mut labs.playground,
+            &mut labs.live_text,
+            &mut labs.live_chapters,
+            &mut labs.vocabulary_biasing,
+            &mut labs.mouse_shortcuts,
+            &mut labs.unload_idle,
+            &mut labs.restore_shortcut_default,
+            &mut labs.keep_on_clipboard,
+            &mut labs.copy_only,
+            &mut labs.spoken_formatting,
+            &mut labs.filler_words,
+            &mut labs.subtitle_export,
+            &mut labs.second_dictation_shortcut,
+            &mut labs.smart_spacing,
+            &mut labs.spoken_symbols,
+            &mut labs.picker_sort_filter,
+            &mut labs.sided_modifier_chords,
+            &mut labs.tap_or_hold,
+            &mut labs.benchmark_details,
+            &mut labs.parakeet_ultra,
+            &mut labs.standalone_special_keys,
+            &mut labs.history_stats,
+            &mut labs.recent_dictations,
+            &mut labs.skip_pauses,
+            &mut labs.stop_when_call_ends,
+            &mut labs.output_fixes,
+            &mut labs.picker_active_first,
+            &mut labs.model_in_place,
+            &mut labs.picker_downloaded,
+            &mut labs.section_key_alone,
+            &mut labs.keep_recordings,
+            &mut labs.hide_menu_bar_icon,
+            &mut labs.movable_meeting_capsules,
+            &mut labs.meeting_summary_model,
+            &mut labs.gnome_clipboard_restore,
+            &mut labs.meeting_notes_vocabulary,
+            &mut labs.notch_indicator,
+        ]
+    }
+
+    /// The managed lock that holds this feature off, if any.
+    pub fn managed(self) -> Option<crate::policy::Lock> {
+        crate::policy::Policy::current().labs_lock(self)
     }
 
     pub fn set(self, settings: &mut AppSettings, on: bool) {
@@ -458,48 +643,72 @@ impl Feature {
             Self::HistoryStats => settings.labs.history_stats = on,
             Self::RecentDictations => settings.labs.recent_dictations = on,
             Self::SkipPauses => settings.labs.skip_pauses = on,
+            Self::StopWhenCallEnds => settings.labs.stop_when_call_ends = on,
+            Self::OutputFixes => settings.labs.output_fixes = on,
+            Self::PickerActiveFirst => settings.labs.picker_active_first = on,
+            Self::ModelInPlace => settings.labs.model_in_place = on,
+            Self::PickerDownloaded => settings.labs.picker_downloaded = on,
+            Self::KeepRecordings => settings.labs.keep_recordings = on,
+            Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
+            Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
+            Self::MeetingSummaryModel => settings.labs.meeting_summary_model = on,
+            Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
+            Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
+            Self::NotchIndicator => settings.labs.notch_indicator = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
                 settings.repair_special_keys();
+            }
+            Self::SectionKeyAlone => {
+                settings.labs.section_key_alone = on;
+                settings.repair_section_key();
             }
         }
     }
 }
 
 /// Set once this process knows its settings.
-const KNOWN: u32 = 1;
-const LIVE_TEXT: u32 = 1 << 1;
-const LIVE_CHAPTERS: u32 = 1 << 2;
-const PLAYGROUND: u32 = 1 << 3;
-const VOCABULARY_BIASING: u32 = 1 << 4;
-const MOUSE_SHORTCUTS: u32 = 1 << 5;
-const UNLOAD_IDLE: u32 = 1 << 6;
-const KEEP_ON_CLIPBOARD: u32 = 1 << 7;
-const COPY_ONLY: u32 = 1 << 8;
-const SPOKEN_FORMATTING: u32 = 1 << 9;
-const FILLER_WORDS: u32 = 1 << 10;
-const SUBTITLE_EXPORT: u32 = 1 << 11;
-const SMART_SPACING: u32 = 1 << 12;
-const SPOKEN_SYMBOLS: u32 = 1 << 13;
-const SIDED_CHORDS: u32 = 1 << 14;
-const TAP_OR_HOLD: u32 = 1 << 15;
-const SKIP_PAUSES: u32 = 1 << 16;
-const PARAKEET_ULTRA: u32 = 1 << 17;
-const HISTORY_STATS: u32 = 1 << 18;
-const RECENT_DICTATIONS: u32 = 1 << 19;
+const KNOWN: u64 = 1;
+const LIVE_TEXT: u64 = 1 << 1;
+const LIVE_CHAPTERS: u64 = 1 << 2;
+const PLAYGROUND: u64 = 1 << 3;
+const VOCABULARY_BIASING: u64 = 1 << 4;
+const MOUSE_SHORTCUTS: u64 = 1 << 5;
+const UNLOAD_IDLE: u64 = 1 << 6;
+const KEEP_ON_CLIPBOARD: u64 = 1 << 7;
+const COPY_ONLY: u64 = 1 << 8;
+const SPOKEN_FORMATTING: u64 = 1 << 9;
+const FILLER_WORDS: u64 = 1 << 10;
+const SUBTITLE_EXPORT: u64 = 1 << 11;
+const SMART_SPACING: u64 = 1 << 12;
+const SPOKEN_SYMBOLS: u64 = 1 << 13;
+const SIDED_CHORDS: u64 = 1 << 14;
+const TAP_OR_HOLD: u64 = 1 << 15;
+const SKIP_PAUSES: u64 = 1 << 16;
+const PARAKEET_ULTRA: u64 = 1 << 17;
+const HISTORY_STATS: u64 = 1 << 18;
+const RECENT_DICTATIONS: u64 = 1 << 19;
+const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
+const KEEP_RECORDINGS: u64 = 1 << 21;
+const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
+const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
+const MEETING_SUMMARY_MODEL: u64 = 1 << 24;
+const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
+const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
+const NOTCH_INDICATOR: u64 = 1 << 27;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u32 = 20;
+const MINUTES_SHIFT: u64 = 32;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
-static STATE: AtomicU32 = AtomicU32::new(0);
+static STATE: AtomicU64 = AtomicU64::new(0);
 
-fn on(bit: u32) -> bool {
+fn on(bit: u64) -> bool {
     state() & bit != 0
 }
 
-fn state() -> u32 {
+fn state() -> u64 {
     match STATE.load(Ordering::Acquire) {
         0 => {
             let saved = encode(&AppSettings::saved_labs());
@@ -589,7 +798,8 @@ pub fn sided_modifier_chords() -> bool {
 }
 
 /// In Toggle mode, a press held past the hold threshold finishes its capture
-/// when it lifts instead of locking it (macOS; read at each release).
+/// when it lifts instead of locking it (macOS reads it at each release;
+/// Linux's listener reads the saved switch with its shortcut options).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn tap_or_hold() -> bool {
     on(TAP_OR_HOLD)
@@ -621,12 +831,70 @@ pub fn skip_pauses() -> bool {
     on(SKIP_PAUSES) && Feature::SkipPauses.on_this_os()
 }
 
+/// A meeting recording Hex started on its own stops once its call app has
+/// left the microphone and gone quiet for a grace period (macOS; read on
+/// each pass of the meeting controller).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn stop_when_call_ends() -> bool {
+    on(STOP_WHEN_CALL_ENDS) && Feature::StopWhenCallEnds.on_this_os()
+}
+
+/// A dictation saved to History keeps its 16 kHz audio, and History offers
+/// Transcribe again for it (read as each capture is handed to the engine;
+/// the History pane reads the saved setting).
+pub fn keep_recordings() -> bool {
+    on(KEEP_RECORDINGS)
+}
+
+/// The menu-bar icon is hidden while nothing records (macOS; read each
+/// time the status item refreshes, about twice a second).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn hide_menu_bar_icon() -> bool {
+    on(HIDE_MENU_BAR_ICON) && Feature::HideMenuBarIcon.on_this_os()
+}
+
+/// The meeting panel capsules (Meeting transcript ready, Recording
+/// automatically, offers, reminders) show in the saved capsule corner and
+/// can be dragged to another (macOS; read each time one shows).
+pub fn movable_meeting_capsules() -> bool {
+    on(MOVABLE_MEETING_CAPSULES) && Feature::MovableMeetingCapsules.on_this_os()
+}
+
+/// Meeting notes written with OpenCode use the saved
+/// `meetings.opencode_model`, with no fallback to another model (every OS
+/// with meetings; read at each generation).
+pub fn meeting_summary_model() -> bool {
+    on(MEETING_SUMMARY_MODEL) && Feature::MeetingSummaryModel.on_this_os()
+}
+
+/// Final meeting notes (title and summary) put the vocabulary ahead of the
+/// transcript (every OS with meetings; read at each generation, so
+/// Regenerate summary uses the current list).
+pub fn meeting_notes_vocabulary() -> bool {
+    on(MEETING_NOTES_VOCABULARY) && Feature::MeetingNotesVocabulary.on_this_os()
+}
+
+/// With the indicator at the top, the HUD grows out of the notch on a
+/// screen that has one (macOS; read each time the HUD is placed).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn notch_indicator() -> bool {
+    on(NOTCH_INDICATOR) && Feature::NotchIndicator.on_this_os()
+}
+
+/// A paste on a Wayland desktop without data-control (GNOME) snapshots and
+/// restores the clipboard through an already running XWayland (Linux; read
+/// as each paste starts).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn gnome_clipboard_restore() -> bool {
+    on(GNOME_CLIPBOARD_RESTORE) && Feature::GnomeClipboardRestore.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
     let state = state();
     (state & UNLOAD_IDLE != 0)
-        .then(|| std::time::Duration::from_secs(u64::from(state >> MINUTES_SHIFT) * 60))
+        .then(|| std::time::Duration::from_secs((state >> MINUTES_SHIFT) * 60))
 }
 
 /// Records the switches the loaded or saved settings hold.
@@ -634,14 +902,17 @@ pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
 }
 
-fn encode(settings: &LabsSettings) -> u32 {
-    encode_where(settings, Feature::shipped)
+fn encode(settings: &LabsSettings) -> u64 {
+    let policy = crate::policy::Policy::current();
+    encode_where(settings, |feature| {
+        feature.shipped() && policy.labs_lock(feature).is_none()
+    })
 }
 
 /// The switches `settings` hold for the features `reaches` admits; the
 /// rest read off while their saved setting stays as it is.
-fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u32 {
-    let minutes = settings.unload_idle_minutes.clamp(1, 24 * 60) << MINUTES_SHIFT;
+fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u64 {
+    let minutes = u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60)) << MINUTES_SHIFT;
     [
         (Feature::LiveText, settings.live_text, LIVE_TEXT),
         (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
@@ -698,6 +969,46 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             RECENT_DICTATIONS,
         ),
         (Feature::SkipPauses, settings.skip_pauses, SKIP_PAUSES),
+        (
+            Feature::StopWhenCallEnds,
+            settings.stop_when_call_ends,
+            STOP_WHEN_CALL_ENDS,
+        ),
+        (
+            Feature::KeepRecordings,
+            settings.keep_recordings,
+            KEEP_RECORDINGS,
+        ),
+        (
+            Feature::HideMenuBarIcon,
+            settings.hide_menu_bar_icon,
+            HIDE_MENU_BAR_ICON,
+        ),
+        (
+            Feature::MovableMeetingCapsules,
+            settings.movable_meeting_capsules,
+            MOVABLE_MEETING_CAPSULES,
+        ),
+        (
+            Feature::MeetingSummaryModel,
+            settings.meeting_summary_model,
+            MEETING_SUMMARY_MODEL,
+        ),
+        (
+            Feature::GnomeClipboardRestore,
+            settings.gnome_clipboard_restore,
+            GNOME_CLIPBOARD_RESTORE,
+        ),
+        (
+            Feature::MeetingNotesVocabulary,
+            settings.meeting_notes_vocabulary,
+            MEETING_NOTES_VOCABULARY,
+        ),
+        (
+            Feature::NotchIndicator,
+            settings.notch_indicator,
+            NOTCH_INDICATOR,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -767,6 +1078,9 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
         return Ok(());
     }
     let feature = resolve(name, Feature::shipped)?;
+    if let Some(lock) = feature.managed() {
+        return Err(eyre!(lock.refusal()));
+    }
     if feature == Feature::VoiceFilter
         && !on
         && crate::audio::hex_microphone::driver_bundle_installed()
@@ -838,9 +1152,15 @@ fn list(settings: &AppSettings) -> String {
             || (feature == Feature::VoiceFilter
                 && crate::audio::hex_microphone::driver_bundle_installed());
         out.push_str(&format!(
-            "{:<width$}  {:<3}  {:<8}  {} (hex settings {})\n",
+            "{:<width$}  {:<7}  {:<8}  {} (hex settings {})\n",
             feature.name(),
-            if on { "on" } else { "off" },
+            if feature.managed().is_some() {
+                "managed"
+            } else if on {
+                "on"
+            } else {
+                "off"
+            },
             feature.audience().name(),
             feature.description(),
             feature.settings_key(),
@@ -879,6 +1199,22 @@ mod tests {
             feature.set(&mut settings, true);
             assert!(feature.on(&settings));
         }
+    }
+
+    #[test]
+    fn switches_hold_every_feature() {
+        let mut settings = AppSettings::default();
+        for switch in Feature::switches(&mut settings) {
+            *switch = true;
+        }
+        for feature in Feature::ALL {
+            assert!(feature.on(&settings), "{} has no switch", feature.name());
+        }
+        assert_eq!(
+            Feature::switches(&mut settings).len(),
+            Feature::ALL.len(),
+            "one switch per feature"
+        );
     }
 
     #[test]
@@ -1058,6 +1394,78 @@ mod tests {
         assert_ne!(state & SKIP_PAUSES, 0);
         assert_eq!(state & TAP_OR_HOLD, 0);
         assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn stop_when_call_ends_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & STOP_WHEN_CALL_ENDS, 0);
+        labs.stop_when_call_ends = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & STOP_WHEN_CALL_ENDS, 0);
+        assert_eq!(state & RECENT_DICTATIONS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn keep_recordings_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & KEEP_RECORDINGS, 0);
+        labs.keep_recordings = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & KEEP_RECORDINGS, 0);
+        assert_eq!(state & STOP_WHEN_CALL_ENDS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn hide_menu_bar_icon_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & HIDE_MENU_BAR_ICON, 0);
+        labs.hide_menu_bar_icon = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & HIDE_MENU_BAR_ICON, 0);
+        assert_eq!(state & KEEP_RECORDINGS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn notch_indicator_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & NOTCH_INDICATOR, 0);
+        labs.notch_indicator = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & NOTCH_INDICATOR, 0);
+        assert_eq!(state & MEETING_NOTES_VOCABULARY, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn movable_meeting_capsules_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & MOVABLE_MEETING_CAPSULES, 0);
+        labs.movable_meeting_capsules = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & MOVABLE_MEETING_CAPSULES, 0);
+        assert_eq!(state & HIDE_MENU_BAR_ICON, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn gnome_clipboard_restore_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & GNOME_CLIPBOARD_RESTORE, 0);
+        labs.gnome_clipboard_restore = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & GNOME_CLIPBOARD_RESTORE, 0);
+        assert_eq!(state & MEETING_SUMMARY_MODEL, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

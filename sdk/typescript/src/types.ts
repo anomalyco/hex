@@ -13,6 +13,7 @@ export const MODEL_IDS = [
   "parakeet_ultra",
   "nemotron_3_5_asr",
   "gigaam_v3",
+  "nb_whisper_medium",
   "apple_speech",
 ] as const
 

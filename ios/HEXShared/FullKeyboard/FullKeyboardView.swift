@@ -70,8 +70,14 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         globeButton.accessibilityLabel = "Next keyboard"
         globeButton.isAccessibilityElement = true
 
-        hexKey.onTap = { [weak self] in self?.hexKeyTapped() }
-        hexKey.onLongPress = { [weak self] in self?.showStyleMenu() }
+        hexKey.onHold = { [weak self] in self?.hexKeyHeld() }
+        hexKey.onMenuOpen = { [weak self] point in
+            guard let self else { return }
+            self.showStyleMenu()
+            self.forwardMenuPoint(point, release: false)
+        }
+        hexKey.onMenuDrag = { [weak self] point in self?.forwardMenuPoint(point, release: false) }
+        hexKey.onMenuRelease = { [weak self] point in self?.forwardMenuPoint(point, release: true) }
 
         plane.onKeyDown = { [weak self] _ in self?.keyFeedback() }
         engine.onChange = { [weak self] in self?.engineChanged() }
@@ -361,8 +367,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
     }
 
-    private func hexKeyTapped() {
-        keyFeedback()
+    /// A still hold on the Hex key; a tap does nothing, so a stray one while typing is harmless.
+    private func hexKeyHeld() {
+        if allowsHaptics() { haptics.impactOccurred() }
         dismissStyleMenu()
         if hexKey.isWarm {
             model.onDictateTap?()
@@ -371,9 +378,19 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
     }
 
+    /// Hold and slide: light the row under the finger, and pick it on release.
+    private func forwardMenuPoint(_ point: CGPoint, release: Bool) {
+        guard let menu = styleMenu else { return }
+        let local = hexKey.convert(point, to: menu)
+        if release {
+            menu.pick(at: local)
+        } else {
+            menu.highlight(at: local)
+        }
+    }
+
     private func showStyleMenu() {
         guard styleMenu == nil, !showsRecording else { return }
-        if allowsHaptics() { haptics.impactOccurred() }
         plane.cancelAllTouches()
         let menu = HexStyleMenuView()
         menu.palette = palette

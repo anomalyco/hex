@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 
 use crate::audio::{self, RecordedAudio};
 use crate::autocrop;
-use crate::capture::{self, write_bundle_artifacts};
+use crate::capture;
 use crate::handoff;
 use crate::helper;
 use crate::keyframes::select_keyframes;
@@ -876,12 +876,11 @@ pub fn build_bundle_from_parts(
                     crate::routing::undo::write_private(&full_dir.join(name), bytes)?;
                 }
             }
-            let manifest_bytes = serde_json::to_vec_pretty(&bundle)?;
-            crate::routing::undo::write_private(&bundle_dir.join("scrawl.json"), &manifest_bytes)?;
             crate::routing::undo::write_private(
                 &bundle_dir.join("summary.md"),
                 summary.as_bytes(),
             )?;
+            capture::publish_manifest(bundle_dir, &bundle)?;
         }
         BundleOutput::Rendered {
             annotated,
@@ -896,14 +895,22 @@ pub fn build_bundle_from_parts(
                     ),
                     _ => None,
                 };
-                write_bundle_artifacts(bundle_dir, &bundle, &annotated, &contact_sheet, &summary)?;
+                let written = capture::write_bundle_files(
+                    bundle_dir,
+                    &bundle,
+                    &annotated,
+                    &contact_sheet,
+                    &summary,
+                );
                 if let Some(handle) = full_write {
                     handle
                         .join()
                         .map_err(|_| anyhow::anyhow!("Full-frame writer panicked"))??;
                 }
-                Ok(())
+                written
             })?;
+            // Last, once everything else is on disk: a bundle with a manifest is complete.
+            capture::publish_manifest(bundle_dir, &bundle)?;
         }
     }
 
@@ -1131,6 +1138,7 @@ pub fn generate_demo_bundle(out: Option<PathBuf>) -> Result<(PathBuf, ScrawlBund
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capture::write_bundle_artifacts;
 
     #[test]
     fn artifact_failures_do_not_publish_a_manifest() {

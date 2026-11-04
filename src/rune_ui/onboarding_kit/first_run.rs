@@ -73,7 +73,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
         .children(skip(p, s));
     // The real window has no title bar: the top of the page moves it.
     let top = if s.live.is_some() {
-        super::super::title_bar(top)
+        super::super::sidebar::title_bar(top)
     } else {
         top
     };
@@ -102,10 +102,11 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     ]
 }
 
-/// Skip, quiet in the top-right corner of every page but the last: ends
-/// onboarding at once, with the model still downloading behind it.
+/// Skip, quiet in the top-right corner of the optional pages only: the
+/// demo and the practice. It passes over that part to the next step setup
+/// still needs, and never past permissions or the model.
 fn skip(p: Paint, s: &Onboard) -> Option<El> {
-    s.live.as_ref().filter(|_| s.step != Step::Ready).map(|_| {
+    s.live.as_ref().filter(|_| s.step.optional()).map(|_| {
         let label = tr("Skip");
         let quiet = p.muted();
         row()
@@ -528,6 +529,7 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .child(after_flight(head, s))
         .child(progress_capsule)
         .children(retry)
+        .children(without_model(p, s))
 }
 
 /// A sketch from `"Watch another one"`, the download up in the top pill.
@@ -545,6 +547,39 @@ fn sketch_page(p: Paint, s: &Onboard) -> El {
             lead(p, super::sketches::lead(s).unwrap_or_default()),
         ))
         .children(super::sketches::card(p, s))
+}
+/// The one way past a model that can't be had (#894): once its download
+/// failed or stalled, and every permission is ready, onboarding can finish
+/// without one.
+fn without_model(p: Paint, s: &Onboard) -> Option<El> {
+    s.live
+        .as_ref()
+        .filter(|live| s.granted && live.model_blocked())
+        .map(|_| {
+            col()
+                .key("without-model")
+                .gap(6.0)
+                .items_center()
+                .transition(arrives())
+                .child(
+                    Button::new(tr("Continue without a model"))
+                        .variant(ButtonVariant::Ghost)
+                        .on_press(live::continue_without_model)
+                        .build_push(p.k)
+                        .key("continue-without-model"),
+                )
+                .child(
+                    text(tr(
+                        "Dictation won't work until you add a model with Add model file… in Settings.",
+                    ))
+                    .key("without-model-why")
+                    .font(DESCRIPTION)
+                    .color(p.muted())
+                    .align(rune::Align::Center)
+                    .wrap()
+                    .w(TRY_W),
+                )
+        })
 }
 
 fn demo_page(p: Paint, s: &Onboard) -> El {

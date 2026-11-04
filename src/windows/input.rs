@@ -16,9 +16,10 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VkKeyScanW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT,
-    PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED, MSG,
+    MSLLHOOKSTRUCT, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
+    UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN,
+    WM_SYSKEYUP,
 };
 
 use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
@@ -221,9 +222,13 @@ impl HotkeyEvent {
         observed_at_ms: u32,
         captured_through: CaptureInstant,
     ) -> CaptureInstant {
-        let delay = observed_at_ms
-            .wrapping_sub(self.timestamp_ms)
-            .min(MAX_EVENT_DELAY_MS);
+        // A delay this long is not a real one: tools that inject keys (a
+        // Stream Deck Hotkey action) can stamp events with a time from
+        // elsewhere, even slightly in the future, which wraps. Clamping it
+        // moved the shortcut a minute back and trimmed the clip to nothing,
+        // so such an event counts as happening now.
+        let delay = observed_at_ms.wrapping_sub(self.timestamp_ms);
+        let delay = if delay > MAX_EVENT_DELAY_MS { 0 } else { delay };
         captured_through
             .checked_sub(Duration::from_millis(u64::from(delay)))
             .unwrap_or(CaptureInstant::ZERO)
@@ -246,6 +251,11 @@ struct CallbackState {
     annotate_trigger_down: bool,
     /// Escape went down to stop Annotate's drawing; its release is ours too.
     drawing_escape_down: bool,
+    /// Toggle mode's cancel shortcut, Hex's only while a recording runs.
+    cancel: Option<WindowsHotkey>,
+    cancel_vk: Option<u32>,
+    /// The cancel key went down while Hex held it; its release is ours too.
+    cancel_down: bool,
     modifiers: ModifierState,
     side_down: SideDownTimes,
     trigger_down: bool,
@@ -357,6 +367,12 @@ impl CaptureState {
         recording.then_some(HotkeyAction::Cancel)
     }
 
+    /// Whether Toggle's cancel shortcut is Hex's now: only while a toggled
+    /// capture records, so the key stays with every app otherwise.
+    fn wants_cancel(&self) -> bool {
+        self.toggle && (self.active || self.locked)
+    }
+
     fn cancel(&mut self) -> Option<HotkeyAction> {
         if !self.active && !self.locked {
             return None;
@@ -447,12 +463,18 @@ impl WindowsHotkeyMonitor {
         paste_last: Option<WindowsHotkey>,
         raw: Option<WindowsHotkey>,
         annotate: Option<WindowsHotkey>,
+        cancel: Option<WindowsHotkey>,
         double_tap_enabled: bool,
         double_tap_only: bool,
         shortcut_mode: ShortcutMode,
         share_trigger: bool,
     ) -> Result<Self> {
         binding.validate()?;
+        let cancel_vk = cancel
+            .as_ref()
+            .and_then(|cancel| cancel.key.as_deref())
+            .map(virtual_key)
+            .transpose()?;
         let trigger_vk = binding.key.as_deref().map(virtual_key).transpose()?;
         let paste_trigger_vk = chord_virtual_key(paste_last.as_ref(), "Paste Last")?;
         let raw_trigger_vk = chord_virtual_key(raw.as_ref(), "Dictate without processing")?;
@@ -475,6 +497,9 @@ impl WindowsHotkeyMonitor {
             annotate_trigger_vk,
             annotate_trigger_down: false,
             drawing_escape_down: false,
+            cancel,
+            cancel_vk,
+            cancel_down: false,
             modifiers: ModifierState::default(),
             side_down: SideDownTimes::default(),
             trigger_down: false,
@@ -629,7 +654,14 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
         return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
     }
     let vk = track_numpad(event, is_down).unwrap_or(event.vkCode);
-    match process_button(vk, is_down, event.time) {
+    // Injected keys carry whatever time their sender gave them, so they
+    // are stamped with the time the hook sees them.
+    let time = if event.flags & LLKHF_INJECTED != 0 {
+        unsafe { GetTickCount() }
+    } else {
+        event.time
+    };
+    match process_button(vk, is_down, time) {
         Disposition::Pass => unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) },
         Disposition::Suppress => 1,
         Disposition::Mask if replay_masked_release(event) => 1,
@@ -845,6 +877,28 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
                 } else if is_up && state.annotate_trigger_down {
                     state.annotate_trigger_down = false;
                     send_event(state, HotkeyAction::CaptureUp, time);
+                }
+                return Disposition::Suppress;
+            }
+            // Toggle's cancel key discards the recording. Hex takes it only
+            // while a toggled capture records, and keeps its repeats and
+            // release, so the app in front never acts on it.
+            let cancel_event = state.cancel_vk == Some(vk)
+                && (state.cancel_down
+                    || (is_down
+                        && state.capture.wants_cancel()
+                        && state
+                            .cancel
+                            .as_ref()
+                            .is_some_and(|binding| state.modifiers.matches(binding))));
+            if cancel_event {
+                if is_down && !state.cancel_down {
+                    state.cancel_down = true;
+                    if let Some(action) = state.capture.cancel() {
+                        send_event(state, action, time);
+                    }
+                } else if is_up {
+                    state.cancel_down = false;
                 }
                 return Disposition::Suppress;
             }
@@ -1367,6 +1421,7 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
     }
     let virtual_key = match normalized.as_str() {
         "return" => u32::from(VK_RETURN),
+        "escape" => u32::from(VK_ESCAPE),
         "num enter" => NUMPAD_ENTER,
         name if HotkeyKey::special_name(name) && name != "menu" && name != "pause" => 0x91,
         "page_up" => 0x21,
@@ -1749,6 +1804,24 @@ mod tests {
     }
 
     #[test]
+    fn an_implausible_event_time_counts_as_now() {
+        // Injected input stamped slightly in the future wraps to a huge
+        // delay; it must not move the shortcut a minute back (#1005).
+        let captured = CaptureInstant::from_nanos(90_000_000_000);
+        for timestamp_ms in [1_010, 1_000u32.wrapping_sub(MAX_EVENT_DELAY_MS + 1)] {
+            let event = HotkeyEvent {
+                action: HotkeyAction::Start,
+                raw: false,
+                timestamp_ms,
+            };
+            assert_eq!(
+                event.occurred_at_with(1_000, captured).as_nanos(),
+                captured.as_nanos()
+            );
+        }
+    }
+
+    #[test]
     fn second_tap_locks_until_the_shortcut_is_pressed_again() {
         let mut state = CaptureState::default();
         assert_eq!(state.press(true, false, 100), Some(HotkeyAction::Start));
@@ -1837,6 +1910,33 @@ mod tests {
         state.release(true, 120);
         assert_eq!(state.cancel(), Some(HotkeyAction::Cancel));
         assert!(!state.active && !state.locked);
+    }
+
+    /// Toggle's cancel key is Hex's only while a toggled capture records:
+    /// held or locked, never idle, and never in Hold mode.
+    #[test]
+    fn cancel_is_wanted_only_while_a_toggled_capture_records() {
+        let mut state = CaptureState {
+            toggle: true,
+            ..CaptureState::default()
+        };
+        assert!(!state.wants_cancel());
+        assert_eq!(state.press(true, false, 100), Some(HotkeyAction::Start));
+        assert!(state.wants_cancel());
+        state.release(true, 120);
+        assert!(state.locked && state.wants_cancel());
+        assert_eq!(state.cancel(), Some(HotkeyAction::Cancel));
+        assert!(!state.wants_cancel());
+        // The next press starts a fresh recording.
+        assert_eq!(state.press(true, false, 1_000), Some(HotkeyAction::Start));
+
+        let mut hold = CaptureState::default();
+        hold.press(true, false, 100);
+        assert!(!hold.wants_cancel());
+        hold.release(true, 120);
+        hold.press(true, false, 200);
+        hold.release(true, 220);
+        assert!(hold.locked && !hold.wants_cancel());
     }
 
     #[test]

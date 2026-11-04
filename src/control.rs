@@ -38,29 +38,9 @@ pub enum CaptureAction {
     Stop,
     /// Start when idle, otherwise stop.
     Toggle,
-}
-
-/// The `action` of a `dictation` request: a [`CaptureAction`], or the
-/// `cancel` older clients still send. [`check_flags`] answers that with
-/// [`cancel_removed`].
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(untagged)]
-pub enum RequestedCapture {
-    Action(CaptureAction),
-    Removed(RemovedCaptureAction),
-}
-
-/// Capture actions Hex no longer has (#786).
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RemovedCaptureAction {
+    /// Discard the recording: nothing is transcribed, pasted, or saved.
+    /// Dictations already transcribing finish.
     Cancel,
-}
-
-impl From<CaptureAction> for RequestedCapture {
-    fn from(action: CaptureAction) -> Self {
-        Self::Action(action)
-    }
 }
 
 /// What `hex capture` does (the `capture` experiment).
@@ -105,7 +85,7 @@ pub enum ControlCommand {
         force: bool,
     },
     Dictation {
-        action: RequestedCapture,
+        action: CaptureAction,
         /// `stop` only: answer with the transcript instead of pasting it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         print: bool,
@@ -489,23 +469,12 @@ pub fn await_printed(receiver: &Receiver<PrintedTranscript>, wait: Duration) -> 
     }
 }
 
-/// The reply to a `cancel` from an older client: dictations always finish.
-pub fn cancel_removed() -> ControlError {
-    ControlError::new(
-        "removed",
-        "cancel was removed: dictations always finish and paste; `hex dictation stop` finishes one",
-    )
-}
-
 /// The action a request asks for; `print` applies only to `stop`.
 pub fn check_flags(
-    action: RequestedCapture,
+    action: CaptureAction,
     print: bool,
     raw: bool,
 ) -> Result<CaptureAction, ControlError> {
-    let RequestedCapture::Action(action) = action else {
-        return Err(cancel_removed());
-    };
     if print && action != CaptureAction::Stop {
         return Err(ControlError::new(
             "invalid-value",
@@ -1028,10 +997,10 @@ mod tests {
             ControlReply::Error { code, .. } if code == "failed"
         ));
         // Only `stop` prints, and older requests without the field still parse.
-        assert!(check_flags(CaptureAction::Start.into(), true, false).is_err());
-        assert!(check_flags(CaptureAction::Stop.into(), true, false).is_ok());
-        assert!(check_flags(CaptureAction::Toggle.into(), false, true).is_ok());
-        assert!(check_flags(CaptureAction::Stop.into(), false, true).is_err());
+        assert!(check_flags(CaptureAction::Start, true, false).is_err());
+        assert!(check_flags(CaptureAction::Stop, true, false).is_ok());
+        assert!(check_flags(CaptureAction::Toggle, false, true).is_ok());
+        assert!(check_flags(CaptureAction::Stop, false, true).is_err());
         assert_eq!(
             serde_json::from_str::<ControlRequest>(
                 r#"{"version":4,"command":"dictation","action":"stop"}"#
@@ -1039,16 +1008,16 @@ mod tests {
             .unwrap()
             .command,
             ControlCommand::Dictation {
-                action: CaptureAction::Stop.into(),
+                action: CaptureAction::Stop,
                 print: false,
                 raw: false,
             }
         );
     }
 
-    /// #786: an older client's `cancel` parses and gets a clear answer.
+    /// `cancel` discards the recording, and takes neither flag.
     #[test]
-    fn an_older_cancel_gets_removed() {
+    fn cancel_parses_and_takes_no_flags() {
         let cancel = serde_json::from_str::<ControlRequest>(
             r#"{"version":4,"command":"dictation","action":"cancel"}"#,
         )
@@ -1056,10 +1025,10 @@ mod tests {
         let ControlCommand::Dictation { action, .. } = cancel.command else {
             panic!("a dictation command");
         };
-        assert_eq!(
-            check_flags(action, false, false).unwrap_err().code,
-            "removed"
-        );
+        assert_eq!(action, CaptureAction::Cancel);
+        assert_eq!(check_flags(action, false, false), Ok(CaptureAction::Cancel));
+        assert!(check_flags(action, true, false).is_err());
+        assert!(check_flags(action, false, true).is_err());
     }
 
     fn round_trip_request(command: ControlCommand) {
@@ -1078,17 +1047,17 @@ mod tests {
             ControlCommand::Quit { force: true },
             ControlCommand::Restart { force: false },
             ControlCommand::Dictation {
-                action: CaptureAction::Toggle.into(),
+                action: CaptureAction::Toggle,
                 print: false,
                 raw: false,
             },
             ControlCommand::Dictation {
-                action: CaptureAction::Stop.into(),
+                action: CaptureAction::Stop,
                 print: true,
                 raw: false,
             },
             ControlCommand::Dictation {
-                action: CaptureAction::Start.into(),
+                action: CaptureAction::Start,
                 print: false,
                 raw: true,
             },

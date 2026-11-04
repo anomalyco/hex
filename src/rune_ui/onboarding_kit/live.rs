@@ -39,6 +39,8 @@ use crate::transcription::models::{
 
 /// How often the first run looks at the model on disk and the permissions.
 const CHECK_EVERY: f64 = 0.25;
+/// A download that gained no bytes for this long has stalled.
+const STALL_AFTER: f64 = 30.0;
 
 /// What the real first run reports to the story's pages.
 pub(crate) struct Live {
@@ -48,6 +50,10 @@ pub(crate) struct Live {
     pub(crate) failed: bool,
     /// Why, in one line, such as a proxy or certificate (#894).
     pub(crate) failure: Option<String>,
+    /// The download runs but gained nothing for [`STALL_AFTER`].
+    pub(crate) stalled: bool,
+    /// The download's bytes, and when they last grew.
+    progress: Option<(u64, f64)>,
     /// A model file chosen with Use a model file… is being added.
     pub(crate) using_file: bool,
     pub(crate) microphone: ItemStatus,
@@ -120,6 +126,12 @@ struct Checked {
 }
 
 impl Live {
+    /// The model can't be had here: its download failed or stalled, so
+    /// Continue without a model is offered (#894).
+    pub(crate) fn model_blocked(&self) -> bool {
+        self.failed || self.stalled
+    }
+
     pub(crate) fn granted_for(&self, now: f64) -> bool {
         self.granted_at
             .is_some_and(|at| now - at >= GRANTED_BEAT + FLOAT_OFF)
@@ -239,6 +251,8 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         listening: false,
         failed: false,
         failure: None,
+        stalled: false,
+        progress: None,
         using_file: false,
         microphone: ItemStatus::Todo,
         accessibility: ItemStatus::Todo,
@@ -294,6 +308,19 @@ pub(in crate::rune_ui) enum Page {
     Ready,
 }
 
+/// The page the first run shows, for the window tests (Linux only).
+#[cfg(all(test, target_os = "linux"))]
+pub(in crate::rune_ui) fn page(ui: &Ui) -> Option<Page> {
+    Some(match ui.first_run.as_ref()?.step {
+        Step::Pick | Step::Started => Page::Download,
+        Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard | Step::Done => Page::Demo,
+        Step::Permissions => Page::Permissions,
+        Step::Waiting => Page::Waiting,
+        Step::Try | Step::TryHearing | Step::TryHeard => Page::Try,
+        Step::Ready => Page::Ready,
+    })
+}
+
 /// Scenes: the first run over the tour a fixture walked, played on its own
 /// clock to `page` as a person would see it, then held there.
 pub(in crate::rune_ui) fn fixture(ui: &mut Ui, page: Page) {
@@ -339,9 +366,14 @@ pub(in crate::rune_ui) fn fixture_resume(ui: &mut Ui, page: Page) {
     if page == Page::Try {
         super::game::step(s, s.now);
     }
-    // Everything that entered has settled; nothing more is due.
+    // Everything that entered has settled; nothing more is due. The
+    // download's progress counts from here, so a scene never shows it
+    // stalled.
     s.now += 10.0;
     s.auto_due_at = None;
+    if let Some(live) = s.live.as_mut() {
+        live.progress = None;
+    }
     poll(ui, &mut tx);
 }
 
@@ -514,6 +546,13 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
 
     // The model download.
     live.failed = !choice_installed && !preparing && (errored || failure.is_some());
+    live.progress = (preparing && !choice_installed).then_some(match live.progress {
+        Some((bytes, since)) if bytes == downloaded_bytes => (bytes, since),
+        _ => (downloaded_bytes, now),
+    });
+    live.stalled = live
+        .progress
+        .is_some_and(|(_, since)| now - since >= STALL_AFTER);
     live.failure = failure;
     live.using_file = using_file;
     s.granted = granted;
@@ -574,19 +613,25 @@ pub(super) fn press_continue(ui: &mut Ui) {
     }
 }
 
-/// Skip: ends onboarding now and marks it done, so the next launch doesn't
-/// open it (Run setup again still replays it). A model that isn't ready
-/// keeps downloading behind it: the one picked from the model step, else
-/// the recommended one, even while a scan or the list held it (#894).
-pub(super) fn skip(ui: &mut Ui) {
-    let model = ui
-        .tour
+/// Skip on the demo or the practice: passes over that part to the next
+/// step setup still needs. It never records completion; only Hex is ready
+/// (or Continue without a model) does.
+pub(in crate::rune_ui) fn skip(ui: &mut Ui) {
+    if let Some(s) = ui.first_run.as_mut() {
+        s.skip_optional();
+    }
+}
+
+/// "Continue without a model", once the download failed or stalled (#894):
+/// onboarding finishes with no model, and Settings says so with Download
+/// and Add model file…. Only offered once every permission is ready.
+pub(in crate::rune_ui) fn continue_without_model(ui: &mut Ui) {
+    let offered = ui
+        .first_run
         .as_ref()
-        .map_or(ItemStatus::Todo, |tour| tour.flow.view().model);
-    if found_choice::pending(ui, model) {
-        found_choice::start_selected(ui);
-    } else if matches!(model, ItemStatus::Todo | ItemStatus::Failed) {
-        onboarding::input(ui, Input::Grant(SetupItem::Model));
+        .is_some_and(|s| s.granted && s.live.as_ref().is_some_and(Live::model_blocked));
+    if !offered {
+        return;
     }
     if ui.live()
         && !crate::desktop::onboarding::completion_recorded()
@@ -631,6 +676,8 @@ pub(super) fn cycle_language(ui: &mut Ui) {
     };
     live.choice = other_selection(&live.choice);
     live.failed = false;
+    live.stalled = false;
+    live.progress = None;
     live.checked = None;
     let choice = live.choice.clone();
     choose(ui, &choice);
@@ -685,6 +732,8 @@ pub(super) fn retry_download(ui: &mut Ui) {
         return;
     };
     live.failed = false;
+    live.stalled = false;
+    live.progress = None;
     let choice = live.choice.clone();
     choose(ui, &choice);
 }

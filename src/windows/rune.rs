@@ -89,6 +89,8 @@ pub(crate) enum ShortcutTarget {
     Capture,
     /// Dictate without processing.
     RawDictation,
+    /// Toggle mode's cancel shortcut.
+    Cancel,
 }
 
 /// What the runtime last published for the window.
@@ -160,6 +162,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let Some(instance) = crate::windows::app::AppInstance::claim(start_hidden)? else {
         return Ok(());
     };
+    name_ui_thread();
     crate::labs::log_launch();
     shutdown.store(false, Ordering::Relaxed);
     let (settings, settings_error) = AppSettings::load_for_launch();
@@ -218,7 +221,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         })
         .map_err(|_| eyre!("the Hex runtime already started"))?;
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
-    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls);
+    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls, None);
     let quit = window.clone();
     let runtime_tray = tray.clone();
     let runtime_shared = shared.clone();
@@ -264,6 +267,17 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     drop(local_api);
     drop(tray);
     Ok(())
+}
+
+/// Names the main thread, which runs Rune's event loop and draws, so
+/// profilers and debuggers tell it from Hex's other threads (which the
+/// standard library names when they start).
+fn name_ui_thread() {
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadDescription};
+    let name: Vec<u16> = "hex-ui".encode_utf16().chain([0]).collect();
+    // SAFETY: `name` is a NUL-terminated UTF-16 string that outlives the
+    // call, and the pseudo handle names the calling thread.
+    unsafe { SetThreadDescription(GetCurrentThread(), name.as_ptr()) };
 }
 
 // ---------------------------------------------------------------------------

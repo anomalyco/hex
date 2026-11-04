@@ -137,7 +137,8 @@ pub(super) enum View {
 /// Meetings is on, so the pane lists recordings and settings instead of the
 /// opt-in card (`MeetingSettings::available`; scenes leave `developer` off).
 pub(super) fn available(ui: &Ui) -> bool {
-    ui.settings.meetings.enabled || ui.platform.developer
+    crate::labs::Feature::Meetings.managed().is_none()
+        && (ui.settings.meetings.enabled || ui.platform.developer)
 }
 
 /// Whether something can write a meeting's notes: Apple Intelligence on a
@@ -145,6 +146,16 @@ pub(super) fn available(ui: &Ui) -> bool {
 fn notes_available(ui: &Ui) -> bool {
     (ui.platform.caps.os == super::platform::Os::Macos && ui.platform.notes.is_available())
         || ui.settings.meetings.summarize_with_opencode
+}
+
+/// What writes the notes now, as the generator picks it: Apple Intelligence
+/// on a Mac that has it, otherwise OpenCode.
+fn notes_running_label(ui: &Ui) -> &'static str {
+    if ui.platform.caps.os == super::platform::Os::Macos && ui.platform.notes.is_available() {
+        tr("Writing a title and summary with Apple Intelligence…")
+    } else {
+        tr("Writing a title and summary with OpenCode…")
+    }
 }
 
 #[derive(Default)]
@@ -165,6 +176,9 @@ pub(super) struct MeetingsPane {
     copied: Option<(String, String)>,
     pub(super) start_pending: bool,
     pub(super) stop_pending: bool,
+    /// Labs › Choose meeting summary model's field while it holds typing
+    /// not yet saved; `None` shows the saved model.
+    pub(super) summary_model: Option<TextEdit>,
     /// Where Linux and Windows perform meeting requests.
     #[cfg(not(target_os = "macos"))]
     pub(super) local: super::meetings_host::LocalMeetings,
@@ -530,13 +544,16 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             "enable",
             vec![super::platform_settings::meetings_toggle(ui, p)],
         ));
-        return (Vec::new(), super::scroll_body("scroll", content));
+        return (Vec::new(), super::scroll_body(p.k, "scroll", content));
     }
     let action = recording_action(ui, p);
     if ui.meetings.view == View::Settings {
         let content =
             page("content").children(super::platform_settings::meetings_settings(ui, p, layer));
-        return (vec![action], super::scroll_body("settings-scroll", content));
+        return (
+            vec![action],
+            super::scroll_body(p.k, "settings-scroll", content),
+        );
     }
     recordings(ui, p, layer, action)
 }
@@ -765,7 +782,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                 None,
             ),
         };
-        let column = ld::list_column(search(ui, p), "meetings-scroll", list);
+        let column = ld::list_column(p, search(ui, p), "meetings-scroll", list);
         ld::body(p, "meetings-body", column, detail)
     };
     (
@@ -946,7 +963,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         );
     } else if meeting.notes_running {
         body = body.child(
-            text(tr("Writing a title and summary with Apple Intelligence…"))
+            text(notes_running_label(ui))
                 .key("notes-running")
                 .font(DESCRIPTION)
                 .color(p.faint()),
@@ -974,7 +991,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         .shrink()
         .child(ld::card_header(title, meta, actions))
         .children(confirm)
-        .child(ld::card_scroll("meeting-transcript", body))
+        .child(ld::card_scroll(p, "meeting-transcript", body))
 }
 
 /// The meeting's chapters, each with its start, name, line, and Copy
@@ -1241,5 +1258,18 @@ mod tests {
         stop(&mut ui);
         assert!(!ui.meetings.stop_pending);
         assert!(ui.meetings.action_error.is_some());
+    }
+
+    /// Off a Mac the notes are written by OpenCode, so the progress line
+    /// names it, never Apple Intelligence (#1151).
+    #[test]
+    fn notes_progress_names_opencode_off_a_mac() {
+        let ui = Ui::with(
+            crate::app_settings::AppSettings::default(),
+            Service::Fixture(Vec::new()),
+        );
+        let label = notes_running_label(&ui);
+        assert!(label.contains("OpenCode"), "{label}");
+        assert!(!label.contains("Apple Intelligence"), "{label}");
     }
 }

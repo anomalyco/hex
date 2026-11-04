@@ -402,7 +402,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     tap(&mut rt, "lab-copy-only");
     assert!(rt.state.settings.labs.copy_only);
 
-    let mut rt = runtime("windows-settings", true, (980.0, 1600.0));
+    // Tall enough that the last Labs rows (Share shortcut, Terminal paste)
+    // sit inside the window, where a tap reaches them.
+    let mut rt = runtime("windows-settings", true, (980.0, 2400.0));
     open_advanced(&mut rt, Pane::General);
     assert!(rt.find("share-dictation-shortcut").is_none());
     tap(&mut rt, "nav-labs");
@@ -412,8 +414,56 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
     assert!(rt.find("lab-spoken-symbols").is_some(), "every OS");
+    assert!(!rt.state.settings.share_dictation_shortcut);
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);
+}
+
+/// Choose meeting summary model is a Labs toggle wherever Meetings is,
+/// Windows and Linux included (#1160), off by default.
+#[test]
+fn the_meeting_summary_model_lab_is_on_every_os_with_meetings() {
+    for scene in ["portal", "windows-settings", "mac-settings"] {
+        let mut rt = runtime(scene, true, (980.0, 2000.0));
+        tap(&mut rt, "nav-labs");
+        assert!(
+            rt.find("lab-meeting-summary-model").is_some(),
+            "{scene} lists Choose meeting summary model"
+        );
+        assert!(!rt.state.settings.labs.meeting_summary_model);
+        tap(&mut rt, "lab-meeting-summary-model");
+        assert!(rt.state.settings.labs.meeting_summary_model, "{scene}");
+    }
+}
+
+/// The cancel shortcut's row shows only in Toggle; its default, Escape,
+/// can't be recorded (Escape ends the recorder), so restoring puts it back.
+#[test]
+fn the_cancel_shortcut_shows_in_toggle_and_restores_escape() {
+    use crate::app_settings::HotkeyBinding;
+    let hold = runtime("mac-settings", true, PANE_SIZE);
+    assert!(hold.find("cancel-shortcut").is_none(), "Hold has no cancel");
+
+    let mut rt = runtime("toggle-cancel", true, PANE_SIZE);
+    assert!(rt.find("cancel-hotkey").is_some());
+    assert!(
+        rt.find("restore-cancel-shortcut").is_none(),
+        "already Escape"
+    );
+    rt.state.settings.cancel_hotkey = HotkeyBinding::paste_last_default();
+    rt.state.settings.paste_last_hotkey = None;
+    refresh(&mut rt);
+    tap(&mut rt, "restore-cancel-shortcut");
+    assert_eq!(
+        rt.state.settings.cancel_hotkey,
+        HotkeyBinding::cancel_default()
+    );
+
+    // On Wayland the portal would hold the key for good: the row points
+    // to `hex dictation cancel` instead of recording one.
+    let portal = runtime("portal-toggle-cancel", true, PANE_SIZE);
+    assert!(portal.find("cancel-shortcut").is_some());
+    assert!(portal.find("cancel-hotkey").is_none());
 }
 
 #[test]
@@ -1486,6 +1536,7 @@ fn platform_goldens() {
             "mac-settings-permissions-stale",
             "shortcut-mode",
             "shortcut-mode-key",
+            "toggle-cancel",
             "sound-sets",
             "sound-sets-playing",
         ] {
@@ -1493,6 +1544,7 @@ fn platform_goldens() {
         }
     }
     check_golden("shortcut-mode-chord", false, PANE_SIZE);
+    check_golden("portal-toggle-cancel", false, PANE_SIZE);
     check_golden("mac-settings-permissions", true, PANE_SIZE);
     check_golden("mac-settings-advanced", false, PANE_SIZE);
     check_golden("mac-microphone-bluetooth", true, PANE_SIZE);
@@ -1708,8 +1760,9 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
     tap(&mut rt, "lab-meetings");
     assert!(rt.find("nav-meetings").is_none(), "hidden while off");
 
-    // Windows lists Terminal paste in Labs, not General.
-    let mut rt = runtime("windows-settings", true, (980.0, 1400.0));
+    // Windows lists Terminal paste in Labs, not General. Labs is tall enough
+    // that its last row needs the macOS half's height to be on screen.
+    let mut rt = runtime("windows-settings", true, (980.0, 2000.0));
     assert!(rt.find("terminal-paste").is_none());
     tap(&mut rt, "nav-labs");
     tap(&mut rt, "lab-terminal-paste");
@@ -1949,4 +2002,33 @@ fn fun_driver_installed(rt: &rune::Runtime<Ui>) -> bool {
         .hex_microphone
         .as_ref()
         .is_some_and(|status| status.driver_bundle_installed)
+}
+
+/// A pane longer than the window shows a scroll bar to drag, for a pointer
+/// without a wheel (#1209).
+#[test]
+fn a_long_transcript_scrolls_by_dragging_its_scroll_bar() {
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    settle(&mut rt);
+    let at = |rt: &Runtime<Ui>, path: &str| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.path.ends_with(path))
+            .unwrap_or_else(|| panic!("no {path}"))
+            .rect
+    };
+    let thumb = at(&rt, "meeting-transcript-area/scroll-bar/thumb");
+    assert!(thumb[3] > 0.0, "the transcript overflows, so its bar shows");
+    let top = at(&rt, "meeting-transcript/inset")[1];
+    let (x, y) = (thumb[0] + thumb[2] / 2.0, thumb[1] + 4.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_move(x, y + 60.0);
+    rt.pointer_up(x, y + 60.0);
+    settle(&mut rt);
+    assert!(
+        at(&rt, "meeting-transcript/inset")[1] < top - 60.0,
+        "dragging the thumb scrolled the transcript"
+    );
+    assert!(at(&rt, "meeting-transcript-area/scroll-bar/thumb")[1] > thumb[1] + 59.0);
 }

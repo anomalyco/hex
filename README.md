@@ -32,7 +32,7 @@ Or install with:
 - Homebrew: `brew install --cask anomalyco/tap/hex`
 - AUR: `yay -S hex-bin`
 - install script (Linux): `curl -fsSL https://anoma.ly/hex/install-linux.sh | sh`
-- Nix: `nix profile install github:anomalyco/hex`
+- Nix: `nix profile add github:anomalyco/hex`
 
 More docs are in [`docs/`](docs/README.md).
 

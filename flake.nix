@@ -12,34 +12,49 @@
   outputs =
     { self, nixpkgs, ... }:
     let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
-      hex = pkgs.callPackage ./nix/package.nix { };
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+      forSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      package = pkgs: self.packages.${pkgs.stdenv.hostPlatform.system}.hex;
     in
     {
-      packages.${system} = {
-        inherit hex;
-        default = hex;
-      };
+      packages = forSystems (
+        pkgs:
+        let
+          hex = pkgs.callPackage ./nix/package.nix { };
+        in
+        {
+          inherit hex;
+          default = hex;
+        }
+      );
 
       overlays.default = final: _prev: {
         hex = final.callPackage ./nix/package.nix { };
       };
 
-      nixosModules.hex = {
-        imports = [ ./nix/module.nix ];
-        programs.hex.package = nixpkgs.lib.mkDefault hex;
-      };
+      nixosModules.hex =
+        { pkgs, ... }:
+        {
+          imports = [ ./nix/module.nix ];
+          programs.hex.package = nixpkgs.lib.mkDefault (package pkgs);
+        };
       nixosModules.default = self.nixosModules.hex;
 
-      homeManagerModules.hex = {
-        imports = [ ./nix/hm-module.nix ];
-        programs.hex.package = nixpkgs.lib.mkDefault hex;
-      };
+      homeManagerModules.hex =
+        { pkgs, ... }:
+        {
+          imports = [ ./nix/hm-module.nix ];
+          programs.hex.package = nixpkgs.lib.mkDefault (package pkgs);
+        };
       homeManagerModules.default = self.homeManagerModules.hex;
 
-      devShells.${system}.default = hex.devShell;
-      checks.${system} = import ./nix/checks.nix { inherit self pkgs; };
-      formatter.${system} = pkgs.nixfmt;
+      devShells = forSystems (pkgs: {
+        default = (package pkgs).devShell;
+      });
+      checks = forSystems (pkgs: import ./nix/checks.nix { inherit self pkgs; });
+      formatter = forSystems (pkgs: pkgs.nixfmt);
     };
 }

@@ -25,6 +25,11 @@ const LINUX_WINDOWS: &str = "Linux & Windows";
 const PATHS: &[(&str, &str)] = &[
     ("mac-settings", "Window/General/Settings"),
     ("mac-settings-sides", "Window/General/Left Option shortcut"),
+    ("toggle-cancel", "Window/General/Toggle cancel shortcut"),
+    (
+        "portal-toggle-cancel",
+        "Window/General/Toggle cancel on Wayland",
+    ),
     ("mac-settings-advanced", "Window/General/Advanced"),
     ("mac-settings-mic-level", "Window/General/Microphone level"),
     (
@@ -242,6 +247,10 @@ const PATHS: &[(&str, &str)] = &[
     (
         "onboarding-download-failed",
         "Linux & Windows/Onboarding · download failed",
+    ),
+    (
+        "onboarding-no-model",
+        "Linux & Windows/Onboarding · continued without a model",
     ),
     (
         "onboarding-model-found",

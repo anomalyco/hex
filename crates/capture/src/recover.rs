@@ -88,11 +88,19 @@ fn orphaned(dir: &Path) -> bool {
         && !dir.join("timeline.json").exists()
 }
 
+/// Whether `dir` has a whole manifest. Builds publish it last and atomically; an empty or
+/// partial one (left by builds that wrote it in place) doesn't count.
+fn built(dir: &Path) -> bool {
+    std::fs::read(dir.join("scrawl.json")).is_ok_and(|bytes| {
+        serde_json::from_slice::<serde_json::Value>(&bytes).is_ok_and(|value| value.is_object())
+    })
+}
+
 /// Whether a build is still owed to `dir`: nothing built it and it hasn't been tried.
 pub fn owed(dir: &Path) -> bool {
-    !dir.join("scrawl.json").exists()
-        && !dir.join(RECOVERING).exists()
+    !dir.join(RECOVERING).exists()
         && (dir.join(UNFINISHED).is_file() || orphaned(dir))
+        && !built(dir)
 }
 
 fn untouched_for(path: &Path, now: SystemTime, age: Duration) -> bool {
@@ -177,7 +185,7 @@ impl Media {
 /// tried first so a crash here isn't repeated at every launch.
 pub fn rebuild(dir: &Path, media: &Media) -> Result<String> {
     anyhow::ensure!(
-        !dir.join("scrawl.json").exists(),
+        !built(dir),
         "{} is already built; `scrawl reprocess` rebuilds it into a new bundle",
         dir.display()
     );
@@ -491,6 +499,34 @@ mod tests {
             times.iter().any(|&t| t >= 1_700),
             "the scene change 1.5 s into the movie is 1.7 s into the capture: {times:?}"
         );
+    }
+
+    /// A build that stops before its last file leaves no manifest, so it is still owed; so is a
+    /// bundle whose manifest an older build left empty or cut short.
+    #[test]
+    fn a_build_that_stops_early_or_a_partial_manifest_is_still_owed() {
+        let captures = temp_dir("early");
+        let dir = orphan(&captures, "early.scrawl");
+        write(&dir, &unfinished());
+        std::fs::create_dir_all(dir.join("summary.md")).unwrap();
+        assert!(
+            crate::pipeline::rebuild_screen_bundle_with(&dir, unfinished(), Some(None), &FAKE)
+                .is_err()
+        );
+        assert!(!dir.join("scrawl.json").exists(), "no manifest yet");
+        assert!(dir.join(UNFINISHED).is_file());
+        assert!(owed(&dir));
+
+        std::fs::remove_dir_all(dir.join("summary.md")).unwrap();
+        for partial in ["", "{\"version\": 1, \"id\""] {
+            std::fs::write(dir.join("scrawl.json"), partial).unwrap();
+            assert!(owed(&dir), "{partial:?}");
+        }
+        // Rebuilt from the video and audio alone, as `assert_rebuilt` expects.
+        std::fs::remove_file(dir.join(UNFINISHED)).unwrap();
+        assert!(owed(&dir));
+        rebuild(&dir, &FAKE).unwrap();
+        assert_rebuilt(&dir);
     }
 
     #[test]

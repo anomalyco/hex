@@ -55,7 +55,7 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too) 
 │   without a spelling, which the RNN-T decoder can still write ("Kip" -> Kit)
 └── SenseVoice, Cohere, GigaAM, Apple Speech -> no vocabulary in transcription
 
-Context prompt (Whisper incl. ivrit.ai, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; transcription::gguf_session::with_vocabulary
+Context prompt (Whisper incl. ivrit.ai and NB-Whisper, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; transcription::gguf_session::with_vocabulary
 ├── Always on (not Labs): replaced the per-model Recognition hints box (#129)
 ├── Every whole-clip run reads the list at its start: dictation, meetings,
 │   captures, the local API; live streams run without it
@@ -102,6 +102,12 @@ OpenCode rewriting (Modes)               // vocabulary.prompt
 Live meeting chapters (experiment live-chapters)  // vocabulary.chapters
 └── Chapter passes and the boundary pass start with "Names and terms that may
     appear: a, b, …" (first 30 terms, no spellings), read on each call
+
+Meeting notes (Labs › Vocabulary in meeting notes)  // vocabulary.notes
+├── Off (default) -> notes prompts are unchanged
+└── On -> the final title and summary prompt (automatic notes and Regenerate
+    summary) starts with the same line, read at each generation, ahead of the
+    calendar event; it shares the transcript's excerpt budget (#1154)
 
 Search                                   // vocabulary.search
 ├── hex meetings search, MCP search_transcripts, hex history --search

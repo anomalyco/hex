@@ -300,7 +300,7 @@ pub fn wide(text: &str) -> Vec<u16> {
 
 /// `%LOCALAPPDATA%\Scrawl`: logs and machine-local state.
 pub fn local_dir() -> PathBuf {
-    dirs::data_local_dir()
+    scrawl_router::user_dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Scrawl")
 }

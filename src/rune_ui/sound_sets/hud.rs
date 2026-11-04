@@ -184,7 +184,8 @@ impl Hud {
 /// Draws the stage's HUD over the window's UI.
 #[derive(Default)]
 pub(crate) struct Preview {
-    painter: Option<Painter>,
+    /// The painter and the device key its buffers belong to.
+    painter: Option<(rune::compose::DeviceKey, Painter)>,
 }
 
 impl Preview {
@@ -215,11 +216,11 @@ impl Preview {
         if self
             .painter
             .as_ref()
-            .is_none_or(|painter| painter.format != f.format)
+            .is_none_or(|(device, painter)| *device != f.device_key() || painter.format != f.format)
         {
-            self.painter = Some(Painter::new(f.device, f.format));
+            self.painter = Some((f.device_key(), Painter::new(f.device, f.format)));
         }
-        let painter = self.painter.as_ref().expect("created above");
+        let (_, painter) = self.painter.as_ref().expect("created above");
         let mut frame = drawn.clone();
         frame.pose.opacity *= opacity;
         let target = Target {

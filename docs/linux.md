@@ -113,6 +113,9 @@ not a network API or the macOS embedded transcription SDK service. It carries
 `Activate`, `Status`, and Annotate's recording commands. The `hex` control
 commands reach Hex through its local API's `POST /control`; dictation
 commands go straight from there to the listener, never through the window.
+The local API's `/dictations` (the TypeScript SDK's `hex.dictation`) also
+records on the listener while Hex is listening, as on macOS: one capture at a
+time, so a client's dictation and the shortcut never end each other.
 
 For development, run `cargo run --release`. `hex dictate` remains an explicit
 foreground diagnostic listener without the window or HUD and cannot coexist
@@ -130,8 +133,8 @@ mark it urgent), and closing it keeps the window's state for the next open.
 ## Install A Published Build
 
 Published builds exist for x86_64 and ARM64, as a bare executable, a `.deb`,
-and an `.rpm`. They are built on Ubuntu 24.04 and need glibc 2.39 or later:
-Ubuntu 24.04, Debian 13, Fedora 40, current Arch, or newer. ARM64 builds use
+and an `.rpm`. They are built on Debian 12 and need glibc 2.36 or later:
+Debian 12, Ubuntu 23.04, Fedora 37, current Arch, or newer. ARM64 builds use
 Vulkan like x64 and fall back to the CPU.
 
 ### Install script
@@ -288,8 +291,7 @@ unmanaged development Hex instead; without one it forwards to the installed Hex.
 ## Dictate
 
 Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
-recording, and press the same chord again to finish. Escape never cancels:
-every dictation finishes and pastes. **Shortcut mode** picks how the shortcut
+recording, and press the same chord again to finish. **Shortcut mode** picks how the shortcut
 triggers: **Hold or double-tap** (the default), **Hold**, **Tap** (starts and
 stops with single presses), or **Double-tap** (waits for two complete taps,
 and needs a shortcut with a key).
@@ -406,6 +408,12 @@ dictation rules:
   records is not used. Hex can't tell whether your config binds it. Prefer
   keys without modifiers, because Hyprland adds every modifier you still hold
   to Hex's paste (see [Native Wayland Requirements](#native-wayland-requirements)).
+  Avoid Alt in the bind too: Hyprland takes the key (Space) but lets Alt
+  through to the focused window, so Electron apps with a hidden menu bar
+  (Slack, Discord, VS Code) see Alt pressed and released alone, move focus to
+  their menu, and the paste lands there instead of the message box
+  (#1023). Hex still logs the
+  paste as sent. Ctrl+Space or a key without modifiers works.
   Hyprland names each shortcut `anomaly.hex:<shortcut>-<trigger>`: Hex's app
   id, the shortcut, and the key Settings records with `+` written as `-`.
   With the default keys these are `anomaly.hex:dictation-ALT-space` and
@@ -479,9 +487,14 @@ and stopping while idle do nothing, so key repeat is
 harmless. Start and stop bypass Hold, Toggle, and double-tap: start records,
 stop finishes. A shortcut press also finishes a recording a command started.
 
-Dictation has no cancel (#786): Escape always stays with your applications,
-and every dictation finishes and pastes. To drop one, finish it and delete the
-text. On KDE, Hex removes the Cancel dictation shortcut older builds asked for,
+In **Tap** mode, a **Cancel** shortcut (Escape by default) throws away the
+recording: nothing is pasted or saved, and dictations already transcribing
+still finish. On X11, Hex grabs that key only while a recording runs, so it
+works normally everywhere else. On Wayland a desktop shortcut would hold the
+key all the time, so Hex binds nothing; bind `hex dictation cancel` to a key in
+your desktop's keyboard shortcuts instead. `hex dictation cancel` works in any
+mode. In the Hold modes there is no cancel: every dictation finishes and pastes.
+On KDE, Hex removes the Cancel dictation shortcut older builds asked for,
 so its key returns to your applications.
 
 Shortcuts need a non-modifier key. Modifier-only shortcuts, such as Super
@@ -530,7 +543,16 @@ target read the paste, so a target stalled past the delay can paste the
 restored clipboard instead (see [#24](https://github.com/anomalyco/hex/issues/24)).
 On Wayland, restoring needs the compositor's `ext-data-control` protocol
 (KDE Plasma 6, recent wlroots compositors) or `wlr-data-control` (wlroots
-compositors, niri, Hyprland); without either the transcript stays.
+compositors, niri, Hyprland); without either the transcript stays, and
+Settings › Output says so.
+
+GNOME offers neither. There you can opt in to Labs › Restore clipboard on
+GNOME (`hex labs on gnome-clipboard-restore`, off by default): Hex then reads
+and restores the clipboard through XWayland, which GNOME keeps in sync with
+Wayland apps both ways. It works only while XWayland is already running (an X11
+app is open and `DISPLAY` is set); Hex never starts XWayland, and otherwise the
+transcript stays and the log says why. The same rules apply: nothing newer is
+ever overwritten.
 
 On GNOME, Hex pastes through the RemoteDesktop portal, and GNOME shows its
 remote-control indicator while that session is open. Hex closes it 15 seconds
@@ -557,7 +579,8 @@ approved, so you're asked only once.
     Ctrl+V to paste" and the transcript stays on the clipboard.
 
   There is no silent XWayland, direct-typing, uinput, or privileged
-  input-injection fallback. Transcript text travels on stdin, not command-line
+  input-injection fallback; the only XWayland use besides the HUD is the
+  opt-in clipboard restore above. Transcript text travels on stdin, not command-line
   arguments.
 - The overlay uses layer-shell. Without it (GNOME), only the HUD opens on
   XWayland as an override-redirect, click-through window that never takes
@@ -579,7 +602,10 @@ approved, so you're asked only once.
   250 ms. A modifier still held past that changes the paste, so bind keys
   without modifiers (End, F-keys) or let go of the modifiers before the
   transcript arrives. Hex logs a dictation as pasted once it sent the paste
-  shortcut; it can't confirm the application accepted it.
+  shortcut; it can't confirm the application accepted it. A compositor that
+  passes a shortcut's Alt through to the app (Hyprland) can also open an
+  Electron app's menu when Alt comes up, which takes the paste (see
+  [Shortcuts](#shortcuts)).
 
 ## Updates And Validation
 

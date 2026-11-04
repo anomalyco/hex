@@ -217,7 +217,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
         }
         list = list.child(source_item(item, selected));
     }
-    let list = super::scroll_body("activity-scroll", source_list(list));
+    let list = super::scroll_body(p.k, "activity-scroll", source_list(list));
     let detail = match pane.selected.and_then(|index| pane.events.get(index)) {
         None => placeholder(p, "activity-detail", "Select an activity row."),
         Some(event) => {
@@ -233,6 +233,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                     Vec::new(),
                 ))
                 .child(super::scroll_body(
+                    p.k,
                     "activity-detail-scroll",
                     col()
                         .key("body")

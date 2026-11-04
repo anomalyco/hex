@@ -81,14 +81,19 @@ in
         pkgs.vulkan-loader
         pkgs.wayland
         pkgs.libxkbcommon
+        pkgs.pipewire
+        pkgs.libva
       ];
     assert lib.all (package: builtins.elem (lib.getDev package) shell.nativeBuildInputs) [
       pkgs.curl
       pkgs.wl-clipboard
       pkgs.wtype
+      pkgs.ffmpeg-headless
     ];
     pkgs.runCommand "hex-shell-environment-check" { } ''
       test -d ${shell.ALSA_PLUGIN_DIR}
+      ${lib.getExe' pkgs.ffmpeg-headless "ffmpeg"} -hide_banner -encoders | grep ' libx264 ' >/dev/null
+      test -x ${lib.getExe' pkgs.ffmpeg-headless "ffprobe"}
       touch "$out"
     '';
 

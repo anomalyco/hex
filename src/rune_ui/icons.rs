@@ -252,3 +252,12 @@ line_icon!(
         "M12 6v4"
     ]
 );
+line_icon!(
+    CIRCLE_X,
+    "hex-row-circle-x",
+    [
+        "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0",
+        "m15 9-6 6",
+        "m9 9 6 6"
+    ]
+);

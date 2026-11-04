@@ -1,8 +1,10 @@
 #!/bin/sh
 # Mirrors a stable release's downloads to its GitHub release, byte for byte,
-# off "Latest" (which the TypeScript SDK uses). Release runs it last, after
-# tag-release.sh tagged v<version> at the release commit; it never creates the
-# tag itself.
+# and makes it GitHub's "Latest" release (the TypeScript SDK's releases never
+# take it). Release runs it last, for stable only, after tag-release.sh tagged
+# v<version> at the release commit; it never creates the tag itself. Nothing
+# downloads through GitHub's releases/latest redirect: the badge is only a
+# label.
 #
 #   publish-github-release.sh <dist>
 #
@@ -20,6 +22,16 @@ version=${HEX_VERSION:?Set HEX_VERSION}
 commit=${HEX_RELEASE_COMMIT:?Set HEX_RELEASE_COMMIT}
 tag=${HEX_RELEASE_TAG:?Set HEX_RELEASE_TAG}
 source=${HEX_RELEASE_SOURCE:?Set HEX_RELEASE_SOURCE}
+# Only a stable X.Y.Z release is ever Latest; dev builds and prereleases never
+# reach this script.
+printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+  echo "Only a stable X.Y.Z release goes to GitHub, not $version." >&2
+  exit 1
+}
+[ "$tag" = "v$version" ] || {
+  echo "The release tag is $tag, not v$version." >&2
+  exit 1
+}
 
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
@@ -42,7 +54,7 @@ if [ "$tagged" != "$commit" ]; then
 fi
 if ! gh release view "$tag" -R "$repo" --json name >/dev/null 2>&1; then
   gh release create "$tag" -R "$repo" --verify-tag --title "Hex $version" \
-    --notes-file "$notes" --latest=false
+    --notes-file "$notes" --latest=true
 fi
 gh release view "$tag" -R "$repo" --json assets > "$temporary/release.json"
 mkdir -p "$temporary/mirror"

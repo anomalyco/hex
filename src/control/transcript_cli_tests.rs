@@ -123,6 +123,11 @@ fn history_stats_parse_sum_retained_entries_and_need_the_labs_toggle() {
         audio_ms: 6_000,
         inference_ms: 0,
         total_ms: 0,
+        recording_bytes: 0,
+        model: None,
+        language: None,
+        text_ms: None,
+        versions: Vec::new(),
     };
     let entries = [
         entry(1, 10, "expired by retention", "expired by retention"),

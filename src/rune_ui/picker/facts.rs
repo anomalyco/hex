@@ -80,6 +80,8 @@ fn state(ui: &Ui, def: &'static ModelDefinition, language: &str) -> State {
     if let Some((label, fraction)) = picker::preparation(ui, def) {
         State::Preparing { label, fraction }
     } else if picker::transcription_selection_is_active(&ui.settings.transcription, def, installed)
+        // A selected import that is missing or changed isn't what Hex runs.
+        && (!def.id.is_custom() || def.available())
     {
         State::InUse
     } else if installed {
@@ -245,6 +247,7 @@ pub(super) fn blurb(def: &ModelDefinition) -> &'static str {
         M::UnderdogBark3Clean => tr("English, with the ums and uhs taken out"),
         M::Nemotron35Asr => tr("Writes while you talk, in 27 languages"),
         M::GigaAmV3 => tr("Russian, with punctuation. A small download"),
+        M::NbWhisperMedium => tr("Whisper, tuned for Norwegian by its National Library"),
         M::AppleSpeech => tr("Apple's speech recognition, kept up to date by macOS"),
         M::Custom(_) => "",
     }

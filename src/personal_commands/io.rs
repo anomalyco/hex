@@ -60,6 +60,8 @@ pub struct Io {
     receiver: Receiver<Completion>,
     /// What the current call may use; nothing outside a call.
     allowed: Capabilities,
+    /// The managed loopback restriction for the current call.
+    loopback_only: bool,
     deadline: Option<Instant>,
     workspace: PathBuf,
 }
@@ -149,15 +151,18 @@ impl Io {
             sender,
             receiver,
             allowed: Capabilities::NONE,
+            loopback_only: false,
             deadline: None,
             workspace,
         }))
     }
 
-    /// Starts a call that may use `allowed` until `deadline`.
-    pub fn begin(&mut self, deadline: Instant, allowed: Capabilities) {
+    /// Starts a call that may use `allowed` until `deadline`; with
+    /// `loopback_only`, `fetch` stays on this computer and no program runs.
+    pub fn begin(&mut self, deadline: Instant, allowed: Capabilities, loopback_only: bool) {
         self.deadline = Some(deadline);
         self.allowed = allowed;
+        self.loopback_only = loopback_only;
     }
 
     /// Ends the call: forgets its pending operations and ends every process
@@ -170,6 +175,7 @@ impl Io {
         }
         self.deadline = None;
         self.allowed = Capabilities::NONE;
+        self.loopback_only = false;
         while self.receiver.try_recv().is_ok() {}
     }
 
@@ -300,10 +306,11 @@ impl Io {
                         })
                         .max(Duration::from_millis(1));
                     let sender = self.sender.clone();
+                    let loopback_only = self.loopback_only;
                     let spawned = thread::Builder::new()
                         .name("hex-config-fetch".into())
                         .spawn(move || {
-                            let outcome = fetch::send(request, timeout);
+                            let outcome = fetch::send(request, timeout, loopback_only);
                             FETCHES.fetch_sub(1, Ordering::AcqRel);
                             let _ = sender.send(Completion {
                                 id,
@@ -464,6 +471,12 @@ fn parse(ctx: &Ctx<'_>, io: &Io, kind: &str, spec: &str) -> rquickjs::Result<Sta
             Ok(State::WaitingToFetch(request))
         }
         "exec" => {
+            if io.loopback_only {
+                return Err(Exception::throw_message(
+                    ctx,
+                    "Your organization doesn't allow transformations to run programs",
+                ));
+            }
             refuse_unless(ctx, io.allowed.exec, "exec", "run programs")?;
             let request: ExecRequest = serde_json::from_str(spec).map_err(invalid)?;
             Ok(State::WaitingToRun(request))

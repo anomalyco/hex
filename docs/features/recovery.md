@@ -57,7 +57,11 @@ Launch -> read settings.json
 
 Loading repaired settings does not itself rewrite the file. A later settings
 save (including a migration save) takes the backup before replacing it.
-Backups are never automatically removed. Unchosen `meetings.retention` is
+Backups are never automatically removed. On Linux, the running Hex checks
+`settings.json` every two seconds and adopts an edit made outside the window
+(by hand or by an agent), so its modes reach the listener and the next save
+keeps it (#970); macOS and Windows still read it only at launch or through
+`hex settings set`. Unchosen `meetings.retention` is
 written as an absent key, so older builds with a non-optional retention still
 read the file; existing `null` values also load in the current build.
 
@@ -100,7 +104,7 @@ LOCKED + key release missed while hands-free          // would block the finish 
 
 delayed pre-recovery input -> fenced                  // cannot corrupt the fresh hold
 ```
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `neutral_keyboard_rearms_after_a_missing_modifier_release`,
 `delayed_neutral_callback_after_recovery_preserves_the_next_hold`,
 `stale_key_recovery_requires_complete_neutrality_and_no_intervening_input`,
@@ -132,10 +136,15 @@ Command-Tab -> Tab still tracked (IDLE, DIRTY, or LOCKED)
 tracked key down in combined-session state but up in HID state  // #612
   -> reads as up for both the press check and the poll   // a latched Tab or Q
      no longer blocks every press until Hex restarts
+tracked keyboard key reads down in both states but sent no key event,  // #1008
+not even a key repeat, for 5 s (TRACKED_KEY_REPEAT_TIMEOUT)
+  -> the press check treats it as released               // logged; mouse buttons excluded
+     a Tab really held keeps repeating and still blocks the press
+     (with key repeat turned off, a key held past 5 s no longer blocks it)
 LOCKED + Escape -> Nothing, stale keys or not (#786)
 fenced edges, edges before a disabled tap, suspension -> no neutral evidence
 ```
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `option_soon_after_command_tab_records`,
 `shortcut_press_after_command_tab_from_dirty_records`,
 `typing_after_command_tab_does_not_block_the_next_press`,
@@ -146,6 +155,7 @@ Checks in [suppression.rs](../../src/suppression.rs):
 `stale_press_requires_a_neutral_keyboard_after_the_tracked_keys`,
 `stale_press_finishes_a_lock_and_leaves_escape_unchanged`,
 `toggle_mode_finishes_after_command_tab_while_recording`,
+`a_latched_key_without_key_repeats_stops_blocking_the_shortcut`,
 `a_key_latched_only_in_session_state_reads_as_released` (the state rule only;
 no real latched key has been observed by a test). Unit tests read a keyboard
 that is all up unless a test sets one, so every shortcut test can take this
@@ -168,7 +178,7 @@ SecondaryFn navigation metadata
 
 strip Fn globally from shortcut matching              // UNSAFE: not the recovery rule
 ```
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `arrow_function_metadata_does_not_block_the_next_option_hold`,
 `function_recovery_preserves_unknown_and_flags_only_fn_holds`.
 Proof limit: supplied modifier evidence, not universal native Fn behavior.
@@ -182,7 +192,7 @@ event tap disabled
   -> invalidate uncertain modifier evidence           // no inferred release
   -> fresh input -> next valid gesture -> expected output
 ```
-Checks in [suppression.rs](../../src/suppression.rs):
+Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `tap_failure_cancels_recording_after_live_opt_in`,
 `blind_input_periods_invalidate_function_modifier_evidence`.
 Proof limit: reducer response to a supplied interruption, not macOS disabling
@@ -223,6 +233,10 @@ initial open fails OR stream interrupts
   -> bounded backoff -> reopen the resolved input     // warm microphone retries
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
+device refuses a stream in its own default format     // #988, Intel Smart Sound on Windows
+  -> log the refused format (channels, Hz, sample format) // audio/input_format
+  -> try the other formats it lists (F32, I16, U16, I32), at most 12
+  -> none opens -> the default format's error, with its format, goes to recovery
 no input device at all (macOS)
   -> devices whose name can't be read are skipped     // audio::device_name, never Display
   -> bounded recovery; `hex status` listener: "No microphone"
@@ -251,6 +265,19 @@ Bluetooth default input (macOS, avoid_bluetooth_microphone on) // transport type
   -> built-in mic stands in, else the first other real input
   ├── no other usable input -> the Bluetooth default
   └── setting changes -> re-resolve like a device-list change -> switch once idle
+virtual input or iPhone Continuity microphone (macOS: ccwd/ccwl transport) // #1100
+  -> never stands in: the phone prompts and can fail to open
+  ├── lid closed, nothing else -> "the built-in microphone is off while the lid is closed"
+  └── the default, the saved microphone, or --device -> used as named
+
+warm stream keeps running but delivers only exact zeros (macOS, #1122)
+  -> that dictation is discarded as near-silent, as before
+  -> its finish reopens the microphone like a stream failure // logged once
+  -> next dictation records from a fresh stream
+
+open stream stops delivering audio without an error (any OS, #1206)
+  -> 4 s with no chunk (STREAM_STALL_TIMEOUT) -> treated as a stream failure
+  -> reopened like any interrupted stream, idle or not // logged "microphone stopped delivering audio"
 
 programmatic dictation (local API) when the stream interrupts or gaps
   ├── audio delivered before the loss -> kept under its id // recover.programmatic-loss
@@ -268,13 +295,18 @@ Checks in [audio.rs](../../src/audio.rs):
 `a_closed_lid_passes_over_the_built_in_microphone`,
 `only_the_internal_microphone_is_switched_off_by_the_lid`,
 `a_headphone_jack_microphone_is_used_with_the_lid_closed`,
+`an_iphone_microphone_never_stands_in`,
+`continuity_capture_transports_are_recognised` (pure resolution and fourcc
+values; no iPhone observed with the lid closed),
 `where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
-`only_an_idle_capture_lets_the_microphone_switch`;
+`only_an_idle_capture_lets_the_microphone_switch`,
+`a_stream_that_stops_delivering_audio_is_reopened`;
 [dictation/audio.rs](../../src/dictation/audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
 `microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,
 `microphone_loss_with_only_pre_roll_keeps_nothing`,
-`finish_after_an_unread_microphone_loss_takes_the_kept_clip`;
+`finish_after_an_unread_microphone_loss_takes_the_kept_clip`,
+`a_dictation_of_digital_silence_reopens_the_microphone`;
 [recognition.rs](../../src/recognition.rs):
 `microphone_loss_keeps_a_programmatic_clip_for_finish` (the hold, not a `/finish`
 through the running listener).
@@ -350,6 +382,22 @@ report that a Bluetooth device was used with `avoid_bluetooth_microphone` on
 was not reproduced (a saved Bluetooth microphone, or no other usable input,
 keeps it by design).
 
+**Fixed after dev ([#1122](https://github.com/anomalyco/hex/issues/1122)):**
+after a WhatsApp desktop call ended, the warm built-in microphone stream kept
+running without an error but delivered only exact zeros, so every dictation
+was discarded as near-silent (`zero_fraction` 1.0) until Hex restarted. A
+finished dictation whose audio through the release is exactly zero now
+reopens the stream the way a stream failure does; a cold microphone
+(release-while-idle) already opens fresh for each press. The first such
+dictation is still discarded. Not verified with a real WhatsApp call.
+
+**Fixed after 3.3.0 ([#1206](https://github.com/anomalyco/hex/issues/1206)):**
+after a burst of overrun warnings while idle, a warm USB microphone's stream
+stopped delivering audio without reporting an error, so every dictation held
+only the stale pre-roll and was discarded as no speech until Hex restarted. An
+open stream that delivers nothing for 4 s now counts as failed and is reopened
+with the usual bounded recovery. Not verified on the reporter's microphone.
+
 ### Fence Late Capture Notifications
 
 `recover.late-notification`: keeping a failure visible is correct until it
@@ -381,6 +429,24 @@ Check in [recognition.rs](../../src/recognition.rs):
 Proof limit: controlled loader responsiveness, not a full model download or
 microphone session. See the [index](README.md) for dependency recovery actions.
 
+`recover.gpu-full`: on Linux and Windows a model, language, or Speech engine
+change loads beside the running model, so a small GPU (2 GB) can run out of
+memory for the second copy (#1170).
+
+```ts
+new model loads beside the running one -> GPU out of memory -> CPU copy loads
+  -> the CPU copy is dropped (not swapped in); the GPU isn't remembered as failed
+  -> once nothing records or transcribes -> engine drops its model, then loads
+     the new one in its place (GPU again, CPU only if it still doesn't fit)
+  -> commands sent meanwhile wait for the load; nothing recorded is lost
+```
+Source: `ModelSwap::place`/`take_reload` in
+[transcription/local_transcriber.rs](../../src/transcription/local_transcriber.rs)
+and `Command::Reload` in [transcription/engine.rs](../../src/transcription/engine.rs).
+Check: `a_model_without_room_on_the_gpu_reloads_in_place_once` (swap state
+only). Not observed on a real 2 GB GPU. A second process (another `hex`
+command that loads a model itself) still loads its own copy.
+
 `recover.command-pressure`: command recognition is best-effort; dictation
 audio is not.
 
@@ -407,6 +473,7 @@ ordinary dictation -> corrections -> optional rewrite -> transformations -> past
                                       v                  v
                              rewrite fails       chain fails
                              -> corrected text   -> chain's input // discard partial results
+                             // the log says why: rewrite off for the mode, or the failure reason
 
 later request -> expected output                       // recovery still needs observation
 ```

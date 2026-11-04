@@ -2,9 +2,9 @@ name: Legacy appcast
 
 # Replaces the frozen 2.3.1 appcast (https://anoma.ly/hex/files/appcast.xml,
 # which Kit-era Macs read through Kit's redirect) with
-# packaging/macos/legacy-appcast.xml: the 2.3.1 items plus one informational
-# item that points those installs at https://anoma.ly/hex. Run once, with the
-# first release on the release service (docs/releasing.md, "Old clients").
+# packaging/macos/legacy-appcast.xml: one informational item, with no
+# enclosure, that points those installs at https://anoma.ly/hex. Run it when
+# that item changes (docs/releasing.md, "Old clients").
 # The job holds the R2 key, so it checks out only .github/release/ and the
 # appcast, which it treats as data, and uploads with .github/release/r2-put.sh.
 on:

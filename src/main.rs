@@ -51,6 +51,8 @@ mod parakeet;
 mod paste;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod personal_commands;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod policy;
 #[cfg(target_os = "macos")]
 mod recognition;
 mod rune_hud;

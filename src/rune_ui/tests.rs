@@ -203,6 +203,44 @@ fn an_unconfirmed_portal_shortcut_is_not_called_refused() {
     assert!(rt.find("basics/refused").is_none());
 }
 
+/// #1120: a check the person asked for says how it went; the hourly check
+/// alone keeps the footer's words.
+#[test]
+fn an_asked_update_check_says_how_it_went() {
+    fn status(rt: &mut Runtime<Ui>, status: DesktopUpdateStatus) {
+        rt.state
+            .view
+            .as_mut()
+            .expect("a service view")
+            .update_status = status;
+        rt.invalidate();
+        rt.frame(0.0);
+    }
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    status(&mut rt, DesktopUpdateStatus::Current);
+    assert!(texts(&rt).iter().any(|text| text == "Check for updates"));
+    tap(&mut rt, "update-status");
+    assert!(
+        sent(&rt)
+            .iter()
+            .any(|request| matches!(request, Request::Desktop(DesktopAction::CheckForUpdates)))
+    );
+    status(&mut rt, DesktopUpdateStatus::Checking);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Checking for updates…")
+    );
+    status(&mut rt, DesktopUpdateStatus::Current);
+    assert!(texts(&rt).iter().any(|text| text == "Hex is up to date"));
+    status(&mut rt, DesktopUpdateStatus::Failed);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Couldn't check for updates")
+    );
+}
+
 #[test]
 fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
@@ -259,6 +297,26 @@ fn toggles_save_through_the_host() {
     assert!(!rt.state.settings.paste_with_shift);
     assert_eq!(saved(&rt), 1);
     assert!(sent(&rt).is_empty());
+}
+
+#[test]
+fn gnome_desktops_point_to_the_clipboard_lab_until_it_is_on() {
+    let mut rt = runtime("portal", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
+    assert!(
+        rt.find("clipboard-restore-note").is_none(),
+        "only desktops without data-control"
+    );
+    rt.state.platform.clipboard_unrestorable = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("clipboard-restore-note").is_some());
+    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "lab-gnome-clipboard-restore");
+    assert!(rt.state.settings.labs.gnome_clipboard_restore);
+    tap(&mut rt, "nav-labs");
+    assert!(rt.find("terminal-paste").is_some(), "back on General");
+    assert!(rt.find("clipboard-restore-note").is_none());
 }
 
 #[test]
@@ -1219,6 +1277,8 @@ fn history_search_without_matches_says_so() {
             audio_ms: 900,
             inference_ms: 80,
             total_ms: 200,
+            recording: None,
+            model: None,
         })
         .unwrap();
     let mut rt = runtime("history-empty", true, PANE_SIZE);
@@ -1237,6 +1297,152 @@ fn history_search_without_matches_says_so() {
         texts
             .iter()
             .all(|text| text != "No dictations retained yet.")
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn transcribe_again_offers_a_language_only_for_models_that_take_one() {
+    use crate::transcription::models::{AUTO_LANGUAGE, TranscriptionModelId};
+    let whisper = history::language_choices(TranscriptionModelId::WhisperLargeV3Turbo).unwrap();
+    assert_eq!(whisper[0], AUTO_LANGUAGE);
+    assert!(whisper.contains(&"en") && whisper.contains(&"es"));
+    assert!(history::language_choices(TranscriptionModelId::ParakeetV3).is_none());
+    assert!(history::language_choices(TranscriptionModelId::GigaAmV3).is_none());
+
+    let mut rt = runtime("history", true, GOLDEN_SIZE);
+    rt.state.settings.labs.keep_recordings = true;
+    rt.state.settings.transcription.language = "es".into();
+    history::choose_model(
+        &mut rt.state,
+        2,
+        TranscriptionModelId::WhisperLargeV3Turbo,
+        "Whisper",
+    );
+    let pending = rt.state.history.pending.as_ref().unwrap();
+    assert_eq!(pending.id, 2);
+    assert_eq!(pending.language, "es", "it starts at the saved language");
+    assert!(
+        rt.state.history.again.is_none(),
+        "nothing runs before Transcribe"
+    );
+    assert_eq!(rt.state.settings.transcription.language, "es");
+
+    rt.state.settings.transcription.language = "pl".into();
+    history::choose_model(
+        &mut rt.state,
+        2,
+        TranscriptionModelId::CohereTranscribe,
+        "Cohere",
+    );
+    let pending = rt.state.history.pending.as_ref().unwrap();
+    assert!(
+        history::language_choices(TranscriptionModelId::CohereTranscribe)
+            .unwrap()
+            .contains(&pending.language.as_str()),
+        "an unsupported saved language falls back to one the model has"
+    );
+}
+
+#[test]
+fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
+    use crate::history::{
+        History, HistoryDraft, HistoryKind, HistoryRetention, HistoryStore, Recording,
+    };
+    let directory = std::env::temp_dir().join(format!("hex-rune-again-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let history = History::new(HistoryStore::open(
+        directory.join("history.json"),
+        HistoryRetention::Week,
+        crate::history::now_ms(),
+    ));
+    let draft = |recording| HistoryDraft {
+        kind: HistoryKind::Dictation,
+        raw_text: "ship it".into(),
+        final_text: "Ship it.".into(),
+        application: None,
+        processing: None,
+        audio_ms: 900,
+        inference_ms: 80,
+        total_ms: 200,
+        recording,
+        model: Some("Parakeet v3".into()),
+    };
+    let plain = history.record(draft(None)).unwrap().unwrap();
+    let id = history
+        .record(draft(Some(Recording::from_samples(vec![0.2; 1_600]))))
+        .unwrap()
+        .unwrap();
+    let mut rt = runtime("history-empty", true, GOLDEN_SIZE);
+    rt.state.history = history::HistoryPane::shared(Some(history.clone()));
+    rt.state.history.reload();
+    rt.state.history.selected = Some(id);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("again").is_none(), "off, History is unchanged");
+
+    rt.state.settings.labs.keep_recordings = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("again").is_some());
+    rt.state.history.selected = Some(plain);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("again").is_none(),
+        "an entry without audio has nothing to transcribe"
+    );
+
+    rt.state.history.selected = Some(id);
+    rt.state.history.again = Some(history::Again::finished(
+        id,
+        "Whisper",
+        Ok("Ship it now.".into()),
+    ));
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(texts(&rt).iter().any(|text| text == "Ship it now."));
+    tap(&mut rt, "again-copy");
+    assert_eq!(rt.copy_request.as_deref(), Some("Ship it now."));
+    tap(&mut rt, "again-replace");
+    settle(&mut rt);
+    assert!(rt.state.history.again.is_none());
+    let entry = history
+        .search("")
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .unwrap();
+    assert_eq!(entry.final_text, "Ship it now.");
+    assert_eq!(entry.model.as_deref(), Some("Whisper"));
+    assert!(entry.has_recording(), "replacing keeps the recording");
+    assert_eq!(entry.versions.len(), 1);
+    assert_eq!(entry.versions[0].final_text, "Ship it.");
+    assert_eq!(entry.versions[0].model.as_deref(), Some("Parakeet v3"));
+
+    // The kept version shows with its model, copies, and comes back.
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Whisper"), "{shown:?}");
+    assert!(shown.iter().any(|text| text.starts_with("Parakeet v3 · ")));
+    tap(&mut rt, "version0/actions/copy");
+    assert_eq!(rt.copy_request.as_deref(), Some("Ship it."));
+    tap(&mut rt, "version0/actions/use");
+    settle(&mut rt);
+    let entry = history
+        .search("")
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .unwrap();
+    assert_eq!(entry.final_text, "Ship it.");
+    assert_eq!(entry.versions[0].final_text, "Ship it now.");
+
+    rt.state.settings.labs.keep_recordings = false;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("versions").is_none(), "off, the versions hide");
+    assert!(
+        texts(&rt).iter().any(|text| text == "Parakeet v3"),
+        "the model shows either way"
     );
     let _ = std::fs::remove_dir_all(&directory);
 }
@@ -1644,10 +1850,11 @@ fn the_wheel_scrolls_a_long_term_list() {
     }
 }
 
-/// The model picker sheet's list scrolls with the wheel too.
+/// The model picker's full list scrolls with the wheel too. The picker opens
+/// on the comparison, which fits without scrolling, so this opens every model.
 #[test]
 fn the_wheel_scrolls_the_model_picker() {
-    let mut rt = runtime("picker-downloading", true, (900.0, 480.0));
+    let mut rt = runtime("picker-custom-models", true, (900.0, 480.0));
     let list = element(&rt, "model-scroll").rect;
     let first = |rt: &Runtime<Ui>| {
         rt.elements()
@@ -2390,4 +2597,31 @@ fn the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed() {
         Some("0".repeat(64).as_str())
     );
     assert!(rt.find("allow-transformations").is_none());
+}
+
+/// Labs › Fix results in Output: the Try card offers Vocabulary and Fix
+/// this only with the toggle on, and Fix this copies for the sentence typed.
+#[test]
+fn output_fixes_show_only_with_their_lab_and_fix_this_copies_for_the_sentence() {
+    let output = |on: bool| {
+        let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        output::fixture(&mut state);
+        state.pane = Pane::Output;
+        state.settings.labs.output_fixes = on;
+        runtime_for(state, false, TALL_SIZE)
+    };
+    let off = output(false);
+    assert!(off.find("output-vocabulary").is_none());
+    assert!(off.find("fix-this").is_none());
+
+    let mut on = output(true);
+    assert!(on.find("output-vocabulary").is_some());
+    tap(&mut on, "fix-this");
+    assert!(on.state.output.prompt_copied);
+    assert_eq!(
+        on.state.output.fix_copied.as_deref(),
+        Some("Um, open code shipped the hex app today.")
+    );
+    tap(&mut on, "output-vocabulary");
+    assert!(on.state.vocabulary.open);
 }

@@ -13,8 +13,10 @@ or user-defined TypeScript transformations.
 
 The default shortcut is `Ctrl+Space`. In **Hold** mode, hold both keys while
 speaking and release Space to transcribe and paste. In **Toggle** mode, press
-`Ctrl+Space` to start and again to finish. Escape never cancels (every
-dictation finishes and pastes), and holding a modifier on its own does nothing. Hex consumes the chord while it matches, so
+`Ctrl+Space` to start and again to finish, or press the **Cancel** shortcut
+(Escape by default) to throw the recording away; Hex takes that key only while
+a recording runs. Hold mode has no cancel (every dictation finishes and
+pastes), and holding a modifier on its own does nothing. Hex consumes the chord while it matches, so
 applications and input methods no longer see `Ctrl+Space`; rebind it in Settings
 if you rely on that chord elsewhere. To let another app use the same key, such as
 a Discord push-to-talk key, turn on **Share dictation shortcut with other apps**

@@ -16,6 +16,8 @@ use crate::opencode::{
     ApiGet, OpenCodeSession, Scan, find_root_session, get_session, normalize_slug, query_escape,
 };
 
+mod read;
+
 /// Pages of newest root sessions read (100 each), besides the exact-folder and by-ID reads.
 pub const SESSION_PAGES: usize = 2;
 /// OpenCode Desktop counts as showing the session viewed last if that was this recently.
@@ -99,45 +101,76 @@ pub fn look_live_by(
     deadline: Instant,
     senses: &Senses,
 ) -> Live {
+    look_live_observed(front, target, pid, deadline, senses, |_| {})
+}
+
+/// Publishes the locally read URL before any session or page result is needed.
+pub fn look_live_observed(
+    front: Option<&str>,
+    target: Option<&str>,
+    pid: Option<i32>,
+    deadline: Instant,
+    senses: &Senses,
+    observed: impl FnOnce(Option<&str>),
+) -> Live {
+    let started = Instant::now();
     let left = || deadline.saturating_duration_since(Instant::now());
-    let url = (senses.tab)(front, target);
-    let mut clues = url
-        .as_deref()
-        .filter(|_| !left().is_zero())
-        .map(|url| url_clues(url, senses, true))
-        .unwrap_or_default();
-    if super::jev::enabled()
-        && let Some(exe) = pid.and_then(senses.executable)
-    {
-        clues.extend(dev_build_clue(target.or(front), &exe));
-    }
-    // Read beside the sessions, so its folder's and session's are read too.
-    clues.extend(target.and_then(|id| app_rule_clue(id, &(senses.apps)())));
-    if let Some((cwd, title)) = [front, target]
-        .into_iter()
-        .flatten()
-        .filter(|_| !left().is_zero())
-        .find_map(|id| (senses.terminal)(id))
-    {
-        clues.push(Clue::new(
-            Source::Terminal,
-            Pointer::Folder(folder_of(&cwd)),
-            format!("the terminal's focused pane is in {}", cwd.display()),
-        ));
-        let title_words = words(&title);
-        if !title_words.is_empty() {
-            clues.push(Clue::new(
-                Source::Title,
-                Pointer::Words { words: title_words },
-                format!("{TERMINAL_TITLE} \"{title}\""),
-            ));
+    let mut url = None;
+    let mut clues = Vec::new();
+    let mut local = Duration::ZERO;
+    let Read {
+        mut candidates,
+        error,
+    } = read::while_looking(senses.hooks.api, left().min(super::LOOK_BUDGET), || {
+        url = (senses.tab)(front, target);
+        observed(url.as_deref());
+        clues = url
+            .as_deref()
+            .filter(|_| !left().is_zero())
+            .map(|url| url_clues(url, senses, true))
+            .unwrap_or_default();
+        if super::jev::enabled()
+            && let Some(exe) = pid.and_then(senses.executable)
+        {
+            clues.extend(dev_build_clue(target.or(front), &exe));
         }
-    }
-    let (mut candidates, error) =
-        read_with(&clues, None, &[], left().min(super::LOOK_BUDGET), senses);
+        // Read beside the sessions, so its folder's and session's are read too.
+        clues.extend(target.and_then(|id| app_rule_clue(id, &(senses.apps)())));
+        if let Some((cwd, title)) = [front, target]
+            .into_iter()
+            .flatten()
+            .filter(|_| !left().is_zero())
+            .find_map(|id| (senses.terminal)(id))
+        {
+            clues.push(Clue::new(
+                Source::Terminal,
+                Pointer::Folder(folder_of(&cwd)),
+                format!("the terminal's focused pane is in {}", cwd.display()),
+            ));
+            let title_words = words(&title);
+            if !title_words.is_empty() {
+                clues.push(Clue::new(
+                    Source::Title,
+                    Pointer::Words { words: title_words },
+                    format!("{TERMINAL_TITLE} \"{title}\""),
+                ));
+            }
+        }
+        local = started.elapsed();
+        targets(&clues, None, &[])
+    });
+    let error = read_error(error, candidates.is_empty());
+    let looked = started.elapsed();
     if !left().is_zero() {
         look_at_page(url.as_deref(), &mut clues, &mut candidates, senses);
     }
+    crate::env::log(format!(
+        "routing time: look local_ms={} lookup_ms={} page_ms={} candidates={}",
+        local.as_millis(),
+        looked.as_millis(),
+        started.elapsed().saturating_sub(looked).as_millis(),
+        candidates.len()
+    ));
     Live {
         url,
         clues,
@@ -294,6 +327,17 @@ pub(crate) fn read_with(
     budget: Duration,
     senses: &Senses,
 ) -> (Vec<Candidate>, Option<String>) {
+    let (roots, ids) = targets(clues, address, also);
+    let Read { candidates, error } = read::parallel(senses.hooks.api, &roots, &ids, budget);
+    let error = read_error(error, candidates.is_empty());
+    (candidates, error)
+}
+
+fn targets(
+    clues: &[Clue],
+    address: Option<&Address>,
+    also: &[String],
+) -> (Vec<PathBuf>, Vec<String>) {
     let mut roots = Vec::new();
     let mut ids = Vec::new();
     for clue in clues {
@@ -305,16 +349,17 @@ pub(crate) fn read_with(
     }
     ids.extend(address.map(|a| a.session().to_owned()));
     ids.extend(also.iter().cloned());
-    let mut api = super::within(senses.hooks.api, budget);
-    let Read { candidates, error } = read_candidates(&mut api, &roots, &ids, SESSION_PAGES);
-    let error = error.map(|err| {
-        if candidates.is_empty() {
+    (roots, ids)
+}
+
+fn read_error(error: Option<anyhow::Error>, empty: bool) -> Option<String> {
+    error.map(|err| {
+        if empty {
             format!("couldn't list sessions: {err:#}")
         } else {
             format!("couldn't list every session: {err:#}")
         }
-    });
-    (candidates, error)
+    })
 }
 
 /// The clues a tab gives: its `/sdk.js` registration, and the folder of the process serving
@@ -1218,8 +1263,9 @@ mod tests {
     struct World {
         reg: Option<Registration>,
         listeners: Vec<(u16, PathBuf)>,
-        sessions: Vec<crate::opencode::OpenCodeSession>,
     }
+
+    static WORLD_SESSIONS: OnceLock<Vec<crate::opencode::OpenCodeSession>> = OnceLock::new();
 
     thread_local! {
         static WORLD: std::cell::RefCell<World> = std::cell::RefCell::default();
@@ -1241,8 +1287,7 @@ mod tests {
         })
     }
     fn world_api(path: &str, _: Duration) -> Result<Vec<u8>> {
-        let sessions = WORLD.with(|w| w.borrow().sessions.clone());
-        crate::opencode::fake_api::serve(&sessions, path)
+        crate::opencode::fake_api::serve(WORLD_SESSIONS.get().unwrap(), path)
     }
     fn world_own_port(url: &WebUrl) -> Option<u16> {
         Some(url.port)
@@ -1260,7 +1305,10 @@ mod tests {
         std::fs::create_dir_all(repo.join("site")).unwrap();
         let repo_s = repo.to_string_lossy().into_owned();
         let site_s = repo.join("site").to_string_lossy().into_owned();
-        let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
+        let home = crate::user_dirs::home_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
 
         let reg = |origin: &str, session: Option<&str>, directory: Option<&str>| Registration {
             origin: origin.into(),
@@ -1295,7 +1343,6 @@ mod tests {
                         Some("/p/app"),
                     )),
                     listeners: vec![(5173, "/p/app".into())],
-                    ..World::default()
                 },
             ),
             (
@@ -1317,7 +1364,6 @@ mod tests {
                 World {
                     reg: Some(reg("http://localhost:4321", None, Some("/p/none"))),
                     listeners: vec![(4321, "/p/app".into())],
-                    ..World::default()
                 },
             ),
             (
@@ -1325,7 +1371,6 @@ mod tests {
                 World {
                     reg: Some(reg("http://localhost:4321", None, None)),
                     listeners: vec![(4321, "/p/app".into())],
-                    ..World::default()
                 },
             ),
             (
@@ -1384,9 +1429,9 @@ mod tests {
             terminal: no_terminal,
             ..Senses::default()
         };
+        WORLD_SESSIONS.set(sessions).unwrap();
         let mut sent = 0;
-        for (url, mut world) in cases {
-            world.sessions = sessions.clone();
+        for (url, world) in cases {
             WORLD.with(|w| *w.borrow_mut() = world);
             let today = super::super::route(url, &senses.hooks).ok();
             let clues = url_clues(url, &senses, false);
@@ -1717,8 +1762,12 @@ mod tests {
             Some("https://studio.example.ts.net:4948/")
         );
         assert!(live.clues.is_empty(), "the tab came too late to look into");
-        assert!(live.candidates.is_empty());
-        assert!(live.error.unwrap().contains("couldn't list sessions"));
+        assert_eq!(
+            live.candidates.len(),
+            2,
+            "the list starts before the slow tab"
+        );
+        assert!(live.error.is_none());
     }
 
     #[test]

@@ -321,3 +321,75 @@ fn a_throwing_or_slow_transformation_pastes_the_text_unchanged() {
     running.join().unwrap();
     fs::remove_dir_all(root).unwrap();
 }
+
+/// A local server that answers one request with a redirect to `location`.
+fn redirect(location: &'static str) -> (u16, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line.trim().is_empty() {
+                break;
+            }
+        }
+        let _ = write!(
+            stream,
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+    });
+    (port, server)
+}
+
+#[cfg(unix)]
+#[test]
+fn restricted_to_loopback_fetch_stays_on_this_computer_and_runs_no_programs() {
+    let (port, server) = serve(2, Duration::ZERO, "200 OK", r#"{"ok":true}"#);
+    let (bounce, bouncer) = redirect("http://10.255.255.1/");
+    let mut harness = Harness::new(&format!(
+        r#"import {{ execFile }} from "node:child_process"
+import {{ promisify }} from "node:util"
+const attempt = async (url) => {{
+  try {{ return String((await fetch(url)).status) }} catch (error) {{ return error.message }}
+}}
+export default {{
+  transformations: {{
+    ip: {{ name: "Ip", transform: () => attempt("http://127.0.0.1:{port}/") }},
+    name: {{ name: "Name", transform: () => attempt("http://localhost:{port}/") }},
+    away: {{ name: "Away", transform: () => attempt("http://10.255.255.1/") }},
+    bounce: {{ name: "Bounce", transform: () => attempt("http://127.0.0.1:{bounce}/") }},
+    run: {{ name: "Run", transform: async () => {{ try {{ return (await promisify(execFile)("echo", ["hi"])).stdout }} catch (error) {{ return error.message }} }} }},
+  }},
+}}
+"#
+    ));
+    harness.allow();
+    harness
+        .worker
+        .loaded
+        .as_mut()
+        .unwrap()
+        .script
+        .restrict_to_loopback();
+    assert_eq!(harness.transform(&["ip"], "").unwrap(), "200");
+    assert_eq!(harness.transform(&["name"], "").unwrap(), "200");
+    let started = Instant::now();
+    let away = harness.transform(&["away"], "").unwrap();
+    assert!(away.contains(crate::net::NOT_LOOPBACK), "{away}");
+    let bounced = harness.transform(&["bounce"], "").unwrap();
+    assert!(bounced.contains(crate::net::NOT_LOOPBACK), "{bounced}");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "nothing left the computer"
+    );
+    let run = harness.transform(&["run"], "").unwrap();
+    assert!(
+        run.contains("doesn't allow transformations to run programs"),
+        "{run}"
+    );
+    server.join().unwrap();
+    bouncer.join().unwrap();
+}
