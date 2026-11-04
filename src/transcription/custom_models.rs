@@ -123,10 +123,12 @@ pub(crate) struct Receipt {
     bytes: u64,
     pub(crate) sha256: String,
     modified_ns: u64,
-    /// The file's identity on its volume (`found_models::file_id`), where
-    /// the OS reports one.
+    /// The file's inode (`found_models::inode`), where the OS reports one.
+    /// Older receipts saved a `file_id` that mixed in the volume's device
+    /// number, which macOS can renumber at a restart; it is ignored, so
+    /// those receipts hold on size and modification time alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    file_id: Option<u64>,
+    inode: Option<u64>,
 }
 
 impl Receipt {
@@ -137,7 +139,7 @@ impl Receipt {
             sha256,
             modified_ns: super::models::modified_ns(&metadata)
                 .ok_or_else(|| eyre!("the file's modification time is unavailable"))?,
-            file_id: super::found_models::file_id(&metadata),
+            inode: super::found_models::inode(&metadata),
         })
     }
 
@@ -145,7 +147,7 @@ impl Receipt {
     pub(crate) fn holds(&self, metadata: &fs::Metadata) -> bool {
         self.bytes == metadata.len()
             && super::models::modified_ns(metadata) == Some(self.modified_ns)
-            && (self.file_id.is_none() || self.file_id == super::found_models::file_id(metadata))
+            && (self.inode.is_none() || self.inode == super::found_models::inode(metadata))
     }
 }
 
@@ -1085,6 +1087,38 @@ mod tests {
                 .contains("no longer matches")
         );
         assert_eq!(status(id), Status::Changed);
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    #[test]
+    fn a_receipt_survives_a_renumbered_volume_but_not_another_file() {
+        let models = temporary_models_dir();
+        let file = models.join("model.gguf");
+        fs::write(&file, b"weights").unwrap();
+        let metadata = fs::metadata(&file).unwrap();
+        let receipt = Receipt::of(&file, "ab".repeat(32)).unwrap();
+        assert!(receipt.holds(&metadata));
+        // An older receipt's `file_id` mixed in the volume's device number,
+        // which macOS renumbers at a restart; size and time still prove it.
+        let modified_ns = super::super::models::modified_ns(&metadata).unwrap();
+        let legacy = format!(
+            r#"{{"bytes":{},"sha256":"","modified_ns":{modified_ns},"file_id":12345}}"#,
+            metadata.len()
+        );
+        assert!(
+            serde_json::from_str::<Receipt>(&legacy)
+                .unwrap()
+                .holds(&metadata)
+        );
+        #[cfg(unix)]
+        {
+            let other = Receipt {
+                inode: receipt.inode.map(|inode| inode ^ 1),
+                ..receipt
+            };
+            assert!(!other.holds(&metadata));
+        }
         super::super::models::set_test_models_dir(None);
         fs::remove_dir_all(models).unwrap();
     }

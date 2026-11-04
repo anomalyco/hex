@@ -188,6 +188,22 @@ pub(crate) fn file_id(metadata: &std::fs::Metadata) -> Option<u64> {
     }
 }
 
+/// The file's inode on Unix, without the volume's device number: macOS can
+/// number a volume differently at each mount, so a saved receipt keeps only
+/// what survives a restart. `None` on Windows.
+pub(crate) fn inode(metadata: &std::fs::Metadata) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(metadata.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        None
+    }
+}
+
 /// One file's result, from the cache while its stamp holds.
 fn read(path: &Path, repository: &str, revision: &str) -> Option<Found> {
     let stamp = stamp(path)?;
