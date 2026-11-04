@@ -24,7 +24,7 @@ const GROUP: &str = "Prototypes/Capture capsule";
 // One story per scene below; adding a scene means adding its index too.
 // The eight `clip-…` scenes after them are timed stories for review clips,
 // and the 40 `keys-…` scenes the send-to list's keys prototypes (t1339).
-const _: () = assert!(SCENES.len() == 10 + 7 + 40);
+const _: () = assert!(SCENES.len() == 11 + 7 + 40);
 
 /// `playground` with the whole flow and every capsule scene as stories.
 pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playground<S> {
@@ -46,6 +46,7 @@ pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playgrou
         .story(scene::<7>())
         .story(scene::<8>())
         .story(scene::<9>())
+        .story(scene::<10>())
         .story(notch_story())
         .story(super::family::story())
 }

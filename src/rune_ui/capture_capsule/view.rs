@@ -163,7 +163,8 @@ pub(super) fn capsule(
         .size(w, h)
         .motion(surface.shell_motion)
         .clip_rounded(corner(h))
-        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::Pill, on, tx));
+        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::Pill, on, tx))
+        .on_pointer_move_local(|s: &mut CapsuleState, _, tx| s.pointer_moved(tx));
     root = root.child(clip.child(inner.child(content)));
     if let Pres::Done(Done {
         open: Some((_, list)),

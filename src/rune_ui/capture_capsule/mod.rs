@@ -497,6 +497,17 @@ impl CapsuleState {
         tx.wake_after(Duration::ZERO);
     }
 
+    /// The pointer moved on the capsule: typing over its suggestions may
+    /// search now, so the tap's keys change at once.
+    fn pointer_moved(&mut self, tx: &mut Tx) {
+        if self.flow.pointer_moved() {
+            take_keys(self);
+            tx.wake_after(Duration::ZERO);
+        } else {
+            tx.live_only();
+        }
+    }
+
     /// Moves the surface to what the flow shows. True when it changed.
     fn present(&mut self, now: f64) -> bool {
         let pres = self.with_thumb(self.flow.pres(now));
