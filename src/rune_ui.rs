@@ -103,7 +103,9 @@ pub(crate) fn run_app(
 ) {
     use crate::linux::service::{Activation, Control};
     rune::set_app_id(crate::linux::portal::APP_ID);
-    let mut app = self::app(Some(host.clone())).args(Vec::new()).windowless();
+    let mut app = self::app(Some(host.clone()))
+        .args(window_args())
+        .windowless();
     // Tiling window managers float a window that maps at a fixed size.
     // Desktops that float every window need no such map, and KWin on X11
     // keeps a fixed-size window from fitting a small screen, its title bar
@@ -176,6 +178,15 @@ pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
     #[cfg(target_os = "macos")]
     let app = app.on_open_url(on_open_url);
     app
+}
+
+/// Rune's flags for the window on Linux and Windows: scroll bars show
+/// whenever there's more to scroll, as those platforms do, so a pointer
+/// without a wheel can reach them (#1209). macOS follows its own "Show scroll
+/// bars" setting.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) fn window_args() -> Vec<String> {
+    vec!["--scroll-bars".into(), "always".into()]
 }
 
 /// Beside a setting an organization locked (`crate::policy`).

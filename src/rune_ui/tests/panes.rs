@@ -1095,12 +1095,12 @@ fn meetings_settings_save_and_ask_for_system_audio() {
         policy(&rt, "us.zoom.xos"),
         Some(MeetingPolicy::AlwaysRecord)
     );
-    pick(&mut rt, "call7-policy", 0);
+    pick(&mut rt, "call8-policy", 0);
     assert_eq!(
         policy(&rt, "problems.kitlangton.com"),
         Some(MeetingPolicy::Ask)
     );
-    assert!(rt.find("call7").is_some());
+    assert!(rt.find("call8").is_some());
     tap(&mut rt, "meetings-enabled");
     assert!(!rt.state.settings.meetings.enabled);
     assert!(rt.find("meeting-folder").is_none());
@@ -1931,7 +1931,12 @@ fn new_in_labs_isnt_repeated_in_the_grid() {
         .into_iter()
         .filter_map(|e| e.key?.strip_prefix("lab-featured-").map(str::to_string))
         .collect();
-    assert_eq!(featured.len(), 2, "two labs are featured");
+    // Up to two of the labs added most recently: how many depends on how
+    // many share the newest date on this OS, not on the test.
+    assert!(
+        (1..=2).contains(&featured.len()),
+        "one or two labs are featured: {featured:?}"
+    );
     for id in featured {
         assert!(
             rt.find(&format!("lab-card-{id}")).is_none(),

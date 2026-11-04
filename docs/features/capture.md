@@ -326,8 +326,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   Some (the bundle's t0; timer, meter, ✓ finish, ✕ cancel) -> Processing ->
 │   done (the lead alone, no word), Failed, or Cancelled, then leaves on its
 │   own; a written capture whose transcript has no words reads "no speech"
-├── Tones (`feedback::Tone::Capture*`, at the dictation volume; zero is
-│   silent): start, stop, a rule's send going, an Undo, a failure
+├── Tones (`capture_capsule::tone`, at the dictation volume; zero is
+│   silent), from the chosen sound set: start and stop are the set's start
+│   and stop, a send going its done (Annotate's own sent sound when the set
+│   has none), a discarded recording its cancel, a failure its error (Basso
+│   for Classic on macOS); a taken-back send keeps Annotate's own undo sound
 ├── Failed -> "Couldn't start" until the engine reports it
 │   recording (`screen`), then "Couldn't save"; a failed send ->
 │   "Couldn't send to X". Each keeps its `error`; a start or save that fails

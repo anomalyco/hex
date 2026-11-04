@@ -796,7 +796,7 @@ impl CaptureCapsule {
 
 // ─── View ────────────────────────────────────────────────────────────────────
 
-/// The sound for a cue, in the dictation tones' family.
+/// The sound for a cue, from the chosen sound set.
 fn tone(cue: Cue) -> crate::feedback::Tone {
     use crate::feedback::Tone;
     match cue {
@@ -804,7 +804,8 @@ fn tone(cue: Cue) -> crate::feedback::Tone {
         Cue::Stop => Tone::CaptureStop,
         Cue::Sent => Tone::CaptureSent,
         Cue::TakenBack => Tone::CaptureUndo,
-        Cue::Failed => Tone::CaptureFailed,
+        Cue::Discarded => Tone::Cancel,
+        Cue::Failed => Tone::Error,
     }
 }
 

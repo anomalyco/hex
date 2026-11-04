@@ -95,11 +95,9 @@ pub enum Tone {
     /// Its auto-send went, once Undo ran out.
     #[cfg(hex_capture)]
     CaptureSent,
-    /// A send was taken back, or a recording cancelled.
+    /// A send was taken back.
     #[cfg(hex_capture)]
     CaptureUndo,
-    #[cfg(hex_capture)]
-    CaptureFailed,
 }
 
 /// A request to the playback worker. The start tone of a shortcut press is
@@ -782,7 +780,7 @@ struct Sounds {
     sets: Vec<SetSounds>,
     onboarding: OnboardingSounds,
     #[cfg(hex_capture)]
-    capture: [SamplesBuffer; 5],
+    capture: CaptureSounds,
 }
 
 impl Sounds {
@@ -794,7 +792,7 @@ impl Sounds {
                 .collect::<Result<_>>()?,
             onboarding: OnboardingSounds::load()?,
             #[cfg(hex_capture)]
-            capture: capture_sounds()?,
+            capture: CaptureSounds::load()?,
         })
     }
 
@@ -834,38 +832,42 @@ impl Sounds {
             Tone::Onboarding(cue) => return self.onboarding.get(cue),
             Tone::Error => return sounds.error.as_ref(),
             #[cfg(hex_capture)]
-            Tone::CaptureStart => &self.capture[0],
+            Tone::CaptureStart => &sounds.start,
             #[cfg(hex_capture)]
-            Tone::CaptureStop => &self.capture[1],
+            Tone::CaptureStop => &sounds.stop,
             #[cfg(hex_capture)]
-            Tone::CaptureSent => &self.capture[2],
+            Tone::CaptureSent => sounds.done.as_ref().unwrap_or(&self.capture.sent),
             #[cfg(hex_capture)]
-            Tone::CaptureUndo => &self.capture[3],
-            #[cfg(hex_capture)]
-            Tone::CaptureFailed => &self.capture[4],
+            Tone::CaptureUndo => &self.capture.undo,
         })
     }
 }
 
-/// The capture tones, in [`Tone`]'s order: start, stop, sent, undo, failed.
+/// The capture tones no set has: a send for sets without a done sound,
+/// so a send is never silent, and a taken-back send.
 #[cfg(hex_capture)]
-fn capture_sounds() -> Result<[SamplesBuffer; 5]> {
-    macro_rules! sound {
-        ($name:literal) => {
-            decode(include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/resources/audio/",
-                $name
-            )))?
-        };
+struct CaptureSounds {
+    sent: SamplesBuffer,
+    undo: SamplesBuffer,
+}
+
+#[cfg(hex_capture)]
+impl CaptureSounds {
+    fn load() -> Result<Self> {
+        macro_rules! sound {
+            ($name:literal) => {
+                decode(include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/resources/audio/",
+                    $name
+                )))?
+            };
+        }
+        Ok(Self {
+            sent: sound!("captureSent.mp3"),
+            undo: sound!("captureUndo.mp3"),
+        })
     }
-    Ok([
-        sound!("captureStart.mp3"),
-        sound!("captureStop.mp3"),
-        sound!("captureSent.mp3"),
-        sound!("captureUndo.mp3"),
-        sound!("captureFailed.mp3"),
-    ])
 }
 
 /// Plays the start tone for a shortcut press that may still become a chord or
