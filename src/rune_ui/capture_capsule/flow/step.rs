@@ -276,6 +276,14 @@ impl Flow {
                 Phase::Routed(routed)
             }
             (Phase::Routed(mut routed), input @ (Input::Type(_) | Input::Backspace)) => {
+                // Typed over the suggestions: the search opens with it, and
+                // Escape goes back to them.
+                if let (Input::Type(_), Some(open)) = (&input, routed.open.as_mut())
+                    && !open.typing
+                {
+                    open.typing = true;
+                    open.back = true;
+                }
                 if let Some(open) = routed.open.as_mut().filter(|open| open.typing) {
                     match input {
                         Input::Type(typed) => open.query.push_str(&typed),

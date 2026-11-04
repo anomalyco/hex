@@ -122,9 +122,9 @@ pub(super) fn hold_until(phase: &Phase) -> Option<f64> {
 }
 
 /// The list for `route`: its suggestions, then the newest sessions, and
-/// searching, every session whose name has the query.
+/// searching, every session with each word of the query in its title,
+/// folder, or id, those with every word in the title first.
 pub(super) fn list(route: &Route, open: &Open) -> List {
-    let query = open.query.to_lowercase();
     let (suggested, recent) = sections(route);
     let site = match route {
         Route::Guess { site, .. } | Route::Rule { site, .. } => site.clone(),
@@ -133,11 +133,7 @@ pub(super) fn list(route: &Route, open: &Open) -> List {
     let always = site.map(|site| (site, open.shift));
     let every = || suggested.iter().chain(recent);
     let mut list = List {
-        rows: every()
-            .filter(|dest| dest.name.to_lowercase().contains(&query))
-            .take(SUGGEST_ROWS)
-            .cloned()
-            .collect(),
+        rows: matching(every(), &open.query),
         title: if open.typing {
             "All sessions"
         } else {
@@ -167,6 +163,52 @@ pub(super) fn list(route: &Route, open: &Open) -> List {
         row.why = "always".into();
     }
     list
+}
+
+/// The first [`SUGGEST_ROWS`] of `dests` that match `query`, in order but
+/// title matches first. A row names its folder beside its reason when its
+/// title alone doesn't say why it matched, or reads like another row's.
+fn matching<'a>(dests: impl Iterator<Item = &'a Dest>, query: &str) -> Vec<Dest> {
+    let query = query.to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut found: Vec<(bool, &Dest)> = dests
+        .filter_map(|dest| {
+            let title = dest.name.to_lowercase();
+            let folder = dest.folder.as_deref().unwrap_or_default().to_lowercase();
+            let id = dest.session.to_lowercase();
+            let in_title = words.iter().all(|word| title.contains(word));
+            let found = in_title
+                || words.iter().all(|word| {
+                    [&title, &folder, &id]
+                        .iter()
+                        .any(|text| text.contains(word))
+                });
+            found.then_some((in_title, dest))
+        })
+        .collect();
+    found.sort_by_key(|(in_title, _)| !in_title);
+    found.truncate(SUGGEST_ROWS);
+    let alike = |dest: &Dest| {
+        found
+            .iter()
+            .filter(|(_, other)| other.name.to_lowercase() == dest.name.to_lowercase())
+            .count()
+            > 1
+    };
+    found
+        .iter()
+        .map(|&(in_title, dest)| match &dest.folder {
+            Some(folder) if !in_title || alike(dest) => Dest {
+                why: if dest.why.is_empty() {
+                    folder.clone()
+                } else {
+                    format!("{folder} · {}", dest.why)
+                },
+                ..dest.clone()
+            },
+            _ => dest.clone(),
+        })
+        .collect()
 }
 
 pub(super) fn clamp(routed: &mut Routed) {

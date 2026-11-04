@@ -358,6 +358,7 @@ pub(super) fn list_panel(
         // Hex's tap reports a press on the list before the list hears it:
         // the pointer being here keeps it from reading as a click away.
         .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::List, on, tx))
+        .on_pointer_move_local(|s: &mut CapsuleState, _, tx| s.pointer_moved(tx))
         .transition(
             Transition::offset(0.0, -LIST_DROP)
                 .combined(Transition::opacity())
