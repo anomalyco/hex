@@ -83,18 +83,31 @@ async function recordingBegan(ctx: Ctx, from: number): Promise<void> {
   }
 }
 
-/** Edge, started by the `browser` case's setup. */
+/** The browser started by the `browser` case's setup. */
 let browser: ReturnType<typeof Bun.spawn> | undefined
 
-/** Puts a browser in front, as when someone dictates into a web page:
- * Microsoft Edge with its own profile in the copy's home, on a long local
- * page, brought to the foreground. Windows only, on an unlocked session
- * (a locked one keeps the lock screen in front). */
+/** Puts a browser in front, as when someone dictates into a web page: a
+ * browser with its own profile in the copy's home, on a long local page,
+ * brought to the foreground. Windows: Microsoft Edge, on an unlocked
+ * session (a locked one keeps the lock screen in front). Linux: Chromium
+ * on X11 with its page in the accessibility tree (Chromium exposes pages
+ * to AT-SPI only with renderer accessibility on). */
 async function browserInFront(ctx: Ctx): Promise<void> {
-  const edge = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
   const page = join(ctx.home, "long-page.html")
   const rows = Array.from({ length: 3_000 }, (_, i) => `<p>Paragraph ${i} with a <a href="#${i}">link</a> and <button>button ${i}</button></p>`)
   writeFileSync(page, `<!doctype html><title>Long page</title><body>${rows.join("")}</body>`)
+  if (process.platform === "linux") {
+    const root = process.getuid?.() === 0 ? ["--no-sandbox"] : []
+    const profile = `--user-data-dir=${join(ctx.home, "chromium")}`
+    browser = Bun.spawn(["chromium", profile, ...root, "--no-first-run", "--no-default-browser-check", "--force-renderer-accessibility", "--new-window", pathToFileURL(page).href])
+    await ctx.page.wait(5_000)
+    Bun.spawnSync(["xdotool", "search", "--sync", "--name", "Long page", "windowactivate", "--sync"])
+    const pid = Bun.spawnSync(["xdotool", "getactivewindow", "getwindowpid"]).stdout.toString().trim()
+    const front = pid ? readFileSync(`/proc/${pid}/comm`, "utf8").trim() : "nothing"
+    if (!front.startsWith("chromium")) throw new Error(`the browser case needs Chromium in front on X11; in front: ${front}`)
+    return
+  }
+  const edge = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
   browser = Bun.spawn([edge, `--user-data-dir=${join(ctx.home, "edge")}`, "--no-first-run", "--no-default-browser-check", "--new-window", pathToFileURL(page).href])
   await ctx.page.wait(5_000)
   // A background process may take the foreground once a key went to it.
@@ -116,10 +129,10 @@ async function printed(reply: Reply): Promise<string> {
   return reply.text
 }
 
-// Windows opens no window with `--hidden`; the macOS app opens none once set
-// up, and `--device` makes a build without the fixture fail to open the
-// microphone instead of recording it.
-const args = process.platform === "win32" ? ["--hidden"] : ["--device", "Audio fixture"]
+// Windows and Linux open no window with `--hidden`; the macOS app opens none
+// once set up, and `--device` makes a build without the fixture fail to open
+// the microphone instead of recording it.
+const args = process.platform === "darwin" ? ["--device", "Audio fixture"] : ["--hidden"]
 
 export default bench({
   targets: {
@@ -192,10 +205,10 @@ export default bench({
         await printed(await ctx.phase("finish", () => stop(ctx)))
       },
     },
-    // Release to text with a browser in front (Windows, unlocked): the
-    // dictation case's stop, plus the page read the foreground context
-    // starts for a browser. Nothing set up here uses the page.
-    ...(process.platform === "win32" && {
+    // Release to text with a browser in front (Windows unlocked, Linux on
+    // X11): the dictation case's stop, plus the page read the foreground
+    // context starts for a browser. Nothing set up here uses the page.
+    ...(process.platform !== "darwin" && {
       browser: {
         targets: ["warm"],
         primary: "phase.finish",
