@@ -50,6 +50,8 @@ The [vocabulary](vocabulary.md) biases transcription toward names you list.
 models another app already downloaded.
 [Annotate](capture.md) (macOS, Linux,
 and Windows) records the screen while you draw and talk and sends it to an agent.
+[Screenshots](labs.md) (Labs, macOS) takes CleanShot-style ⌘⇧4 area and
+window screenshots.
 The other capabilities stay here until they need their own verification recipe.
 
 ## Get Ready

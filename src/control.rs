@@ -95,6 +95,12 @@ pub enum ControlCommand {
         raw: bool,
     },
     PasteLast,
+    /// Labs › Screenshots (macOS): the display under the pointer, or with
+    /// `pick` the picker its shortcut opens.
+    Screenshot {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        pick: bool,
+    },
     MeetingRecord {
         #[serde(default)]
         title: Option<String>,
@@ -1062,6 +1068,8 @@ mod tests {
                 raw: true,
             },
             ControlCommand::PasteLast,
+            ControlCommand::Screenshot { pick: false },
+            ControlCommand::Screenshot { pick: true },
             ControlCommand::MeetingRecord {
                 title: Some("Design sync".into()),
             },

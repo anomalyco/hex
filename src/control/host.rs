@@ -233,6 +233,10 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
                 Ok(reply)
             }))
         }
+        ControlCommand::Screenshot { .. } => reply(Err(ControlError::new(
+            "unsupported",
+            "screenshots are macOS only",
+        ))),
         command @ (ControlCommand::ScrawlCapture { .. }
         | ControlCommand::ScrawlCaptureList { .. }
         | ControlCommand::ScrawlCaptureShow { .. }

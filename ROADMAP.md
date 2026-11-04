@@ -273,6 +273,18 @@ the Hex UI becomes a client. Today the running app serves
 first; the service keeps that contract, so stream clients such as Seer don't
 change.
 
+## Grow Labs › Screenshots
+
+The ⌘⇧4 lab (docs/features/labs.md) shoots an area, a window, or a display
+to the clipboard, a folder, and a corner thumbnail. Next, once a person has
+used it on a real Mac:
+
+- A markup editor from the thumbnail: arrows, text, boxes, blur, crop.
+- Scrolling capture of a long window.
+- Copy the text in a shot (OCR, Apple's Vision).
+- A self-timer before the shot.
+- Pin a shot to the screen as a floating window.
+
 ## Deliberate Deferrals
 
 Do not generalize the `~/.config/hex` TypeScript transformation config into a
