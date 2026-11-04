@@ -79,10 +79,10 @@ own Hex:
   the private home (`HEX_APPLICATION_SUPPORT_DIR`), not in your
   `~/Library/Application Support/hex`, so your own Hex there does not stop
   the bench. strobe brings the copy's window to the front only after a
-  minute without keyboard or mouse input. Every profile records the
-  `anomaly-hex-identity` migration: without it, a copy whose setup isn't
-  ready (the copy has no Microphone grant) reopens the first-run tour over
-  the window, and every click lands on the tour.
+  minute without keyboard or mouse input. Every profile but `hex-tour`
+  records the `anomaly-hex-identity` migration: without it, a copy whose
+  setup isn't ready (the copy has no Microphone grant) reopens the first-run
+  tour over the window, and every click lands on the tour.
 
 The copy loads no model, except in the listening and dictation cases below.
 
@@ -91,6 +91,7 @@ The copy loads no model, except in the listening and dictation cases below.
 | File | Case | Primary | Measures | Locked session |
 | --- | --- | --- | --- | --- |
 | `perf/idle.bench.ts` | `window-open` | `cpu.work` | 8 s at rest with the window on General | waits for an unlock |
+| `perf/idle.bench.ts` | `tour-open` | `ui.cpu` | 8 s on the first-run tour a Mac reopens when setup isn't ready (`hex-tour` profile); Settings elsewhere | waits for an unlock |
 | `perf/idle.bench.ts` | `window-closed` | `cpu.work` | 8 s at rest, tray only (`app --hidden`) | runs |
 | `perf/idle.bench.ts` | `window-closed-memory` | `memory.app.private` | The same tray's private memory and dedicated GPU memory (`gpu.vram`) | runs |
 | `perf/launch.bench.ts` | `cold-launch` | `launch.ready` | Process start to the first painted window | waits for an unlock |
