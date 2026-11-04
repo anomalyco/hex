@@ -1,8 +1,10 @@
 //! `HEX_AUDIO_FIXTURE`: a WAV file that stands in for every microphone, so
 //! benchmarks and tests drive the real capture, stream, and output pipeline
 //! without recording anyone. The file plays at real-time pace in 10 ms
-//! chunks, from its start at each open, and loops. Its audio is stamped on
-//! the clock the shortcuts use ([`CaptureInstant::now`]), as a device's is.
+//! chunks, from its start at each open, and loops. Each chunk is stamped
+//! with when its last sample was due on the clock the shortcuts use
+//! ([`CaptureInstant::now`]), as a device stamps its samples' own time: a
+//! late wake on a busy machine delivers the chunk late but never moves it.
 //! Device enumeration is skipped: the fixture is the only input.
 
 use std::path::{Path, PathBuf};
@@ -81,6 +83,7 @@ pub(super) fn open(path: &Path) -> Result<AudioInput> {
         .name("audio-fixture".into())
         .spawn(move || {
             let started = Instant::now();
+            let opened = CaptureInstant::now();
             let mut at = 0;
             for chunk in 1_u32.. {
                 // Paced against the start, so a late wake never drifts.
@@ -94,7 +97,7 @@ pub(super) fn open(path: &Path) -> Result<AudioInput> {
                     out.extend_from_slice(&samples[at..at + take]);
                     at = (at + take) % samples.len();
                 }
-                if sender.send((out, CaptureInstant::now())).is_err() {
+                if sender.send((out, opened + period * chunk)).is_err() {
                     return;
                 }
             }
