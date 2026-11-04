@@ -39,8 +39,9 @@ default) shows each model's raw WER or CER with its language, dataset, source,
 and conditions (#647).
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
-used for any French system language (#892). Neither has had a native
-speaker's review yet. It offers 简体中文 (`zh`) and 繁體中文 (`zh-Hant`, #944);
+used for any French system language (#892), and Русский, used for any
+Russian system language (#1317). None of these has had a native speaker's
+review yet. It offers 简体中文 (`zh`) and 繁體中文 (`zh-Hant`, #944);
 Traditional Chinese is drafted from the Simplified strings by a character and
 Taiwan-usage phrase converter (`desktop/i18n/traditional_chinese.rs`), not yet
 reviewed by a native speaker.
