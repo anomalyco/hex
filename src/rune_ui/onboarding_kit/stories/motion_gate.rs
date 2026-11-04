@@ -77,13 +77,6 @@ const ALLOW: &[AllowRow] = &[
     )
     .max(6),
     AllowRow::new(
-        "pop-in",
-        "stage/card",
-        "island",
-        "its parts fly in and a plate grows under them",
-    )
-    .max(6),
-    AllowRow::new(
         "pop-out",
         "bubble/surface",
         "island",
@@ -251,6 +244,22 @@ fn windows() -> Vec<(&'static str, Window)> {
                 length: 3.0,
                 act: Some(("click the Launch Room", |s, _| s.start_scene())),
             },
+        ),
+        // Autocorrect's hit: the camera pushes in, shakes and pulls out.
+        (
+            "autocorrect",
+            beat(
+                |s| {
+                    s.typing_from.is_some_and(|from| {
+                        s.scene
+                            .slams()
+                            .next()
+                            .is_some_and(|hit| s.now - from >= hit)
+                    })
+                },
+                1.0,
+                2.5,
+            ),
         ),
         ("with-hex", beat(|s| s.step == Step::YourTurn, 0.5, 3.0)),
         ("words", beat(|s| s.step == Step::Hearing, 0.2, 4.0)),

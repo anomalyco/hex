@@ -140,6 +140,11 @@ pub enum OnboardingTone {
     Word(u8),
     /// A card struck by lightning and dissolving.
     Burn,
+    /// `"Keyboard mode"` called as `"Without Hex"` opens: a heavy stamp.
+    ModeKeyboard,
+    /// `"Voice-first mode"` called as `"With Hex"` takes over: a rising
+    /// whoosh into a bright chord.
+    ModeVoice,
 }
 
 /// [`KeySoundStyle::Clack`]'s distinct presses, each also played a little
@@ -806,6 +811,8 @@ struct OnboardingSounds {
     triumphs: [SamplesBuffer; TRIUMPHS as usize],
     words: [SamplesBuffer; 3],
     burn: SamplesBuffer,
+    mode_keyboard: SamplesBuffer,
+    mode_voice: SamplesBuffer,
 }
 
 impl OnboardingSounds {
@@ -896,6 +903,8 @@ impl OnboardingSounds {
                 decode_wav(bundled_sound!("onboarding", "word_3"))?,
             ],
             burn: decode_wav(bundled_sound!("onboarding", "card_burn"))?,
+            mode_keyboard: decode_wav(bundled_sound!("onboarding", "mode_keyboard"))?,
+            mode_voice: decode_wav(bundled_sound!("onboarding", "mode_voice"))?,
         })
     }
 
@@ -945,6 +954,8 @@ impl OnboardingSounds {
             OnboardingTone::Triumph(i) => &self.triumphs[usize::from(i) % self.triumphs.len()],
             OnboardingTone::Word(i) => &self.words[usize::from(i) % self.words.len()],
             OnboardingTone::Burn => &self.burn,
+            OnboardingTone::ModeKeyboard => &self.mode_keyboard,
+            OnboardingTone::ModeVoice => &self.mode_voice,
         })
     }
 }
@@ -1554,6 +1565,8 @@ mod tests {
             OnboardingTone::SlowDown,
             OnboardingTone::Slam,
             OnboardingTone::Burn,
+            OnboardingTone::ModeKeyboard,
+            OnboardingTone::ModeVoice,
         ]
         .iter()
         .chain(&tapbacks)

@@ -290,9 +290,22 @@ impl SfxTrack {
         }
     }
 
-    /// The story winding back into `"With Hex"`.
+    /// `"Keyboard mode"` called as `"Without Hex"`'s clock starts at `from`.
+    pub(crate) fn on_keyboard_mode(&mut self, from: f64) {
+        self.push(
+            from + super::versus::KEYBOARD_CALL_SOUND,
+            Tone::Onboarding(OnboardingTone::ModeKeyboard),
+        );
+    }
+
+    /// The story winding back into `"With Hex"`, and `"Voice-first mode"`
+    /// called.
     pub(crate) fn on_rewind(&mut self, now: f64) {
         self.push(now, Tone::Onboarding(OnboardingTone::Rewind));
+        self.push(
+            now + super::versus::VOICE_CALL_AT,
+            Tone::Onboarding(OnboardingTone::ModeVoice),
+        );
     }
 
     /// `"With Hex"`'s payoff from the shortcut at `from`: the answer

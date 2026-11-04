@@ -196,6 +196,20 @@ def main():
         add(burn, at, [0.3 * (1.0 - i / 22) * v for v in noise_burst(0.005, 0.0012, hp=0.95)])
     write("card_burn", finish(burn, -17.0, fade=0.06))
 
+    keyboard = silence(0.45)
+    for at, hi, loud in [(0.0, 240.0, 0.55), (0.085, 170.0, 1.0)]:
+        add(keyboard, at, [0.8 * loud * v for v in noise_burst(0.02, 0.004, hp=0.7)])
+        add(keyboard, at, [loud * v for v in thump(0.36, hi, 70.0, 0.07, h2=0.45, attack=0.0015)])
+    keyboard = [math.tanh(1.8 * v) for v in keyboard]
+    write("mode_keyboard", finish(keyboard, -13.0, fade=0.05))
+
+    voice = silence(1.2)
+    add(voice, 0.0, [0.7 * v for v in swish(0.36, 300.0, 4500.0)])
+    for i, hz in enumerate([659.25, 830.61, 987.77, 1318.51]):
+        add(voice, 0.3 + 0.025 * i, [0.32 * v for v in pip(hz, 0.85, 0.3, attack=0.01, h2=0.08)])
+    add(voice, 0.3, [0.3 * v for v in thump(0.3, 140.0, 70.0, 0.08, h2=0.2, attack=0.004)])
+    write("mode_voice", finish(voice, -14.0, fade=0.2))
+
 
 if __name__ == "__main__":
     main()

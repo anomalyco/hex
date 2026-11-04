@@ -39,6 +39,10 @@ use super::scene_script::{Script, fill};
 use super::stories::{Flow, Onboard, Step};
 use super::triumph::{self, HexBeats, Said};
 use super::typing::{Focus, Glyph, Line, Scene, Timing, Who};
+pub(crate) use stage_fx::{KEYBOARD_CALL_SOUND, VOICE_CALL_AT};
+use stage_fx::{camera, camera_focus, mode_call, mode_chip, slam, stamp_knock};
+
+mod stage_fx;
 
 const STAGE_W: f32 = 500.0;
 const STAGE_H: f32 = 540.0;
@@ -401,6 +405,11 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             line("lead-done", "The same reply, typed and then spoken.".into()),
         ),
     };
+    let mode = match key {
+        "without" => Some(false),
+        "with" => Some(true),
+        _ => None,
+    };
     // The first run's download flies up past it from "Setting up Hex".
     after_flight(col(), s)
         .key(key)
@@ -408,7 +417,14 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
         .items_center()
         .transition(act_break())
         .enter_delay(HEADING_GAP)
-        .child(text(title).key("title").font(title_font(p)).color(p.text()))
+        .child(
+            row()
+                .key("title-row")
+                .gap(12.0)
+                .center_y()
+                .child(text(title).key("title").font(title_font(p)).color(p.text()))
+                .children(mode.map(|voice| mode_chip(p, voice))),
+        )
         .child(row().key("lead-row").h(24.0).center().child(lead))
 }
 
@@ -604,7 +620,8 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
             },
         },
     );
-    let kb_shift = (1.0 - enter_u) * 14.0 + melt_u * 6.0;
+    let knock_down = stamp_knock(s);
+    let kb_shift = (1.0 - enter_u) * 14.0 + melt_u * 6.0 + knock_down;
     let shudder = match t {
         Some(t) if !reduced && !voice_phase => s.scene.shudder(t),
         _ => [0.0, 0.0],
@@ -619,6 +636,11 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .offset(shudder[0], kb_shift + shudder[1])
         .size(kw, kh)
         .offset_motion(Anim::INSTANT)
+        .motion_intent(if knock_down > 0.0 {
+            MotionIntent::KICK
+        } else {
+            MotionIntent::NONE
+        })
         .child(kb_el.motion_intent(MotionIntent::STEP));
 
     // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
@@ -678,15 +700,39 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     let pointer = opened_at(s)
         .filter(|&at| clicked(at))
         .and_then(|at| inbox::pointer(INBOX_AT, since_parked, Some(s.now - at), reduced));
-    el().key("stage")
+    let (zoom, shake) = match t {
+        Some(t) if !voice_phase => camera(s, t),
+        _ => (1.0, [0.0, 0.0]),
+    };
+    let camera = el()
+        .key("camera")
+        .absolute(0.0, 0.0)
         .size(STAGE_W, STAGE_H)
         .child(keys_el)
         .children(hud_el)
         .child(plate(p, opening))
         .child(card)
         .children(pointer)
-        .child(words(p, s, nudge))
+        .child(words(p, s, nudge));
+    // The push in and the blow's shake are the camera's own; at rest it
+    // leaves the stage untouched.
+    let camera = if zoom != 1.0 || shake != [0.0, 0.0] {
+        let focus_at = camera_focus();
+        camera
+            .origin(focus_at[0] / STAGE_W, focus_at[1] / STAGE_H)
+            .scale(zoom)
+            .scale_motion(Anim::INSTANT)
+            .offset(shake[0], shake[1])
+            .offset_motion(Anim::INSTANT)
+            .motion_intent(MotionIntent::KICK)
+    } else {
+        camera
+    };
+    el().key("stage")
+        .size(STAGE_W, STAGE_H)
+        .child(camera)
         .children(t.filter(|_| !voice_phase).and_then(|t| slam(p, s, t)))
+        .children(mode_call(p, s))
         .children(take_time(s).and_then(|t| {
             triumph::effects(
                 p,
@@ -700,101 +746,6 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
 
 /// Caps Lock's light once it's on.
 const CAPS_LIGHT: f32 = 0.9;
-/// The autocorrect title: how long it takes to land, and how far it shakes.
-const SLAM_IN: f64 = 0.09;
-const SLAM_SHAKE: f32 = 9.0;
-const SLAM_COPY: &str = "AUTOCORRECT";
-
-/// The autocorrect title slamming onto the stage like a fighting game's
-/// round call: it drops in oversized, punches past its size, shakes the
-/// stage with a flash, holds, then snaps away as time comes back. Reduce
-/// Motion fades it in and out where it lands.
-fn slam(p: Paint, s: &Onboard, t: f64) -> Option<El> {
-    let since = s.scene.slam(t)?;
-    let reduced = s.reduced.get();
-    let k = p.k;
-    let u = (since / SLAM_IN).min(1.0) as f32;
-    let (scale, shake) = if reduced {
-        (1.0, [0.0, 0.0])
-    } else {
-        // In from 2.4x, overshooting to 0.9x, then a damped punch to rest.
-        let settle = (since - SLAM_IN).max(0.0);
-        let punch = if since < SLAM_IN {
-            2.4 - 1.5 * smoothstep(u)
-        } else {
-            1.0 - 0.1
-                * (std::f64::consts::TAU * settle / 0.16).cos() as f32
-                * (-settle / 0.09).exp() as f32
-        };
-        let decay = (-settle / 0.12).exp() as f32 * (since >= SLAM_IN) as u8 as f32;
-        let wobble =
-            |f: f64, phase: f64| (std::f64::consts::TAU * (f * settle + phase)).sin() as f32;
-        (
-            punch,
-            [
-                SLAM_SHAKE * decay * wobble(23.0, 0.0),
-                0.6 * SLAM_SHAKE * decay * wobble(17.0, 0.3),
-            ],
-        )
-    };
-    let opacity = if reduced {
-        smoothstep(u)
-    } else {
-        u.min(1.0).sqrt()
-    };
-    let flash = if reduced {
-        0.0
-    } else {
-        0.55 * (-(since - SLAM_IN).max(0.0) / 0.07).exp() as f32
-            * (since >= SLAM_IN * 0.6) as u8 as f32
-    };
-    let title = text(SLAM_COPY.to_string())
-        .key("slam-copy")
-        .font(TextStyle::new(52.0, 900.0).lh(56.0).tracking(-1.0))
-        .color(k.c.submit_fg);
-    let plate = row()
-        .key("slam-plate")
-        .px(26.0)
-        .py(10.0)
-        .radius(14.0)
-        .continuous_corners()
-        .fill(k.c.bg_accent)
-        .shadow(8.0, 24.0, k.c.black.alpha(0.55))
-        .rotate(-0.07)
-        .child(title);
-    Some(
-        el().key("slam")
-            .absolute(0.0, 0.0)
-            .size(STAGE_W, STAGE_H)
-            .instant_changes()
-            // It snaps away as time comes back, not fades.
-            .transition(Transition::opacity().springs(SpringPair::new(
-                Spring::new(0.05, 0.0),
-                Spring::new(0.04, 0.0),
-            )))
-            .child(
-                el().key("slam-flash")
-                    .absolute(0.0, 0.0)
-                    .size(STAGE_W, STAGE_H)
-                    .fill(k.c.white)
-                    .opacity(flash),
-            )
-            .child(
-                row()
-                    .key("slam-stage")
-                    .absolute(0.0, 0.0)
-                    .size(STAGE_W, STAGE_H * 0.62)
-                    .center()
-                    .child(
-                        plate
-                            .scale(scale)
-                            .offset(shake[0], shake[1])
-                            .opacity(opacity),
-                    ),
-            ),
-    )
-}
-
 /// The red pill in the header, from the first frame, flaring at scene
 /// time `t`.
 fn banner(p: Paint, s: &Onboard, scene: &Scene, t: f64) -> Option<El> {

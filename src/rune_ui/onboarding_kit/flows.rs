@@ -37,6 +37,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> El {
         .w_full()
         .h_full()
         .fill(p.k.c.bg_deep)
+        .children(super::backdrop::backdrop(p, s))
         .children(page)
 }
 

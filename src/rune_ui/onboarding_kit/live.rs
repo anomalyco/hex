@@ -183,7 +183,9 @@ impl StoryClock {
     fn at(&self, at: Instant) -> f64 {
         self.story
             + self.last.map_or(0.0, |last| {
-                at.saturating_duration_since(last).as_secs_f64().min(MAX_STEP)
+                at.saturating_duration_since(last)
+                    .as_secs_f64()
+                    .min(MAX_STEP)
             })
     }
 }
