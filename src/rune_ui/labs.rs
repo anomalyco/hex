@@ -255,6 +255,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Vocabulary in meeting notes"),
             tr("Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"),
         ));
+        rows.push(row(
+            Feature::MeetingFinishedEvent,
+            &HINTS,
+            tr("Meeting finished event"),
+            tr("Tell apps on this computer when a meeting's transcript is ready. They get only the meeting's ID, through Hex's local API"),
+        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -543,6 +549,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
         Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
         Feature::NotchIndicator => "lab-notch-indicator",
+        Feature::MeetingFinishedEvent => "lab-meeting-finished-event",
     }
 }
 

@@ -1251,7 +1251,10 @@ impl Woken {
 impl Drop for Woken {
     fn drop(&mut self) {
         let mut listener = LISTENER.lock().unwrap_or_else(|error| error.into_inner());
-        if listener.as_ref().is_some_and(|thread| thread.id() == self.0) {
+        if listener
+            .as_ref()
+            .is_some_and(|thread| thread.id() == self.0)
+        {
             *listener = None;
         }
     }

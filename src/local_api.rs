@@ -16,6 +16,7 @@ use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
 mod dictation;
 mod discovery;
 mod http;
+mod meeting_events;
 mod streams;
 
 #[cfg(debug_assertions)]
@@ -93,6 +94,7 @@ struct HttpContext {
     dictations: dictation::Dictations,
     streams: Arc<crate::transcription::stream::Streams>,
     stream_engine: crate::transcription::stream::EngineSource,
+    meeting_events: meeting_events::Source,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -186,6 +188,25 @@ impl LocalApi {
         options: LocalApiOptions,
         instance: Option<crate::desktop::instance::InstanceLock>,
     ) -> Result<Self> {
+        Self::start_with_meeting_events(
+            discovery_path,
+            health,
+            events,
+            options,
+            instance,
+            meeting_events::Source::default(),
+        )
+    }
+
+    /// [`Self::start_bound`] with `/meetings/events` on `meeting_events`.
+    fn start_with_meeting_events(
+        discovery_path: Option<PathBuf>,
+        health: HealthProvider,
+        events: EventLog,
+        options: LocalApiOptions,
+        instance: Option<crate::desktop::instance::InstanceLock>,
+        meeting_events: meeting_events::Source,
+    ) -> Result<Self> {
         if let Some(path) = &discovery_path {
             prepare_discovery_path(path)?;
         }
@@ -234,6 +255,7 @@ impl LocalApi {
             stream_engine: options
                 .stream_engine
                 .unwrap_or_else(|| Arc::new(crate::transcription::stream::shared_engine)),
+            meeting_events,
         };
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -606,6 +628,9 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 dictation::handle(&mut stream, id, owner_token, action, &context);
             }
             RequestAction::Stream(action) => streams::handle(&mut stream, action, &context),
+            RequestAction::MeetingEvents(subscription) => {
+                meeting_events::stream(&mut stream, subscription, &context);
+            }
         }
     }
 }
@@ -636,6 +661,9 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 body_prefix,
             },
         );
+    }
+    if path == meeting_events::PATH {
+        return meeting_events::action(&request, context);
     }
     if request.method == "POST" && path == "/streams" {
         return streams::create_action(request);
@@ -1357,6 +1385,7 @@ enum RequestAction {
         action: DictationAction,
     },
     Stream(streams::StreamAction),
+    MeetingEvents(crate::meeting::finished_events::Subscription),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2124,6 +2153,7 @@ mod tests {
             dictations: dictation::Dictations::new(None),
             streams: Arc::default(),
             stream_engine: Arc::new(crate::transcription::stream::shared_engine),
+            meeting_events: meeting_events::Source::default(),
         };
         let action = handle_request(
             HttpRequest {

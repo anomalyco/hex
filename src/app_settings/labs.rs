@@ -73,6 +73,8 @@ pub struct LabsSettings {
     pub meeting_notes_vocabulary: bool,
     /// With the indicator at the top, the HUD grows out of the notch on a screen with one (macOS).
     pub notch_indicator: bool,
+    /// The local API's `GET /meetings/events` tells a subscriber each finished meeting's id (issue 964).
+    pub meeting_finished_event: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -119,6 +121,7 @@ impl Default for LabsSettings {
             gnome_clipboard_restore: false,
             meeting_notes_vocabulary: false,
             notch_indicator: false,
+            meeting_finished_event: false,
         }
     }
 }

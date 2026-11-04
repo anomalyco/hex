@@ -47,6 +47,10 @@ Subtitles -> hex meetings show <id> --srt | --vtt   // Labs › Subtitle export,
              one cue per transcript entry (You / Them), timed by entry offsets,
              not word timings; off -> refused naming hex labs on subtitle-export
              (docs/transcript-cli.md; no export button in the window yet)
+Apps -> GET /meetings/events on the local API      // Labs › Meeting finished event, off by default (#964)
+        one SSE event per meeting once its final transcript is written:
+        {"type":"meeting.finished","id":"<id>"}, nothing else; one subscriber;
+        off -> 404 labs-off (docs/streams.md, labs.md)
 ```
 
 Requires the selected local dictation model, Microphone, and System Audio

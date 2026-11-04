@@ -216,3 +216,28 @@ has no body.
 
 `model-changed` means the user switched dictation's model during the stream;
 start a new one. `hex-quitting` means Hex quit.
+
+## Meeting finished events (`GET /meetings/events`, Labs)
+
+Not part of `/streams`, but on the same local API with the same discovery
+and bearer token. Only while Labs › Meeting finished event
+(`labs.meeting_finished_event`, `hex labs on meeting-finished-event`) is on;
+off, it answers `404 labs-off`. Code: `src/local_api/meeting_events.rs`
+(route) and `src/meeting/finished_events.rs` (the hub the recorder publishes
+to).
+
+Server-sent events with `: keep-alive` comments every 15 s. Once per meeting,
+after its final transcript and Markdown are written and its manifest reads
+`complete` (a Stop, or the final pass of a meeting Hex quit while recording):
+
+```text
+data: {"type":"meeting.finished","id":"1730700000000-4242"}
+```
+
+Only the id is sent: no title, path, transcript, or audio. Read the rest with
+`hex meetings show <id>` (or `hex mcp`). One subscriber at a time; a
+second answers `409 subscriber-busy`. Nothing is queued while nobody listens,
+so a client that reconnects should list meetings to catch up. A meeting whose
+final transcript fails sends nothing. The stream ends when Hex quits or the
+toggle turns off. `hex service` serves the route but records no meetings, so
+it never sends one.

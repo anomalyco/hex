@@ -64,6 +64,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
 ├── Vocabulary in meeting notes no labs.meeting_notes_vocabulary (every OS with Meetings)
 │                                        final meeting titles and summaries (and Regenerate summary) read the vocabulary ahead of the transcript (#1154)
+├── Meeting finished event no labs.meeting_finished_event (every OS with Meetings)
+│                                        the local API's GET /meetings/events sends each finished meeting's id once its final transcript is written (#964)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
@@ -953,6 +955,37 @@ per-meeting context field, or adding terms to retranscription. Checks:
 [labs.rs](../../src/labs.rs). Not yet observed: real notes written with the
 toggle on; the Labs page goldens that show Meetings rows need regenerating
 with the new row.
+
+Meeting finished event (`meeting-finished-event`, issue 964; every OS with
+Meetings; its row shows wherever Meetings does): for a companion app that
+processes a meeting once its transcript is ready, without watching the
+meetings folder or polling `hex meetings list`. While on, the local API's
+authenticated `GET /meetings/events` is a server-sent event stream that
+sends `{"type":"meeting.finished","id":"<id>"}` once per meeting, after
+its final transcript and Markdown are written and the manifest says
+`complete` (`record` after Stop, or `finish_pending` for a meeting Hex quit
+while recording), with a `: keep-alive` comment every 15 s
+([streams.md](../streams.md#meeting-finished-events-get-meetingsevents-labs)).
+Only the id is sent, never a title, path, transcript, or audio, and nothing
+leaves the computer; the client reads the meeting with `hex meetings show
+<id>`. One subscriber at a time (a second answers `409 subscriber-busy`), so
+it holds at most one of the four HTTP workers. The gates are
+`labs::meeting_finished_event()`, read where the route starts (off: `404
+labs-off`), on each 250 ms pass of an open stream (off ends it), and where
+`meeting::finished_events::publish` is called; with it off, or with nobody
+subscribed, nothing is queued or kept. A failed final pass sends nothing. Not
+built: the webhook with audio upload, retries, or a command run on finish
+that the issue also asked for. Checks:
+`a_finished_meeting_reaches_the_one_subscriber_as_its_id` and
+`nothing_is_sent_or_kept_while_the_toggle_is_off` in
+[meeting/finished_events.rs](../../src/meeting/finished_events.rs);
+`a_finished_meeting_is_streamed_as_its_id_to_one_authenticated_subscriber`
+in [local_api/meeting_events.rs](../../src/local_api/meeting_events.rs)
+(unauthenticated 401, `labs-off`, one subscriber, the event, the toggle
+ending the stream); `meeting_finished_event_is_its_own_bit_and_off_by_default`
+in [labs.rs](../../src/labs.rs). Not yet observed: a real recorded call
+sending the event, on any OS; the Labs page goldens that show Meetings rows
+need regenerating with the new row.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard
