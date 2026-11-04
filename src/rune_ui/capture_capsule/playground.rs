@@ -25,6 +25,8 @@ use crate::rune_ui::controls::{DESCRIPTION, Paint};
 use crate::rune_ui::lists::slider_in;
 
 mod family;
+mod living;
+mod pill;
 mod stories;
 pub(crate) use stories::add as stories;
 
@@ -68,6 +70,32 @@ pub(crate) struct Playground {
     copied: bool,
     /// The screens the notch story shows.
     screens: stories::Screens,
+    /// The Annotate pill looks (t1290), shown on the stage instead of the
+    /// capsule while one is picked.
+    options: Option<Proto>,
+}
+
+/// An Annotate pill prototype: round 1's three looks or round 2's living
+/// pill.
+enum Proto {
+    Round1(pill::Options),
+    Living(living::Living),
+}
+
+impl Proto {
+    fn advance(&mut self, dt: f64, reduced: bool) {
+        match self {
+            Self::Round1(o) => o.advance(dt, reduced),
+            Self::Living(o) => o.advance(dt, reduced),
+        }
+    }
+
+    fn stage(&self, p: Paint, reduced: bool) -> El {
+        match self {
+            Self::Round1(o) => pill::stage(p, o, reduced, (PANEL_W, PANEL_H)),
+            Self::Living(o) => living::stage(p, o, reduced, (PANEL_W, PANEL_H)),
+        }
+    }
 }
 
 /// Opens the playground and runs it until its window closes.
@@ -84,7 +112,28 @@ pub(crate) fn run(rune_args: Vec<String>) {
         on_key: Some(on_key),
         ..rune::AppSpec::new("Hex capsule playground", WINDOW, init, super::view)
     };
-    rune::App::new(spec).modifier_keys().args(rune_args).run();
+    rune::App::new(spec)
+        .modifier_keys()
+        .args(settled(rune_args))
+        .run();
+}
+
+/// A snap without a time or frames would draw the first frame, before the
+/// scene's steps have arrived and the capsule has grown in: snap once it
+/// has settled instead.
+fn settled(mut args: Vec<String>) -> Vec<String> {
+    let timed = [
+        "--at",
+        "--frames",
+        "--duration",
+        "--video",
+        "--out",
+        "--script",
+    ];
+    if args.iter().any(|a| a == "--snap") && !args.iter().any(|a| timed.contains(&a.as_str())) {
+        args.extend(["--at".into(), "1.5".into()]);
+    }
+    args
 }
 
 fn init() -> CapsuleState {
@@ -120,6 +169,7 @@ fn init() -> CapsuleState {
         log: Vec::new(),
         copied: false,
         screens: stories::Screens::Both,
+        options: None,
     }));
     state
 }
@@ -167,7 +217,33 @@ const SCENES: &[Scene] = &[
     }),
     // Allow walks it to granted, as System Settings would.
     ("permission", |s| scene(s, &[needs_screen()])),
+    // The Annotate pill looks: snap with `--at` (recording 1.75, working
+    // 3.25, done 4.3 seconds).
+    ("pill-a", |s| look(s, pill::Pick::A)),
+    ("pill-b", |s| look(s, pill::Pick::B)),
+    ("pill-c", |s| look(s, pill::Pick::C)),
+    // Round 2's living pill: recording 1.0 (hover 2.0), working 2.5, the
+    // end state 3.6, sent 5.0 seconds.
+    ("pill-hover", |s| living(s, living::Look::ALL[0])),
+    ("pill-always", |s| living(s, living::Look::ALL[1])),
+    ("pill-rule", |s| living(s, living::Look::ALL[2])),
+    ("pill-failure", |s| living(s, living::Look::ALL[3])),
 ];
+
+/// How many of [`SCENES`] are the capsule's own, before the looks.
+const CAPSULE_SCENES: usize = 10;
+
+fn look(s: &mut CapsuleState, pick: pill::Pick) {
+    if let Some(pg) = s.playground.as_mut() {
+        pg.options = Some(Proto::Round1(pill::Options::new(pick)));
+    }
+}
+
+fn living(s: &mut CapsuleState, look: living::Look) {
+    if let Some(pg) = s.playground.as_mut() {
+        pg.options = Some(Proto::Living(living::Living::new(look)));
+    }
+}
 
 /// A capture refused for Screen Recording: the permission helper.
 fn needs_screen() -> Step {
@@ -360,6 +436,11 @@ fn poll(s: &mut CapsuleState, wall: f64, tx: &mut Tx) -> bool {
     pg.wall = Some(wall);
     pg.clock += dt * scale;
     let now = pg.clock;
+    if let Some(options) = pg.options.as_mut() {
+        options.advance(dt * scale, pg.reduced);
+        tx.wake_after(Duration::ZERO);
+        return true;
+    }
     let actions = std::mem::take(&mut *pg.actions.lock().unwrap_or_else(|e| e.into_inner()));
     for action in actions {
         pg.answer(action);
@@ -459,21 +540,16 @@ pub(super) fn view(s: &CapsuleState, cx: &mut Cx<CapsuleState>) -> El {
         cx.reduced_motion(true);
     }
     s.reduced.set(cx.is_reduced_motion());
-    let stage = el()
-        .key("stage")
-        .size(PANEL_W, PANEL_H)
-        .fill(p.k.c.layer_03);
-    let stage = match pg.tuning.flow {
-        _ if s.surface.anchor == super::surface::Anchor::Cursor => stage.child(super::pointer(p)),
-        CapsuleFlow::MenuBar => stage.child(super::menu_item(p)),
-        _ => stage,
-    }
-    .child(capsule(p, &s.surface, &s.live, cx));
+    let stage = match pg.options.as_ref() {
+        Some(options) => options.stage(p, cx.is_reduced_motion()),
+        None => capsule_stage(p, s, pg, cx),
+    };
     let controls = col()
         .key("controls")
         .w(PANEL_W)
         .gap(20.0)
         .padding(PAD)
+        .child(looks(p))
         .child(states(p))
         .child(flow_controls(p, pg))
         .child(log(p, pg));
@@ -495,6 +571,64 @@ pub(super) fn view(s: &CapsuleState, cx: &mut Cx<CapsuleState>) -> El {
         .fill(p.k.c.bg_base)
         .child(left)
         .child(panel(p, pg))
+}
+
+/// The real capsule on its backdrop.
+fn capsule_stage(p: Paint, s: &CapsuleState, pg: &Playground, cx: &mut Cx<CapsuleState>) -> El {
+    let stage = el()
+        .key("stage")
+        .size(PANEL_W, PANEL_H)
+        .fill(p.k.c.layer_03);
+    match pg.tuning.flow {
+        _ if s.surface.anchor == super::surface::Anchor::Cursor => stage.child(super::pointer(p)),
+        CapsuleFlow::MenuBar => stage.child(super::menu_item(p)),
+        _ => stage,
+    }
+    .child(capsule(p, &s.surface, &s.live, cx))
+}
+
+/// The Annotate pill looks: one on the stage, looping, or the capsule.
+fn looks(p: Paint) -> El {
+    let mut buttons = row().key("looks-row").gap(6.0).flex_wrap();
+    for pick in pill::Pick::ALL {
+        buttons = buttons.child(button(
+            p,
+            pick.label(),
+            pick.label(),
+            false,
+            move |s, tx| {
+                if let Some(pg) = s.playground.as_mut() {
+                    pg.options = Some(Proto::Round1(pill::Options::new(pick)));
+                }
+                tx.wake_after(Duration::ZERO);
+            },
+        ));
+    }
+    for look in living::Look::ALL {
+        buttons = buttons.child(button(
+            p,
+            look.label(),
+            look.label(),
+            false,
+            move |s, tx| {
+                if let Some(pg) = s.playground.as_mut() {
+                    pg.options = Some(Proto::Living(living::Living::new(look)));
+                }
+                tx.wake_after(Duration::ZERO);
+            },
+        ));
+    }
+    buttons = buttons.child(button(p, "capsule", "The capsule", false, |s, tx| {
+        if let Some(pg) = s.playground.as_mut() {
+            pg.options = None;
+        }
+        tx.wake_after(Duration::ZERO);
+    }));
+    col()
+        .key("looks")
+        .gap(8.0)
+        .child(heading(p, "Annotate pill looks"))
+        .child(buttons)
 }
 
 /// A button that does something once; settings that stay on or off are

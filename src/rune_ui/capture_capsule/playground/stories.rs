@@ -11,8 +11,8 @@ use super::super::notch::{self, DISPLAY_27, MACBOOK_PRO_14, Screen};
 use super::super::surface::{Anchor, PANEL_H, PANEL_W};
 use super::super::{PANEL_MARGIN, capsule};
 use super::{
-    CapsuleFlow, CapsuleState, Input, Paint, SCENES, SLOW, Step, Tuning, init, log, poll, states,
-    tuning,
+    CAPSULE_SCENES, CapsuleFlow, CapsuleState, Input, Paint, SCENES, SLOW, Step, Tuning, init, log,
+    poll, states, tuning,
 };
 
 /// The side column's content width (Rune's 264 pt column, less padding).
@@ -21,8 +21,9 @@ const SIDE_W: f32 = 240.0;
 const SIDE_H: f32 = 440.0;
 const GROUP: &str = "Prototypes/Capture capsule";
 
-// One story per scene below; adding a scene means adding its index too.
-const _: () = assert!(SCENES.len() == 10);
+// One story per capsule scene below; adding a scene means adding its
+// index too. The looks after them have their own story.
+const _: () = assert!(CAPSULE_SCENES == 10 && SCENES.len() == CAPSULE_SCENES + 7);
 
 /// `playground` with the whole flow and every capsule scene as stories.
 pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playground<S> {
@@ -46,6 +47,8 @@ pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playgrou
         .story(scene::<9>())
         .story(notch_story())
         .story(super::family::story())
+        .story(super::pill::story())
+        .story(super::living::story())
 }
 
 fn scene<const I: usize>() -> Story<CapsuleState> {
