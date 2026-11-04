@@ -486,6 +486,10 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      (Idle menu bar: "Record Meeting" + "Copy Last Meeting Transcript")
   -> Floating recording indicator (when Show recording indicator is on) // meetings.indicator
      ├── Rune interactive overlay: a non-activating panel that never becomes key
+     ├── Only the drawn pill takes the pointer (OverlayInput::Regions, the
+     │   pill `.hit()`); the window is as wide as the open pill, and clicks
+     │   in its transparent rest reach the app beneath (#1305; not observed
+     │   on a real Mac)
      ├── In the saved recording_indicator_corner
      ├── Compact: pulsing red dot · title · mm:ss, plus "+N" when turns wait
      ├── Hover -> widens toward the screen with the actions below; pointer
@@ -523,8 +527,10 @@ Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.pan
   -> Off: top right below the menu bar, no drag, exactly as before
   Checks: a_released_panel_snaps_by_its_own_size,
   each_corner_places_the_panel_at_its_edges, only_a_movable_panel_drags
-  (rune_ui/meeting_capsules.rs); not observed on a real Mac. Not built:
-  clicks passing through the panel outside its buttons
+  (rune_ui/meeting_capsules.rs); not observed on a real Mac. Every panel
+  capsule takes the pointer only on its body, never the window's margin
+  around it (#1305); a click on the body outside its buttons still stops
+  there
 
 Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-stop
   Only a recording Hex started on its own (Always record); manual, offered,
