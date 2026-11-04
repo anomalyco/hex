@@ -993,13 +993,16 @@ fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
         .size(w, h)
         .radius(corner(h));
     // At the notch it's the notch: black, with no edge or shadow, and
-    // tucked into the notch rather than gone when hidden.
+    // tucked into the notch rather than gone when hidden. Under Reduce
+    // Motion it never travels, so it fades at rest instead.
     if surface.anchor == surface::Anchor::Notch {
-        return body
-            .fill(k.c.black)
-            .motion(surface.shell_motion)
-            .role("group")
-            .label("Capture");
+        body = body.fill(k.c.black).motion(surface.shell_motion);
+        if surface.reduced {
+            body = body
+                .opacity(if surface.shell_on { 1.0 } else { 0.0 })
+                .opacity_motion(surface.shell_fade);
+        }
+        return body.role("group").label("Capture");
     }
     body = body.fill(k.c.bg_base);
     for shadow in &k.elevation.overlay {
