@@ -38,8 +38,12 @@ pub(super) fn sent_to(to: &str) -> String {
     format!("Sent to {}", short(to))
 }
 
-/// A session's name cut to the capsule's available width.
+/// A session's name cut to the capsule's available width. A raw `ses…` id
+/// (a host that named a session by id) reads "session": never the id.
 pub(super) fn short(name: &str) -> String {
+    if name.trim().starts_with("ses_") {
+        return "session".to_owned();
+    }
     if name.chars().count() <= ROUTE_NAME_MAX {
         return name.to_owned();
     }
