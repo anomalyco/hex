@@ -1490,7 +1490,8 @@ Linux beta                               // not macOS feature parity
 │   │   the CPU too and keeps the faster; a slower GPU is recorded (slow), so
 │   │   later loads go straight to the CPU (#484: UHD 620, Iris Plus 655)
 │   ├── GPU -> tries the GPU anyway; working, it clears that GPU's record
-│   └── CPU -> CPU only
+│   └── CPU -> CPU only; launched on CPU, Hex loads no GPU driver for speech
+│       and switching to Auto or GPU says it turns on when Hex restarts (#1253)
 │   // checked on apollo with a planted record (RADV); a real i915 hang not reproduced
 │   └── CPU or a model that cannot stream -> Transcribe the whole clip after release
 ├── hex / hex app -> Window in the same process; closing it leaves Hex running

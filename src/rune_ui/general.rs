@@ -1302,7 +1302,10 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
         tr("Hex uses the CPU because the graphics driver's Vulkan is missing or too old. Update the GPU driver to use the GPU.")
             .to_owned()
     });
-    let note = vulkan_note.or_else(|| failed.map(|failure| {
+    // Launched on CPU, Hex loaded no GPU driver (#1253).
+    let restart_note = (ui.live() && crate::transcription::local_transcriber::gpu_after_restart())
+        .then(|| tr("Turns on when Hex restarts").to_owned());
+    let note = vulkan_note.or(restart_note).or_else(|| failed.map(|failure| {
         tr_named(
             if failure.slow {
                 "Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway."

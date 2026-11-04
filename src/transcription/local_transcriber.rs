@@ -73,27 +73,40 @@ pub fn install(selection: &TranscriptionSelection, canceled: &AtomicBool) -> Res
     Ok(())
 }
 
+/// Speech engine was CPU when [`init_backends`] ran, so only the CPU
+/// backend registered.
+static CPU_CHOSEN: AtomicBool = AtomicBool::new(false);
+
 /// Registers transcribe.cpp's backends once per process and returns the
-/// backend models load on: every GPU (`Auto`), or on Windows only the CPU
-/// after a launch of this build crashed while ggml started a GPU (#662). A
-/// GPU driver crash can't be caught, so a marker file spans that work.
+/// backend models load on: every GPU (`Auto`), or only the CPU when Speech
+/// engine is CPU, so no GPU driver loads (#1253), or on Windows after a
+/// launch of this build crashed while ggml started a GPU (#662). A GPU
+/// driver crash can't be caught, so a marker file spans that work.
 pub fn init_backends() -> Result<Backend> {
     static BACKEND: std::sync::OnceLock<Backend> = std::sync::OnceLock::new();
     if let Some(backend) = BACKEND.get() {
         return Ok(*backend);
     }
     transcribe_cpp::init_logging();
+    let cpu_only = || {
+        transcribe_cpp::init_backends_with(
+            None::<&Path>,
+            transcribe_cpp::BackendMask::for_backend(Backend::Cpu),
+        )
+        .wrap_err("could not initialize the CPU transcription backend")
+    };
     #[cfg(target_os = "windows")]
     if gpu_guard::crashed_before() {
         tracing::warn!(
             marker = %gpu_guard::marker().map(|path| path.display().to_string()).unwrap_or_default(),
             "a previous launch of this Hex crashed while starting the GPU for transcription; transcribing on the CPU until Hex updates or the marker is deleted"
         );
-        transcribe_cpp::init_backends_with(
-            None::<&Path>,
-            transcribe_cpp::BackendMask::for_backend(Backend::Cpu),
-        )
-        .wrap_err("could not initialize the CPU transcription backend")?;
+        cpu_only()?;
+        return Ok(*BACKEND.get_or_init(|| Backend::Cpu));
+    }
+    if device() == TranscriptionDevice::Cpu {
+        cpu_only()?;
+        CPU_CHOSEN.store(true, Ordering::Relaxed);
         return Ok(*BACKEND.get_or_init(|| Backend::Cpu));
     }
     let init = || {
@@ -106,6 +119,12 @@ pub fn init_backends() -> Result<Backend> {
     let init = || gpu_guard::guarded(init);
     init().wrap_err("could not initialize transcription backends")?;
     Ok(*BACKEND.get_or_init(|| Backend::Auto))
+}
+
+/// Speech engine left CPU after this launch registered the CPU alone: the
+/// GPU needs a restart.
+pub(crate) fn gpu_after_restart() -> bool {
+    CPU_CHOSEN.load(Ordering::Relaxed) && device() != TranscriptionDevice::Cpu
 }
 
 /// The marker a Windows launch keeps while ggml starts a GPU (`init_backends`,
