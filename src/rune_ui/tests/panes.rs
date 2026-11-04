@@ -1579,6 +1579,8 @@ fn platform_goldens() {
     let _goldens = Goldens::collect();
     for dark in [true, false] {
         check_golden("meetings-calendar", dark, (980.0, 1800.0));
+        check_golden("meetings-summary-model", dark, (980.0, 1800.0));
+        check_golden("meetings-summary-model-not-running", dark, (980.0, 1800.0));
         for scene in [
             "mac-settings",
             "mac-input-source-models",
