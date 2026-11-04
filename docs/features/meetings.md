@@ -73,8 +73,12 @@ System audio                                      // meetings.system-audio
 ├── Linux -> pw-record of the default output's monitor (stream.capture.sink);
 │   the session manager follows a changed default; no pw-record -> recording
 │   refuses with "Install PipeWire's pw-record"
-└── Windows -> WASAPI loopback of the default output (cpal); silence while
-    nothing plays is padded on resume; a changed default reopens it
+└── Windows -> WASAPI loopback of every active output (cpal), mixed into the
+    one system track, so a call playing on a headset that isn't the default
+    output is recorded (#1221; audio_on_any_output_reaches_the_system_track,
+    unverified on a real call); silence while nothing plays is padded on
+    resume; a change in the list of outputs reopens it; an output whose
+    loopback fails is dropped while the others keep recording
 Call detection                                    // meetings.detect
 ├── Linux -> one pw-dump --monitor: running Stream/Input/Audio nodes that are
 │   not monitor captures, by application.process.binary (node or client)
