@@ -593,22 +593,27 @@ pub(super) const SCENES: &[Scene] = &[
         ui.platform.developer = true;
         ui.pane = Pane::HudLab;
     }),
-    ("mac-labs", |ui| {
-        *ui = mac_fixture();
-        #[cfg(hex_capture)]
-        {
-            ui.platform.scrawl = Some(platform::ScrawlView::preview());
-        }
-        ui.labs_open = true;
-    }),
+    ("mac-labs", labs_with_some_on),
     ("mac-labs-link", |ui| {
         *ui = mac_fixture();
         ui.labs_open = true;
-        // Far ahead, so the pulse holds for the render.
-        ui.lab_flash = Some((
-            crate::labs::Feature::VocabularyBiasing,
-            Instant::now() + Duration::from_secs(3600),
-        ));
+        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::VocabularyBiasing));
+    }),
+    ("mac-labs-on", |ui| {
+        labs_with_some_on(ui);
+        ui.lab_store.tab = labs::Tab::On;
+    }),
+    ("mac-labs-category", |ui| {
+        labs_with_some_on(ui);
+        ui.lab_store.category = labs::Category::from_id("shortcuts");
+    }),
+    ("mac-labs-search", |ui| {
+        labs_with_some_on(ui);
+        ui.lab_store.search = rune::TextEdit::new("paste".to_string());
+    }),
+    ("mac-labs-drawer", |ui| {
+        labs_with_some_on(ui);
+        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::LiveText));
     }),
     ("mac-production", |ui| {
         *ui = mac_fixture();
@@ -839,4 +844,22 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         editing: false,
     });
     ui
+}
+
+/// Labs with a few labs on: every store scene's fixture, so a lab reads
+/// the same in each.
+fn labs_with_some_on(ui: &mut Ui) {
+    *ui = mac_fixture();
+    for feature in [
+        crate::labs::Feature::LiveText,
+        crate::labs::Feature::SmartSpacing,
+        crate::labs::Feature::TapOrHold,
+    ] {
+        feature.set(&mut ui.settings, true);
+    }
+    #[cfg(hex_capture)]
+    {
+        ui.platform.scrawl = Some(platform::ScrawlView::preview());
+    }
+    ui.labs_open = true;
 }

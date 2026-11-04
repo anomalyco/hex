@@ -110,11 +110,6 @@ line_icon!(
     ]
 );
 line_icon!(
-    HINTS,
-    "hex-row-hints",
-    ["M4 7V4h16v3", "M9 20h6", "M12 4v16"]
-);
-line_icon!(
     PASTE,
     "hex-row-paste",
     [

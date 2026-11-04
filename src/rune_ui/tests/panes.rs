@@ -1774,29 +1774,219 @@ fn labs_is_one_flat_list_of_toggles_off_by_default() {
 }
 
 #[test]
-fn a_labs_link_opens_labs_pulses_its_row_and_leaves_it_off() {
+fn a_labs_link_opens_its_labs_drawer_and_leaves_it_off() {
+    use super::super::labs::Lab;
+    use super::super::labs::LabsLink;
     use crate::labs::Feature;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
     let feature = Feature::VocabularyBiasing;
     assert!(!feature.on(&rt.state.settings));
-    rt.update(|ui, tx| super::super::labs::reveal(ui, Some(feature.name()), tx));
+    let link = LabsLink {
+        lab: Some(feature.name().into()),
+        ..LabsLink::default()
+    };
+    rt.update(|ui, tx| super::super::labs::reveal(ui, &link, tx));
     settle(&mut rt);
     assert!(rt.state.labs_open);
-    assert_eq!(rt.state.lab_flash.map(|(f, _)| f), Some(feature));
-    assert!(rt.find("lab-vocabulary-biasing").is_some());
+    assert_eq!(rt.state.lab_store.drawer, Some(Lab::Feature(feature)));
+    assert!(rt.find("lab-drawer").is_some());
     assert!(!feature.on(&rt.state.settings), "a link never flips it");
-    let later = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    assert!(super::super::labs::poll_flash(&mut rt.state, later));
-    assert!(rt.state.lab_flash.is_none());
+    key(&mut rt, Key::Escape, Mods::default());
+    assert!(
+        rt.state.lab_store.drawer.is_none(),
+        "Escape closes the drawer"
+    );
+    assert!(rt.state.labs_open, "and leaves Labs open");
 }
 
 #[test]
-fn a_labs_link_to_an_unknown_name_opens_labs_without_a_pulse() {
+fn a_labs_link_to_an_unknown_name_opens_labs_without_a_drawer() {
+    use super::super::labs::LabsLink;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
-    rt.update(|ui, tx| super::super::labs::reveal(ui, Some("no-such-lab"), tx));
+    let link = LabsLink {
+        lab: Some("no-such-lab".into()),
+        category: Some("no-such-category".into()),
+        ..LabsLink::default()
+    };
+    rt.update(|ui, tx| super::super::labs::reveal(ui, &link, tx));
     settle(&mut rt);
     assert!(rt.state.labs_open);
-    assert!(rt.state.lab_flash.is_none());
+    assert!(rt.state.lab_store.drawer.is_none());
+    assert!(rt.state.lab_store.category.is_none());
+}
+
+#[test]
+fn a_labs_link_sets_the_stores_tab_chip_and_search() {
+    use super::super::labs::LabsLink;
+    use super::super::labs::Tab;
+    let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
+    let link = LabsLink {
+        turned_on: true,
+        category: Some("shortcuts".into()),
+        search: Some("tap".into()),
+        ..LabsLink::default()
+    };
+    rt.update(|ui, tx| super::super::labs::reveal(ui, &link, tx));
+    settle(&mut rt);
+    let store = &rt.state.lab_store;
+    assert_eq!(store.tab, Tab::On);
+    assert_eq!(
+        store.category.map(|category| category.id()),
+        Some("shortcuts")
+    );
+    assert_eq!(store.search.text, "tap");
+}
+
+#[test]
+fn a_labs_card_opens_its_drawer_and_its_switch_turns_it_on() {
+    use super::super::labs::Lab;
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
+    let feature = Feature::SubtitleExport;
+    tap(&mut rt, "lab-card-subtitle-export");
+    assert_eq!(rt.state.lab_store.drawer, Some(Lab::Feature(feature)));
+    assert!(
+        !feature.on(&rt.state.settings),
+        "opening a card flips nothing"
+    );
+    tap(&mut rt, "lab-drawer-toggle");
+    assert!(
+        feature.on(&rt.state.settings),
+        "the drawer's switch turns it on"
+    );
+    tap(&mut rt, "lab-drawer-close");
+    assert!(rt.state.lab_store.drawer.is_none());
+    tap(&mut rt, "lab-subtitle-export");
+    assert!(
+        !feature.on(&rt.state.settings),
+        "the card's switch turns it off"
+    );
+}
+
+#[test]
+fn the_labs_store_filters_by_tab_chip_and_search() {
+    let mut rt = runtime("mac-labs-on", true, (980.0, 2000.0));
+    assert!(rt.find("lab-card-live-text").is_some());
+    assert!(
+        rt.find("lab-card-vocabulary-biasing").is_none(),
+        "Turned on lists only what's on"
+    );
+    rt.update(|ui, _| ui.lab_store.tab = super::super::labs::Tab::Discover);
+    settle(&mut rt);
+    assert!(
+        rt.find("featured").is_some(),
+        "Discover leads with what's new"
+    );
+    tap(&mut rt, "chip-shortcuts");
+    assert!(rt.find("featured").is_none());
+    assert!(rt.find("lab-card-mouse-shortcuts").is_some());
+    assert!(rt.find("lab-card-live-text").is_none());
+    tap(&mut rt, "chip-all");
+    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("no such words".to_string()));
+    settle(&mut rt);
+    assert!(rt.find("empty-copy").is_some());
+    assert!(rt.find("lab-card-live-text").is_none());
+}
+
+#[test]
+fn a_lone_lab_card_keeps_half_the_row() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    let mut width = None;
+    let mut lone = false;
+    let chips = [
+        "chip-all",
+        "chip-dictation",
+        "chip-shortcuts",
+        "chip-clipboard",
+        "chip-meetings",
+        "chip-models",
+        "chip-app",
+    ];
+    for chip in chips {
+        if rt.find(chip).is_none() {
+            continue;
+        }
+        tap(&mut rt, chip);
+        let widths: Vec<f32> = rt
+            .elements()
+            .into_iter()
+            .filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("lab-card-")))
+            .map(|e| e.rect[2])
+            .collect();
+        lone |= widths.len() % 2 == 1;
+        let width = *width.get_or_insert(widths[0]);
+        assert!(
+            widths.iter().all(|w| (w - width).abs() < 0.5),
+            "{chip}: every card is as wide: {widths:?}"
+        );
+    }
+    assert!(lone, "some chip leaves a card alone in its row");
+}
+
+#[test]
+fn new_in_labs_isnt_repeated_in_the_grid() {
+    let rt = runtime("mac-labs", true, (980.0, 4000.0));
+    let featured: Vec<String> = rt
+        .elements()
+        .into_iter()
+        .filter_map(|e| e.key?.strip_prefix("lab-featured-").map(str::to_string))
+        .collect();
+    assert_eq!(featured.len(), 2, "two labs are featured");
+    for id in featured {
+        assert!(
+            rt.find(&format!("lab-card-{id}")).is_none(),
+            "{id} shows once"
+        );
+    }
+}
+
+/// Whether the switch keyed `key` is on: its thumb sits past the track's
+/// middle.
+fn shows_on(rt: &Runtime<Ui>, key: &str) -> bool {
+    let inside = format!("/{key}/");
+    let part = |name: &str| {
+        rt.elements()
+            .into_iter()
+            .find(|e| !e.exiting && e.key.as_deref() == Some(name) && e.path.contains(&inside))
+            .unwrap_or_else(|| panic!("no {name} in {key}"))
+            .rect
+    };
+    let (track, thumb) = (part("control"), part("thumb"));
+    thumb[0] + thumb[2] / 2.0 > track[0] + track[2] / 2.0
+}
+
+/// Every card's switch matches its drawer's.
+#[test]
+fn a_labs_drawer_agrees_with_its_card() {
+    let mut rt = runtime("mac-labs-drawer", true, (980.0, 4000.0));
+    assert!(shows_on(&rt, "lab-drawer-toggle"), "Live text is on");
+    key(&mut rt, Key::Escape, Mods::default());
+    assert!(shows_on(&rt, "lab-live-text"), "and its card says so");
+    let ids: Vec<String> = rt
+        .elements()
+        .into_iter()
+        .filter_map(|e| e.key?.strip_prefix("lab-card-").map(str::to_string))
+        .collect();
+    assert!(ids.len() > 20, "{ids:?}");
+    for id in ids {
+        let card_on = shows_on(&rt, &format!("lab-{id}"));
+        tap(&mut rt, &format!("lab-card-{id}"));
+        assert_eq!(
+            shows_on(&rt, "lab-drawer-toggle"),
+            card_on,
+            "{id}: the drawer agrees with the card"
+        );
+        key(&mut rt, Key::Escape, Mods::default());
+        assert!(rt.state.lab_store.drawer.is_none());
+    }
+}
+
+#[test]
+fn command_f_searches_labs() {
+    let mut rt = runtime("mac-labs", true, PANE_SIZE);
+    assert!(!rt.state.lab_store.search.focused);
+    key(&mut rt, Key::Command('f'), Mods::default());
+    assert!(rt.state.lab_store.search.focused);
 }
 
 #[test]
@@ -1979,6 +2169,8 @@ fn an_installed_driver_keeps_the_voice_filter_on() {
         !rt.state.settings.experimental.hex_microphone,
         "the toggle is locked"
     );
+    assert!(rt.state.lab_store.drawer.is_some(), "its drawer says why");
+    key(&mut rt, Key::Escape, Mods::default());
     assert!(rt.find("nav-voice-filter").is_some());
 
     if let Some(driver) = &mut rt.state.platform.hex_microphone {
