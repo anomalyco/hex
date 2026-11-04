@@ -357,6 +357,10 @@ pub struct MeetingDetector {
     /// once its app has been off the microphone for [`CALL_ENDED_AFTER`],
     /// not a minute, so the next call is offered (#1113).
     stopped: bool,
+    /// The offer's capsule closed on its timeout without an answer: the
+    /// snooze ends as soon as the call app leaves the microphone, so a call
+    /// joined after its pre-join screen is offered again (#1267).
+    timed_out: bool,
     /// When a candidate was last on the microphone (or known to be, while
     /// recording); absence is counted from here, gaps included.
     last_present: Option<Instant>,
@@ -425,6 +429,13 @@ impl MeetingDetector {
         }
     }
 
+    /// The offer's capsule closed on its timeout, unanswered.
+    pub fn offer_timed_out(&mut self) {
+        if self.offered.is_some() {
+            self.timed_out = true;
+        }
+    }
+
     /// Whether the call app is on the microphone, seen while a recording is
     /// transcribing and detection doesn't run: an absence then still ends
     /// the snooze.
@@ -465,6 +476,14 @@ impl MeetingDetector {
     /// lasted long enough.
     fn absent_at(&mut self, now: Instant) {
         let since = *self.last_present.get_or_insert(now);
+        if self.timed_out {
+            self.offered = None;
+            self.offered_application = None;
+            self.offered_call = None;
+            self.stopped = false;
+            self.timed_out = false;
+            return;
+        }
         let reset_after = if self.stopped {
             CALL_ENDED_AFTER
         } else {
@@ -475,6 +494,7 @@ impl MeetingDetector {
             self.offered_application = None;
             self.offered_call = None;
             self.stopped = false;
+            self.timed_out = false;
         }
     }
 
@@ -571,6 +591,7 @@ impl MeetingDetector {
         self.offered_application = candidate.application.clone();
         self.offered_call = candidate.call.clone();
         self.stopped = false;
+        self.timed_out = false;
         if self
             .calendar
             .as_ref()
@@ -1174,6 +1195,33 @@ mod tests {
         // Dismissed or ignored: twenty seconds off the microphone keeps it snoozed.
         assert!(watch.run(None, &[], 20_000).is_empty());
         assert!(watch.run(Some(&candidate), &[], 5_000).is_empty());
+    }
+
+    #[test]
+    fn a_timed_out_offer_is_offered_again_when_the_call_retakes_the_microphone() {
+        // Google Meet's pre-join screen holds the microphone; nobody answers
+        // the offer before it times out (#1267).
+        let meet = candidate_from_context(&context(
+            "Arc",
+            Some("https://meet.google.com/abc-defg-hij"),
+            "Meet - Design sync",
+        ))
+        .unwrap();
+        let mut watch = Watch::new();
+        assert!(watch.stable(&meet, &[]).is_some());
+        assert!(watch.run(Some(&meet), &[], 30_000).is_empty());
+        watch.detector.offer_timed_out();
+        assert!(watch.run(Some(&meet), &[], 10_000).is_empty());
+        // Joining releases and retakes the microphone: offered again.
+        assert!(watch.run(None, &[], 500).is_empty());
+        assert_eq!(
+            watch.stable(&meet, &[]),
+            Some(Detection::Offer(meet.clone()))
+        );
+
+        // An offer that hasn't timed out stays snoozed through the same release.
+        assert!(watch.run(None, &[], 500).is_empty());
+        assert!(watch.run(Some(&meet), &[], 10_000).is_empty());
     }
 
     #[test]
