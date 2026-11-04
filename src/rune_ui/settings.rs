@@ -1065,6 +1065,7 @@ pub(super) fn input_source_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 controls.child(select(
                     p,
                     &format!("input-source-model{index}"),
+                    tr("Speech model"),
                     &label,
                     ui.open == Some(Menu::InputSourceModel(index)),
                     choices,
@@ -1089,7 +1090,7 @@ fn input_source_language(
     let current = transcription_models::language_name(&choice.language);
     let codes = transcription_models::definition(choice.model).language_choices();
     if codes.len() <= 1 {
-        return fixed_select(p, &key, current);
+        return fixed_select(p, &key, tr("Language"), current);
     }
     let choices = codes
         .into_iter()
@@ -1118,6 +1119,7 @@ fn input_source_language(
     select(
         p,
         &key,
+        tr("Language"),
         current,
         ui.open == Some(Menu::InputSourceLanguage(index)),
         choices,

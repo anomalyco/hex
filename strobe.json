@@ -13,6 +13,9 @@
       "CARGO_PROFILE_RELEASE_STRIP": "false",
       "CARGO_PROFILE_RELEASE_INCREMENTAL": "false",
       "TRANSCRIBE_CMAKE_ARGS": "-DGGML_NATIVE=OFF"
+    },
+    "windows": {
+      "env": { "RUSTUP_TOOLCHAIN": "stable-x86_64-pc-windows-msvc" }
     }
   },
   "apps": {

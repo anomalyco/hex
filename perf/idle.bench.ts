@@ -6,9 +6,9 @@ import { bench, native } from "@hona/strobe"
 export default bench({
   targets: {
     // The Settings window open on General. Needs an unlocked session.
-    window: native("hex", { bridge: false }),
+    window: native("hex"),
     // A login launch: the tray only, no window. Runs on a locked session too.
-    tray: native("hex", { args: ["--hidden"], window: false, bridge: false }),
+    tray: native("hex", { args: ["--hidden"], window: false }),
   },
   // Startup work (fonts, GPU, first frames) finishes before any run.
   async setup({ page }) {

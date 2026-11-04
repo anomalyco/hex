@@ -757,9 +757,12 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Kind::Offer(candidate) => {
             let mut actions = Vec::new();
             if candidate.provider().is_some() {
-                actions.push(button(p, "offer-more", "…", false, |c| {
-                    c.set_more_open(true);
-                }));
+                actions.push(
+                    button(p, "offer-more", "…", false, |c| {
+                        c.set_more_open(true);
+                    })
+                    .label(tr("More")),
+                );
             }
             actions.push(button(p, "not-now", tr("Not now"), false, |c| {
                 if let Some(Kind::Offer(candidate)) = &c.kind {
@@ -1150,8 +1153,12 @@ fn panel_radius(p: Paint) -> f32 {
 /// rectangle for the panel capsules, a full pill for the recording capsule.
 fn pill_body(p: Paint, dot: El, title: &str, subtitle: &str, radius: f32) -> El {
     let c = &p.k.c;
+    // A status named by its title, announced when the capsule's title
+    // changes; the subtitle stays readable inside it.
     row()
         .key("pill")
+        .role("status")
+        .label(title)
         .h_full()
         .gap(12.0)
         .pl(16.0)
@@ -1171,7 +1178,8 @@ fn pill_body(p: Paint, dot: El, title: &str, subtitle: &str, radius: f32) -> El 
                         .key("title")
                         .truncate()
                         .font(p.k.ty.ui_medium)
-                        .color(p.text()),
+                        .color(p.text())
+                        .a11y_hidden(),
                 )
                 .children((!subtitle.is_empty()).then(|| {
                     text(subtitle.to_owned())

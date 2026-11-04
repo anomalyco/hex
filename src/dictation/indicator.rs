@@ -273,6 +273,18 @@ impl IndicatorModel {
         self.active
     }
 
+    /// What the HUD says to assistive technology: Recording, Transcribing,
+    /// or Failed, in English (callers translate it); `None` while nothing
+    /// shows or the HUD fades out.
+    pub fn status(&self) -> Option<&'static str> {
+        match self.phase {
+            Phase::Recording => Some("Recording"),
+            Phase::Transcribing => Some("Transcribing"),
+            Phase::Failed => Some("Failed"),
+            Phase::Hidden | Phase::Completed | Phase::Cancelled => None,
+        }
+    }
+
     /// Dot scope's tuning, as set.
     #[cfg(target_os = "macos")]
     pub fn tuning(&self) -> Tuning {
@@ -492,6 +504,32 @@ mod tests {
         assert!((average - 0.5).abs() < f32::EPSILON);
         assert!((peak - 0.5).abs() < f32::EPSILON);
         assert!(DictationIndicatorEvent::meter(&[]).is_none());
+    }
+
+    /// The HUD's status for screen readers follows the capture and its job,
+    /// and says nothing once the HUD fades out.
+    #[test]
+    fn the_status_says_recording_then_transcribing() {
+        let start = Instant::now();
+        let mut model = IndicatorModel::new(Tuning::default(), start);
+        assert_eq!(model.status(), None);
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        assert_eq!(model.status(), Some("Recording"));
+        model.handle(
+            DictationIndicatorEvent::Submitted { job_id: 1 },
+            start,
+            false,
+        );
+        assert_eq!(model.status(), Some("Transcribing"));
+        model.handle(
+            DictationIndicatorEvent::JobFailed { job_id: 1 },
+            start,
+            false,
+        );
+        assert_eq!(model.status(), Some("Failed"));
+        model.handle(DictationIndicatorEvent::Started, start, false);
+        model.handle(DictationIndicatorEvent::Discarded, start, false);
+        assert_eq!(model.status(), None);
     }
 
     fn at(start: Instant, seconds: f32) -> Instant {

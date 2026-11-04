@@ -1,3 +1,4 @@
+use super::accessibility_tests::a11y_value;
 use super::settings::{desktop_shortcut, recorded_binding, validate};
 use super::*;
 use crate::transcription::models::TranscriptionSelection;
@@ -2263,11 +2264,13 @@ fn the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one() {
 
 #[test]
 fn the_microphone_field_names_the_input_in_use() {
-    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control").label;
-    let rt = runtime("mac-settings", true, PANE_SIZE);
+    // Tall enough that the row shows: the accessibility tree holds only what
+    // the window draws.
+    let field = |rt: &Runtime<Ui>| a11y_value(rt, "microphone-control");
+    let rt = runtime("mac-settings", true, GOLDEN_SIZE);
     assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
 
-    let rt = runtime("mac-microphone-missing", true, PANE_SIZE);
+    let rt = runtime("mac-microphone-missing", true, GOLDEN_SIZE);
     assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
     let texts = texts(&rt);
     assert!(texts.contains(&"not connected".to_owned()), "{texts:?}");
@@ -2277,8 +2280,8 @@ fn the_microphone_field_names_the_input_in_use() {
 #[test]
 fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
     let note = "MacBook Pro Microphone is off while the lid is closed, so Hex listens to Studio Display Microphone";
-    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control").label;
-    let mut rt = runtime("mac-microphone-lid-closed", true, PANE_SIZE);
+    let field = |rt: &Runtime<Ui>| a11y_value(rt, "microphone-control");
+    let mut rt = runtime("mac-microphone-lid-closed", true, GOLDEN_SIZE);
     assert_eq!(
         field(&rt).as_deref(),
         Some("System default, Studio Display Microphone")
@@ -2306,7 +2309,7 @@ fn a_passed_over_bluetooth_default_names_the_input_in_use() {
     let note = "Kit Pods is Bluetooth, so Hex listens to MacBook Pro Microphone";
     let mut rt = runtime("mac-microphone-bluetooth", true, TALL_SIZE);
     assert_eq!(
-        element(&rt, "microphone-control").label.as_deref(),
+        a11y_value(&rt, "microphone-control").as_deref(),
         Some("System default, MacBook Pro Microphone")
     );
     assert!(texts(&rt).contains(&note.to_owned()), "{:?}", texts(&rt));

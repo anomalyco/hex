@@ -232,8 +232,11 @@ pub(super) fn body(ui: &Ui, p: Paint, entries: &[Entry], language: &str) -> El {
                     .color(p.muted())
                     .wrap(),
             );
+        // A group named by its model, so its action reads with it.
         let mut column = col()
             .key(format!("model{index}"))
+            .role("group")
+            .label(entry.def.name)
             .w(width)
             .radius(p.k.radius.lg)
             .child(head);

@@ -221,8 +221,11 @@ fn model_row(p: Paint, index: usize, model: &ChoiceRow) -> El {
     let tag = model
         .recommended
         .then(|| Badge::new(tr("Recommended")).build(p.k).key("recommended"));
+    // The radio inside is the choice assistive technology reads; the row
+    // only widens where a press lands.
     row()
         .key(format!("model{index}"))
+        .role("none")
         .min_h(METRICS.row_h_described)
         .px(METRICS.row_px)
         .py(10.0)

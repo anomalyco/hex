@@ -1099,7 +1099,8 @@ fn processing(
             update_mode(ui, |mode| mode.post_processing.enabled = enabled);
         })
         .build(p.k)
-        .key("processing-toggle");
+        .key("processing-toggle")
+        .label(tr("OpenCode transformation"));
     let reason = (!can_toggle)
         .then(|| models::unavailable_reason(ui, OpenCodeFeature::Transformation))
         .flatten();
@@ -1118,6 +1119,7 @@ fn processing(
             tr("Deadline"),
             Some(tr("Seconds")),
             TextInput::new(&ui.modes.editor.deadline)
+                .label(tr("Deadline"))
                 .placeholder("30")
                 .width(Some(96.0))
                 .on_edit(|ui: &mut Ui| &mut ui.modes.editor.deadline)

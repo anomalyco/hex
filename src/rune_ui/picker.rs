@@ -494,6 +494,19 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         .pr(12.0)
         .gap(8.0)
         .center_y();
+    let title = match view {
+        View::Compare => facts::title(&language),
+        View::All => tr("All speech models").to_owned(),
+    };
+    let heading = |title: &str| {
+        text(title.to_owned())
+            .key("title")
+            .role("heading")
+            .level(2)
+            .font(p.k.ty.body_medium)
+            .color(p.text())
+            .grow(1.0)
+    };
     let body = match view {
         View::Compare => {
             let entries = facts::entries(
@@ -501,13 +514,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 &language,
                 &transcription_models::picker_models(&language),
             );
-            header = header.pl(24.0).child(
-                text(facts::title(&language))
-                    .key("title")
-                    .font(p.k.ty.body_medium)
-                    .color(p.text())
-                    .grow(1.0),
-            );
+            header = header.pl(24.0).child(heading(&title));
             compare::body(ui, p, &entries, &language)
         }
         View::All => {
@@ -525,13 +532,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                         .key("picker-back")
                         .rotate(std::f32::consts::PI),
                 )
-                .child(
-                    text(tr("All speech models"))
-                        .key("title")
-                        .font(p.k.ty.body_medium)
-                        .color(p.text())
-                        .grow(1.0),
-                );
+                .child(heading(&title));
             // Labs › Use model files where they are.
             if let Some(in_place) = super::model_import::in_place_button(ui, p) {
                 header = header.child(in_place);
@@ -567,6 +568,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     let mut panel = col()
         .key("transcription-picker")
         .role("dialog")
+        .label(title)
         .w(PANEL_WIDTH)
         .radius(p.k.radius.xl)
         .fill(c.bg_base)
@@ -666,9 +668,11 @@ fn sort_filter_row(ui: &Ui, p: Paint, language: &str) -> El {
                     .font(p.k.ty.small)
                     .color(p.text())
                     .shrink()
-                    .wrap(),
+                    .wrap()
+                    .a11y_hidden(),
             )
             .child(row_switch(p, ui.picker.supported_only)),
+        ui.picker.supported_only,
     )
     .on_press(|ui: &mut Ui| ui.picker.supported_only = !ui.picker.supported_only);
     row()
@@ -705,9 +709,11 @@ fn downloaded_row(ui: &Ui, p: Paint, language: &str) -> El {
                     .font(p.k.ty.small)
                     .color(p.text())
                     .shrink()
-                    .wrap(),
+                    .wrap()
+                    .a11y_hidden(),
             )
             .child(row_switch(p, ui.picker.downloaded_only)),
+        ui.picker.downloaded_only,
     )
     .on_press(|ui: &mut Ui| ui.picker.downloaded_only = !ui.picker.downloaded_only);
     row()

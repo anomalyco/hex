@@ -26,6 +26,8 @@ Hex                                      // macOS release
 
 [Dictation](dictation.md), [Meetings](meetings.md), and [Recovery](recovery.md)
 have detailed maps.
+[Accessibility](accessibility.md) maps what screen readers, Voice Control, and
+automation (strobe's benches) read from the window, the HUD, and the capsules.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
 [Labs](labs.md) is one switch, on by default, for every unfinished feature.

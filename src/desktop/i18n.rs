@@ -329,6 +329,8 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 6])] = &[
+    ("Your answer", ["Twoja odpowiedź", "你的回答", "あなたの回答", "Deine Antwort", "Tu respuesta", "Ваша відповідь"]),
+    ("History retention", ["Przechowywanie historii", "历史记录保留时间", "履歴の保存期間", "Aufbewahrung des Verlaufs", "Conservación del historial", "Зберігання історії"]),
     ("Earlier versions", ["Wcześniejsze wersje", "早期版本", "以前のバージョン", "Frühere Versionen", "Versiones anteriores", "Попередні версії"]),
     ("Unknown model", ["Nieznany model", "未知模型", "不明なモデル", "Unbekanntes Modell", "Modelo desconocido", "Невідома модель"]),
     ("Use this version", ["Użyj tej wersji", "使用此版本", "このバージョンを使う", "Diese Version verwenden", "Usar esta versión", "Використати цю версію"]),
@@ -1575,6 +1577,7 @@ mod tests {
         include_str!("../rune_ui/meetings_host.rs"),
         include_str!("../windows/app.rs"),
         include_str!("../windows/rune.rs"),
+        include_str!("../rune_hud.rs"),
     ];
 
     /// The string literals passed to `tr`, `tr_fill`, and `tr_named`.

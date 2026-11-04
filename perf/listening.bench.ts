@@ -15,8 +15,8 @@ const quiet = ["cpu.wakes", "cpu.app.total", "memory.app.private"]
 
 export default bench({
   targets: {
-    released: native("hex-listening", { args: ["--hidden"], home, window: false, bridge: false }),
-    warm: native("hex-listening-warm", { args: ["--hidden"], home, window: false, bridge: false }),
+    released: native("hex-listening", { args: ["--hidden"], home, window: false }),
+    warm: native("hex-listening-warm", { args: ["--hidden"], home, window: false }),
   },
   // The model loads and the listener settles first.
   async setup({ page }) {

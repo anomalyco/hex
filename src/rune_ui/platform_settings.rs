@@ -457,6 +457,7 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         ui,
         p,
         "meeting-retention",
+        tr("Keep meetings"),
         MeetingRetention::ALL
             .iter()
             .map(|retention| tr(retention.label()))
@@ -682,6 +683,7 @@ fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
                 ui,
                 p,
                 "calendar-lead",
+                tr("Remind me"),
                 vec![tr("At start"), tr("1 min"), tr("2 min"), tr("5 min")],
                 CALENDAR_LEAD_MINUTES
                     .iter()
@@ -798,6 +800,7 @@ fn calendars_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         select(
             p,
             "calendar-calendars-control",
+            tr("Calendars"),
             &label,
             ui.open == Some(Menu::Calendars),
             choices,
@@ -843,6 +846,7 @@ fn detected_calls_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 p,
                 Menu::Call(index),
                 format!("call{index}-policy-control"),
+                &shown,
                 labels.to_vec(),
                 selected.unwrap_or(0),
                 move |ui, index| {

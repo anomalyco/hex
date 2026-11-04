@@ -544,6 +544,7 @@ pub(in crate::rune_ui) fn overlay(ui: &Ui, p: Paint, reduced: bool) -> Option<El
         super::flows::view(p, s)
             .key("first-run")
             .role("dialog")
+            .label(tr("Setting up Hex"))
             .absolute(0.0, 0.0)
             .on_press(|_: &mut Ui| {}),
     )
