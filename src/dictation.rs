@@ -1505,8 +1505,8 @@ mod tests {
         let pressed = through + Duration::from_millis(800);
         capture.start_at_press(pressed);
         assert!(capture.recorded_from(0).is_empty());
-        let through = ingest_chunks(&mut capture, through, chunk, 2, 2);
-        let Finish::Transcribe(clip) = capture.finish(through - Duration::from_millis(200)) else {
+        ingest_chunks(&mut capture, through, chunk, 2, 2);
+        let Finish::Transcribe(clip) = capture.finish(pressed + Duration::from_secs(1)) else {
             panic!("expected transcription")
         };
         assert_eq!(clip.duration_ms(), 450 + 1_000);
