@@ -113,6 +113,12 @@ Idle sleep -> systemd-inhibit idle:sleep (Linux),
 Tray -> Record meeting, Stop & transcribe, Copy last meeting transcript
     while Meetings is on
 Quit while recording -> audio kept; the transcript finishes at the next launch
+Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
+    overlay there, only the HUD on XWayland, #1271)
+    -> 2 s after the offer Rune reports the overlay unavailable -> logged
+       "meeting recording offer could not show", and the window opens on
+       Meetings saying so with Rune's reason; its Start recording records
+    └── not observed on a real GNOME session; no automated check
 Files -> Reveal opens the folder (xdg-open, Explorer); Delete moves to the
     freedesktop Trash or the Recycle Bin
 ```
