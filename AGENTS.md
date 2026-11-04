@@ -75,7 +75,12 @@ substitute for source inspection or a second roadmap.
 - `audio`: `cpal` device enumeration, input resolution (`--device`, the saved
   microphone, else the system default, never Hex Microphone), the CoreAudio
   default-input and device-list listeners, timestamped mono float PCM
-  delivery, live selection, and bounded stream recovery.
+  delivery, live selection, and bounded stream recovery. `audio/fixture`:
+  with `HEX_AUDIO_FIXTURE=<wav>` every microphone open plays that file
+  instead (10 ms chunks at real-time pace, from its start at each open,
+  looping) and no device is enumerated or opened, so benchmarks drive the
+  real capture, stream, and output pipeline without recording anyone; the
+  microphone permission then reads as ready.
 - `suppression`: the macOS event taps, shortcut suppression, and the
   configurable dictation-hotkey state machine.
 - `keyboard`: active-layout key resolution and balanced synthetic shortcuts.

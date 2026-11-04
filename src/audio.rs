@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 pub(crate) mod browser_media;
 mod call_input;
+mod fixture;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod hex_microphone;
 pub(crate) mod idle_sleep;
@@ -29,6 +30,12 @@ static AUDIO_SERVICE_RESTART_GENERATION: AtomicU64 = AtomicU64::new(0);
 static INPUT_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static STREAM_GLITCHED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 static AVOID_BLUETOOTH_MICROPHONE: AtomicBool = AtomicBool::new(true);
+
+/// Whether `HEX_AUDIO_FIXTURE` names a WAV file that stands in for every
+/// microphone (benchmarks and tests; see `audio/fixture.rs`).
+pub fn uses_fixture() -> bool {
+    fixture::path().is_some()
+}
 
 /// Whether System default passes over a Bluetooth default input, whose
 /// microphone drops the headset into low-quality call audio. A change
@@ -1112,6 +1119,14 @@ fn description_name<E: std::fmt::Display>(
 /// the same device. A listed saved microphone that will not open falls back
 /// to the system default.
 fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
+    if let Some(path) = fixture::path() {
+        if request.keep.as_deref() == Some(fixture::NAME) {
+            return Ok(Opened::Unchanged {
+                selection: Selection::InUse,
+            });
+        }
+        return Ok(Opened::Input(Box::new(fixture::open(path)?)));
+    }
     let host = cpal::default_host();
     let (devices, names) = input_devices_of(&host)?;
     let (default, default_name) = default_input_of(&host).unzip();
