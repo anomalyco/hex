@@ -13,12 +13,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::artifacts::{
-    COHERE_ARTIFACT, COHERE_LANGUAGES, GIGAAM_V3_E2E_RNNT_ARTIFACT, IVRIT_WHISPER_ARTIFACT,
-    NB_WHISPER_MEDIUM_ARTIFACT, NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES,
-    NEMOTRON_3_5_LOCALES, PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT,
-    PARAKEET_V2_ARTIFACT, PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT,
-    QWEN_LANGUAGES, QWENCLEO_ARTIFACT, SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT,
-    UNDERDOG_BARK_3_PRO_ARTIFACT, WHISPER_ARTIFACT,
+    COHERE_ARTIFACT, COHERE_LANGUAGES, GIGAAM_V3_E2E_RNNT_ARTIFACT, GRANITE_SPEECH_5_ARTIFACT,
+    GRANITE_SPEECH_5_LANGUAGES, IVRIT_WHISPER_ARTIFACT, NB_WHISPER_MEDIUM_ARTIFACT,
+    NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES,
+    PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT,
+    PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT,
+    SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT,
+    WHISPER_ARTIFACT,
 };
 pub use super::custom_models::CustomModelId;
 pub use super::languages::{LANGUAGES, language_name};
@@ -47,6 +48,7 @@ pub enum TranscriptionModelId {
     Nemotron35Asr,
     GigaAmV3,
     NbWhisperMedium,
+    GraniteSpeech5,
     AppleSpeech,
     Custom(CustomModelId),
 }
@@ -82,6 +84,7 @@ impl TranscriptionModelId {
             Self::Nemotron35Asr => "nemotron_3_5_asr",
             Self::GigaAmV3 => "gigaam_v3",
             Self::NbWhisperMedium => "nb_whisper_medium",
+            Self::GraniteSpeech5 => "granite_speech_5",
             Self::AppleSpeech => "apple_speech",
             Self::Custom(id) => id.as_str(),
         }
@@ -119,6 +122,7 @@ impl FromStr for TranscriptionModelId {
             "nemotron_3_5_asr" => Ok(Self::Nemotron35Asr),
             "gigaam_v3" => Ok(Self::GigaAmV3),
             "nb_whisper_medium" => Ok(Self::NbWhisperMedium),
+            "granite_speech_5" => Ok(Self::GraniteSpeech5),
             "apple_speech" => Ok(Self::AppleSpeech),
             _ => CustomModelId::parse(value)
                 .map(Self::Custom)
@@ -592,6 +596,23 @@ pub const MODELS: &[ModelDefinition] = &[
         supports_language_detection: false,
     },
     ModelDefinition {
+        id: TranscriptionModelId::GraniteSpeech5,
+        name: "Granite Speech 5.0",
+        // On apollo's Vulkan GPU it ran 2.1 to 2.4 times as fast as Whisper
+        // large-v3-turbo and 0.4 to 0.64 times Parakeet v3's speed (an 11 s
+        // clip, and the FLEURS English and Japanese test splits).
+        realtime: "~25x",
+        // FLEURS English test, Hex's run (`model_benchmarks`).
+        word_error_rate: Some(4.77),
+        streams: false,
+        runtime: ModelRuntime::Gguf(&GRANITE_SPEECH_5_ARTIFACT),
+        languages: GRANITE_SPEECH_5_LANGUAGES,
+        // A CTC head with no language input: it transcribes whichever of
+        // its seven languages it hears.
+        accepts_language_hint: false,
+        supports_language_detection: false,
+    },
+    ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
         name: "Apple Speech",
         realtime: "On device",
@@ -650,6 +671,9 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
             (Qwen3Asr06B, Recommended),
             (WhisperLargeV3Turbo, Vocabulary),
         ],
+        // FLEURS Japanese test: Granite Speech 5.0 tied Whisper turbo
+        // (5.04% CER against 5.02%) at 2.4 times its speed, without
+        // vocabulary, so it stays unbadged (Hex's run).
         "ja" => &[
             (WhisperLargeV3Turbo, Recommended),
             (SenseVoiceSmall, Fastest),
