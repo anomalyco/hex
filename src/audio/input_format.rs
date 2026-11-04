@@ -63,6 +63,23 @@ pub(super) fn start_stream_with_fallback(
     let supported = device
         .default_input_config()
         .wrap_err("could not read the input device configuration")?;
+    // ALSA's default period, PipeWire's included, can be large: about a
+    // second of audio per chunk put speech from before the press into the
+    // pre-roll (#1309). Ask for about 20 ms first.
+    #[cfg(target_os = "linux")]
+    if let Some(&period) =
+        fixed_buffer_sizes(supported.sample_rate(), supported.buffer_size()).first()
+    {
+        match start_stream(device, &supported, period, default_name.clone()) {
+            Ok(started) => return Ok(started),
+            Err(error) => tracing::warn!(
+                error = format!("{error:#}"),
+                device = %device_name,
+                buffer = ?period,
+                "the microphone refused a short period; using its default"
+            ),
+        }
+    }
     let error = match start_stream(
         device,
         &supported,
