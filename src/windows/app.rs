@@ -271,9 +271,13 @@ impl WindowsDesktopHost {
             Request::PasteLast => {
                 if let Some(listener) = &self.listener {
                     self.foreground.activate();
-                    let _ = listener
+                    if listener
                         .commands
-                        .send(crate::windows::dictation::ListenerCommand::PasteLast);
+                        .send(crate::windows::dictation::ListenerCommand::PasteLast)
+                        .is_ok()
+                    {
+                        crate::windows::dictation::wake();
+                    }
                 }
             }
             Request::Quit => return true,

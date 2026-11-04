@@ -408,7 +408,9 @@ impl WindowsControl {
         })?;
         listener
             .send(command)
-            .map_err(|_| ControlError::new("busy", "Hex's listener stopped; try again"))
+            .map_err(|_| ControlError::new("busy", "Hex's listener stopped; try again"))?;
+        crate::windows::dictation::wake();
+        Ok(())
     }
 }
 
