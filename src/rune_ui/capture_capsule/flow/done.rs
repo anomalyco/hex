@@ -11,32 +11,32 @@ pub(super) fn permission_done(need: CaptureNeed, grant: Grant) -> Done {
 }
 
 pub(super) fn permission_lines(need: CaptureNeed, grant: Grant) -> Done {
-    let name = need.name();
+    let name = tr(need.name());
     let why = match need {
-        CaptureNeed::ScreenRecording => "to see your screen",
-        CaptureNeed::Microphone => "to hear you",
-        CaptureNeed::Accessibility => "to follow your clicks",
+        CaptureNeed::ScreenRecording => tr("to see your screen"),
+        CaptureNeed::Microphone => tr("to hear you"),
+        CaptureNeed::Accessibility => tr("to follow your clicks"),
     };
     match grant {
         Grant::Off => Done {
             why: Some(why.into()),
-            ask: Some("Allow".into()),
-            ..Done::plain(Lead::Warning, format!("Hex needs {name}"))
+            ask: Some(tr("Allow").into()),
+            ..Done::plain(Lead::Warning, tr_fill("Hex needs {}", name))
         },
         Grant::Asked => Done {
-            why: Some("turn Hex on in System Settings".into()),
-            ask: Some("Allow".into()),
-            ..Done::plain(Lead::Warning, format!("Hex needs {name}"))
+            why: Some(tr("turn Hex on in System Settings").into()),
+            ask: Some(tr("Allow").into()),
+            ..Done::plain(Lead::Warning, tr_fill("Hex needs {}", name))
         },
         Grant::Restart => Done {
-            why: Some("turns on when Hex restarts".into()),
-            ask: Some("Restart Hex".into()),
-            ..Done::plain(Lead::Warning, format!("{name} is on"))
+            why: Some(tr("turns on when Hex restarts").into()),
+            ask: Some(tr("Restart Hex").into()),
+            ..Done::plain(Lead::Warning, tr_fill("{} is on", name))
         },
         Grant::Ready => Done {
-            ask: Some("Capture".into()),
+            ask: Some(tr("Capture").into()),
             ask_keys: true,
-            ..Done::plain(Lead::Check, format!("{name} is on"))
+            ..Done::plain(Lead::Check, tr_fill("{} is on", name))
         },
     }
 }
@@ -121,10 +121,21 @@ pub(super) fn hold_until(phase: &Phase) -> Option<f64> {
     }
 }
 
+/// Backspace in the search: deletes the selection, else the character
+/// before the caret. Keys come through Hex's tap, not Rune's key events.
+pub(super) fn backspace(edit: &mut TextEdit) {
+    let (start, end) = edit.range();
+    let back = edit.text[..start].chars().last().map_or(0, char::len_utf8);
+    if start == end {
+        edit.set_selection(start - back, start);
+    }
+    edit.insert("");
+}
+
 /// The list for `route`: its suggestions, then the newest sessions, and
-/// searching, every session whose name has the query.
+/// searching, every session with each word of the query in its title,
+/// folder, or id, those with every word in the title first.
 pub(super) fn list(route: &Route, open: &Open) -> List {
-    let query = open.query.to_lowercase();
     let (suggested, recent) = sections(route);
     let site = match route {
         Route::Guess { site, .. } | Route::Rule { site, .. } => site.clone(),
@@ -133,15 +144,11 @@ pub(super) fn list(route: &Route, open: &Open) -> List {
     let always = site.map(|site| (site, open.shift));
     let every = || suggested.iter().chain(recent);
     let mut list = List {
-        rows: every()
-            .filter(|dest| dest.name.to_lowercase().contains(&query))
-            .take(SUGGEST_ROWS)
-            .cloned()
-            .collect(),
+        rows: matching(every(), &open.query.text),
         title: if open.typing {
-            "All sessions"
+            tr("All sessions")
         } else {
-            "Send to"
+            tr("Send to")
         },
         // Searching keeps the suggestions' height, so the footer is all
         // that comes in.
@@ -164,9 +171,55 @@ pub(super) fn list(route: &Route, open: &Open) -> List {
     if list.always.as_ref().is_some_and(|(_, shift)| *shift)
         && let Some(row) = list.rows.get_mut(list.selected)
     {
-        row.why = "always".into();
+        row.why = tr("always").into();
     }
     list
+}
+
+/// The first [`SUGGEST_ROWS`] of `dests` that match `query`, in order but
+/// title matches first. A row names its folder beside its reason when its
+/// title alone doesn't say why it matched, or reads like another row's.
+fn matching<'a>(dests: impl Iterator<Item = &'a Dest>, query: &str) -> Vec<Dest> {
+    let query = query.to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut found: Vec<(bool, &Dest)> = dests
+        .filter_map(|dest| {
+            let title = dest.name.to_lowercase();
+            let folder = dest.folder.as_deref().unwrap_or_default().to_lowercase();
+            let id = dest.session.to_lowercase();
+            let in_title = words.iter().all(|word| title.contains(word));
+            let found = in_title
+                || words.iter().all(|word| {
+                    [&title, &folder, &id]
+                        .iter()
+                        .any(|text| text.contains(word))
+                });
+            found.then_some((in_title, dest))
+        })
+        .collect();
+    found.sort_by_key(|(in_title, _)| !in_title);
+    found.truncate(SUGGEST_ROWS);
+    let alike = |dest: &Dest| {
+        found
+            .iter()
+            .filter(|(_, other)| other.name.to_lowercase() == dest.name.to_lowercase())
+            .count()
+            > 1
+    };
+    found
+        .iter()
+        .map(|&(in_title, dest)| match &dest.folder {
+            Some(folder) if !in_title || alike(dest) => Dest {
+                why: if dest.why.is_empty() {
+                    folder.clone()
+                } else {
+                    format!("{folder} · {}", dest.why)
+                },
+                ..dest.clone()
+            },
+            _ => dest.clone(),
+        })
+        .collect()
 }
 
 pub(super) fn clamp(routed: &mut Routed) {
@@ -263,9 +316,9 @@ pub(super) fn offered_again(route: Route, from: &Dest, too_late: bool, now: f64)
         };
         rows.push(Dest {
             why: if too_late {
-                "already sent"
+                tr("already sent")
             } else {
-                "taken back"
+                tr("taken back")
             }
             .into(),
             ..dest
@@ -305,7 +358,7 @@ pub(super) fn lone_back(from: &Dest, now: f64) -> Routed {
     Routed {
         route: Route::Nothing {
             recent: vec![Dest {
-                why: "taken back".into(),
+                why: tr("taken back").into(),
                 ..from.clone()
             }],
         },
@@ -325,12 +378,12 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
         // Sent nowhere, it waits for a pick: a click on Send to… reopens the list.
         _ if routed.taken_back => Done {
             // Too late, it's where it went: nothing to offer.
-            ask: routed.already_with.is_none().then(|| "Send to…".into()),
+            ask: routed.already_with.is_none().then(|| tr("Send to…").into()),
             ..Done::plain(
                 Lead::Check,
                 match &routed.already_with {
                     Some(to) => already_sent_to(to),
-                    None => "Taken back".into(),
+                    None => tr("Taken back").into(),
                 },
             )
         },
@@ -342,35 +395,35 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
                 if routed.delivered {
                     sent_to(&to.name)
                 } else {
-                    format!("Sending to {}", short(&to.name))
+                    tr_fill("Sending to {}", &short(&to.name))
                 },
             )
         },
         Route::ResolvingRule { name } => Done {
             undo: true,
             countdown,
-            ..Done::plain(Lead::Check, format!("Sending to {}", short(name)))
+            ..Done::plain(Lead::Check, tr_fill("Sending to {}", &short(name)))
         },
         // The suggestions are the ask (closed, Send to… opens them).
         Route::Guess { .. } => Done {
-            ask: Some("Send to…".into()),
+            ask: Some(tr("Send to…").into()),
             ..Done::plain(Lead::Check, "")
         },
         Route::Nothing { .. } => Done {
-            ask: Some("Send to…".into()),
+            ask: Some(tr("Send to…").into()),
             ..Done::plain(Lead::Check, "")
         },
         Route::NoAnswer { .. } => Done {
-            why: Some("no suggestions".into()),
-            ask: Some("Send to…".into()),
-            ..Done::plain(Lead::Check, COPIED)
+            why: Some(tr("no suggestions").into()),
+            ask: Some(tr("Send to…").into()),
+            ..Done::plain(Lead::Check, copied())
         },
         // Still copied, so Paste and Inspect stay; there's nothing to list.
         Route::Unreachable { why } => match plain_reason(why) {
-            Some(why) if why == NOT_RUNNING => Done::plain(Lead::Warning, NOT_RUNNING),
+            Some(why) if why == not_running() => Done::plain(Lead::Warning, not_running()),
             why => Done {
                 why,
-                ..Done::plain(Lead::Warning, "Couldn't reach OpenCode")
+                ..Done::plain(Lead::Warning, tr("Couldn't reach OpenCode"))
             },
         },
     };
@@ -384,7 +437,7 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
             undo: false,
             countdown: None,
             ask: None,
-            open: Some((open.query.clone(), list(&routed.route, open))),
+            open: Some((*open.query.clone(), list(&routed.route, open))),
             ..base
         },
         None => Done {
@@ -406,23 +459,24 @@ pub(super) fn offered(base: Done, list: List) -> Done {
         // sends, and the capture is already on the clipboard to paste.
         CapsuleFlow::List => Done {
             text: if base.text.is_empty() {
-                COPIED.into()
+                copied().into()
             } else {
                 base.text.clone()
             },
-            ask: Some("Search".into()),
+            ask: Some(tr("Search").into()),
             ask_keys: true,
-            open: Some((String::new(), list)),
+            open: Some((TextEdit::default(), list)),
             hand_off: false,
             ..base
         },
         // One guess at a time on one quiet line; ⏎ sends it, ⇥ moves on.
         CapsuleFlow::Toast => Done {
-            text: format!(
+            text: tr_fill(
                 "Send to {}",
-                list.selected_dest()
+                &list
+                    .selected_dest()
                     .map(|dest| short(&dest.name))
-                    .unwrap_or_default()
+                    .unwrap_or_default(),
             ),
             why: Some("⏎".into()),
             ask: None,
@@ -439,7 +493,7 @@ pub(super) fn offered(base: Done, list: List) -> Done {
             ..base
         },
         CapsuleFlow::Cursor | CapsuleFlow::Notch => Done {
-            text: "Send to".into(),
+            text: tr("Send to").into(),
             why: None,
             ask: None,
             picks: names(),

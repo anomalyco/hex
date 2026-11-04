@@ -1,13 +1,18 @@
 //! The capsule's words for what happened, and host errors as a person
 //! would say them.
 use super::short;
+use crate::desktop::i18n::{tr, tr_fill};
 
 /// A written capture, on the clipboard and sent nowhere yet.
-pub(crate) const COPIED: &str = "Copied";
-pub(super) const NOT_RUNNING: &str = "OpenCode isn't running";
+pub(crate) fn copied() -> &'static str {
+    tr("Copied")
+}
+pub(super) fn not_running() -> &'static str {
+    tr("OpenCode isn't running")
+}
 
 pub(super) fn already_sent_to(to: &str) -> String {
-    format!("Already sent to {}", short(to))
+    tr_fill("Already sent to {}", &short(to))
 }
 
 /// A host error (`{error:#}`, outer context first) as the capsule's reason,
@@ -21,10 +26,10 @@ pub(super) fn plain_reason(error: &str) -> Option<String> {
         || lower.contains("isn't running")
         || lower.contains("connection refused")
     {
-        return Some(NOT_RUNNING.into());
+        return Some(not_running().into());
     }
     if lower.contains("didn't answer in time") || lower.contains("timed out") {
-        return Some("OpenCode didn't answer".into());
+        return Some(tr("OpenCode didn't answer").into());
     }
     let cause = line.rsplit(": ").next().unwrap_or(line).trim();
     let technical = ["/", "\\", "://", "os error", "error:", "{", "0x"]

@@ -277,6 +277,59 @@ pub(super) fn described_row(
     )
 }
 
+/// One numbered step of a how-to card: the number, the title with the
+/// step's keys beside it when it has any, and the description under them.
+#[cfg(hex_capture)]
+pub(super) fn step_row(
+    p: Paint,
+    key: &str,
+    number: usize,
+    title: &str,
+    keys: Option<El>,
+    description: &str,
+) -> El {
+    // As tall as a keycaps tray, so a step with keys lines up with one
+    // without.
+    const LINE: f32 = 28.0;
+    // A fixed width, so every step's copy starts at the same x.
+    let number = row().key("number").w(16.0).h(LINE).center_y().child(
+        text(number.to_string())
+            .font(p.k.ty.ui)
+            .color(p.faint())
+            .a11y_hidden(),
+    );
+    let heading = row()
+        .key("title")
+        .min_h(LINE)
+        .gap(8.0)
+        .center_y()
+        .child(
+            text(title)
+                .key("label")
+                .font(p.k.ty.ui)
+                .color(p.text())
+                .a11y_hidden(),
+        )
+        .children(keys);
+    let step = row()
+        .key(key)
+        .px(METRICS.row_px)
+        .py(8.0)
+        .gap(8.0)
+        .items_start()
+        .label(title)
+        .child(number)
+        .child(
+            col()
+                .key("copy")
+                .grow(1.0)
+                .shrink()
+                .child(heading)
+                .child(described_copy(description, p.muted())),
+        );
+    described(step, Some(description.to_string()))
+}
+
 /// A row's description line. The row reads it to assistive technology as
 /// its description ([`described`]), so the line itself stays out of the
 /// tree.

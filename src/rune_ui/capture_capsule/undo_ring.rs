@@ -18,7 +18,7 @@ use rune::{Color, El, LineCap, Shape, Tween, canvas, el};
 
 use super::super::controls::Paint;
 use super::flow::{Pres, undo_s};
-use super::surface::{CHIP_RADIUS, HINT_GAP, UNDO_LABEL, medium};
+use super::surface::{CHIP_RADIUS, HINT_GAP, medium, undo_label};
 use super::tuning::{self, RingLook};
 
 const STROKE: f32 = 1.5;
@@ -209,9 +209,9 @@ pub(crate) fn chip(p: Paint, base: El, size: [f32; 2], ground: Color, ring: Opti
     if let Some(ring) = ring {
         chip = chip.child(border(p, size, ground, ring));
     }
-    chip.child(super::label(UNDO_LABEL, medium(), ink))
+    chip.child(super::label(undo_label(), medium(), ink))
         .role("button")
-        .label(UNDO_LABEL)
+        .label(undo_label())
         .hit()
 }
 

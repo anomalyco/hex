@@ -2271,7 +2271,7 @@ fn a_long_transcript_scrolls_by_dragging_its_scroll_bar() {
             .unwrap_or_else(|| panic!("no {path}"))
             .rect
     };
-    let thumb = at(&rt, "meeting-transcript-area/scroll-bar/thumb");
+    let thumb = at(&rt, "meeting-transcript-area/scroll-bar/thumb-slot/thumb");
     assert!(thumb[3] > 0.0, "the transcript overflows, so its bar shows");
     let top = at(&rt, "meeting-transcript/inset")[1];
     let (x, y) = (thumb[0] + thumb[2] / 2.0, thumb[1] + 4.0);
@@ -2284,5 +2284,48 @@ fn a_long_transcript_scrolls_by_dragging_its_scroll_bar() {
         at(&rt, "meeting-transcript/inset")[1] < top - 60.0,
         "dragging the thumb scrolled the transcript"
     );
-    assert!(at(&rt, "meeting-transcript-area/scroll-bar/thumb")[1] > thumb[1] + 59.0);
+    assert!(at(&rt, "meeting-transcript-area/scroll-bar/thumb-slot/thumb")[1] > thumb[1] + 59.0);
+}
+
+/// A touchscreen taps like a click and a finger drag pans a long transcript
+/// (#1337).
+#[test]
+fn a_finger_pans_the_transcript_and_taps_the_sidebar() {
+    use rune::TouchPhase::{Ended, Moved, Started};
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    settle(&mut rt);
+    let inset = |rt: &Runtime<Ui>| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.path.ends_with("meeting-transcript/inset"))
+            .expect("the transcript")
+            .rect[1]
+    };
+    let top = inset(&rt);
+    let thumb = rt
+        .elements()
+        .into_iter()
+        .find(|e| {
+            e.path
+                .ends_with("meeting-transcript-area/scroll-bar/thumb-slot/thumb")
+        })
+        .expect("the transcript's bar")
+        .rect;
+    let (x, y) = (thumb[0] - 80.0, thumb[1] + 200.0);
+    rt.touch(1, Started, x, y, 0.0);
+    for step in 1..=4 {
+        rt.touch(1, Moved, x, y - 30.0 * step as f32, 0.01 * f64::from(step));
+    }
+    rt.touch(1, Ended, x, y - 120.0, 0.5);
+    settle(&mut rt);
+    assert!(
+        inset(&rt) <= top - 110.0,
+        "the transcript followed the finger"
+    );
+
+    let (x, y) = rt.find("nav-labs").expect("the Labs item");
+    rt.touch(2, Started, x, y, 1.0);
+    rt.touch(2, Ended, x, y, 1.05);
+    settle(&mut rt);
+    assert!(rt.find("lede").is_some(), "the tap opened Labs");
 }
