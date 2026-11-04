@@ -1,8 +1,8 @@
-//! Which GPU Hex draws on. Rune takes the lowest-power adapter, which keeps a
-//! hybrid laptop's discrete GPU asleep. A broken integrated GPU driver can
-//! crash Hex before its first frame (#662), and a driver crash can't be
-//! caught, so the app marks its launch until a frame reaches the screen or
-//! it quits cleanly. A marker this build left behind means that launch
+//! Which GPU Hex draws on. Rune takes the lowest-power adapter that drives a
+//! display, which keeps a hybrid laptop's discrete GPU asleep. A broken
+//! integrated GPU driver can crash Hex before its first frame (#662), and a
+//! driver crash can't be caught, so the app marks its launch until a frame
+//! reaches the screen or it quits cleanly. A marker this build left behind means that launch
 //! crashed while drawing: this one draws on the high-performance GPU, and so
 //! does every launch of this build. An update tries the integrated GPU again.
 

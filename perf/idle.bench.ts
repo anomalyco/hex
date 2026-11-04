@@ -31,5 +31,16 @@ export default bench({
         await page.wait(8_000)
       },
     },
+    // The same tray, judged by what it holds: the GPU device and the
+    // surfaces of the overlays that wait hidden (the capture capsule,
+    // picker, and ink are made at launch).
+    "window-closed-memory": {
+      targets: ["tray"],
+      primary: "memory.app.private",
+      metrics: ["cpu.wakes", "cpu.work"],
+      async run({ page }) {
+        await page.wait(8_000)
+      },
+    },
   },
 })

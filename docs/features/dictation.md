@@ -1466,8 +1466,8 @@ a DX12 DirectComposition swapchain composites alpha on Windows: a Vulkan
 surface is a swapchain on the HWND, which this window shows black (#499) or
 not at all (#510, a hybrid laptop where the integrated GPU's Vulkan driver
 claimed premultiplied alpha). Rune draws transparent Windows surfaces only
-through DX12, on the lowest-power adapter, and fails the overlay when none
-can (93c7a04b; from reading the code and Windows' rules, not yet observed on
+through DX12, on the lowest-power adapter that drives a display, and fails
+the overlay when none can (93c7a04b; from reading the code and Windows' rules, not yet observed on
 Windows). If the window, its GPU surface or the show fails (including a
 cloaked window), Rune reports why (`OverlayHandle::failure`). Hex logs the
 HUD's surface (backend, adapter, alpha mode) once, and treats a dictation
