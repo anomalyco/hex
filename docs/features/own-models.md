@@ -17,8 +17,9 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // set
 │   Q8_0 tensors (the types every build runs on Metal and Vulkan); the tensor
 │   data fits the file. Anything else -> "<file> can't be imported: <reason>"
 ├── Copy -> models/custom/<16 hex>.gguf while hashing; the copy is checked again;
-│   receipt <16 hex>.gguf.verified.json (size, SHA-256, mtime, file ID where
-│   the OS reports one); manifest <16 hex>.json (name, general.name, family,
+│   receipt <16 hex>.gguf.verified.json (size, SHA-256, mtime, inode where
+│   the OS reports one, never the volume's device number, which macOS can
+│   renumber at a restart; older receipts' file_id is ignored); manifest <16 hex>.json (name, general.name, family,
 │   variant, languages, detection, file name, licence, repo URL). The original
 │   is never touched; a failed or cancelled import removes only its partial
 │   copy; the same file again keeps the first import
@@ -159,8 +160,8 @@ without symlinks, and the GPU memory warning on a small GPU.
 Checks: `transcription::found_models::tests` (scan, cache, catalog match,
 in-place use and forgetting, the full check refusing a mismatched file),
 `transcription::gguf_header::tests`, `transcription::custom_models::tests`
-(including `a_relinked_copy_reads_as_changed_and_check_again_accepts_only_the_same_contents`
-and `a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`),
+(including `a_relinked_copy_reads_as_changed_and_check_again_accepts_only_the_same_contents`,
+`a_receipt_survives_a_renumbered_volume_but_not_another_file`, and `a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`),
 `desktop::onboarding::tests::a_held_download_waits_for_the_person`,
 `a_found_model_moves_on_without_a_download_and_back_returns_to_it`,
 `the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one`,

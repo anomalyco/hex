@@ -9,6 +9,7 @@ pub mod env;
 pub mod model;
 pub mod opencode;
 pub mod routing;
+pub mod user_dirs;
 pub mod util;
 
 use std::sync::Arc;

@@ -1,21 +1,35 @@
-// Cold launch to the first painted Settings window (docs/perf.md): process
-// start, fonts, GPU device and pipelines, and the first frames.
+// Launches (docs/perf.md): process start, fonts, GPU device and pipelines,
+// and the first frames.
 import { bench, native } from "@hona/strobe"
+
+const api = { match: "local API started" }
 
 export default bench({
   targets: {
+    // Needs an unlocked session: it ends on the window's first painted frame.
     window: native("hex", { bridge: false }),
+    // A login launch with no window. Runs on a locked session too.
+    tray: native("hex", { args: ["--hidden"], window: false, bridge: false }),
   },
   cases: {
     "cold-launch": {
+      targets: ["window"],
       primary: "launch.ready",
       metrics: ["launch.settled", "launch.api", "cpu.work", "memory.app.private"],
       launch: {
         until: { window: "painted" },
-        milestones: {
-          // The local API starts on its own thread while the window opens.
-          api: { match: "local API started" },
-        },
+        // The local API starts on its own thread while the window opens.
+        milestones: { api },
+      },
+    },
+    // To the local API answering: the runtime, tray, and overlays are up.
+    "hidden-launch": {
+      targets: ["tray"],
+      primary: "launch.ready",
+      metrics: ["cpu.work", "memory.app.private"],
+      launch: {
+        until: { milestone: "api" },
+        milestones: { api },
       },
     },
   },

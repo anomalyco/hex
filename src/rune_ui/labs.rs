@@ -455,6 +455,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Hide menu bar icon"),
                 tr("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings"),
             ));
+            // macOS's HUD reads the screen's notch from NSScreen.
+            rows.push(row(
+                Feature::NotchIndicator,
+                Some(&WAVE),
+                tr("Notch indicator"),
+                tr("On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"),
+            ));
         }
     }
     // Linux's X11 grabs and shortcuts portal take these keys alone.
@@ -674,6 +681,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingSummaryModel => "lab-meeting-summary-model",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
         Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
+        Feature::NotchIndicator => "lab-notch-indicator",
     }
 }
 

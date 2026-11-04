@@ -187,7 +187,29 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             });
         });
     let window = app.handle();
-    let tray = match create_tray(window.clone()) {
+    // Adding the tray icon waits for Explorer, so it runs on its own thread
+    // while the overlays install.
+    let adding_tray = {
+        let window = window.clone();
+        std::thread::Builder::new()
+            .name("hex-tray-setup".into())
+            .spawn(move || create_tray(window))
+    };
+    let hud = crate::rune_hud::install(&mut app);
+    crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
+    // The capture capsule, picker, and ink.
+    let _capture_overlays =
+        crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
+    let meetings = crate::meeting::runtime::Meetings::install(&mut app, shutdown)
+        .inspect_err(|error| tracing::error!(%error, "meetings could not start"))
+        .ok();
+    let added_tray = match adding_tray {
+        Ok(thread) => thread
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        Err(_) => create_tray(window.clone()),
+    };
+    let tray = match added_tray {
         Ok(tray) => {
             app = if start_hidden {
                 app.windowless()
@@ -203,14 +225,6 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             None
         }
     };
-    let hud = crate::rune_hud::install(&mut app);
-    crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
-    // The capture capsule, picker, and ink.
-    let _capture_overlays =
-        crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app);
-    let meetings = crate::meeting::runtime::Meetings::install(&mut app, shutdown)
-        .inspect_err(|error| tracing::error!(%error, "meetings could not start"))
-        .ok();
     let (requests, receiver) = mpsc::channel();
     let shared = Arc::new(Shared::default());
     RUNTIME
@@ -394,7 +408,9 @@ impl WindowsControl {
         })?;
         listener
             .send(command)
-            .map_err(|_| ControlError::new("busy", "Hex's listener stopped; try again"))
+            .map_err(|_| ControlError::new("busy", "Hex's listener stopped; try again"))?;
+        crate::windows::dictation::wake();
+        Ok(())
     }
 }
 

@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 pub(crate) mod browser_media;
 mod call_input;
+mod fixture;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod hex_microphone;
 pub(crate) mod idle_sleep;
@@ -29,6 +30,12 @@ static AUDIO_SERVICE_RESTART_GENERATION: AtomicU64 = AtomicU64::new(0);
 static INPUT_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static STREAM_GLITCHED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 static AVOID_BLUETOOTH_MICROPHONE: AtomicBool = AtomicBool::new(true);
+
+/// Whether `HEX_AUDIO_FIXTURE` names a WAV file that stands in for every
+/// microphone (benchmarks and tests; see `audio/fixture.rs`).
+pub fn uses_fixture() -> bool {
+    fixture::path().is_some()
+}
 
 /// Whether System default passes over a Bluetooth default input, whose
 /// microphone drops the headset into low-quality call audio. A change
@@ -215,7 +222,17 @@ pub struct AudioInput {
     watch_service_restarts: bool,
     restart_generation: u64,
     hex_microphone: crate::audio::hex_microphone::CaptureFeedSwitch,
+    /// How long the stream may go without delivering audio before it counts
+    /// as failed; `None` for test inputs fed by hand.
+    stall_after: Option<Duration>,
+    /// When the stream opened or last delivered a chunk.
+    last_delivery: Mutex<Instant>,
 }
+
+/// A running stream delivers audio every few milliseconds, even silence. One
+/// that has delivered nothing for this long has stopped without reporting an
+/// error (seen after a burst of overruns, #1206) and is reopened.
+const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(4);
 
 pub enum AudioInputEvent {
     Chunk {
@@ -436,9 +453,20 @@ impl AudioInput {
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
                 hex_microphone: crate::audio::hex_microphone::capture_feed(48_000).1,
+                stall_after: None,
+                last_delivery: Mutex::new(Instant::now()),
             },
             sender,
         )
+    }
+
+    #[cfg(test)]
+    fn watch_stalls_for_test(&mut self, after: Duration) {
+        self.stall_after = Some(after);
+        *self
+            .last_delivery
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Instant::now();
     }
 
     #[cfg(test)]
@@ -499,6 +527,8 @@ impl AudioInput {
             watch_service_restarts: true,
             restart_generation,
             hex_microphone: started.hex_microphone,
+            stall_after: Some(STREAM_STALL_TIMEOUT),
+            last_delivery: Mutex::new(Instant::now()),
         })
     }
 
@@ -530,11 +560,32 @@ impl AudioInput {
             return AudioInputEvent::StreamFailed(error);
         }
         match received {
-            Ok((samples, captured_through)) => AudioInputEvent::Chunk {
-                samples,
-                captured_through,
-            },
-            Err(RecvTimeoutError::Timeout) => AudioInputEvent::Timeout,
+            Ok((samples, captured_through)) => {
+                if self.stall_after.is_some() {
+                    *self
+                        .last_delivery
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner()) = Instant::now();
+                }
+                AudioInputEvent::Chunk {
+                    samples,
+                    captured_through,
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                let stalled = self.stall_after.is_some_and(|after| {
+                    self.last_delivery
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .elapsed()
+                        >= after
+                });
+                if stalled {
+                    AudioInputEvent::StreamFailed("microphone stopped delivering audio".into())
+                } else {
+                    AudioInputEvent::Timeout
+                }
+            }
             Err(RecvTimeoutError::Disconnected) => {
                 AudioInputEvent::StreamFailed("microphone audio channel disconnected".into())
             }
@@ -1068,6 +1119,14 @@ fn description_name<E: std::fmt::Display>(
 /// the same device. A listed saved microphone that will not open falls back
 /// to the system default.
 fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
+    if let Some(path) = fixture::path() {
+        if request.keep.as_deref() == Some(fixture::NAME) {
+            return Ok(Opened::Unchanged {
+                selection: Selection::InUse,
+            });
+        }
+        return Ok(Opened::Input(Box::new(fixture::open(path)?)));
+    }
     let host = cpal::default_host();
     let (devices, names) = input_devices_of(&host)?;
     let (default, default_name) = default_input_of(&host).unzip();
@@ -2506,5 +2565,36 @@ mod tests {
             RecoveringAudioInputEvent::Chunk { samples, captured_through }
                 if samples == vec![0.5; 240] && captured_through == at
         ));
+    }
+
+    #[test]
+    fn a_stream_that_stops_delivering_audio_is_reopened() {
+        let stall = Duration::from_millis(400);
+        let mut input = RecoveringAudioInput::closed(None, 1, Some("Test microphone"));
+        let (mut opened, samples) = AudioInput::channel_for_test();
+        opened.watch_stalls_for_test(stall);
+        input.finish_initial_open(Ok(opened), Instant::now());
+
+        // Delivering audio keeps the stream alive.
+        let at = CaptureInstant::from_nanos(10_000_000_000);
+        std::thread::sleep(stall / 4);
+        samples.send((vec![0.5; 240], at)).unwrap();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Chunk { .. }
+        ));
+        std::thread::sleep(stall / 4);
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Timeout
+        ));
+
+        // A quiet stream with no error counts as failed and recovers.
+        std::thread::sleep(stall);
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Interrupted
+        ));
+        assert!(input.is_recovering());
     }
 }

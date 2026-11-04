@@ -16,6 +16,8 @@ pub(super) const HANG: f32 = METRICS.gutter - METRICS.row_px;
 const LIST_W: f32 = 316.0;
 /// How far a list fades as rows slide under the search field.
 const LIST_FADE: (f32, f32) = (18.0, 28.0);
+/// Room the card's text leaves for its scroll bar.
+const SCROLL_BAR: f32 = 12.0;
 
 pub(super) static COPY_ICON: &Icon = &rune_theme_opencode::icons::OUTLINE_COPY;
 pub(super) static TRASH_ICON: &Icon = &rune_theme_opencode::icons::TRASH;
@@ -43,7 +45,7 @@ pub(super) fn body(p: Paint, key: &str, list: El, detail: El) -> El {
 }
 
 /// The search field over the scrolling list, both on the title's edge.
-pub(super) fn list_column(search: El, scroll_key: &str, list: El) -> El {
+pub(super) fn list_column(p: Paint, search: El, scroll_key: &str, list: El) -> El {
     col()
         .key("list-column")
         .w(LIST_W)
@@ -51,6 +53,7 @@ pub(super) fn list_column(search: El, scroll_key: &str, list: El) -> El {
         .pl(HANG)
         .child(search)
         .child(super::faded_body(
+            p.k,
             scroll_key,
             super::lists::source_list(list),
             LIST_FADE,
@@ -198,9 +201,9 @@ pub(super) fn meta_text(p: Paint, meta: &str) -> El {
         .truncate()
 }
 
-/// The card's scrolling content under its header.
-pub(super) fn card_scroll(key: &str, content: El) -> El {
-    super::faded_body(key, content, LIST_FADE)
+/// The card's scrolling content under its header, clear of the scroll bar.
+pub(super) fn card_scroll(p: Paint, key: &str, content: El) -> El {
+    super::faded_body(p.k, key, content.pr(SCROLL_BAR), LIST_FADE)
 }
 
 /// A quiet empty state: an icon, a short title, and at most one line.

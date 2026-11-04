@@ -69,9 +69,8 @@ remapped to Menu with GNOME's keyboard options and
 reach X11 grabs as keysyms 0xff67/0xff13/0xff14 and the portal as `Menu`,
 `Pause`, `Scroll_Lock`. Off, `hex settings` refuses them, the window's
 recorder refuses them, and a saved shortcut on one goes back to its default
-when settings load or the toggle turns off. Limit: Rune doesn't report these
-keys to the window's recorder, so set them with `hex settings`. Details and
-checks in [labs.md](labs.md).
+when settings load or the toggle turns off. On, the window's recorder takes
+them too (#1187). Details and checks in [labs.md](labs.md).
 
 Linux with Labs › Section key alone on (`labs.section_key_alone`, off by
 default; issue 1050): the ISO § key, left of 1, may be a shortcut with no
@@ -280,6 +279,17 @@ Whole-clip run starts -> labs::skip_pauses()        // dictate.skip-pauses
 ```
 
 Details and checks in [labs.md](labs.md).
+
+**Fixed November 3, 2026 (issue 1194):** a clip longer than the model's
+window (Cohere's 35 s) is transcribed in chunks, and a chunk that was only
+silence (a locked dictation left waiting before the words) went to the model
+anyway; Cohere invented long repeating text for it, pasted before the real
+sentence. Each chunk of such a clip now goes through the speech detector
+first and is skipped when it hears no speech; without the detector every
+chunk still runs. Clips that fit the window are unchanged. Check:
+`a_long_clip_skips_only_chunks_the_detector_hears_no_speech_in` in
+[gguf_session.rs](../../src/transcription/gguf_session.rs) (detector verdict
+overridden; not run with Cohere on real audio).
 
 ### Vocabulary Quality Checks
 
@@ -1436,7 +1446,10 @@ capture starts, as macOS does (#486; `rune_hud::display`). Windows and X11
 read the pointer and pick its monitor; Windows keeps it inside that
 monitor's work area and draws it at that monitor's scale. A layer-shell
 surface pins no output, so niri, Sway and Hyprland put it on the focused
-output. GNOME and KDE keep the primary display. On Windows and X11, while
+output. GNOME and KDE on Wayland keep the primary display; on X11 they
+follow the pointer like any other X11 desktop (#1200; check
+`only_gnome_and_kde_on_wayland_keep_the_primary_display`, not run on a
+two-monitor GNOME X11 session). On Windows and X11, while
 the HUD shows it checks the pointer's display every 250 ms (`Hud::follow_pointer`,
 Rune's `refollow_pointer`), and the HUD and live text move there, without
 animating or taking focus, once two checks in a row find the pointer on the
@@ -1453,8 +1466,8 @@ a DX12 DirectComposition swapchain composites alpha on Windows: a Vulkan
 surface is a swapchain on the HWND, which this window shows black (#499) or
 not at all (#510, a hybrid laptop where the integrated GPU's Vulkan driver
 claimed premultiplied alpha). Rune draws transparent Windows surfaces only
-through DX12, on the lowest-power adapter, and fails the overlay when none
-can (93c7a04b; from reading the code and Windows' rules, not yet observed on
+through DX12, on the lowest-power adapter that drives a display, and fails
+the overlay when none can (93c7a04b; from reading the code and Windows' rules, not yet observed on
 Windows). If the window, its GPU surface or the show fails (including a
 cloaked window), Rune reports why (`OverlayHandle::failure`). Hex logs the
 HUD's surface (backend, adapter, alpha mode) once, and treats a dictation

@@ -21,6 +21,31 @@ use crate::windows::input::{HotkeyAction, WindowsHotkeyMonitor};
 use crate::windows::paste::WindowsPaster;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(5);
+/// The longest wait with the microphone streaming, idle or recording. Its
+/// chunks (about every 10 ms) wake the loop, which then takes shortcut
+/// events and commands and ends a release's tail, so it needs no wakeup of
+/// its own between them. A shortcut's audio boundaries come from its
+/// event's own time, so taking it at the next chunk moves nothing.
+const STREAM_WAIT: Duration = Duration::from_millis(50);
+/// The longest wait while idle with the microphone released: a shortcut
+/// event or a command ends it at once ([`wake`]); settings and Annotate's
+/// controls are taken within it.
+const IDLE_RELEASED_WAIT: Duration = Duration::from_millis(50);
+
+/// The running listener's thread, which [`wake`] unparks.
+static LISTENER: Mutex<Option<thread::Thread>> = Mutex::new(None);
+
+/// Ends the listener's idle wait at once: the keyboard hook calls it for
+/// each shortcut event, and the tray and `hex` commands after sending one.
+pub fn wake() {
+    if let Some(listener) = LISTENER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .as_ref()
+    {
+        listener.unpark();
+    }
+}
 
 struct Job {
     transcript: PendingTranscript,
@@ -186,6 +211,7 @@ pub fn run(
     // Read by the output worker at each paste, so a change applies in place.
     let paste_with_shift = Arc::new(AtomicBool::new(paste_with_shift));
     let _indicator_guard = IndicatorGuard(indicator.clone());
+    let _woken = Woken::register();
     crate::feedback::set_enabled(feedback_volume > 0);
     crate::feedback::set_volume(f32::from(feedback_volume) / 100.0);
     crate::feedback::set_sound_set(sound_theme);
@@ -240,6 +266,8 @@ pub fn run(
         share_dictation_shortcut,
     };
     let mut hotkey = shortcuts.start()?;
+    // A shortcut event the idle wait took, handled at the next turn.
+    let mut held_event = None;
     let mut while_dictating = while_dictating;
     let mut audio_suppressor =
         crate::windows::audio_control::AudioSuppressor::start(while_dictating);
@@ -333,6 +361,7 @@ pub fn run(
             if next_shortcuts != shortcuts {
                 // The old hook goes first; one keyboard hook runs at a time.
                 drop(hotkey);
+                held_event = None;
                 shortcuts = next_shortcuts;
                 hotkey = shortcuts.start()?;
                 toggle_mode = shortcuts.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
@@ -498,6 +527,7 @@ pub fn run(
         while finishing.is_none()
             && let Some((action, occurred_at, deliberate, raw)) = next_action(
                 &hotkey,
+                &mut held_event,
                 commands.as_ref(),
                 recording || start_pending,
                 captured_through,
@@ -679,8 +709,30 @@ pub fn run(
             emit_current_state(&mut events, recording, pending, &device_label)?;
         }
 
+        let idle = !recording
+            && !start_pending
+            && finishing.is_none()
+            && pending == 0
+            && !timeline.wants_audio();
+        // A released microphone delivers nothing: wait for the next shortcut
+        // event, which is taken at once, instead of sleeping 5 ms at a time.
+        if idle && !input.is_active() {
+            // Shortcut events and commands unpark the loop ([`wake`]).
+            held_event = hotkey.events.try_recv().ok();
+            if held_event.is_none() {
+                thread::park_timeout(IDLE_RELEASED_WAIT);
+                held_event = hotkey.events.try_recv().ok();
+            }
+            continue;
+        }
+        // Only an opening or recovering microphone is polled.
+        let streaming = audio_ready && input.is_open();
         match input.recv_timeout(
-            UPDATE_INTERVAL,
+            if streaming {
+                STREAM_WAIT
+            } else {
+                UPDATE_INTERVAL
+            },
             crate::audio::capture_idle(
                 recording || timeline.wants_audio(),
                 start_pending,
@@ -1031,12 +1083,13 @@ fn resolve_device_name(query: &str) -> Result<String> {
 /// stop leaves its reply in `print`.
 fn next_action(
     hotkey: &WindowsHotkeyMonitor,
+    held: &mut Option<crate::windows::input::HotkeyEvent>,
     commands: Option<&mpsc::Receiver<ListenerCommand>>,
     recording: bool,
     captured_through: CaptureInstant,
     print: &mut Option<PrintReply>,
 ) -> Option<(HotkeyAction, CaptureInstant, bool, bool)> {
-    if let Ok(event) = hotkey.events.try_recv() {
+    if let Some(event) = held.take().or_else(|| hotkey.events.try_recv().ok()) {
         return Some((
             event.action,
             event.occurred_at(captured_through),
@@ -1181,6 +1234,30 @@ fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<
         device: device.into(),
     })?;
     Ok(())
+}
+
+/// This thread as the one [`wake`] unparks, until the listener returns.
+struct Woken(thread::ThreadId);
+
+impl Woken {
+    fn register() -> Self {
+        let current = thread::current();
+        let id = current.id();
+        *LISTENER.lock().unwrap_or_else(|error| error.into_inner()) = Some(current);
+        Self(id)
+    }
+}
+
+impl Drop for Woken {
+    fn drop(&mut self) {
+        let mut listener = LISTENER.lock().unwrap_or_else(|error| error.into_inner());
+        if listener
+            .as_ref()
+            .is_some_and(|thread| thread.id() == self.0)
+        {
+            *listener = None;
+        }
+    }
 }
 
 struct IndicatorGuard(Option<crate::rune_hud::HudSender>);

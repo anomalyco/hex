@@ -83,6 +83,7 @@ impl Category {
             | Feature::MeetingSummaryModel
             | Feature::MeetingNotesVocabulary => Self::Meetings,
             Feature::LiveText
+            | Feature::NotchIndicator
             | Feature::SmartSpacing
             | Feature::SpokenFormatting
             | Feature::SpokenSymbols
@@ -147,7 +148,9 @@ impl Place {
             }
             // A command, so never translated.
             Feature::SubtitleExport => Self::Elsewhere("hex meetings show"),
-            Feature::LiveText => Self::Elsewhere(tr("Dictation indicator")),
+            Feature::LiveText | Feature::NotchIndicator => {
+                Self::Elsewhere(tr("Dictation indicator"))
+            }
             Feature::SmartSpacing
             | Feature::SpokenFormatting
             | Feature::SpokenSymbols

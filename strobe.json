@@ -1,10 +1,17 @@
 {
   "$schema": "https://raw.githubusercontent.com/Hona/strobe/main/schema/strobe.v1.json",
   "build": {
-    "command": "cargo build --locked --profile strobe --features strobe --bin hex",
-    "output": "{cache}/cargo-target/strobe/hex.exe",
+    "command": "cargo build --locked --release --bin hex",
+    "output": {
+      "windows": "{cache}/cargo-target/release/hex.exe",
+      "macos": "{cache}/cargo-target/release/hex",
+      "linux": "{cache}/cargo-target/release/hex"
+    },
     "env": {
       "CARGO_TARGET_DIR": "{cache}/cargo-target",
+      "CARGO_PROFILE_RELEASE_DEBUG": "line-tables-only",
+      "CARGO_PROFILE_RELEASE_STRIP": "false",
+      "CARGO_PROFILE_RELEASE_INCREMENTAL": "false",
       "TRANSCRIBE_CMAKE_ARGS": "-DGGML_NATIVE=OFF"
     }
   },
@@ -12,7 +19,7 @@
     "hex": {
       "kind": "native",
       "exe": {
-        "windows": "target/strobe/hex.exe",
+        "windows": "target/release/hex.exe",
         "macos": "/Applications/Hex.app/Contents/MacOS/hex",
         "linux": "~/.local/share/hex/current/hex"
       },
@@ -23,6 +30,7 @@
         "HF_HUB_CACHE": "{home}/.cache/huggingface/hub"
       },
       "unset": ["HEX_*", "WGPU_*", "RUNE_*", "HF_HOME", "RUST_LOG"],
+      "moved": ["~/Library/Application Support/hex"],
       "files": {
         "hex-data/onboarding-complete": "",
         "hex-data/settings.json": {
@@ -32,13 +40,66 @@
         }
       },
       "guard": [
-        { "file": "%APPDATA%/hex/local-api.json", "pid": "pid" },
-        { "file": "%APPDATA%/hex/settings.json" },
-        { "file": "~/Library/Application Support/hex/local-api.json", "pid": "pid" },
-        { "file": "~/Library/Application Support/hex/settings.json" },
-        { "file": "~/.local/share/hex/local-api.json", "pid": "pid" },
-        { "file": "~/.local/share/hex/settings.json" }
+        { "os": "windows", "file": "%APPDATA%/hex/local-api.json", "pid": "pid" },
+        { "os": "windows", "file": "%APPDATA%/hex/settings.json" },
+        { "os": "macos", "file": "~/Library/Application Support/hex/local-api.json", "pid": "pid" },
+        { "os": "macos", "file": "~/Library/Application Support/hex/settings.json" },
+        { "os": "linux", "file": "~/.local/share/hex/local-api.json", "pid": "pid" },
+        { "os": "linux", "file": "~/.local/share/hex/settings.json" }
       ]
+    },
+    "hex-listening": {
+      "extends": "hex",
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": true,
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+        }
+      }
+    },
+    "hex-listening-warm": {
+      "extends": "hex",
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": false,
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+        }
+      }
+    },
+    "hex-dictation": {
+      "extends": "hex",
+      "env": { "HEX_AUDIO_FIXTURE": "{home}/speech.wav" },
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": false,
+          "sound_effects": false,
+          "dictation_hotkey": { "keys": [{ "code": 80, "label": "F19" }] },
+          "paste_last_hotkey": null,
+          "capture": { "enabled": true, "hotkey": { "keys": [{ "code": 79, "label": "F18" }] } },
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings", "annotate-on-by-default", "anomaly-hex-identity"]
+        }
+      }
+    },
+    "hex-dictation-released": {
+      "extends": "hex-dictation",
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": true,
+          "sound_effects": false,
+          "dictation_hotkey": { "keys": [{ "code": 80, "label": "F19" }] },
+          "paste_last_hotkey": null,
+          "capture": { "enabled": true, "hotkey": { "keys": [{ "code": 79, "label": "F18" }] } },
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings", "annotate-on-by-default", "anomaly-hex-identity"]
+        }
+      }
     }
   },
   "benches": ["perf/**/*.bench.ts"],

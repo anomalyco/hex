@@ -399,6 +399,11 @@ const KEYS: &[Key] = &[
         "Labs: hide Hex's menu bar icon while nothing records; shortcuts keep working, and opening Hex again from Finder or Spotlight shows Settings (macOS)",
     ),
     key(
+        "labs.notch_indicator",
+        Kind::Bool,
+        "Labs: with indicator_position top, the recording indicator grows out of the notch on a screen that has one, and sits below the menu bar elsewhere (macOS)",
+    ),
+    key(
         "labs.skip_pauses",
         Kind::Bool,
         "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",
@@ -686,6 +691,16 @@ fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<Contro
         return Some(ControlError::new(
             "unsupported",
             format!("`{name}` belongs to a Labs feature that only dev builds have"),
+        ));
+    }
+    // A `labs.` key is only its feature's switch, so off its OS it does nothing.
+    if let Some(feature) = crate::labs::Feature::for_settings_key(name)
+        && name.starts_with("labs.")
+        && !feature.on_this_os()
+    {
+        return Some(ControlError::new(
+            "unsupported",
+            format!("`{name}` belongs to a Labs feature this OS doesn't have"),
         ));
     }
     let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
@@ -1152,7 +1167,7 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
         Kind::Text => Ok(Value::String(raw.into())),
         Kind::Path => {
             let path = match trimmed.strip_prefix("~/") {
-                Some(rest) => dirs::home_dir()
+                Some(rest) => crate::app_paths::home_dir()
                     .ok_or_else(|| invalid(name, "no home folder to expand ~ in"))?
                     .join(rest),
                 None => std::path::PathBuf::from(trimmed),
@@ -1361,6 +1376,17 @@ mod tests {
             Some("managed")
         );
         assert!(unavailable_under("labs.live_text", Policy::default()).is_none());
+    }
+
+    #[test]
+    fn a_labs_switch_for_another_os_is_refused() {
+        let refused = unavailable_under("labs.notch_indicator", crate::policy::Policy::default())
+            .map(|error| error.code);
+        if cfg!(target_os = "macos") {
+            assert_eq!(refused, None);
+        } else {
+            assert_eq!(refused, Some("unsupported"));
+        }
     }
 
     fn rules() -> ShortcutRules {

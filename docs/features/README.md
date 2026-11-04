@@ -977,6 +977,28 @@ the GPUI occlusion regression went with GPUI and has no Rune counterpart.
 
 **Easy to misread:** an open microphone is not an active recording.
 
+### Scroll without a wheel
+
+```ts
+A pane, detail card or dropdown longer than its space    // ui.scroll-bar (#1209)
+├── Scroll bar -> a thin thumb on the right edge, only while the content overflows
+│   ├── Drag the thumb -> the content follows it
+│   └── Press above or below it -> jumps there
+├── Page Up / Page Down, Home / End -> page the pane around focus or the pointer
+├── Open menu or dropdown -> ↑ ↓ move the highlight, Page Up / Down by the rows it
+│   shows, Home / End to the ends; the highlight stays in view
+├── Model search picker -> the same; Home / End only while the search is empty
+└── Wheel and trackpad -> unchanged
+```
+
+The bar is Rune's `rune_kit::scroll_bar`, used by `scroll_body`, `faded_body`
+and every kit `Menu`, `Select` and `Combobox`. Checks:
+`a_long_transcript_scrolls_by_dragging_its_scroll_bar`, and in Rune the
+`scroll_bar` tests and `page_keys_move_a_scrolling_listbox_highlight_by_what_it_shows`.
+Gaps: dragging content with a touchscreen or pen does not scroll on desktop
+(Rune pans by touch only on the web), and the bar is not verified on a real
+Windows PC.
+
 ## Process Text With Modes
 
 ```ts
@@ -1495,6 +1517,13 @@ Linux beta                               // not macOS feature parity
 │   │   │   │   Open button, and process.log warns (#723)
 │   │   │   │   // no check; not run on a GNOME session
 │   │   │   // a desktop keeps a stored binding over a new preferred_trigger for the same id
+│   │   ├── Hold whose release never comes (GNOME sends none when a modifier
+│   │   │   comes up first) -> once the desktop's repeats of the held press stop
+│   │   │   for 1 s, it counts as released and the capture finishes; that inferred
+│   │   │   release never starts a double tap. A hold too short to repeat still
+│   │   │   finishes on the next press (#1227)
+│   │   │   // check: a_hold_whose_repeats_stop_without_a_release_finishes_by_itself
+│   │   │   // (the state machine only); not run on a GNOME session
 │   │   ├── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
 │   │   │   under that shortcut's own row (Dictation, Output);
 │   │   │   the rest keep working
@@ -1694,8 +1723,9 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Launch -> DLLs load from System32 and Hex's folder only, never PATH (#587)
 │   └── DX12 compiles shaders with FXC (System32), never a dxcompiler.dll on PATH
 ├── GPU -> Rune draws with DX12 only (Vulkan only without a DX12 adapter) on
-│   the lowest-power adapter; a GPU whose device fails hands the window to the
-│   next adapter (#662)
+│   the lowest-power adapter that drives a display (an unused integrated GPU
+│   beside the monitors' card would present every surface across adapters);
+│   a GPU whose device fails hands the window to the next adapter (#662)
 │   └── A launch that crashed before its first frame (gpu-draw.pending left in
 │       the data folder, same version; cleared by a window or HUD frame or a
 │       clean quit) -> high-performance GPU (WGPU_POWER_PREF=high), warned in

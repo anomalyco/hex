@@ -75,7 +75,12 @@ substitute for source inspection or a second roadmap.
 - `audio`: `cpal` device enumeration, input resolution (`--device`, the saved
   microphone, else the system default, never Hex Microphone), the CoreAudio
   default-input and device-list listeners, timestamped mono float PCM
-  delivery, live selection, and bounded stream recovery.
+  delivery, live selection, and bounded stream recovery. `audio/fixture`:
+  with `HEX_AUDIO_FIXTURE=<wav>` every microphone open plays that file
+  instead (10 ms chunks at real-time pace, from its start at each open,
+  looping) and no device is enumerated or opened, so benchmarks drive the
+  real capture, stream, and output pipeline without recording anyone; the
+  microphone permission then reads as ready.
 - `suppression`: the macOS event taps, shortcut suppression, and the
   configurable dictation-hotkey state machine.
 - `keyboard`: active-layout key resolution and balanced synthetic shortcuts.
@@ -1425,14 +1430,19 @@ tests through cargo-nextest (`brew install cargo-nextest`) with
 the same config's `ci` profile. Read its output whole rather than piping it
 through `grep | head`; failures are summarized at the end.
 
-Benchmark with strobe (`docs/perf.md`): `strobe.json` builds `--profile strobe
---features strobe` (release's code with line tables in `hex.pdb`), and
-`perf/*.bench.ts` holds the cases. A benchmarked copy runs with its own
+Benchmark with strobe (`docs/perf.md`): `strobe.json` builds `--release`
+with `CARGO_PROFILE_RELEASE_*` env for line tables in `hex.pdb` (no profile
+or feature, so any commit builds), and `perf/*.bench.ts` holds the cases. A
+benchmarked copy runs with its own
 `HEX_APPLICATION_SUPPORT_DIR` (a root other than the default also gets its
 own Windows single-instance event), `HEX_DISABLE_UPDATES=1` (no update
 checks, as a test build), `USERPROFILE`/`HOME` for `~/.config/hex`, and a
 seeded `settings.json` with the listener off. Never point a benchmark at the
-user's own data folder. Add a case beside each performance change, in the
+user's own data folder. Derive user folders through `app_paths`
+(`home_dir`, `data_dir`, `document_dir`) and, in Annotate's crates,
+`scrawl_router::user_dirs`, never `dirs` directly: on Windows `dirs` ignores
+the redirected `USERPROFILE`/`APPDATA`/`LOCALAPPDATA` and reaches the real
+user's folders. Add a case beside each performance change, in the
 same PR.
 
 Keep source files under 800 non-test lines (`#[cfg(test)]` code excluded);

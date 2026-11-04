@@ -245,7 +245,24 @@ impl TrackTranscript {
         // A model without word timings (Apple Speech) took over mid-track.
         self.finish();
         let segments = transcript.segments;
-        let segmented = !segments.is_empty();
+        // A model that gives no usable time range for a segment (Cohere
+        // reports one segment at zero) keeps its text over the whole chunk.
+        let timed = |segment: &TranscriptSegment| {
+            let start = (segment.start_ms.max(0) as u64).min(duration_ms);
+            let end = (segment.end_ms.max(0) as u64).min(duration_ms);
+            segment.text.trim().is_empty() || end > start
+        };
+        let segmented = !segments.is_empty() && segments.iter().all(timed);
+        let text = if segmented || !transcript.text.trim().is_empty() {
+            transcript.text
+        } else {
+            segments
+                .iter()
+                .map(|segment| segment.text.trim())
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
         let mut incoming: Vec<TranscriptEntry> = if segmented {
             segments
                 .into_iter()
@@ -262,7 +279,7 @@ impl TrackTranscript {
                 })
                 .collect()
         } else {
-            let text = transcript.text.trim();
+            let text = text.trim();
             (!text.is_empty())
                 .then(|| TranscriptEntry {
                     source: self.source,
@@ -2586,6 +2603,76 @@ mod tests {
             transcript(vec![segment(1_200, 2_500, "Maybe Friday.")]),
         );
         assert_eq!(view(&track), ["Settled words.", "Maybe Friday."]);
+    }
+
+    #[test]
+    fn a_segment_without_usable_times_keeps_its_text_over_the_chunk() {
+        // Cohere Transcribe reports one segment at zero start and end.
+        let mut track = TrackTranscript::new(MeetingSource::System, 1_000);
+        let chunk = Chunk {
+            start: 0,
+            overlap: 0,
+            tail: 0,
+            samples: vec![0.1; 10 * RATE],
+        };
+        track.accept(
+            &chunk,
+            Transcript {
+                text: String::new(),
+                segments: vec![TranscriptSegment {
+                    start_ms: 0,
+                    end_ms: 0,
+                    text: " hello from the call ".into(),
+                }],
+                words: Vec::new(),
+            },
+        );
+        track.finish();
+        assert_eq!(
+            track.entries,
+            [entry(
+                MeetingSource::System,
+                1_000,
+                11_000,
+                "hello from the call"
+            )]
+        );
+    }
+
+    #[test]
+    fn segments_without_usable_times_still_join_at_the_seam() {
+        let mut track = TrackTranscript::new(MeetingSource::System, 0);
+        let zero = |text: &str| Transcript {
+            text: String::new(),
+            segments: vec![TranscriptSegment {
+                start_ms: 0,
+                end_ms: 0,
+                text: text.into(),
+            }],
+            words: Vec::new(),
+        };
+        let first = Chunk {
+            start: 0,
+            overlap: 0,
+            tail: 2 * RATE,
+            samples: vec![0.1; 10 * RATE],
+        };
+        track.accept(&first, zero("we can ship it on Friday"));
+        let second = Chunk {
+            start: 8 * RATE,
+            overlap: 2 * RATE,
+            tail: 0,
+            samples: vec![0.1; 10 * RATE],
+        };
+        track.accept(&second, zero("on Friday then we test"));
+        track.finish();
+        assert_eq!(
+            track.entries,
+            [
+                entry(MeetingSource::System, 0, 10_000, "we can ship it on Friday"),
+                entry(MeetingSource::System, 8_000, 18_000, "then we test"),
+            ]
+        );
     }
 
     pub(super) static MODEL_LOADS: std::sync::atomic::AtomicUsize =

@@ -275,6 +275,10 @@ warm stream keeps running but delivers only exact zeros (macOS, #1122)
   -> its finish reopens the microphone like a stream failure // logged once
   -> next dictation records from a fresh stream
 
+open stream stops delivering audio without an error (any OS, #1206)
+  -> 4 s with no chunk (STREAM_STALL_TIMEOUT) -> treated as a stream failure
+  -> reopened like any interrupted stream, idle or not // logged "microphone stopped delivering audio"
+
 programmatic dictation (local API) when the stream interrupts or gaps
   ├── audio delivered before the loss -> kept under its id // recover.programmatic-loss
   │     -> /finish transcribes it; /cancel, heartbeats, and the lease still apply
@@ -295,7 +299,8 @@ Checks in [audio.rs](../../src/audio.rs):
 `continuity_capture_transports_are_recognised` (pure resolution and fourcc
 values; no iPhone observed with the lid closed),
 `where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
-`only_an_idle_capture_lets_the_microphone_switch`;
+`only_an_idle_capture_lets_the_microphone_switch`,
+`a_stream_that_stops_delivering_audio_is_reopened`;
 [dictation/audio.rs](../../src/dictation/audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
 `microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,
@@ -385,6 +390,13 @@ finished dictation whose audio through the release is exactly zero now
 reopens the stream the way a stream failure does; a cold microphone
 (release-while-idle) already opens fresh for each press. The first such
 dictation is still discarded. Not verified with a real WhatsApp call.
+
+**Fixed after 3.3.0 ([#1206](https://github.com/anomalyco/hex/issues/1206)):**
+after a burst of overrun warnings while idle, a warm USB microphone's stream
+stopped delivering audio without reporting an error, so every dictation held
+only the stale pre-roll and was discarded as no speech until Hex restarted. An
+open stream that delivers nothing for 4 s now counts as failed and is reopened
+with the usual bounded recovery. Not verified on the reporter's microphone.
 
 ### Fence Late Capture Notifications
 

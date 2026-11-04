@@ -607,6 +607,9 @@ struct ShortcutState {
     held_since: Option<Instant>,
     /// The dictation shortcut was pressed and its release hasn't arrived.
     down: bool,
+    /// The desktop repeated the held press (GNOME, KWin), so repeats that
+    /// stop mean its keys came up.
+    repeating: bool,
     /// Dictate without processing, not the dictation shortcut, owns the
     /// capture (or the last one).
     raw: bool,
@@ -625,6 +628,7 @@ impl ShortcutState {
             last_press: None,
             held_since: None,
             down: false,
+            repeating: false,
             raw: false,
         }
     }
@@ -675,7 +679,32 @@ impl ShortcutState {
         self.last_release = None;
         self.last_press = None;
         self.down = false;
+        self.repeating = false;
         true
+    }
+
+    /// A held press the desktop was repeating whose repeats stopped for
+    /// longer than any repeat interval, with no release: GNOME's portal sends
+    /// no deactivation when a modifier comes up before the key, so the keys
+    /// are up and this counts as the release. Never the first tap of a
+    /// double tap, since the release itself wasn't seen.
+    fn expire(&mut self, now: Instant) -> Option<HotkeyEvent> {
+        let stopped = self.down
+            && self.repeating
+            && self
+                .last_press
+                .is_some_and(|pressed| now.saturating_duration_since(pressed) >= KEY_REPEAT_GAP);
+        if !stopped {
+            return None;
+        }
+        let shortcut = if self.raw {
+            Shortcut::RawDictation
+        } else {
+            Shortcut::Dictation
+        };
+        let event = self.update(Input::Released(shortcut), now);
+        self.last_release = None;
+        event
     }
 
     fn stop_dictation(&mut self) -> Option<HotkeyEvent> {
@@ -698,6 +727,7 @@ impl ShortcutState {
             }
             Input::Lost => {
                 self.down = false;
+                self.repeating = false;
                 self.cancel()
             }
             Input::Cancel if self.wants_cancel() => self.cancel(),
@@ -714,6 +744,7 @@ impl ShortcutState {
                     });
                 self.last_press = Some(now);
                 self.down = true;
+                self.repeating = repeat;
                 if repeat {
                     return None;
                 }
@@ -754,6 +785,7 @@ impl ShortcutState {
                     return None;
                 }
                 self.down = false;
+                self.repeating = false;
                 match self.capture {
                     Capture::Armed => {
                         self.capture = Capture::Idle;
@@ -848,6 +880,25 @@ impl Dispatcher {
     fn input(&mut self, input: Input) {
         self.pending
             .extend(self.state.update(input, Instant::now()));
+    }
+
+    /// Releases a held dictation shortcut whose desktop stopped repeating it
+    /// without sending its release (see [`ShortcutState::expire`]).
+    fn expire(&mut self) {
+        let raw = self.state.raw;
+        let was_down = self.state.down;
+        let event = self.state.expire(Instant::now());
+        if was_down && !self.state.down {
+            tracing::info!(
+                "the held dictation shortcut stopped repeating without a release; treating it as released"
+            );
+            self.keys.released(if raw {
+                Shortcut::RawDictation
+            } else {
+                Shortcut::Dictation
+            });
+        }
+        self.pending.extend(event);
     }
 
     /// Feeds every queued `hex` command.
@@ -1189,6 +1240,7 @@ impl Backend {
                 };
                 dispatcher.input(input);
             }
+            dispatcher.expire();
             dispatcher.commands();
             if self.status.configure.swap(false, Ordering::AcqRel)
                 && let Err(error) = portal.configure()
@@ -1273,6 +1325,12 @@ mod tests {
 
         fn command(&mut self, command: ShortcutCommand) {
             self.input(Input::Command(command));
+        }
+
+        fn expire(&mut self) {
+            if let Some(event) = self.state.expire(self.now) {
+                self.events.push(event);
+            }
         }
 
         fn tap(&mut self) {
@@ -1827,6 +1885,44 @@ mod tests {
             test.now += Duration::from_secs(1);
             test.tap();
             assert_eq!(test.events, [START, Finish, START, Finish]);
+        }
+    }
+
+    /// #1227: GNOME sends no release when a modifier comes up first, so a
+    /// hold whose repeats stop finishes by itself, and a press right after
+    /// starts a fresh capture rather than locking a double tap.
+    #[test]
+    fn a_hold_whose_repeats_stop_without_a_release_finishes_by_itself() {
+        for double_tap in [false, true] {
+            let mut test = Test::new(double_tap);
+            test.press(Shortcut::Dictation);
+            for _ in 0..20 {
+                test.now += Duration::from_millis(33);
+                test.press(Shortcut::Dictation);
+            }
+            test.now += Duration::from_millis(500);
+            test.expire();
+            assert_eq!(test.events, [START], "repeats may still come");
+            test.now += Duration::from_millis(500);
+            test.expire();
+            assert_eq!(test.events, [START, Finish]);
+            assert_eq!(test.state.capture, Capture::Idle);
+            test.expire();
+            assert_eq!(test.events, [START, Finish]);
+            // A quick press after it is a new capture, never a lock.
+            test.now += Duration::from_millis(100);
+            test.tap();
+            assert_eq!(test.events, [START, Finish, START, Finish]);
+            assert_eq!(test.state.capture, Capture::Idle);
+            // A hold that never repeated has nothing to go on: it waits for
+            // its release or the next press.
+            test.now += Duration::from_secs(1);
+            test.press(Shortcut::Dictation);
+            test.now += Duration::from_secs(5);
+            test.expire();
+            assert_eq!(test.events, [START, Finish, START, Finish, START]);
+            test.release(Shortcut::Dictation);
+            assert_eq!(test.events, [START, Finish, START, Finish, START, Finish]);
         }
     }
 

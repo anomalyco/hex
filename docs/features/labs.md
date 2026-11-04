@@ -58,6 +58,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
+├── Notch indicator no    labs.notch_indicator         (macOS) with the indicator at Top, the notch widens sideways in the Dynamic Island's compact style: an orange mic and level bars, the macOS spinner, a green checkmark; flat screens keep it below the menu bar
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (every OS with Meetings)
 │                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
@@ -137,6 +138,17 @@ settings load (macOS), with a one-time note in General
 (`mouse_shortcut_notice`). Check:
 `mouse_shortcuts_go_back_to_their_default_while_their_labs_toggle_is_off` in
 [app_settings.rs](../../src/app_settings.rs).
+
+Clicks and drags reach Hex's filtering (event-consuming) session tap only
+while some shortcut is a mouse button; otherwise they go to the listen-only
+tap, as chord evidence only. A filtering tap on mouse events, even one that
+passes every event through, broke dragging windows between displays and
+Spaces (#1215). The tap thread's 5 s health check moves them when a mouse
+shortcut is bound or cleared, so for up to 5 s after that a newly bound button
+still reaches the app. Check:
+`mouse_events_reach_the_filtering_tap_only_while_a_mouse_shortcut_is_bound` in
+[suppression/tests.rs](../../src/suppression/tests.rs) (macOS only). Not yet
+observed: a real two-display Mac dragging windows with Hex running.
 
 Unload model when idle (`unload-idle`, issue 442 from @theoneand33): while
 on, its row shows "Unload after" (5, 15, 30, or 60 minutes; default 15).
@@ -525,8 +537,9 @@ hex settings set dictation_hotkey menu        // labs.special-keys
 │   instead lets Insert, Home, End, Page Up, Page Down stand alone ("home alone
 │   needs Labs › Special keys alone" while off), and off puts a saved one back
 ├── macOS -> no toggle; a bare one still needs a modifier, as before
-├── Window recorder -> refuses them while off ("Add a modifier"); Rune reports
-│   none of these keys yet, so the recorder can't record them either way
+├── Window recorder (Linux) -> records them, alone too, while on (#1187);
+│   refuses them while off ("Add a modifier")
+│   Check: `recorder_takes_special_keys_alone` in `rune_ui/settings.rs`
 └── Toggle turned off (row, hex labs off, hex settings), or settings load with
     it off -> a Linux shortcut on one goes back to its default (Dictate without
     processing unbound), so the listener never registers it
@@ -838,6 +851,46 @@ only); `hide_menu_bar_icon_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: the icon hiding on a real
 Mac, or macOS restoring an item's remembered visibility; the row renders
 only in macOS builds, so no golden changes.
+
+Notch indicator (`notch-indicator`, macOS only): for MacBooks with a
+notch, a recording indicator in the Dynamic Island's compact style that
+reads as part of the Mac. It is not Dot scope: the notch keeps its height
+and widens by `hud_placement::EAR_WIDTH` (34 pt) on each side, with fully
+rounded bottom corners, and draws one SF Symbols–style glyph beside the
+camera on each side in Apple's dark system colours (`ears` in
+[rune_hud.wgsl](../../src/rune_hud.wgsl)):
+
+```ts
+Recording   -> orange mic.fill (the colour macOS and iOS give a microphone in use)
+               + five orange capsule bars that move with the voice (√ level)
+Working     -> the macOS 12-spoke spinner + the bars at rest with light running through them
+Done        -> a green checkmark pops in, held 700 ms (Dot scope's done stays 100 ms)
+Failed      -> red exclamationmark.circle.fill
+Then        -> the ears fold back into the notch; glyphs scale and unblur in and out with them
+Reduce Motion -> the spinner, bars' wobble, and light hold still (Pose::clock stays 0)
+```
+
+The gate, `labs::notch_indicator()`, is read each time the HUD is placed on
+the pointer's screen (`Hud::place_on_pointer_screen` in
+[rune_hud/macos.rs](../../src/rune_hud/macos.rs)), so it applies from the
+next dictation. `hud_placement::ears` places it only on a screen whose
+`NSScreen` reports a notch, and only with Settings' indicator position at
+Top; a flat external display, Bottom, and Hidden keep what they did, and
+with the lab off HUD Lab's placement stands. Linux and Windows have no row,
+`hex labs on notch-indicator` doesn't know it there, and `hex settings set
+labs.notch_indicator` answers `unsupported` (as any `labs.` switch for
+another OS now does). Checks: `ears_widen_the_notch_sideways_at_its_own_height`
+in [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs);
+`the_notch_indicator_holds_done_for_its_checkmark` in
+[dictation/indicator.rs](../../src/dictation/indicator.rs);
+`a_labs_switch_for_another_os_is_refused` in
+[control/settings.rs](../../src/control/settings.rs);
+`notch_indicator_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs); its frames render through the real shaders
+with `HEX_HUD_EARS=1` and `rune_hud_frames`. Not yet observed: a real
+dictation through the ears on a Mac with the lab on (`hex dev hud` drives
+them in a debug build), and the failure glyph, which no render covers yet; the
+row renders only in macOS builds, so no golden changes.
 
 Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
 like Meetings; its row shows wherever Meetings does, in macOS builds): for

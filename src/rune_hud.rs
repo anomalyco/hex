@@ -52,6 +52,8 @@ pub(crate) const WINDOW: (f32, f32) = (304.0, 80.0);
 const NOTCH_RADIUS: f32 = 8.0;
 /// The open island's bottom corner radius.
 const ISLAND_RADIUS: f32 = 18.0;
+/// The notch indicator's bottom corner radius once its ears are out.
+const EARS_RADIUS: f32 = 14.0;
 
 /// The live text's gap from the HUD's plate.
 const LIVE_TEXT_GAP: f32 = 6.0;
@@ -224,7 +226,8 @@ impl Hud {
     /// While shown, every `FOLLOW_EVERY`: the HUD and the live text move to
     /// the display under the pointer when it moved to another, at once and
     /// without focus. Windows and X11; a layer-shell surface stays on the
-    /// compositor's focused output, and GNOME and KDE on the primary.
+    /// compositor's focused output, and GNOME and KDE on Wayland on the
+    /// primary.
     #[cfg(not(target_os = "macos"))]
     fn follow_pointer(&mut self, now: Instant) {
         if !self.shown || self.followed.is_some_and(|at| now < at + FOLLOW_EVERY) {
@@ -390,20 +393,31 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
 /// the pointer and pick its monitor; a layer-shell surface pins no output, so
 /// the compositor puts it on the focused one. GNOME (whose HUD runs on
 /// XWayland, blind to the pointer over Wayland windows) and KDE keep the
-/// primary display.
+/// primary display on Wayland; their X11 sessions follow the pointer (#1200).
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn display() -> rune::DisplayTarget {
     #[cfg(target_os = "linux")]
-    if std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktops| {
-        desktops.split(':').any(|desktop| {
-            ["GNOME", "KDE"]
-                .iter()
-                .any(|d| desktop.eq_ignore_ascii_case(d))
-        })
-    }) {
+    if keeps_primary_display(
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+        crate::linux::session::LinuxSession::detect().is_wayland(),
+    ) {
         return rune::DisplayTarget::Primary;
     }
     rune::DisplayTarget::UnderPointer
+}
+
+/// Whether the HUD stays on the primary display: GNOME and KDE on Wayland
+/// only. On X11 the pointer is readable on every desktop.
+#[cfg(any(target_os = "linux", test))]
+fn keeps_primary_display(desktops: Option<&str>, wayland: bool) -> bool {
+    wayland
+        && desktops.is_some_and(|desktops| {
+            desktops.split(':').any(|desktop| {
+                ["GNOME", "KDE"]
+                    .iter()
+                    .any(|d| desktop.eq_ignore_ascii_case(d))
+            })
+        })
 }
 
 fn view(_: &Hud, _: &mut Cx<Hud>) -> El {
@@ -437,9 +451,11 @@ pub(crate) struct DotUniforms {
     plate_layout: [f32; 4],
     island: [f32; 4],
     field: [f32; 4],
+    /// The notch indicator's done and failed, 0 to 1.
+    ears: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<DotUniforms>() == 192);
+const _: () = assert!(std::mem::size_of::<DotUniforms>() == 208);
 const DOT_UNIFORM_BYTES: u32 = std::mem::size_of::<DotUniforms>() as u32;
 const DOT_BYTES: u64 = (MAX_DOTS * 4) as u64;
 /// How `rune_hud.wgsl` declares `u` as a uniform buffer; with immediates it
@@ -492,7 +508,13 @@ impl DotUniforms {
             island: layout
                 .island
                 .map_or([0.0; 4], |island| island_shape(island, pose)),
-            field: [field_radius(layout, pose), 0.0, 0.0, 0.0],
+            // The ears draw glyphs, not the field: the notch's half width,
+            // the mode, the voice, and the stage's clock.
+            field: match layout.island {
+                Some(island) if island.ears => [island.notch[0] / 2.0, 1.0, pose.level, pose.clock],
+                _ => [field_radius(layout, pose), 0.0, 0.0, 0.0],
+            },
+            ears: [pose.done, pose.fail, 0.0, 0.0],
         }
     }
 }
@@ -501,6 +523,17 @@ impl DotUniforms {
 /// the plate as it shows, bouncing with it.
 fn island_shape(island: Island, pose: &dot_scope::Pose) -> [f32; 4] {
     let [notch_width, notch_height] = island.notch;
+    if island.ears {
+        // The notch's height throughout, widening to the island's width.
+        let half_width = notch_width / 2.0;
+        let grow = pose.reveal;
+        return [
+            half_width + (island.width / 2.0 - half_width) * grow,
+            notch_height,
+            island.top,
+            (NOTCH_RADIUS + (EARS_RADIUS - NOTCH_RADIUS) * grow.min(1.0)).min(notch_height / 2.0),
+        ];
+    }
     let pad = ISLAND_PAD as f32;
     let grow = pose.reveal;
     let half_width = notch_width / 2.0;

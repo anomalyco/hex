@@ -477,7 +477,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                 .on_edit(|ui: &mut Ui| &mut ui.history.search)
                 .build(p.k)
                 .key("history-search");
-            let column = ld::list_column(search, "history-scroll", list);
+            let column = ld::list_column(p, search, "history-scroll", list);
             ld::body(p, "history-body", column, detail(ui, p, layer))
         }
     };
@@ -744,7 +744,7 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 ),
             ],
         ))
-        .child(ld::card_scroll("detail-scroll", body))
+        .child(ld::card_scroll(p, "detail-scroll", body))
 }
 
 /// Labs › Keep recordings: Transcribe again's menu of installed models, and

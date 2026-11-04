@@ -101,10 +101,11 @@ pub enum Feature {
     MeetingSummaryModel,
     GnomeClipboardRestore,
     MeetingNotesVocabulary,
+    NotchIndicator,
 }
 
 impl Feature {
-    pub const ALL: [Self; 42] = [
+    pub const ALL: [Self; 43] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -147,6 +148,7 @@ impl Feature {
         Self::MeetingSummaryModel,
         Self::GnomeClipboardRestore,
         Self::MeetingNotesVocabulary,
+        Self::NotchIndicator,
     ];
 
     /// The features this OS and build have.
@@ -211,7 +213,8 @@ impl Feature {
             | Self::MovableMeetingCapsules
             | Self::MeetingSummaryModel
             | Self::GnomeClipboardRestore
-            | Self::MeetingNotesVocabulary => Audience::Everyone,
+            | Self::MeetingNotesVocabulary
+            | Self::NotchIndicator => Audience::Everyone,
         }
     }
 
@@ -259,7 +262,8 @@ impl Feature {
             Self::MovableMeetingCapsules
             | Self::MeetingSummaryModel
             | Self::GnomeClipboardRestore
-            | Self::MeetingNotesVocabulary => 20261103,
+            | Self::MeetingNotesVocabulary
+            | Self::NotchIndicator => 20261103,
         }
     }
 
@@ -285,7 +289,8 @@ impl Feature {
             .find(|feature| feature.settings_key() == key)
     }
 
-    fn on_this_os(self) -> bool {
+    /// Whether this OS has the feature at all, in any build.
+    pub fn on_this_os(self) -> bool {
         match self {
             Self::Meetings
             | Self::LiveChapters
@@ -306,7 +311,8 @@ impl Feature {
             | Self::SmartSpacing
             | Self::SidedChords
             | Self::RecentDictations
-            | Self::HideMenuBarIcon => cfg!(target_os = "macos"),
+            | Self::HideMenuBarIcon
+            | Self::NotchIndicator => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
@@ -376,6 +382,7 @@ impl Feature {
             Self::MeetingSummaryModel => "meeting-summary-model",
             Self::GnomeClipboardRestore => "gnome-clipboard-restore",
             Self::MeetingNotesVocabulary => "meeting-notes-vocabulary",
+            Self::NotchIndicator => "notch-indicator",
         }
     }
 
@@ -424,6 +431,7 @@ impl Feature {
             Self::MeetingSummaryModel => "labs.meeting_summary_model",
             Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
             Self::MeetingNotesVocabulary => "labs.meeting_notes_vocabulary",
+            Self::NotchIndicator => "labs.notch_indicator",
         }
     }
 
@@ -538,6 +546,9 @@ impl Feature {
             Self::MeetingNotesVocabulary => {
                 "Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"
             }
+            Self::NotchIndicator => {
+                "On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"
+            }
         }
     }
 
@@ -590,6 +601,7 @@ impl Feature {
             Self::MeetingSummaryModel => settings.labs.meeting_summary_model,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
+            Self::NotchIndicator => settings.labs.notch_indicator,
         }
     }
 
@@ -640,6 +652,7 @@ impl Feature {
             &mut labs.meeting_summary_model,
             &mut labs.gnome_clipboard_restore,
             &mut labs.meeting_notes_vocabulary,
+            &mut labs.notch_indicator,
         ]
     }
 
@@ -690,6 +703,7 @@ impl Feature {
             Self::MeetingSummaryModel => settings.labs.meeting_summary_model = on,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
+            Self::NotchIndicator => settings.labs.notch_indicator = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -731,6 +745,7 @@ const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
 const MEETING_SUMMARY_MODEL: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
+const NOTCH_INDICATOR: u64 = 1 << 27;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -908,6 +923,13 @@ pub fn meeting_notes_vocabulary() -> bool {
     on(MEETING_NOTES_VOCABULARY) && Feature::MeetingNotesVocabulary.on_this_os()
 }
 
+/// With the indicator at the top, the HUD grows out of the notch on a
+/// screen that has one (macOS; read each time the HUD is placed).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn notch_indicator() -> bool {
+    on(NOTCH_INDICATOR) && Feature::NotchIndicator.on_this_os()
+}
+
 /// A paste on a Wayland desktop without data-control (GNOME) snapshots and
 /// restores the clipboard through an already running XWayland (Linux; read
 /// as each paste starts).
@@ -1030,6 +1052,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MeetingNotesVocabulary,
             settings.meeting_notes_vocabulary,
             MEETING_NOTES_VOCABULARY,
+        ),
+        (
+            Feature::NotchIndicator,
+            settings.notch_indicator,
+            NOTCH_INDICATOR,
         ),
     ]
     .into_iter()
@@ -1452,6 +1479,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & HIDE_MENU_BAR_ICON, 0);
         assert_eq!(state & KEEP_RECORDINGS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn notch_indicator_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & NOTCH_INDICATOR, 0);
+        labs.notch_indicator = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & NOTCH_INDICATOR, 0);
+        assert_eq!(state & MEETING_NOTES_VOCABULARY, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

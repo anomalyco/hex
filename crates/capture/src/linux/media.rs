@@ -12,7 +12,19 @@ use crate::helper::{FrameTimes, Probe};
 use crate::model::RgbaFrame;
 
 /// The recorder's frame rate: a constant-rate movie, the newest screen frame repeated.
-pub const FPS: u32 = 30;
+pub const FPS: u32 = 60;
+
+/// Up to 1440p (`2560×1440`), `x264` runs `superfast` at 60 fps; larger frames use `ultrafast`.
+const MAX_SUPERFAST_PIXELS: u64 = 2560 * 1440;
+
+pub(crate) fn x264_preset(size: (u32, u32), out: (u32, u32)) -> &'static str {
+    let pixels = u64::from(size.0.max(out.0)) * u64::from(size.1.max(out.1));
+    if pixels <= MAX_SUPERFAST_PIXELS {
+        "superfast"
+    } else {
+        "ultrafast"
+    }
+}
 
 fn ffmpeg() -> Command {
     let mut command = Command::new("ffmpeg");
@@ -48,16 +60,23 @@ impl Writer {
 
     /// Encodes raw 32-bit frames (`bgr0`, `rgb0`, …) of `size` with x264, scaled to `out`.
     pub fn x264(movie: &Path, pixel: &str, size: (u32, u32), out: (u32, u32)) -> Result<Self> {
+        let vf = if size == out {
+            format!("format=yuv420p,fps={FPS}")
+        } else {
+            format!(
+                "scale={}:{}:flags=fast_bilinear,format=yuv420p,fps={FPS}",
+                out.0, out.1
+            )
+        };
+        let preset = x264_preset(size, out);
         let mut command = ffmpeg();
         command
+            .args(["-use_wallclock_as_timestamps", "1"])
             .args(["-f", "rawvideo", "-pix_fmt", pixel])
             .args(["-video_size", &format!("{}x{}", size.0, size.1)])
-            .args(["-framerate", &FPS.to_string(), "-i", "pipe:0"])
-            .args([
-                "-vf",
-                &format!("scale={}:{}:flags=area,format=yuv420p", out.0, out.1),
-            ])
-            .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "24"])
+            .args(["-i", "pipe:0"])
+            .args(["-vf", &vf])
+            .args(["-c:v", "libx264", "-preset", preset, "-crf", "24"])
             .args(["-movflags", "+faststart", "-y"])
             .arg(movie);
         Self::start(command)
@@ -66,6 +85,10 @@ impl Writer {
     fn start(command: Command) -> Result<Self> {
         let mut child = spawn(command)?;
         let stdin = child.stdin.take();
+        if let Some(ref stdin) = stdin {
+            use std::os::fd::AsRawFd as _;
+            unsafe { libc::fcntl(stdin.as_raw_fd(), libc::F_SETPIPE_SZ, 1 << 20) };
+        }
         Ok(Self { child, stdin })
     }
 

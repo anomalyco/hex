@@ -6,9 +6,10 @@
 
 use anyhow::{Context, Result, bail, ensure};
 use x11rb::connection::Connection;
+use x11rb::protocol::Event;
 use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::shm::ConnectionExt as _;
-use x11rb::protocol::xfixes::ConnectionExt as _;
+use x11rb::protocol::xfixes::{ConnectionExt as _, CursorNotifyMask};
 use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat};
 use x11rb::rust_connection::RustConnection;
 
@@ -67,13 +68,27 @@ impl Drop for Shm {
 // The segment is only touched by the thread that owns the grabber.
 unsafe impl Send for Shm {}
 
+/// Cached premultiplied-ARGB cursor image from XFixes, refreshed only when the cursor changes.
+struct CachedCursor {
+    serial: u32,
+    width: u16,
+    height: u16,
+    xhot: u16,
+    yhot: u16,
+    image: Vec<u32>,
+}
+
 /// Grabs one rectangle of the screen, frame after frame.
 pub struct Grabber {
     conn: RustConnection,
     root: u32,
     pub rect: Rect,
     shm: Option<Shm>,
+    fallback: Vec<u8>,
     cursor: bool,
+    cursor_notify: bool,
+    cursor_dirty: bool,
+    cached_cursor: Option<CachedCursor>,
 }
 
 impl Grabber {
@@ -115,12 +130,22 @@ impl Grabber {
             .ok()
             .and_then(|cookie| cookie.reply().ok())
             .is_some();
+        let cursor_notify = cursor
+            && conn
+                .xfixes_select_cursor_input(root, CursorNotifyMask::DISPLAY_CURSOR)
+                .ok()
+                .and_then(|cookie| cookie.check().ok())
+                .is_some();
         let mut grabber = Self {
             conn,
             root,
             rect,
             shm: None,
+            fallback: Vec::new(),
             cursor,
+            cursor_notify,
+            cursor_dirty: cursor,
+            cached_cursor: None,
         };
         grabber.shm = grabber.attach_shm().ok();
         Ok(grabber)
@@ -155,9 +180,9 @@ impl Grabber {
         Ok(shm)
     }
 
-    /// The next frame into `pixels` (BGRX rows, `rect.width * 4` bytes each), the pointer
-    /// drawn in.
-    pub fn grab(&mut self, pixels: &mut Vec<u8>) -> Result<()> {
+    /// The next frame as BGRX rows (`rect.width * 4` bytes each), the pointer drawn in.
+    /// Borrows the shared-memory segment directly when MIT-SHM is active.
+    pub fn grab(&mut self) -> Result<&[u8]> {
         let Rect {
             x,
             y,
@@ -165,9 +190,30 @@ impl Grabber {
             height,
         } = self.rect;
         let len = usize::from(width) * usize::from(height) * 4;
-        pixels.resize(len, 0);
+        if self.cursor && self.cursor_notify {
+            while let Ok(Some(event)) = self.conn.poll_for_event() {
+                if let Event::XfixesCursorNotify(notify) = event
+                    && self
+                        .cached_cursor
+                        .as_ref()
+                        .is_none_or(|c| c.serial != notify.cursor_serial)
+                {
+                    self.cursor_dirty = true;
+                }
+            }
+        }
+        // Pipeline the cursor request (full image when changed, else pointer position) alongside
+        // the image grab so both complete in one X11 round-trip.
+        let need_cursor_image = self.cursor && (self.cursor_dirty || self.cached_cursor.is_none());
+        let cursor_image_cookie = need_cursor_image
+            .then(|| self.conn.xfixes_get_cursor_image().ok())
+            .flatten();
+        let pointer_cookie = (self.cursor && !need_cursor_image)
+            .then(|| self.conn.query_pointer(self.root).ok())
+            .flatten();
+
         let shm_grabbed = match &self.shm {
-            Some(shm) => self
+            Some(shm) if shm.len >= len => self
                 .conn
                 .shm_get_image(
                     self.root,
@@ -182,41 +228,68 @@ impl Grabber {
                 )
                 .map_err(anyhow::Error::from)
                 .and_then(|cookie| Ok(cookie.reply()?))
-                .map(|_| {
-                    let src = unsafe { std::slice::from_raw_parts(shm.addr, shm.len.min(len)) };
-                    pixels[..src.len()].copy_from_slice(src);
-                })
                 .is_ok(),
-            None => false,
+            _ => false,
         };
-        if !shm_grabbed {
-            let image = self
-                .conn
-                .get_image(ImageFormat::Z_PIXMAP, self.root, x, y, width, height, !0)?
+
+        let pointer_pos = if let Some(cookie) = cursor_image_cookie {
+            if let Ok(reply) = cookie.reply() {
+                let pos = (reply.x, reply.y);
+                self.cached_cursor = Some(CachedCursor {
+                    serial: reply.cursor_serial,
+                    width: reply.width,
+                    height: reply.height,
+                    xhot: reply.xhot,
+                    yhot: reply.yhot,
+                    image: reply.cursor_image,
+                });
+                if self.cursor_notify {
+                    self.cursor_dirty = false;
+                }
+                Some(pos)
+            } else {
+                None
+            }
+        } else if let Some(cookie) = pointer_cookie {
+            cookie
                 .reply()
-                .context("the X server sent no image")?;
-            ensure!(image.data.len() >= len, "the X server sent a short image");
-            pixels.copy_from_slice(&image.data[..len]);
+                .ok()
+                .filter(|p| p.same_screen)
+                .map(|p| (p.root_x, p.root_y))
+        } else {
+            None
+        };
+
+        let pixels: &mut [u8] = match (&mut self.shm, shm_grabbed) {
+            (Some(shm), true) => unsafe { std::slice::from_raw_parts_mut(shm.addr, len) },
+            _ => {
+                let image = self
+                    .conn
+                    .get_image(ImageFormat::Z_PIXMAP, self.root, x, y, width, height, !0)?
+                    .reply()
+                    .context("the X server sent no image")?;
+                ensure!(image.data.len() >= len, "the X server sent a short image");
+                self.fallback.resize(len, 0);
+                self.fallback.copy_from_slice(&image.data[..len]);
+                &mut self.fallback[..len]
+            }
+        };
+        if let (Some((cx, cy)), Some(cursor)) = (pointer_pos, self.cached_cursor.as_ref()) {
+            Self::blend_cursor(pixels, self.rect, (cx, cy), cursor);
         }
-        if self.cursor {
-            self.draw_cursor(pixels);
-        }
-        Ok(())
+        Ok(pixels)
     }
 
-    /// Blends the pointer's image (premultiplied ARGB) into the frame where it is.
-    fn draw_cursor(&self, pixels: &mut [u8]) {
-        let Some(cursor) = self
-            .conn
-            .xfixes_get_cursor_image()
-            .ok()
-            .and_then(|cookie| cookie.reply().ok())
-        else {
-            return;
-        };
-        let (rw, rh) = (i32::from(self.rect.width), i32::from(self.rect.height));
-        let left = i32::from(cursor.x) - i32::from(cursor.xhot) - i32::from(self.rect.x);
-        let top = i32::from(cursor.y) - i32::from(cursor.yhot) - i32::from(self.rect.y);
+    /// Blends the pointer's image (premultiplied ARGB) into `pixels` at `(cursor_x, cursor_y)`.
+    fn blend_cursor(
+        pixels: &mut [u8],
+        rect: Rect,
+        (cursor_x, cursor_y): (i16, i16),
+        cursor: &CachedCursor,
+    ) {
+        let (rw, rh) = (i32::from(rect.width), i32::from(rect.height));
+        let left = i32::from(cursor_x) - i32::from(cursor.xhot) - i32::from(rect.x);
+        let top = i32::from(cursor_y) - i32::from(cursor.yhot) - i32::from(rect.y);
         let (cw, ch) = (i32::from(cursor.width), i32::from(cursor.height));
         for cy in 0..ch {
             let y = top + cy;
@@ -228,7 +301,7 @@ impl Grabber {
                 if !(0..rw).contains(&x) {
                     continue;
                 }
-                let argb = cursor.cursor_image[(cy * cw + cx) as usize];
+                let argb = cursor.image[(cy * cw + cx) as usize];
                 let a = argb >> 24;
                 if a == 0 {
                     continue;
@@ -300,5 +373,32 @@ mod tests {
             height: 10,
         };
         assert_eq!(off.clipped(screen), None);
+    }
+
+    #[test]
+    fn cursor_blends_premultiplied_argb_in_place() {
+        let mut pixels = vec![100_u8, 100, 100, 0, 100, 100, 100, 0];
+        let cursor = super::CachedCursor {
+            serial: 1,
+            width: 1,
+            height: 1,
+            xhot: 0,
+            yhot: 0,
+            image: vec![0x80_40_20_10],
+        };
+        super::Grabber::blend_cursor(
+            &mut pixels,
+            Rect {
+                x: 10,
+                y: 20,
+                width: 2,
+                height: 1,
+            },
+            (11, 20),
+            &cursor,
+        );
+        assert_eq!(&pixels[..4], &[100, 100, 100, 0]);
+        let bg = (100_u32 * 127 / 255) as u8;
+        assert_eq!(&pixels[4..7], &[0x10 + bg, 0x20 + bg, 0x40 + bg]);
     }
 }

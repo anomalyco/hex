@@ -128,7 +128,18 @@ fn system_tool(name: &str) -> PathBuf {
 }
 
 pub fn ssh(host: &str) -> Command {
+    #[cfg(test)]
+    if let Some(root) = &crate::env::get().remote_fixture {
+        let mut command = Command::new(root.join("ssh"));
+        command
+            .env_clear()
+            .env("PATH", "/opt/homebrew/bin:/usr/bin:/bin")
+            .env("HOME", root)
+            .env("XDG_STATE_HOME", root);
+        return command;
+    }
     let mut command = Command::new(system_tool("ssh"));
+    remote::reuse_connection(&mut command);
     command.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", host]);
     command
 }
@@ -269,6 +280,15 @@ impl Drop for RemoveOnDrop {
 /// One request to the running local service over HTTP, or, when the agents run on another Mac,
 /// `opencode api` there over SSH. Nothing local is ever started.
 fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> Result<Vec<u8>> {
+    opencode_api_within(method, path, data, SERVICE_TIMEOUT)
+}
+
+fn opencode_api_within(
+    method: &str,
+    path: &str,
+    data: Option<&serde_json::Value>,
+    timeout: std::time::Duration,
+) -> Result<Vec<u8>> {
     let Some(host) = agent_host() else {
         let body = data.map(serde_json::to_vec).transpose()?;
         let (address, password) = local_server();
@@ -278,9 +298,18 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
             &method.to_ascii_uppercase(),
             path,
             body.as_deref(),
-            SERVICE_TIMEOUT,
+            timeout,
         );
     };
+    let started = std::time::Instant::now();
+    if crate::env::get().config.agent_opencode.is_none() {
+        match remote::request(&host, method, path, data, timeout) {
+            Err(error) if error.is::<remote::MissingClient>() => {}
+            result => return result,
+        }
+    }
+    let timeout = timeout.saturating_sub(started.elapsed());
+    ensure!(!timeout.is_zero(), "Agent host request timed out");
     let command = {
         let mut remote = format!(
             "PATH=\"$HOME/bin:$HOME/.opencode/bin:/opt/homebrew/bin:$PATH\" {} api {} {}",
@@ -298,7 +327,7 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
         command.arg(remote);
         command
     };
-    let output = bounded_output(command)?;
+    let output = bounded_output(command, timeout)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let message = format!("OpenCode API failed: {}", stderr.trim());
@@ -322,45 +351,10 @@ const SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// How much of the agent host's `opencode api` stderr is kept; the rest is read and dropped.
 const CLI_STDERR_LIMIT: u64 = 64 * 1024;
 
-/// `command.output()` with stdout capped at [`SERVER_RESPONSE_LIMIT`] (the child is killed
-/// past it) and stderr at [`CLI_STDERR_LIMIT`].
-fn bounded_output(mut command: Command) -> Result<std::process::Output> {
-    use std::io::Read;
-    use std::process::Stdio;
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("Could not reach the agent host")?;
-    let mut stderr = child.stderr.take().context("No agent host stderr")?;
-    let errors = std::thread::spawn(move || {
-        let mut kept = Vec::new();
-        let _ = (&mut stderr).take(CLI_STDERR_LIMIT).read_to_end(&mut kept);
-        let _ = std::io::copy(&mut stderr, &mut std::io::sink());
-        kept
-    });
-    let mut stdout = Vec::new();
-    let read = child
-        .stdout
-        .take()
-        .context("No agent host output")?
-        .take(SERVER_RESPONSE_LIMIT + 1)
-        .read_to_end(&mut stdout);
-    let too_much = stdout.len() as u64 > SERVER_RESPONSE_LIMIT;
-    if too_much {
-        let _ = child.kill();
-    }
-    let status = child.wait().context("Could not wait for the agent host")?;
-    let stderr = errors.join().unwrap_or_default();
-    read.context("Could not read the agent host output")?;
-    ensure!(!too_much, "OpenCode response too large");
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
-}
+use remote::bounded_output;
+pub(crate) mod remote;
+#[cfg(all(test, unix))]
+mod remote_fixture;
 
 /// The status in `opencode api`'s `HTTP 409 Conflict` line.
 fn cli_status(stderr: &str) -> Option<u16> {
@@ -428,13 +422,18 @@ fn non_empty(value: Option<&str>) -> Option<String> {
 }
 
 /// The socket address in `http://127.0.0.1:4096…` when its host is an IP or `localhost` (no
-/// lookups).
+/// lookups). A service bound to every address (`0.0.0.0`, `::`) is reached through loopback:
+/// Windows refuses to connect to an unspecified address.
 fn server_address(url: &str) -> Option<std::net::SocketAddr> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     let parsed = crate::routing::parse_url(url.split_whitespace().next()?)?;
-    let ip = if parsed.host == "localhost" {
-        std::net::IpAddr::from([127, 0, 0, 1])
-    } else {
-        parsed.host.parse().ok()?
+    let ip = match parsed.host.as_str() {
+        "localhost" => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        host => match host.parse().ok()? {
+            IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+            ip => ip,
+        },
     };
     Some(std::net::SocketAddr::new(ip, parsed.port))
 }
@@ -467,7 +466,7 @@ fn local_server() -> (std::net::SocketAddr, Option<String>) {
             .filter(|dir| !dir.is_empty())
             .map(PathBuf::from)
     };
-    let home = dirs::home_dir();
+    let home = crate::user_dirs::home_dir();
     let files: Vec<ServiceFile> = [
         env_dir("XDG_STATE_HOME").map(|d| d.join("opencode/service.json")),
         home.as_ref()
@@ -649,7 +648,7 @@ pub fn api_within(
     timeout: std::time::Duration,
 ) -> Result<Vec<u8>> {
     if agent_host().is_some() {
-        return opencode_api(&method.to_ascii_lowercase(), path, data);
+        return opencode_api_within(&method.to_ascii_lowercase(), path, data, timeout);
     }
     let body = data.map(serde_json::to_vec).transpose()?;
     let (address, password) = local_server();
@@ -667,7 +666,7 @@ pub fn api_within(
 /// [`SERVER_CONNECT_TIMEOUT`] connect cap and `timeout` read deadline.
 pub fn api_get_within(path: &str, timeout: std::time::Duration) -> Result<Vec<u8>> {
     if agent_host().is_some() {
-        return opencode_api("get", path, None);
+        return opencode_api_within("get", path, None, timeout);
     }
     let (address, password) = local_server();
     http_get(address, password.as_deref(), path, timeout)
@@ -882,12 +881,19 @@ pub fn posted_id(body: &[u8]) -> Option<String> {
 fn post_prompt(session: &str, mut body: serde_json::Value) -> Result<Posted> {
     let delivery = crate::env::get().config.delivery.label();
     body["delivery"] = serde_json::json!(delivery);
+    let started = std::time::Instant::now();
     let was_idle = session_idle(session);
+    let idle = started.elapsed();
     let answer = opencode_api(
         "post",
         &format!("/api/session/{session}/prompt"),
         Some(&body),
     )?;
+    crate::env::log(format!(
+        "routing time: send idle_ms={} post_ms={}",
+        idle.as_millis(),
+        started.elapsed().saturating_sub(idle).as_millis()
+    ));
     Ok(Posted {
         message_id: posted_id(&answer),
         delivery: delivery.to_owned(),
@@ -906,15 +912,20 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
         "Invalid OpenCode session ID"
     );
-    if let Some(host) = agent_host() {
+    if let Some(host) = agent_host().filter(|_| crate::env::get().config.agent_opencode.is_some()) {
+        let started = std::time::Instant::now();
         sync_bundle_to(&host, &directory)?;
+        crate::env::log(format!(
+            "routing time: send sync_ms={}",
+            started.elapsed().as_millis()
+        ));
     }
     // The agent host has the bundle at the same path (synced above), and an
     // SSH command line can't carry inline images.
     // A capture with no screen (`no_screen`) sends its words alone: its sheet is blank.
     let files = if bundle.keyframes.is_empty() {
         Vec::new()
-    } else if agent_host().is_some() {
+    } else if agent_host().is_some() && crate::env::get().config.agent_opencode.is_some() {
         vec![serde_json::json!({
             "uri": file_uri(&directory.join(&bundle.contact_sheet)),
             "name": "contact-sheet.png",
@@ -928,13 +939,32 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
     } else {
         "Attached: the contact sheet (every keyframe in order). Full-size keyframes are in frames/ and frames-full/ in that folder if you need a closer look."
     };
+    let availability = if agent_host().is_some()
+        && crate::env::get().config.agent_opencode.is_none()
+    {
+        " Folder files are copied in the background and may not have arrived yet; the attached image is ready now."
+    } else {
+        ""
+    };
     let text = format!(
-        "{}\n\n{attached}\nRecorded at {}.\nThis capture is {} ms long.",
+        "{}\n\n{attached}{availability}\nRecorded at {}.\nThis capture is {} ms long.",
         summary.trim_end(),
         directory.display(),
         bundle.duration_ms,
     );
-    post_prompt(session, serde_json::json!({ "text": text, "files": files }))
+    let posted = post_prompt(session, serde_json::json!({ "text": text, "files": files }))?;
+    if let Some(host) = agent_host().filter(|_| crate::env::get().config.agent_opencode.is_none()) {
+        crate::env::spawn(move || {
+            let started = std::time::Instant::now();
+            let result = sync_bundle_to(&host, &directory);
+            crate::env::log(format!(
+                "routing time: background sync_ms={} ok={}",
+                started.elapsed().as_millis(),
+                result.is_ok()
+            ));
+        });
+    }
+    Ok(posted)
 }
 
 /// A `file://` URL for an absolute path, percent-encoding everything but unreserved
@@ -1221,6 +1251,18 @@ mod session_lookup {
             Some("127.0.0.1:4096")
         );
         assert_eq!(addr("http://[::1]:5000").as_deref(), Some("[::1]:5000"));
+        // A service bound to every address is reached through loopback (#1210).
+        assert_eq!(
+            addr("http://0.0.0.0:4096").as_deref(),
+            Some("127.0.0.1:4096")
+        );
+        assert_eq!(addr("http://[::]:4096").as_deref(), Some("[::1]:4096"));
+        let wildcard = ServiceFile {
+            hostname: Some("0.0.0.0".into()),
+            port: Some(4096),
+            ..Default::default()
+        };
+        assert_eq!(wildcard.address(), Some("127.0.0.1:4096".parse().unwrap()));
         assert_eq!(addr("https://10.0.0.2").as_deref(), Some("10.0.0.2:443"));
         assert_eq!(addr("http://studio.example.ts.net:4096"), None);
         assert_eq!(addr("nonsense"), None);
@@ -1423,7 +1465,7 @@ mod session_lookup {
     fn agent_host_output_is_bounded() {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "head -c 200000 /dev/zero >&2; printf ok; exit 3"]);
-        let output = bounded_output(command).unwrap();
+        let output = bounded_output(command, std::time::Duration::from_secs(2)).unwrap();
         assert_eq!(output.stdout, b"ok");
         assert_eq!(output.stderr.len() as u64, CLI_STDERR_LIMIT);
         assert_eq!(output.status.code(), Some(3));

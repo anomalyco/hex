@@ -76,7 +76,7 @@ fn state_dir() -> Option<PathBuf> {
     let root = std::env::var_os("XDG_STATE_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".local").join("state")))?;
+        .or_else(|| crate::app_paths::home_dir().map(|home| home.join(".local").join("state")))?;
     Some(root.join("opencode"))
 }
 

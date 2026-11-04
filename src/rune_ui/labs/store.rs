@@ -125,7 +125,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
         .shrink()
         .min_h(0.0)
         .child(chips(&rows, store.category, p))
-        .child(super::super::scroll_body("scroll", content))
+        .child(super::super::scroll_body(p.k, "scroll", content))
 }
 
 /// Whether `row` matches a lowercase search.

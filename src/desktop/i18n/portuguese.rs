@@ -23,6 +23,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex is up to date", "O Hex está atualizado"),
     ("Couldn't check for updates", "Não foi possível verificar atualizações"),
     ("{model} · Language: {language}", "{model} · Idioma: {language}"),
+    ("Notch indicator", "Indicador no notch"),
+    ("On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar", "Em uma tela com notch, o indicador de gravação sai do notch em vez de ficar abaixo da barra de menus"),
     ("Hide menu bar icon", "Ocultar ícone da barra de menus"),
     ("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings", "Oculta o ícone do Hex na barra de menus. Os atalhos continuam funcionando; abra o Hex de novo pelo Finder ou Spotlight para ver os Ajustes"),
     ("Movable meeting capsules", "Cápsulas de reunião móveis"),
