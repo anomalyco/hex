@@ -133,6 +133,14 @@ pub fn data_dir() -> Option<PathBuf> {
     dirs::data_dir()
 }
 
+/// The Desktop folder (Labs › Screenshots saves there by default):
+/// `dirs::desktop_dir`, else `Desktop` in the home folder.
+pub fn desktop_dir() -> PathBuf {
+    dirs::desktop_dir()
+        .or_else(|| home_dir().map(|home| home.join("Desktop")))
+        .unwrap_or_else(|| PathBuf::from("Desktop"))
+}
+
 /// The Documents folder: `dirs::document_dir`, or `Documents` in a Windows
 /// profile `USERPROFILE` points to that is not the signed-in user's own.
 pub fn document_dir() -> Option<PathBuf> {

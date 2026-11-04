@@ -558,7 +558,10 @@ pub fn run(
                 {
                     recording_raw = raw;
                     if audio_ready {
-                        capture.start_at(occurred_at);
+                        capture.start_hotkey_at(
+                            occurred_at,
+                            crate::dictation::hotkey_pre_roll(while_dictating),
+                        );
                         recording = true;
                         // A toggle press or a `hex` command is deliberate, so
                         // it streams at once.
@@ -756,7 +759,10 @@ pub fn run(
                         // still held: recording starts here, without the
                         // pre-roll a held-open microphone would have had.
                         start_pending = false;
-                        capture.start_at(chunk_captured_through);
+                        capture.start_hotkey_at(
+                            chunk_captured_through,
+                            crate::dictation::hotkey_pre_roll(while_dictating),
+                        );
                         recording = true;
                         // The released microphone is ready only now.
                         recording_feedback_started = toggle_mode;
@@ -875,7 +881,12 @@ fn process_dictation_job(
     let started = Instant::now();
     let printed = job.print.is_some();
     // The context read starts now so the UIA walk overlaps inference.
-    let pending_context = crate::windows::context::begin_capture();
+    let reads_page = !job.raw
+        && mode_runtime
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .reads_page();
+    let pending_context = crate::windows::context::begin_capture(reads_page);
     let inference_started = Instant::now();
     let transcription = job.transcript.wait().map(|transcribed| {
         tracing::info!(

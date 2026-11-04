@@ -1043,7 +1043,10 @@ impl Owner {
 
     fn start_capture_at(&mut self, kind: CaptureKind, at: CaptureInstant) {
         match kind {
-            CaptureKind::Hotkey => self.capture.start_at(at),
+            CaptureKind::Hotkey => self.capture.start_hotkey_at(
+                at,
+                crate::dictation::hotkey_pre_roll(crate::app_settings::recording_audio_behavior()),
+            ),
             CaptureKind::Programmatic => self.capture.start_programmatic_at(at),
         }
         // Only hotkey captures stream; programmatic ones need no speed-up.

@@ -15,6 +15,9 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Hex picks a fast model", "O Hex escolhe um modelo rápido"),
+    ("Summary models show once Hex connects to OpenCode.", "Os modelos de resumo aparecem quando o Hex se conecta ao OpenCode."),
+    ("Start OpenCode to choose a summary model. Hex keeps the saved one.", "Inicie o OpenCode para escolher um modelo de resumo. O Hex mantém o salvo."),
     ("Your answer", "Sua resposta"),
     ("History retention", "Retenção do histórico"),
     ("Earlier versions", "Versões anteriores"),
@@ -59,6 +62,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Transcription was cancelled.", "A transcrição foi cancelada."),
     ("Section key alone", "Tecla § sozinha"),
     ("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound", "Usa a tecla §, à esquerda do 1 em teclados ISO, como atalho sem modificador. Enquanto estiver atribuída, o Hex toma a tecla § de todos os apps"),
+    ("Meeting platform icons", "Ícones de plataforma das reuniões"),
+    ("Show a small icon for the app or website each meeting was recorded from, beside its name", "Mostra ao lado do nome de cada reunião um pequeno ícone do app ou site de onde ela foi gravada"),
     ("Floating meeting capsules on GNOME", "Cápsulas de reunião flutuantes no GNOME"),
     ("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running", "Mostra a oferta de gravação e o indicador de gravação flutuando sobre a sua chamada, pelo XWayland. Só funciona se o XWayland já estiver em execução"),
     ("Restore clipboard on GNOME", "Restaurar a área de transferência no GNOME"),
@@ -1067,6 +1072,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("In the background", "Em segundo plano"),
     ("Dictation indicator", "Indicador de ditado"),
     ("Record your screen, draw on it, and talk over it with a shortcut", "Grave a tela, desenhe nela e narre com um atalho"),
+    ("Screenshots", "Capturas de tela"),
+    ("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder", "Pressione ⌘⇧4 para capturar uma área ou Espaço para uma janela. A captura vai para a área de transferência e para uma pasta"),
+    ("Screenshot shortcut", "Atalho de captura de tela"),
+    ("Saves to", "Salva em"),
+    ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "O macOS usa este atalho primeiro. Desative os atalhos de captura dele em Atalhos de Teclado › Capturas de tela ou escolha outro"),
+    ("Open Keyboard Settings", "Abrir Ajustes de Teclado"),
+    ("Full screen · Click to capture", "Tela inteira · Clique para capturar"),
 ];
 
 #[cfg(test)]

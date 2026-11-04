@@ -15,7 +15,7 @@ use rune::{Color, El, LineCap, Shape, Tween, canvas, el};
 
 use super::super::controls::Paint;
 use super::flow::{Pres, undo_s};
-use super::surface::{CHIP_RADIUS, HINT_GAP, MEDIUM, UNDO_LABEL};
+use super::surface::{CHIP_RADIUS, HINT_GAP, UNDO_LABEL, medium};
 
 /// Arcs in a ring: enough that each one's fade reads as a sweep.
 const ARCS: usize = 48;
@@ -93,7 +93,7 @@ pub(crate) fn chip(p: Paint, base: El, size: [f32; 2], ring: Option<&Ring>) -> E
     if let Some(ring) = ring {
         chip = chip.child(border(size, ring, ink, track));
     }
-    chip.child(super::label(UNDO_LABEL, MEDIUM, ink))
+    chip.child(super::label(UNDO_LABEL, medium(), ink))
         .role("button")
         .label(UNDO_LABEL)
         .hit()

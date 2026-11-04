@@ -1,9 +1,9 @@
 // A home seed for dictation benches: the default English model (as the
 // listening seed) and `speech.wav`, one spoken sentence and then silence,
 // which the copy hears instead of a microphone (HEX_AUDIO_FIXTURE). The
-// speech comes from this machine's own text-to-speech voice at 48 kHz, a
-// microphone's usual rate, so no one is recorded. Returns null without a
-// model or a voice.
+// speech comes from this machine's own text-to-speech voice (Windows and
+// macOS at 48 kHz, a microphone's usual rate; Linux through espeak-ng), so
+// no one is recorded. Returns null without a model or a voice.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { seedModels } from "./listening"
@@ -26,6 +26,9 @@ function speak(path: string): boolean {
     Bun.spawnSync(["powershell", "-NoProfile", "-Command", script])
   } else if (process.platform === "darwin") {
     Bun.spawnSync(["say", "-o", path, "--file-format=WAVE", "--data-format=LEI16@48000", TEXT])
+  } else if (Bun.which("espeak-ng")) {
+    // 22.05 kHz: espeak-ng's own rate; Hex resamples any rate.
+    Bun.spawnSync(["espeak-ng", "-w", path, TEXT])
   }
   return existsSync(path)
 }

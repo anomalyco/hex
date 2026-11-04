@@ -31,7 +31,11 @@ struct FocusedWindow {
     title: Option<String>,
 }
 
-pub(crate) fn capture() -> ContextSnapshot {
+/// The focused window's application, and its page when `read_page` says
+/// processing uses it (`ModeRuntime::reads_page`). AT-SPI is asked only for
+/// the page, or for the process of a window the display server names no
+/// other way; its walk runs before the paste, for up to its deadline.
+pub(crate) fn capture(read_page: bool) -> ContextSnapshot {
     let window = if crate::linux::session::LinuxSession::detect().is_wayland() {
         wayland_focused_window()
     } else {
@@ -40,22 +44,29 @@ pub(crate) fn capture() -> ContextSnapshot {
     let Some(window) = window else {
         return ContextSnapshot::default();
     };
-    let accessible = crate::linux::atspi::focused_window(&WindowHint {
-        pid: window.pid,
-        title: window.title.clone(),
-    });
+    let desktop_name = window
+        .app_id
+        .as_deref()
+        .and_then(crate::application_catalog::desktop_application_name);
+    let accessible = (read_page || (desktop_name.is_none() && window.pid.is_none()))
+        .then(|| {
+            crate::linux::atspi::focused_window(&WindowHint {
+                pid: window.pid,
+                title: window.title.clone(),
+            })
+        })
+        .flatten();
     let pid = window
         .pid
         .or_else(|| accessible.as_ref().and_then(|accessible| accessible.pid));
-    let application = window
-        .app_id
-        .as_deref()
-        .and_then(crate::application_catalog::desktop_application_name)
+    let application = desktop_name
         .or_else(|| pid.and_then(process_name))
         .or_else(|| window.app_id.as_deref().map(str::to_lowercase));
     ContextSnapshot {
         application,
-        browser_url: accessible.and_then(|accessible| accessible.url),
+        browser_url: accessible
+            .filter(|_| read_page)
+            .and_then(|accessible| accessible.url),
         window_title: window.title,
         input_revision: None,
     }
@@ -236,6 +247,6 @@ mod tests {
     #[ignore]
     fn linux_context_reads_the_focused_window() {
         let started = std::time::Instant::now();
-        println!("{:?} in {:?}", super::capture(), started.elapsed());
+        println!("{:?} in {:?}", super::capture(true), started.elapsed());
     }
 }

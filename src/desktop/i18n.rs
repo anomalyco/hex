@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 mod french;
 mod portuguese;
+mod russian;
 mod traditional_chinese;
 
 /// A persisted interface-language code (`None` follows the system) and its
@@ -19,8 +20,8 @@ pub(crate) type LanguageChoice = (Option<&'static str>, &'static str);
 
 /// The selectable interface languages: persisted code and native name. The
 /// leading `None` entry follows the system display language. Português
-/// (Brasil), Français, and 繁體中文 have not had a native speaker's review
-/// yet.
+/// (Brasil), Français, 繁體中文, and Русский have not had a native
+/// speaker's review yet.
 pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (None, "System"),
     (Some("en"), "English"),
@@ -33,6 +34,7 @@ pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (Some("uk"), "Українська"),
     (Some("pt"), "Português (Brasil)"),
     (Some("fr"), "Français"),
+    (Some("ru"), "Русский"),
 ];
 
 /// Active language column into [`TRANSLATIONS`]; 255 means English.
@@ -74,9 +76,11 @@ const FRENCH_COLUMN: u8 = 7;
 /// Traditional Chinese, drawn from the Simplified column
 /// ([`traditional_chinese::table`]).
 const TRADITIONAL_CHINESE_COLUMN: u8 = 8;
+/// Russian, kept in its own table ([`russian::TRANSLATIONS`]).
+const RUSSIAN_COLUMN: u8 = 9;
 
 /// The column for a persisted code; `pt` (any Portuguese system language)
-/// is Brazilian Portuguese, and `fr` any French one.
+/// is Brazilian Portuguese, `fr` any French one, and `ru` any Russian one.
 fn column_for_code(code: &str) -> u8 {
     match code {
         "pl" => 0,
@@ -88,6 +92,7 @@ fn column_for_code(code: &str) -> u8 {
         "uk" => 5,
         "pt" => PORTUGUESE_COLUMN,
         "fr" => FRENCH_COLUMN,
+        "ru" => RUSSIAN_COLUMN,
         _ => ENGLISH,
     }
 }
@@ -281,6 +286,7 @@ pub(crate) fn tr(english: &str) -> &str {
     let table = match column {
         PORTUGUESE_COLUMN => portuguese::table(),
         FRENCH_COLUMN => french::table(),
+        RUSSIAN_COLUMN => russian::table(),
         _ => &tables()[column as usize],
     };
     table.get(english).copied().unwrap_or(english)
@@ -329,6 +335,9 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 6])] = &[
+    ("Hex picks a fast model", ["Hex wybiera szybki model", "由 Hex 选择快速模型", "Hex が高速なモデルを選ぶ", "Hex wählt ein schnelles Modell", "Hex elige un modelo rápido", "Hex вибирає швидку модель"]),
+    ("Summary models show once Hex connects to OpenCode.", ["Modele podsumowań pojawią się, gdy Hex połączy się z OpenCode.", "Hex 连接到 OpenCode 后会显示摘要模型。", "Hex が OpenCode に接続すると要約モデルが表示されます。", "Modelle für Zusammenfassungen erscheinen, sobald Hex mit OpenCode verbunden ist.", "Los modelos de resumen aparecen cuando Hex se conecta a OpenCode.", "Моделі для підсумків з'являться, щойно Hex під'єднається до OpenCode."]),
+    ("Start OpenCode to choose a summary model. Hex keeps the saved one.", ["Uruchom OpenCode, aby wybrać model podsumowań. Hex zachowuje zapisany.", "启动 OpenCode 以选择摘要模型。Hex 会保留已保存的模型。", "要約モデルを選ぶには OpenCode を起動してください。保存済みのモデルはそのまま残ります。", "Starte OpenCode, um ein Modell für Zusammenfassungen zu wählen. Hex behält das gespeicherte.", "Inicia OpenCode para elegir un modelo de resumen. Hex conserva el guardado.", "Запустіть OpenCode, щоб вибрати модель для підсумків. Hex зберігає збережену."]),
     ("Your answer", ["Twoja odpowiedź", "你的回答", "あなたの回答", "Deine Antwort", "Tu respuesta", "Ваша відповідь"]),
     ("History retention", ["Przechowywanie historii", "历史记录保留时间", "履歴の保存期間", "Aufbewahrung des Verlaufs", "Conservación del historial", "Зберігання історії"]),
     ("Earlier versions", ["Wcześniejsze wersje", "早期版本", "以前のバージョン", "Frühere Versionen", "Versiones anteriores", "Попередні версії"]),
@@ -373,6 +382,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Transcription was cancelled.", ["Transkrypcja została anulowana.", "转写已取消。", "文字起こしはキャンセルされました。", "Die Transkription wurde abgebrochen.", "Se canceló la transcripción.", "Розпізнавання скасовано."]),
     ("Section key alone", ["Klawisz § bez modyfikatora", "单独使用 § 键", "§ キーを単独で使う", "§-Taste allein", "Tecla § sola", "Клавіша § окремо"]),
     ("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound", ["Pozwala użyć klawisza § (na lewo od 1 na klawiaturach ISO) jako skrótu bez modyfikatora. Gdy jest przypisany, Hex przejmuje § od wszystkich aplikacji", "将 § 键（ISO 键盘上 1 左侧的键）单独用作快捷键。设为快捷键期间，所有应用都收不到 § 键，由 Hex 使用", "§ キー（ISO キーボードで 1 の左にあるキー）を修飾キーなしのショートカットとして使います。割り当てている間、Hex はすべてのアプリから § を受け取ります", "Die §-Taste links neben der 1 auf ISO-Tastaturen ohne Zusatztaste als Kürzel verwenden. Solange sie zugewiesen ist, nimmt Hex allen Apps die §-Taste weg", "Usa la tecla §, a la izquierda del 1 en teclados ISO, como atajo sin modificador. Mientras esté asignada, Hex toma la tecla § de todas las apps", "Використовуйте клавішу § (ліворуч від 1 на клавіатурах ISO) як комбінацію без модифікатора. Поки її призначено, Hex забирає § у всіх програм"]),
+    ("Meeting platform icons", ["Ikony platform spotkań", "会议平台图标", "会議プラットフォームのアイコン", "Plattform-Symbole für Meetings", "Iconos de plataforma de reuniones", "Значки платформ зустрічей"]),
+    ("Show a small icon for the app or website each meeting was recorded from, beside its name", ["Pokazuje obok nazwy spotkania małą ikonę aplikacji lub strony, z której je nagrano", "在每个会议名称旁显示一个小图标，表示录制它的应用或网站", "各会議の名前の横に、録音元のアプリやウェブサイトの小さなアイコンを表示します", "Zeigt neben dem Namen jedes Meetings ein kleines Symbol der App oder Website, aus der es aufgenommen wurde", "Muestra junto al nombre de cada reunión un pequeño icono de la app o el sitio web desde el que se grabó", "Показує біля назви кожної зустрічі невеликий значок програми чи вебсайту, з яких її записано"]),
     ("Floating meeting capsules on GNOME", ["Pływające kapsułki spotkań w GNOME", "在 GNOME 上显示悬浮会议胶囊", "GNOME でフローティング会議カプセル", "Schwebende Meeting-Kapseln unter GNOME", "Cápsulas de reunión flotantes en GNOME", "Плаваючі панелі зустрічей у GNOME"]),
     ("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running", ["Pokazuje propozycję nagrania i wskaźnik nagrywania nad rozmową, przez XWayland. Działa tylko, gdy XWayland już działa", "通过 XWayland 在通话上方悬浮显示录制提示和录制指示器。仅在 XWayland 已运行时有效", "録音の提案と録音インジケーターを XWayland 経由で通話の上に表示します。XWayland がすでに動作しているときだけ使えます", "Zeigt das Aufnahmeangebot und die Aufnahmeanzeige schwebend über dem Anruf, über XWayland. Funktioniert nur, wenn XWayland bereits läuft", "Muestra la oferta de grabación y el indicador de grabación flotando sobre tu llamada, a través de XWayland. Solo funciona si XWayland ya se está ejecutando", "Показує пропозицію запису та індикатор запису поверх дзвінка через XWayland. Працює, лише коли XWayland уже запущено"]),
     ("Restore clipboard on GNOME", ["Przywracanie schowka w GNOME", "在 GNOME 上恢复剪贴板", "GNOME でクリップボードを復元", "Zwischenablage unter GNOME wiederherstellen", "Restaurar el portapapeles en GNOME", "Відновлення буфера обміну в GNOME"]),
@@ -1399,6 +1410,13 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("In the background", ["W tle", "在后台", "バックグラウンド", "Im Hintergrund", "En segundo plano", "У фоні"]),
     ("Dictation indicator", ["Wskaźnik dyktowania", "听写指示器", "音声入力インジケーター", "Diktatanzeige", "Indicador de dictado", "Індикатор диктування"]),
     ("Record your screen, draw on it, and talk over it with a shortcut", ["Nagrywaj ekran, rysuj na nim i komentuj go głosem za pomocą skrótu", "用快捷键录制屏幕、在上面绘制并配上讲解", "ショートカットで画面を録画し、描き込みながら話せます", "Bildschirm per Kürzel aufnehmen, darauf zeichnen und dazu sprechen", "Graba tu pantalla, dibuja sobre ella y coméntala con un atajo", "Записуйте екран, малюйте на ньому й коментуйте голосом за допомогою комбінації"]),
+    ("Screenshots", ["Zrzuty ekranu", "截图", "スクリーンショット", "Bildschirmfotos", "Capturas de pantalla", "Знімки екрана"]),
+    ("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder", ["Naciśnij ⌘⇧4, aby uchwycić obszar, lub naciśnij spację, aby wybrać okno. Zrzut trafia do schowka i do folderu", "按 ⌘⇧4 截取一块区域，或按空格键截取窗口。截图会放到剪贴板并存入文件夹", "⌘⇧4 で範囲を撮影し、スペースキーでウインドウに切り替えます。撮影した画像はクリップボードとフォルダに入ります", "Drücke ⌘⇧4, um einen Bereich aufzunehmen, oder die Leertaste für ein Fenster. Die Aufnahme landet in der Zwischenablage und in einem Ordner", "Pulsa ⌘⇧4 para capturar un área o la barra espaciadora para una ventana. La captura va al portapapeles y a una carpeta", "Натисніть ⌘⇧4, щоб зняти область, або пробіл, щоб зняти вікно. Знімок потрапляє в буфер обміну й у теку"]),
+    ("Screenshot shortcut", ["Skrót zrzutu ekranu", "截图快捷键", "スクリーンショットのショートカット", "Kürzel für Bildschirmfotos", "Atajo de captura de pantalla", "Комбінація для знімка екрана"]),
+    ("Saves to", ["Zapisuje w", "保存到", "保存先", "Speichert in", "Guarda en", "Зберігає в"]),
+    ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", ["macOS przechwytuje ten skrót pierwszy. Wyłącz jego skróty zrzutów ekranu w Skróty klawiszowe › Zrzuty ekranu albo wybierz inny", "macOS 会先占用这个快捷键。请在“键盘快捷键 › 截屏”中关闭它的截屏快捷键，或换一个", "このショートカットは macOS が先に使います。「キーボードショートカット › スクリーンショット」で macOS のショートカットをオフにするか、別のものを選んでください", "macOS belegt dieses Kürzel zuerst. Schalte seine Bildschirmfoto-Kürzel unter Tastaturkurzbefehle › Bildschirmfotos aus oder wähle ein anderes", "macOS usa este atajo primero. Desactiva sus atajos de captura en Funciones rápidas de teclado › Capturas de pantalla o elige otro", "macOS перехоплює цю комбінацію першою. Вимкніть її комбінації для знімків у Сполучення клавіш › Знімки екрана або виберіть іншу"]),
+    ("Open Keyboard Settings", ["Otwórz ustawienia klawiatury", "打开键盘设置", "キーボード設定を開く", "Tastatureinstellungen öffnen", "Abrir ajustes de teclado", "Відкрити налаштування клавіатури"]),
+    ("Full screen · Click to capture", ["Cały ekran · Kliknij, aby uchwycić", "全屏 · 点按以截图", "全画面 · クリックで撮影", "Ganzer Bildschirm · Klicken zum Aufnehmen", "Pantalla completa · Haz clic para capturar", "Увесь екран · Клацніть, щоб зняти"]),
 ];
 
 #[cfg(test)]
@@ -1423,6 +1441,13 @@ mod tests {
         assert_eq!(column_for_language_tag("fr_CA"), super::FRENCH_COLUMN);
         assert_eq!(column_for_code("fr"), super::FRENCH_COLUMN);
         assert!(LANGUAGE_CHOICES.contains(&(Some("fr"), "Français")));
+        assert_eq!(column_for_language_tag("ru-RU"), super::RUSSIAN_COLUMN);
+        assert_eq!(
+            column_for_language_tag("ru_RU.UTF-8"),
+            super::RUSSIAN_COLUMN
+        );
+        assert_eq!(column_for_code("ru"), super::RUSSIAN_COLUMN);
+        assert!(LANGUAGE_CHOICES.contains(&(Some("ru"), "Русский")));
     }
 
     #[test]
@@ -1479,6 +1504,15 @@ mod tests {
         super::set_current(super::FRENCH_COLUMN);
         assert_eq!(super::tr("Don't switch"), "Ne pas changer");
         assert_eq!(super::tr_fill("Remove {}?", "x"), "Supprimer x ?");
+        super::set_current(super::ENGLISH);
+        assert_eq!(super::tr("Don't switch"), "Don't switch");
+    }
+
+    #[test]
+    fn russian_translates_with_its_column() {
+        super::set_current(super::RUSSIAN_COLUMN);
+        assert_eq!(super::tr("Don't switch"), "Не переключать");
+        assert_eq!(super::tr_fill("Remove {}?", "x"), "Удалить x?");
         super::set_current(super::ENGLISH);
         assert_eq!(super::tr("Don't switch"), "Don't switch");
     }
@@ -1541,6 +1575,7 @@ mod tests {
         include_str!("../rune_ui/labs.rs"),
         include_str!("../rune_ui/labs/category.rs"),
         include_str!("../rune_ui/labs/drawer.rs"),
+        include_str!("../rune_ui/labs/screenshots.rs"),
         include_str!("../rune_ui/labs/store.rs"),
         include_str!("../rune_ui/linux_host.rs"),
         include_str!("../rune_ui/list_detail.rs"),
@@ -1564,6 +1599,8 @@ mod tests {
         include_str!("../rune_ui/onboarding_kit/stories.rs"),
         include_str!("../rune_ui/onboarding_kit/versus.rs"),
         include_str!("../rune_ui/output.rs"),
+        include_str!("../rune_ui/screenshot_thumbnail.rs"),
+        include_str!("../screenshots.rs"),
         include_str!("../rune_ui/picker.rs"),
         include_str!("../rune_ui/picker/compare.rs"),
         include_str!("../rune_ui/picker/facts.rs"),

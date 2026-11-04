@@ -61,11 +61,19 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Notch indicator no    labs.notch_indicator         (macOS) with the indicator at Top, the notch widens sideways in the Dynamic Island's compact style: an orange mic and level bars, the macOS spinner, a green checkmark; flat screens keep it below the menu bar
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (every OS with Meetings)
-│                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
+│                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows a
+│                                        searchable picker of OpenCode's models, "Hex picks a fast model" first (clears it), Retry / Check again
+│                                        while OpenCode is missing, the saved ID kept and shown (#1107, #1301)
+│                                        // check: the_meeting_summary_model_is_picked_from_opencode_s_models (tests/panes.rs);
+│                                        // scenes and light/dark goldens meetings-summary-model, meetings-summary-model-not-running;
+│                                        // a meetings-folder error opening Advanced with the fold closed still shows the picker
 ├── Vocabulary in meeting notes no labs.meeting_notes_vocabulary (every OS with Meetings)
 │                                        final meeting titles and summaries (and Regenerate summary) read the vocabulary ahead of the transcript (#1154)
 ├── Meeting finished event no labs.meeting_finished_event (every OS with Meetings)
 │                                        the local API's GET /meetings/events sends each finished meeting's id once its final transcript is written (#964)
+├── Meeting platform icons no labs.meeting_platform_icons (every OS with Meetings)
+│                                        each recording in the Meetings list shows its call service's icon (Zoom, Google Meet, Teams, Slack, Webex)
+│                                        before its title, a neutral call icon otherwise (#1290)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
@@ -74,6 +82,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the Meetings pane (#1271), whose note names the lab (#1274)
 │                                        // checks: floats_only_by_opt_in_*, looks_for_nothing_while_the_lab_is_off (linux/meeting_capsules.rs),
 │                                        // gnome_meeting_capsules_is_its_own_bit_*; Rune's xwayland pointer tests; not run on a GNOME session
+├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
+│                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page, a store (labs/store.rs, labs/drawer.rs)
@@ -901,6 +911,68 @@ dictation through the ears on a Mac with the lab on (`hex dev hud` drives
 them in a debug build), and the failure glyph, which no render covers yet; the
 row renders only in macOS builds, so no golden changes.
 
+Screenshots (`screenshots`, macOS only, category App): for people who
+miss CleanShot's ⌘⇧4. While on, the shortcut (`screenshots.hotkey`,
+default ⌘⇧4; the drawer's recorder changes it and refuses one another Hex
+shortcut uses) opens a second copy of Annotate's capture picker
+(`PickerOverlay::install_as` in
+[capture_capsule/picker.rs](../../src/rune_ui/capture_capsule/picker.rs)):
+
+```ts
+⌘⇧4            -> the screen dims under a crosshair; a drag draws the area with its W × H
+├── Space      -> window mode: the window under the pointer highlights; Space again -> area
+├── Click      -> the whole display ("Full screen · Click to capture")
+├── Escape     -> closes it, nothing shot; Escape reaches no other app or Hex shortcut
+└── Release    -> shot at the display's own pixels (ScreenCaptureKit), Hex's overlays,
+                  the picker, and the pointer left out
+                  ├── PNG (pHYs at the display's scale) -> "Hex Screenshot 2026-11-04 at 14.03.22.png"
+                  │   in screenshots.folder (the Desktop when unset); a second shot that second gets " (2)"
+                  ├── clipboard -> the PNG and the file's URL, one pasteboard item
+                  └── thumbnail bottom right for 5 s (held while the pointer is on it):
+                      click -> opens it in Preview, drag -> the file, ✕ -> closes
+                      a failure -> the error tone; there is no success sound (Hex has no shutter cue)
+```
+
+The shortcut is taken in Hex's session tap (`screenshots::key`, called
+from [suppression.rs](../../src/suppression.rs) before the listener's
+own handling), never by the listener, and its press and release stay with
+it. With the lab off the tap returns at once and nothing is made: no
+picker window, no thumbnail, no work. Screen Recording is Annotate's: a
+press without it shows Annotate's permission helper instead of the
+picker.
+
+macOS matches its own screenshot shortcuts (Keyboard Shortcuts ›
+Screenshots, ⌘⇧4 among them) in the window server before any app's event
+tap, so while that system shortcut is on, Hex never sees the press. Hex
+reads `com.apple.symbolichotkeys` (`screenshots::system_shortcut`) and,
+when the system takes Hex's chord, the drawer says so with Open Keyboard
+Settings, which opens that pane; turning macOS's shortcut off, or
+choosing another chord, hands it to Hex.
+
+`hex screenshot` shoots the whole display under the pointer and prints the
+file's path; `hex screenshot --pick` opens the picker instead
+([cli.md](../cli.md)). With the lab off it answers `disabled`; Linux and
+Windows answer `unsupported`.
+
+Checks: `the_shortcut_opens_the_picker_and_its_release_stays_with_it`,
+`a_held_shortcut_opens_one_picker`,
+`escape_and_space_belong_to_the_open_picker_only`,
+`other_keys_and_other_chords_pass`, `recording_a_shortcut_takes_nothing`
+and `a_large_shot_shrinks_for_its_thumbnail` in
+[screenshots.rs](../../src/screenshots.rs); the file name, the second
+file in one second, and the PNG's density in
+[screenshots/save.rs](../../src/screenshots/save.rs); the system shortcut
+read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
+`thumbnail_goldens` (rest and hover, light and dark) and the thumbnail's
+timer in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
+`screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
+the drawer renders as `--scene mac-labs-screenshots`. Not yet observed: a
+real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
+clipboard paste, the thumbnail's drag and Preview, and whether a session
+tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
+symbolic hotkeys are dispatched, not tested). The row renders only in
+macOS builds, so the settings goldens don't change.
+
 Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
 like Meetings; its row shows wherever Meetings does, in macOS builds): for
 panel capsules that sit over another app's window controls or toolbar. The
@@ -1012,6 +1084,31 @@ ending the stream); `meeting_finished_event_is_its_own_bit_and_off_by_default`
 in [labs.rs](../../src/labs.rs). Not yet observed: a real recorded call
 sending the event, on any OS; the Labs page goldens that show Meetings rows
 need regenerating with the new row.
+
+Meeting platform icons (`meeting-platform-icons`, issue 1290; every OS with
+Meetings; its row shows wherever Meetings does): for telling at a glance
+where each recording took place. While on, each row of the Meetings list
+puts a 14 pt icon in the faint icon colour before its title: the call
+service's monochrome glyph (the ones the calendar list uses) when the
+meeting's recorded app names Zoom, Google Meet, Microsoft Teams, Slack, or
+Webex (`CallProvider::from_meeting_app` in [calendar.rs](../../src/calendar.rs):
+exactly the label detection or a calendar reminder records, such as `Zoom` or
+`Slack Huddle`, or a browser call's host matched by domain, so `us02web.zoom.us`
+is Zoom and `zoominfo.com` is not), and a neutral call
+icon (`icons::CALL`) for any other app (FaceTime, Discord, WhatsApp, …) or a
+meeting started by hand. The meta line, the detail card, and what screen
+readers hear are unchanged. The gate is the list itself (`platform_icon` in
+[rune_ui/meetings.rs](../../src/rune_ui/meetings.rs) reads
+`labs.meeting_platform_icons`); the feature does no other work. Off, the
+list is exactly as before. Not built: glyphs for FaceTime, Discord,
+WhatsApp, or Gather, which get the neutral icon. Scene:
+`meetings-platform-icons` (golden, light). Checks:
+`platform_icons_show_only_with_their_lab_and_fall_back_to_a_neutral_one` in
+[rune_ui/meetings.rs](../../src/rune_ui/meetings.rs) (Linux and Windows);
+`a_recorded_meeting_app_names_its_service_exactly` in
+[calendar.rs](../../src/calendar.rs);
+`every_feature_is_off_by_default_and_round_trips` in
+[labs.rs](../../src/labs.rs). Not yet observed: the icons in a real window.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

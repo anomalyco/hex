@@ -104,10 +104,12 @@ pub enum Feature {
     NotchIndicator,
     MeetingFinishedEvent,
     GnomeMeetingCapsules,
+    MeetingPlatformIcons,
+    Screenshots,
 }
 
 impl Feature {
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 47] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -153,6 +155,8 @@ impl Feature {
         Self::NotchIndicator,
         Self::MeetingFinishedEvent,
         Self::GnomeMeetingCapsules,
+        Self::MeetingPlatformIcons,
+        Self::Screenshots,
     ];
 
     /// The features this OS and build have.
@@ -220,6 +224,8 @@ impl Feature {
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::GnomeMeetingCapsules
+            | Self::MeetingPlatformIcons
+            | Self::Screenshots
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -270,7 +276,10 @@ impl Feature {
             | Self::GnomeClipboardRestore
             | Self::MeetingNotesVocabulary
             | Self::NotchIndicator => 20261103,
-            Self::MeetingFinishedEvent | Self::GnomeMeetingCapsules => 20261104,
+            Self::MeetingFinishedEvent
+            | Self::GnomeMeetingCapsules
+            | Self::MeetingPlatformIcons
+            | Self::Screenshots => 20261104,
         }
     }
 
@@ -321,7 +330,8 @@ impl Feature {
             | Self::SidedChords
             | Self::RecentDictations
             | Self::HideMenuBarIcon
-            | Self::NotchIndicator => cfg!(target_os = "macos"),
+            | Self::NotchIndicator
+            | Self::Screenshots => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
@@ -343,6 +353,7 @@ impl Feature {
             | Self::MeetingSummaryModel
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
+            | Self::MeetingPlatformIcons
             | Self::FillerWords => true,
         }
     }
@@ -395,6 +406,8 @@ impl Feature {
             Self::NotchIndicator => "notch-indicator",
             Self::MeetingFinishedEvent => "meeting-finished-event",
             Self::GnomeMeetingCapsules => "gnome-meeting-capsules",
+            Self::MeetingPlatformIcons => "meeting-platform-icons",
+            Self::Screenshots => "screenshots",
         }
     }
 
@@ -446,6 +459,8 @@ impl Feature {
             Self::NotchIndicator => "labs.notch_indicator",
             Self::MeetingFinishedEvent => "labs.meeting_finished_event",
             Self::GnomeMeetingCapsules => "labs.gnome_meeting_capsules",
+            Self::MeetingPlatformIcons => "labs.meeting_platform_icons",
+            Self::Screenshots => "labs.screenshots",
         }
     }
 
@@ -569,6 +584,12 @@ impl Feature {
             Self::GnomeMeetingCapsules => {
                 "Show the meeting capsules (recording offer, recording indicator) floating over your call on GNOME Wayland, through XWayland while XWayland is running"
             }
+            Self::MeetingPlatformIcons => {
+                "Show a small icon for the app or website each meeting was recorded from, beside its name in Meetings"
+            }
+            Self::Screenshots => {
+                "Take a screenshot of an area or a window with a shortcut (Command-Shift-4 by default): copied, saved, and shown in the corner"
+            }
         }
     }
 
@@ -624,6 +645,8 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
+            Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons,
+            Self::Screenshots => settings.labs.screenshots,
         }
     }
 
@@ -677,6 +700,8 @@ impl Feature {
             &mut labs.notch_indicator,
             &mut labs.meeting_finished_event,
             &mut labs.gnome_meeting_capsules,
+            &mut labs.meeting_platform_icons,
+            &mut labs.screenshots,
         ]
     }
 
@@ -730,6 +755,8 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
+            Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons = on,
+            Self::Screenshots => settings.labs.screenshots = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -774,6 +801,7 @@ const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
 const NOTCH_INDICATOR: u64 = 1 << 27;
 const MEETING_FINISHED_EVENT: u64 = 1 << 28;
 const GNOME_MEETING_CAPSULES: u64 = 1 << 29;
+const SCREENSHOTS: u64 = 1 << 30;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -980,6 +1008,13 @@ pub fn meeting_finished_event() -> bool {
     on(MEETING_FINISHED_EVENT) && Feature::MeetingFinishedEvent.on_this_os()
 }
 
+/// The screenshot shortcut takes an area or a window (macOS; read by the
+/// session tap on each key press, so nothing runs while it is off).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn screenshots() -> bool {
+    on(SCREENSHOTS) && Feature::Screenshots.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -1110,6 +1145,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             settings.gnome_meeting_capsules,
             GNOME_MEETING_CAPSULES,
         ),
+        (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -1531,6 +1567,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & HIDE_MENU_BAR_ICON, 0);
         assert_eq!(state & KEEP_RECORDINGS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn screenshots_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & SCREENSHOTS, 0);
+        labs.screenshots = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & SCREENSHOTS, 0);
+        assert_eq!(state & MEETING_FINISHED_EVENT, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

@@ -32,8 +32,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rune::{
-    Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlaySpec, Phase, ScreenEdge, Spring, Tx,
-    col, row, text,
+    Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlayInput, OverlaySpec, Phase, ScreenEdge,
+    Spring, Tx, col, row, text,
 };
 use rune_kit::{
     Badge, BadgeVariant, Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant,
@@ -441,6 +441,9 @@ impl MeetingCapsules {
                     copy_new: None,
                 },
             );
+            // Only the drawn capsule (its `.hit()` body) takes clicks; the
+            // window's transparent rest passes them to the app beneath.
+            handle.set_input(OverlayInput::Regions);
             let (hide, resize, shift) = (handle.clone(), handle.clone(), handle.clone());
             let copied = handle.clone();
             let copy_new: CopyNew = Arc::new(move |id: String| {
@@ -1146,7 +1149,10 @@ fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automat
             RECORDING_CLOSE
         })
         .on_hover_change(|c: &mut Capsule, inside, _| c.hovered = inside)
-        .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx));
+        .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
+        // Only the drawn pill takes the pointer; the rest of the window,
+        // as wide as the open pill, lets clicks through.
+        .hit();
     let pill = if open {
         pill.w_full()
     } else {
@@ -1172,9 +1178,11 @@ fn pill(
     actions: Vec<El>,
     movable: bool,
 ) -> El {
+    // Only the body takes the pointer, not the window's margin around it.
     let body = pill_body(p, status_dot(dot), title, subtitle, panel_radius(p))
         .w_full()
-        .child(row().key("actions").gap(8.0).children(actions));
+        .child(row().key("actions").gap(8.0).children(actions))
+        .hit();
     let body = if movable {
         body.cursor(Cursor::Grab)
             .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
