@@ -444,6 +444,11 @@ const KEYS: &[Key] = &[
         "Labs: on Wayland desktops without layer-shell, such as GNOME, the meeting capsules float over the call through XWayland while it is already running (Linux)",
     ),
     key(
+        "labs.meeting_platform_icons",
+        Kind::Bool,
+        "Labs: each recording in the Meetings list shows a small icon for its call app or website, or a neutral one when Hex doesn't know it",
+    ),
+    key(
         "labs.output_fixes",
         Kind::Bool,
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
@@ -671,6 +676,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.meeting_summary_model", "meetings"),
     ("labs.meeting_notes_vocabulary", "meetings"),
     ("labs.meeting_finished_event", "meetings"),
+    ("labs.meeting_platform_icons", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),

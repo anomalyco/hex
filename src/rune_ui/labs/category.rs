@@ -83,6 +83,7 @@ impl Category {
             | Feature::MeetingSummaryModel
             | Feature::MeetingNotesVocabulary
             | Feature::MeetingFinishedEvent
+            | Feature::MeetingPlatformIcons
             | Feature::GnomeMeetingCapsules => Self::Meetings,
             Feature::LiveText
             | Feature::NotchIndicator
@@ -145,7 +146,8 @@ impl Place {
             | Feature::LiveChapters
             | Feature::MeetingSummaryModel
             | Feature::MeetingNotesVocabulary
-            | Feature::MeetingFinishedEvent => Self::Pane(Pane::Meetings),
+            | Feature::MeetingFinishedEvent
+            | Feature::MeetingPlatformIcons => Self::Pane(Pane::Meetings),
             Feature::StopWhenCallEnds
             | Feature::MovableMeetingCapsules
             | Feature::GnomeMeetingCapsules => Self::Elsewhere(tr("Meeting capsules")),

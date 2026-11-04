@@ -600,7 +600,8 @@ static WEBEX_ICON: Icon = Icon {
     body: include_str!("../../assets/icons/providers/webex.svg"),
 };
 
-fn provider_icon(provider: CallProvider) -> &'static Icon {
+/// A call service's icon, as the calendar list and the Meetings list show it.
+pub(super) fn provider_icon(provider: CallProvider) -> &'static Icon {
     match provider {
         CallProvider::Zoom => &ZOOM_ICON,
         CallProvider::GoogleMeet => &MEET_ICON,
