@@ -1726,10 +1726,23 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   the lowest-power adapter that drives a display (an unused integrated GPU
 │   beside the monitors' card would present every surface across adapters);
 │   a GPU whose device fails hands the window to the next adapter (#662)
-│   └── A launch that crashed before its first frame (gpu-draw.pending left in
-│       the data folder, same version; cleared by a window or HUD frame or a
-│       clean quit) -> high-performance GPU (WGPU_POWER_PREF=high), warned in
-│       process.log, until Hex updates or the file is deleted
+│   ├── Tray at rest -> no GPU device until something shows: the capture
+│   │   capsule, picker, and ink keep their windows from launch but make their
+│   │   GPU surfaces at each show and drop them at each hide (Rune
+│   │   release_gpu_when_hidden); the HUD keeps its surface for 5 minutes
+│   │   after its last hide (release_gpu_after), then gives the device back
+│   │   ├── Dictation shortcut's modifiers down (Ctrl of Ctrl+Space) -> Rune
+│   │   │   makes the device and the HUD's pipeline on a thread (warm_gpu_with,
+│   │   │   unclaimed for 30 s they go), so the HUD shows without them
+│   │   └── A show with no device and no warm-up waits for one (about 200 ms
+│   │       plus the HUD pipeline's 75 to 115 ms on an RTX 5070 Ti; Rune's
+│   │       overlay_gpu_lifecycle measures the device part)
+│   └── A launch that crashed drawing (gpu-draw.pending, written when Rune
+│       starts the launch's first GPU device, left in the data folder, same
+│       version; cleared by the first frame on any surface or a clean quit; a
+│       tray launch that never draws writes none) -> high-performance GPU
+│       (WGPU_POWER_PREF=high), warned in process.log, until Hex updates or
+│       the file is deleted
 ├── Present cadence -> after any change the window presents every refresh for
 │   1 s, then rests: windowed G-SYNC/FreeSync sees one rate change per
 │   interaction, not a swing per hover (#689; Rune e2ea18e4; not run on Windows)
