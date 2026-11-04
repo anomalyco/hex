@@ -176,6 +176,31 @@ pub(super) fn title_bar(element: El) -> El {
     }
 }
 
+/// The title bar of the content panel: the title, a view switch that stays
+/// beside it, and the pane's actions on the right. The title is the pane's
+/// level 1 heading.
+pub(super) fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Vec<El>) -> El {
+    title_bar(row())
+        .key("pane-header")
+        .h(52.0)
+        .px(METRICS.gutter)
+        .gap(8.0)
+        .center_y()
+        .child(
+            text(title)
+                .key("pane-title")
+                .role("heading")
+                .level(1)
+                .font(p.k.ty.body_medium)
+                .color(p.text())
+                .shrink()
+                .truncate(),
+        )
+        .children(switch.map(|switch| switch.ml(8.0)))
+        .child(el().key("header-spacer").grow(1.0))
+        .children(actions)
+}
+
 pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
     let mut nav = lists::source_list(col().key("nav"));
     for pane in labs::main_panes(ui) {

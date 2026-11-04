@@ -3212,7 +3212,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 2.0.0",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4512,20 +4512,11 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-crate"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e8366a6159044a37876a2b9817124296703c586a5c92e2c53751fa06d8d43e8"
-dependencies = [
- "toml_edit 0.20.7",
-]
-
-[[package]]
-name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
- "toml_edit 0.25.15+spec-1.1.0",
+ "toml_edit",
 ]
 
 [[package]]
@@ -4540,7 +4531,7 @@ dependencies = [
 [[package]]
 name = "procwatch"
 version = "0.1.0"
-source = "git+https://github.com/anomalyco/rune.git?rev=3cc417c570e232154131560889230fc22775948c#3cc417c570e232154131560889230fc22775948c"
+source = "git+https://github.com/anomalyco/rune.git?rev=c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb#c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb"
 dependencies = [
  "libc",
 ]
@@ -5011,7 +5002,7 @@ dependencies = [
 [[package]]
 name = "rune"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=3cc417c570e232154131560889230fc22775948c#3cc417c570e232154131560889230fc22775948c"
+source = "git+https://github.com/anomalyco/rune.git?rev=c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb#c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -5087,7 +5078,7 @@ dependencies = [
 [[package]]
 name = "rune-kit"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=3cc417c570e232154131560889230fc22775948c#3cc417c570e232154131560889230fc22775948c"
+source = "git+https://github.com/anomalyco/rune.git?rev=c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb#c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb"
 dependencies = [
  "rune",
  "rune-motion",
@@ -5097,12 +5088,12 @@ dependencies = [
 [[package]]
 name = "rune-motion"
 version = "0.1.0"
-source = "git+https://github.com/anomalyco/rune.git?rev=3cc417c570e232154131560889230fc22775948c#3cc417c570e232154131560889230fc22775948c"
+source = "git+https://github.com/anomalyco/rune.git?rev=c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb#c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb"
 
 [[package]]
 name = "rune-staging"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=3cc417c570e232154131560889230fc22775948c#3cc417c570e232154131560889230fc22775948c"
+source = "git+https://github.com/anomalyco/rune.git?rev=c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb#c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb"
 dependencies = [
  "wgpu",
 ]
@@ -5110,7 +5101,7 @@ dependencies = [
 [[package]]
 name = "rune-taffy"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=3cc417c570e232154131560889230fc22775948c#3cc417c570e232154131560889230fc22775948c"
+source = "git+https://github.com/anomalyco/rune.git?rev=c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb#c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb"
 dependencies = [
  "taffy",
 ]
@@ -5118,7 +5109,7 @@ dependencies = [
 [[package]]
 name = "rune-theme-opencode"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=3cc417c570e232154131560889230fc22775948c#3cc417c570e232154131560889230fc22775948c"
+source = "git+https://github.com/anomalyco/rune.git?rev=c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb#c35fe19d2e0cba26db0ca37dcf9b3776d5b2e5cb"
 dependencies = [
  "rune",
  "rune-kit",
@@ -6210,17 +6201,11 @@ dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned",
- "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_datetime",
  "toml_parser",
  "toml_writer",
- "winnow 1.0.4",
+ "winnow",
 ]
-
-[[package]]
-name = "toml_datetime"
-version = "0.6.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
 
 [[package]]
 name = "toml_datetime"
@@ -6233,25 +6218,14 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.20.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70f427fce4d84c72b5b732388bf4a9f4531b53f74e2887e3ecb2481f68f66d81"
-dependencies = [
- "indexmap",
- "toml_datetime 0.6.11",
- "winnow 0.5.40",
-]
-
-[[package]]
-name = "toml_edit"
 version = "0.25.15+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1340ea94a5856333492c9064b02c778b191dd2c853778d9609debdcdfea3a614"
 dependencies = [
  "indexmap",
- "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_datetime",
  "toml_parser",
- "winnow 1.0.4",
+ "winnow",
 ]
 
 [[package]]
@@ -6260,7 +6234,7 @@ version = "1.1.3+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
 dependencies = [
- "winnow 1.0.4",
+ "winnow",
 ]
 
 [[package]]
@@ -7535,15 +7509,6 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.5.40"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f593a95398737aeed53e489c785df13f3618e41dbcd6718c6addbf1395aa6876"
-dependencies = [
- "memchr",
-]
-
-[[package]]
-name = "winnow"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
@@ -7750,7 +7715,7 @@ dependencies = [
  "uds_windows",
  "uuid",
  "windows-sys 0.61.2",
- "winnow 1.0.4",
+ "winnow",
  "zbus_macros 5.19.0",
  "zbus_names",
  "zvariant",
@@ -7777,7 +7742,7 @@ dependencies = [
  "uds_windows",
  "uuid",
  "windows-sys 0.61.2",
- "winnow 1.0.4",
+ "winnow",
  "zbus_macros 6.1.0",
  "zbus_utils",
  "zcheapstr",
@@ -7814,7 +7779,7 @@ version = "5.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2990635d09ade6df1868f72f8cac69a876a90981e8bd3c40b1be413f8dc88f40"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 3.0.6",
@@ -7842,7 +7807,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812a12be4ead7a59e18ea8f047d08add0066b73bc62fc1467066a2472ae088dd"
 dependencies = [
  "serde",
- "winnow 1.0.4",
+ "winnow",
  "zvariant",
 ]
 
@@ -7856,7 +7821,7 @@ dependencies = [
  "quote",
  "serde",
  "syn 3.0.6",
- "winnow 1.0.4",
+ "winnow",
 ]
 
 [[package]]
@@ -7866,7 +7831,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1586c021a01ca0a9216dcd874e546382e156a5cbab5fab6cb5f10087e22682a"
 dependencies = [
  "serde",
- "winnow 1.0.4",
+ "winnow",
  "zbus_names",
  "zvariant",
 ]
@@ -8014,7 +7979,7 @@ dependencies = [
  "endi",
  "enumflags2",
  "serde",
- "winnow 1.0.4",
+ "winnow",
  "zcheapstr",
  "zvariant_derive",
  "zvariant_utils",
@@ -8026,7 +7991,7 @@ version = "5.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef2672456ba1cb54b5eaec136e63135b3c7495fb938e53b28a62e633496d486d"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 3.0.6",
@@ -8043,5 +8008,5 @@ dependencies = [
  "quote",
  "serde",
  "syn 3.0.6",
- "winnow 1.0.4",
+ "winnow",
 ]
