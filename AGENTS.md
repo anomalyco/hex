@@ -642,10 +642,15 @@ CoreAudio formats, AppleScript details, or event serialization.
   dictation of the saved shortcut (the listener's event log on Linux and
   Windows), and Done always skips it.
 - GUI startup must successfully call `keyboard::initialize_layout` on the OS
-  main thread before settings, keyboard-using workers, or Rune start. That
-  snapshot is fixed until restart; cached misses must not re-enter TIS/TSM.
-  Uncached headless lookups retain live-layout resolution, with all native
-  lookup and snapshot construction serialized by the same lock.
+  main thread before settings, keyboard-using workers, or Rune start. When the
+  selected input source changes, the main thread rebuilds the snapshot
+  (`keyboard::refresh_layout`, from the one always-on input-source observer)
+  and publishes it whole; workers read the old or the new snapshot, never a
+  mix, and cached misses never re-enter TIS/TSM. After a rebuild the runtime
+  shortcuts are resolved again from the last applied settings; a macOS
+  shortcut on a letter key follows its letter, and the listener rebinds it
+  only once idle. Uncached headless lookups retain live-layout resolution,
+  with all native lookup and snapshot construction serialized by the same lock.
 - macOS launch order: `main` calls `rune::prewarm_gpu()` (macOS draws with Rune's native Metal
   backend by default; Hex never picks a backend) right after parsing
   the command line, only when it will run the app (`hex app` without Rune's
@@ -686,7 +691,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   fences remain required. Never strip Fn globally from shortcut matching.
 - Hold the shortcut to dictate and release to transcribe. Captures shorter than
   300 ms discard. A 450 ms hotkey pre-roll
-  protects speech onset. Capture has no automatic duration limit; release or
+  protects speech onset, except when "While dictating" mutes or pauses other
+  audio: that audio predates the mute and holds whatever was playing, so those
+  hotkey captures keep no pre-roll (#1309; `dictation::hotkey_pre_roll`, every
+  OS). Ducking keeps 450 ms. There is no separate pre-roll setting. Capture has
+  no automatic duration limit; release or
   an explicit stop ends it.
 - Only Toggle mode has a cancel (#786, #1022): its cancel shortcut
   (`cancel_hotkey`, Escape by default, rebindable in General under Shortcut

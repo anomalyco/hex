@@ -1,5 +1,6 @@
-//! Main-thread-only TIS observation, independent of keyboard shortcuts. Hex
-//! reads input sources only while keyboard model switching is on.
+//! Main-thread-only TIS observation. One observer runs for the app's life:
+//! every change rebuilds the keyboard layout snapshot, and keyboard model
+//! switching reads the selected source only while it is on.
 
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -136,45 +137,80 @@ pub(crate) fn enabled(_mtm: MainThreadMarker) -> Vec<InputSource> {
 /// Distributed notifications only mark dirty; the app's main-loop pump reads TIS.
 /// The marker also keeps this owner on the main thread through teardown.
 struct Watcher {
-    dirty: Box<AtomicBool>,
+    changes: Box<Changes>,
+    /// Keyboard model switching wants the selected source.
+    switching: bool,
     mtm: MainThreadMarker,
 }
 
+/// What the one observer marks on every change, each taken by its reader.
+struct Changes {
+    /// The keyboard layout snapshot must be rebuilt.
+    layout: AtomicBool,
+    /// Keyboard model switching has not yet seen the selected source.
+    source: AtomicBool,
+}
+
 thread_local! {
-    /// Present only while keyboard model switching is on.
+    /// Present from GUI startup for the app's life.
     static WATCHER: RefCell<Option<Watcher>> = const { RefCell::new(None) };
 }
 
-/// Starts or stops observing input-source changes. A new observer reports
-/// the current source once, so the runtime learns it when switching turns on.
-pub(crate) fn observe(mtm: MainThreadMarker, on: bool) {
+/// Starts observing input-source changes for the app's life; later calls do
+/// nothing. Hex rebuilds its keyboard layout snapshot on every change.
+pub(crate) fn start(mtm: MainThreadMarker) {
     WATCHER.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if on && slot.is_none() {
-            *slot = Some(Watcher::new(mtm));
-        } else if !on {
-            *slot = None;
+        slot.borrow_mut().get_or_insert_with(|| Watcher::new(mtm));
+    });
+}
+
+/// Turns reporting the selected source to keyboard model switching on or
+/// off. Turning it on reports the current source once, so the runtime learns
+/// it when switching turns on.
+pub(crate) fn observe(mtm: MainThreadMarker, on: bool) {
+    start(mtm);
+    WATCHER.with(|slot| {
+        if let Some(watcher) = slot.borrow_mut().as_mut()
+            && watcher.switching != on
+        {
+            watcher.switching = on;
+            watcher.changes.source.store(on, Ordering::Release);
         }
     });
 }
 
-/// The current source when it changed since the last call, if observing.
+/// The current source when it changed since the last call, while keyboard
+/// model switching is on.
 pub(crate) fn take_change(_mtm: MainThreadMarker) -> Option<Option<String>> {
     WATCHER.with(|slot| slot.borrow().as_ref().and_then(Watcher::poll))
+}
+
+/// Whether the selected source changed since the last call, so the keyboard
+/// layout snapshot must be rebuilt.
+pub(crate) fn take_layout_change(_mtm: MainThreadMarker) -> bool {
+    WATCHER.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|watcher| watcher.changes.layout.swap(false, Ordering::AcqRel))
+    })
 }
 
 impl Watcher {
     fn new(mtm: MainThreadMarker) -> Self {
         let watcher = Self {
-            dirty: Box::new(AtomicBool::new(true)),
+            changes: Box::new(Changes {
+                layout: AtomicBool::new(false),
+                source: AtomicBool::new(false),
+            }),
+            switching: false,
             mtm,
         };
-        // SAFETY: the boxed flag has a stable address and outlives registration.
+        // SAFETY: the boxed flags have a stable address and outlive registration.
         // 4 = DeliverImmediately, including when Hex is in the background.
         unsafe {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDistributedCenter(),
-                (&*watcher.dirty as *const AtomicBool).cast(),
+                (&*watcher.changes as *const Changes).cast(),
                 changed,
                 kTISNotifySelectedKeyboardInputSourceChanged,
                 ptr::null(),
@@ -185,19 +221,18 @@ impl Watcher {
     }
 
     fn poll(&self) -> Option<Option<String>> {
-        self.dirty
-            .swap(false, Ordering::AcqRel)
+        (self.switching && self.changes.source.swap(false, Ordering::AcqRel))
             .then(|| current(self.mtm))
     }
 }
 
 impl Drop for Watcher {
     fn drop(&mut self) {
-        // SAFETY: unregister on the main thread before dropping the boxed flag.
+        // SAFETY: unregister on the main thread before dropping the boxed flags.
         unsafe {
             CFNotificationCenterRemoveObserver(
                 CFNotificationCenterGetDistributedCenter(),
-                (&*self.dirty as *const AtomicBool).cast(),
+                (&*self.changes as *const Changes).cast(),
                 kTISNotifySelectedKeyboardInputSourceChanged,
                 ptr::null(),
             );
@@ -206,8 +241,9 @@ impl Drop for Watcher {
 }
 
 unsafe extern "C" fn changed(_: Ref, observer: *mut c_void, _: Ref, _: Ref, _: Ref) {
-    // SAFETY: observer is the flag registered by Watcher, removed before free.
-    if let Some(dirty) = unsafe { observer.cast::<AtomicBool>().as_ref() } {
-        dirty.store(true, Ordering::Release);
+    // SAFETY: observer is the flags registered by Watcher, removed before free.
+    if let Some(changes) = unsafe { observer.cast::<Changes>().as_ref() } {
+        changes.layout.store(true, Ordering::Release);
+        changes.source.store(true, Ordering::Release);
     }
 }

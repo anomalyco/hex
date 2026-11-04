@@ -644,6 +644,12 @@ pub(super) const SCENES: &[Scene] = &[
         labs_with_some_on(ui);
         ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::LiveText));
     }),
+    // Labs › Screenshots' drawer (macOS only: elsewhere the lab has no row).
+    ("mac-labs-screenshots", |ui| {
+        labs_with_some_on(ui);
+        ui.settings.labs.screenshots = true;
+        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::Screenshots));
+    }),
     ("mac-production", |ui| {
         *ui = mac_fixture();
         ui.settings.meetings.enabled = false;

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use color_eyre::eyre::{Result, eyre};
 
@@ -34,7 +34,7 @@ const EVENT_SOURCE_USER_DATA: u32 = 42;
 /// F13–F20 or the JIS keys it has no system action and nothing binds it.
 pub const CHORD_BREAKER_KEY_CODE: u16 = 0x44;
 pub const SYNTHETIC_EVENT_MARKER: i64 = 0x0056_4f49_4345;
-static KEY_CODES: OnceLock<LayoutCodes> = OnceLock::new();
+static KEY_CODES: LayoutSnapshot = LayoutSnapshot::new();
 static LAYOUT_ACCESS: Mutex<()> = Mutex::new(());
 #[cfg(test)]
 pub(crate) static INPUT_SOURCE_QUERIES: std::sync::atomic::AtomicUsize =
@@ -83,6 +83,7 @@ unsafe extern "C" {
 /// Character key codes for the active layout's plain and Command layers.
 /// Layouts such as "Dvorak – QWERTY ⌘" switch to a different arrangement while
 /// Command is held, so Command shortcuts must resolve against that layer.
+#[derive(Debug, PartialEq)]
 struct LayoutCodes {
     plain: HashMap<char, u16>,
     command: HashMap<char, u16>,
@@ -99,9 +100,44 @@ impl LayoutCodes {
     }
 }
 
+/// The published layout codes. The main thread replaces them whole when the
+/// selected input source changes; any thread reads the current ones without
+/// touching TIS, and sees either the old codes or the new, never a mix.
+struct LayoutSnapshot(RwLock<Option<Arc<LayoutCodes>>>);
+
+impl LayoutSnapshot {
+    const fn new() -> Self {
+        Self(RwLock::new(None))
+    }
+
+    fn get(&self) -> Option<Arc<LayoutCodes>> {
+        self.0
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    /// Publishes `codes`; returns whether they differ from the current ones.
+    fn publish(&self, codes: LayoutCodes) -> bool {
+        let mut current = self.0.write().unwrap_or_else(|error| error.into_inner());
+        if current.as_deref() == Some(&codes) {
+            return false;
+        }
+        *current = Some(Arc::new(codes));
+        true
+    }
+}
+
 /// The key that produces `character` on the active layout's plain layer.
 pub fn key_code_for(character: char) -> Result<u16> {
     resolve_key_code(character, false)
+}
+
+/// The key that produces `character` in a shortcut, on the Command layer
+/// when the shortcut holds Command.
+#[cfg_attr(test, allow(dead_code))]
+pub fn shortcut_key_code(character: char, command: bool) -> Result<u16> {
+    resolve_key_code(character, command)
 }
 
 fn resolve_key_code(character: char, command: bool) -> Result<u16> {
@@ -115,8 +151,9 @@ fn resolve_key_code(character: char, command: bool) -> Result<u16> {
     if let Some(result) = cached() {
         return result;
     }
-    // Headless callers retain live-layout resolution. GUI callers must prewarm
-    // on the main thread; even a cache miss then returns without entering TIS.
+    // Headless callers retain live-layout resolution. GUI callers publish the
+    // snapshot on the main thread; even a cache miss then returns without
+    // entering TIS.
     let _access = LAYOUT_ACCESS
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -146,8 +183,8 @@ fn resolve_key_code(character: char, command: bool) -> Result<u16> {
 }
 
 /// The character `code` types with Command held on the active layout, read
-/// from the startup snapshot only (never TIS): a capture's key log names keys
-/// with it.
+/// from the published snapshot only (never TIS): a capture's key log names
+/// keys with it.
 #[cfg(hex_capture)]
 pub fn command_character(code: u16) -> Option<char> {
     let codes = KEY_CODES.get()?;
@@ -159,8 +196,10 @@ pub fn command_character(code: u16) -> Option<char> {
         .map(|(character, _)| *character)
 }
 
-/// GUI startup must build this snapshot on the main thread before starting workers.
-/// Later lookups, including misses, never re-enter TIS/TSM from a worker thread.
+/// GUI startup must build this snapshot on the main thread before starting
+/// workers; [`refresh_layout`] rebuilds it there when the selected input
+/// source changes. Lookups, including misses, never re-enter TIS/TSM from a
+/// worker thread.
 pub fn initialize_layout() -> Result<()> {
     if KEY_CODES.get().is_some() {
         return Ok(());
@@ -168,9 +207,22 @@ pub fn initialize_layout() -> Result<()> {
     let _access = LAYOUT_ACCESS
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    if KEY_CODES.get().is_some() {
-        return Ok(());
+    if KEY_CODES.get().is_none() {
+        KEY_CODES.publish(read_layout()?);
     }
+    Ok(())
+}
+
+/// Rebuilds the snapshot from the now-selected input source, on the main
+/// thread, and publishes it whole. Returns whether any key moved.
+pub fn refresh_layout(_mtm: objc2::MainThreadMarker) -> Result<bool> {
+    let _access = LAYOUT_ACCESS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    Ok(KEY_CODES.publish(read_layout()?))
+}
+
+fn read_layout() -> Result<LayoutCodes> {
     let source = LayoutSource::current()?;
     let mut codes = collect_layout_codes(&source, NO_MODIFIER_STATE)?;
     let command = collect_layout_codes(&source, COMMAND_MODIFIER_STATE).unwrap_or_default();
@@ -184,15 +236,15 @@ pub fn initialize_layout() -> Result<()> {
     {
         fill_missing_ascii_letters(&mut codes, ascii_codes);
     }
-    let _ = KEY_CODES.set(LayoutCodes {
+    Ok(LayoutCodes {
         plain: codes,
         command,
-    });
-    Ok(())
+    })
 }
 
 fn ascii_capable_key_codes() -> Option<HashMap<char, u16>> {
-    // Called only while LAYOUT_ACCESS is held, before the GUI snapshot is published.
+    // Called only while LAYOUT_ACCESS is held: on the main thread for the GUI
+    // snapshot, or by a headless caller without one.
     collect_layout_codes(&LayoutSource::ascii_capable()?, NO_MODIFIER_STATE).ok()
 }
 
@@ -620,6 +672,69 @@ mod tests {
         };
         assert_eq!(non_latin.key_code('v', true), Some(9));
         assert_eq!(non_latin.key_code('x', true), None);
+    }
+
+    fn dvorak() -> LayoutCodes {
+        LayoutCodes {
+            plain: collect_key_codes([('v', 47), ('.', 9)]),
+            command: collect_key_codes([('v', 47), ('.', 9)]),
+        }
+    }
+
+    fn us() -> LayoutCodes {
+        LayoutCodes {
+            plain: collect_key_codes([('v', 9), ('.', 47)]),
+            command: collect_key_codes([('v', 9), ('.', 47)]),
+        }
+    }
+
+    /// Launched on Dvorak, then switched to U.S. (t1304): ⌘V must post the
+    /// U.S. V key once the main thread publishes the new layout.
+    #[test]
+    fn a_published_layout_replaces_the_one_before() {
+        let snapshot = LayoutSnapshot::new();
+        assert!(snapshot.get().is_none());
+        assert!(snapshot.publish(dvorak()));
+        assert_eq!(snapshot.get().unwrap().key_code('v', true), Some(47));
+        assert!(
+            !snapshot.publish(dvorak()),
+            "the same layout changes nothing"
+        );
+        assert!(snapshot.publish(us()));
+        assert_eq!(snapshot.get().unwrap().key_code('v', true), Some(9));
+        assert!(snapshot.publish(dvorak()));
+        assert_eq!(snapshot.get().unwrap().key_code('v', true), Some(47));
+    }
+
+    /// Workers read while the main thread publishes: each read is the old
+    /// layout or the new one, never a mix of the two.
+    #[test]
+    fn readers_see_a_whole_layout_while_it_is_replaced() {
+        let snapshot = Arc::new(LayoutSnapshot::new());
+        snapshot.publish(dvorak());
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let readers = (0..4)
+            .map(|_| {
+                let snapshot = snapshot.clone();
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    let (dvorak, us) = (dvorak(), us());
+                    let mut reads = 0_u64;
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) || reads == 0 {
+                        let codes = snapshot.get().expect("published before reading");
+                        assert!(*codes == dvorak || *codes == us, "torn layout: {codes:?}");
+                        reads += 1;
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for round in 0..2_000 {
+            snapshot.publish(if round % 2 == 0 { us() } else { dvorak() });
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for reader in readers {
+            reader.join().unwrap();
+        }
     }
 
     #[test]

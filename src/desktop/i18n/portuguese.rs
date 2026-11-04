@@ -1118,6 +1118,13 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Sent to {}", "Enviado para {}"),
     ("Processing…", "Processando…"),
     ("Undo", "Desfazer"),
+    ("Screenshots", "Capturas de tela"),
+    ("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder", "Pressione ⌘⇧4 para capturar uma área ou Espaço para uma janela. A captura vai para a área de transferência e para uma pasta"),
+    ("Screenshot shortcut", "Atalho de captura de tela"),
+    ("Saves to", "Salva em"),
+    ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "O macOS usa este atalho primeiro. Desative os atalhos de captura dele em Atalhos de Teclado › Capturas de tela ou escolha outro"),
+    ("Open Keyboard Settings", "Abrir Ajustes de Teclado"),
+    ("Full screen · Click to capture", "Tela inteira · Clique para capturar"),
 ];
 
 #[cfg(test)]

@@ -79,7 +79,10 @@ own Hex:
   the private home (`HEX_APPLICATION_SUPPORT_DIR`), not in your
   `~/Library/Application Support/hex`, so your own Hex there does not stop
   the bench. strobe brings the copy's window to the front only after a
-  minute without keyboard or mouse input.
+  minute without keyboard or mouse input. Every profile records the
+  `anomaly-hex-identity` migration: without it, a copy whose setup isn't
+  ready (the copy has no Microphone grant) reopens the first-run tour over
+  the window, and every click lands on the tour.
 
 The copy loads no model, except in the listening and dictation cases below.
 

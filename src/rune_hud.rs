@@ -327,7 +327,13 @@ impl Hud {
 
 /// How long the hidden HUD keeps its GPU surface: the device it holds costs
 /// about 150 MB and the GPU driver's threads waking some 65 times a second.
+/// Windows gives it back, window included, as soon as the HUD hides: a hidden
+/// topmost window that presented with DXGI let NVIDIA's Instant Replay take
+/// Hex for the running game (#1308).
+#[cfg(not(target_os = "windows"))]
 const GPU_IDLE: Duration = Duration::from_secs(5 * 60);
+#[cfg(target_os = "windows")]
+const GPU_IDLE: Duration = Duration::ZERO;
 
 /// The format the HUD draws in on Windows and Linux (Rune drops the
 /// surface's sRGB suffix for `srgb_blend`).
@@ -397,8 +403,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
         })
         // The shaders write display (sRGB-encoded) values.
         .srgb_blend(true)
-        // A burst of dictations keeps the GPU surface, so each HUD shows at
-        // once; a Hex at rest gives the GPU device back (Windows and Linux).
+        // On Linux a burst of dictations keeps the GPU surface, so each HUD
+        // shows at once; a Hex at rest gives the GPU device back.
         .release_gpu_after(GPU_IDLE)
         .compositor(HudCompositor {
             gpu: None,

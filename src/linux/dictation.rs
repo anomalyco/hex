@@ -60,6 +60,42 @@ struct Finishing {
     released: Instant,
 }
 
+/// Where the microphone stream's clock stands between chunks: the newest
+/// chunk's end plus the time since it arrived. PipeWire and ALSA can deliver
+/// large chunks (#1309), so the newest audio may trail a press by most of
+/// one; shortcut presses and releases are placed here instead.
+#[derive(Default)]
+struct StreamClock {
+    newest: Option<(CaptureInstant, Instant)>,
+}
+
+impl StreamClock {
+    /// A stalled stream's lag is not counted past this.
+    const MAX_LAG: Duration = Duration::from_secs(2);
+
+    fn chunk(&mut self, captured_through: CaptureInstant, received: Instant) {
+        self.newest = Some((captured_through, received));
+    }
+
+    /// A replaced or reopened stream keeps its own clock: nothing of the old
+    /// one carries over.
+    fn reset(&mut self) {
+        self.newest = None;
+    }
+
+    /// The end of the newest chunk.
+    fn through(&self) -> CaptureInstant {
+        self.newest
+            .map_or(CaptureInstant::ZERO, |(through, _)| through)
+    }
+
+    /// The stream time at `now`; `None` before this stream's first chunk.
+    fn at(&self, now: Instant) -> Option<CaptureInstant> {
+        let (through, received) = self.newest?;
+        Some(through + now.saturating_duration_since(received).min(Self::MAX_LAG))
+    }
+}
+
 struct OutputWorker {
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
@@ -191,15 +227,15 @@ impl DictationOutput {
         started: Instant,
         recording: Option<crate::history::Recording>,
     ) -> Result<String> {
-        let context = crate::linux::context::capture();
+        let modes = self
+            .modes
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let context = crate::linux::context::capture(!raw && modes.reads_page());
         let processed = if raw {
             crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
-            let modes = self
-                .modes
-                .read()
-                .unwrap_or_else(|error| error.into_inner())
-                .clone();
             modes.process(&raw_text, &context, &self.transformations)
         };
         if processed.text.trim().is_empty() {
@@ -420,10 +456,10 @@ pub(crate) fn run(
     let mut model =
         crate::transcription::local_transcriber::ModelSwap::new(&settings.transcription);
     let mut next_suspended: Option<bool> = None;
-    // A press that arrived while the released microphone was opening;
-    // recording starts at its first chunk.
+    // A press that arrived while the microphone was opening, or before its
+    // stream's first chunk; recording starts at that chunk.
     let mut start_pending = false;
-    let mut captured_through = CaptureInstant::ZERO;
+    let mut clock = StreamClock::default();
     let mut finishing: Option<Finishing> = None;
     // The recording skips processing (Dictate without processing).
     let mut recording_raw = false;
@@ -483,6 +519,7 @@ pub(crate) fn run(
                     || next.release_microphone_while_idle != release_while_idle
                 {
                     drop(input);
+                    clock.reset();
                     input = microphone_input(&next, device);
                     release_while_idle = next.release_microphone_while_idle;
                     audio_ready = input.is_open();
@@ -645,12 +682,12 @@ pub(crate) fn run(
                     .is_some_and(|host| host.recording_since(&timeline).is_some());
             match service.control(control, busy, now) {
                 Effect::None => {}
-                Effect::Start if audio_ready => {
+                Effect::Start if audio_ready && clock.at(now).is_some() => {
                     start_service_capture(
                         &mut capture,
                         &mut service,
                         &suppressor,
-                        captured_through,
+                        clock.through(),
                         input.sample_rate(),
                     );
                     service_ended |= !service.is_active();
@@ -663,7 +700,7 @@ pub(crate) fn run(
                 }
                 Effect::Finish(id) => {
                     // The client's finish is its exact end: no tail.
-                    match capture.finish_with_tail(captured_through, Duration::ZERO) {
+                    match capture.finish_with_tail(clock.through(), Duration::ZERO) {
                         Finish::Discard => service.complete(id, Err("capture-discarded".into())),
                         Finish::Transcribe(mut clip) => {
                             service.transcribing(id, clip.duration_ms());
@@ -727,14 +764,19 @@ pub(crate) fn run(
                         .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
                 HotkeyEvent::Start { raw } if !capture.is_recording() && !start_pending => {
                     recording_raw = raw;
-                    if audio_ready {
-                        start_capture(&mut capture, captured_through, || {
+                    let pressed_at = clock.at(Instant::now()).filter(|_| audio_ready);
+                    if let Some(pressed_at) = pressed_at {
+                        let pre_roll =
+                            crate::dictation::hotkey_pre_roll(settings.recording_audio_behavior);
+                        start_capture(&mut capture, pressed_at, pre_roll, || {
                             feedback::play_provisional_start();
                         });
                         stream_when_due(&mut capture, &engine, toggle);
-                    } else if release_while_idle {
+                    } else if audio_ready || release_while_idle {
                         start_pending = true;
-                        input.request_open();
+                        if !audio_ready {
+                            input.request_open();
+                        }
                         feedback::prepare();
                     } else {
                         continue;
@@ -750,7 +792,7 @@ pub(crate) fn run(
                         print.send(PrintedTranscript::NoSpeech);
                     }
                     suppressor.restore();
-                    if !timeline.wants_audio() {
+                    if release_while_idle && !timeline.wants_audio() {
                         input.close();
                         audio_ready = false;
                     }
@@ -765,9 +807,10 @@ pub(crate) fn run(
                     emit_state(&mut events, active_state(false, pending), &device_label)?;
                 }
                 HotkeyEvent::Finish if capture.is_recording() => {
+                    let released_at = clock.at(Instant::now()).unwrap_or(CaptureInstant::ZERO);
                     finishing = Some(Finishing {
                         raw: recording_raw,
-                        ..begin_finishing(&capture, captured_through, print.take(), || {
+                        ..begin_finishing(&capture, released_at, print.take(), || {
                             suppressor.restore_then(|| feedback::play(Tone::DictationStop))
                         })
                     });
@@ -857,21 +900,21 @@ pub(crate) fn run(
         ) {
             RecoveringAudioInputEvent::Chunk {
                 samples,
-                captured_through: chunk_captured_through,
+                captured_through,
             } => {
-                captured_through = chunk_captured_through;
+                clock.chunk(captured_through, Instant::now());
                 if !audio_ready {
                     capture = DictationCapture::new(input.sample_rate());
                     audio_ready = true;
                     device_label = input.device_name().to_string();
-                    if start_pending {
-                        // The on-demand open finished while the shortcut is
-                        // held: recording starts here, without pre-roll.
-                        start_pending = false;
-                        start_capture(&mut capture, captured_through, || {
-                            feedback::play_provisional_start();
-                        });
-                    }
+                }
+                if start_pending {
+                    // The stream's first chunk arrived while the shortcut is
+                    // held: recording starts here, without pre-roll.
+                    start_pending = false;
+                    start_capture(&mut capture, captured_through, Duration::ZERO, || {
+                        feedback::play_provisional_start();
+                    });
                 }
                 if service.is_starting() && !capture.is_recording() {
                     start_service_capture(
@@ -899,6 +942,7 @@ pub(crate) fn run(
             RecoveringAudioInputEvent::Timeout => {}
             RecoveringAudioInputEvent::Interrupted => {
                 timeline.restart();
+                clock.reset();
                 // A release still in its tail finishes with the audio it has.
                 if let Some(finish) = &mut finishing {
                     finish.release.stop_waiting();
@@ -926,6 +970,7 @@ pub(crate) fn run(
             }
             RecoveringAudioInputEvent::Reopened => {
                 timeline.restart();
+                clock.reset();
                 audio_ready = false;
                 device_label = input.device_name().to_string();
                 // A press waiting on the released microphone is already
@@ -988,8 +1033,13 @@ pub(crate) fn initialize_feedback(settings: &crate::app_settings::AppSettings) {
     }
 }
 
-fn start_capture(capture: &mut DictationCapture, started_at: CaptureInstant, play: impl FnOnce()) {
-    capture.start(started_at);
+fn start_capture(
+    capture: &mut DictationCapture,
+    pressed_at: CaptureInstant,
+    pre_roll: Duration,
+    play: impl FnOnce(),
+) {
+    capture.start_at_press(pressed_at, pre_roll);
     play();
 }
 
@@ -1130,6 +1180,8 @@ mod tests {
     use crate::dictation::POST_RELEASE_TAIL;
     use crate::transcription::engine::Command;
 
+    const PRE_ROLL: Duration = Duration::from_millis(450);
+
     fn capture_time() -> CaptureInstant {
         CaptureInstant::from_nanos(60_000_000_000)
     }
@@ -1155,7 +1207,7 @@ mod tests {
         seconds: u64,
     ) -> CaptureInstant {
         let start = capture_time();
-        start_capture(capture, start, || {});
+        start_capture(capture, start, PRE_ROLL, || {});
         stream_when_due(capture, engine, toggle);
         let mut through = start;
         for _ in 0..seconds * 10 {
@@ -1168,6 +1220,46 @@ mod tests {
             stream_when_due(capture, engine, toggle);
         }
         through
+    }
+
+    #[test]
+    fn a_press_between_large_chunks_is_placed_on_the_stream_clock() {
+        let mut clock = StreamClock::default();
+        let mut capture = DictationCapture::new(16_000);
+        let received = Instant::now();
+        let through = capture_time();
+        capture.ingest(&[1.0; 16_000], through);
+        clock.chunk(through, received);
+        // Pressed 800 ms after a 1 s chunk arrived: none of it is pre-roll.
+        let pressed = clock.at(received + Duration::from_millis(800)).unwrap();
+        assert_eq!(pressed, through + Duration::from_millis(800));
+        start_capture(&mut capture, pressed, PRE_ROLL, || {});
+        assert!(capture.recorded_from(0).is_empty());
+        capture.ingest(&[2.0; 16_000], through + Duration::from_secs(1));
+        assert_eq!(capture.recorded_from(0).len(), 7_200 + 3_200);
+        assert!(!capture.become_intentional(through + Duration::from_secs(1)));
+        // A stalled stream's lag is bounded.
+        assert_eq!(
+            clock.at(received + Duration::from_secs(60)),
+            Some(through + StreamClock::MAX_LAG)
+        );
+    }
+
+    #[test]
+    fn a_reopened_stream_carries_no_old_clock() {
+        let mut clock = StreamClock::default();
+        let received = Instant::now();
+        clock.chunk(capture_time(), received);
+        clock.reset();
+        // A press before the new stream's first chunk waits for it.
+        assert_eq!(clock.at(received + Duration::from_millis(10)), None);
+        assert_eq!(clock.through(), CaptureInstant::ZERO);
+        let fresh = CaptureInstant::from_nanos(1_000_000_000);
+        clock.chunk(fresh, received + Duration::from_millis(20));
+        assert_eq!(
+            clock.at(received + Duration::from_millis(30)),
+            Some(fresh + Duration::from_millis(10))
+        );
     }
 
     #[test]
@@ -1223,7 +1315,7 @@ mod tests {
         let started_at = capture_time();
         let mut sounds = Vec::new();
 
-        start_capture(&mut capture, started_at, || {
+        start_capture(&mut capture, started_at, PRE_ROLL, || {
             sounds.push(Tone::DictationStart)
         });
 
@@ -1241,7 +1333,7 @@ mod tests {
             let (engine, commands) = TranscriptionEngine::for_test();
             let mut capture = DictationCapture::new(16_000);
             let start = capture_time();
-            start_capture(&mut capture, start, || {});
+            start_capture(&mut capture, start, PRE_ROLL, || {});
             stream_when_due(&mut capture, &engine, toggle);
             assert_eq!(capture.is_streaming(), toggle);
             capture.ingest(&[0.1; 1_600], start + Duration::from_millis(100));
@@ -1337,7 +1429,7 @@ mod tests {
 
         let mut short = DictationCapture::new(16_000);
         let start = capture_time();
-        start_capture(&mut short, start, || {});
+        start_capture(&mut short, start, PRE_ROLL, || {});
         stream_when_due(&mut short, &engine, true);
         short.ingest(&[0.1; 1_600], start + Duration::from_millis(100));
         // A printing stop of a short tap prints nothing and says why.

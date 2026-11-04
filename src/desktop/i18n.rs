@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 mod french;
 mod portuguese;
+mod russian;
 mod traditional_chinese;
 
 /// A persisted interface-language code (`None` follows the system) and its
@@ -19,8 +20,8 @@ pub(crate) type LanguageChoice = (Option<&'static str>, &'static str);
 
 /// The selectable interface languages: persisted code and native name. The
 /// leading `None` entry follows the system display language. Português
-/// (Brasil), Français, and 繁體中文 have not had a native speaker's review
-/// yet.
+/// (Brasil), Français, 繁體中文, and Русский have not had a native
+/// speaker's review yet.
 pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (None, "System"),
     (Some("en"), "English"),
@@ -33,6 +34,7 @@ pub(crate) const LANGUAGE_CHOICES: &[LanguageChoice] = &[
     (Some("uk"), "Українська"),
     (Some("pt"), "Português (Brasil)"),
     (Some("fr"), "Français"),
+    (Some("ru"), "Русский"),
 ];
 
 /// Active language column into [`TRANSLATIONS`]; 255 means English.
@@ -74,9 +76,11 @@ const FRENCH_COLUMN: u8 = 7;
 /// Traditional Chinese, drawn from the Simplified column
 /// ([`traditional_chinese::table`]).
 const TRADITIONAL_CHINESE_COLUMN: u8 = 8;
+/// Russian, kept in its own table ([`russian::TRANSLATIONS`]).
+const RUSSIAN_COLUMN: u8 = 9;
 
 /// The column for a persisted code; `pt` (any Portuguese system language)
-/// is Brazilian Portuguese, and `fr` any French one.
+/// is Brazilian Portuguese, `fr` any French one, and `ru` any Russian one.
 fn column_for_code(code: &str) -> u8 {
     match code {
         "pl" => 0,
@@ -88,6 +92,7 @@ fn column_for_code(code: &str) -> u8 {
         "uk" => 5,
         "pt" => PORTUGUESE_COLUMN,
         "fr" => FRENCH_COLUMN,
+        "ru" => RUSSIAN_COLUMN,
         _ => ENGLISH,
     }
 }
@@ -281,6 +286,7 @@ pub(crate) fn tr(english: &str) -> &str {
     let table = match column {
         PORTUGUESE_COLUMN => portuguese::table(),
         FRENCH_COLUMN => french::table(),
+        RUSSIAN_COLUMN => russian::table(),
         _ => &tables()[column as usize],
     };
     table.get(english).copied().unwrap_or(english)
@@ -1450,6 +1456,13 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Sent to {}", ["Wysłano do {}", "已发送到 {}", "{} に送信しました", "An {} gesendet", "Enviado a {}", "Надіслано до {}"]),
     ("Processing…", ["Przetwarzanie…", "处理中…", "処理中…", "Wird verarbeitet…", "Procesando…", "Обробка…"]),
     ("Undo", ["Cofnij", "撤销", "取り消す", "Widerrufen", "Deshacer", "Скасувати"]),
+    ("Screenshots", ["Zrzuty ekranu", "截图", "スクリーンショット", "Bildschirmfotos", "Capturas de pantalla", "Знімки екрана"]),
+    ("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder", ["Naciśnij ⌘⇧4, aby uchwycić obszar, lub naciśnij spację, aby wybrać okno. Zrzut trafia do schowka i do folderu", "按 ⌘⇧4 截取一块区域，或按空格键截取窗口。截图会放到剪贴板并存入文件夹", "⌘⇧4 で範囲を撮影し、スペースキーでウインドウに切り替えます。撮影した画像はクリップボードとフォルダに入ります", "Drücke ⌘⇧4, um einen Bereich aufzunehmen, oder die Leertaste für ein Fenster. Die Aufnahme landet in der Zwischenablage und in einem Ordner", "Pulsa ⌘⇧4 para capturar un área o la barra espaciadora para una ventana. La captura va al portapapeles y a una carpeta", "Натисніть ⌘⇧4, щоб зняти область, або пробіл, щоб зняти вікно. Знімок потрапляє в буфер обміну й у теку"]),
+    ("Screenshot shortcut", ["Skrót zrzutu ekranu", "截图快捷键", "スクリーンショットのショートカット", "Kürzel für Bildschirmfotos", "Atajo de captura de pantalla", "Комбінація для знімка екрана"]),
+    ("Saves to", ["Zapisuje w", "保存到", "保存先", "Speichert in", "Guarda en", "Зберігає в"]),
+    ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", ["macOS przechwytuje ten skrót pierwszy. Wyłącz jego skróty zrzutów ekranu w Skróty klawiszowe › Zrzuty ekranu albo wybierz inny", "macOS 会先占用这个快捷键。请在“键盘快捷键 › 截屏”中关闭它的截屏快捷键，或换一个", "このショートカットは macOS が先に使います。「キーボードショートカット › スクリーンショット」で macOS のショートカットをオフにするか、別のものを選んでください", "macOS belegt dieses Kürzel zuerst. Schalte seine Bildschirmfoto-Kürzel unter Tastaturkurzbefehle › Bildschirmfotos aus oder wähle ein anderes", "macOS usa este atajo primero. Desactiva sus atajos de captura en Funciones rápidas de teclado › Capturas de pantalla o elige otro", "macOS перехоплює цю комбінацію першою. Вимкніть її комбінації для знімків у Сполучення клавіш › Знімки екрана або виберіть іншу"]),
+    ("Open Keyboard Settings", ["Otwórz ustawienia klawiatury", "打开键盘设置", "キーボード設定を開く", "Tastatureinstellungen öffnen", "Abrir ajustes de teclado", "Відкрити налаштування клавіатури"]),
+    ("Full screen · Click to capture", ["Cały ekran · Kliknij, aby uchwycić", "全屏 · 点按以截图", "全画面 · クリックで撮影", "Ganzer Bildschirm · Klicken zum Aufnehmen", "Pantalla completa · Haz clic para capturar", "Увесь екран · Клацніть, щоб зняти"]),
 ];
 
 #[cfg(test)]
@@ -1474,6 +1487,13 @@ mod tests {
         assert_eq!(column_for_language_tag("fr_CA"), super::FRENCH_COLUMN);
         assert_eq!(column_for_code("fr"), super::FRENCH_COLUMN);
         assert!(LANGUAGE_CHOICES.contains(&(Some("fr"), "Français")));
+        assert_eq!(column_for_language_tag("ru-RU"), super::RUSSIAN_COLUMN);
+        assert_eq!(
+            column_for_language_tag("ru_RU.UTF-8"),
+            super::RUSSIAN_COLUMN
+        );
+        assert_eq!(column_for_code("ru"), super::RUSSIAN_COLUMN);
+        assert!(LANGUAGE_CHOICES.contains(&(Some("ru"), "Русский")));
     }
 
     #[test]
@@ -1530,6 +1550,15 @@ mod tests {
         super::set_current(super::FRENCH_COLUMN);
         assert_eq!(super::tr("Don't switch"), "Ne pas changer");
         assert_eq!(super::tr_fill("Remove {}?", "x"), "Supprimer x ?");
+        super::set_current(super::ENGLISH);
+        assert_eq!(super::tr("Don't switch"), "Don't switch");
+    }
+
+    #[test]
+    fn russian_translates_with_its_column() {
+        super::set_current(super::RUSSIAN_COLUMN);
+        assert_eq!(super::tr("Don't switch"), "Не переключать");
+        assert_eq!(super::tr_fill("Remove {}?", "x"), "Удалить x?");
         super::set_current(super::ENGLISH);
         assert_eq!(super::tr("Don't switch"), "Don't switch");
     }
@@ -1592,6 +1621,7 @@ mod tests {
         include_str!("../rune_ui/labs.rs"),
         include_str!("../rune_ui/labs/category.rs"),
         include_str!("../rune_ui/labs/drawer.rs"),
+        include_str!("../rune_ui/labs/screenshots.rs"),
         include_str!("../rune_ui/labs/store.rs"),
         include_str!("../rune_ui/linux_host.rs"),
         include_str!("../rune_ui/list_detail.rs"),
@@ -1615,6 +1645,8 @@ mod tests {
         include_str!("../rune_ui/onboarding_kit/stories.rs"),
         include_str!("../rune_ui/onboarding_kit/versus.rs"),
         include_str!("../rune_ui/output.rs"),
+        include_str!("../rune_ui/screenshot_thumbnail.rs"),
+        include_str!("../screenshots.rs"),
         include_str!("../rune_ui/picker.rs"),
         include_str!("../rune_ui/picker/compare.rs"),
         include_str!("../rune_ui/picker/facts.rs"),

@@ -193,8 +193,10 @@ direct install gets it in `~/.local/share/icons/hicolor` when Hex first starts.
 Remove the application while preserving logs and settings with:
 
 ```sh
-sh install-linux.sh uninstall
+curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh -s -- uninstall
 ```
+
+or, with a saved copy of the installer, `sh install-linux.sh uninstall`.
 
 ### Upgrading from 2.3.1
 

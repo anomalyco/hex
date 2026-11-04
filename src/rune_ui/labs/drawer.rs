@@ -141,6 +141,11 @@ fn body(ui: &Ui, p: Paint, entry: &Row) -> El {
             tr("Shows up in"),
             place(ui, p, entry.lab),
         ));
+    #[cfg(all(target_os = "macos", hex_capture))]
+    if entry.lab == Lab::Feature(Feature::Screenshots) {
+        let system = entry.on && crate::screenshots::system_takes_shortcut();
+        body = body.child(super::screenshots::body(ui, p, system));
+    }
     if entry.lab == Lab::Feature(Feature::UnloadIdle) && entry.on {
         body = body.child(fact(
             p,
