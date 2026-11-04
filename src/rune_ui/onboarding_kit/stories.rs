@@ -17,7 +17,6 @@ use std::time::Duration;
 use rune::{Cx, El, Play, Playground, Story, TextEdit, TextStyle, Tx, canvas, col, el, row, text};
 
 use super::super::controls::Paint;
-use super::backdrop::Backdrop;
 use super::cards::{self, Caption, Side, TAP_BOX, bubble};
 use super::dictated::Dictated;
 use super::fixture::{ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded};
@@ -114,8 +113,6 @@ pub(crate) struct Onboard {
     pub(crate) now: f64,
     pub(crate) reduced: Cell<bool>,
     pub(crate) motion: super::landing::Motion,
-    /// What sits behind the first screen, while the options are compared.
-    pub(crate) backdrop: Backdrop,
     download_from: Option<f64>,
     pub(crate) download: Option<Download>,
     /// Whether the download showed in the top bar at the last poll, when it
@@ -265,7 +262,6 @@ impl Onboard {
             now: 0.0,
             reduced: Cell::new(false),
             motion: super::landing::Motion::default(),
-            backdrop: Backdrop::None,
             download_from: None,
             download: None,
             pill_up: false,
@@ -856,15 +852,6 @@ fn first_run() -> Story<Onboard> {
         s.rehearsal = Some(Rehearsal::new(true));
         s.practice_field = true;
     })
-    .variant("First screen · Dot field", |s| {
-        first_screen(s, Backdrop::Field)
-    })
-    .variant("First screen · Spoken words", |s| {
-        first_screen(s, Backdrop::Words)
-    })
-    .variant("First screen · Horizon", |s| {
-        first_screen(s, Backdrop::Horizon)
-    })
     .variant("Quick motion", |s| {
         s.motion.enter = 0.28;
         s.motion.exit = 0.20;
@@ -876,14 +863,6 @@ fn first_run() -> Story<Onboard> {
         s.motion.keyboard = 0.8;
     })
     .side(side::side)
-}
-
-/// The whole run, slowly downloading, with `backdrop` behind its first screen.
-fn first_screen(s: &mut Onboard, backdrop: Backdrop) {
-    s.rehearsal = Some(Rehearsal::new(true));
-    s.autoplay = true;
-    s.download_secs = SKETCH_DOWNLOAD_SECS;
-    s.backdrop = backdrop;
 }
 
 fn finish_download(s: &mut Onboard, _: &mut Play<'_, Onboard>) {

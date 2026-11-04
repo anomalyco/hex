@@ -22,7 +22,6 @@
 //! - [`mic`] & [`mic_line`]: microphone level bars and selector capsule.
 //! - [`landing`]: shared typography, zero-bounce transitions, and `"Hex is ready"`.
 
-mod backdrop;
 mod cards;
 mod dictated;
 mod field_text;
@@ -55,7 +54,6 @@ mod typing;
 mod versus;
 mod words;
 
-pub(super) use backdrop::fixture as backdrop_fixture;
 pub(crate) use game::add as game;
 pub(super) use sketches::fixture as sketch_fixture;
 pub(super) use stories::Onboard;

@@ -684,8 +684,7 @@ pub(super) const SCENES: &[Scene] = &[
     // The first run on macOS: setting up Hex, each permission state, the
     // practice game, and Hex is ready.
     ("mac-onboarding", |ui| {
-        mac_first_run(ui, onboarding::MacStep::Setup, Page::Download);
-        onboarding_kit::backdrop_fixture(ui);
+        mac_first_run(ui, onboarding::MacStep::Setup, Page::Download)
     }),
     ("mac-onboarding-permissions", |ui| {
         mac_first_run(ui, onboarding::MacStep::Setup, Page::Permissions)
