@@ -5,9 +5,10 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use objc2::msg_send;
+use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
-use objc2_foundation::NSAppleEventManager;
+use objc2_foundation::{NSAppleEventDescriptor, NSAppleEventManager};
 
 use super::MenuTarget;
 
@@ -78,10 +79,16 @@ pub(super) fn launched_as_login_item() -> bool {
     let Some(event) = NSAppleEventManager::sharedAppleEventManager().currentAppleEvent() else {
         return false;
     };
-    let login_item = event.eventID() == OPEN_APPLICATION
-        && event
-            .paramDescriptorForKeyword(PROP_DATA)
-            .is_some_and(|data| data.enumCodeValue() == LAUNCHED_AS_LOGIN_ITEM);
+    // SAFETY: `eventID` and `paramDescriptorForKeyword:` take and return
+    // four-character codes and an optional descriptor, as declared here.
+    let (event_id, data): (u32, Option<Retained<NSAppleEventDescriptor>>) = unsafe {
+        (
+            msg_send![&*event, eventID],
+            msg_send![&*event, paramDescriptorForKeyword: PROP_DATA],
+        )
+    };
+    let login_item = event_id == OPEN_APPLICATION
+        && data.is_some_and(|data| data.enumCodeValue() == LAUNCHED_AS_LOGIN_ITEM);
     if login_item {
         LOGIN_LAUNCH_ACTIVATION.store(true, Ordering::Relaxed);
     }
