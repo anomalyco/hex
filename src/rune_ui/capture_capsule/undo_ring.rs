@@ -1,5 +1,5 @@
-//! The Undo chip's countdown: a ring that drains clockwise and is gone
-//! the moment the Undo window ends, drawn as [`UndoRing`] picks.
+//! The Undo chip's countdown: the chip's own outline drains clockwise from
+//! the top and is gone the moment the Undo window ends.
 //!
 //! The ring is [`ARCS`] short arcs, each bound to a render-time [`Tween`]
 //! of its opacity: an arc fades out as the hand passes it, so the drain is
@@ -8,23 +8,19 @@
 //! holds the countdown the arcs stand still, and a new ring takes over
 //! from what was left once it leaves.
 
-use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use std::f32::consts::{FRAC_PI_2, PI};
 use std::time::Duration;
 
 use rune::{Color, El, LineCap, Shape, Tween, canvas, el};
 
 use super::super::controls::Paint;
 use super::flow::{Pres, undo_s};
-use super::surface::{self, CHIP_RADIUS, HINT_GAP, MEDIUM, UNDO_LABEL};
-use super::tuning::{self, UndoRing};
+use super::surface::{CHIP_RADIUS, HINT_GAP, MEDIUM, UNDO_LABEL};
 
 /// Arcs in a ring: enough that each one's fade reads as a sweep.
 const ARCS: usize = 48;
 /// Each arc reaches this far over its neighbours, hiding the seams.
 const OVERLAP: f32 = 0.2;
-/// The dial before "Undo": its diameter and stroke.
-pub(crate) const DIAL: f32 = 12.0;
-const DIAL_STROKE: f32 = 2.0;
 const BORDER_STROKE: f32 = 1.5;
 
 /// The live ring for one Undo window.
@@ -84,16 +80,6 @@ pub(crate) fn sync(ring: &mut Option<Ring>, pres: &Pres, now: f64, reduced: bool
     }
 }
 
-/// The Undo chip's width: the dial takes room before the word.
-pub(crate) fn chip_width(counting: bool) -> f32 {
-    let word = surface::keyed_width(&[], UNDO_LABEL, MEDIUM);
-    if counting && tuning::get().undo_ring == UndoRing::Dial {
-        word + DIAL + HINT_GAP
-    } else {
-        word
-    }
-}
-
 /// The Undo chip `size` big, with its countdown when there is one.
 pub(crate) fn chip(p: Paint, base: El, size: [f32; 2], ring: Option<&Ring>) -> El {
     let k = p.k;
@@ -104,10 +90,8 @@ pub(crate) fn chip(p: Paint, base: El, size: [f32; 2], ring: Option<&Ring>) -> E
         .gap(HINT_GAP)
         .hover(k.c.hover)
         .press(k.c.pressed);
-    match (ring, tuning::get().undo_ring) {
-        (Some(ring), UndoRing::Border) => chip = chip.child(border(size, ring, ink, track)),
-        (Some(ring), UndoRing::Dial) => chip = chip.child(dial(ring, ink, track)),
-        (None, _) => {}
+    if let Some(ring) = ring {
+        chip = chip.child(border(size, ring, ink, track));
     }
     chip.child(super::label(UNDO_LABEL, MEDIUM, ink))
         .role("button")
@@ -126,25 +110,6 @@ fn border([w, h]: [f32; 2], ring: &Ring, ink: Color, track: Color) -> El {
         ring,
         &at,
         BORDER_STROKE,
-        ink,
-        track,
-    )
-}
-
-/// A small ring before the word, from twelve clockwise.
-fn dial(ring: &Ring, ink: Color, track: Color) -> El {
-    let c = DIAL * 0.5;
-    let radius = c - DIAL_STROKE * 0.5;
-    let at = |f: f32| {
-        let a = -FRAC_PI_2 + TAU * f;
-        [c + radius * a.cos(), c + radius * a.sin()]
-    };
-    arcs(
-        el().size(DIAL, DIAL),
-        [DIAL, DIAL],
-        ring,
-        &at,
-        DIAL_STROKE,
         ink,
         track,
     )

@@ -394,9 +394,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   ├── The Undo ring -> one per send (rule or pick), tied to the window's end
 │   │   (`Done.countdown`) and drawn by `capture_capsule::undo_ring` as render-time
 │   │   opacity tweens, so nothing ticks: the capsule wakes only when the window
-│   │   ends. Reduce Motion steps it a second at a time. Two looks while Kit picks
-│   │   (`UndoRing`, the playground's "Undo countdown"): Border, the chip's own
-│   │   outline, and Dial, a small ring before "Undo"
+│   │   ends. Reduce Motion steps it a second at a time. It is the Undo chip's
+│   │   own outline, draining clockwise from the top
 │   ├── The pointer on the capsule -> holds the countdown, one that starts
 │   │   under it too: the ring stands still (Reduce Motion too), Undo never
 │   │   runs out, and a rule's send waits (`CaptureCommand::Hold`). Leaving

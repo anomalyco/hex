@@ -469,7 +469,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Undo,
             String::new(),
-            super::undo_ring::chip_width(done.countdown.is_some()),
+            keyed_width(&[], UNDO_LABEL, MEDIUM),
             false,
         ));
     } else {
