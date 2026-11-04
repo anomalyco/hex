@@ -1248,10 +1248,11 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
     changed |= paste_access::poll(ui);
-    // The OpenCode catalog is read only while the pane that uses it shows.
+    // The OpenCode catalog is read only while a pane that uses it shows:
+    // Modes, or Labs › Choose meeting summary model's picker.
     changed |= ui.models.poll(
         ui.live()
-            && ui.pane == Pane::Modes
+            && (ui.pane == Pane::Modes || platform_settings::summary_model_shown(ui))
             && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
     );
     changed |= ui.history.poll(ui.pane == Pane::History);

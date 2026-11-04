@@ -61,7 +61,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Notch indicator no    labs.notch_indicator         (macOS) with the indicator at Top, the notch widens sideways in the Dynamic Island's compact style: an orange mic and level bars, the macOS spinner, a green checkmark; flat screens keep it below the menu bar
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (every OS with Meetings)
-│                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
+│                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows a
+│                                        searchable picker of OpenCode's models, "Hex picks a fast model" first (clears it), Retry / Check again
+│                                        while OpenCode is missing, the saved ID kept and shown (#1107, #1301)
+│                                        // check: the_meeting_summary_model_is_picked_from_opencode_s_models (tests/panes.rs);
+│                                        // scenes and light/dark goldens meetings-summary-model, meetings-summary-model-not-running;
+│                                        // a meetings-folder error opening Advanced with the fold closed still shows the picker
 ├── Vocabulary in meeting notes no labs.meeting_notes_vocabulary (every OS with Meetings)
 │                                        final meeting titles and summaries (and Regenerate summary) read the vocabulary ahead of the transcript (#1154)
 ├── Meeting finished event no labs.meeting_finished_event (every OS with Meetings)

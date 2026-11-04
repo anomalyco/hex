@@ -30,9 +30,13 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   Transcript folder (~/Documents/Hex Meetings; Reveal / choose; an error opens
 │   │   Advanced), Summarize with Apple Intelligence (on by default), Summarize
 │   │   with OpenCode (off by default; when Apple Intelligence is off or missing),
-│   │   then with Labs › Choose meeting summary model on, Summary model: the
-│   │   provider/model OpenCode notes use, no fallback; empty -> the ranked fast
-│   │   models (meetings.opencode_model; see labs.md, #1107)
+│   │   then with Labs › Choose meeting summary model on, Summary model: a
+│   │   searchable picker of the running OpenCode's models (the catalog Modes
+│   │   uses, read only while this row shows) whose pick is the provider/model
+│   │   OpenCode notes use, no fallback; "Hex picks a fast model" clears it ->
+│   │   the ranked fast models. OpenCode missing or failing -> a notice with
+│   │   Check again / Retry, the saved model kept and shown by its ID
+│   │   (meetings.opencode_model; see labs.md, #1107, #1301)
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
