@@ -36,7 +36,7 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
-│       │   Gather (always listed)
+│       │   Gather, Discord (always listed)
 │       └── then each website or app chosen for from an offer's "…"
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
            the pane leaves the sidebar
@@ -153,12 +153,14 @@ hardware.
 ### Detect And Offer
 
 ```ts
-Zoom / Teams / Slack huddle / FaceTime / WhatsApp / browser call uses the microphone
+Zoom / Teams / Slack huddle / FaceTime / WhatsApp / Discord / browser call uses the microphone
   (WhatsApp: net.whatsapp.WhatsApp, the older desktop.WhatsApp, WhatsApp.exe or
   WhatsApp.Root.exe on Windows, web.whatsapp.com in a browser; 20 s, as voice
   notes also hold the microphone; Gather: com.gather.GatherV2 and its helpers,
   com.gather.Gather, Gather.exe, app.v2.gather.town and app.gather.town; 20 s,
-  as sitting in a space can hold it)
+  as sitting in a space can hold it; Discord: com.hnc.Discord and its helpers,
+  its Canary and PTB builds, Discord.exe, the Linux discord binary and Flatpak,
+  #1283)
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
   -> On the microphone for 2 s by the monotonic clock // meetings.detect
      │   Google Meet and Banshee (banshee.app) in a browser count as known
