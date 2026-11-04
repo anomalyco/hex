@@ -1517,6 +1517,13 @@ Linux beta                               // not macOS feature parity
 │   │   │   │   Open button, and process.log warns (#723)
 │   │   │   │   // no check; not run on a GNOME session
 │   │   │   // a desktop keeps a stored binding over a new preferred_trigger for the same id
+│   │   ├── Hold whose release never comes (GNOME sends none when a modifier
+│   │   │   comes up first) -> once the desktop's repeats of the held press stop
+│   │   │   for 1 s, it counts as released and the capture finishes; that inferred
+│   │   │   release never starts a double tap. A hold too short to repeat still
+│   │   │   finishes on the next press (#1227)
+│   │   │   // check: a_hold_whose_repeats_stop_without_a_release_finishes_by_itself
+│   │   │   // (the state machine only); not run on a GNOME session
 │   │   ├── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
 │   │   │   under that shortcut's own row (Dictation, Output);
 │   │   │   the rest keep working
