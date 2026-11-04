@@ -9,7 +9,7 @@
 // - `warm`: the microphone open while idle, the default (`hex-dictation`).
 // - `released`: Release microphone while idle (`hex-dictation-released`).
 import { bench, native } from "@hona/strobe"
-import { readFileSync } from "node:fs"
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { dictationSeed, SILENCE_MS, speechMs } from "./seeds/dictation"
 
@@ -56,6 +56,32 @@ async function start(ctx: Ctx): Promise<Reply> {
   return control(ctx, { command: "dictation", action: "start" })
 }
 
+/** The copy's event log (`live.ndjson`), whose states say when a recording began. */
+const events = (ctx: Ctx) => join(ctx.home, "hex-data", "logs", "live.ndjson")
+
+/** Resolves once the event log, read from byte `from` on, shows the
+ * recording began. A released microphone's start reports `dictating` twice:
+ * at the command, and at the opened microphone's first chunk, where the
+ * recording begins. The log is written as each event happens; this reads it
+ * every millisecond. */
+async function recordingBegan(ctx: Ctx, from: number): Promise<void> {
+  const deadline = Date.now() + 5_000
+  const fd = openSync(events(ctx), "r")
+  try {
+    let text = ""
+    for (;;) {
+      const chunk = Buffer.alloc(64 * 1024)
+      const read = readSync(fd, chunk, 0, chunk.length, from + Buffer.byteLength(text))
+      text += chunk.toString("utf8", 0, read)
+      if ((text.match(/"state":"dictating"/g) ?? []).length >= 2) return
+      if (Date.now() > deadline) throw new Error("the recording never began")
+      await Bun.sleep(1)
+    }
+  } finally {
+    closeSync(fd)
+  }
+}
+
 async function printed(reply: Reply): Promise<string> {
   if (reply.status !== "transcript" || !reply.text) throw new Error(`stop --print answered ${JSON.stringify(reply)}`)
   return reply.text
@@ -82,6 +108,25 @@ export default bench({
     if (ctx.case === "recording") await start(ctx)
   },
   cases: {
+    // Start to capture with the microphone released: the start command
+    // reaching the idle listener, the microphone opening, and its first
+    // chunk recorded.
+    start: {
+      targets: ["released"],
+      primary: "phase.start",
+      metrics: ["cpu.work", "cpu.wakes"],
+      async run(ctx) {
+        // The listener settles into its idle wait after the last dictation.
+        await ctx.page.wait(1_000)
+        const from = statSync(events(ctx)).size
+        await ctx.phase("start", async () => {
+          await start(ctx)
+          await recordingBegan(ctx, from)
+        })
+        await ctx.page.wait(STOP_AFTER_MS)
+        await printed(await stop(ctx))
+      },
+    },
     // While a dictation records: the audio path, the live stream's
     // inference, and the HUD meter's plumbing. Each run is 6 s of one
     // recording; reset finishes it and starts the next.

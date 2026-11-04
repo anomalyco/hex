@@ -28,9 +28,24 @@ const UPDATE_INTERVAL: Duration = Duration::from_millis(5);
 /// event's own time, so taking it at the next chunk moves nothing.
 const STREAM_WAIT: Duration = Duration::from_millis(50);
 /// The longest wait while idle with the microphone released: a shortcut
-/// event ends it at once; commands, settings, and Annotate's controls are
-/// taken within it.
+/// event or a command ends it at once ([`wake`]); settings and Annotate's
+/// controls are taken within it.
 const IDLE_RELEASED_WAIT: Duration = Duration::from_millis(50);
+
+/// The running listener's thread, which [`wake`] unparks.
+static LISTENER: Mutex<Option<thread::Thread>> = Mutex::new(None);
+
+/// Ends the listener's idle wait at once: the keyboard hook calls it for
+/// each shortcut event, and the tray and `hex` commands after sending one.
+pub fn wake() {
+    if let Some(listener) = LISTENER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .as_ref()
+    {
+        listener.unpark();
+    }
+}
 
 struct Job {
     transcript: PendingTranscript,
@@ -196,6 +211,7 @@ pub fn run(
     // Read by the output worker at each paste, so a change applies in place.
     let paste_with_shift = Arc::new(AtomicBool::new(paste_with_shift));
     let _indicator_guard = IndicatorGuard(indicator.clone());
+    let _woken = Woken::register();
     crate::feedback::set_enabled(feedback_volume > 0);
     crate::feedback::set_volume(f32::from(feedback_volume) / 100.0);
     crate::feedback::set_sound_set(sound_theme);
@@ -701,8 +717,11 @@ pub fn run(
         // A released microphone delivers nothing: wait for the next shortcut
         // event, which is taken at once, instead of sleeping 5 ms at a time.
         if idle && !input.is_active() {
-            if let Ok(event) = hotkey.events.recv_timeout(IDLE_RELEASED_WAIT) {
-                held_event = Some(event);
+            // Shortcut events and commands unpark the loop ([`wake`]).
+            held_event = hotkey.events.try_recv().ok();
+            if held_event.is_none() {
+                thread::park_timeout(IDLE_RELEASED_WAIT);
+                held_event = hotkey.events.try_recv().ok();
             }
             continue;
         }
@@ -1215,6 +1234,27 @@ fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<
         device: device.into(),
     })?;
     Ok(())
+}
+
+/// This thread as the one [`wake`] unparks, until the listener returns.
+struct Woken(thread::ThreadId);
+
+impl Woken {
+    fn register() -> Self {
+        let current = thread::current();
+        let id = current.id();
+        *LISTENER.lock().unwrap_or_else(|error| error.into_inner()) = Some(current);
+        Self(id)
+    }
+}
+
+impl Drop for Woken {
+    fn drop(&mut self) {
+        let mut listener = LISTENER.lock().unwrap_or_else(|error| error.into_inner());
+        if listener.as_ref().is_some_and(|thread| thread.id() == self.0) {
+            *listener = None;
+        }
+    }
 }
 
 struct IndicatorGuard(Option<crate::rune_hud::HudSender>);

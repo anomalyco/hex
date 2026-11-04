@@ -1101,7 +1101,7 @@ fn send_event(state: &mut CallbackState, action: HotkeyAction, timestamp_ms: u32
         raw: state.capture.raw,
         timestamp_ms,
     }) {
-        Ok(()) => {}
+        Ok(()) => crate::windows::dictation::wake(),
         Err(TrySendError::Full(_)) => {
             let _ = state
                 .errors
