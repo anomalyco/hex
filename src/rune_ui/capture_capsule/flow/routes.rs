@@ -35,7 +35,7 @@ pub(super) fn undoable(phase: &Phase, now: f64) -> Option<Action> {
 }
 
 pub(super) fn sent_to(to: &str) -> String {
-    format!("Sent to {}", short(to))
+    tr_fill("Sent to {}", &short(to))
 }
 
 /// A session's name cut to the capsule's available width.
@@ -70,7 +70,7 @@ pub(super) fn refine(mut routed: Routed, route: Route, _now: f64, suggest: bool)
 
 pub(super) fn countdown(routed: &Routed, now: f64) -> Option<String> {
     let left = 3.0 - (now - routed.at);
-    (!routed.delivered && left > 0.0).then(|| format!("{} s", left.ceil() as u32))
+    (!routed.delivered && left > 0.0).then(|| tr_fill("{} s", &(left.ceil() as u32).to_string()))
 }
 
 pub(super) fn sections(route: &Route) -> (&[Dest], &[Dest]) {

@@ -660,13 +660,17 @@ fn top_line_from_env() {
     }
 }
 
-/// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark.
+/// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark;
+/// `HEX_CAPSULE_LANGUAGE=de` (any interface language code) in that language.
 #[test]
 fn capture_capsule_snapshots() {
     let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS") else {
         return;
     };
     top_line_from_env();
+    if let Ok(language) = std::env::var("HEX_CAPSULE_LANGUAGE") {
+        crate::desktop::i18n::apply(Some(&language));
+    }
     let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
         eprintln!("skipping capture capsule snapshots: no GPU adapter");
         return;

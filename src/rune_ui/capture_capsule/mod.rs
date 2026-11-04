@@ -37,16 +37,18 @@ use rune::{
     Color, Compositor, Cx, El, Frame, LineCap, Live, LiveText, OverlayHandle, Path, Runtime, Shape,
     SpringPair, Transition, Tx, canvas, col, el, row, text,
 };
+use rune_kit::TextInput;
 
 use self::flow::{Action, Cue, Done, Flow, Footer, Input, Lead, List, Mode, Pres};
 use self::surface::{
     CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LIST_PAD, LIST_Y, MEDIUM, PANEL_H,
-    PANEL_W, PROCESSING, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, SMALL, STRONG, Shown,
-    Surface, THUMB_H, THUMB_W, THUMB_X, TIMER, UNDO_LABEL, chord, clock_width, corner, done_style,
-    done_text_x, ellipsize, measure,
+    PANEL_W, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, SMALL, STRONG, Shown, Surface,
+    THUMB_H, THUMB_W, THUMB_X, TIMER, chord, clock_width, corner, done_style, done_text_x,
+    ellipsize, measure, processing, undo_label,
 };
 use self::tuning::ListFooter;
 use super::controls::Paint;
+use crate::desktop::i18n::{tr, tr_fill};
 
 /// Peak blur (pt) of the picker's badge and the list's rows softening in
 /// place.
@@ -70,20 +72,22 @@ const LIST_DROP: f32 = 6.0;
 
 // ─── Live values ─────────────────────────────────────────────────────────────
 
-const GLYPHS: usize = 11;
+/// Room for "Processing…" in the longest language.
+const GLYPHS: usize = 24;
 
 /// "Processing…" split into glyphs, each with its x and width as the whole
 /// label shapes them.
 fn processing_glyphs() -> [(char, f32, f32); GLYPHS] {
     let mut out = [(' ', 0.0, 0.0); GLYPHS];
-    for (k, (at, c)) in PROCESSING.char_indices().enumerate().take(GLYPHS) {
+    let label = processing();
+    for (k, (at, c)) in label.char_indices().enumerate().take(GLYPHS) {
         let end = at + c.len_utf8();
         let x = if at == 0 {
             0.0
         } else {
-            measure(&PROCESSING[..at], STRONG)
+            measure(&label[..at], STRONG)
         };
-        out[k] = (c, x, measure(&PROCESSING[..end], STRONG) - x);
+        out[k] = (c, x, measure(&label[..end], STRONG) - x);
     }
     out
 }
@@ -142,7 +146,7 @@ impl Meter {
             spin: std::array::from_fn(|_| Live::new(0.18)),
             shimmer: std::array::from_fn(|_| Live::new(1.0)),
             shimmer_at: {
-                let total = measure(PROCESSING, STRONG).max(1.0);
+                let total = measure(processing(), STRONG).max(1.0);
                 let glyphs = processing_glyphs();
                 std::array::from_fn(|k| (glyphs[k].1 + glyphs[k].2 * 0.5) / total)
             },
@@ -998,7 +1002,7 @@ fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
             .fill(k.c.black)
             .motion(surface.shell_motion)
             .role("group")
-            .label("Capture");
+            .label(tr("Capture"));
     }
     body = body.fill(k.c.bg_base);
     for shadow in &k.elevation.overlay {
@@ -1028,7 +1032,7 @@ fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
         .motion(surface.shell_motion)
         .opacity_motion(surface.shell_fade)
         .role("group")
-        .label("Capture")
+        .label(tr("Capture"))
 }
 
 fn label(content: &str, style: rune::TextStyle, color: Color) -> El {
@@ -1073,9 +1077,9 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             base.child(
                 button
                     .role("button")
-                    .label("Draw")
+                    .label(tr("Draw"))
                     .checked(lit)
-                    .help("Draw")
+                    .help(tr("Draw"))
                     .hit()
                     .on_press_tx(press(id)),
             )
@@ -1090,8 +1094,8 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             base.child(
                 icon_button(p, canvas(square).size(side, side))
                     .role("button")
-                    .label("Stop")
-                    .help("Stop")
+                    .label(tr("Stop"))
+                    .help(tr("Stop"))
                     .hit()
                     .on_press_tx(press(id)),
             )
@@ -1103,13 +1107,13 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 canvas(icon(Id::Close, 12.0 * 2.4 / 24.0, p.muted())).size(12.0, 12.0),
             )
             .role("button")
-            .label("Discard")
-            .help("Discard")
+            .label(tr("Discard"))
+            .help(tr("Discard"))
             .hit()
             .on_press_tx(press(id)),
         ),
         Id::Record => {
-            let name = "Record";
+            let name = tr("Record");
             base.radius(surface::CHIP_RADIUS)
                 .fill(c.bg_contrast)
                 .hover(c.contrast_hover)
@@ -1121,7 +1125,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 .on_press_tx(press(id))
         }
         Id::Keep => {
-            let name = surface::KEEP_LABEL;
+            let name = surface::keep_label();
             base.radius(surface::CHIP_RADIUS)
                 .hover(c.hover)
                 .press(c.pressed)
@@ -1138,9 +1142,9 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             .fill(c.layer_02)
             .hover(c.hover)
             .press(c.pressed)
-            .child(label(surface::DISCARD_LABEL, STRONG, p.danger()))
+            .child(label(surface::discard_label(), STRONG, p.danger()))
             .role("button")
-            .label(surface::DISCARD_LABEL)
+            .label(surface::discard_label())
             .hit()
             .on_press_tx(press(id)),
         Id::Close => base.child(
@@ -1152,7 +1156,7 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                 .press(c.pressed)
                 .child(canvas(icon(id, 12.0 * 2.4 / 24.0, p.muted())).size(12.0, 12.0))
                 .role("button")
-                .label("Close")
+                .label(tr("Close"))
                 .hit()
                 .on_press_tx(press(id)),
         ),
@@ -1199,12 +1203,12 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
                     .on_press_tx(press(id));
             }
             done.role("text").label(if shown.ident.is_empty() {
-                "Copied".to_owned()
+                tr("Copied").to_owned()
             } else {
                 shown.ident.clone()
             })
         }
-        Id::Next => keyed(p, base, &["⇥"], "Next", MEDIUM).on_press_tx(press(id)),
+        Id::Next => keyed(p, base, &["⇥"], tr("Next"), MEDIUM).on_press_tx(press(id)),
         // A chip beside the frame in the menu-bar flow.
         Id::Pick(_) if tuning::get().flow == tuning::CapsuleFlow::MenuBar => {
             keyed(p, base, &[], shown.text(), MEDIUM).on_press_tx(press(id))
@@ -1213,15 +1217,15 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
         Id::CardHints => base
             .justify_start()
             .px(ROW_PX)
-            .child(hint(p, "Search", shown.text()))
+            .child(hint(p, tr("Search"), shown.text()))
             .role("text")
-            .label(format!("Search {}", shown.text())),
+            .label(tr_fill("Search {}", shown.text())),
         Id::Why => placed(row().center_y(), shown)
             .trace_name("why")
             .child(quiet(p, shown.text(), done_style())),
         // The quiet way out of a send that just went.
         // Click only: Escape meant for another app was taking sends back.
-        Id::Undo => keyed(p, base, &[], UNDO_LABEL, MEDIUM).on_press_tx(press(id)),
+        Id::Undo => keyed(p, base, &[], undo_label(), MEDIUM).on_press_tx(press(id)),
         // Search, with the capture shortcut that opens it as Settings draws it.
         Id::Ask
             if matches!(
@@ -1251,9 +1255,9 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
         Id::Ask => keyed(p, base, &[], &shown.ident, MEDIUM).on_press_tx(press(id)),
         Id::Paste | Id::Inspect => {
             let (name, help) = if id == Id::Paste {
-                ("Paste", "Paste the capture")
+                (tr("Paste"), tr("Paste the capture"))
             } else {
-                ("Inspect", "Open the capture")
+                (tr("Inspect"), tr("Open the capture"))
             };
             base.child(
                 row()
@@ -1271,12 +1275,13 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             )
         }
         Id::Field => {
+            let empty = rune::TextEdit::default();
             let typed = match &surface.pres {
                 Pres::Done(Done {
                     open: Some((typed, _)),
                     ..
-                }) => typed.as_str(),
-                _ => "",
+                }) => typed,
+                _ => &empty,
             };
             field(p, base, typed)
         }
@@ -1376,34 +1381,20 @@ const KEY_BOX_H: f32 = 18.0;
 const KEY_BOX_PX: f32 = 5.0;
 const KEY_BOX_RADIUS: f32 = 5.0;
 
-/// The open capsule's field: what's typed and the caret, or the
-/// placeholder.
-fn field(p: Paint, base: El, typed: &str) -> El {
-    let caret = el()
-        .key("caret")
-        .size(1.5, 15.0)
-        .radius(0.75)
-        .fill(p.accent());
-    let inner = if typed.is_empty() {
-        row()
-            .center_y()
-            .gap(1.0)
-            .child(caret)
-            .child(label("Send to…", MEDIUM, p.faint()))
-    } else {
-        row()
-            .center_y()
-            .gap(1.0)
-            .child(label(typed, MEDIUM, p.text()))
-            .child(caret)
-    };
-    base.trace_name("field")
-        .px(CHIP_PX)
-        .radius(surface::CHIP_RADIUS)
-        .fill(p.k.c.layer_01)
-        .child(inner.grow(1.0))
-        .role("textbox")
-        .label("Send to")
+/// The open capsule's field: the kit's search field over the typed
+/// text. The capsule never takes key focus, so the field always reads as
+/// focused and Hex's tap feeds it ([`flow::Input::Type`]).
+fn field(p: Paint, base: El, typed: &rune::TextEdit) -> El {
+    let mut edit = typed.clone();
+    edit.focused = true;
+    let input = TextInput::new(&edit)
+        .placeholder(tr("Send to…"))
+        .label(tr("Send to"))
+        .leading_icon(p.k.glyph.search)
+        .width(None)
+        .height(CHIP_H)
+        .build(p.k);
+    base.trace_name("field").child(input.grow(1.0))
 }
 
 /// The finished capsule's check, or its warning: its ink spans 12…20,
@@ -1456,9 +1447,9 @@ fn processing_label(p: Paint, meter: &Meter) -> El {
     let mut glyphs = el()
         .absolute(PROCESSING_TEXT_X, 0.0)
         .h(CHIP_H)
-        .w(measure(PROCESSING, STRONG))
+        .w(measure(processing(), STRONG))
         .role("text")
-        .label(PROCESSING);
+        .label(processing());
     for ((c, x, w), live) in processing_glyphs().into_iter().zip(&meter.shimmer) {
         glyphs = glyphs.child(
             row()
@@ -1540,7 +1531,7 @@ fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
     // search's footer says it there).
     let remembers = (suggesting && list.always.is_some()).then(|| {
         label(
-            "⇧ remembers",
+            tr("⇧ remembers"),
             k.ty.small_medium,
             if saving { p.accent() } else { p.faint() },
         )
@@ -1619,22 +1610,22 @@ fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
 fn search_hints(p: Paint, remember: bool, w: f32) -> El {
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
     let shortcut = chord(&surface::shortcut_keycaps());
-    let used = hint_width("Send", "⏎") + HINTS_GAP;
-    let remember = remember && used + hint_width("Remember", "⇧⏎") <= room;
+    let used = hint_width(tr("Send"), "⏎") + HINTS_GAP;
+    let remember = remember && used + hint_width(tr("Remember"), "⇧⏎") <= room;
     let used = used
         + if remember {
-            hint_width("Remember", "⇧⏎")
+            hint_width(tr("Remember"), "⇧⏎")
         } else {
             0.0
         };
-    let capture = used + HINTS_GAP + hint_width("New capture", &shortcut) <= room;
+    let capture = used + HINTS_GAP + hint_width(tr("New capture"), &shortcut) <= room;
     row()
         .center_y()
         .gap(HINTS_GAP)
-        .child(hint(p, "Send", "⏎").key("send"))
-        .children(remember.then(|| hint(p, "Remember", "⇧⏎").key("remember")))
+        .child(hint(p, tr("Send"), "⏎").key("send"))
+        .children(remember.then(|| hint(p, tr("Remember"), "⇧⏎").key("remember")))
         .child(el().grow(1.0))
-        .children(capture.then(|| hint(p, "New capture", &shortcut).key("capture")))
+        .children(capture.then(|| hint(p, tr("New capture"), &shortcut).key("capture")))
 }
 
 /// Shift down: the footer says where the rule will send `site`, each in
@@ -1643,7 +1634,7 @@ fn search_hints(p: Paint, remember: bool, w: f32) -> El {
 fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
     let to = list.selected_dest().map(|dest| dest.name.as_str());
-    let words = measure("Always send", SMALL) + measure("to", SMALL) + 3.0 * BADGE_GAP;
+    let words = measure(tr("Always send"), SMALL) + measure(tr("to"), SMALL) + 3.0 * BADGE_GAP;
     let badges =
         if to.is_some() { 2.0 } else { 1.0 } * (2.0 * BADGE_PX + BADGE_ICON + BADGE_ICON_GAP);
     let left = (room - words - badges).max(0.0);
@@ -1659,13 +1650,13 @@ fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
         .center_y()
         .gap(BADGE_GAP)
         .key("saving")
-        .child(label("Always send", SMALL, p.muted()))
+        .child(label(tr("Always send"), SMALL, p.muted()))
         .child(badge(p, Badge::of_site(site), &ellipsize(site, SMALL, site_room)).key("site"));
     hint = match to {
         Some(to) => hint
-            .child(label("to", SMALL, p.muted()))
+            .child(label(tr("to"), SMALL, p.muted()))
             .child(badge(p, Badge::Chat, &ellipsize(to, SMALL, to_room)).key("to")),
-        None => hint.child(label("to…", SMALL, p.muted())),
+        None => hint.child(label(tr("to…"), SMALL, p.muted())),
     };
     hint.child(el().grow(1.0))
 }
@@ -1832,7 +1823,7 @@ fn list_panel(p: Paint, body: El, hints: Option<El>, x: f32, w: f32, h: f32, blu
     panel
         .motion(tuning::get().island)
         .role("list")
-        .label("Send to")
+        .label(tr("Send to"))
         .hit()
         // Hex's tap reports a press on the list before the list hears it:
         // the pointer being here keeps it from reading as a click away.
