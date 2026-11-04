@@ -32,12 +32,13 @@ export default bench({
       },
     },
     // The same tray, judged by what it holds: the GPU device and the
-    // surfaces of the overlays that wait hidden (the capture capsule,
-    // picker, and ink are made at launch).
+    // surfaces of the overlays that wait hidden (the capture capsule and
+    // ink are made at launch, and the picker too except on Windows).
+    // `gpu.vram` is the surfaces' dedicated GPU memory.
     "window-closed-memory": {
       targets: ["tray"],
       primary: "memory.app.private",
-      metrics: ["cpu.wakes", "cpu.work"],
+      metrics: ["gpu.vram", "cpu.wakes", "cpu.work"],
       async run({ page }) {
         await page.wait(8_000)
       },

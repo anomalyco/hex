@@ -291,8 +291,8 @@ pub(crate) struct CaptureOverlays {
 }
 
 impl CaptureOverlays {
-    /// Adds the three overlays, prewarmed and hidden, and starts following
-    /// captures.
+    /// Adds the three overlays, hidden, and starts following captures. The
+    /// capsule and ink are prewarmed; the picker too, except on Windows.
     pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
         let picker = PickerOverlay::install(app, act);
         let aim = picker.clone();
