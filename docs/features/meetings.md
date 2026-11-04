@@ -30,9 +30,13 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   Transcript folder (~/Documents/Hex Meetings; Reveal / choose; an error opens
 │   │   Advanced), Summarize with Apple Intelligence (on by default), Summarize
 │   │   with OpenCode (off by default; when Apple Intelligence is off or missing),
-│   │   then with Labs › Choose meeting summary model on, Summary model: the
-│   │   provider/model OpenCode notes use, no fallback; empty -> the ranked fast
-│   │   models (meetings.opencode_model; see labs.md, #1107)
+│   │   then with Labs › Choose meeting summary model on, Summary model: a
+│   │   searchable picker of the running OpenCode's models (the catalog Modes
+│   │   uses, read only while this row shows) whose pick is the provider/model
+│   │   OpenCode notes use, no fallback; "Hex picks a fast model" clears it ->
+│   │   the ranked fast models. OpenCode missing or failing -> a notice with
+│   │   Check again / Retry, the saved model kept and shown by its ID
+│   │   (meetings.opencode_model; see labs.md, #1107, #1301)
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
@@ -482,6 +486,10 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      (Idle menu bar: "Record Meeting" + "Copy Last Meeting Transcript")
   -> Floating recording indicator (when Show recording indicator is on) // meetings.indicator
      ├── Rune interactive overlay: a non-activating panel that never becomes key
+     ├── Only the drawn pill takes the pointer (OverlayInput::Regions, the
+     │   pill `.hit()`); the window is as wide as the open pill, and clicks
+     │   in its transparent rest reach the app beneath (#1305; not observed
+     │   on a real Mac)
      ├── In the saved recording_indicator_corner
      ├── Compact: pulsing red dot · title · mm:ss, plus "+N" when turns wait
      ├── Hover -> widens toward the screen with the actions below; pointer
@@ -519,8 +527,10 @@ Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.pan
   -> Off: top right below the menu bar, no drag, exactly as before
   Checks: a_released_panel_snaps_by_its_own_size,
   each_corner_places_the_panel_at_its_edges, only_a_movable_panel_drags
-  (rune_ui/meeting_capsules.rs); not observed on a real Mac. Not built:
-  clicks passing through the panel outside its buttons
+  (rune_ui/meeting_capsules.rs); not observed on a real Mac. Every panel
+  capsule takes the pointer only on its body, never the window's margin
+  around it (#1305); a click on the body outside its buttons still stops
+  there
 
 Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-stop
   Only a recording Hex started on its own (Always record); manual, offered,

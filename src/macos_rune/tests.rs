@@ -5,6 +5,16 @@ use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
 
 const WAIT: Duration = Duration::from_secs(3);
 
+/// ⌘Tab back to Hex opens its closed window (#1298), but never for a
+/// menu-bar-only Hex, an overlay that took the keyboard, or an open window.
+#[test]
+fn switching_to_hex_opens_its_closed_window() {
+    assert!(reopen_on_activation(true, false, false));
+    assert!(!reopen_on_activation(false, false, false));
+    assert!(!reopen_on_activation(true, true, false));
+    assert!(!reopen_on_activation(true, false, true));
+}
+
 /// Hold each preparation until released, observing its exact request and cancellation.
 struct Fixture {
     runtime: Runtime,

@@ -296,7 +296,7 @@ pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
 /// Always record / Never offer choice; behind Advanced the indicator,
 /// folder, Apple Intelligence notes, and the granted permission.
 pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
-    use super::general::{advanced_open, advanced_toggle};
+    use super::general::advanced_toggle;
     let meetings = &ui.settings.meetings;
     let mut rows = vec![meetings_toggle(ui, p)];
     let mut more = Vec::new();
@@ -423,14 +423,18 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
         )
         });
         // Labs › Choose meeting summary model, for OpenCode's notes only.
-        let summary_model = crate::labs::Feature::MeetingSummaryModel;
-        if meetings.summarize_with_opencode
-            && !opencode_managed()
-            && summary_model.managed().is_none()
-            && summary_model.shipped()
-            && summary_model.on(&ui.settings)
-        {
-            more.push(summary_model_row(ui, p));
+        if summary_model_shown(ui) {
+            more.extend(super::models::rows(
+                ui,
+                p,
+                super::models::Target::MeetingSummary,
+                layer,
+            ));
+            more.extend(super::models::unavailable(
+                ui,
+                p,
+                crate::desktop::opencode_catalog::OpenCodeFeature::MeetingSummary,
+            ));
         }
         if let Some(error) = &ui.platform.meeting_folder_error {
             // A failed folder change shows where it happened, opening the fold.
@@ -442,7 +446,7 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
         sections.extend(calendar_section(ui, p, layer));
         sections.push(detected_calls_section(ui, p, layer));
         sections.push(advanced_toggle(ui, p, Pane::Meetings));
-        if advanced_open(ui, Pane::Meetings) || ui.platform.meeting_folder_error.is_some() {
+        if meetings_advanced_shown(ui) {
             sections.push(card(p, "advanced", more));
         }
     }
@@ -489,25 +493,33 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     )
 }
 
-/// Labs › Choose meeting summary model: the OpenCode `provider/model` that
-/// writes meeting titles and summaries, saved on Return or Save.
-fn summary_model_row(ui: &Ui, p: Paint) -> El {
-    let saved = ui
-        .settings
-        .meetings
-        .opencode_model
-        .as_deref()
-        .unwrap_or_default();
-    let fallback;
-    let edit = match &ui.meetings.summary_model {
-        Some(edit) => edit,
-        None => {
-            fallback = rune::TextEdit::new(saved.to_owned());
-            &fallback
-        }
-    };
-    let edited = edit.text.trim() != saved.trim();
-    let about = match crate::meeting::generator::parse_model(saved) {
+/// Whether Meetings › Settings shows its Advanced card: the fold is open, or
+/// a failed folder change opened it to show where.
+fn meetings_advanced_shown(ui: &Ui) -> bool {
+    super::general::advanced_open(ui, Pane::Meetings) || ui.platform.meeting_folder_error.is_some()
+}
+
+/// Whether Labs › Choose meeting summary model's picker shows: Meetings ›
+/// Settings › Advanced shows with Summarize with OpenCode and the lab on.
+/// The window reads the OpenCode catalog only while it does.
+pub(super) fn summary_model_shown(ui: &Ui) -> bool {
+    let summary_model = crate::labs::Feature::MeetingSummaryModel;
+    ui.pane == Pane::Meetings
+        && !ui.labs_open
+        && super::meetings::available(ui)
+        && ui.meetings.view == super::meetings::View::Settings
+        && ui.settings.meetings.enabled
+        && meetings_advanced_shown(ui)
+        && ui.settings.meetings.summarize_with_opencode
+        && !opencode_managed()
+        && summary_model.managed().is_none()
+        && summary_model.shipped()
+        && summary_model.on(&ui.settings)
+}
+
+/// What the summary model row says about the saved `provider/model`.
+pub(super) fn summary_model_about(saved: &str) -> String {
+    match crate::meeting::generator::parse_model(saved) {
         Some((provider, model)) => tr_named(
             "Summaries use {model}. If it isn't available, the meeting shows the error instead of trying another model",
             &[("model", &format!("{provider}/{model}"))],
@@ -520,57 +532,6 @@ fn summary_model_row(ui: &Ui, p: Paint) -> El {
             "Write it as provider/model, such as openai/gpt-5.4-mini. Until then, Hex tries its list of fast models",
         )
         .to_owned(),
-    };
-    let input = rune_kit::TextInput::new(edit)
-        .placeholder("provider/model")
-        .width(Some(220.0))
-        .on_edit(|ui: &mut Ui| {
-            let saved = ui
-                .settings
-                .meetings
-                .opencode_model
-                .clone()
-                .unwrap_or_default();
-            ui.meetings
-                .summary_model
-                .get_or_insert_with(|| rune::TextEdit::new(saved))
-        })
-        .on_submit(|ui: &mut Ui, _| save_summary_model(ui))
-        .build(p.k)
-        .key("meeting-summary-model-field");
-    let controls = row()
-        .key("controls")
-        .gap(8.0)
-        .center_y()
-        .child(input)
-        .children(edited.then(|| {
-            button(
-                p,
-                "meeting-summary-model-save",
-                tr("Save"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| save_summary_model(ui),
-            )
-        }));
-    icon_row(
-        p,
-        "meeting-summary-model",
-        &icons::SPARKLES,
-        tr("Summary model"),
-        Some(about.as_str()),
-        controls,
-    )
-}
-
-/// Saves the summary model field: its trimmed text, or none when empty.
-fn save_summary_model(ui: &mut Ui) {
-    let Some(edit) = ui.meetings.summary_model.take() else {
-        return;
-    };
-    let typed = edit.text.trim();
-    let model = (!typed.is_empty()).then(|| typed.to_owned());
-    if model != ui.settings.meetings.opencode_model {
-        ui.update(|settings| settings.meetings.opencode_model = model);
     }
 }
 

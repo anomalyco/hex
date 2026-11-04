@@ -15,6 +15,9 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Hex picks a fast model", "Hex choisit un modèle rapide"),
+    ("Summary models show once Hex connects to OpenCode.", "Les modèles de résumé s'affichent dès que Hex se connecte à OpenCode."),
+    ("Start OpenCode to choose a summary model. Hex keeps the saved one.", "Lancez OpenCode pour choisir un modèle de résumé. Hex garde celui enregistré."),
     ("Your answer", "Votre réponse"),
     ("History retention", "Conservation de l'historique"),
     ("Earlier versions", "Versions précédentes"),
