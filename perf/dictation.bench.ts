@@ -87,10 +87,15 @@ async function printed(reply: Reply): Promise<string> {
   return reply.text
 }
 
+// Windows opens no window with `--hidden`; the macOS app opens none once set
+// up, and `--device` makes a build without the fixture fail to open the
+// microphone instead of recording it.
+const args = process.platform === "win32" ? ["--hidden"] : ["--device", "Audio fixture"]
+
 export default bench({
   targets: {
-    warm: native("hex-dictation", { args: ["--hidden"], home, window: false }),
-    released: native("hex-dictation-released", { args: ["--hidden"], home, window: false }),
+    warm: native("hex-dictation", { args, home, window: false }),
+    released: native("hex-dictation-released", { args, home, window: false }),
   },
   // The model loads and the listener starts; one dictation then warms the
   // whole path (stream, model, output).
@@ -125,6 +130,17 @@ export default bench({
         })
         await ctx.page.wait(STOP_AFTER_MS)
         await printed(await stop(ctx))
+      },
+    },
+    // Release to text: the stop's wait for the transcript (the 200 ms
+    // release tail, the live stream's finish, processing, and History).
+    dictation: {
+      primary: "phase.finish",
+      metrics: ["cpu.work", "cpu.wakes", "memory.app.host"],
+      async run(ctx) {
+        await start(ctx)
+        await ctx.page.wait(STOP_AFTER_MS)
+        await printed(await ctx.phase("finish", () => stop(ctx)))
       },
     },
     // While a dictation records: the audio path, the live stream's

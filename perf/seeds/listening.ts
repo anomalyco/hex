@@ -1,6 +1,7 @@
 // A home seed holding the default English model, hard-linked from this
-// machine's own Hex install (read only; strobe copies the seed into each
-// private home). Returns null when no installed model is found.
+// machine's own Hex install, or from the folder HEX_SEED_MODELS names on a
+// machine without one (read only; strobe copies the seed into each private
+// home). Returns null when no installed model is found.
 import { copyFileSync, existsSync, linkSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -8,6 +9,7 @@ import { join } from "node:path"
 const MODELS = ["parakeet-unified-en-0.6b-Q8_0.gguf", "silero-vad-v6.2-F32.gguf"]
 
 function installedModels(): string | null {
+  if (process.env.HEX_SEED_MODELS && existsSync(join(process.env.HEX_SEED_MODELS, MODELS[0]))) return process.env.HEX_SEED_MODELS
   const roots = [
     process.env.APPDATA && join(process.env.APPDATA, "hex"),
     join(homedir(), "Library", "Application Support", "hex"),

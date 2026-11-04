@@ -504,6 +504,21 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     #[cfg(hex_capture)]
     let capture_overlays =
         Some(crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
+    // `hex dictation` and `hex paste-last` go straight to the listener; the
+    // rest reach the main thread's pump.
+    let (pump_calls, pump_call_receiver) = mpsc::sync_channel(8);
+    let control_runtime = handle.clone();
+    thread::Builder::new()
+        .name("hex-control".into())
+        .spawn(move || {
+            for call in control_receiver {
+                if let Some(call) = control::answer_off_main(&control_runtime, call)
+                    && pump_calls.send(call).is_err()
+                {
+                    return;
+                }
+            }
+        })?;
     let pump = Pump {
         window: window.clone(),
         capsules,
@@ -516,7 +531,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         status_actions: None,
         controller_events,
         developer_calls: developer_receiver,
-        control_calls: control_receiver,
+        control_calls: pump_call_receiver,
         meeting_waiters: Vec::new(),
         meeting_state: MeetingMenuState::Idle,
         meeting_menu_at: Instant::now(),
