@@ -59,19 +59,6 @@ pub(super) fn spoken_text_end_ms(tokens: &[transcribe_cpp::Token]) -> Option<u64
         .map(|end| end as u64)
 }
 
-/// Silence a dictation stream of `model` hears after the clip, before it
-/// finalizes: on macOS the trailing silence its whole-clip runs get, so a
-/// streamed sentence keeps its closing punctuation (issue 657).
-#[cfg(target_os = "macos")]
-pub(super) fn stream_trailing_silence(model: &Model) -> usize {
-    model.stream_trailing_silence()
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(super) fn stream_trailing_silence(_model: &Model) -> usize {
-    0
-}
-
 /// Pause audio a dictation stream still hears before its long pauses are
 /// cut: longer than a chunk plus its lookahead (2.08 s for Unified English),
 /// so the words before a pause decode during it.
@@ -112,12 +99,10 @@ pub(super) struct PauseCap<'a, S> {
     pub(super) dropped: usize,
     /// Whether any frame rose above the noise floor.
     heard: bool,
-    /// Silence fed after the clip, just before finalizing.
-    trailing_silence: usize,
 }
 
 impl<'a, S: StreamFeed> PauseCap<'a, S> {
-    pub(super) fn new(stream: &'a mut S, trailing_silence: usize) -> Self {
+    pub(super) fn new(stream: &'a mut S) -> Self {
         Self {
             stream,
             speech: Default::default(),
@@ -128,7 +113,6 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
             tail: VecDeque::with_capacity(PAUSE_TAIL_SAMPLES),
             dropped: 0,
             heard: false,
-            trailing_silence,
         }
     }
 
@@ -179,8 +163,9 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         self.stream.feed(&out)
     }
 
-    /// A trailing pause keeps only its head; then the model's trailing
-    /// silence follows.
+    /// A trailing pause keeps only its head. Nothing is added after the
+    /// clip: a buffered stream's finalize decodes a right context of silence
+    /// past the last audio itself, which keeps the closing punctuation.
     fn finalize(&mut self) -> Result<String, String> {
         if self.pause <= PAUSE_HEAD_SAMPLES && !self.frame.is_empty() {
             let rest = std::mem::take(&mut self.frame);
@@ -198,9 +183,6 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
                 "the stream heard only quiet audio and {} ms was cut as a pause",
                 self.dropped / 16
             ));
-        }
-        if self.trailing_silence > 0 {
-            self.stream.feed(&vec![0.0; self.trailing_silence])?;
         }
         let text = self.stream.finalize()?;
         if !text.is_empty()
@@ -255,7 +237,7 @@ impl StreamFeed for Kept {
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(super) fn skip_long_pauses(clip: &[f32]) -> Option<(Vec<f32>, usize)> {
     let mut kept = Kept::default();
-    let mut capped = PauseCap::new(&mut kept, 0);
+    let mut capped = PauseCap::new(&mut kept);
     capped.feed(clip).ok()?;
     capped.finalize().ok()?;
     let dropped = capped.dropped;

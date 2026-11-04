@@ -45,9 +45,10 @@ use crate::transcription::models::{
 #[cfg(target_os = "macos")]
 pub use crate::transcription::transcript::{Transcript, TranscriptSegment};
 
-/// Silence after a Unified English clip (400 ms at 16 kHz), so the model
-/// has the context to emit the final word and its closing punctuation
-/// (issue 657: sentences lost their full stop or question mark).
+/// Silence after a whole Unified English clip (400 ms at 16 kHz), so the
+/// model has the context to emit the final word and its closing punctuation
+/// (issue 657: sentences lost their full stop or question mark). A live
+/// stream needs none: its finalize decodes silence past the clip itself.
 #[cfg(target_os = "macos")]
 pub(crate) const UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES: usize = 6_400;
 
@@ -179,15 +180,6 @@ impl WarmTranscriber {
         match &self.active {
             Some(Transcriber::Gguf(model)) => model.selection(),
             _ => None,
-        }
-    }
-
-    /// Silence a live stream of the warm model hears before it finalizes,
-    /// the same trailing silence its whole-clip runs get.
-    pub(crate) fn stream_trailing_silence(&self) -> usize {
-        match &self.active {
-            Some(Transcriber::Gguf(model)) => trailing_silence_samples(model.model_id()),
-            _ => 0,
         }
     }
 

@@ -1166,9 +1166,8 @@ impl Worker {
         let Some(model) = self.model.as_mut() else {
             return;
         };
-        let trailing_silence = stream_trailing_silence(model);
         let ended = model.with_stream(&options, cancel, |stream| {
-            let mut capped = PauseCap::new(stream, trailing_silence);
+            let mut capped = PauseCap::new(stream);
             let ended = drive_stream(
                 id,
                 &mut capped,
@@ -1442,7 +1441,7 @@ mod tests {
         clip.extend(tone(16_000));
         clip.extend(vec![0.0; 80_000]);
         let mut fake = FakeStream::default();
-        let mut capped = PauseCap::new(&mut fake, 0);
+        let mut capped = PauseCap::new(&mut fake);
         for chunk in clip.chunks(1_234) {
             capped.feed(chunk).unwrap();
         }
@@ -1480,7 +1479,7 @@ mod tests {
         let mut seed = 3;
         let clip = noise(6_000, -80.0, &mut seed);
         let mut fake = FakeStream::default();
-        let mut capped = PauseCap::new(&mut fake, 0);
+        let mut capped = PauseCap::new(&mut fake);
         let result = finish_stream(&mut capped, &clip, 0);
         assert!(capped.dropped > 0);
         assert!(result.is_err(), "{result:?}");
@@ -1502,7 +1501,7 @@ mod tests {
             text_end_ms: Some(text_end_ms),
             ..FakeStream::default()
         };
-        let mut capped = PauseCap::new(&mut fake, 0);
+        let mut capped = PauseCap::new(&mut fake);
         for chunk in clip.chunks(1_600) {
             capped.feed(chunk).unwrap();
         }
@@ -1639,32 +1638,13 @@ mod tests {
             "the speech margin misses this speech"
         );
         let mut fake = FakeStream::default();
-        let mut capped = PauseCap::new(&mut fake, 0);
+        let mut capped = PauseCap::new(&mut fake);
         for chunk in clip.chunks(1_234) {
             capped.feed(chunk).unwrap();
         }
         capped.finalize().unwrap();
         assert_eq!(capped.dropped, 0);
         assert_eq!(fake.fed, clip);
-    }
-
-    #[test]
-    fn a_dictation_stream_hears_trailing_silence_before_it_finalizes() {
-        // #657: without trailing silence the stream dropped the closing
-        // full stop or question mark the whole clip kept.
-        let clip = tone(16_000);
-        let mut fake = FakeStream::default();
-        let mut capped = PauseCap::new(&mut fake, 6_400);
-        for chunk in clip.chunks(1_234) {
-            capped.feed(chunk).unwrap();
-        }
-        assert_eq!(
-            capped.finalize(),
-            Ok(format!("streamed {}", 16_000 + 6_400))
-        );
-        assert_eq!(capped.dropped, 0);
-        assert_eq!(fake.fed[..16_000], clip[..]);
-        assert!(fake.fed[16_000..].iter().all(|&sample| sample == 0.0));
     }
 
     fn heard(samples: usize) -> Partial {
