@@ -421,7 +421,7 @@ observe input-source changes or show these controls.
 - `json` settings (modes, meeting providers, excluded calendars) take the JSON
   value the file stores.
 - `ui_language` takes `en`, `pl`, `zh` (Simplified Chinese), `zh-Hant`
-  (Traditional Chinese), `ja`, `de`, `es`, `uk`, `pt`, `fr`, or `none`
+  (Traditional Chinese), `ja`, `de`, `es`, `uk`, `pt`, `fr`, `ru`, or `none`
   (follow the system language), the same languages Settings offers. Following
   the system, a Chinese locale with the Hant script or the TW, HK, or MO
   region shows Traditional Chinese; other Chinese locales show Simplified.

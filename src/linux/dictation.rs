@@ -227,15 +227,15 @@ impl DictationOutput {
         started: Instant,
         recording: Option<crate::history::Recording>,
     ) -> Result<String> {
-        let context = crate::linux::context::capture();
+        let modes = self
+            .modes
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let context = crate::linux::context::capture(!raw && modes.reads_page());
         let processed = if raw {
             crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
-            let modes = self
-                .modes
-                .read()
-                .unwrap_or_else(|error| error.into_inner())
-                .clone();
             modes.process(&raw_text, &context, &self.transformations)
         };
         if processed.text.trim().is_empty() {
@@ -766,7 +766,9 @@ pub(crate) fn run(
                     recording_raw = raw;
                     let pressed_at = clock.at(Instant::now()).filter(|_| audio_ready);
                     if let Some(pressed_at) = pressed_at {
-                        start_capture(&mut capture, pressed_at, || {
+                        let pre_roll =
+                            crate::dictation::hotkey_pre_roll(settings.recording_audio_behavior);
+                        start_capture(&mut capture, pressed_at, pre_roll, || {
                             feedback::play_provisional_start();
                         });
                         stream_when_due(&mut capture, &engine, toggle);
@@ -910,7 +912,7 @@ pub(crate) fn run(
                     // The stream's first chunk arrived while the shortcut is
                     // held: recording starts here, without pre-roll.
                     start_pending = false;
-                    start_capture(&mut capture, captured_through, || {
+                    start_capture(&mut capture, captured_through, Duration::ZERO, || {
                         feedback::play_provisional_start();
                     });
                 }
@@ -1031,8 +1033,13 @@ pub(crate) fn initialize_feedback(settings: &crate::app_settings::AppSettings) {
     }
 }
 
-fn start_capture(capture: &mut DictationCapture, pressed_at: CaptureInstant, play: impl FnOnce()) {
-    capture.start_at_press(pressed_at);
+fn start_capture(
+    capture: &mut DictationCapture,
+    pressed_at: CaptureInstant,
+    pre_roll: Duration,
+    play: impl FnOnce(),
+) {
+    capture.start_at_press(pressed_at, pre_roll);
     play();
 }
 
@@ -1173,6 +1180,8 @@ mod tests {
     use crate::dictation::POST_RELEASE_TAIL;
     use crate::transcription::engine::Command;
 
+    const PRE_ROLL: Duration = Duration::from_millis(450);
+
     fn capture_time() -> CaptureInstant {
         CaptureInstant::from_nanos(60_000_000_000)
     }
@@ -1198,7 +1207,7 @@ mod tests {
         seconds: u64,
     ) -> CaptureInstant {
         let start = capture_time();
-        start_capture(capture, start, || {});
+        start_capture(capture, start, PRE_ROLL, || {});
         stream_when_due(capture, engine, toggle);
         let mut through = start;
         for _ in 0..seconds * 10 {
@@ -1224,7 +1233,7 @@ mod tests {
         // Pressed 800 ms after a 1 s chunk arrived: none of it is pre-roll.
         let pressed = clock.at(received + Duration::from_millis(800)).unwrap();
         assert_eq!(pressed, through + Duration::from_millis(800));
-        start_capture(&mut capture, pressed, || {});
+        start_capture(&mut capture, pressed, PRE_ROLL, || {});
         assert!(capture.recorded_from(0).is_empty());
         capture.ingest(&[2.0; 16_000], through + Duration::from_secs(1));
         assert_eq!(capture.recorded_from(0).len(), 7_200 + 3_200);
@@ -1306,7 +1315,7 @@ mod tests {
         let started_at = capture_time();
         let mut sounds = Vec::new();
 
-        start_capture(&mut capture, started_at, || {
+        start_capture(&mut capture, started_at, PRE_ROLL, || {
             sounds.push(Tone::DictationStart)
         });
 
@@ -1324,7 +1333,7 @@ mod tests {
             let (engine, commands) = TranscriptionEngine::for_test();
             let mut capture = DictationCapture::new(16_000);
             let start = capture_time();
-            start_capture(&mut capture, start, || {});
+            start_capture(&mut capture, start, PRE_ROLL, || {});
             stream_when_due(&mut capture, &engine, toggle);
             assert_eq!(capture.is_streaming(), toggle);
             capture.ingest(&[0.1; 1_600], start + Duration::from_millis(100));
@@ -1420,7 +1429,7 @@ mod tests {
 
         let mut short = DictationCapture::new(16_000);
         let start = capture_time();
-        start_capture(&mut short, start, || {});
+        start_capture(&mut short, start, PRE_ROLL, || {});
         stream_when_due(&mut short, &engine, true);
         short.ingest(&[0.1; 1_600], start + Duration::from_millis(100));
         // A printing stop of a short tap prints nothing and says why.
