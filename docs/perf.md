@@ -62,7 +62,7 @@ own Hex:
 - `guard` stops a run if your own `settings.json` or `local-api.json`
   changes, or your Hex exits.
 
-The copy loads no model, except in the listening cases below.
+The copy loads no model, except in the listening and dictation cases below.
 
 ## Cases
 
@@ -74,6 +74,7 @@ The copy loads no model, except in the listening cases below.
 | `perf/launch.bench.ts` | `cold-launch` | `launch.ready` | Process start to the first painted window | waits for an unlock |
 | `perf/launch.bench.ts` | `hidden-launch` | `launch.ready` | Process start to `local API started`, tray only | runs |
 | `perf/listening.bench.ts` | `listening-at-rest` | `cpu.work` | 8 s listening at rest, microphone released and open | runs |
+| `perf/dictation.bench.ts` | `recording` | `cpu.wakes` | 6 s of one dictation recording a fixture, microphone open and released | runs |
 
 Secondary metrics are thread wakeups (`cpu.wakes`), GPU use, and private
 memory. `strobe query <rec> threads` names the threads; Hex names every
@@ -100,3 +101,24 @@ keyboard hook and loads the default English model, which
 `perf/seeds/.generated`. strobe shares a seed file this large (64 MB and up)
 read only between launches instead of copying it into each private home. The warm profile opens the machine's real microphone; neither records.
 Leave the dictation shortcut alone while it runs.
+
+## Dictation cases
+
+`perf/dictation.bench.ts` runs whole dictations with no microphone and no
+paste. The `hex-dictation` profiles set `HEX_AUDIO_FIXTURE` to `speech.wav`,
+which `perf/seeds/dictation.ts` makes with this machine's own
+text-to-speech voice (one sentence at 48 kHz, then 2 s of silence) beside
+the model the listening seed links. Every microphone open in the copy plays
+that file instead, from its start, in 10 ms chunks at real-time pace, and
+no device is opened, so nothing is recorded.
+
+The bench drives the copy through its local API as `hex dictation` does.
+Each dictation starts as the sentence begins (with the microphone open,
+when the looping file comes round) and ends with `dictation stop --print`,
+which returns the processed text instead of pasting it. The profiles move
+the copy's shortcuts to F19 and F18 and unbind Paste Last, so a key pressed
+while a bench runs on a machine in use reaches nothing.
+
+Only bench builds that have `HEX_AUDIO_FIXTURE`. An older build ignores it
+and opens the real microphone; setup then refuses the block, but only
+after the microphone was open.

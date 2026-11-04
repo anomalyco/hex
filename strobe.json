@@ -64,6 +64,37 @@
           "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
         }
       }
+    },
+    "hex-dictation": {
+      "extends": "hex",
+      "env": { "HEX_AUDIO_FIXTURE": "{home}/speech.wav" },
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": false,
+          "sound_effects": false,
+          "dictation_hotkey": { "keys": [{ "code": 80, "label": "F19" }] },
+          "paste_last_hotkey": null,
+          "capture": { "enabled": true, "hotkey": { "keys": [{ "code": 79, "label": "F18" }] } },
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings", "annotate-on-by-default", "anomaly-hex-identity"]
+        }
+      }
+    },
+    "hex-dictation-released": {
+      "extends": "hex-dictation",
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": true,
+          "release_microphone_while_idle": true,
+          "sound_effects": false,
+          "dictation_hotkey": { "keys": [{ "code": 80, "label": "F19" }] },
+          "paste_last_hotkey": null,
+          "capture": { "enabled": true, "hotkey": { "keys": [{ "code": 79, "label": "F18" }] } },
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings", "annotate-on-by-default", "anomaly-hex-identity"]
+        }
+      }
     }
   },
   "benches": ["perf/**/*.bench.ts"],
