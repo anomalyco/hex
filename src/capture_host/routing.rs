@@ -28,9 +28,9 @@ use super::{SharedOutcomes, lock};
 mod preparation;
 mod session_name;
 
-use session_name::{name_answer, session_name};
 #[cfg(test)]
 use session_name::session_name_by;
+use session_name::{name_answer, session_name};
 
 /// How often sends OpenCode didn't take are retried.
 const RETRY_EVERY: Duration = Duration::from_secs(15);
