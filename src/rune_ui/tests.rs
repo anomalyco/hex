@@ -2267,10 +2267,10 @@ fn the_microphone_field_names_the_input_in_use() {
     // Tall enough that the row shows: the accessibility tree holds only what
     // the window draws.
     let field = |rt: &Runtime<Ui>| a11y_value(rt, "microphone-control");
-    let rt = runtime("mac-settings", true, GOLDEN_SIZE);
+    let rt = runtime("mac-settings", true, TALL_SIZE);
     assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
 
-    let rt = runtime("mac-microphone-missing", true, GOLDEN_SIZE);
+    let rt = runtime("mac-microphone-missing", true, TALL_SIZE);
     assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
     let texts = texts(&rt);
     assert!(texts.contains(&"not connected".to_owned()), "{texts:?}");
@@ -2281,7 +2281,7 @@ fn the_microphone_field_names_the_input_in_use() {
 fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
     let note = "MacBook Pro Microphone is off while the lid is closed, so Hex listens to Studio Display Microphone";
     let field = |rt: &Runtime<Ui>| a11y_value(rt, "microphone-control");
-    let mut rt = runtime("mac-microphone-lid-closed", true, GOLDEN_SIZE);
+    let mut rt = runtime("mac-microphone-lid-closed", true, TALL_SIZE);
     assert_eq!(
         field(&rt).as_deref(),
         Some("System default, Studio Display Microphone")

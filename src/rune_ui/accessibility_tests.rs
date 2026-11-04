@@ -66,11 +66,18 @@ fn nodes(tree: &Value) -> Vec<(String, &Value)> {
 /// The node keyed `key` in `rt`'s accessibility tree.
 pub(super) fn node(rt: &Runtime<Ui>, key: &str) -> Value {
     let tree = rt.accessibility_json();
-    nodes(&tree)
-        .into_iter()
+    let all = nodes(&tree);
+    all.iter()
         .find(|(_, node)| node["key"].as_str() == Some(key))
-        .map(|(_, node)| node.clone())
-        .unwrap_or_else(|| panic!("no accessible element keyed {key}"))
+        .map(|(_, node)| (*node).clone())
+        .unwrap_or_else(|| {
+            let paths: Vec<&str> = all.iter().map(|(path, _)| path.as_str()).collect();
+            panic!(
+                "no accessible element keyed {key}; drawn at {:?}; the tree:\n{}",
+                rt.find(key),
+                paths.join("\n")
+            )
+        })
 }
 
 /// The accessible value of the element keyed `key`: a choice's chosen item.
