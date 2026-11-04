@@ -153,7 +153,9 @@ pub(crate) fn done_style() -> TextStyle {
 
 /// [`TopLine::Icons`] says nothing for a plain copy: the check is enough.
 pub(crate) fn bare(done: &Done) -> bool {
-    tuning::get().top_line == TopLine::Icons && done.text.is_empty() && done.why.is_none()
+    tuning::get().top_line == TopLine::Icons
+        && (done.text.is_empty() || done.text == super::flow::copied())
+        && done.why.is_none()
 }
 
 /// The capsule unfolds from this fraction of its height, anchored on its

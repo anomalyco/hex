@@ -884,8 +884,8 @@ pub(crate) struct PickerOverlay {
 }
 
 impl PickerOverlay {
-    /// Adds the overlay, prewarmed and hidden, holding no GPU surface while
-    /// hidden (Windows and Linux). `act` starts what it picks; it runs on
+    /// Adds the overlay, hidden, holding no GPU surface while hidden, nor on
+    /// macOS and Windows a window. `act` starts what it picks; it runs on
     /// the main thread, so it must only hand the action on.
     pub(crate) fn install<S: 'static>(
         app: &mut rune::App<S>,

@@ -381,16 +381,27 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 ├── Routing (Scrawl's routing.md) -> `last.route` once its answer arrives; the
 │   capsule follows refinements and delivery separately, including Queued
 │   (then Sent), how an Undo ended, and a failed send
-│   ├── A saved rule -> "Sending to X", a 3–2–1 second countdown and Undo.
+│   ├── A saved rule -> "Sending to X" and Undo, whose ring drains through the
+│   │   Undo window (5 s) and is gone when Undo is; no words count it down.
 │   │   A repository awaiting its session shows the repository name. Undo
 │   │   cancels before posting. The capsule remains visible until delivery;
 │   │   then it reads "Sent to X" and plays the Sent tone. A picked send still
-│   │   goes immediately with its plain Undo. No runner-up chip for a rule;
+│   │   goes immediately, with the same ring on its Undo. No runner-up chip for a rule;
 │   │   after delivery and the Undo window, the capsule leaves by
 │   │   itself (with the list open it stays; the pointer on it holds it, and a
 │   │   folded list gives it a brief hold). Picking the rule's own session there (without
 │   │   "Always") only closes the list; nothing is sent again
-│   ├── A rule's countdown wakes each second; a pick's Undo wakes only at its end
+│   ├── The Undo ring -> one per send (rule or pick), tied to the window's end
+│   │   (`Done.countdown`) and drawn by `capture_capsule::undo_ring` as render-time
+│   │   opacity tweens, so nothing ticks: the capsule wakes only when the window
+│   │   ends. Reduce Motion steps it a second at a time. It is the Undo chip's
+│   │   own outline, draining clockwise from the top
+│   ├── The pointer on the capsule -> holds the countdown, one that starts
+│   │   under it too: the ring stands still (Reduce Motion too), Undo never
+│   │   runs out, and a rule's send waits (`CaptureCommand::Hold`). Leaving
+│   │   goes on with the time it had left, at least 1 s. A pick already went,
+│   │   so only its Undo waits (`Flow::hold_countdown`)
+├── A finished capture with nowhere sent yet reads "Copied" from the start
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
 │   │   answer) -> macOS: "Copied", then Search with the capture shortcut's
 │   │   keycaps (as Settings draws them) and ✕, the suggestions open under
@@ -408,21 +419,22 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   │   name each in a rounded-rect badge with its kind's icon (a globe for
 │   │   │   a site, a window for an app, a bubble for the session). Shift+click
 │   │   │   (or ⇧⏎ in the search)
-│   │   │   sends and saves the rule: "Sent to X · saved rule", and its Undo
+│   │   │   sends and saves the rule: "Sent to X · always", and its Undo
 │   │   │   takes back the send and the rule (what the key held before, or
 │   │   │   nothing, comes back). The rule names that session (`ses_…`),
 │   │   │   never its folder: a folder rule goes to the folder's newest
 │   │   │   session, so with SEER and RUNE DESKTOP in one checkout, a rule
 │   │   │   saved for RUNE DESKTOP went to SEER
 │   │   ├── A click -> sends at once: "Sent to X", the Sent tone, and a
-│   │   │   quiet Undo for the same 5 s, with no ring or drain; ✕ closes;
+│   │   │   Undo with its ring for the same 5 s; ✕ closes;
 │   │   │   the capsule then leaves by itself with its exit
 │   │   ├── Search or the capture shortcut (⌥⇧S) -> the search: "All
 │   │   │   sessions" over every session the router's look read (its two
 │   │   │   newest pages, every folder's, and any it named), filtered by
 │   │   │   what's typed, five rows at most and never shorter than the
 │   │   │   suggestions it opened from; the footer reads "Send ⏎",
-│   │   │   "Remember ⇧⏎", and "New capture ⌥⇧S". Esc or a click away goes
+│   │   │   "Remember ⇧⏎", and "New capture ⌥⇧S". Matching nothing, it reads
+│   │   │   "No sessions match" and the footer drops Send and Remember. Esc or a click away goes
 │   │   │   back to the suggestions; ⌥⇧S in the search records a new capture
 │   │   ├── Once the capsule has gone, ⌥⇧S records as usual
 │   │   ├── Esc -> not Hex's here: it goes to the app in front
@@ -434,12 +446,15 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   folds it to "Taken back" with "Send to…", and it leaves after the done
 │   │   hold; nothing here takes Esc. ✕ (or Esc in the typed list) dismisses:
 │   │   "Kept", the bundle untouched. Either way it then
-│   │   waits for Send to…, even after the router said the pick went.
+│   │   waits for Send to…, even after the router said the pick went. With no
+│   │   other session to offer, the list still opens with the one it went to
+│   │   ("taken back"), so Search can send it elsewhere; only a rule still
+│   │   resolving its folder reads "Taken back" with nothing to list.
 │   │   News of the send being taken back (it went, queued, or failed) leaves
 │   │   that list alone, and a pick made before the router answers the Undo
 │   │   stands: the Undo's answer and the earlier send's news never take it back
-│   ├── Too late to take back -> the same list, the session marked "has it",
-│   │   folded "Sent to X · too late"; a pick sends a copy there,
+│   ├── Too late to take back -> the same list, the session marked "already
+│   │   sent", folded "Already sent to X"; a pick sends a copy there,
 │   │   and ✕ just closes (it leaves by itself after the brief hold). Closed, it doesn't wait for a pick.
 │   │   An Undo OpenCode refuses (an error) reads as too late
 │   ├── Sends -> CaptureCommand::Send{to} and Undo, naming the
@@ -734,7 +749,10 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   a Shift pick's): a three-second countdown begins at Written. A folder
 │   │   rule shows its repository while its session resolves; it sends once both
 │   │   the countdown and resolution finish. Undo during the countdown posts
-│   │   nothing. Sending -> Sent, or Queued when OpenCode didn't take it. Whatever
+│   │   nothing. The capsule's `Hold` pauses the countdown while the pointer is
+│   │   on it and resumes it with what it had left (at least 1 s; a hold the
+│   │   capsule never ends lapses after 2 min, and the next capture resumes
+│   │   it). Sending -> Sent, or Queued when OpenCode didn't take it. Whatever
 │   │   autoSend, smartRouting, or jevRouting say, a saved rule sends and
 │   │   nothing else sends on its own. smartRouting off decides with the port
 │   │   ladder, after rules and addresses, on the same look
@@ -757,8 +775,10 @@ Where it goes                            // capture.route; capture.routing's aut
 │   ├── Nothing / NoAnswer -> recent sessions only
 │   └── Unreachable -> the look read no sessions (OpenCode slow past the look's
 │       deadline, down, or refusing); a warning in process.log with the error, and
-│       the capsule reads "Couldn't reach OpenCode" with why ("didn't answer in
-│       time"), keeping Paste
+│       the capsule reads "Couldn't reach OpenCode" with why ("OpenCode didn't
+│       answer"), or "OpenCode isn't running" alone, keeping Paste. A reason is
+│       shown only in plain words: one with a path, URL, OS error or code goes
+│       to process.log and the capsule shows none
 │       └── OpenCode refusing Hex's password (HTTP 401/403) -> "OpenCode needs a
 │           password Hex doesn't have", for the look and for a send, and
 │           process.log says where Hex reads it (service.json under this user's
@@ -784,7 +804,8 @@ Where it goes                            // capture.route; capture.routing's aut
 │   serves the ingest port (that process retries); a retried send can't be
 │   undone, so its "Sent to X" has no Undo. A queued or too-late-to-undo send
 │   leaves after the brief hold (4 s) rather than the 25 s done hold; a taken
-│   back capture with nothing to list ('Taken back') does too
+│   back capture with nothing to list ('Taken back', a rule still resolving)
+│   does too
 └── autoSend off -> no look, no route; the capture is only copied
 
 hex capture list|show|send|route         // capture.cli; docs/cli.md
