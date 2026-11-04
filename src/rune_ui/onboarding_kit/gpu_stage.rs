@@ -85,10 +85,9 @@ impl OnboardingGpu {
             &f.rt.instances,
             f.size,
         );
-        let dark = f.rt.env.system_dark;
         let (device, queue) = (f.device, f.queue);
         f.ui.draw_with(f.encoder, f.target, clear, &mut |pass, site| {
-            self.paint(pass, site, device, queue, dark);
+            self.paint(pass, site, device, queue);
         });
         self.end();
     }
@@ -123,7 +122,6 @@ impl OnboardingGpu {
         site: &EffectSite<'_>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        dark: bool,
     ) {
         let Some(hud) = self.huds.get_mut(&site.mark) else {
             return;
@@ -149,7 +147,8 @@ impl OnboardingGpu {
                 (bottom - top) as u32,
             ],
             scale: w / WINDOW.0,
-            dark,
+            // Dot scope sits on its dark plate in either appearance.
+            dark: true,
         };
         let painter = hud
             .painters

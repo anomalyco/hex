@@ -410,6 +410,20 @@ impl EventReader {
         }
     }
 
+    /// Opens the log at its current end, so `refresh` reads only records
+    /// appended from now on, without first parsing the whole history.
+    pub fn open_at_end(path: impl Into<PathBuf>) -> Self {
+        let mut reader = Self::open(path);
+        if let Ok(metadata) = fs::metadata(&reader.path) {
+            reader.offset = metadata.len();
+            #[cfg(unix)]
+            {
+                reader.file_id = Some((metadata.dev(), metadata.ino()));
+            }
+        }
+        reader
+    }
+
     pub fn refresh(&mut self) -> io::Result<()> {
         let mut file = match File::open(&self.path) {
             Ok(file) => file,
@@ -761,6 +775,28 @@ mod tests {
         );
         // Scratch space follows one record, never the size of the file.
         assert!(reader.pending.capacity() <= EVENT_READ_BUFFER_BYTES);
+        drop(log);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_reader_opened_at_the_end_reads_only_what_is_appended() {
+        let path = std::env::temp_dir().join(format!(
+            "hex-event-reader-at-end-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let log = EventLog::create(&path).unwrap();
+        log.dictation(DictationPhase::Pasted, "before").unwrap();
+        log.flush().unwrap();
+        let mut reader = EventReader::open_at_end(&path);
+        log.dictation(DictationPhase::Pasted, "after").unwrap();
+        log.flush().unwrap();
+        reader.refresh().unwrap();
+        assert_eq!(reader.events().len(), 1);
+        assert!(
+            matches!(reader.events().back(), Some(VoiceEvent::Dictation { text, .. }) if text == "after")
+        );
         drop(log);
         fs::remove_file(path).unwrap();
     }

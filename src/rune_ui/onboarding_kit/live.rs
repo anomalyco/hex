@@ -91,6 +91,11 @@ pub(crate) struct Live {
     pub(crate) fixture: bool,
     /// Dictation streams send their live words to the practice field.
     _live_words: crate::dictation::live_text::Demand,
+    /// The desktop HUD and live text stay away while `"Your turn"` draws
+    /// its own and the window has the focus.
+    desktop_hud_hidden: Option<crate::rune_hud::Hidden>,
+    /// The window has the focus, so a dictation lands in the practice.
+    window_focused: bool,
 }
 
 /// The model step, shown only when the scan found a compatible model.
@@ -273,6 +278,8 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         checked: None,
         fixture: ui.is_fixture(),
         _live_words: crate::dictation::live_text::demand(),
+        desktop_hud_hidden: None,
+        window_focused: true,
     });
     let now = clock(ui);
     s.now = now;
@@ -574,10 +581,30 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     // Hex's state arrives between frames, so the first run keeps polling;
     // a fixture shows one moment and stays still.
     advance_to(s, now, tx);
+    let draws_hud = live_window
+        && matches!(s.step, Step::Try | Step::TryHearing | Step::TryHeard)
+        && s.interactive_try();
+    if let Some(live) = s.live.as_mut() {
+        let hides = draws_hud && live.window_focused;
+        if hides != live.desktop_hud_hidden.is_some() {
+            live.desktop_hud_hidden = hides.then(crate::rune_hud::hide);
+        }
+    }
     if live_window {
         tx.wake_after(FRAME);
     }
     true
+}
+
+/// The window gained or lost the focus, or closed (`false`): the desktop
+/// HUD comes back for dictations into other apps.
+pub(in crate::rune_ui) fn window_focused(ui: &mut Ui, focused: bool) {
+    if let Some(live) = ui.first_run.as_mut().and_then(|s| s.live.as_mut()) {
+        live.window_focused = focused;
+        if !focused {
+            live.desktop_hud_hidden = None;
+        }
+    }
 }
 
 /// The first run over the whole window, while it shows.

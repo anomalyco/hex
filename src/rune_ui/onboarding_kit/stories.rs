@@ -431,7 +431,7 @@ impl Onboard {
             return;
         }
         if !self.granted {
-            self.jump_to_permissions();
+            self.resume_setup();
         } else if !self.can_hear() {
             self.jump_to_waiting();
         } else {

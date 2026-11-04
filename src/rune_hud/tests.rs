@@ -24,6 +24,16 @@ fn only_gnome_and_kde_on_wayland_keep_the_primary_display() {
         assert!(!keeps_primary_display(desktops, false));
     }
 }
+#[test]
+fn the_hud_stays_hidden_until_the_last_hider_drops() {
+    let first = hide();
+    let second = hide();
+    assert!(hidden());
+    drop(first);
+    assert!(hidden());
+    drop(second);
+    assert!(!hidden());
+}
 
 #[test]
 fn dot_scope_window_fits_the_largest_plate() {

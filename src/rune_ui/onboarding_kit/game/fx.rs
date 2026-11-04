@@ -203,6 +203,10 @@ struct Pipes {
     mote: wgpu::RenderPipeline,
 }
 
+/// The format of the layers Rune isolates effects into, where a strike or
+/// burn can also land.
+const LAYER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
 /// The burn and strike pipelines, made per target format as they're met.
 pub(crate) struct GameFx {
     module: wgpu::ShaderModule,
@@ -341,6 +345,26 @@ impl GameFx {
         (items, points, bind)
     }
 
+    /// Builds the effects and their pipelines for `format` and Rune's
+    /// layers on a thread of their own. Metal compiles these shaders on
+    /// first use, which held the first strike's frame for about 300 ms.
+    pub(crate) fn prewarm(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> Option<std::thread::JoinHandle<GameFx>> {
+        let device = device.clone();
+        std::thread::Builder::new()
+            .name("game-fx".into())
+            .spawn(move || {
+                let mut fx = GameFx::new(&device);
+                for format in [format, LAYER_FORMAT] {
+                    fx.pipes(&device, format);
+                }
+                fx
+            })
+            .ok()
+    }
+
     fn pipes(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) -> &Pipes {
         let (module, layout) = (&self.module, &self.pipeline_layout);
         self.pipes.entry(format).or_insert_with(|| {
@@ -460,7 +484,6 @@ impl GameFx {
         let bolts = fx.bolts.len() as u32;
         let motes = fx.motes.len() as u32;
         let tones = fx.tones;
-        let dark = f.rt.env.system_dark;
         let mut used = 0u64;
         f.ui.draw_with(
             f.encoder,
@@ -471,7 +494,7 @@ impl GameFx {
                     return;
                 };
                 if is_onboard_mark(site.mark) {
-                    hud.paint(pass, site, device, queue, dark);
+                    hud.paint(pass, site, device, queue);
                     return;
                 }
                 if !is_game_mark(mark) || used >= SLOTS {

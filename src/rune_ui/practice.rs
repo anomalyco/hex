@@ -16,7 +16,7 @@ pub(super) struct PracticeFeed {
 impl PracticeFeed {
     pub(super) fn new(event_path: &Path) -> Self {
         Self {
-            reader: EventReader::open(event_path),
+            reader: EventReader::open_at_end(event_path),
             since_ms: crate::desktop::events::now_ms(),
         }
     }
