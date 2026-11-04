@@ -384,6 +384,21 @@ pub(super) const SCENES: &[Scene] = &[
         ui.picker.installed = Some(vec![TranscriptionModelId::CohereTranscribe]);
         vocabulary::fixture(ui, true);
     }),
+    // Whisper reads only the terms that fit its prompt: the sheet says how many.
+    ("vocabulary-budget", |ui| {
+        *ui = portal_fixture();
+        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+        ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
+        vocabulary::fixture(ui, true);
+        let entries: Vec<_> = (1..=52)
+            .map(|n| crate::dictation::vocabulary::VocabularyEntry {
+                term: format!("Project codename {n}"),
+                sounds_like: Vec::new(),
+            })
+            .collect();
+        ui.settings.vocabulary = entries;
+        ui.vocabulary.reload(&ui.settings.vocabulary);
+    }),
     ("mac-settings-recording", |ui| {
         *ui = mac_fixture();
         let held = crate::app_settings::HotkeyModifiers {

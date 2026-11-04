@@ -14,6 +14,11 @@ General › Vocabulary   // vocabulary.settings; after Language
 │   Underdog Bark, Whisper, and Qwen3-ASR (QwenCleo too) show none
 ├── Parakeet-based model with Labs › Vocabulary biasing off -> the sheet says
 │   transcription uses the terms only with it on
+├── Selected model reads fewer terms than the list holds -> muted line under
+│   the sheet's description: "This model reads the first 38 of 52 terms"
+│   (dictation::vocabulary::terms_read: Parakeet's 64-term cap or the
+│   prompt's character budget, the same count transcription takes; scene
+│   vocabulary-budget)
 ├── Sheet description -> what the list does, then "Terms with spaces match
 │   only when said in full" (a term is matched whole; "Dax Rad" doesn't help
 │   "Dax" said alone, so a name also said alone gets its own row)
@@ -63,8 +68,8 @@ Context prompt (Whisper incl. ivrit.ai and NB-Whisper, Qwen3-ASR, QwenCleo)  // 
 │   characters (Whisper: its prompt slot holds 223 tokens and trims an
 │   overlong one from the front) or 1,000 (Qwen3-ASR's system message); the
 │   64-term cap is Parakeet's bias array only (#1246)
-├── Known gap: the sheet doesn't say how many terms the selected model reads
-│   or where they stop, and the 64-term vs full-budget hit rate is unmeasured
+├── The sheet says how many terms the selected model reads when that is
+│   fewer than the list; the 64-term vs full-budget hit rate is unmeasured
 ├── Whisper: transcribe.cpp's generic context prompt in the <|startofprev|>
 │   slot; Qwen3-ASR: the system message
 ├── Output that only repeats the prompt (two or more terms) is dropped, as
@@ -161,7 +166,8 @@ Sources: [dictation/vocabulary.rs](../../src/dictation/vocabulary.rs),
 Checks: `dictation::vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
 comma splitting, reading the saved list without settings, the
 first 64 terms and their spellings reaching transcription, the prompt bounded
-by characters alone (`the_prompt_keeps_the_first_terms_that_fit`),
+by characters alone (`the_prompt_keeps_the_first_terms_that_fit`), the
+sheet's count matching both (`terms_read_counts_exactly_what_transcription_takes`),
 folding hints, boost names);
 `loading_folds_saved_recognition_hints_into_the_vocabulary_once` in
 [app_settings.rs](../../src/app_settings.rs);

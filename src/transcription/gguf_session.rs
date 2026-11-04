@@ -93,14 +93,6 @@ fn session_options(device_type: transcribe_cpp::DeviceType) -> transcribe_cpp::S
     }
 }
 
-/// How much of the vocabulary a context prompt carries, in characters.
-/// Whisper's prompt slot holds 223 tokens and its engine trims an overlong
-/// one from the front, dropping the first (most important) terms, so the list
-/// stays well inside it. Qwen3-ASR's system message has far more room; the
-/// bound keeps a long list from crowding out the audio or being echoed.
-const WHISPER_PROMPT_CHARS: usize = 500;
-const QWEN3_ASR_PROMPT_CHARS: usize = 1_000;
-
 /// How a session feeds its model the vocabulary.
 #[derive(Clone, Copy)]
 enum VocabularySlot {
@@ -125,11 +117,7 @@ impl VocabularySlot {
         if !model.supports(transcribe_cpp::Feature::ContextPrompt) {
             return Self::None;
         }
-        match architecture.as_str() {
-            "whisper" => Self::Prompt(WHISPER_PROMPT_CHARS),
-            "qwen3_asr" => Self::Prompt(QWEN3_ASR_PROMPT_CHARS),
-            _ => Self::None,
-        }
+        crate::dictation::vocabulary::prompt_chars(&architecture).map_or(Self::None, Self::Prompt)
     }
 }
 

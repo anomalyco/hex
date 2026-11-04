@@ -70,6 +70,10 @@ const PATHS: &[(&str, &str)] = &[
         "vocabulary-unused",
         "Window/General/Vocabulary · not used by the model",
     ),
+    (
+        "vocabulary-budget",
+        "Window/General/Vocabulary · more terms than the model reads",
+    ),
     ("shortcut-row", "Window/General/Shortcut/Left Option"),
     ("shortcut-row-right", "Window/General/Shortcut/Right Option"),
     (
