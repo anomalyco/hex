@@ -213,7 +213,7 @@ pub(super) fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
                 .opacity(if surface.shell_on { 1.0 } else { 0.0 })
                 .opacity_motion(surface.shell_fade);
         }
-        return body.role("group").label("Capture");
+        return body.role("group").label(tr("Capture"));
     }
     body = body.fill(k.c.bg_base);
     for shadow in &k.elevation.overlay {
@@ -243,7 +243,7 @@ pub(super) fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
         .motion(surface.shell_motion)
         .opacity_motion(surface.shell_fade)
         .role("group")
-        .label("Capture")
+        .label(tr("Capture"))
 }
 
 pub(super) fn label(content: &str, style: rune::TextStyle, color: Color) -> El {
@@ -285,9 +285,9 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             base.child(
                 button
                     .role("button")
-                    .label("Draw")
+                    .label(tr("Draw"))
                     .checked(lit)
-                    .help("Draw")
+                    .help(tr("Draw"))
                     .hit()
                     .on_press_tx(press(id)),
             )
@@ -302,8 +302,8 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             base.child(
                 icon_button(p, canvas(square).size(side, side))
                     .role("button")
-                    .label("Stop")
-                    .help("Stop")
+                    .label(tr("Stop"))
+                    .help(tr("Stop"))
                     .hit()
                     .on_press_tx(press(id)),
             )
@@ -312,13 +312,13 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         Id::Cancel => base.child(
             icon_button(p, close_glyph(p))
                 .role("button")
-                .label("Discard")
-                .help("Discard")
+                .label(tr("Discard"))
+                .help(tr("Discard"))
                 .hit()
                 .on_press_tx(press(id)),
         ),
         Id::Record => {
-            let name = "Record";
+            let name = tr("Record");
             base.radius(surface::CHIP_RADIUS)
                 .fill(c.bg_contrast)
                 .hover(c.contrast_hover)
@@ -330,7 +330,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .on_press_tx(press(id))
         }
         Id::Keep => {
-            let name = surface::KEEP_LABEL;
+            let name = surface::keep_label();
             base.radius(surface::CHIP_RADIUS)
                 .hover(c.hover)
                 .press(c.pressed)
@@ -347,9 +347,9 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             .fill(c.layer_02)
             .hover(c.hover)
             .press(c.pressed)
-            .child(label(surface::DISCARD_LABEL, medium(), p.danger()))
+            .child(label(surface::discard_label(), medium(), p.danger()))
             .role("button")
-            .label(surface::DISCARD_LABEL)
+            .label(surface::discard_label())
             .hit()
             .on_press_tx(press(id)),
         Id::Close => base.child(
@@ -361,7 +361,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .press(c.pressed)
                 .child(close_glyph(p))
                 .role("button")
-                .label("Close")
+                .label(tr("Close"))
                 .hit()
                 .on_press_tx(press(id)),
         ),
@@ -408,12 +408,12 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                     .on_press_tx(press(id));
             }
             done.role("text").label(if shown.ident.is_empty() {
-                "Copied".to_owned()
+                tr("Copied").to_owned()
             } else {
                 shown.ident.clone()
             })
         }
-        Id::Next => keyed(p, base, &["⇥"], "Next", medium()).on_press_tx(press(id)),
+        Id::Next => keyed(p, base, &["⇥"], tr("Next"), medium()).on_press_tx(press(id)),
         // A chip beside the frame in the menu-bar flow.
         Id::Pick(_) if tuning::get().flow == tuning::CapsuleFlow::MenuBar => {
             keyed(p, base, &[], shown.text(), medium()).on_press_tx(press(id))
@@ -422,9 +422,9 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         Id::CardHints => base
             .justify_start()
             .px(ROW_PX)
-            .child(hint(p, "Search", &surface::shortcut_keycaps()))
+            .child(hint(p, tr("Search"), &surface::shortcut_keycaps()))
             .role("text")
-            .label(format!("Search {}", shown.text())),
+            .label(tr_fill("Search {}", shown.text())),
         Id::Why => placed(row().center_y(), shown)
             .trace_name("why")
             .child(quiet(p, shown.text(), done_style())),
@@ -463,9 +463,9 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
         Id::Paste | Id::Inspect => {
             let (name, help) = if id == Id::Paste {
-                ("Paste", "Paste the capture")
+                (tr("Paste"), tr("Paste the capture"))
             } else {
-                ("Inspect", "Open the capture")
+                (tr("Inspect"), tr("Open the capture"))
             };
             base.child(
                 row()
@@ -483,12 +483,13 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
             )
         }
         Id::Field => {
+            let empty = rune::TextEdit::default();
             let typed = match &surface.pres {
                 Pres::Done(Done {
                     open: Some((typed, _)),
                     ..
-                }) => typed.as_str(),
-                _ => "",
+                }) => typed,
+                _ => &empty,
             };
             field(p, base, typed)
         }
@@ -581,34 +582,20 @@ pub(super) fn key_parts<S: AsRef<str>>(keys: &[S]) -> Vec<String> {
     keys.iter().map(|key| key.as_ref().to_owned()).collect()
 }
 
-/// The open capsule's field: what's typed and the caret, or the
-/// placeholder.
-pub(super) fn field(p: Paint, base: El, typed: &str) -> El {
-    let caret = el()
-        .key("caret")
-        .size(1.5, 15.0)
-        .radius(0.75)
-        .fill(p.accent());
-    let inner = if typed.is_empty() {
-        row()
-            .center_y()
-            .gap(1.0)
-            .child(caret)
-            .child(label("Send to…", medium(), p.faint()))
-    } else {
-        row()
-            .center_y()
-            .gap(1.0)
-            .child(label(typed, medium(), p.text()))
-            .child(caret)
-    };
-    base.trace_name("field")
-        .px(CHIP_PX)
-        .radius(surface::CHIP_RADIUS)
-        .fill(p.k.c.layer_01)
-        .child(inner.grow(1.0))
-        .role("textbox")
-        .label("Send to")
+/// The open capsule's field: the kit's search field over the typed
+/// text. The capsule never takes key focus, so the field always reads as
+/// focused and Hex's tap feeds it ([`flow::Input::Type`]).
+pub(super) fn field(p: Paint, base: El, typed: &rune::TextEdit) -> El {
+    let mut edit = typed.clone();
+    edit.focused = true;
+    let input = TextInput::new(&edit)
+        .placeholder(tr("Send to…"))
+        .label(tr("Send to"))
+        .leading_icon(p.k.glyph.search)
+        .width(None)
+        .height(CHIP_H)
+        .build(p.k);
+    base.trace_name("field").child(input.grow(1.0))
 }
 
 /// The finished capsule's check, or its warning: its ink spans 12…20,
@@ -681,9 +668,9 @@ pub(super) fn processing_label(p: Paint, meter: &Meter) -> El {
     let mut glyphs = el()
         .absolute(PROCESSING_TEXT_X, 0.0)
         .h(CHIP_H)
-        .w(measure(PROCESSING, medium()))
+        .w(measure(processing(), medium()))
         .role("text")
-        .label(PROCESSING);
+        .label(processing());
     for ((c, x, w), live) in processing_glyphs().into_iter().zip(&meter.shimmer) {
         glyphs = glyphs.child(
             row()

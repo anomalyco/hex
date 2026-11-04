@@ -4,9 +4,11 @@
 //! [`Flow::input`] and [`Flow::tick`] move it, [`Flow::pres`] says what the
 //! capsule draws, and each returns the [`Action`]s the host carries out.
 
+use rune::TextEdit;
 use scrawl_capture::capture::Stage;
 
 use crate::capture_host::CaptureNeed;
+use crate::desktop::i18n::{tr, tr_fill};
 
 use super::tuning::{self, CapsuleFlow};
 mod done;
@@ -16,8 +18,8 @@ mod step;
 mod words;
 use done::*;
 use routes::{sections, sent_to, short};
-pub(crate) use words::COPIED;
-use words::{NOT_RUNNING, already_sent_to, plain_reason};
+pub(crate) use words::copied;
+use words::{already_sent_to, not_running, plain_reason};
 
 /// A send, a rule's or a pick's, can be taken back with the Undo button for this
 /// long (Scrawl's `SMART_SEND_UNDO`).
@@ -73,9 +75,9 @@ impl Mode {
 
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Mode::Area => "Area",
-            Mode::Window => "Window",
-            Mode::Screen => "Screen",
+            Mode::Area => tr("Area"),
+            Mode::Window => tr("Window"),
+            Mode::Screen => tr("Screen"),
             Mode::Iphone => "iPhone",
         }
     }
@@ -412,7 +414,7 @@ pub(crate) struct Done {
     /// on the chip ("Search ⌥⇧S").
     pub(crate) ask_keys: bool,
     /// Open: what's typed into the field, and the list under it.
-    pub(crate) open: Option<(String, List)>,
+    pub(crate) open: Option<(TextEdit, List)>,
     /// A written capture: Paste and Inspect, as Scrawl's capsule offers.
     pub(crate) hand_off: bool,
     /// The guesses in the capsule itself, picked with a click: chips
@@ -563,7 +565,7 @@ struct Routed {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Open {
-    query: String,
+    query: Box<TextEdit>,
     selected: usize,
     /// Searching every session (Send to…): the field
     /// takes typing. Otherwise it's the suggestions a capture opens with.
@@ -578,7 +580,7 @@ struct Open {
 impl Open {
     fn suggesting() -> Self {
         Self {
-            query: String::new(),
+            query: Box::default(),
             selected: 0,
             typing: false,
             back: false,
@@ -1048,10 +1050,10 @@ impl Flow {
         // Scrawl's "No speech": a capture with no words still copies.
         if let Pres::Done(done) = &mut pres
             && self.silent
-            && (done.text.is_empty() || done.text == COPIED)
+            && (done.text.is_empty() || done.text == copied())
             && done.why.is_none()
         {
-            done.why = Some("no speech".into());
+            done.why = Some(tr("no speech").into());
         }
         pres
     }
@@ -1081,22 +1083,22 @@ impl Flow {
             Phase::Processing => Pres::Processing,
             Phase::Saved { .. } => Pres::Done(Done {
                 hand_off: true,
-                ..Done::plain(Lead::Check, COPIED)
+                ..Done::plain(Lead::Check, copied())
             }),
             Phase::Failed { what, why, .. } => Pres::Done(Done {
                 why: why.clone(),
                 ..Done::plain(
                     Lead::Warning,
                     match what {
-                        Failure::Start => "Couldn't start".to_owned(),
-                        Failure::Save => "Couldn't save".to_owned(),
-                        Failure::Send(to) => format!("Couldn't send to {}", short(to)),
+                        Failure::Start => tr("Couldn't start").to_owned(),
+                        Failure::Save => tr("Couldn't save").to_owned(),
+                        Failure::Send(to) => tr_fill("Couldn't send to {}", &short(to)),
                     },
                 )
             }),
             Phase::Permission { need, grant, .. } => Pres::Done(permission_done(*need, *grant)),
-            Phase::TakenBack { .. } => Pres::Done(Done::plain(Lead::Check, "Taken back")),
-            Phase::Kept { .. } => Pres::Done(Done::plain(Lead::Check, "Kept")),
+            Phase::TakenBack { .. } => Pres::Done(Done::plain(Lead::Check, tr("Taken back"))),
+            Phase::Kept { .. } => Pres::Done(Done::plain(Lead::Check, tr("Kept"))),
             Phase::TooLate { to, .. } => Pres::Done(Done {
                 hand_off: true,
                 ..Done::plain(Lead::Check, already_sent_to(to))
@@ -1109,7 +1111,7 @@ impl Flow {
             // A pick went at once: the check, and Undo with its ring while
             // it can still be taken back.
             Phase::Sent(sent) => Pres::Done(Done {
-                why: sent.rule_saved.then(|| "always".into()),
+                why: sent.rule_saved.then(|| tr("always").into()),
                 undo: sent.undoable && undo_left(sent.at),
                 countdown: (sent.undoable && undo_left(sent.at)).then(|| sent.at + undo_s()),
                 hand_off: true,
@@ -1290,12 +1292,43 @@ mod tests {
         flow.input(Input::Type("ho".into()), 9.1);
         flow.input(Input::Type("x".into()), 9.2);
         flow.input(Input::Backspace, 9.3);
-        assert_eq!(done(&flow, 9.3).open.unwrap().0, "ho");
+        assert_eq!(done(&flow, 9.3).open.unwrap().0.text, "ho");
         flow.input(Input::SendRow(0), 9.4);
         assert_eq!(flow.keys(), None, "a send takes no keys: Undo is a click");
 
         flow.input(Input::Stage(Stage::Done), 20.0);
         assert_eq!(flow.keys(), None);
+    }
+
+    /// The search's field is a `TextEdit` fed by Hex's tap: typing inserts
+    /// at the caret, Backspace takes one character (not one byte) back,
+    /// and the caret follows the text.
+    #[test]
+    fn the_search_field_edits_at_its_caret() {
+        let mut flow = Flow::new();
+        flow.input(Input::Stage(Stage::Recording), 0.0);
+        flow.input(Input::Routed(rule()), 2.0);
+        flow.input(Input::OpenList, 9.0);
+        let field = |flow: &Flow| done(flow, 9.5).open.unwrap().0;
+        assert_eq!(field(&flow).text, "");
+
+        flow.input(Input::Type("hé".into()), 9.1);
+        flow.input(Input::Type("x".into()), 9.2);
+        let typed = field(&flow);
+        assert_eq!(typed.text, "héx");
+        assert_eq!(typed.range(), (4, 4), "the caret sits after what's typed");
+
+        flow.input(Input::Backspace, 9.3);
+        flow.input(Input::Backspace, 9.3);
+        let typed = field(&flow);
+        assert_eq!(typed.text, "h");
+        assert_eq!(typed.range(), (1, 1));
+
+        flow.input(Input::Backspace, 9.4);
+        flow.input(Input::Backspace, 9.4);
+        let typed = field(&flow);
+        assert_eq!(typed.text, "", "Backspace on an empty field does nothing");
+        assert_eq!(typed.range(), (0, 0));
     }
 
     #[test]
@@ -1350,7 +1383,7 @@ mod tests {
             assert_eq!(flow.pres(6.0), Pres::Processing);
         }
         flow.input(Input::Stage(Stage::Done), 7.0);
-        assert_eq!(done(&flow, 7.0).text, COPIED);
+        assert_eq!(done(&flow, 7.0).text, copied());
         assert!(flow.tick(7.0 + tuning::get().done_hold_s));
         assert_eq!(flow.pres(40.0), Pres::Hidden);
     }
@@ -1784,7 +1817,7 @@ mod tests {
     }
 
     /// A host that named a session by id (an old build, or a rule that only
-    /// knew the id) still reads as a name in the pill, including "too late".
+    /// knew the id) still reads as a name in the pill, including "Already sent".
     #[test]
     fn a_session_named_by_its_id_reads_as_a_session() {
         let to = Dest::new("ses_e853b1bd3ffe68OoWKFGtjPy43", "rule")
@@ -2336,7 +2369,7 @@ mod tests {
         flow.input(Input::OpenList, 1.0);
         let open = done(&flow, 1.0);
         let (query, list) = open.open.expect("open");
-        assert_eq!(query, "");
+        assert_eq!(query.text, "");
         assert_eq!(list.selected_dest().unwrap().name, "SEER");
         assert_eq!(list.footer, Footer::Search { remember: true });
         assert_eq!(list.title, "All sessions");
@@ -2410,7 +2443,7 @@ mod tests {
         );
         flow.input(Input::Type("hom".into()), 1.5);
         let (query, list) = done(&flow, 1.5).open.unwrap();
-        assert_eq!(query, "hom");
+        assert_eq!(query.text, "hom");
         assert_eq!(list.title, "All sessions");
         assert_eq!(
             list.rows().map(|d| d.name.as_str()).collect::<Vec<_>>(),
@@ -2419,7 +2452,7 @@ mod tests {
         assert_eq!(list.min_rows, height, "fewer matches keep the height");
         assert!(flow.input(Input::Escape, 2.0).is_empty());
         let (query, list) = done(&flow, 2.0).open.unwrap();
-        assert_eq!(query, "", "Escape goes back to the suggestions");
+        assert_eq!(query.text, "", "Escape goes back to the suggestions");
         assert!(list.suggesting());
         assert_eq!(
             flow.keys(),
@@ -2450,7 +2483,8 @@ mod tests {
             flow.input(Input::Type(typed.into()), 1.0);
         }
         let (query, list) = done(&flow, 1.0).open.unwrap();
-        assert_eq!(query, "hex");
+        assert_eq!(query.text, "hex");
+        assert_eq!(query.range(), (3, 3), "the caret follows what was typed");
         assert_eq!(list.title, "All sessions");
         assert_eq!(
             list.rows().map(|d| d.name.as_str()).collect::<Vec<_>>(),
@@ -2463,7 +2497,7 @@ mod tests {
         );
         flow.input(Input::Escape, 1.5);
         let (query, list) = done(&flow, 1.5).open.unwrap();
-        assert_eq!(query, "", "Escape goes back to the suggestions");
+        assert_eq!(query.text, "", "Escape goes back to the suggestions");
         assert!(list.suggesting());
     }
 
@@ -2708,7 +2742,7 @@ mod tests {
         assert_eq!(flow.keys(), None);
         assert!(flow.input(Input::OpenList, 30.0).is_empty());
         let (query, list) = done(&flow, 30.0).open.expect("the list is open");
-        assert_eq!(query, "");
+        assert_eq!(query.text, "");
         assert_eq!(list.selected_dest().unwrap().name, "SEER");
         assert_eq!(flow.keys(), Some(CapsuleKeys::List));
         // Escape folds the list; it then leaves with its hold and waits again.

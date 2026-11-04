@@ -22,7 +22,7 @@ pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) ->
     // search's footer says it there).
     let remembers = (suggesting && list.always.is_some()).then(|| {
         label(
-            "⇧ remembers",
+            tr("⇧ remembers"),
             k.ty.small_medium,
             if saving { p.accent() } else { p.faint() },
         )
@@ -98,7 +98,7 @@ pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) ->
                 .center_y()
                 .h(ROW_H)
                 .px(ROW_PX)
-                .child(label(UNMATCHED, medium(), p.faint()))
+                .child(label(tr("No sessions match"), medium(), p.faint()))
                 .transition(in_place),
         );
     }
@@ -122,25 +122,32 @@ pub(super) fn search_hints(p: Paint, remember: bool, send: bool, w: f32) -> El {
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
     let shortcut = surface::shortcut_keycaps();
     let used = if send {
-        hint_width("Send", &SEND) + HINTS_GAP
+        hint_width(tr("Send"), &SEND) + HINTS_GAP
     } else {
         0.0
     };
-    let remember = remember && used + hint_width("Remember", &REMEMBER) <= room;
+    let remember = remember && used + hint_width(tr("Remember"), &REMEMBER) <= room;
     let used = used
         + if remember {
-            hint_width("Remember", &REMEMBER)
+            hint_width(tr("Remember"), &REMEMBER)
         } else {
             0.0
         };
-    let capture = used + HINTS_GAP + hint_width("New capture", &shortcut) <= room;
+    let capture = used + HINTS_GAP + hint_width(tr("New capture"), &shortcut) <= room;
+    // Send and Remember share a growing row, so the gaps drawn are the
+    // gaps measured: no spacer with a gap on each side.
+    let left = row()
+        .key("left")
+        .center_y()
+        .gap(HINTS_GAP)
+        .grow(1.0)
+        .children(send.then(|| hint(p, tr("Send"), &SEND).key("send")))
+        .children(remember.then(|| hint(p, tr("Remember"), &REMEMBER).key("remember")));
     row()
         .center_y()
         .gap(HINTS_GAP)
-        .children(send.then(|| hint(p, "Send", &SEND).key("send")))
-        .children(remember.then(|| hint(p, "Remember", &REMEMBER).key("remember")))
-        .child(el().grow(1.0))
-        .children(capture.then(|| hint(p, "New capture", &shortcut).key("capture")))
+        .child(left)
+        .children(capture.then(|| hint(p, tr("New capture"), &shortcut).key("capture")))
 }
 
 /// Shift down: the footer says where the rule will send `site`, each in
@@ -149,7 +156,7 @@ pub(super) fn search_hints(p: Paint, remember: bool, send: bool, w: f32) -> El {
 pub(super) fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
     let to = list.selected_dest().map(|dest| dest.name.as_str());
-    let words = measure("Always send", small()) + measure("to", small()) + 3.0 * BADGE_GAP;
+    let words = measure(tr("Always send"), small()) + measure(tr("to"), small()) + 3.0 * BADGE_GAP;
     let badges =
         if to.is_some() { 2.0 } else { 1.0 } * (2.0 * BADGE_PX + BADGE_ICON + BADGE_ICON_GAP);
     let left = (room - words - badges).max(0.0);
@@ -165,7 +172,7 @@ pub(super) fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
         .center_y()
         .gap(BADGE_GAP)
         .key("saving")
-        .child(label("Always send", small(), p.muted()))
+        .child(label(tr("Always send"), small(), p.muted()))
         .child(
             badge(
                 p,
@@ -176,9 +183,9 @@ pub(super) fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
         );
     hint = match to {
         Some(to) => hint
-            .child(label("to", small(), p.muted()))
+            .child(label(tr("to"), small(), p.muted()))
             .child(badge(p, Badge::Chat, &ellipsize(to, small(), to_room)).key("to")),
-        None => hint.child(label("to…", small(), p.muted())),
+        None => hint.child(label(tr("to…"), small(), p.muted())),
     };
     hint.child(el().grow(1.0))
 }
@@ -353,7 +360,7 @@ pub(super) fn list_panel(
     panel
         .motion(tuning::get().island)
         .role("list")
-        .label("Send to")
+        .label(tr("Send to"))
         .hit()
         // Hex's tap reports a press on the list before the list hears it:
         // the pointer being here keeps it from reading as a click away.
@@ -370,16 +377,13 @@ pub(super) fn list_panel(
         )
 }
 
-/// Whether the list shows its header: over rows, or the room a search
-/// keeps for them.
-/// What a search that matches nothing says, in place of its rows.
-pub(super) const UNMATCHED: &str = "No sessions match";
-
 /// A search that matches nothing: it says so rather than show no rows.
 pub(super) fn unmatched(list: &List) -> bool {
     !list.suggesting() && list.rows.is_empty()
 }
 
+/// Whether the list shows its header: over rows, or the room a search
+/// keeps for them.
 pub(super) fn headed(list: &List) -> bool {
     !list.rows.is_empty() || list.min_rows > 0
 }

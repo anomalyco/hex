@@ -286,10 +286,8 @@ impl Flow {
                 }
                 if let Some(open) = routed.open.as_mut().filter(|open| open.typing) {
                     match input {
-                        Input::Type(typed) => open.query.push_str(&typed),
-                        _ => {
-                            open.query.pop();
-                        }
+                        Input::Type(typed) => open.query.insert(&typed),
+                        _ => backspace(&mut open.query),
                     }
                     open.selected = 0;
                 }
@@ -435,7 +433,7 @@ impl Flow {
                     {
                         for dest in suggested.iter_mut().chain(recent.iter_mut()) {
                             if dest.session == from.session {
-                                dest.why = "already sent".into();
+                                dest.why = tr("already sent").into();
                             }
                         }
                     }

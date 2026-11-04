@@ -40,18 +40,20 @@ use rune::{
     Color, Compositor, Cx, El, Frame, LineCap, Live, LiveText, OverlayHandle, Path, Runtime, Shape,
     SpringPair, Transition, Tx, canvas, col, el, row, text,
 };
+use rune_kit::TextInput;
 
 use self::flow::{Action, Cue, Done, Flow, Footer, Input, Lead, List, Mode, Pres};
 use self::list_view::*;
 use self::surface::{
     CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LIST_PAD, LIST_Y, PANEL_H, PANEL_W,
-    PROCESSING, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H, THUMB_W,
-    THUMB_X, chord, clock_style, clock_width, corner, done_style, done_text_x, ellipsize, measure,
-    medium, small,
+    PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H, THUMB_W, THUMB_X,
+    chord, clock_style, clock_width, corner, done_style, done_text_x, ellipsize, measure, medium,
+    processing, small,
 };
 use self::tuning::ListFooter;
 use self::view::*;
 use super::controls::Paint;
+use crate::desktop::i18n::{tr, tr_fill};
 
 /// Peak blur (pt) of the picker's badge and the list's rows softening in
 /// place.
@@ -75,20 +77,22 @@ const LIST_DROP: f32 = 6.0;
 
 // ─── Live values ─────────────────────────────────────────────────────────────
 
-const GLYPHS: usize = 11;
+/// Room for "Processing…" in the longest language.
+const GLYPHS: usize = 24;
 
 /// "Processing…" split into glyphs, each with its x and width as the whole
 /// label shapes them.
 fn processing_glyphs() -> [(char, f32, f32); GLYPHS] {
     let mut out = [(' ', 0.0, 0.0); GLYPHS];
-    for (k, (at, c)) in PROCESSING.char_indices().enumerate().take(GLYPHS) {
+    let label = processing();
+    for (k, (at, c)) in label.char_indices().enumerate().take(GLYPHS) {
         let end = at + c.len_utf8();
         let x = if at == 0 {
             0.0
         } else {
-            measure(&PROCESSING[..at], medium())
+            measure(&label[..at], medium())
         };
-        out[k] = (c, x, measure(&PROCESSING[..end], medium()) - x);
+        out[k] = (c, x, measure(&label[..end], medium()) - x);
     }
     out
 }
@@ -147,7 +151,7 @@ impl Meter {
             spin: std::array::from_fn(|_| Live::new(0.18)),
             shimmer: std::array::from_fn(|_| Live::new(1.0)),
             shimmer_at: {
-                let total = measure(PROCESSING, medium()).max(1.0);
+                let total = measure(processing(), medium()).max(1.0);
                 let glyphs = processing_glyphs();
                 std::array::from_fn(|k| (glyphs[k].1 + glyphs[k].2 * 0.5) / total)
             },
