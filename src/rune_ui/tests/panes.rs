@@ -486,7 +486,9 @@ fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
     refresh(&mut rt);
     assert!(rt.find("meeting-folder-error").is_some());
     assert!(rt.find("meeting-summary-model").is_some());
-    assert!(super::super::platform_settings::summary_model_shown(&rt.state));
+    assert!(super::super::platform_settings::summary_model_shown(
+        &rt.state
+    ));
 }
 
 /// The cancel shortcut's row shows only in Toggle; its default, Escape,
