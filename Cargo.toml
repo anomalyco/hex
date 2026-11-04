@@ -118,14 +118,14 @@ rmcp = { version = "3.5.1", default-features = false, features = ["server", "mac
 tokio = { version = "1.53.1", features = ["rt", "io-std"] }
 anyhow = "1.0.104"
 # The capture capsule's motion-lint trace.
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "ae0c94990cf7c8c0037de36d912ccb9c794db8a9" }
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "4c039671c7754e17f25db7671e75aa2da6c3f3dc" }
 scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"] }
 pollster = "1.0.1"
 # The local API's `/profile/vitals`; it reports nothing off macOS.
-procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "ae0c94990cf7c8c0037de36d912ccb9c794db8a9" }
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "ae0c94990cf7c8c0037de36d912ccb9c794db8a9", features = ["native-file-dialog"] }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "ae0c94990cf7c8c0037de36d912ccb9c794db8a9" }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "ae0c94990cf7c8c0037de36d912ccb9c794db8a9" }
+procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "4c039671c7754e17f25db7671e75aa2da6c3f3dc" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "4c039671c7754e17f25db7671e75aa2da6c3f3dc", features = ["native-file-dialog"] }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "4c039671c7754e17f25db7671e75aa2da6c3f3dc" }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "4c039671c7754e17f25db7671e75aa2da6c3f3dc" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 

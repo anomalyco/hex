@@ -169,14 +169,9 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let history = History::open_default(settings.history_retention)
         .inspect_err(|error| tracing::warn!(%error, "could not open retained history"))
         .ok();
-    crate::windows::gpu_fallback::arm();
+    crate::windows::gpu_fallback::watch();
     let mut app = crate::rune_ui::app(Default::default())
         .args(Vec::new())
-        .on_frame_encoded(|frame| {
-            if frame.outcome() == rune::FrameOutcome::Drawn {
-                crate::windows::gpu_fallback::disarm();
-            }
-        })
         .on_window(|window| {
             let _ = window.with_raw_handle(|handle| {
                 if let rune::raw_window_handle::RawWindowHandle::Win32(handle) = handle.as_raw() {
@@ -312,15 +307,9 @@ fn run_runtime(
     let mut tray_view = None;
     let mut tray_meetings = None;
     indicator.set_position(settings.indicator_position);
-    let hud = indicator.clone();
     let mut host =
         WindowsDesktopHost::new(event_path, settings, settings_error, history, indicator);
     loop {
-        // A HUD frame counts as this launch's first drawing too, for a
-        // launch that never opens the window.
-        if crate::windows::gpu_fallback::armed() && hud.presented() {
-            crate::windows::gpu_fallback::disarm();
-        }
         let mut next = match requests.recv_timeout(RUNTIME_TICK) {
             Ok(request) => Some(request),
             Err(RecvTimeoutError::Timeout) => None,

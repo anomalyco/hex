@@ -291,8 +291,9 @@ pub(crate) struct CaptureOverlays {
 }
 
 impl CaptureOverlays {
-    /// Adds the three overlays, hidden, and starts following captures. The
-    /// capsule and ink are prewarmed; the picker too, except on Windows.
+    /// Adds the three overlays, prewarmed and hidden, and starts following
+    /// captures. Away from macOS they make their GPU surfaces only to show,
+    /// so a Hex that never annotates holds none.
     pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
         let picker = PickerOverlay::install(app, act);
         let aim = picker.clone();

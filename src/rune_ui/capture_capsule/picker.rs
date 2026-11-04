@@ -864,9 +864,9 @@ pub(crate) struct PickerOverlay {
 }
 
 impl PickerOverlay {
-    /// Adds the overlay, hidden (prewarmed except on Windows). `act` starts
-    /// what it picks; it runs on the main thread, so it must only hand the
-    /// action on.
+    /// Adds the overlay, prewarmed and hidden, holding no GPU surface while
+    /// hidden (Windows and Linux). `act` starts what it picks; it runs on
+    /// the main thread, so it must only hand the action on.
     pub(crate) fn install<S: 'static>(
         app: &mut rune::App<S>,
         act: impl Fn(Action) + Send + Sync + 'static,
@@ -880,13 +880,10 @@ impl PickerOverlay {
                 level: OverlayLevel::AboveStatus,
                 exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::All,
-                // Windows keeps no prewarmed pixels, only a hidden
-                // full-screen surface; the picker is made at its first open
-                // instead. It shows only before the capture it starts, so
-                // that capture still knows its window.
-                prewarm: !cfg!(target_os = "windows"),
+                prewarm: true,
                 ..Default::default()
             })
+            .release_gpu_when_hidden()
             .poll(poll)
             .on_created(|c| {
                 if let Some(window) = c.window_number {

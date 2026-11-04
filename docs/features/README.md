@@ -1726,10 +1726,18 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   the lowest-power adapter that drives a display (an unused integrated GPU
 │   beside the monitors' card would present every surface across adapters);
 │   a GPU whose device fails hands the window to the next adapter (#662)
-│   └── A launch that crashed before its first frame (gpu-draw.pending left in
-│       the data folder, same version; cleared by a window or HUD frame or a
-│       clean quit) -> high-performance GPU (WGPU_POWER_PREF=high), warned in
-│       process.log, until Hex updates or the file is deleted
+│   ├── Tray at rest -> no GPU device until something shows: the capture
+│   │   capsule, picker, and ink keep their windows from launch but make their
+│   │   GPU surfaces at each show and drop them at each hide (Rune
+│   │   release_gpu_when_hidden); the HUD keeps its surface once shown. The
+│   │   first show of a launch waits for the device and pipelines (about
+│   │   0.6 s on an RTX 5070 Ti, measured by Rune's overlay_gpu_lifecycle)
+│   └── A launch that crashed drawing (gpu-draw.pending, written when Rune
+│       starts the launch's first GPU device, left in the data folder, same
+│       version; cleared by the first frame on any surface or a clean quit; a
+│       tray launch that never draws writes none) -> high-performance GPU
+│       (WGPU_POWER_PREF=high), warned in process.log, until Hex updates or
+│       the file is deleted
 ├── Present cadence -> after any change the window presents every refresh for
 │   1 s, then rests: windowed G-SYNC/FreeSync sees one rate change per
 │   interaction, not a swing per hover (#689; Rune e2ea18e4; not run on Windows)

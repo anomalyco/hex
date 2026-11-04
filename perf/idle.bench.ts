@@ -31,14 +31,14 @@ export default bench({
         await page.wait(8_000)
       },
     },
-    // The same tray, judged by what it holds: the GPU device and the
-    // surfaces of the overlays that wait hidden (the capture capsule and
-    // ink are made at launch, and the picker too except on Windows).
-    // `gpu.vram` is the surfaces' dedicated GPU memory.
+    // The same tray, judged by what it holds. The capture capsule, picker,
+    // and ink wait hidden from launch; a GPU device, and their swapchains,
+    // count here and in gpu.vram. memory.app.host is Hex's own memory
+    // without the VRAM a driver maps into the process.
     "window-closed-memory": {
       targets: ["tray"],
       primary: "memory.app.private",
-      metrics: ["gpu.vram", "cpu.wakes", "cpu.work"],
+      metrics: ["cpu.wakes", "cpu.work", "gpu.vram", "memory.app.host"],
       async run({ page }) {
         await page.wait(8_000)
       },

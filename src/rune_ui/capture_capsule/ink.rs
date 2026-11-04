@@ -340,7 +340,9 @@ pub(crate) struct InkOverlay {
 
 impl InkOverlay {
     /// Adds the overlay, prewarmed and hidden; it shows over a capture's
-    /// target once its engine records.
+    /// target once its engine records. Hidden, it holds no GPU surface
+    /// (Windows and Linux): a full-screen swapchain held tens of megabytes
+    /// between captures.
     pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
         use rune::{
             DisplayTarget, OverlayInput, OverlayLevel, OverlayOptions, OverlayPlacement,
@@ -358,6 +360,7 @@ impl InkOverlay {
                 keys: rune::KeyPolicy::OnDemand,
                 ..Default::default()
             })
+            .release_gpu_when_hidden()
             .poll(poll)
             .on_created(|c| {
                 if let Some(window) = c.window_number {

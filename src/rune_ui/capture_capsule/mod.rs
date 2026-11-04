@@ -713,9 +713,10 @@ pub(crate) struct CaptureCapsule {
 pub(crate) const PANEL_MARGIN: f32 = 14.0;
 
 impl CaptureCapsule {
-    /// Adds the capsule's overlay, prewarmed and hidden. `act` carries out
-    /// what a press or key asks for; it runs on the main thread, so it
-    /// must only hand the action on.
+    /// Adds the capsule's overlay, prewarmed and hidden, holding no GPU
+    /// surface while hidden (Windows and Linux). `act` carries out what a
+    /// press or key asks for; it runs on the main thread, so it must only
+    /// hand the action on.
     pub(crate) fn install<S: 'static>(
         app: &mut rune::App<S>,
         act: impl Fn(Action) + Send + Sync + 'static,
@@ -739,6 +740,7 @@ impl CaptureCapsule {
                 prewarm: true,
                 ..Default::default()
             })
+            .release_gpu_when_hidden()
             .poll(poll)
             .compositor(TraceFrames::default())
             .on_created(|c| {
