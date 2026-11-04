@@ -169,8 +169,14 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-delete", "Window/Meetings/Delete"),
     ("meetings-failed", "Window/Meetings/Failed"),
     ("meetings-empty", "Window/Meetings/Empty"),
+    ("meetings-platform-icons", "Window/Meetings/Platform icons"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
+    ("meetings-summary-model", "Window/Meetings/Summary model"),
+    (
+        "meetings-summary-model-not-running",
+        "Window/Meetings/Summary model without OpenCode",
+    ),
     ("meetings-allow", "Window/Meetings/Allow system audio"),
     ("meetings-calendar", "Window/Meetings/Calendar"),
     (

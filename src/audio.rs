@@ -20,6 +20,8 @@ mod transport;
 pub(crate) mod voice_filter;
 #[cfg(target_os = "windows")]
 mod wasapi_capture;
+#[cfg(target_os = "windows")]
+pub(crate) use wasapi_capture::note_call as note_wasapi_call;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
@@ -1081,9 +1083,14 @@ use lid::closed as lid_closed;
 /// without a readable name, such as CoreAudio's placeholder when no input
 /// exists, cannot be selected or opened, so it is left out.
 fn input_devices_of(host: &cpal::Host) -> Result<(Vec<Device>, Vec<String>)> {
-    Ok(host
+    #[cfg(target_os = "windows")]
+    let devices = wasapi_capture::capture_devices(host)?;
+    #[cfg(not(target_os = "windows"))]
+    let devices = host
         .input_devices()
-        .wrap_err("could not enumerate input devices")?
+        .wrap_err("could not enumerate input devices")?;
+    Ok(devices
+        .into_iter()
         .filter_map(|device| device_name(&device).map(|name| (device, name)))
         .unzip())
 }

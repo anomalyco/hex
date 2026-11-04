@@ -884,8 +884,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   found through its registration file (`desktop/opencode_service`). Nothing touches
   OpenCode unless a feature that uses it runs: mode rewriting, meeting notes
   with Summarize with OpenCode, sending an Annotate capture, or the model
-  catalog while the Modes pane shows. Checks stay off the UI thread. A stopped
-  service is looked for again at a coarse interval only while that pane shows;
+  catalog while a picker that uses it shows: the Modes pane, or Meetings ›
+  Settings › Advanced's Summary model (Labs › Choose meeting summary model,
+  with Summarize with OpenCode on). Both read the one catalog loader
+  (`rune_ui/models`). Checks stay off the UI thread. A stopped service is
+  looked for again at a coarse interval only while such a picker shows;
   catalog failures require an explicit retry. Hex's OpenCode workspace folder is
   created by the first request that uses it.
 - Personal transformations run in-process: no child process,
@@ -1261,6 +1264,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   this user's XWayland process already runs with `DISPLAY` set; Hex never
   connects first, so it never starts XWayland. While it is off there, Settings
   › Output says the clipboard can't be restored and points to the toggle.
+  A second explicit opt-in exception: Labs › Floating meeting capsules on
+  GNOME (`gnome-meeting-capsules`, off by default) lets the meeting capsules
+  (recording offer, recording capsule) open on XWayland through Rune's
+  `OverlayOptions::xwayland_input`, as override-redirect windows that take
+  clicks in their input shape and never keyboard focus, only on a Wayland
+  session without layer-shell and only while this user's XWayland process
+  already runs; Hex decides at each show and never starts XWayland. Off, or
+  when the overlay still can't open, an offer opens the Meetings pane (#1271).
   Everything else stays on Wayland. The desktop may grant a different
   trigger, keep an older one, or refuse one; Settings shows what it granted,
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).

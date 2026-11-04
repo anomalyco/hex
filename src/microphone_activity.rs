@@ -227,7 +227,15 @@ fn is_process_of(bundle_id: &str, canonical_bundle_id: &str) -> bool {
 
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
-const EXECUTABLES: [(&str, &str); 26] = [
+const EXECUTABLES: [(&str, &str); 32] = [
+    // Discord and its Canary and PTB builds, on Windows and Linux (the
+    // Flatpak runs the same binary).
+    ("discord", "com.hnc.Discord"),
+    ("discordcanary", "com.hnc.Discord"),
+    ("discordptb", "com.hnc.Discord"),
+    ("discord-canary", "com.hnc.Discord"),
+    ("discord-ptb", "com.hnc.Discord"),
+    ("com.discordapp.discord", "com.hnc.Discord"),
     // Gather for Windows.
     ("gather", "com.gather.GatherV2"),
     ("gatherv2", "com.gather.GatherV2"),
@@ -289,6 +297,10 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         // Gather V2 and its Electron helpers, and Gather V1.
         ("com.gather.gatherv2", "com.gather.GatherV2"),
         ("com.gather.gather", "com.gather.GatherV2"),
+        // Discord and its helpers, and its Canary and PTB builds.
+        ("com.hnc.discord", "com.hnc.Discord"),
+        ("com.hnc.discordcanary", "com.hnc.Discord"),
+        ("com.hnc.discordptb", "com.hnc.Discord"),
         ("com.google.chrome", "com.google.Chrome"),
         ("com.brave.browser", "com.brave.Browser"),
         ("com.apple.safari", "com.apple.Safari"),
@@ -315,6 +327,7 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "com.apple.FaceTime" => Some("FaceTime"),
         "net.whatsapp.WhatsApp" => Some("WhatsApp"),
         "com.gather.GatherV2" => Some("Gather"),
+        "com.hnc.Discord" => Some("Discord"),
         "com.google.Chrome" => Some("Google Chrome"),
         "com.brave.Browser" => Some("Brave Browser"),
         "com.apple.Safari" => Some("Safari"),

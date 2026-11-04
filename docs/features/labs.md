@@ -61,13 +61,27 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Notch indicator no    labs.notch_indicator         (macOS) with the indicator at Top, the notch widens sideways in the Dynamic Island's compact style: an orange mic and level bars, the macOS spinner, a green checkmark; flat screens keep it below the menu bar
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Choose meeting summary model no labs.meeting_summary_model + meetings.opencode_model (every OS with Meetings)
-│                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows its field (#1107)
+│                                        OpenCode meeting notes use exactly that provider/model, no fallback; Meetings › Settings › Advanced shows a
+│                                        searchable picker of OpenCode's models, "Hex picks a fast model" first (clears it), Retry / Check again
+│                                        while OpenCode is missing, the saved ID kept and shown (#1107, #1301)
+│                                        // check: the_meeting_summary_model_is_picked_from_opencode_s_models (tests/panes.rs);
+│                                        // scenes and light/dark goldens meetings-summary-model, meetings-summary-model-not-running;
+│                                        // a meetings-folder error opening Advanced with the fold closed still shows the picker
 ├── Vocabulary in meeting notes no labs.meeting_notes_vocabulary (every OS with Meetings)
 │                                        final meeting titles and summaries (and Regenerate summary) read the vocabulary ahead of the transcript (#1154)
 ├── Meeting finished event no labs.meeting_finished_event (every OS with Meetings)
 │                                        the local API's GET /meetings/events sends each finished meeting's id once its final transcript is written (#964)
+├── Meeting platform icons no labs.meeting_platform_icons (every OS with Meetings)
+│                                        each recording in the Meetings list shows its call service's icon (Zoom, Google Meet, Teams, Slack, Webex)
+│                                        before its title, a neutral call icon otherwise (#1290)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
+├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
+│                                        recording capsule open on XWayland (Rune xwayland_input: override-redirect, clicks in the input shape, never keyboard
+│                                        focus), decided at each show, only while this user's Xwayland already runs; never starts it. Off, an offer opens
+│                                        the Meetings pane (#1271), whose note names the lab (#1274)
+│                                        // checks: floats_only_by_opt_in_*, looks_for_nothing_while_the_lab_is_off (linux/meeting_capsules.rs),
+│                                        // gnome_meeting_capsules_is_its_own_bit_*; Rune's xwayland pointer tests; not run on a GNOME session
 ├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
@@ -1070,6 +1084,31 @@ ending the stream); `meeting_finished_event_is_its_own_bit_and_off_by_default`
 in [labs.rs](../../src/labs.rs). Not yet observed: a real recorded call
 sending the event, on any OS; the Labs page goldens that show Meetings rows
 need regenerating with the new row.
+
+Meeting platform icons (`meeting-platform-icons`, issue 1290; every OS with
+Meetings; its row shows wherever Meetings does): for telling at a glance
+where each recording took place. While on, each row of the Meetings list
+puts a 14 pt icon in the faint icon colour before its title: the call
+service's monochrome glyph (the ones the calendar list uses) when the
+meeting's recorded app names Zoom, Google Meet, Microsoft Teams, Slack, or
+Webex (`CallProvider::from_meeting_app` in [calendar.rs](../../src/calendar.rs):
+exactly the label detection or a calendar reminder records, such as `Zoom` or
+`Slack Huddle`, or a browser call's host matched by domain, so `us02web.zoom.us`
+is Zoom and `zoominfo.com` is not), and a neutral call
+icon (`icons::CALL`) for any other app (FaceTime, Discord, WhatsApp, …) or a
+meeting started by hand. The meta line, the detail card, and what screen
+readers hear are unchanged. The gate is the list itself (`platform_icon` in
+[rune_ui/meetings.rs](../../src/rune_ui/meetings.rs) reads
+`labs.meeting_platform_icons`); the feature does no other work. Off, the
+list is exactly as before. Not built: glyphs for FaceTime, Discord,
+WhatsApp, or Gather, which get the neutral icon. Scene:
+`meetings-platform-icons` (golden, light). Checks:
+`platform_icons_show_only_with_their_lab_and_fall_back_to_a_neutral_one` in
+[rune_ui/meetings.rs](../../src/rune_ui/meetings.rs) (Linux and Windows);
+`a_recorded_meeting_app_names_its_service_exactly` in
+[calendar.rs](../../src/calendar.rs);
+`every_feature_is_off_by_default_and_round_trips` in
+[labs.rs](../../src/labs.rs). Not yet observed: the icons in a real window.
 
 Normal features, not Labs: dictation, Annotate (every build; its own pane
 and switch), lowering audio while dictating (#210), Dot scope, chord shortcuts, QuickJS transformations, clipboard

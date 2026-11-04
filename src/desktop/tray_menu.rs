@@ -161,16 +161,19 @@ mod tray {
             );
             if let Some(meetings) = self.meetings {
                 menu.push(TrayItem::Separator);
+                // The disabled states take ids of their own: some tray hosts
+                // (GNOME's AppIndicators) keep an item's disabled state when
+                // the same id comes back enabled (#1287).
                 menu.push(match meetings {
                     MeetingTray::Idle => TrayItem::action("meeting-record", tr("Record meeting")),
                     MeetingTray::Starting => {
-                        TrayItem::action("meeting-record", tr("Starting…")).enabled(false)
+                        TrayItem::action("meeting-starting", tr("Starting…")).enabled(false)
                     }
                     MeetingTray::Recording => {
                         TrayItem::action("meeting-stop", tr("Stop & transcribe"))
                     }
                     MeetingTray::Transcribing => {
-                        TrayItem::action("meeting-stop", tr("Transcribing…")).enabled(false)
+                        TrayItem::action("meeting-transcribing", tr("Transcribing…")).enabled(false)
                     }
                 });
                 menu.push(TrayItem::action(
@@ -335,6 +338,27 @@ mod tests {
             TrayCommand::from_id("meeting-stop"),
             Some(TrayCommand::StopMeeting)
         );
+        // Disabled meeting states never reuse an enabled item's id (#1287).
+        let meeting_id = |state| {
+            TrayView {
+                meetings: Some(state),
+                ..view.clone()
+            }
+            .menu()
+            .into_iter()
+            .find_map(|item| match item {
+                rune::TrayItem::Action { id, .. } if id.starts_with("meeting-") => Some(id),
+                _ => None,
+            })
+            .unwrap()
+        };
+        let enabled = [
+            meeting_id(MeetingTray::Idle),
+            meeting_id(MeetingTray::Recording),
+        ];
+        for disabled in [MeetingTray::Starting, MeetingTray::Transcribing] {
+            assert!(!enabled.contains(&meeting_id(disabled)));
+        }
         let stopped = TrayView::new(
             false,
             Some(VoiceState::Dictating),

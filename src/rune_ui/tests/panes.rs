@@ -436,6 +436,61 @@ fn the_meeting_summary_model_lab_is_on_every_os_with_meetings() {
     }
 }
 
+/// Labs › Choose meeting summary model picks from OpenCode's models in
+/// Meetings › Settings › Advanced, with the automatic choice first; without
+/// OpenCode it offers a retry and keeps the saved model (#1301).
+#[test]
+fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
+    let size = (980.0, 2400.0);
+    let mut rt = runtime("meetings-summary-model", true, size);
+    assert!(rt.find("meeting-summary-model").is_some());
+    assert!(rt.find("opencode-unavailable").is_none());
+    rt.state.models.open_picker();
+    rt.invalidate();
+    settle(&mut rt);
+    // Hex's automatic choice, then the catalog in order.
+    tap(&mut rt, "model-picker-option-3");
+    assert_eq!(
+        rt.state.settings.meetings.opencode_model.as_deref(),
+        Some("openai/gpt-5")
+    );
+    assert!(rt.find("thinking").is_none(), "summaries have no thinking");
+    tap(&mut rt, "model-value");
+    assert!(rt.state.models.picker.open);
+    tap(&mut rt, "model-picker-option-0");
+    assert_eq!(rt.state.settings.meetings.opencode_model, None);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Hex picks a fast model")
+    );
+
+    rt.state.settings.labs.meeting_summary_model = false;
+    refresh(&mut rt);
+    assert!(rt.find("meeting-summary-model").is_none(), "off, no picker");
+
+    let rt = runtime("meetings-summary-model-not-running", true, size);
+    assert!(rt.find("opencode-unavailable").is_some());
+    assert!(rt.find("retry-opencode").is_some());
+    assert_eq!(
+        rt.state.settings.meetings.opencode_model.as_deref(),
+        Some("anthropic/claude-sonnet-4-5")
+    );
+    assert!(texts(&rt).iter().any(|text| text == "claude-sonnet-4-5"));
+
+    // A failed folder change opens Advanced with the fold closed; the picker
+    // shows there too, and the catalog is read for it.
+    let mut rt = runtime("meetings-summary-model", true, size);
+    rt.state.advanced.clear();
+    rt.state.platform.meeting_folder_error = Some("Couldn't use that folder".into());
+    refresh(&mut rt);
+    assert!(rt.find("meeting-folder-error").is_some());
+    assert!(rt.find("meeting-summary-model").is_some());
+    assert!(super::super::platform_settings::summary_model_shown(
+        &rt.state
+    ));
+}
+
 /// The cancel shortcut's row shows only in Toggle; its default, Escape,
 /// can't be recorded (Escape ends the recorder), so restoring puts it back.
 #[test]
@@ -1095,12 +1150,12 @@ fn meetings_settings_save_and_ask_for_system_audio() {
         policy(&rt, "us.zoom.xos"),
         Some(MeetingPolicy::AlwaysRecord)
     );
-    pick(&mut rt, "call7-policy", 0);
+    pick(&mut rt, "call8-policy", 0);
     assert_eq!(
         policy(&rt, "problems.kitlangton.com"),
         Some(MeetingPolicy::Ask)
     );
-    assert!(rt.find("call7").is_some());
+    assert!(rt.find("call8").is_some());
     tap(&mut rt, "meetings-enabled");
     assert!(!rt.state.settings.meetings.enabled);
     assert!(rt.find("meeting-folder").is_none());
@@ -1526,6 +1581,8 @@ fn platform_goldens() {
     let _goldens = Goldens::collect();
     for dark in [true, false] {
         check_golden("meetings-calendar", dark, (980.0, 1800.0));
+        check_golden("meetings-summary-model", dark, (980.0, 1800.0));
+        check_golden("meetings-summary-model-not-running", dark, (980.0, 1800.0));
         for scene in [
             "mac-settings",
             "mac-input-source-models",
@@ -1931,7 +1988,12 @@ fn new_in_labs_isnt_repeated_in_the_grid() {
         .into_iter()
         .filter_map(|e| e.key?.strip_prefix("lab-featured-").map(str::to_string))
         .collect();
-    assert_eq!(featured.len(), 2, "two labs are featured");
+    // Up to two of the labs added most recently: how many depends on how
+    // many share the newest date on this OS, not on the test.
+    assert!(
+        (1..=2).contains(&featured.len()),
+        "one or two labs are featured: {featured:?}"
+    );
     for id in featured {
         assert!(
             rt.find(&format!("lab-card-{id}")).is_none(),

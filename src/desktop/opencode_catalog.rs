@@ -37,20 +37,24 @@ pub(crate) struct OpenCodeUnavailableCopy {
 #[derive(Clone, Copy)]
 pub(crate) enum OpenCodeFeature {
     Transformation,
+    /// Labs › Choose meeting summary model's picker.
+    MeetingSummary,
 }
 
 pub(crate) fn opencode_unavailable_copy(
     state: &ModelCatalogState,
     feature: OpenCodeFeature,
 ) -> Option<OpenCodeUnavailableCopy> {
-    let OpenCodeFeature::Transformation = feature;
+    let meeting = matches!(feature, OpenCodeFeature::MeetingSummary);
     match state {
         ModelCatalogState::Loading => Some(OpenCodeUnavailableCopy {
             reason: tr("Checking for OpenCode"),
             title: tr("Checking for OpenCode"),
-            description: tr(
-                "OpenCode transformation will be available after Hex connects to OpenCode.",
-            ),
+            description: if meeting {
+                tr("Summary models show once Hex connects to OpenCode.")
+            } else {
+                tr("OpenCode transformation will be available after Hex connects to OpenCode.")
+            },
             error: None,
             can_retry: false,
             retry_label: tr("Retry"),
@@ -59,7 +63,11 @@ pub(crate) fn opencode_unavailable_copy(
         ModelCatalogState::NotRunning => Some(OpenCodeUnavailableCopy {
             reason: tr("OpenCode isn't running"),
             title: tr("OpenCode isn't running"),
-            description: tr("Install or start OpenCode to transform dictated text."),
+            description: if meeting {
+                tr("Start OpenCode to choose a summary model. Hex keeps the saved one.")
+            } else {
+                tr("Install or start OpenCode to transform dictated text.")
+            },
             error: None,
             can_retry: true,
             retry_label: tr("Check again"),

@@ -256,6 +256,14 @@ line_icon!(
     ]
 );
 line_icon!(
+    CALL,
+    "hex-row-call",
+    [
+        "m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5",
+        "M4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z",
+    ]
+);
+line_icon!(
     CIRCLE_X,
     "hex-row-circle-x",
     [

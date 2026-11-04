@@ -36,7 +36,9 @@ use color_eyre::eyre::eyre;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
 use objc2::{MainThreadOnly, msg_send, sel};
-use objc2_app_kit::{NSApplication, NSEventModifierFlags, NSMenu, NSMenuItem};
+use objc2_app_kit::{
+    NSApplication, NSApplicationActivationPolicy, NSEventModifierFlags, NSMenu, NSMenuItem,
+};
 use objc2_foundation::{MainThreadMarker, NSAppleEventManager, NSObject, NSString, NSTimer};
 
 use crate::app_settings::AppSettings;
@@ -56,8 +58,11 @@ use crate::transcription::models::{
 };
 use crate::transcription::preparation::TranscriptionPreparation;
 
+mod activation;
 mod control;
 pub(crate) mod status_item;
+
+use activation::{observe_activation, reopen_on_activation};
 
 #[cfg(test)]
 mod tests;
@@ -935,6 +940,7 @@ fn start_main_thread() {
     );
     let indicator = DictationIndicatorUi::new(pump.hud.clone());
     install_main_menu(&target, mtm);
+    observe_activation(&target);
     // Inside the loop, once AppKit has started, so its own Apple event setup
     // can't replace this handler.
     // SAFETY: the target outlives the handler (kept in PUMP for the app's
@@ -1367,6 +1373,20 @@ objc2::define_class!(
         #[unsafe(method(handleReopen:withReplyEvent:))]
         fn handle_reopen(&self, _event: Option<&AnyObject>, _reply: Option<&AnyObject>) {
             with_window(|window| show(window, Destination::Settings));
+        }
+
+        /// ⌘Tab (or any activation) with the window closed opens it where
+        /// it was, as clicking the Dock icon does.
+        #[unsafe(method(applicationDidBecomeActive:))]
+        fn application_did_become_active(&self, _notification: Option<&AnyObject>) {
+            let app = NSApplication::sharedApplication(self.mtm());
+            if reopen_on_activation(
+                app.activationPolicy() == NSApplicationActivationPolicy::Regular,
+                app.keyWindow().is_some(),
+                window_visible(),
+            ) {
+                with_window(bring_forward);
+            }
         }
 
         /// `-[NSApplication terminate:]` calls `exit` right after this.

@@ -174,6 +174,30 @@ impl CallProvider {
             Self::Webex => &["webex.com"],
         }
     }
+
+    /// The service a recorded meeting's app names: the exact label detection
+    /// or a calendar reminder records (`Zoom`, `Slack Huddle`), or a browser
+    /// call's website host, which matches a service's host or its
+    /// subdomains. `None` for any other app or website.
+    pub fn from_meeting_app(app: &str) -> Option<Self> {
+        const ALL: [CallProvider; 5] = [
+            CallProvider::Zoom,
+            CallProvider::GoogleMeet,
+            CallProvider::Teams,
+            CallProvider::Slack,
+            CallProvider::Webex,
+        ];
+        let app = app.trim();
+        let site = app.strip_prefix("www.").unwrap_or(app);
+        ALL.into_iter().find(|provider| {
+            app == provider.label()
+                || (*provider == Self::Slack && app == "Slack Huddle")
+                || provider
+                    .detection_keys()
+                    .iter()
+                    .any(|known| key_matches(site, known))
+        })
+    }
 }
 
 /// The call an invitation links to.
@@ -1023,6 +1047,45 @@ mod tests {
         assert_eq!(minutes_until(100 * MINUTE, 95 * MINUTE - 1), 6);
         assert_eq!(minutes_until(100 * MINUTE, 100 * MINUTE), 0);
         assert_eq!(minutes_until(100 * MINUTE, 103 * MINUTE), 0);
+    }
+
+    #[test]
+    fn a_recorded_meeting_app_names_its_service_exactly() {
+        use crate::meeting::detection::MeetingSource;
+        for (app, provider) in [
+            (MeetingSource::Zoom.label(), CallProvider::Zoom),
+            (MeetingSource::GoogleMeet.label(), CallProvider::GoogleMeet),
+            (MeetingSource::Teams.label(), CallProvider::Teams),
+            (MeetingSource::SlackHuddle.label(), CallProvider::Slack),
+            ("Slack", CallProvider::Slack),
+            ("Webex", CallProvider::Webex),
+            ("us.zoom.xos", CallProvider::Zoom),
+            ("zoom.us", CallProvider::Zoom),
+            ("us02web.zoom.us", CallProvider::Zoom),
+            ("www.zoom.us", CallProvider::Zoom),
+            ("meet.google.com", CallProvider::GoogleMeet),
+            ("teams.microsoft.com", CallProvider::Teams),
+            ("app.slack.com", CallProvider::Slack),
+            ("acme.webex.com", CallProvider::Webex),
+        ] {
+            assert_eq!(CallProvider::from_meeting_app(app), Some(provider), "{app}");
+        }
+        for app in [
+            MeetingSource::FaceTime.label(),
+            MeetingSource::Discord.label(),
+            MeetingSource::WhatsApp.label(),
+            "zoominfo.com",
+            "notzoom.us",
+            "zoom.us.example.com",
+            "livestreams.example",
+            "Zoom Rooms",
+            "Teams",
+            "google.com",
+            "Google Chrome",
+            "",
+        ] {
+            assert_eq!(CallProvider::from_meeting_app(app), None, "{app}");
+        }
     }
 
     #[test]

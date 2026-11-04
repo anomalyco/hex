@@ -1253,6 +1253,12 @@ Menu-bar installation fails -> Show Dock icon and open the window // recovery ac
 Show Dock icon off                       // maintain.dock-policy
 ├── Settings window open -> Dock icon stays // hiding it would deactivate Hex
 └── Settings window closes -> Menu-bar only
+
+⌘Tab to Hex while it's in the Dock and its window is closed   // maintain.app-switcher (#1298)
+└── Opens the window in front, on the pane it last showed, as the Dock icon does
+    ├── No reopen Apple event comes with ⌘Tab; Hex watches its own activation
+    └── Menu-bar only, an overlay that took the keyboard, or the window already open -> nothing
+    // check: switching_to_hex_opens_its_closed_window (the decision only); not run on a Mac
 ```
 
 ```ts
@@ -1600,6 +1606,9 @@ Linux beta                               // not macOS feature parity
 │       │   // seen in headless mutter 51 + Xwayland on apollo: HUD at the top
 │       │   // centre, animating, focus unchanged, the pointer over it hits the
 │       │   // window below; not yet on a real GNOME Shell session
+│       │   ├── Meeting capsules take clicks, so they open there only with Labs ›
+│       │   │   Floating meeting capsules on GNOME on and Xwayland already running
+│       │   │   (meetings.md, labs.md; #1274)
 │       │   ├── Drawn on the compositor's GPU only, opaque when its driver offers
 │       │   │   no translucent alpha (NVIDIA), never moved to an iGPU or lavapipe
 │       │   │   that can't make its swapchain (#979, #982)

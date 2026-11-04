@@ -15,6 +15,9 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
+    ("Hex picks a fast model", "O Hex escolhe um modelo rápido"),
+    ("Summary models show once Hex connects to OpenCode.", "Os modelos de resumo aparecem quando o Hex se conecta ao OpenCode."),
+    ("Start OpenCode to choose a summary model. Hex keeps the saved one.", "Inicie o OpenCode para escolher um modelo de resumo. O Hex mantém o salvo."),
     ("Your answer", "Sua resposta"),
     ("History retention", "Retenção do histórico"),
     ("Earlier versions", "Versões anteriores"),
@@ -59,6 +62,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Transcription was cancelled.", "A transcrição foi cancelada."),
     ("Section key alone", "Tecla § sozinha"),
     ("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound", "Usa a tecla §, à esquerda do 1 em teclados ISO, como atalho sem modificador. Enquanto estiver atribuída, o Hex toma a tecla § de todos os apps"),
+    ("Meeting platform icons", "Ícones de plataforma das reuniões"),
+    ("Show a small icon for the app or website each meeting was recorded from, beside its name", "Mostra ao lado do nome de cada reunião um pequeno ícone do app ou site de onde ela foi gravada"),
+    ("Floating meeting capsules on GNOME", "Cápsulas de reunião flutuantes no GNOME"),
+    ("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running", "Mostra a oferta de gravação e o indicador de gravação flutuando sobre a sua chamada, pelo XWayland. Só funciona se o XWayland já estiver em execução"),
     ("Restore clipboard on GNOME", "Restaurar a área de transferência no GNOME"),
     ("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running", "Devolve o que você copiou antes de ditar, pelo XWayland. Só funciona se o XWayland já estiver rodando"),
     ("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it.", "Este desktop não deixa o Hex devolver sua área de transferência depois de colar. Ative Labs › Restaurar a área de transferência no GNOME para testar."),
