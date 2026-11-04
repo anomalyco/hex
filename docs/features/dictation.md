@@ -190,7 +190,18 @@ Alt alone never matches there; bind Right Ctrl instead. Checks:
 `one_modifier_alone_is_a_shortcut_and_alt_or_windows_mask_their_release`,
 `a_key_joining_a_held_modifier_ends_it_quietly_unless_it_records` in
 [windows/input.rs](../../src/windows/input.rs), cross-compiled only; the menu
-mask and AltGr behavior have not run on a Windows PC. Linux
+mask and AltGr behavior have not run on a Windows PC.
+
+**Fixed November 4, 2026 (issue 1254):** a Windows key chord holding Alt or
+Windows (Alt+0, say) swallows its key, so the app saw Alt pressed and released
+alone. Chrome took that as a menu tap and moved focus to its menu button, and
+the paste landed there instead of the page. When Hex swallows the key of a
+chord (dictation, Dictate without processing, Paste Last, Annotate) that holds
+Alt or Windows, that modifier's release is now masked like a modifier-only
+shortcut's: swallowed, VK 0xE8 tapped, release replayed (not with Share
+shortcut). Check: the `holds_menu_modifier` assertions in
+`one_modifier_alone_is_a_shortcut_and_alt_or_windows_mask_their_release`
+(cross-compiled only; not run in Chrome on a Windows PC). Linux
 binds what the portal and X11 grabs take, a key with modifiers and no side:
 releasing modifiers pressed alone in the recorder says Linux needs a key (or
 can't bind both sides) and suggests adding one, such as Space.
