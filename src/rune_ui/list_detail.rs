@@ -239,7 +239,36 @@ pub(super) fn meta_text(p: Paint, meta: &str) -> El {
 
 /// The card's scrolling content under its header, clear of the scroll bar.
 pub(super) fn card_scroll(p: Paint, key: &str, content: El) -> El {
-    super::faded_body(p.k, key, content.pr(SCROLL_BAR), LIST_FADE)
+    card_scroll_sticky(p, key, content, false)
+}
+
+/// A [`card_scroll`] that, with `stick_bottom`, follows content added at
+/// its end while scrolled to the bottom.
+pub(super) fn card_scroll_sticky(p: Paint, key: &str, content: El, stick_bottom: bool) -> El {
+    faded_body_sticky(p.k, key, content.pr(SCROLL_BAR), LIST_FADE, stick_bottom)
+}
+
+/// The window's faded scroll body (`super::faded_body`); with
+/// `stick_bottom` it keeps its newest content in view while scrolled to the
+/// bottom (Labs › Follow live transcript).
+pub(super) fn faded_body_sticky(
+    k: &rune_kit::Kit,
+    key: &str,
+    content: El,
+    (top, bottom): (f32, f32),
+    stick_bottom: bool,
+) -> El {
+    // Both shrink below their content in a fixed-height parent (#906).
+    let viewport = col().grow(1.0).shrink().min_h(0.0);
+    let viewport = viewport
+        .clip_fade(0.0, top, 0.0, bottom)
+        .scroll(super::ScrollSpec { stick_bottom })
+        .child(col().key("inset").pt(top).pb(bottom).child(content));
+    let area = format!("{key}-area");
+    rune_kit::scroll_bar(k, &area, key, viewport)
+        .grow(1.0)
+        .shrink()
+        .min_h(0.0)
 }
 
 /// A quiet empty state: an icon, a short title, and at most one line.

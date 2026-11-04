@@ -153,6 +153,21 @@ const SCENES: &[Scene] = &[
             ],
         )
     }),
+    // Typed over the suggestions, with the pointer on them.
+    ("typed", |s| {
+        scene(
+            s,
+            &[
+                record(),
+                Step::Input(stop()),
+                done(),
+                routed(guess()),
+                Step::Input(Input::Type("h".into())),
+                Step::Input(Input::Type("e".into())),
+                Step::Input(Input::Type("x".into())),
+            ],
+        )
+    }),
     ("picked", |s| {
         scene(
             s,
@@ -350,11 +365,16 @@ fn routed(route: Route) -> Step {
     Step::Input(Input::Routed(route))
 }
 
+/// `name` working in `folder`.
+fn dest(name: &str, why: &str, folder: &str) -> Dest {
+    Dest::new(name, why).folder(Some(folder.into()))
+}
+
 fn recent() -> Vec<Dest> {
     vec![
-        Dest::new("RUNE", "2 min ago"),
-        Dest::new("SCRAWL", "an hour ago"),
-        Dest::new("HOME", "yesterday"),
+        dest("RUNE", "2 min ago", "rune"),
+        dest("SCRAWL", "an hour ago", "hex"),
+        dest("HOME", "yesterday", "home"),
     ]
 }
 
@@ -372,9 +392,9 @@ fn rule() -> Route {
 fn guess() -> Route {
     Route::Guess {
         suggested: vec![
-            Dest::new("HEX", "you were just in it"),
-            Dest::new("SEER", "same page"),
-            Dest::new("HOME", "mentioned"),
+            dest("HEX", "you were just in it", "hex"),
+            dest("SEER", "same page", "seer"),
+            dest("HOME", "mentioned", "home"),
         ],
         recent: recent(),
         site: Some("problems.kitlangton.com".into()),
@@ -531,6 +551,10 @@ fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
         keys,
         crate::capture_host::CapsuleKeys::Suggest { cycle: true, .. }
     );
+    let search = matches!(
+        keys,
+        crate::capture_host::CapsuleKeys::Suggest { search: true, .. }
+    );
     let escape = matches!(
         keys,
         crate::capture_host::CapsuleKeys::List | crate::capture_host::CapsuleKeys::Picker
@@ -557,6 +581,14 @@ fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
         Key::Tab if cycle => Input::Cycle(if key.mods.shift { -1 } else { 1 }),
         Key::Backspace if list => Input::Backspace,
         Key::Text(t) if list => Input::Type(t.clone()),
+        Key::Text(t)
+            if search
+                && !key.mods.cmd
+                && !key.mods.ctrl
+                && crate::capture_host::opens_search(t) =>
+        {
+            Input::Type(t.clone())
+        }
         _ => return false,
     };
     s.inbox.push(input);

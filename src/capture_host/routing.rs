@@ -83,6 +83,8 @@ pub struct RouteDest {
     pub name: String,
     /// A quiet word on why: `rule`, `dev server`, `guess`, `2 min ago`.
     pub why: String,
+    /// The session's folder, which the capsule's search also matches.
+    pub directory: Option<PathBuf>,
 }
 
 /// `recent` is every other session the look read, newest first.
@@ -1287,6 +1289,7 @@ fn answer_for(
             session: dest.session,
             name: dest.title,
             why: why(&dest.via).to_owned(),
+            directory: scored.candidate.directory.clone(),
         }
     };
     let recent = |shown: &[&str]| recent(candidates, shown, now_ms);
@@ -1395,6 +1398,7 @@ fn recent(candidates: &[smart::Candidate], shown: &[&str], now_ms: u64) -> Vec<R
                 "{} ago",
                 smart::ago_text(now_ms.saturating_sub(candidate.updated_ms))
             ),
+            directory: candidate.directory.clone(),
         })
         .collect()
 }
@@ -1864,6 +1868,7 @@ mod tests {
                 session: "ses_b".into(),
                 name: "Beta".into(),
                 why: "1 min ago".into(),
+                directory: Some("/tmp/ses_b".into()),
             }]
         );
     }
