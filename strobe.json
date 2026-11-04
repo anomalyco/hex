@@ -51,6 +51,16 @@
         { "os": "linux", "file": "~/.local/share/hex/settings.json" }
       ]
     },
+    "hex-tour": {
+      "extends": "hex",
+      "files": {
+        "hex-data/settings.json": {
+          "enable_on_launch": false,
+          "history_retention": "forever",
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+        }
+      }
+    },
     "hex-listening": {
       "extends": "hex",
       "files": {

@@ -14,7 +14,7 @@ use super::dictated::Dictated;
 use super::fixture::{
     ANSWER_JAY, ANSWER_TRY, Download, EXAMPLE_REPLIES, Language, Speech, Take, downloaded,
 };
-use super::hud_stage::{FlowHud, LiveHud};
+use super::hud_stage::{FlowHud, LiveHud, VoiceHud};
 use super::live::Live;
 use super::sfx::SfxTrack;
 use super::{flows, permissions, typing, versus};
@@ -132,6 +132,7 @@ pub(crate) struct Onboard {
     /// The `"Your turn"` plate, on the microphone's real level.
     pub(crate) hud: LiveHud,
     pub(crate) flow_hud: FlowHud,
+    pub(crate) voice_hud: VoiceHud,
     /// A dictation's text landed since the plate last stepped.
     pub(crate) hud_landed: bool,
     pub(crate) sfx: SfxTrack,
@@ -250,6 +251,7 @@ impl Onboard {
             live_hold_from: None,
             hud: LiveHud::default(),
             flow_hud: FlowHud::default(),
+            voice_hud: VoiceHud::default(),
             hud_landed: false,
             sfx: SfxTrack::default(),
             live: None,
@@ -694,6 +696,7 @@ fn start_first_run(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
 pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> f64 {
     s.now = now;
     s.flow_hud = FlowHud::default();
+    s.voice_hud = VoiceHud::default();
     s.examples_from = Some(now);
     s.pick(s.wants);
     if s.had_model {

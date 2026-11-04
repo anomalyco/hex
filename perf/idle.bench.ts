@@ -9,6 +9,10 @@ export default bench({
     window: native("hex"),
     // A login launch: the tray only, no window. Runs on a locked session too.
     tray: native("hex", { args: ["--hidden"], window: false }),
+    // The first-run tour a Mac reopens when setup isn't ready under the
+    // `anomaly.hex` identity: the demo page waits for the shortcut with
+    // Hex's HUD humming over the keyboard. Elsewhere it opens Settings.
+    tour: native("hex-tour"),
   },
   // Startup work (fonts, GPU, first frames) finishes before any run.
   async setup({ page }) {
@@ -19,6 +23,14 @@ export default bench({
       targets: ["window"],
       primary: "cpu.work",
       metrics: ["cpu.wakes", "cpu.app.total", "gpu.process.3d", "memory.app.private"],
+      async run({ page }) {
+        await page.wait(8_000)
+      },
+    },
+    "tour-open": {
+      targets: ["tour"],
+      primary: "ui.cpu",
+      metrics: ["cpu.work", "cpu.wakes", "gpu.process.3d"],
       async run({ page }) {
         await page.wait(8_000)
       },

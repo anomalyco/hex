@@ -90,8 +90,8 @@ const IDLE_METER: Event = Event::Meter {
     average: 0.024,
     peak: 0.075,
 };
-/// After its first unfold, the resting plate replays this window so the idle
-/// simulation stays bounded however long it waits.
+/// After its first unfold, a plate that mounts mid-wait replays this window
+/// so its first frame's simulation stays bounded however long it waited.
 const IDLE_LOOP: f64 = 6.0;
 const IDLE_SETTLED: f64 = 0.55;
 
@@ -113,68 +113,201 @@ fn idle_time(idle: f64) -> f32 {
 /// `take` recording `elapsed` seconds after the press, on one model: the plate
 /// unfolds when it mounts and keeps running through the press instead of
 /// starting over. `None` before the press or once the Done collapse finishes.
+#[cfg(test)]
 pub(crate) fn voice_frame_at(
     idle: f64,
     take: Option<(&Take, f64)>,
     reduce: bool,
 ) -> Option<DotFrame> {
-    if take.is_some_and(|(take, elapsed)| elapsed < 0.0 || elapsed > take.release + 1.2) {
+    if outside(take) {
         return None;
     }
-    let clock = Instant::now();
-    let mut model = IndicatorModel::new(Tuning::default(), clock);
-    model.handle(Event::Started, clock, reduce);
-    let mut drawn = model.step(clock, 0.0, reduce);
+    Voice::replay(idle, take, reduce).drawn
+}
 
-    let idle = idle_time(idle);
-    let (count, dt) = steps(idle);
-    for i in 1..=count {
-        let time = i as f32 * dt;
-        let at = clock + Duration::from_secs_f32(time);
-        model.handle(IDLE_METER, at, reduce);
-        drawn = model.step(at, dt, reduce);
-    }
-    let Some((take, elapsed)) = take else {
-        return Some(drawn);
-    };
+fn outside(take: Option<(&Take, f64)>) -> bool {
+    take.is_some_and(|(take, elapsed)| elapsed < 0.0 || elapsed > take.release + 1.2)
+}
 
-    let pressed = idle;
-    let target = elapsed as f32;
-    let stop_at = take.release as f32;
-    let done_at = (take.release + DONE_DELAY) as f32;
-    let mut submitted = false;
-    let mut completed = false;
-    let (count, dt) = steps(target);
-    for i in 1..=count {
-        let since = i as f32 * dt;
-        let now = clock + Duration::from_secs_f32(pressed + since);
-        if !submitted && since >= stop_at {
-            submitted = true;
-            model.handle(Event::Submitted { job_id: JOB }, now, reduce);
-            model.handle(Event::Transcribing { job_id: JOB }, now, reduce);
-        }
-        if !completed && since >= done_at {
-            completed = true;
-            model.handle(Event::JobCompleted { job_id: JOB }, now, reduce);
-        }
-        if !submitted {
-            let (avg, pk) = take.meter(f64::from(since));
-            let demo = demo_level(since);
-            model.handle(
-                Event::Meter {
-                    average: (0.06 * demo + 0.11 * avg).min(0.35),
-                    peak: (0.22 * demo + 0.28 * pk).min(0.85),
-                },
-                now,
-                reduce,
-            );
-        }
-        if !model.active() {
+/// The `"With Hex"` and `"Your turn"` plates advance from the last
+/// presentation time, as [`FlowHud`] does: replaying the whole wait and take
+/// in every view kept the first run's window at about 40% of a core.
+#[derive(Default)]
+pub(crate) struct VoiceHud(RefCell<Option<(String, Voice)>>);
+
+impl VoiceHud {
+    /// [`voice_frame_at`]'s plate for `key`, stepped on from its last frame
+    /// when it continues it; otherwise replayed.
+    pub(crate) fn frame(
+        &self,
+        key: &str,
+        idle: f64,
+        take: Option<(&Take, f64)>,
+        reduce: bool,
+    ) -> Option<DotFrame> {
+        if outside(take) {
             return None;
         }
-        drawn = model.step(now, dt, reduce);
+        let mut cached = self.0.borrow_mut();
+        match cached.as_mut() {
+            Some((shown, voice)) if shown == key && voice.continues(idle, take, reduce) => {
+                voice.advance(idle, take);
+                voice.drawn.clone()
+            }
+            _ => {
+                let voice = Voice::replay(idle, take, reduce);
+                let drawn = voice.drawn.clone();
+                *cached = Some((key.to_owned(), voice));
+                drawn
+            }
+        }
     }
-    model.active().then_some(drawn)
+}
+
+/// A window returning after a longer pause replays instead.
+const CATCH_UP: f64 = 1.0;
+
+struct Voice {
+    model: IndicatorModel,
+    clock: Instant,
+    /// Model seconds since the plate mounted.
+    at: f32,
+    /// The caller's waiting seconds `at` stands for.
+    idle: f64,
+    take: Option<Taking>,
+    reduce: bool,
+    /// `None` once the Done collapse finished.
+    drawn: Option<DotFrame>,
+}
+
+struct Taking {
+    /// The caller's waiting seconds when the shortcut went down.
+    press_idle: f64,
+    /// Model seconds when the shortcut went down.
+    pressed: f32,
+    elapsed: f32,
+    submitted: bool,
+    completed: bool,
+}
+
+impl Voice {
+    fn replay(idle: f64, take: Option<(&Take, f64)>, reduce: bool) -> Self {
+        let clock = Instant::now();
+        let mut model = IndicatorModel::new(Tuning::default(), clock);
+        model.handle(Event::Started, clock, reduce);
+        let drawn = Some(model.step(clock, 0.0, reduce));
+        let mut voice = Self {
+            model,
+            clock,
+            at: 0.0,
+            idle,
+            take: None,
+            reduce,
+            drawn,
+        };
+        voice.wait(idle_time(idle));
+        if let Some((take, elapsed)) = take {
+            voice.press(idle);
+            voice.record(take, elapsed as f32);
+        }
+        voice
+    }
+
+    fn continues(&self, idle: f64, take: Option<(&Take, f64)>, reduce: bool) -> bool {
+        let close = |from: f64, to: f64| to >= from && to - from <= CATCH_UP;
+        reduce == self.reduce
+            && match (&self.take, take) {
+                (None, _) => close(self.idle, idle),
+                (Some(taking), Some((_, elapsed))) => {
+                    taking.press_idle == idle && close(f64::from(taking.elapsed), elapsed)
+                }
+                (Some(_), None) => false,
+            }
+    }
+
+    fn advance(&mut self, idle: f64, take: Option<(&Take, f64)>) {
+        if self.take.is_none() {
+            self.wait((idle - self.idle) as f32);
+            self.idle = idle;
+        }
+        if let Some((take, elapsed)) = take {
+            if self.take.is_none() {
+                self.press(idle);
+            }
+            self.record(take, elapsed as f32);
+        }
+    }
+
+    /// Waits `seconds` more on the resting meter.
+    fn wait(&mut self, seconds: f32) {
+        let (count, dt) = steps(seconds);
+        let from = self.at;
+        for i in 1..=count {
+            let at = self.clock + Duration::from_secs_f32(from + i as f32 * dt);
+            self.model.handle(IDLE_METER, at, self.reduce);
+            self.drawn = Some(self.model.step(at, dt, self.reduce));
+        }
+        self.at = from + seconds.max(0.0);
+    }
+
+    fn press(&mut self, idle: f64) {
+        self.take = Some(Taking {
+            press_idle: idle,
+            pressed: self.at,
+            elapsed: 0.0,
+            submitted: false,
+            completed: false,
+        });
+    }
+
+    /// Records `take` on to `elapsed` seconds after the press.
+    fn record(&mut self, take: &Take, elapsed: f32) {
+        let Some(taking) = self.take.as_mut() else {
+            return;
+        };
+        let reduce = self.reduce;
+        let stop_at = take.release as f32;
+        let done_at = (take.release + DONE_DELAY) as f32;
+        let from = taking.elapsed;
+        let (count, dt) = steps(elapsed - from);
+        taking.elapsed = elapsed.max(from);
+        if self.drawn.is_none() {
+            return;
+        }
+        for i in 1..=count {
+            let since = from + i as f32 * dt;
+            let now = self.clock + Duration::from_secs_f32(taking.pressed + since);
+            if !taking.submitted && since >= stop_at {
+                taking.submitted = true;
+                self.model.handle(Event::Submitted { job_id: JOB }, now, reduce);
+                self.model.handle(Event::Transcribing { job_id: JOB }, now, reduce);
+            }
+            if !taking.completed && since >= done_at {
+                taking.completed = true;
+                self.model.handle(Event::JobCompleted { job_id: JOB }, now, reduce);
+            }
+            if !taking.submitted {
+                let (avg, pk) = take.meter(f64::from(since));
+                let demo = demo_level(since);
+                self.model.handle(
+                    Event::Meter {
+                        average: (0.06 * demo + 0.11 * avg).min(0.35),
+                        peak: (0.22 * demo + 0.28 * pk).min(0.85),
+                    },
+                    now,
+                    reduce,
+                );
+            }
+            if !self.model.active() {
+                self.drawn = None;
+                return;
+            }
+            self.drawn = Some(self.model.step(now, dt, reduce));
+        }
+        if !self.model.active() {
+            self.drawn = None;
+        }
+    }
 }
 
 /// Computes Hex's real [`DotFrame`] at `elapsed` seconds after shortcut press
@@ -353,7 +486,7 @@ pub(crate) fn voice_or_idle_slot(
     if let Some(from) = take_from {
         let elapsed = now - from;
         let idle = s.hud_from.map_or(0.0, |shown| from - shown);
-        if let Some(frame) = voice_frame_at(idle, Some((take, elapsed)), reduce) {
+        if let Some(frame) = s.voice_hud.frame(key, idle, Some((take, elapsed)), reduce) {
             let heat = (frame.pose.opacity * if elapsed < take.release { 1.0 } else { 0.45 })
                 .clamp(0.0, 1.0);
             let (avg, _) = take.meter(elapsed);
@@ -368,7 +501,7 @@ pub(crate) fn voice_or_idle_slot(
         .map_or(IDLE_SETTLED + now.rem_euclid(IDLE_LOOP), |shown| {
             now - shown
         });
-    if waiting && let Some(frame) = voice_frame_at(idle, None, reduce) {
+    if waiting && let Some(frame) = s.voice_hud.frame(key, idle, None, reduce) {
         let heat = 0.22 * frame.pose.opacity;
         update_hud(hud_mark(key), frame);
         return (Some(slot_el(key, centre, scale)), heat, 0.04);
@@ -416,6 +549,65 @@ mod tests {
         assert_ne!(
             flow.frame(0.25, false),
             flow.frame(0.25 + 1.0 / 120.0, false)
+        );
+    }
+
+    /// Stepped on from its last frame, the plate waits and records as a
+    /// replay of its whole wait and take shows it within a frame of the same
+    /// time, and its Done collapse ends on the same frame.
+    #[test]
+    fn the_plate_steps_on_as_a_replay_would() {
+        const FRAME: f64 = 1.0 / 60.0;
+        let hud = VoiceHud::default();
+        let press = 0.5;
+        let replay = |now: f64| {
+            let take = (now >= press).then_some((&ANSWER_JAY, now - press));
+            let idle = if take.is_some() { press } else { now };
+            (idle, take)
+        };
+        let (mut stepped_end, mut replayed_end) = (None, None);
+        for i in 0..=200 {
+            let now = f64::from(i) * FRAME;
+            let (idle, take) = replay(now);
+            let stepped = hud.frame("plate", idle, take, false);
+            if stepped.is_none() {
+                stepped_end.get_or_insert(now);
+            }
+            if replayed_end.is_none()
+                && now >= press + ANSWER_JAY.release
+                && voice_frame_at(idle, take, false).is_none()
+            {
+                replayed_end = Some(now);
+            }
+            // The unfold, and the release onwards, move faster than a frame;
+            // the collapse is checked by when it ends. Every fourth frame
+            // keeps the replays affordable.
+            let recording = i % 4 == 0 && (0.1..press + ANSWER_JAY.release).contains(&now);
+            let (Some(a), true) = (stepped.map(|frame| frame.pose), recording) else {
+                continue;
+            };
+            // Dot scope steps at 240 Hz and keeps the remainder: the nearest
+            // replayed pose within a frame.
+            let nearest = (-4..=4)
+                .filter_map(|steps| {
+                    let (idle, take) = replay(now + f64::from(steps) / 240.0);
+                    voice_frame_at(idle, take, false)
+                })
+                .map(|b| {
+                    let b = b.pose;
+                    (a.opacity - b.opacity)
+                        .abs()
+                        .max((a.scale - b.scale).abs())
+                        .max((a.width - b.width).abs() / 10.0)
+                        .max((a.live - b.live).abs())
+                })
+                .fold(f32::INFINITY, f32::min);
+            assert!(nearest < 0.02, "at {now}: {a:?} is {nearest} from any replay");
+        }
+        let (stepped_end, replayed_end) = (stepped_end.unwrap(), replayed_end.unwrap());
+        assert!(
+            (stepped_end - replayed_end).abs() <= FRAME + 1e-9,
+            "the collapse ends at {stepped_end} stepped, {replayed_end} replayed"
         );
     }
 
