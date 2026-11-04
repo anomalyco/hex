@@ -11,6 +11,24 @@ const SUBTYPE_TAIL: [u8; 12] = [
     0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71,
 ];
 
+/// A `WAVEFORMATEXTENSIBLE` for 32-bit float audio, as raw bytes.
+pub(super) fn float_format_bytes(channels: u16, sample_rate: u32, channel_mask: u32) -> Vec<u8> {
+    let block_align = channels * 4;
+    let mut bytes = Vec::with_capacity(40);
+    bytes.extend(WAVE_FORMAT_EXTENSIBLE.to_le_bytes());
+    bytes.extend(channels.to_le_bytes());
+    bytes.extend(sample_rate.to_le_bytes());
+    bytes.extend((sample_rate * u32::from(block_align)).to_le_bytes());
+    bytes.extend(block_align.to_le_bytes());
+    bytes.extend(32_u16.to_le_bytes());
+    bytes.extend(22_u16.to_le_bytes());
+    bytes.extend(32_u16.to_le_bytes());
+    bytes.extend(channel_mask.to_le_bytes());
+    bytes.extend(u32::from(WAVE_FORMAT_IEEE_FLOAT).to_le_bytes());
+    bytes.extend(SUBTYPE_TAIL);
+    bytes
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Sample {
     Float,
@@ -181,6 +199,17 @@ mod tests {
             format.to_string(),
             "2 channels, 48000 Hz, 32-bit float (tag 0xfffe, valid 32 bits, block 8, mask 0x3)"
         );
+    }
+
+    #[test]
+    fn builds_float_formats_byte_for_byte() {
+        assert_eq!(float_format_bytes(2, 48_000, 3), intel_smart_sound());
+        let mono = MixFormat::parse(&float_format_bytes(1, 16_000, 4)).unwrap();
+        assert_eq!(
+            mono.to_string(),
+            "1 channels, 16000 Hz, 32-bit float (tag 0xfffe, valid 32 bits, block 4, mask 0x4)"
+        );
+        assert!(mono.is_decodable());
     }
 
     #[test]
