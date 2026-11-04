@@ -1251,6 +1251,12 @@ Menu-bar installation fails -> Show Dock icon and open the window // recovery ac
 Show Dock icon off                       // maintain.dock-policy
 ├── Settings window open -> Dock icon stays // hiding it would deactivate Hex
 └── Settings window closes -> Menu-bar only
+
+⌘Tab to Hex while it's in the Dock and its window is closed   // maintain.app-switcher (#1298)
+└── Opens the window in front, on the pane it last showed, as the Dock icon does
+    ├── No reopen Apple event comes with ⌘Tab; Hex watches its own activation
+    └── Menu-bar only, an overlay that took the keyboard, or the window already open -> nothing
+    // check: switching_to_hex_opens_its_closed_window (the decision only); not run on a Mac
 ```
 
 ```ts
