@@ -54,6 +54,33 @@ pub(crate) struct OnboardingGpu {
     huds: HashMap<u32, Hud>,
 }
 
+/// Builds, once per process and on a thread, the pipelines the first run
+/// reaches for later: Rune's layer and backdrop blurs (the Launch Room's
+/// opening) and the game's. Built cold, they cost the frame that first needs
+/// them most of a second, and the motion on it jumps; built here and
+/// dropped, the GPU driver's shader cache has them by then.
+pub(crate) fn warm_later_pipelines(device: &wgpu::Device, format: wgpu::TextureFormat) {
+    static WARMED: std::sync::Once = std::sync::Once::new();
+    WARMED.call_once(|| {
+        let device = device.clone();
+        // Rune's isolated layers draw into this format.
+        const LAYER: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+        let warm = move || {
+            let mut renderer = rune::render::Renderer::new(&device, format);
+            renderer.add_format(&device, LAYER);
+            drop(renderer.first_use_ms(&device));
+            drop(Painter::with_color_space(&device, LAYER, true));
+            drop(super::game::fx::GameFx::new(&device));
+        };
+        if let Err(error) = std::thread::Builder::new()
+            .name("onboarding-gpu-warm".into())
+            .spawn(warm)
+        {
+            tracing::debug!(%error, "could not warm the first run's pipelines");
+        }
+    });
+}
+
 impl OnboardingGpu {
     pub(crate) fn new(_: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         Self {

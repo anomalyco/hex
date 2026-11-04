@@ -16,7 +16,7 @@
 //! downloading by itself.
 
 use crate::desktop::i18n::tr;
-use std::sync::OnceLock;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use rune::{El, TextEdit, Transition, Tx, text};
@@ -158,14 +158,58 @@ impl Live {
 /// Where a fixture's clock starts.
 const FIXTURE_START: f64 = 100.0;
 
+/// The most one drawn frame moves the first run's clock: two 30 Hz frames.
+const MAX_STEP: f64 = 1.0 / 15.0;
+
+/// The first run's clock, which runs on drawn frames rather than the wall.
+/// It stands still until the window draws its first frame, and a slow frame
+/// moves it at most [`MAX_STEP`]. A cold launch spends most of a second on
+/// its first frames (the GPU's pipelines, fonts and glyphs), and a beat's
+/// first frame can be slow the same way; on the wall's time the opening
+/// and the Launch Room's growth would play out unseen behind them and jump.
+struct StoryClock {
+    /// Story seconds at `last`.
+    story: f64,
+    last: Option<Instant>,
+}
+
+impl StoryClock {
+    fn frame_drawn(&mut self, at: Instant) {
+        self.story = self.at(at);
+        self.last = Some(at);
+    }
+
+    /// Story seconds at `at`, after the last drawn frame.
+    fn at(&self, at: Instant) -> f64 {
+        self.story
+            + self.last.map_or(0.0, |last| {
+                at.saturating_duration_since(last).as_secs_f64().min(MAX_STEP)
+            })
+    }
+}
+
+static STORY_CLOCK: Mutex<StoryClock> = Mutex::new(StoryClock {
+    story: 0.0,
+    last: None,
+});
+
+/// The window drew a frame.
+pub(in crate::rune_ui) fn frame_drawn() {
+    if let Ok(mut clock) = STORY_CLOCK.lock() {
+        clock.frame_drawn(Instant::now());
+    }
+}
+
 /// Seconds on the first run's own clock. Fixtures keep the story's own
 /// time, so a scene shows one settled moment.
 fn clock(ui: &Ui) -> f64 {
-    static START: OnceLock<Instant> = OnceLock::new();
     if ui.is_fixture() {
         return ui.first_run.as_ref().map_or(FIXTURE_START, |s| s.now);
     }
-    START.get_or_init(Instant::now).elapsed().as_secs_f64() + 1.0
+    STORY_CLOCK
+        .lock()
+        .map_or(0.0, |clock| clock.at(Instant::now()))
+        + 1.0
 }
 
 /// Every permission is ready, the desktop's paste permission included
@@ -808,4 +852,35 @@ pub(super) fn hint(p: Paint, live: &Live) -> Option<El> {
             .color(p.muted())
             .transition(Transition::opacity()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_STEP, StoryClock};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn the_story_waits_for_the_first_frame_and_slow_frames_dont_skip_it() {
+        let open = Instant::now();
+        let mut clock = StoryClock {
+            story: 0.0,
+            last: None,
+        };
+        // A cold first frame takes most of a second: the story stands still.
+        assert_eq!(clock.at(open + Duration::from_millis(700)), 0.0);
+        let first = open + Duration::from_millis(700);
+        clock.frame_drawn(first);
+        assert_eq!(clock.story, 0.0);
+        // Frames at 60 Hz move it on the wall's time.
+        let frame = Duration::from_micros(16_667);
+        clock.frame_drawn(first + frame);
+        assert!((clock.story - frame.as_secs_f64()).abs() < 1e-9);
+        // A 400 ms frame moves it one step, and time between frames
+        // never runs ahead of the next frame.
+        let slow = first + frame + Duration::from_millis(400);
+        let between = clock.at(slow);
+        clock.frame_drawn(slow);
+        assert!((clock.story - (frame.as_secs_f64() + MAX_STEP)).abs() < 1e-9);
+        assert!(between <= clock.story);
+    }
 }

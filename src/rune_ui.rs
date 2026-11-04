@@ -283,11 +283,13 @@ impl rune::compose::Compositor<Ui> for WindowCompositor {
                 .iter()
                 .any(|&m| onboarding_kit::gpu_stage::is_onboard_mark(m))
         {
+            onboarding_kit::gpu_stage::warm_later_pipelines(f.device, f.format);
             onboarding_kit::gpu_stage::OnboardingGpu::for_frame(&mut self.onboarding, f).render(f);
         } else {
             f.draw_ui();
         }
         self.sounds.render(f);
+        onboarding_kit::live::frame_drawn();
     }
 }
 
