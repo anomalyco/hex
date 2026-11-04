@@ -253,3 +253,53 @@ fn the_model_picker_is_a_named_modal_dialog() {
         "the window behind the picker leaves the tree"
     );
 }
+
+/// Closing Settings and opening it again keeps the window's runtime but
+/// gives it a new accessibility adapter. With assistive technology on, the
+/// new adapter's first update must hold the whole tree: a partial one
+/// panicked AccessKit, which took the window down on reopen.
+#[test]
+fn settings_reopened_sends_its_whole_tree_to_the_new_adapter() {
+    let mut rt = runtime("portal");
+    let mut first = rune::AccessibilityLink::new();
+    first.activate();
+    let opened = first
+        .service(&mut rt, "Hex")
+        .expect("the first window's tree");
+    assert!(opened.tree.is_some());
+    assert!(rt.accessibility_action("transcription-control", Action::Click, None));
+    settle(&mut rt);
+    assert!(
+        first
+            .service(&mut rt, "Hex")
+            .expect("the picker opened")
+            .tree
+            .is_none()
+    );
+
+    rt.update(on_close);
+    settle(&mut rt);
+    drop(first);
+
+    rt.update(|ui, tx| show(ui, Destination::Settings, tx));
+    settle(&mut rt);
+    let mut reopened = rune::AccessibilityLink::new();
+    if let Some(update) = reopened.service(&mut rt, "Hex") {
+        assert!(
+            update.tree.is_some(),
+            "a partial tree before the client asked"
+        );
+    }
+    reopened.activate();
+    let update = reopened
+        .service(&mut rt, "Hex")
+        .expect("the reopened window's tree");
+    assert!(update.tree.is_some());
+    assert!(
+        update
+            .nodes
+            .iter()
+            .any(|(_, node)| node.author_id() == Some("transcription-control")),
+        "the reopened window shows Settings"
+    );
+}
