@@ -415,6 +415,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Meeting platform icons"),
             tr("Show a small icon for the app or website each meeting was recorded from, beside its name"),
         ));
+        rows.push(row(
+            Feature::FollowLiveTranscript,
+            None,
+            tr("Follow live transcript"),
+            tr("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."),
+        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -743,6 +749,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
         Feature::MeetingPlatformIcons => "lab-meeting-platform-icons",
         Feature::Screenshots => "lab-screenshots",
+        Feature::FollowLiveTranscript => "lab-follow-live-transcript",
     }
 }
 
