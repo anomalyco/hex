@@ -1,29 +1,51 @@
 //! The screenshot just taken, as a card in the bottom-right corner of the
-//! display under the pointer, as macOS and CleanShot show theirs: a click
-//! opens it in Preview, a drag carries the file out, and ✕ closes it. It
-//! goes by itself a few seconds on, unless the pointer is on it.
+//! display under the pointer, as macOS and CleanShot show theirs: it slides
+//! in from the display's edge and leaves the same way. A click opens it in
+//! Preview, a drag carries the file out, and ✕ closes it. It goes by itself
+//! a few seconds on, unless the pointer is on it.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-use rune::{Align, Anim, Cursor, Cx, El, OverlayHandle, OverlaySpec, ScreenEdge, Spring, Tx, el};
+use rune::{
+    Align, Anim, Cursor, Cx, El, OverlayHandle, OverlaySpec, ScreenEdge, Spring, SpringPair,
+    Transition, Tx, el,
+};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
 use super::controls::Paint;
 use crate::desktop::i18n::tr;
 
-/// The overlay: room for the largest card and its ✕.
+/// The overlay: room for the largest card and its shadow.
 const SIZE: (f32, f32) = (CARD_MAX.0 + 2.0 * PAD, CARD_MAX.1 + 2.0 * PAD);
 const CARD_MAX: (f32, f32) = (240.0, 168.0);
-/// Around the card, for its shadow and the ✕ that overhangs its corner.
+/// Around the card, for its shadow.
 const PAD: f32 = 16.0;
-const MARGIN: f32 = 8.0;
-const RADIUS: f32 = 10.0;
+/// The corner the card's own corner follows. macOS gives no display's
+/// corner radius (and a MacBook's bottom corners are square glass), so this
+/// is a design constant: the card's corner is concentric with it.
+const SCREEN_RADIUS: f32 = 30.0;
+/// From the display's edges to the card's.
+const INSET: f32 = 16.0;
+/// The overlay sits on the display's edges; [`PAD`] holds the card in.
+const MARGIN: f32 = INSET - PAD;
+/// Concentric with [`SCREEN_RADIUS`], and so the capture capsule's shell.
+const RADIUS: f32 = SCREEN_RADIUS - INSET;
+/// ✕ sits inside the card's corner, its corner concentric with the card's.
+const CLOSE_INSET: f32 = 6.0;
+const CLOSE_RADIUS: f32 = RADIUS - CLOSE_INSET;
 /// How long it stays once the pointer isn't on it.
 const LINGER: Duration = Duration::from_secs(5);
 const FADE: Spring = Spring::new(0.22, 0.0);
-/// The fade's length, before the overlay hides.
-const FADE_S: f64 = 0.3;
+/// In on the HUD family's spring, a little bounce; out shorter, none.
+const ENTER: Spring = super::capture_capsule::tuning::spring(crate::rune_hud::spring::MORPH);
+const LEAVE: Spring = Spring::new(0.24, 0.0);
+const REDUCED: Spring =
+    super::capture_capsule::tuning::spring(crate::rune_hud::spring::REDUCED_FADE);
+/// How far it leans back as it travels, about its bottom-right corner.
+const TRAVEL_SCALE: f32 = 0.94;
+/// How long leaving takes, before the overlay hides.
+const LEAVE_S: f64 = 0.4;
 
 static CLOSE: &rune::Icon = &rune_theme_opencode::icons::CLOSE;
 
@@ -65,7 +87,7 @@ impl Card {
             self.on = false;
             self.leaving = Some(self.now);
             tx.animated();
-            tx.wake_after(Duration::from_secs_f64(FADE_S));
+            tx.wake_after(Duration::from_secs_f64(LEAVE_S));
         }
     }
 
@@ -97,7 +119,7 @@ impl Card {
 fn poll(s: &mut Card, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
     if let Some(at) = s.leaving {
-        if now - at >= FADE_S {
+        if now - at >= LEAVE_S {
             s.leaving = None;
             s.shot = None;
             if let Some(overlay) = &s.overlay {
@@ -105,7 +127,7 @@ fn poll(s: &mut Card, now: f64, tx: &mut Tx) -> bool {
             }
             return true;
         }
-        tx.wake_after(Duration::from_secs_f64(at + FADE_S - now));
+        tx.wake_after(Duration::from_secs_f64(at + LEAVE_S - now));
         return false;
     }
     if !s.on || s.hovered {
@@ -190,7 +212,7 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .key("screenshot-thumbnail")
         .size(SIZE.0, SIZE.1)
         .hover_motion_within(Anim::INSTANT, Anim::INSTANT);
-    let Some(shot) = &s.shot else {
+    let Some(shot) = s.shot.as_ref().filter(|_| s.on) else {
         return root;
     };
     let (w, h) = s.card_size();
@@ -226,9 +248,22 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .on_press_tx(|s: &mut Card, tx| s.close(tx))
         .build(k)
         .key("close")
-        .absolute(PAD - 10.0, PAD - 10.0)
+        .radius(CLOSE_RADIUS)
+        .absolute(PAD + CLOSE_INSET, PAD + CLOSE_INSET)
         .opacity(if s.hovered { 1.0 } else { 0.0 })
         .opacity_motion(FADE);
+    // In from past the display's right edge, leaning back about the corner
+    // it rests in, and out the same way; Reduce Motion only fades.
+    let travel = if cx.is_reduced_motion() {
+        Transition::opacity().springs(SpringPair::new(REDUCED, REDUCED))
+    } else {
+        Transition::offset(w + PAD + INSET, 0.0)
+            .combined(Transition::scale_anchor(
+                TRAVEL_SCALE,
+                rune::Vec2::new(1.0, 1.0),
+            ))
+            .springs(SpringPair::new(ENTER, LEAVE))
+    };
     let group = el()
         .key("shot")
         .absolute(x - PAD, y - PAD)
@@ -242,8 +277,7 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
             }
             tx.animated();
         })
-        .opacity(if s.on { 1.0 } else { 0.0 })
-        .opacity_motion(FADE)
+        .transition(travel)
         .child(card)
         .child(close);
     root.child(group)
@@ -384,6 +418,13 @@ mod tests {
     }
 
     #[test]
+    fn its_corners_nest_in_the_displays_and_match_the_capsule() {
+        assert_eq!(RADIUS, SCREEN_RADIUS - INSET);
+        assert_eq!(RADIUS, super::super::capture_capsule::surface::SHELL_RADIUS);
+        assert_eq!(CLOSE_RADIUS + CLOSE_INSET, RADIUS);
+    }
+
+    #[test]
     fn the_card_keeps_the_shots_shape() {
         let wide = Card::still(shot([1600, 400]), false);
         assert_eq!(wide.card_size(), (240.0, 60.0));
@@ -400,7 +441,7 @@ mod tests {
         assert!(card.on);
         poll(&mut card, 5.0, &mut tx);
         assert!(!card.on);
-        poll(&mut card, 5.01 + FADE_S, &mut tx);
+        poll(&mut card, 5.01 + LEAVE_S, &mut tx);
         assert!(card.shot.is_none());
 
         let mut card = Card::still(shot([800, 600]), true);

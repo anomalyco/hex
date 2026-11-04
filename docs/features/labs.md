@@ -944,7 +944,10 @@ shortcut uses) opens a second copy of Annotate's capture picker
                   ├── PNG (pHYs at the display's scale) -> "Hex Screenshot 2026-11-04 at 14.03.22.png"
                   │   in screenshots.folder (the Desktop when unset); a second shot that second gets " (2)"
                   ├── clipboard -> the PNG and the file's URL, one pasteboard item
-                  └── thumbnail bottom right for 5 s (held while the pointer is on it):
+                  └── thumbnail bottom right for 5 s (held while the pointer is on it), 16 pt in,
+                      its corner concentric with the display's (30 pt, a design constant):
+                      slides in from past the right edge on the HUD's spring and out the same way
+                      (Reduce Motion: a fade); ✕ shows inside its top-left corner on hover;
                       click -> opens it in Preview, drag -> the file, ✕ -> closes
                       a failure -> the error tone; there is no success sound (Hex has no shutter cue)
 ```
