@@ -32,6 +32,14 @@ unlocked.
   so a machine whose default Rust toolchain is GNU still builds with MSVC
   (GNU fails with "dlltool not found"). Windows builds also need the Vulkan
   SDK (`docs/windows.md`).
+- Each variant keeps the GPU driver's compiled shaders across its own
+  launches (strobe's default, `gpuCache: "warm"`), as a machine that ran Hex
+  before has them. Base and head never share them, and discarded warm-up
+  launches fill them before the timed pairs. Without them, every launch
+  compiled Hex's shaders again: a dictation spent 4.6 to 5.3 s of each 6 s
+  run in the driver's compiler. So `cold-launch` is a returning user's launch
+  (Hex not running, shaders cached). A first launch after an install or a
+  driver update would need a target with `gpuCache: "cold"`.
 
 ## Isolation
 
