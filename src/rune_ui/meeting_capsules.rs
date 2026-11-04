@@ -75,6 +75,9 @@ const COPIED_FEEDBACK: Duration = Duration::from_millis(1_500);
 const RECORDING_PANEL_HEIGHT: f32 = 48.0;
 const OFFER_TIMEOUT: Duration = Duration::from_secs(20);
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long after an offer Linux checks that its overlay opened.
+#[cfg(target_os = "linux")]
+const OFFER_CHECK: Duration = Duration::from_secs(2);
 /// How long an automatic recording says so before showing its elapsed time.
 const AUTOMATIC_LABEL: Duration = Duration::from_secs(10);
 const WINDOW_MARGIN: f32 = 12.0;
@@ -626,6 +629,28 @@ impl MeetingCapsules {
                 }
             });
         }
+    }
+
+    /// Linux: calls `unshown` with Rune's reason when the offer just shown
+    /// could not open its overlay (GNOME on Wayland has no layer-shell for
+    /// interactive overlays, #1271), unless a newer capsule replaced it.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn when_offer_unshown(&self, unshown: impl FnOnce(String) + Send + 'static) {
+        let (panel, current) = (self.panel.clone(), self.generation.clone());
+        let generation = current.load(Ordering::SeqCst);
+        std::thread::spawn(move || {
+            std::thread::sleep(OFFER_CHECK);
+            if current.load(Ordering::SeqCst) != generation
+                || panel.availability() != rune::Availability::Unavailable
+            {
+                return;
+            }
+            unshown(
+                panel
+                    .failure()
+                    .unwrap_or_else(|| "no reason given".to_owned()),
+            );
+        });
     }
 
     // Hide through the handle, not `Capsule::close`: a hide requested inside
