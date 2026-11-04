@@ -318,8 +318,10 @@ pub(crate) enum Cue {
     Stop,
     /// A send went: a pick at once, a rule's once the router says so.
     Sent,
-    /// A send was taken back, or a recording cancelled.
+    /// A send was taken back.
     TakenBack,
+    /// A recording was discarded.
+    Discarded,
     Failed,
 }
 
@@ -709,7 +711,7 @@ impl Flow {
             (Phase::Recording { .. } | Phase::Selecting(_), Phase::Hidden)
                 if actions.contains(&Action::Cancel) =>
             {
-                Some(Cue::TakenBack)
+                Some(Cue::Discarded)
             }
             _ => None,
         };
@@ -3534,7 +3536,7 @@ mod tests {
         flow.click(super::super::surface::Id::Cancel, 0.8);
         assert_eq!(flow.take_cues(), [Cue::Start]);
         flow.click(super::super::surface::Id::Discard, 1.0);
-        assert_eq!(flow.take_cues(), [Cue::TakenBack]);
+        assert_eq!(flow.take_cues(), [Cue::Discarded]);
         flow.input(Input::Failed(Failure::Start, None), 2.0);
         assert_eq!(flow.take_cues(), [Cue::Failed]);
     }
@@ -3653,7 +3655,7 @@ mod tests {
         assert!(!flow.tick(1.0 + DISCARD_ASK_S - 0.1));
         assert!(flow.tick(1.0 + DISCARD_ASK_S));
         assert!(!discarding(&flow, 1.0 + DISCARD_ASK_S));
-        assert!(flow.cues.iter().all(|cue| *cue != Cue::TakenBack));
+        assert!(flow.cues.iter().all(|cue| *cue != Cue::Discarded));
 
         // Never under the pointer, and a moment after it leaves; the
         // chips' ✕ asks too.

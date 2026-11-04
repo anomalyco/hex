@@ -101,6 +101,20 @@ pub(super) struct Item {
 /// action in the time's place), a quiet fill when selected. Nothing on it
 /// animates.
 pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> El {
+    item_with_icon(p, item, None, select)
+}
+
+/// The size of a row's leading icon, about the meta line's height.
+const LEADING_ICON: f32 = 14.0;
+
+/// [`item`] with a small faint icon before its title when `leading` is
+/// set; assistive technology hears the title alone.
+pub(super) fn item_with_icon(
+    p: Paint,
+    item: Item,
+    leading: Option<&'static Icon>,
+    select: impl Fn(&mut Ui) + 'static,
+) -> El {
     let c = &p.k.c;
     // A row of the list: its title names it and its meta and time describe
     // it, so their texts stay out of the tree.
@@ -144,6 +158,13 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
                 .key("top")
                 .gap(12.0)
                 .center_y()
+                .children(leading.map(|glyph| {
+                    icon(glyph, LEADING_ICON)
+                        .key("leading-icon")
+                        .color(c.icon_faint)
+                        .mr(-6.0)
+                        .a11y_hidden()
+                }))
                 .child(
                     text(item.title)
                         .key("title")

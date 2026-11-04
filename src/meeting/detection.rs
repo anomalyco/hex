@@ -325,6 +325,7 @@ pub enum MeetingSource {
     FaceTime,
     WhatsApp,
     Gather,
+    Discord,
     BrowserCall,
 }
 
@@ -340,6 +341,7 @@ impl MeetingSource {
             Self::FaceTime => "FaceTime",
             Self::WhatsApp => "WhatsApp",
             Self::Gather => "Gather",
+            Self::Discord => "Discord",
             Self::BrowserCall => "Browser call",
         }
     }
@@ -711,6 +713,7 @@ pub fn candidate_from_microphone(
         "com.apple.FaceTime" => (MeetingSource::FaceTime, "FaceTime call"),
         "net.whatsapp.WhatsApp" => (MeetingSource::WhatsApp, "WhatsApp call"),
         "com.gather.GatherV2" => (MeetingSource::Gather, "Gather call"),
+        "com.hnc.Discord" => (MeetingSource::Discord, "Discord call"),
         _ => return None,
     };
     let mut candidate = candidate(source, canonical_bundle, title);
@@ -1122,6 +1125,36 @@ mod tests {
             assert_eq!(web.source, MeetingSource::Gather, "{url}");
         }
         assert_eq!(known_provider_label("com.gather.GatherV2"), Some("Gather"));
+    }
+
+    #[test]
+    fn discord_calls_are_detected_on_every_desktop() {
+        for bundle_id in [
+            "com.hnc.Discord",
+            "com.hnc.Discord.helper",
+            "com.hnc.Discord.helper.Renderer",
+            "com.hnc.DiscordCanary",
+            "com.hnc.DiscordPTB",
+            "Discord.exe",
+            "DiscordCanary.exe",
+            "DiscordPTB.exe",
+            "Discord",
+            "discord",
+            "discord-canary",
+            "com.discordapp.Discord",
+        ] {
+            let app = ActiveMicrophoneApplication {
+                pid: 7,
+                bundle_id: bundle_id.into(),
+                name: "Discord".into(),
+            };
+            let call = candidate_from_microphone(&app, &ContextSnapshot::default())
+                .unwrap_or_else(|| panic!("{bundle_id} is Discord"));
+            assert_eq!(call.source, MeetingSource::Discord);
+            assert_eq!(call.application.as_deref(), Some("com.hnc.Discord"));
+            assert_eq!(call.required_stability(), STABLE_FOR);
+        }
+        assert_eq!(known_provider_label("com.hnc.Discord"), Some("Discord"));
     }
 
     #[test]

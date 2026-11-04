@@ -326,8 +326,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   Some (the bundle's t0; timer, meter, ✓ finish, ✕ cancel) -> Processing ->
 │   done (the lead alone, no word), Failed, or Cancelled, then leaves on its
 │   own; a written capture whose transcript has no words reads "no speech"
-├── Tones (`feedback::Tone::Capture*`, at the dictation volume; zero is
-│   silent): start, stop, a rule's send going, an Undo, a failure
+├── Tones (`capture_capsule::tone`, at the dictation volume; zero is
+│   silent), from the chosen sound set: start and stop are the set's start
+│   and stop, a send going its done (Annotate's own sent sound when the set
+│   has none), a discarded recording its cancel, a failure its error (Basso
+│   for Classic on macOS); a taken-back send keeps Annotate's own undo sound
 ├── Failed -> "Couldn't start" until the engine reports it
 │   recording (`screen`), then "Couldn't save"; a failed send ->
 │   "Couldn't send to X". Each keeps its `error`; a start or save that fails
@@ -503,14 +506,19 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   ListFooter::Well, a rounded well inset like the rows
 │   └── Long names give way together so the widest row stays inside the panel
 ├── Every change moves at once, as Dynamic Island's: the walls and what stays
-│   travel on `island` (0.30 s, bounce 0.12), while everything leaving and
+│   travel on `island`, the dictation HUD's morph (`rune_hud::spring::MORPH`,
+│   0.30 s, bounce 0.15; the entry's rise and exit's fall too, with the
+│   shell fading over the same time unbounced), while everything leaving and
 │   everything arriving blurs (`content_blur` 3 pt), scales toward the
 │   capsule's middle (`content_scale` 0.92), and fades over that same move
 │   (`content_in` 0.30 s, `content_out` 0.24 s). Nothing staggers, and nothing
 │   waits for a wall or for other content; only an entry takes two frames
 │   (the origin pose, then rest). The list under the capsule comes and goes
 │   on the same springs. The playground's Transition card tunes all of it
-├── Reduce Motion -> travel jumps, nothing blurs or scales; opacity still fades
+├── Reduce Motion -> the capsule enters at rest and leaves where it is (no
+│   origin pose, menu-bar fold, or edge glow), changes jump, nothing blurs
+│   or scales; the shell, at the notch too, fades on the HUD's short fade
+│   (`reduce_motion_only_fades_the_capsule`)
 └── After a capture, one of five flows (`capture.capsule_flow`, the
     playground's "Flow after a capture"; prototypes to compare, clips in
     r22-flows). Only the guesses' look changes; rules, Undo, ✕ and the

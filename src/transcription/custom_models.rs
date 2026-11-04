@@ -504,8 +504,10 @@ fn profile(header: &GgufHeader, file_name: &str) -> Result<Profile> {
     };
     if !ARCHITECTURES.iter().any(|(name, _)| *name == architecture) {
         bail!(
-            "its architecture is {architecture}; Hex runs Parakeet, Whisper, Qwen3-ASR, \
-             Cohere Transcribe, SenseVoice, and GigaAM models"
+            "its architecture is {architecture}, so it was made for another program. Hex runs \
+             only GGUF files converted with transcribe.cpp (Parakeet, Whisper, Qwen3-ASR, \
+             Cohere Transcribe, SenseVoice, or GigaAM); for a model in Hex's list, download \
+             it from the list instead"
         );
     }
     let Some(variant) = header.string("stt.variant") else {
@@ -1247,6 +1249,16 @@ mod tests {
             ))
             .contains("its architecture is llama")
         );
+        // A SenseVoice file made for another program names that, not a
+        // family Hex says it runs (#1299).
+        let other_runtime = reason(gguf(
+            &[("general.architecture", "sensevoice-small")],
+            &[],
+            &[],
+            &[("a", 0, 4)],
+        ));
+        assert!(other_runtime.contains("made for another program"));
+        assert!(other_runtime.contains("converted with transcribe.cpp"));
         assert!(reason(gguf(&[], &[], &[], &[("a", 0, 4)])).contains("no general.architecture"));
         assert!(
             reason(gguf(

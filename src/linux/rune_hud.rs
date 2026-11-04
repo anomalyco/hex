@@ -199,7 +199,7 @@ fn display_limitation() -> Option<Limitation> {
     None
 }
 
-const LAYER_SHELL: &str = "zwlr_layer_shell_v1";
+pub(crate) const LAYER_SHELL: &str = "zwlr_layer_shell_v1";
 
 /// Whether a Wayland connection opens at all, so a missing display is never
 /// read as a compositor without layer-shell.

@@ -21,6 +21,10 @@
 //! With Labs › Movable meeting capsules on, the panel capsules (offer,
 //! reminder, call ended, ready, recording automatically) show in that same
 //! saved corner and drag the same way; off, they stay in the top right.
+//!
+//! On a Linux Wayland compositor without layer-shell (GNOME) the capsules
+//! float on XWayland only with Labs › Floating meeting capsules on GNOME
+//! (`linux::meeting_capsules`); otherwise an offer opens the Meetings pane.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::SyncSender;
@@ -375,6 +379,16 @@ fn place_capsule(
     handle.set_align(align, inset);
 }
 
+/// Linux: lets the capsule's next show float on XWayland where Wayland has
+/// no layer-shell, only by Labs › Floating meeting capsules on GNOME (#1274).
+/// Off, Rune can't open it there and the Meetings pane stands in (#1271).
+fn float_on_xwayland(capsule: &OverlayHandle<Capsule>) {
+    #[cfg(target_os = "linux")]
+    capsule.set_xwayland_input(crate::linux::meeting_capsules::on_xwayland());
+    #[cfg(not(target_os = "linux"))]
+    let _ = capsule;
+}
+
 /// The two capsules: the timed panel (offer, call ended, ready) and the
 /// recording capsule in the configured corner.
 pub(crate) struct MeetingCapsules {
@@ -589,6 +603,7 @@ impl MeetingCapsules {
             capsule.corner = corner;
             tx.instant();
         });
+        float_on_xwayland(&self.panel);
         self.panel.show();
         if reminder && let Some(timeout) = timeout {
             // Recount "Starts in N min" while this reminder may show.
@@ -679,6 +694,7 @@ impl MeetingCapsules {
             capsule.corner = corner;
             tx.instant();
         });
+        float_on_xwayland(&self.recording);
         self.recording.show();
         *self.ticking.lock().unwrap() = Some(ticker_id.clone());
         let (recording, ticking) = (self.recording.clone(), self.ticking.clone());

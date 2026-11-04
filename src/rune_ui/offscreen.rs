@@ -19,6 +19,9 @@ pub(crate) fn runtime<S: 'static>(
 ) -> Runtime<S> {
     let mut rt = Runtime::with_text(state, view, size, env, text);
     rt.set_srgb_blend(true);
+    // As the Linux and Windows apps ask (`rune_ui::window_args`).
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    rt.set_system_scroll_bars(rune::ScrollBars::Always);
     rt
 }
 

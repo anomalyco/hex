@@ -17,6 +17,7 @@ use super::flow::{Done, Lead, Mode, Pen, Pres};
 use super::notch;
 use super::tuning::{self, CapsuleFlow, TopLine};
 use crate::desktop::i18n::tr;
+use crate::rune_hud::spring::REDUCED_FADE;
 
 /// The overlay's panel: wide enough for the open list, and tall enough for
 /// it and the shadow under it.
@@ -896,25 +897,23 @@ impl Surface {
         if matches!(next, Pres::Hidden) {
             // Exit in place: the capsule settles back to its origin pose as
             // it fades, and every item leaves with it. In the menu-bar flow
-            // a finished capture folds up into the menu bar instead.
-            let exit = Spring::new(tuning::get().island_scale.duration * 0.9, 0.0);
-            let fold = tuning::get().flow == CapsuleFlow::MenuBar && matches!(prev, Pres::Done(_));
-            self.shell = if fold {
-                MENU_FOLD
+            // a finished capture folds up into the menu bar instead. Under
+            // Reduce Motion it stays where it is and only fades.
+            let fold = !self.reduced
+                && tuning::get().flow == CapsuleFlow::MenuBar
+                && matches!(prev, Pres::Done(_));
+            let motion = if fold {
+                self.shell = MENU_FOLD;
+                tuning::get().island
             } else {
-                pose(self.shell, self.anchor)
+                if !self.reduced {
+                    self.shell = pose(self.shell, self.anchor);
+                }
+                tuning::get().island_scale
             };
-            if fold {
-                self.shell_motion = tuning::get().island;
-                self.shell_fade = Spring::new(tuning::get().island.duration, 0.0);
-                self.shell_on = false;
-                self.items.clear();
-                self.highlight = None;
-                return;
-            }
             self.shell_on = false;
-            self.shell_motion = exit;
-            self.shell_fade = exit;
+            self.shell_motion = motion;
+            self.shell_fade = self.fade(motion);
             self.items.clear();
             self.highlight = None;
             return;
@@ -924,7 +923,12 @@ impl Surface {
         if !self.shell_on || moved || matches!(prev, Pres::Hidden) {
             // Entry: this commit puts the capsule at its origin pose,
             // invisibly and instantly; the next frame springs it to rest.
-            self.shell = pose(rest, self.anchor);
+            // Under Reduce Motion it starts at rest and only fades in.
+            self.shell = if self.reduced {
+                rest
+            } else {
+                pose(rest, self.anchor)
+            };
             self.shell_on = false;
             self.instant = true;
             self.items.clear();
@@ -948,11 +952,11 @@ impl Surface {
                 self.morph_settle = island.duration;
             }
             self.shell_motion = island;
-            self.shell_fade = island;
+            self.shell_fade = self.fade(island);
         } else {
             let entry = tuning::get().island_scale;
             self.shell_motion = entry;
-            self.shell_fade = Spring::new(entry.duration * 0.9, 0.0);
+            self.shell_fade = self.fade(entry);
         }
         self.shell = rest;
         self.shell_on = true;
@@ -988,6 +992,16 @@ impl Surface {
             }
         }
         self.items.sort_by_key(|s| s.id.order());
+    }
+
+    /// The shell's fade beside `motion`: its time with no bounce, as the
+    /// HUD fades, or under Reduce Motion the HUD's short fade.
+    fn fade(&self, motion: Spring) -> Spring {
+        if self.reduced {
+            tuning::spring(REDUCED_FADE)
+        } else {
+            Spring::new(motion.duration, 0.0)
+        }
     }
 
     /// Runs an entry's second frame when it's due. True when something
@@ -1169,6 +1183,33 @@ mod tests {
             assert_eq!(s.shell, MENU_FOLD);
             assert!(!s.shell_on);
         });
+    }
+
+    /// Under Reduce Motion the capsule never travels: it comes in at rest,
+    /// goes out where it is, and only fades, on the HUD's short fade. No
+    /// change of width lights the edge glow.
+    #[test]
+    fn reduce_motion_only_fades_the_capsule() {
+        for flow in [CapsuleFlow::List, CapsuleFlow::MenuBar, CapsuleFlow::Notch] {
+            tuning::with_flow(flow, || {
+                let mut s = Surface::new();
+                s.reduced = true;
+                s.set(recording(false), 0.0);
+                let (rest, _) = layout_at(&s.pres, &s.clock, s.anchor);
+                assert_eq!(s.shell, rest, "{flow:?} enters at rest");
+                let now = run(&mut s, 0.0, 1.0);
+                assert!(s.shell_on);
+                assert_eq!(s.shell_fade, tuning::spring(REDUCED_FADE));
+                s.set(Pres::Processing, now);
+                s.set(Pres::Done(Done::plain(Lead::Check, "Copied")), now + 1.0);
+                assert_eq!(s.morphs, 0, "{flow:?} lights no glow");
+                let shown = s.shell;
+                s.set(Pres::Hidden, now + 2.0);
+                assert_eq!(s.shell, shown, "{flow:?} leaves where it is");
+                assert!(!s.shell_on);
+                assert_eq!(s.shell_fade, tuning::spring(REDUCED_FADE));
+            });
+        }
     }
 
     #[test]

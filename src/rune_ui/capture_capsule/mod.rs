@@ -800,7 +800,7 @@ impl CaptureCapsule {
 
 // ─── View ────────────────────────────────────────────────────────────────────
 
-/// The sound for a cue, in the dictation tones' family.
+/// The sound for a cue, from the chosen sound set.
 fn tone(cue: Cue) -> crate::feedback::Tone {
     use crate::feedback::Tone;
     match cue {
@@ -808,7 +808,8 @@ fn tone(cue: Cue) -> crate::feedback::Tone {
         Cue::Stop => Tone::CaptureStop,
         Cue::Sent => Tone::CaptureSent,
         Cue::TakenBack => Tone::CaptureUndo,
-        Cue::Failed => Tone::CaptureFailed,
+        Cue::Discarded => Tone::Cancel,
+        Cue::Failed => Tone::Error,
     }
 }
 
@@ -996,13 +997,16 @@ fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
         .size(w, h)
         .radius(corner(h));
     // At the notch it's the notch: black, with no edge or shadow, and
-    // tucked into the notch rather than gone when hidden.
+    // tucked into the notch rather than gone when hidden. Under Reduce
+    // Motion it never travels, so it fades at rest instead.
     if surface.anchor == surface::Anchor::Notch {
-        return body
-            .fill(k.c.black)
-            .motion(surface.shell_motion)
-            .role("group")
-            .label(tr("Capture"));
+        body = body.fill(k.c.black).motion(surface.shell_motion);
+        if surface.reduced {
+            body = body
+                .opacity(if surface.shell_on { 1.0 } else { 0.0 })
+                .opacity_motion(surface.shell_fade);
+        }
+        return body.role("group").label(tr("Capture"));
     }
     body = body.fill(k.c.bg_base);
     for shadow in &k.elevation.overlay {

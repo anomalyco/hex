@@ -103,10 +103,12 @@ pub enum Feature {
     MeetingNotesVocabulary,
     NotchIndicator,
     MeetingFinishedEvent,
+    GnomeMeetingCapsules,
+    MeetingPlatformIcons,
 }
 
 impl Feature {
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 46] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -151,6 +153,8 @@ impl Feature {
         Self::MeetingNotesVocabulary,
         Self::NotchIndicator,
         Self::MeetingFinishedEvent,
+        Self::GnomeMeetingCapsules,
+        Self::MeetingPlatformIcons,
     ];
 
     /// The features this OS and build have.
@@ -217,6 +221,8 @@ impl Feature {
             | Self::GnomeClipboardRestore
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
+            | Self::GnomeMeetingCapsules
+            | Self::MeetingPlatformIcons
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -267,7 +273,9 @@ impl Feature {
             | Self::GnomeClipboardRestore
             | Self::MeetingNotesVocabulary
             | Self::NotchIndicator => 20261103,
-            Self::MeetingFinishedEvent => 20261104,
+            Self::MeetingFinishedEvent
+            | Self::GnomeMeetingCapsules
+            | Self::MeetingPlatformIcons => 20261104,
         }
     }
 
@@ -303,7 +311,9 @@ impl Feature {
             | Self::MovableMeetingCapsules => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
-            Self::SectionKeyAlone | Self::GnomeClipboardRestore => cfg!(target_os = "linux"),
+            Self::SectionKeyAlone | Self::GnomeClipboardRestore | Self::GnomeMeetingCapsules => {
+                cfg!(target_os = "linux")
+            }
             Self::StandaloneSpecialKeys | Self::SkipPauses => {
                 cfg!(any(target_os = "linux", target_os = "windows"))
             }
@@ -338,6 +348,7 @@ impl Feature {
             | Self::MeetingSummaryModel
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
+            | Self::MeetingPlatformIcons
             | Self::FillerWords => true,
         }
     }
@@ -389,6 +400,8 @@ impl Feature {
             Self::MeetingNotesVocabulary => "meeting-notes-vocabulary",
             Self::NotchIndicator => "notch-indicator",
             Self::MeetingFinishedEvent => "meeting-finished-event",
+            Self::GnomeMeetingCapsules => "gnome-meeting-capsules",
+            Self::MeetingPlatformIcons => "meeting-platform-icons",
         }
     }
 
@@ -439,6 +452,8 @@ impl Feature {
             Self::MeetingNotesVocabulary => "labs.meeting_notes_vocabulary",
             Self::NotchIndicator => "labs.notch_indicator",
             Self::MeetingFinishedEvent => "labs.meeting_finished_event",
+            Self::GnomeMeetingCapsules => "labs.gnome_meeting_capsules",
+            Self::MeetingPlatformIcons => "labs.meeting_platform_icons",
         }
     }
 
@@ -559,6 +574,12 @@ impl Feature {
             Self::MeetingFinishedEvent => {
                 "Tell apps on this computer when a meeting's transcript is ready, through the local API's GET /meetings/events (the meeting's id only)"
             }
+            Self::GnomeMeetingCapsules => {
+                "Show the meeting capsules (recording offer, recording indicator) floating over your call on GNOME Wayland, through XWayland while XWayland is running"
+            }
+            Self::MeetingPlatformIcons => {
+                "Show a small icon for the app or website each meeting was recorded from, beside its name in Meetings"
+            }
         }
     }
 
@@ -613,6 +634,8 @@ impl Feature {
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
+            Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
+            Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons,
         }
     }
 
@@ -665,6 +688,8 @@ impl Feature {
             &mut labs.meeting_notes_vocabulary,
             &mut labs.notch_indicator,
             &mut labs.meeting_finished_event,
+            &mut labs.gnome_meeting_capsules,
+            &mut labs.meeting_platform_icons,
         ]
     }
 
@@ -717,6 +742,8 @@ impl Feature {
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
+            Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
+            Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -760,6 +787,7 @@ const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
 const NOTCH_INDICATOR: u64 = 1 << 27;
 const MEETING_FINISHED_EVENT: u64 = 1 << 28;
+const GNOME_MEETING_CAPSULES: u64 = 1 << 29;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -952,6 +980,13 @@ pub fn gnome_clipboard_restore() -> bool {
     on(GNOME_CLIPBOARD_RESTORE) && Feature::GnomeClipboardRestore.on_this_os()
 }
 
+/// On a Wayland desktop without layer-shell (GNOME), the meeting capsules
+/// float on an already running XWayland (Linux; read as each capsule shows).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn gnome_meeting_capsules() -> bool {
+    on(GNOME_MEETING_CAPSULES) && Feature::GnomeMeetingCapsules.on_this_os()
+}
+
 /// The local API's `GET /meetings/events` serves, and a meeting's final
 /// publication sends, its id (every OS with meetings; read where the route
 /// starts, on each pass of its stream, and at each publication).
@@ -1083,6 +1118,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MeetingFinishedEvent,
             settings.meeting_finished_event,
             MEETING_FINISHED_EVENT,
+        ),
+        (
+            Feature::GnomeMeetingCapsules,
+            settings.gnome_meeting_capsules,
+            GNOME_MEETING_CAPSULES,
         ),
     ]
     .into_iter()
@@ -1553,6 +1593,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & MEETING_FINISHED_EVENT, 0);
         assert_eq!(state & NOTCH_INDICATOR, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn gnome_meeting_capsules_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & GNOME_MEETING_CAPSULES, 0);
+        labs.gnome_meeting_capsules = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & GNOME_MEETING_CAPSULES, 0);
+        assert_eq!(state & GNOME_CLIPBOARD_RESTORE, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

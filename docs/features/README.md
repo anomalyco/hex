@@ -1598,6 +1598,9 @@ Linux beta                               // not macOS feature parity
 │       │   // seen in headless mutter 51 + Xwayland on apollo: HUD at the top
 │       │   // centre, animating, focus unchanged, the pointer over it hits the
 │       │   // window below; not yet on a real GNOME Shell session
+│       │   ├── Meeting capsules take clicks, so they open there only with Labs ›
+│       │   │   Floating meeting capsules on GNOME on and Xwayland already running
+│       │   │   (meetings.md, labs.md; #1274)
 │       │   ├── Drawn on the compositor's GPU only, opaque when its driver offers
 │       │   │   no translucent alpha (NVIDIA), never moved to an iGPU or lavapipe
 │       │   │   that can't make its swapchain (#979, #982)
