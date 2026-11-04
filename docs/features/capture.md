@@ -546,9 +546,10 @@ The on-screen picker                     // capture.picker (capture_capsule/pick
 ├── A full-screen Rune overlay on the pointer's display, under the capsule,
 │   left out of recordings (`OwnWindow::Picker`); it takes the pointer only while
 │   picking and never takes focus; it follows the pointer to another display
-├── Made at launch, hidden; on Windows at its first open instead, since a
-│   hidden full-screen surface there holds GPU memory and no pixels
-│   (`perf/idle.bench.ts#window-closed-memory`, `gpu.vram`)
+├── Made at launch, hidden; away from macOS its window holds no GPU surface
+│   while hidden (`release_gpu_when_hidden`), so a Hex that never annotates
+│   holds no GPU memory for it (`perf/idle.bench.ts#window-closed-memory`,
+│   `gpu.vram`)
 ├── Everything but the target dims; the dim moves with the target as one piece
 ├── Window -> the window under the pointer: tinted, ringed, its title in a badge;
 │   the cursor becomes Scrawl's camera; no window under it -> the display
