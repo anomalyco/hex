@@ -558,7 +558,10 @@ pub fn run(
                 {
                     recording_raw = raw;
                     if audio_ready {
-                        capture.start_at(occurred_at);
+                        capture.start_hotkey_at(
+                            occurred_at,
+                            crate::dictation::hotkey_pre_roll(while_dictating),
+                        );
                         recording = true;
                         // A toggle press or a `hex` command is deliberate, so
                         // it streams at once.
@@ -756,7 +759,10 @@ pub fn run(
                         // still held: recording starts here, without the
                         // pre-roll a held-open microphone would have had.
                         start_pending = false;
-                        capture.start_at(chunk_captured_through);
+                        capture.start_hotkey_at(
+                            chunk_captured_through,
+                            crate::dictation::hotkey_pre_roll(while_dictating),
+                        );
                         recording = true;
                         // The released microphone is ready only now.
                         recording_feedback_started = toggle_mode;

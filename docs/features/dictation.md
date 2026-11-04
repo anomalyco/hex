@@ -433,6 +433,15 @@ before its first chunk records from that chunk. Checks:
 `a_reopened_stream_carries_no_old_clock` in linux/dictation.rs (constructed
 chunks; not run against PipeWire or a physical microphone).
 
+**Changed November 4, 2026 (issue 1309 follow-up):** with "While dictating"
+set to Mute or Pause media, the pre-roll came from before the mute took
+effect and picked up whatever was playing. On every OS, those hotkey captures
+now keep no pre-roll (`dictation::hotkey_pre_roll`); Duck and Do nothing keep
+450 ms. There is no separate setting. Check:
+`muting_or_pausing_while_dictating_keeps_no_pre_roll` in
+[dictation.rs](../../src/dictation.rs) (constructed audio; not run on a
+device).
+
 **Fixed November 2, 2026 (issue 978):** a Windows paste refused to run when
 the clipboard held only a format Hex can't snapshot (an app's private
 format), failing every dictation with "the current clipboard format cannot be
@@ -639,6 +648,7 @@ These cover gesture decisions, not hardware keyboard-layout or remapping equival
 ```ts
 Keep ready -> Press shortcut                          // dictate.boundaries
   -> Include up to 450 ms of available pre-roll
+     └── "While dictating" mutes or pauses -> No pre-roll (it predates the mute)
   -> Linux: press and release placed on the stream clock (newest chunk's end
      plus the time since it arrived), so large chunks add no pre-press audio
   -> Delayed handling still uses original event boundaries
