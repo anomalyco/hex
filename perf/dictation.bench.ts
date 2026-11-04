@@ -96,6 +96,10 @@ export default bench({
   targets: {
     warm: native("hex-dictation", { args, home, window: false }),
     released: native("hex-dictation-released", { args, home, window: false }),
+    // Released and idle between dictations. ggml keeps a Metal model's
+    // memory wired for 3 minutes after its last use; 2 s lets a run see what
+    // an idle Hex does once that has run out.
+    idle: native("hex-dictation-released", { args, home, window: false, env: { GGML_METAL_RESIDENCY_KEEP_ALIVE_S: "2" } }),
   },
   // The model loads and the listener starts; one dictation then warms the
   // whole path (stream, model, output).
@@ -113,6 +117,16 @@ export default bench({
     if (ctx.case === "recording") await start(ctx)
   },
   cases: {
+    // Listening between dictations, microphone released: what the loaded
+    // model and the listener cost while nothing records.
+    listening: {
+      targets: ["idle"],
+      primary: "cpu.wakes",
+      metrics: ["cpu.work", "memory.app.host"],
+      async run({ page }) {
+        await page.wait(8_000)
+      },
+    },
     // Start to capture with the microphone released: the start command
     // reaching the idle listener, the microphone opening, and its first
     // chunk recorded.
@@ -135,6 +149,7 @@ export default bench({
     // Release to text: the stop's wait for the transcript (the 200 ms
     // release tail, the live stream's finish, processing, and History).
     dictation: {
+      targets: ["warm", "released"],
       primary: "phase.finish",
       metrics: ["cpu.work", "cpu.wakes", "memory.app.host"],
       async run(ctx) {
@@ -147,6 +162,7 @@ export default bench({
     // inference, and the HUD meter's plumbing. Each run is 6 s of one
     // recording; reset finishes it and starts the next.
     recording: {
+      targets: ["warm", "released"],
       primary: "cpu.wakes",
       metrics: ["cpu.work", "memory.app.host"],
       async run({ page }) {
