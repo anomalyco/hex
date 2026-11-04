@@ -431,7 +431,12 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
         // Click only: Escape meant for another app was taking sends back.
         Id::Undo => {
             let [_, _, w, h] = shown.rect;
-            undo_ring::chip(p, base, [w, h], live.ring.as_ref()).on_press_tx(press(id))
+            let ground = if surface.anchor == surface::Anchor::Notch {
+                c.black
+            } else {
+                c.bg_base
+            };
+            undo_ring::chip(p, base, [w, h], ground, live.ring.as_ref()).on_press_tx(press(id))
         }
         // Search, with the capture shortcut that opens it as Settings draws it.
         Id::Ask
