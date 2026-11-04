@@ -82,7 +82,7 @@ use host::{Backend, Request, ShortcutTarget};
 use onboarding_kit::live::Page;
 use scenes::{SCENES, Scene, fixture, mac_fixture, portal_fixture};
 use settings::Capture;
-use sidebar::{BuildKind, Pane, pane_header, sidebar, title_bar};
+use sidebar::{BuildKind, Pane, pane_header, sidebar};
 
 /// How long typing pauses before a text field's edit is saved.
 const DRAFT_DELAY: Duration = Duration::from_millis(250);
