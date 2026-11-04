@@ -128,7 +128,7 @@ fn uses_xwayland(data_control: bool, opted_in: bool, running: impl FnOnce() -> b
 /// Whether this user's XWayland is up for `DISPLAY`. GNOME starts XWayland
 /// when a client connects to its socket, so this looks for the process
 /// rather than connecting.
-fn xwayland_running() -> bool {
+pub(crate) fn xwayland_running() -> bool {
     std::env::var_os("DISPLAY").is_some_and(|display| !display.is_empty())
         && std::fs::read_dir("/proc").is_ok_and(|entries| {
             let uid = unsafe { libc::getuid() };

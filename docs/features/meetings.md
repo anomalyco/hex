@@ -117,7 +117,15 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     overlay there, only the HUD on XWayland, #1271)
     -> 2 s after the offer Rune reports the overlay unavailable -> logged
        "meeting recording offer could not show", and the window opens on
-       Meetings saying so with Rune's reason; its Start recording records
+       Meetings saying so with Rune's reason; its Start recording records;
+       while Labs › Floating meeting capsules on GNOME is off, the note
+       names it
+    ├── Labs › Floating meeting capsules on GNOME on (off by default, #1274),
+    │   layer-shell missing, this user's Xwayland already running (checked at
+    │   each show; never started) -> offer and recording capsules float on
+    │   XWayland: override-redirect, clicks on their buttons, never keyboard
+    │   focus; if Rune still can't open them, the pane path above
+    │   // checks: linux/meeting_capsules.rs gating tests; not run on GNOME
     └── not observed on a real GNOME session; no automated check
 Files -> Reveal opens the folder (xdg-open, Explorer); Delete moves to the
     freedesktop Trash or the Recycle Bin

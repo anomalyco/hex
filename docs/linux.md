@@ -579,12 +579,18 @@ approved, so you're asked only once.
     Ctrl+V to paste" and the transcript stays on the clipboard.
 
   There is no silent XWayland, direct-typing, uinput, or privileged
-  input-injection fallback; the only XWayland use besides the HUD is the
-  opt-in clipboard restore above. Transcript text travels on stdin, not command-line
+  input-injection fallback; the only XWayland uses besides the HUD are the
+  opt-in clipboard restore above and the opt-in floating meeting capsules
+  below. Transcript text travels on stdin, not command-line
   arguments.
 - The overlay uses layer-shell. Without it (GNOME), only the HUD opens on
   XWayland as an override-redirect, click-through window that never takes
-  focus. With neither, Settings reports that the HUD is unavailable rather than
+  focus. The meeting capsules take clicks, so there a call offer opens the
+  Meetings pane instead, unless you opt in to Labs › Floating meeting capsules
+  on GNOME (`hex labs on gnome-meeting-capsules`, off by default): the offer
+  and recording capsule then float over the call on XWayland, taking clicks
+  on their buttons but never keyboard focus. It works only while XWayland is
+  already running; Hex never starts it. With neither, Settings reports that the HUD is unavailable rather than
   presenting a normal focus-taking window as an overlay.
 - Shortcuts come from the GlobalShortcuts portal or from your own keybindings
   for the `hex` commands ([Shortcuts](#shortcuts)). Hex reads no input devices

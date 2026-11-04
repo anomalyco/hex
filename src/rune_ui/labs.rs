@@ -526,6 +526,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Restore clipboard on GNOME"),
             tr("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running"),
         ));
+        rows.push(row(
+            Feature::GnomeMeetingCapsules,
+            None,
+            tr("Floating meeting capsules on GNOME"),
+            tr("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running"),
+        ));
     }
     // Linux's and Windows' engines transcribe a whole clip on the CPU.
     if caps.os != super::platform::Os::Macos {
@@ -718,6 +724,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
         Feature::NotchIndicator => "lab-notch-indicator",
         Feature::MeetingFinishedEvent => "lab-meeting-finished-event",
+        Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
     }
 }
 

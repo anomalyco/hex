@@ -59,6 +59,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Transcription was cancelled.", "La transcription a été annulée."),
     ("Section key alone", "Touche § seule"),
     ("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound", "Utilise la touche §, à gauche du 1 sur les claviers ISO, comme raccourci sans modificateur. Tant qu'elle est attribuée, Hex prend la touche § à toutes les apps"),
+    ("Floating meeting capsules on GNOME", "Capsules de réunion flottantes sous GNOME"),
+    ("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running", "Affiche la proposition d'enregistrement et l'indicateur d'enregistrement par-dessus votre appel, via XWayland. Fonctionne seulement si XWayland est déjà lancé"),
     ("Restore clipboard on GNOME", "Restaurer le presse-papiers sous GNOME"),
     ("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running", "Remet ce que vous aviez copié avant une dictée, via XWayland. Fonctionne seulement si XWayland est déjà lancé"),
     ("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it.", "Ce bureau ne permet pas à Hex de remettre votre presse-papiers après un collage. Activez Labs › Restaurer le presse-papiers sous GNOME pour essayer."),

@@ -68,6 +68,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the local API's GET /meetings/events sends each finished meeting's id once its final transcript is written (#964)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
+├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
+│                                        recording capsule open on XWayland (Rune xwayland_input: override-redirect, clicks in the input shape, never keyboard
+│                                        focus), decided at each show, only while this user's Xwayland already runs; never starts it. Off, an offer opens
+│                                        the Meetings pane (#1271), whose note names the lab (#1274)
+│                                        // checks: floats_only_by_opt_in_*, looks_for_nothing_while_the_lab_is_off (linux/meeting_capsules.rs),
+│                                        // gnome_meeting_capsules_is_its_own_bit_*; Rune's xwayland pointer tests; not run on a GNOME session
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page, a store (labs/store.rs, labs/drawer.rs)
