@@ -584,11 +584,27 @@ pub enum OwnWindow {
 }
 
 /// Leaves `window` out of every later capture's recording, replacing the
-/// window that last held `role` (Rune may recreate an overlay's window).
+/// window that last held `role`. Rune makes the overlays' windows for each
+/// show (#1315), so one made while a capture records joins it too.
 pub fn exclude_window(role: OwnWindow, window: u32) {
-    OWN_WINDOWS
+    let mut own = OWN_WINDOWS
         .lock()
-        .unwrap_or_else(|error| error.into_inner())[role as usize] = Some(window);
+        .unwrap_or_else(|error| error.into_inner());
+    own[role as usize] = Some(window);
+    let joined = own_windows_of(&own);
+    drop(own);
+    let Some(source) = ink_source() else { return };
+    for (ids, list) in [
+        (&*source.telemetry.excluded_window_ids, joined.excluded),
+        (&source.telemetry.passthrough_window_ids, joined.passthrough),
+    ] {
+        let mut ids = ids.lock().unwrap_or_else(|error| error.into_inner());
+        for id in list {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
 }
 
 /// The engine's settings, from Hex rather than `~/.config/scrawl`. The
