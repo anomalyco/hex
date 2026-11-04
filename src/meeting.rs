@@ -43,6 +43,7 @@ pub(crate) use os::{
 };
 mod delta;
 mod echo;
+pub(crate) mod finished_events;
 pub(crate) mod generator;
 pub(crate) mod mcp;
 mod notes;
@@ -568,6 +569,7 @@ pub fn record(
         }
         keep_rename(&meeting_dir, &mut manifest);
         write_manifest(&meeting_dir, &manifest)?;
+        finished_events::publish(&manifest.id);
         println!("Saved meeting {}", meeting_dir.display());
         Ok(manifest)
     })();
@@ -921,6 +923,7 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
             manifest.status = MeetingStatus::Complete;
             manifest.error = None;
             write_manifest(&directory, &manifest)?;
+            finished_events::publish(&manifest.id);
             Ok(Some(manifest))
         }
         Err(error) if crate::desktop::process_exit::quitting() => Err(error),

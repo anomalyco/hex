@@ -429,6 +429,11 @@ const KEYS: &[Key] = &[
         "Labs: final meeting titles and summaries read the vocabulary, so names are spelled the way you wrote them",
     ),
     key(
+        "labs.meeting_finished_event",
+        Kind::Bool,
+        "Labs: the local API's GET /meetings/events tells one subscriber each finished meeting's id once its final transcript is written; no transcript, audio, path, or title",
+    ),
+    key(
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
@@ -660,6 +665,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.movable_meeting_capsules", "meetings"),
     ("labs.meeting_summary_model", "meetings"),
     ("labs.meeting_notes_vocabulary", "meetings"),
+    ("labs.meeting_finished_event", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),

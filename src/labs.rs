@@ -102,10 +102,11 @@ pub enum Feature {
     GnomeClipboardRestore,
     MeetingNotesVocabulary,
     NotchIndicator,
+    MeetingFinishedEvent,
 }
 
 impl Feature {
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 44] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -149,6 +150,7 @@ impl Feature {
         Self::GnomeClipboardRestore,
         Self::MeetingNotesVocabulary,
         Self::NotchIndicator,
+        Self::MeetingFinishedEvent,
     ];
 
     /// The features this OS and build have.
@@ -214,6 +216,7 @@ impl Feature {
             | Self::MeetingSummaryModel
             | Self::GnomeClipboardRestore
             | Self::MeetingNotesVocabulary
+            | Self::MeetingFinishedEvent
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -333,6 +336,7 @@ impl Feature {
             | Self::KeepRecordings
             | Self::MeetingSummaryModel
             | Self::MeetingNotesVocabulary
+            | Self::MeetingFinishedEvent
             | Self::FillerWords => true,
         }
     }
@@ -383,6 +387,7 @@ impl Feature {
             Self::GnomeClipboardRestore => "gnome-clipboard-restore",
             Self::MeetingNotesVocabulary => "meeting-notes-vocabulary",
             Self::NotchIndicator => "notch-indicator",
+            Self::MeetingFinishedEvent => "meeting-finished-event",
         }
     }
 
@@ -432,6 +437,7 @@ impl Feature {
             Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
             Self::MeetingNotesVocabulary => "labs.meeting_notes_vocabulary",
             Self::NotchIndicator => "labs.notch_indicator",
+            Self::MeetingFinishedEvent => "labs.meeting_finished_event",
         }
     }
 
@@ -549,6 +555,9 @@ impl Feature {
             Self::NotchIndicator => {
                 "On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"
             }
+            Self::MeetingFinishedEvent => {
+                "Tell apps on this computer when a meeting's transcript is ready, through the local API's GET /meetings/events (the meeting's id only)"
+            }
         }
     }
 
@@ -602,6 +611,7 @@ impl Feature {
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
             Self::NotchIndicator => settings.labs.notch_indicator,
+            Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
         }
     }
 
@@ -653,6 +663,7 @@ impl Feature {
             &mut labs.gnome_clipboard_restore,
             &mut labs.meeting_notes_vocabulary,
             &mut labs.notch_indicator,
+            &mut labs.meeting_finished_event,
         ]
     }
 
@@ -704,6 +715,7 @@ impl Feature {
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
             Self::NotchIndicator => settings.labs.notch_indicator = on,
+            Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -746,6 +758,7 @@ const MEETING_SUMMARY_MODEL: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
 const NOTCH_INDICATOR: u64 = 1 << 27;
+const MEETING_FINISHED_EVENT: u64 = 1 << 28;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -938,6 +951,13 @@ pub fn gnome_clipboard_restore() -> bool {
     on(GNOME_CLIPBOARD_RESTORE) && Feature::GnomeClipboardRestore.on_this_os()
 }
 
+/// The local API's `GET /meetings/events` serves, and a meeting's final
+/// publication sends, its id (every OS with meetings; read where the route
+/// starts, on each pass of its stream, and at each publication).
+pub fn meeting_finished_event() -> bool {
+    on(MEETING_FINISHED_EVENT) && Feature::MeetingFinishedEvent.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -1057,6 +1077,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::NotchIndicator,
             settings.notch_indicator,
             NOTCH_INDICATOR,
+        ),
+        (
+            Feature::MeetingFinishedEvent,
+            settings.meeting_finished_event,
+            MEETING_FINISHED_EVENT,
         ),
     ]
     .into_iter()
@@ -1515,6 +1540,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & GNOME_CLIPBOARD_RESTORE, 0);
         assert_eq!(state & MEETING_SUMMARY_MODEL, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn meeting_finished_event_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & MEETING_FINISHED_EVENT, 0);
+        labs.meeting_finished_event = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & MEETING_FINISHED_EVENT, 0);
+        assert_eq!(state & NOTCH_INDICATOR, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
