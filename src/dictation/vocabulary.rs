@@ -241,16 +241,18 @@ fn bias_for(
 }
 
 /// The context prompt Whisper and Qwen3-ASR runs read: the first terms in
-/// list order (at most the bias cap), comma-separated so the echo filter can
-/// recognise the list, and only as many as fit `max_chars`. `None` while the
-/// list is empty. Read at the start of each run, like the bias.
+/// list order, comma-separated so the echo filter can recognise the list,
+/// and as many as fit `max_chars`. The bias's term cap is Parakeet's and
+/// does not apply here; the character budget is the prompt's own limit.
+/// `None` while the list is empty. Read at the start of each run, like the
+/// bias.
 pub(crate) fn transcription_prompt(max_chars: usize) -> Option<String> {
     prompt_for(&transcription_entries(), max_chars)
 }
 
 fn prompt_for(entries: &[VocabularyEntry], max_chars: usize) -> Option<String> {
     let mut prompt = String::new();
-    for entry in entries.iter().take(MAX_BIASED_TERMS) {
+    for entry in entries {
         let separator = if prompt.is_empty() { "" } else { ", " };
         if prompt.chars().count() + separator.len() + entry.term.chars().count() > max_chars {
             break;
@@ -581,8 +583,12 @@ mod tests {
         assert_eq!(prompt_for(&list, 3), None);
         assert_eq!(prompt_for(&[], 100), None);
         let many: Vec<_> = (0..100).map(|n| entry(&format!("T{n}"), &[])).collect();
+        // Only the character budget limits the prompt, not the bias's term cap.
         let prompt = prompt_for(&many, 10_000).unwrap();
-        assert_eq!(prompt.split(", ").count(), MAX_BIASED_TERMS);
+        assert_eq!(prompt.split(", ").count(), 100);
+        let prompt = prompt_for(&many, 1_000).unwrap();
+        assert!(prompt.split(", ").count() > MAX_BIASED_TERMS);
+        assert!(prompt.chars().count() <= 1_000);
     }
 
     #[test]

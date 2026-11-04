@@ -59,9 +59,12 @@ Context prompt (Whisper incl. ivrit.ai and NB-Whisper, Qwen3-ASR, QwenCleo)  // 
 ├── Always on (not Labs): replaced the per-model Recognition hints box (#129)
 ├── Every whole-clip run reads the list at its start: dictation, meetings,
 │   captures, the local API; live streams run without it
-├── "Term, Term, …": the first terms in list order, at most 64, as many as
-│   fit 500 characters (Whisper: its prompt slot holds 223 tokens and trims
-│   an overlong one from the front) or 1,000 (Qwen3-ASR's system message)
+├── "Term, Term, …": the first terms in list order, as many as fit 500
+│   characters (Whisper: its prompt slot holds 223 tokens and trims an
+│   overlong one from the front) or 1,000 (Qwen3-ASR's system message); the
+│   64-term cap is Parakeet's bias array only (#1246)
+├── Known gap: the sheet doesn't say how many terms the selected model reads
+│   or where they stop, and the 64-term vs full-budget hit rate is unmeasured
 ├── Whisper: transcribe.cpp's generic context prompt in the <|startofprev|>
 │   slot; Qwen3-ASR: the system message
 ├── Output that only repeats the prompt (two or more terms) is dropped, as
@@ -157,7 +160,8 @@ Sources: [dictation/vocabulary.rs](../../src/dictation/vocabulary.rs),
 
 Checks: `dictation::vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
 comma splitting, reading the saved list without settings, the
-first 64 terms and their spellings reaching transcription, the bounded prompt,
+first 64 terms and their spellings reaching transcription, the prompt bounded
+by characters alone (`the_prompt_keeps_the_first_terms_that_fit`),
 folding hints, boost names);
 `loading_folds_saved_recognition_hints_into_the_vocabulary_once` in
 [app_settings.rs](../../src/app_settings.rs);
