@@ -23,7 +23,7 @@ const GROUP: &str = "Prototypes/Capture capsule";
 
 // One story per capsule scene below; adding a scene means adding its
 // index too. The looks after them have their own story.
-const _: () = assert!(CAPSULE_SCENES == 10 && SCENES.len() == CAPSULE_SCENES + 3);
+const _: () = assert!(CAPSULE_SCENES == 10 && SCENES.len() == CAPSULE_SCENES + 7);
 
 /// `playground` with the whole flow and every capsule scene as stories.
 pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playground<S> {
@@ -48,6 +48,7 @@ pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playgrou
         .story(notch_story())
         .story(super::family::story())
         .story(super::pill::story())
+        .story(super::living::story())
 }
 
 fn scene<const I: usize>() -> Story<CapsuleState> {

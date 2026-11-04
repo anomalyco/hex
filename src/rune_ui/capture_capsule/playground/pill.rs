@@ -37,15 +37,15 @@ const OUT: f64 = 5.6;
 const LOOP: f64 = 6.4;
 
 /// The HUD's own spring: Dot scope's transition and bounce.
-const SHELL: Spring = Spring::new(0.3, 0.15);
+pub(super) const SHELL: Spring = Spring::new(0.3, 0.15);
 
 const DESTINATION: &str = "Sent to OpenCode";
 const UNDO: &str = "Undo";
 const WORKING: &str = "Processing…";
 
 /// How much of each screen's top middle the stage shows.
-const SHOT: (f32, f32) = (640.0, 200.0);
-const BEZEL: f32 = 8.0;
+pub(super) const SHOT: (f32, f32) = (640.0, 200.0);
+pub(super) const BEZEL: f32 = 8.0;
 
 /// One of the looks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,7 +197,7 @@ impl Options {
 
 /// A critically damped approach to 1 over about `duration`, from `dt`
 /// seconds in.
-fn settle(dt: f32, duration: f32) -> f32 {
+pub(super) fn settle(dt: f32, duration: f32) -> f32 {
     if dt <= 0.0 {
         return 0.0;
     }
@@ -218,7 +218,7 @@ fn macbook() -> Screen {
 }
 
 /// A flat 27-inch display: 2560 × 1440 pt, its menu bar 24 pt.
-fn display() -> Screen {
+pub(super) fn display() -> Screen {
     Screen {
         frame: rect(2560.0, 1440.0),
         visible: rect(2560.0, 1416.0),
@@ -240,7 +240,12 @@ fn rect(width: f64, height: f64) -> Rect {
 
 /// The plate's middle on `screen` where `hud_placement` puts a `plate`
 /// sized HUD, in screen points from the top-left.
-fn plate_middle(placement: Placement, screen: &Screen, plate: (f32, f32), spread: f32) -> [f32; 2] {
+pub(super) fn plate_middle(
+    placement: Placement,
+    screen: &Screen,
+    plate: (f32, f32),
+    spread: f32,
+) -> [f32; 2] {
     let window = (f64::from(plate.0) + 80.0, f64::from(plate.1) + 80.0);
     let placed = hud_placement::place(
         placement,
@@ -822,9 +827,15 @@ impl Hole {
     }
 }
 
-fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+pub(super) fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// A Dot scope palette colour, display sRGB, as a (linear) `Color`.
+pub(super) fn srgb(rgb: [f32; 3]) -> Color {
+    let [r, g, b] = rgb.map(rune::color::srgb_decode);
+    Color { r, g, b, a: 1.0 }
 }
 
 /// Dot scope's field in a `w` × `h` box: its simulation's dots, lit as its
@@ -842,11 +853,8 @@ pub(super) fn field(
     let tuning = scope.tuning();
     let pose = scope.pose();
     let colors = palette(dark, &pose, tuning.saturation);
-    let decode = |rgb: [f32; 3]| {
-        let [r, g, b] = rgb.map(rune::color::srgb_decode);
-        Color { r, g, b, a: 1.0 }
-    };
-    let (base, core) = (decode(colors.base), decode(colors.core));
+    // The palette is display sRGB; Color is linear.
+    let (base, core) = (srgb(colors.base), srgb(colors.core));
     let (columns, rows) = (scope.columns(), scope.rows());
     let pitch = tuning.spacing * fit;
     let radius = h * 0.5;
@@ -882,6 +890,18 @@ pub(super) fn field(
         let a = alpha * mask;
         if a < 0.01 {
             continue;
+        }
+        // A loud dot's halo, twice its radius, as the shader lights it.
+        if power > 0.05 {
+            let halo = 2.0 * r;
+            dots = dots.child(
+                el().key(format!("h{n}"))
+                    .motion(Spring::NONE)
+                    .absolute(w * 0.5 + x - halo, h * 0.5 + y - halo)
+                    .size(2.0 * halo, 2.0 * halo)
+                    .radius(halo)
+                    .fill(color.alpha(0.132 * power * power * mask)),
+            );
         }
         // Each dot is its own: keyed so a skipped one doesn't shift the
         // rest, and drawn where it is now rather than sprung from where
