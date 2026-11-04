@@ -1377,7 +1377,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("All labs", ["Wszystkie eksperymenty", "全部实验功能", "すべてのラボ", "Alle Labs", "Todos los labs", "Усі експерименти"]),
     ("New", ["Nowe", "新", "新着", "Neu", "Nuevo", "Нове"]),
     ("On", ["Wł.", "已开", "オン", "An", "Activado", "Увімк."]),
-    ("Turn off", ["Wyłącz", "关闭", "オフにする", "Ausschalten", "Desactivar", "Вимкнути"]),
     ("Unfinished features. They may change or break.", ["Niedokończone funkcje. Mogą się zmienić lub zepsuć.", "未完成的功能，可能会变化或出错。", "未完成の機能です。変更されたり動かなくなったりすることがあります。", "Unfertige Funktionen. Sie können sich ändern oder kaputtgehen.", "Funciones sin terminar. Pueden cambiar o fallar.", "Незавершені функції. Вони можуть змінитися або зламатися."]),
     ("No labs match", ["Brak pasujących eksperymentów", "没有匹配的实验功能", "一致するラボはありません", "Keine passenden Labs", "Ningún lab coincide", "Немає відповідних експериментів"]),
     ("Nothing turned on yet", ["Nic jeszcze nie włączono", "还没有开启任何功能", "まだ何もオンにしていません", "Noch nichts aktiviert", "Aún no has activado nada", "Ще нічого не увімкнено"]),

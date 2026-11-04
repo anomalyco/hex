@@ -1,13 +1,13 @@
 //! The Labs store: a search and the Discover and Turned on tabs in the
 //! title bar, category chips, the newest labs as featured cards, then every
-//! lab as a card in two columns. A card's button turns its lab on or off;
+//! lab as a card in two columns. A card's switch turns its lab on or off;
 //! pressing anywhere else on it opens its drawer.
 
 use rune::{El, Icon, Tx, col, el, row, text};
-use rune_kit::{Button, ButtonVariant, TextInput};
+use rune_kit::{Button, ButtonVariant, ControlSize, Switch, TextInput};
 
 use super::super::Ui;
-use super::super::controls::{DESCRIPTION, METRICS, Paint, PushSize, segmented_tx, status_dot};
+use super::super::controls::{DESCRIPTION, METRICS, Paint, PushSize, segmented_tx};
 use super::super::lists::{Tone, tone_tag};
 use super::{Category, Row, Tab, flip, open_drawer, row_key, shown};
 use crate::desktop::i18n::{tr, tr_fill};
@@ -27,6 +27,8 @@ pub(in crate::rune_ui) fn search_field(ui: &Ui, p: Paint) -> El {
 }
 
 const SEARCH_WIDTH: f32 = 220.0;
+/// Between cards, across and down.
+const GAP: f32 = 8.0;
 
 /// Discover and Turned on, at the title bar's end.
 pub(in crate::rune_ui) fn tabs(ui: &Ui, p: Paint) -> El {
@@ -75,7 +77,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
                         .map(|row| card(p, row, true, true))
                         .collect(),
                 ))
-                .child(heading(p, "all-heading", tr("All labs")).mt(12.0));
+                .child(heading(p, "all-heading", tr("All labs")).mt(8.0));
         }
     }
     let matching: Vec<&Row> = rows
@@ -104,7 +106,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
             ),
         );
     } else {
-        let mut grid = col().key("grid").gap(12.0);
+        let mut grid = col().key("grid").gap(GAP);
         for (index, pair_rows) in matching.chunks(2).enumerate() {
             grid = grid.child(pair(
                 &format!("grid-row{index}"),
@@ -135,14 +137,14 @@ fn matches(row: &Row, query: &str) -> bool {
 }
 
 fn heading(p: Paint, key: &str, title: &str) -> El {
-    text(title).key(key).font(p.k.ty.ui_medium).color(p.muted())
+    p.section_label(title).key(key)
 }
 
 /// Two cards side by side, equally wide; a lone card keeps half the row.
 fn pair(key: &str, cards: Vec<El>) -> El {
     row()
         .key(key)
-        .gap(12.0)
+        .gap(GAP)
         .equal_columns(2)
         .items_stretch()
         .children(cards.into_iter().map(|card| card.min_w(0.0)))
@@ -251,34 +253,37 @@ pub(super) fn tile(p: Paint, category: Category, icon: &'static Icon, size: f32)
         )
 }
 
-/// One lab as a card: tile, name and tags, two lines of description, and
-/// Try or On. `featured` cards are larger and tinted.
+/// One lab as a card: tile, name and tags on one line, up to two lines of
+/// description, and its switch. `featured` cards take their category's
+/// tint; they sit under New in Labs, so they carry no New tag.
 fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
     let c = &p.k.c;
     let lab = entry.lab;
     let mut tags = Vec::new();
-    if new {
+    if new && !featured {
         tags.push(tone_tag(p, "new-tag", tr("New"), Tone::Accent));
     }
     if lab.audience() == crate::labs::Audience::Dev {
         tags.push(tone_tag(p, "dev-tag", tr("Dev"), Tone::Neutral));
     }
-    // Up to two lines, so a long name shows whole beside its tags.
     let title = row()
         .key("title-row")
         .min_w(0.0)
         .gap(6.0)
-        .items_start()
+        .center_y()
         .child(
             text(entry.title)
                 .key("title")
                 .font(p.k.ty.ui_medium)
                 .color(p.text())
-                .max_lines(2)
+                .truncate()
                 .shrink()
                 .min_w(0.0),
         )
-        .children(tags);
+        .children(tags)
+        .child(el().key("spacer").grow(1.0).min_w(8.0))
+        .child(lab_switch(p, entry).key(row_key(lab)));
+    // The description runs under the switch too.
     let copy = col()
         .key("copy")
         .grow(1.0)
@@ -298,60 +303,40 @@ fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
     } else {
         format!("lab-card-{}", lab.id())
     };
-    let mut card = row()
+    let card = row()
         .key(key)
         .role("button")
         .label(entry.title)
-        .padding(if featured { 16.0 } else { 14.0 })
-        .gap(12.0)
-        .center_y()
+        .padding(CARD_PADDING)
+        .gap(10.0)
+        .items_start()
         .radius(p.k.radius.lg)
         .hover(c.hover)
         .press(c.pressed)
-        .child(tile(
-            p,
-            entry.category,
-            entry.icon,
-            if featured { 44.0 } else { 36.0 },
-        ))
+        .child(tile(p, entry.category, entry.icon, TILE))
         .child(copy)
-        .child(toggle_button(p, entry))
         .on_press(move |ui: &mut Ui| open_drawer(ui, lab));
     if featured {
         let (wash, edge) = entry.category.wash(p);
-        card = card.fill(wash).border(p.hair, edge);
+        card.fill(wash).border(p.hair, edge)
     } else {
-        card = card.fill(c.bg_base);
-        for shadow in &p.k.elevation.raised {
-            card = card.box_shadow(*shadow);
-        }
+        card.fill(c.bg_base).border(p.hair, c.border_weak)
     }
-    card
 }
 
-/// A card's Try, or On with a dot while the lab is on. It keeps the row's
-/// old key, `lab-<id>`.
-fn toggle_button(p: Paint, entry: &Row) -> El {
+const CARD_PADDING: f32 = 12.0;
+const TILE: f32 = 32.0;
+
+/// A lab's switch: it flips the lab; a locked lab's is disabled.
+pub(super) fn lab_switch(p: Paint, entry: &Row) -> El {
     let lab = entry.lab;
-    let button = if entry.on {
-        let success = p.success();
-        Button::new(tr("On")).label_with(move |style, color| {
-            rune::row()
-                .key("on")
-                .gap(6.0)
-                .center_y()
-                .child(status_dot(success).size(6.0, 6.0).radius(3.0))
-                .child(text(tr("On")).key("label").font(style).color(color))
-        })
-    } else {
-        Button::new(tr("Try"))
-    };
-    button
-        .variant(ButtonVariant::Neutral)
+    Switch::new(entry.on)
+        .control_size(ControlSize::Small)
+        .label(entry.title)
+        .hide_label()
         .disabled(entry.locked)
-        .on_press(move |ui: &mut Ui| flip(ui, lab))
-        .build_small_push(p.k)
-        .key(row_key(lab))
+        .on_toggle(move |ui: &mut Ui| flip(ui, lab))
+        .build(p.k)
 }
 
 /// What Labs is, Run setup again, and Send feedback.

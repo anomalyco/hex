@@ -72,22 +72,22 @@ Settings › Labs                          // labs.page, a store (labs/store.rs,
 ├── Category chips with counts -> All, Dictation, Shortcuts, Clipboard, Meetings, Models, App
 │   (labs/category.rs; a category this OS has no lab in hides)
 ├── Discover, no chip or search -> New in Labs: the two newest labs, washed in their category's colour,
-│   then All labs; a lab added on the newest date among those shown carries New
+│   then All labs without them; a lab added on the newest date among those shown carries New
 ├── A chip, a search (name, description, category), or Turned on -> only the matching cards;
 │   none -> "No labs match" / "Nothing turned on yet"
-├── Card -> coloured tile, name, New / Dev tags, two lines of description, Try / On
-│   ├── Try / On (key lab-<id>) -> flips the lab, saved at once
+├── Card -> coloured tile, name with New / Dev tags on one line, up to two lines of description, a switch
+│   ├── The switch (key lab-<id>) -> flips the lab, saved at once
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
-│   └── Voice Filter while its driver is installed, or a managed or locked lab -> its button is disabled
+│   └── Voice Filter while its driver is installed, or a managed or locked lab -> its switch is disabled
 ├── Card body -> a drawer from the right over a dim: big tile, name, category, description,
-│   a preview placeholder, "Shows up in …" (a link when it's a pane), Send feedback, Try it / Turn off;
+│   a preview placeholder, "Shows up in …" (a link when it's a pane), Send feedback, On / Off and the lab's switch;
 │   Unload model when idle also shows Unload after. Escape, ✕ or the dim closes it
 ├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<id> and ?search=<text>
 │   set the store; hex://labs/<lab> also opens that lab's drawer. It never turns a lab on. An unknown
 │   or absent name -> the page opens and process.log notes it. hex://settings/<pane>
 │   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
 │   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
-├── Annotate is listed as a lab (App) wherever Hex has the Annotate pane; its button flips capture.enabled
+├── Annotate is listed as a lab (App) wherever Hex has the Annotate pane; its switch flips capture.enabled
 └── Footer -> "Unfinished features. They may change or break.", Run setup again (replays the onboarding,
     below), Send feedback -> https://github.com/anomalyco/hex/issues/new
 

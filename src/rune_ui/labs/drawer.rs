@@ -1,15 +1,15 @@
 //! A lab's drawer, over a dim at the window's right edge: what the lab
-//! does, a preview, where it shows up, and Try it or Turn off. Escape, the
+//! does, a preview, where it shows up, and its switch. Escape, the
 //! close button, or a press on the dim closes it.
 
 use rune::{Edge, El, Transition, Tx, col, el, row, text};
-use rune_kit::{Button, ButtonVariant, IconButton, IconButtonVariant};
+use rune_kit::{ButtonVariant, IconButton, IconButtonVariant};
 
 use super::super::Ui;
-use super::super::controls::{DESCRIPTION, Paint, PushSize, modal_scrim_transition, status_dot};
+use super::super::controls::{DESCRIPTION, Paint, modal_scrim_transition};
 use super::category::Place;
-use super::store::{feedback_button, tile};
-use super::{Lab, Row, close_drawer, flip, shown, unload_after};
+use super::store::{feedback_button, lab_switch, tile};
+use super::{Lab, Row, close_drawer, shown, unload_after};
 use crate::desktop::i18n::tr;
 use crate::labs::Feature;
 
@@ -192,27 +192,16 @@ fn go(ui: &mut Ui, place: Place, tx: &mut Tx) {
 }
 
 fn footer(p: Paint, entry: &Row) -> El {
-    let lab = entry.lab;
-    let toggle = if entry.on {
-        let success = p.success();
-        Button::new(tr("Turn off"))
-            .variant(ButtonVariant::Neutral)
-            .label_with(move |style, color| {
-                rune::row()
-                    .key("on")
-                    .gap(6.0)
-                    .center_y()
-                    .child(status_dot(success).size(6.0, 6.0).radius(3.0))
-                    .child(text(tr("Turn off")).key("label").font(style).color(color))
-            })
-    } else {
-        // The drawer's one main action.
-        Button::new(tr("Try it")).variant(ButtonVariant::Contrast)
-    }
-    .disabled(entry.locked)
-    .on_press(move |ui: &mut Ui| flip(ui, lab))
-    .build_push(p.k)
-    .key("lab-drawer-toggle");
+    let state = text(if entry.on { tr("On") } else { tr("Off") })
+        .key("state")
+        .font(p.k.ty.ui)
+        .color(if entry.on { p.text() } else { p.muted() });
+    let toggle = row()
+        .key("toggle")
+        .gap(10.0)
+        .center_y()
+        .child(state)
+        .child(lab_switch(p, entry).key("lab-drawer-toggle"));
     let actions = row()
         .key("actions")
         .px(PADDING)

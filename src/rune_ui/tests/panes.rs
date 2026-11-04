@@ -1838,7 +1838,7 @@ fn a_labs_link_sets_the_stores_tab_chip_and_search() {
 }
 
 #[test]
-fn a_labs_card_opens_its_drawer_and_its_button_turns_it_on() {
+fn a_labs_card_opens_its_drawer_and_its_switch_turns_it_on() {
     use super::super::labs::Lab;
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
@@ -1850,13 +1850,16 @@ fn a_labs_card_opens_its_drawer_and_its_button_turns_it_on() {
         "opening a card flips nothing"
     );
     tap(&mut rt, "lab-drawer-toggle");
-    assert!(feature.on(&rt.state.settings), "Try it turns it on");
+    assert!(
+        feature.on(&rt.state.settings),
+        "the drawer's switch turns it on"
+    );
     tap(&mut rt, "lab-drawer-close");
     assert!(rt.state.lab_store.drawer.is_none());
     tap(&mut rt, "lab-subtitle-export");
     assert!(
         !feature.on(&rt.state.settings),
-        "the card's On turns it off"
+        "the card's switch turns it off"
     );
 }
 
@@ -1937,15 +1940,22 @@ fn new_in_labs_isnt_repeated_in_the_grid() {
     }
 }
 
-/// Whether the button keyed `key` shows On (a card) or Turn off (a drawer).
+/// Whether the switch keyed `key` is on: its thumb sits past the track's
+/// middle.
 fn shows_on(rt: &Runtime<Ui>, key: &str) -> bool {
     let inside = format!("/{key}/");
-    rt.elements()
-        .into_iter()
-        .any(|e| !e.exiting && e.key.as_deref() == Some("on") && e.path.contains(&inside))
+    let part = |name: &str| {
+        rt.elements()
+            .into_iter()
+            .find(|e| !e.exiting && e.key.as_deref() == Some(name) && e.path.contains(&inside))
+            .unwrap_or_else(|| panic!("no {name} in {key}"))
+            .rect
+    };
+    let (track, thumb) = (part("control"), part("thumb"));
+    thumb[0] + thumb[2] / 2.0 > track[0] + track[2] / 2.0
 }
 
-/// Every card's Try or On matches its drawer's Try it or Turn off.
+/// Every card's switch matches its drawer's.
 #[test]
 fn a_labs_drawer_agrees_with_its_card() {
     let mut rt = runtime("mac-labs-drawer", true, (980.0, 4000.0));

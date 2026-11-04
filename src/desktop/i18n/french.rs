@@ -1048,7 +1048,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("All labs", "Tous les labs"),
     ("New", "Nouveau"),
     ("On", "Activé"),
-    ("Turn off", "Désactiver"),
     ("Unfinished features. They may change or break.", "Fonctions inachevées. Elles peuvent changer ou casser."),
     ("No labs match", "Aucun lab ne correspond"),
     ("Nothing turned on yet", "Rien d'activé pour l'instant"),
