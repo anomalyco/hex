@@ -1,9 +1,11 @@
 //! macOS' proxy for a URL: CFNetwork applies the network's proxy settings
 //! and their exceptions list (`CFNetworkCopyProxiesForURL`). A PAC file
-//! (automatic proxy configuration) isn't evaluated, so such networks need
-//! `HTTPS_PROXY`.
+//! (automatic proxy configuration) isn't evaluated: Hex passes over it to the
+//! next HTTP or HTTPS entry, so a PAC-only network needs `HTTPS_PROXY`.
 
 use std::ffi::{c_char, c_void};
+
+use super::{SystemEntry, first_usable};
 
 type CFTypeRef = *const c_void;
 
@@ -81,24 +83,30 @@ pub(super) fn proxy(url: &str) -> Option<String> {
         if proxies.0.is_null() {
             return None;
         }
-        // The first entry is the one to use; `None` means connect directly.
-        if CFArrayGetCount(proxies.0) < 1 {
-            return None;
+        // The entries in the order macOS would try them (#1235): a PAC
+        // entry Hex can't evaluate is passed over for the next one.
+        let mut entries = Vec::new();
+        for index in 0..CFArrayGetCount(proxies.0) {
+            let entry = CFArrayGetValueAtIndex(proxies.0, index);
+            let kind = CFDictionaryGetValue(entry, kCFProxyTypeKey);
+            if kind.is_null() {
+                continue;
+            }
+            if CFEqual(kind, kCFProxyTypeHTTPS) == 0 && CFEqual(kind, kCFProxyTypeHTTP) == 0 {
+                entries.push(SystemEntry::Other(string(kind).unwrap_or_default()));
+                continue;
+            }
+            let host = string(CFDictionaryGetValue(entry, kCFProxyHostNameKey));
+            let number = CFDictionaryGetValue(entry, kCFProxyPortNumberKey);
+            let mut port: i32 = 0;
+            let has_port =
+                !number.is_null() && CFNumberGetValue(number, SINT32, (&raw mut port).cast()) != 0;
+            let address = host
+                .filter(|_| has_port)
+                .map(|host| format!("{host}:{port}"));
+            entries.push(SystemEntry::Http(address));
         }
-        let entry = CFArrayGetValueAtIndex(proxies.0, 0);
-        let kind = CFDictionaryGetValue(entry, kCFProxyTypeKey);
-        if kind.is_null()
-            || (CFEqual(kind, kCFProxyTypeHTTPS) == 0 && CFEqual(kind, kCFProxyTypeHTTP) == 0)
-        {
-            return None;
-        }
-        let host = string(CFDictionaryGetValue(entry, kCFProxyHostNameKey))?;
-        let number = CFDictionaryGetValue(entry, kCFProxyPortNumberKey);
-        let mut port: i32 = 0;
-        if number.is_null() || CFNumberGetValue(number, SINT32, (&raw mut port).cast()) == 0 {
-            return None;
-        }
-        Some(format!("{host}:{port}"))
+        first_usable(&entries)
     }
 }
 
