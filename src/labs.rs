@@ -106,10 +106,11 @@ pub enum Feature {
     GnomeMeetingCapsules,
     MeetingPlatformIcons,
     Screenshots,
+    FollowLiveTranscript,
 }
 
 impl Feature {
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 48] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -157,6 +158,7 @@ impl Feature {
         Self::GnomeMeetingCapsules,
         Self::MeetingPlatformIcons,
         Self::Screenshots,
+        Self::FollowLiveTranscript,
     ];
 
     /// The features this OS and build have.
@@ -226,6 +228,7 @@ impl Feature {
             | Self::GnomeMeetingCapsules
             | Self::MeetingPlatformIcons
             | Self::Screenshots
+            | Self::FollowLiveTranscript
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -279,7 +282,8 @@ impl Feature {
             Self::MeetingFinishedEvent
             | Self::GnomeMeetingCapsules
             | Self::MeetingPlatformIcons
-            | Self::Screenshots => 20261104,
+            | Self::Screenshots
+            | Self::FollowLiveTranscript => 20261104,
         }
     }
 
@@ -354,6 +358,7 @@ impl Feature {
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::MeetingPlatformIcons
+            | Self::FollowLiveTranscript
             | Self::FillerWords => true,
         }
     }
@@ -408,6 +413,7 @@ impl Feature {
             Self::GnomeMeetingCapsules => "gnome-meeting-capsules",
             Self::MeetingPlatformIcons => "meeting-platform-icons",
             Self::Screenshots => "screenshots",
+            Self::FollowLiveTranscript => "follow-live-transcript",
         }
     }
 
@@ -461,6 +467,7 @@ impl Feature {
             Self::GnomeMeetingCapsules => "labs.gnome_meeting_capsules",
             Self::MeetingPlatformIcons => "labs.meeting_platform_icons",
             Self::Screenshots => "labs.screenshots",
+            Self::FollowLiveTranscript => "labs.follow_live_transcript",
         }
     }
 
@@ -590,6 +597,9 @@ impl Feature {
             Self::Screenshots => {
                 "Take a screenshot of an area or a window with a shortcut (Command-Shift-4 by default): copied, saved, and shown in the corner"
             }
+            Self::FollowLiveTranscript => {
+                "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
+            }
         }
     }
 
@@ -647,6 +657,7 @@ impl Feature {
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons,
             Self::Screenshots => settings.labs.screenshots,
+            Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
         }
     }
 
@@ -702,6 +713,7 @@ impl Feature {
             &mut labs.gnome_meeting_capsules,
             &mut labs.meeting_platform_icons,
             &mut labs.screenshots,
+            &mut labs.follow_live_transcript,
         ]
     }
 
@@ -757,6 +769,7 @@ impl Feature {
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons = on,
             Self::Screenshots => settings.labs.screenshots = on,
+            Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
