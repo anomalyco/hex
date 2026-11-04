@@ -471,11 +471,11 @@ fn the_widest_states_fit_the_panel() {
     }
 }
 
-/// The capsule says its shortcuts in quiet text ("⏎", "esc"), a hint's
-/// keys in one small rect at most. The one keycap tray is Search's: the
-/// capture shortcut that opens it, drawn as Settings draws it.
+/// Keycaps, as Settings draws a shortcut, are for Search's chip and the
+/// hints under the list; a chip on the top line says its shortcut in quiet
+/// text ("Next ⇥").
 #[test]
-fn the_capsule_draws_keycaps_only_on_search() {
+fn the_capsule_draws_keycaps_only_on_search_and_hints() {
     for (name, pres) in stills() {
         let rt = runtime(pres, false);
         for e in rt.elements() {
@@ -484,7 +484,10 @@ fn the_capsule_draws_keycaps_only_on_search() {
                 .as_deref()
                 .is_some_and(|k| k == "keys" || k.starts_with("keycap"));
             assert!(
-                !keycap || e.path.contains("ask-keys"),
+                !keycap
+                    || ["ask-keys", "footer", "card-hints"]
+                        .iter()
+                        .any(|at| e.path.contains(at)),
                 "{name}: {} is a keycap",
                 e.path
             );

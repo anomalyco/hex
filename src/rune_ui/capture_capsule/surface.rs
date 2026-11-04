@@ -110,11 +110,18 @@ pub(crate) enum Anchor {
     Cursor,
 }
 
-pub(crate) const MEDIUM: TextStyle = TextStyle::new(13.0, 530.0);
-pub(crate) const STRONG: TextStyle = TextStyle::new(13.0, 600.0);
+/// The kit's type, the same in either appearance: its labels in
+/// `ui_medium`, its notes and hints in `small_medium`.
+pub(crate) fn medium() -> TextStyle {
+    rune_theme_opencode::kit(false).ty.ui_medium
+}
+pub(crate) fn small() -> TextStyle {
+    rune_theme_opencode::kit(false).ty.small_medium
+}
 /// Tabular digits, so a new second never changes the timer's width.
-pub(crate) const TIMER: TextStyle = STRONG.features("'tnum' 1");
-pub(crate) const SMALL: TextStyle = TextStyle::new(11.5, 530.0);
+pub(crate) fn clock_style() -> TextStyle {
+    medium().features("'tnum' 1")
+}
 pub(crate) const PROCESSING: &str = "Processing…";
 /// The hairline between the recording's tools and its stop and cancel.
 pub(crate) const DIVIDER_W: f32 = 1.0;
@@ -134,12 +141,9 @@ pub(crate) fn chord<S: AsRef<str>>(keys: &[S]) -> String {
     out
 }
 
-/// The finished capsule's label: quieter in [`TopLine::Quiet`].
+/// The finished capsule's label: [`TopLine::Quiet`] only inks it fainter.
 pub(crate) fn done_style() -> TextStyle {
-    match tuning::get().top_line {
-        TopLine::Quiet => MEDIUM,
-        TopLine::Icons => STRONG,
-    }
+    medium()
 }
 
 /// [`TopLine::Icons`] says nothing for a plain copy: the check is enough.
@@ -331,7 +335,7 @@ pub(crate) struct Item {
 }
 
 fn mode_width(mode: Mode) -> f32 {
-    measure(mode.label(), MEDIUM) + 2.0 * SEG_PX + SEG_ICON + SEG_ICON_GAP
+    measure(mode.label(), medium()) + 2.0 * SEG_PX + SEG_ICON + SEG_ICON_GAP
 }
 
 fn chip_width(label: f32) -> f32 {
@@ -369,11 +373,11 @@ pub(crate) fn keyed_width(keys: &[&str], label: &str, style: TextStyle) -> f32 {
     if keys.is_empty() {
         return chip_width(measure(label, style));
     }
-    chip_width(measure(label, style) + HINT_GAP + measure(&chord(keys), SMALL))
+    chip_width(measure(label, style) + HINT_GAP + measure(&chord(keys), small()))
 }
 
 pub(crate) fn clock_width(clock: &str) -> f32 {
-    measure(clock, TIMER)
+    measure(clock, clock_style())
 }
 
 /// The widest a row gets: the panel, less room for the shadow.
@@ -426,7 +430,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Why,
             format!("{why}{NOTE_OF}{text}"),
-            measure(why, SMALL) + LEAD_TRAIL * 0.5,
+            measure(why, small()) + LEAD_TRAIL * 0.5,
             false,
         ));
     }
@@ -449,7 +453,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Next,
             String::new(),
-            keyed_width(&["⇥"], "Next", MEDIUM),
+            keyed_width(&["⇥"], "Next", medium()),
             false,
         ));
     }
@@ -458,7 +462,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             raw.push((
                 Id::Pick(row),
                 name.clone(),
-                keyed_width(&[], name, MEDIUM),
+                keyed_width(&[], name, medium()),
                 false,
             ));
         }
@@ -467,7 +471,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Undo,
             String::new(),
-            keyed_width(&[], UNDO_LABEL, MEDIUM),
+            keyed_width(&[], UNDO_LABEL, medium()),
             false,
         ));
     } else {
@@ -480,9 +484,9 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         // opens it.
         if let Some(ask) = done.ask.as_ref().filter(|_| !listed || done.ask_keys) {
             let width = if done.ask_keys {
-                keycaps_chip_width(ask, MEDIUM)
+                keycaps_chip_width(ask, medium())
             } else {
-                keyed_width(&[], ask, MEDIUM)
+                keyed_width(&[], ask, medium())
             };
             raw.push((Id::Ask, ask.clone(), width, false));
         }
@@ -588,7 +592,7 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
                 raw.push((
                     Id::Record,
                     String::new(),
-                    chip_width(measure("Record", STRONG)),
+                    chip_width(measure("Record", medium())),
                     false,
                 ));
             }
@@ -608,13 +612,13 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
                 raw.push((
                     Id::Keep,
                     String::new(),
-                    chip_width(measure(KEEP_LABEL, MEDIUM)),
+                    chip_width(measure(KEEP_LABEL, medium())),
                     false,
                 ));
                 raw.push((
                     Id::Discard,
                     String::new(),
-                    chip_width(measure(DISCARD_LABEL, STRONG)),
+                    chip_width(measure(DISCARD_LABEL, medium())),
                     false,
                 ));
             } else if *chips {
@@ -633,7 +637,7 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
             }
         }
         Pres::Processing => {
-            let w = PROCESSING_TEXT_X + measure(PROCESSING, STRONG) + PROCESSING_TRAIL;
+            let w = PROCESSING_TEXT_X + measure(PROCESSING, medium()) + PROCESSING_TRAIL;
             raw.push((Id::Processing, String::new(), w, false));
         }
         Pres::Done(done) => done_items(done, &mut raw),
@@ -1217,15 +1221,15 @@ mod tests {
     }
 
     /// The Undo chip is laid out as wide as it's drawn: its label in
-    /// MEDIUM, with no shortcut beside it.
+    /// the kit's `ui_medium`, with no shortcut beside it.
     #[test]
     fn the_undo_chip_is_as_wide_as_its_label_is_drawn() {
         let (_, items) = layout(&ruled(true), "0:00");
         let undo = items.iter().find(|i| i.id == Id::Undo).unwrap();
-        assert_eq!(undo.rect[2], keyed_width(&[], UNDO_LABEL, MEDIUM));
+        assert_eq!(undo.rect[2], keyed_width(&[], UNDO_LABEL, medium()));
         assert_ne!(
-            keyed_width(&[], UNDO_LABEL, MEDIUM),
-            keyed_width(&[], UNDO_LABEL, STRONG)
+            keyed_width(&[], UNDO_LABEL, medium()),
+            keyed_width(&[], UNDO_LABEL, small())
         );
     }
 
@@ -1348,11 +1352,11 @@ mod tests {
 
     #[test]
     fn long_names_end_in_an_ellipsis() {
-        let cut = ellipsize("OpenCode Desktop · Problems board rewrite", MEDIUM, 120.0);
+        let cut = ellipsize("OpenCode Desktop · Problems board rewrite", medium(), 120.0);
         assert!(
-            cut.ends_with('…') && measure(&cut, MEDIUM) <= 120.0,
+            cut.ends_with('…') && measure(&cut, medium()) <= 120.0,
             "{cut}"
         );
-        assert_eq!(ellipsize("HEX", MEDIUM, 120.0), "HEX");
+        assert_eq!(ellipsize("HEX", medium(), 120.0), "HEX");
     }
 }

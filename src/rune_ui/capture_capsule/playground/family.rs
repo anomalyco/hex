@@ -21,7 +21,7 @@ use rune::{
 };
 
 use super::super::notch;
-use super::super::surface::{MEDIUM, SMALL, STRONG, TIMER, corner, measure};
+use super::super::surface::{clock_style, corner, measure, medium, small as small_text};
 use super::super::tuning;
 use super::Paint;
 use crate::rune_hud::dot_scope::{self, Frame, Scope, Stage, demo_level, demo_loudness, palette};
@@ -443,9 +443,9 @@ fn layout(step: Step, place: Place, screen: &Screen) -> Layout {
             // Text keeps its size in the bar's smaller type, so it's
             // measured there and laid out as if full size.
             let (strong, body) = if fit < 1.0 {
-                (SMALL, SMALL)
+                (small_text(), small_text())
             } else {
-                (STRONG, MEDIUM)
+                (medium(), medium())
             };
             let sent = measure(&format!("Sent to {}", DESTINATIONS[0]), strong) / fit;
             let undo = measure("Undo", body) / fit;
@@ -630,7 +630,7 @@ fn draw(
     let k = p.k;
     let [_, _, w, h] = rect;
     let small = fit < 1.0;
-    let body = if small { SMALL } else { MEDIUM };
+    let body = if small { small_text() } else { medium() };
     match piece {
         Piece::Voice { working } => voice(p, s, w, h, fit, working, dark || k.dark),
         Piece::Cue => cue(p, s, h, fit),
@@ -639,9 +639,9 @@ fn draw(
             row().center_y().justify_end().child(
                 text(format!("{}:{:02}", secs / 60, secs % 60))
                     .font(if small {
-                        SMALL.features("'tnum' 1")
+                        small_text().features("'tnum' 1")
                     } else {
-                        TIMER
+                        clock_style()
                     })
                     .color(p.text()),
             )
@@ -656,10 +656,11 @@ fn draw(
                 .radius(4.0)
                 .fill(k.alpha(k.c.text_base, if on { 0.2 } else { 0.1 }))
                 .child(
-                    row()
-                        .center()
-                        .size(16.0, 16.0)
-                        .child(text(format!("{}", i + 1)).font(SMALL).color(p.text())),
+                    row().center().size(16.0, 16.0).child(
+                        text(format!("{}", i + 1))
+                            .font(small_text())
+                            .color(p.text()),
+                    ),
                 );
             row()
                 .center_y()
@@ -668,11 +669,11 @@ fn draw(
                 .radius(8.0)
                 .fill(if on { k.c.layer_02 } else { Color::TRANSPARENT })
                 .child(key)
-                .child(text(DESTINATIONS[i]).font(MEDIUM).color(p.text()))
+                .child(text(DESTINATIONS[i]).font(medium()).color(p.text()))
         }
         Piece::Sent => row().center_y().child(
             text(format!("Sent to {}", DESTINATIONS[0]))
-                .font(if small { SMALL } else { STRONG })
+                .font(if small { small_text() } else { medium() })
                 .color(p.text()),
         ),
         Piece::Undo => row()
