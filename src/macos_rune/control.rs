@@ -2,6 +2,9 @@
 //! thread answers what it owns (the window, the menu bar's meeting state,
 //! settings saves) and hands commands that wait on the listener or the
 //! window to a short-lived thread, so a slow answer never stalls the run loop.
+//! Commands only the listener answers (`hex dictation`, `hex paste-last`)
+//! skip the main thread: the control thread hands them over at once
+//! ([`answer_off_main`]).
 
 use std::sync::mpsc::{self, SyncSender};
 use std::thread;
@@ -58,6 +61,10 @@ impl Pump {
         reply: &SyncSender<ControlResponse>,
     ) -> Option<ControlReply> {
         let runtime = self.runtime.clone();
+        let command = match listener_command(&runtime, command, reply) {
+            Ok(()) => return None,
+            Err(command) => command,
+        };
         match command {
             ControlCommand::Status => {
                 let meeting = meeting_report(&self.meeting_state);
@@ -95,44 +102,6 @@ impl Pump {
                         let _ = runtime.send(Request::CancelModel);
                         super::quit();
                     }
-                });
-                None
-            }
-            ControlCommand::Dictation {
-                action,
-                print: true,
-                raw,
-            } => {
-                background(reply, move || {
-                    let action = control::check_flags(action, true, raw)?;
-                    listener_ready(&runtime)?;
-                    let (print, printed) = control::PrintReply::channel();
-                    // The listener answers once the recording stopped; only
-                    // this command then waits for the transcript.
-                    match ask(&runtime, |reply| RecognitionControl::Capture {
-                        action,
-                        print: Some(print),
-                        raw: false,
-                        reply,
-                    })? {
-                        ControlReply::Done { .. } => {
-                            Ok(control::await_printed(&printed, control::PRINT_WAIT))
-                        }
-                        refused => Ok(refused),
-                    }
-                });
-                None
-            }
-            ControlCommand::Dictation { action, raw, .. } => {
-                background(reply, move || {
-                    let action = control::check_flags(action, false, raw)?;
-                    listener_ready(&runtime)?;
-                    ask(&runtime, |reply| RecognitionControl::Capture {
-                        action,
-                        print: None,
-                        raw,
-                        reply,
-                    })
                 });
                 None
             }
@@ -197,14 +166,8 @@ impl Pump {
                 "unsupported",
                 "this build has no capture engine: it is a build option (`--features capture`), off in public builds",
             )),
-            ControlCommand::PasteLast => {
-                background(reply, move || {
-                    listener_ready(&runtime)?;
-                    ask(&runtime, |reply| RecognitionControl::PasteLast {
-                        reply: Some(reply),
-                    })
-                });
-                None
+            ControlCommand::Dictation { .. } | ControlCommand::PasteLast => {
+                unreachable!("listener_command answers it")
             }
             ControlCommand::MeetingRecord { title } => self.meeting(false, title, reply),
             ControlCommand::MeetingStop => self.meeting(true, None, reply),
@@ -561,6 +524,75 @@ fn spawn(work: impl FnOnce() + Send + 'static) {
     {
         tracing::error!(%error, "could not start a control thread");
     }
+}
+
+/// Answers a call that needs only the listener (`hex dictation`, `hex
+/// paste-last`) from a thread of its own, or returns it for the main thread,
+/// whose pump drains its channels on a timer.
+pub(super) fn answer_off_main(runtime: &RuntimeHandle, call: ControlCall) -> Option<ControlCall> {
+    let ControlCall { mut request, reply } = call;
+    if control::check_version(&request).is_err() {
+        return Some(ControlCall { request, reply });
+    }
+    match listener_command(runtime, request.command, &reply) {
+        Ok(()) => None,
+        Err(command) => {
+            request.command = command;
+            Some(ControlCall { request, reply })
+        }
+    }
+}
+
+/// Hands a command the listener answers to a thread that waits for it, or
+/// gives the command back.
+fn listener_command(
+    runtime: &RuntimeHandle,
+    command: ControlCommand,
+    reply: &SyncSender<ControlResponse>,
+) -> Result<(), ControlCommand> {
+    let runtime = runtime.clone();
+    match command {
+        ControlCommand::Dictation {
+            action,
+            print: true,
+            raw,
+        } => background(reply, move || {
+            let action = control::check_flags(action, true, raw)?;
+            listener_ready(&runtime)?;
+            let (print, printed) = control::PrintReply::channel();
+            // The listener answers once the recording stopped; only this
+            // command then waits for the transcript.
+            match ask(&runtime, |reply| RecognitionControl::Capture {
+                action,
+                print: Some(print),
+                raw: false,
+                reply,
+            })? {
+                ControlReply::Done { .. } => {
+                    Ok(control::await_printed(&printed, control::PRINT_WAIT))
+                }
+                refused => Ok(refused),
+            }
+        }),
+        ControlCommand::Dictation { action, raw, .. } => background(reply, move || {
+            let action = control::check_flags(action, false, raw)?;
+            listener_ready(&runtime)?;
+            ask(&runtime, |reply| RecognitionControl::Capture {
+                action,
+                print: None,
+                raw,
+                reply,
+            })
+        }),
+        ControlCommand::PasteLast => background(reply, move || {
+            listener_ready(&runtime)?;
+            ask(&runtime, |reply| RecognitionControl::PasteLast {
+                reply: Some(reply),
+            })
+        }),
+        command => return Err(command),
+    }
+    Ok(())
 }
 
 /// Answers `reply` from a thread; a dropped reply reads as `control-unavailable`.
