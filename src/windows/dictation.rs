@@ -293,19 +293,28 @@ pub fn run(
         .spawn(move || {
             let mut paster = WindowsPaster::new(worker_paste_with_shift);
             while let Ok(job) = job_receiver.recv() {
-                let result = match job {
+                let (result, draft) = match job {
                     OutputJob::Dictation(job) => process_dictation_job(
                         job,
                         &mut paster,
-                        history.as_ref(),
                         &last_dictation,
                         &mode_runtime,
                         transformations.as_ref(),
                     ),
-                    OutputJob::PasteLast => process_paste_last(&mut paster, &last_dictation),
+                    OutputJob::PasteLast => {
+                        (process_paste_last(&mut paster, &last_dictation), None)
+                    }
                 };
                 if result_sender.send(result).is_err() {
                     break;
+                }
+                // History is written once the text is out: a printing stop
+                // has its reply and the listener its result, so neither
+                // waits for the file to be rewritten.
+                if let (Some(history), Some(draft)) = (&history, draft)
+                    && let Err(error) = history.record(draft)
+                {
+                    tracing::warn!(%error, "could not retain Windows dictation history");
                 }
             }
         })?;
@@ -863,15 +872,15 @@ pub fn run(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Pastes or prints one dictation, and returns its result with what History
+/// keeps of it, which the caller records after sending the result.
 fn process_dictation_job(
     mut job: Job,
     paster: &mut Result<WindowsPaster>,
-    history: Option<&crate::history::History>,
     last_dictation: &Mutex<Option<String>>,
     mode_runtime: &RwLock<crate::dictation::modes::ModeRuntime>,
     transformations: &crate::personal_commands::TransformationClient,
-) -> JobResult {
+) -> (JobResult, Option<crate::history::HistoryDraft>) {
     let started = Instant::now();
     let printed = job.print.is_some();
     // The context read starts now so the UIA walk overlaps inference.
@@ -889,6 +898,7 @@ fn process_dictation_job(
     let inference_ms = inference_started.elapsed().as_millis() as u64;
     let context = pending_context.finish();
     let application = context.application.clone();
+    let mut history_draft = None;
     let result = transcription.and_then(|raw_text| {
         if raw_text.is_empty() {
             return Err("transcription was empty".into());
@@ -917,25 +927,21 @@ fn process_dictation_job(
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()) = Some(text.clone());
         }
-        if let Some(history) = history {
-            let mut draft = crate::dictation::modes::history_draft(
-                raw_text,
-                &processed,
-                application.clone(),
-                job.audio_ms,
-                inference_ms,
-                started.elapsed().as_millis() as u64,
-                job.recording.take(),
-            );
-            if printed {
-                draft.kind = crate::history::HistoryKind::Printed;
-            } else if job.raw {
-                draft.kind = crate::history::HistoryKind::Raw;
-            }
-            if let Err(error) = history.record(draft) {
-                tracing::warn!(%error, "could not retain Windows dictation history");
-            }
+        let mut draft = crate::dictation::modes::history_draft(
+            raw_text,
+            &processed,
+            application.clone(),
+            job.audio_ms,
+            inference_ms,
+            started.elapsed().as_millis() as u64,
+            job.recording.take(),
+        );
+        if printed {
+            draft.kind = crate::history::HistoryKind::Printed;
+        } else if job.raw {
+            draft.kind = crate::history::HistoryKind::Raw;
         }
+        history_draft = Some(draft);
         Ok(text)
     });
     let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
@@ -949,9 +955,15 @@ fn process_dictation_job(
             Ok(text) => PrintedTranscript::Text(text.clone()),
             Err(error) => PrintedTranscript::Failed(error.clone()),
         });
-        return job_result(OutputKind::Printed, result, latency_ms);
+        return (
+            job_result(OutputKind::Printed, result, latency_ms),
+            history_draft,
+        );
     }
-    job_result(OutputKind::Dictation, result, latency_ms)
+    (
+        job_result(OutputKind::Dictation, result, latency_ms),
+        history_draft,
+    )
 }
 
 fn process_paste_last(

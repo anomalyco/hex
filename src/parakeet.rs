@@ -961,7 +961,7 @@ fn finish_output(
                 .as_ref()
                 .ok()
                 .and_then(|result| result.processing.clone());
-            let result = result.and_then(|mut completed| {
+            let completed = result.and_then(|completed| {
                 if control.is_cancelled() {
                     return Err("dictation was cancelled".into());
                 }
@@ -993,9 +993,6 @@ fn finish_output(
                     ) {
                         *last_transcript = Some(completed.text.clone());
                     }
-                    if let Some(history) = history {
-                        record_history(history, target, &mut completed);
-                    }
                 }
                 tracing::info!(
                     audio_ms = completed.timings.audio_ms,
@@ -1006,8 +1003,12 @@ fn finish_output(
                     total_ms = completed.timings.total_started.elapsed().as_millis(),
                     "dictation pipeline completed"
                 );
-                Ok(completed.text)
+                Ok(completed)
             });
+            let result = completed
+                .as_ref()
+                .map(|completed| completed.text.clone())
+                .map_err(Clone::clone);
             if matches!(
                 target,
                 TranscriptionTarget::Print | TranscriptionTarget::RawPrint
@@ -1020,6 +1021,13 @@ fn finish_output(
                     Ok(text) => crate::control::PrintedTranscript::Text(text.clone()),
                     Err(error) => crate::control::PrintedTranscript::Failed(error.clone()),
                 });
+            }
+            // History is written once the text is out, so a printing stop's
+            // reply never waits for the file to be rewritten and synced.
+            if let (Some(history), Ok(mut completed)) = (history, completed)
+                && !completed.text.trim().is_empty()
+            {
+                record_history(history, target, &mut completed);
             }
             if control.is_cancelled() {
                 WorkerEvent::Cancelled { job_id }
