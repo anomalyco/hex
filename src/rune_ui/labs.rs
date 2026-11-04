@@ -497,6 +497,15 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Notch indicator"),
                 tr("On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"),
             ));
+            #[cfg(hex_capture)]
+            if Feature::AnnotateReplay.on_this_os() {
+                rows.push(row(
+                    Feature::AnnotateReplay,
+                    Some(Pane::Annotate.icon()),
+                    tr("Annotate 15 s replay"),
+                    tr("Keep a rolling 15-second screen buffer so you can capture something after it happens"),
+                ));
+            }
         }
     }
     // Linux's X11 grabs and shortcuts portal take these keys alone.
@@ -718,6 +727,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
         Feature::NotchIndicator => "lab-notch-indicator",
         Feature::MeetingFinishedEvent => "lab-meeting-finished-event",
+        Feature::AnnotateReplay => "lab-annotate-replay",
     }
 }
 

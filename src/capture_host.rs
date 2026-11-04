@@ -75,6 +75,7 @@ use crate::transcription::models::{ModelRuntime, TranscriptionModelId};
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 mod library;
 mod permissions;
+mod replay;
 mod routing;
 #[cfg(target_os = "macos")]
 mod screen_access;
@@ -87,6 +88,7 @@ pub use permissions::{
     CaptureNeed, NeedState, allow as allow_permission, on_missing,
     restart as restart_for_permission, state_of as permission_state,
 };
+pub use replay::available as replay_available;
 pub use routing::CaptureRoute;
 pub use routing::{RouteAnswer, RouteDelivery, RouteDest};
 #[cfg(target_os = "macos")]
@@ -1447,6 +1449,7 @@ pub struct CaptureHost {
     /// Mutes or pauses other audio while a capture records; `None` (a
     /// replay) leaves it alone.
     environment: Option<Environment>,
+    replay: replay::Controller,
     /// Tests pin the policy; captures otherwise follow "While dictating".
     #[cfg(test)]
     audio_behavior: Option<crate::app_settings::RecordingAudioBehavior>,
@@ -1491,6 +1494,9 @@ impl CaptureHost {
                     return;
                 }
                 *host = Self::start(engine.cloned(), environment);
+                if let Some(started) = host {
+                    started.replay.reconcile(audio, &started.outcomes);
+                }
                 *retry_at = host.is_none().then(|| Instant::now() + START_RETRY);
             }
             (false, false) => {
@@ -1505,6 +1511,7 @@ impl CaptureHost {
             (true, true) => {
                 if let Some(host) = host {
                     host.reap(CaptureInstant::now(), audio);
+                    host.replay.reconcile(audio, &host.outcomes);
                 }
             }
         }
@@ -1536,6 +1543,7 @@ impl CaptureHost {
             ended: Vec::new(),
             looking: Arc::default(),
             environment: None,
+            replay: replay::Controller::default(),
             #[cfg(test)]
             audio_behavior: None,
         })
@@ -1546,7 +1554,10 @@ impl CaptureHost {
     /// shortcut press into a stop.
     pub fn recording_since(&mut self, audio: &impl AudioTimeline) -> Option<CaptureInstant> {
         self.reap(CaptureInstant::now(), audio);
-        self.active.as_ref().map(|active| active.t0)
+        self.active
+            .as_ref()
+            .map(|active| active.t0)
+            .or_else(|| self.replay.narrating_since())
     }
 
     /// What the host is doing for the capture shortcut pressed at `at`.
@@ -1568,12 +1579,53 @@ impl CaptureHost {
 
     /// Carries out a capture shortcut action ([`CaptureShortcut`]), with the
     /// error tone when it does nothing.
+    #[cfg_attr(all(target_os = "macos", not(test)), allow(dead_code))]
     pub fn shortcut(&mut self, action: ShortcutAction, audio: &impl AudioTimeline) -> ControlReply {
+        self.shortcut_at(action, CaptureInstant::now(), audio)
+    }
+
+    pub fn shortcut_at(
+        &mut self,
+        action: ShortcutAction,
+        at: CaptureInstant,
+        audio: &impl AudioTimeline,
+    ) -> ControlReply {
+        #[cfg(not(target_os = "macos"))]
+        let _ = at;
         let action = match action {
             ShortcutAction::Record => ScrawlCaptureAction::Start,
             ShortcutAction::Finish => ScrawlCaptureAction::Stop,
             ShortcutAction::Pick => {
                 capsule_key(CapsuleKey::Shortcut);
+                return self.report(false, None);
+            }
+            #[cfg(target_os = "macos")]
+            ShortcutAction::ReplayBegin => {
+                let busy = self.active.is_some();
+                let refusal = self.refuse_start();
+                let quiet = self.quiet();
+                self.replay.begin_shortcut(
+                    at,
+                    busy,
+                    refusal,
+                    self.captures_dir.as_deref(),
+                    audio,
+                    quiet,
+                    &self.outcomes,
+                );
+                return self.report(self.replay.is_narrating(), None);
+            }
+            #[cfg(target_os = "macos")]
+            ShortcutAction::ReplayFinish => {
+                let ended = self.replay.narrating_bundle();
+                let finisher = self.finisher.as_ref().map(|(jobs, _)| jobs);
+                self.replay
+                    .finish_shortcut(at, audio, finisher, &self.outcomes);
+                return self.report(ended.is_some(), ended);
+            }
+            #[cfg(target_os = "macos")]
+            ShortcutAction::ReplayCancel => {
+                self.replay.cancel_narration(at, audio, &self.outcomes);
                 return self.report(false, None);
             }
             ShortcutAction::None | ShortcutAction::Cancel => return self.report(false, None),
@@ -1687,6 +1739,22 @@ impl CaptureHost {
             }
             ScrawlCaptureAction::Toggle => self.begin(now, audio, CaptureTarget::Pointer, None),
             ScrawlCaptureAction::Status => Ok(self.report(false, None)),
+            ScrawlCaptureAction::Replay => {
+                let busy = self.active.is_some();
+                let refusal = self.refuse_start();
+                let finisher = self.finisher.as_ref().map(|(jobs, _)| jobs);
+                return match self.replay.export_cli(
+                    now,
+                    busy,
+                    refusal,
+                    self.captures_dir.as_deref(),
+                    finisher,
+                    &self.outcomes,
+                ) {
+                    Ok(bundle) => self.report(true, Some(bundle)),
+                    Err(reply) => reply,
+                };
+            }
         };
         result.unwrap_or_else(|error| ControlReply::error("failed", format!("{error:#}")))
     }
@@ -1721,6 +1789,8 @@ impl CaptureHost {
         if self.active.is_some() {
             let _ = self.end(CaptureInstant::now(), audio, End::Cancel);
         }
+        self.replay
+            .shutdown(CaptureInstant::now(), audio, &self.outcomes);
         for collector in std::mem::take(&mut self.ended) {
             join_by(collector, deadline, "capture-audio");
         }
@@ -1845,9 +1915,9 @@ impl CaptureHost {
         }
         // Every unfinished capture but the recording one is stopped and
         // writing or about to be.
-        let writing = lock(&self.outcomes)
-            .writing()
-            .saturating_sub(usize::from(self.active.is_some()));
+        let writing = lock(&self.outcomes).writing().saturating_sub(usize::from(
+            self.active.is_some() || self.replay.is_narrating(),
+        ));
         (writing >= MAX_FINISHING).then(|| {
             ControlReply::error(
                 "busy",
@@ -1865,7 +1935,7 @@ impl CaptureHost {
         target: CaptureTarget,
         quiet: Option<Quiet>,
     ) -> Result<ControlReply> {
-        if self.active.is_some() {
+        if self.active.is_some() || self.replay.is_narrating() {
             return Ok(self.report(false, None));
         }
         if let Some(refused) = self.refuse_start() {
@@ -1942,6 +2012,25 @@ impl CaptureHost {
         end: End,
     ) -> Result<ControlReply> {
         let Some(mut active) = self.active.take() else {
+            #[cfg(target_os = "macos")]
+            if self.replay.is_narrating() {
+                let ended = self.replay.narrating_bundle();
+                match end {
+                    End::Finish => {
+                        let finisher = self.finisher.as_ref().map(|(jobs, _)| jobs);
+                        self.replay
+                            .finish_shortcut(now, audio, finisher, &self.outcomes);
+                        return Ok(self.report(true, ended));
+                    }
+                    End::Cancel | End::Discard => {
+                        self.replay
+                            .cancel_narration_with(now, end, audio, &self.outcomes);
+                        return Ok(
+                            self.report(true, (end != End::Discard).then_some(ended).flatten())
+                        );
+                    }
+                }
+            }
             return Ok(self.report(false, None));
         };
         // Input after the stop belongs to no capture.
@@ -2012,11 +2101,20 @@ impl CaptureHost {
 
     fn report(&self, changed: bool, ended: Option<PathBuf>) -> ControlReply {
         let outcomes = lock(&self.outcomes);
-        let (state, bundle, elapsed_ms) = match &self.active {
-            Some(active) => (
+        let live_bundle = self
+            .active
+            .as_ref()
+            .map(|active| (active.bundle.clone(), active.t0))
+            .or_else(|| {
+                self.replay
+                    .narrating_bundle()
+                    .zip(self.replay.narrating_since())
+            });
+        let (state, bundle, elapsed_ms) = match &live_bundle {
+            Some((bundle, t0)) => (
                 ScrawlCaptureState::Recording,
-                Some(active.bundle.clone()),
-                Some(CaptureInstant::now().duration_since(active.t0).as_millis() as u64),
+                Some(bundle.clone()),
+                Some(CaptureInstant::now().duration_since(*t0).as_millis() as u64),
             ),
             None => (ScrawlCaptureState::Idle, ended, None),
         };
@@ -2030,10 +2128,9 @@ impl CaptureHost {
                 .iter()
                 .filter(|unfinished| {
                     !unfinished.discarded
-                        && self
-                            .active
+                        && live_bundle
                             .as_ref()
-                            .is_none_or(|active| active.bundle != unfinished.bundle)
+                            .is_none_or(|(bundle, _)| *bundle != unfinished.bundle)
                 })
                 .map(|unfinished| unfinished.bundle.clone())
                 .collect(),
@@ -2694,6 +2791,12 @@ pub enum ShortcutAction {
     /// The capsule takes the press ([`CapsuleKey::Shortcut`]): the picker
     /// records what it is on, the suggestions open the search.
     Pick,
+    #[cfg(target_os = "macos")]
+    ReplayBegin,
+    #[cfg(target_os = "macos")]
+    ReplayFinish,
+    #[cfg(target_os = "macos")]
+    ReplayCancel,
 }
 
 /// The capture shortcut in the listener's input, as Scrawl has it: a fresh
@@ -2711,6 +2814,7 @@ pub struct CaptureShortcut {
     armed: Option<crate::app_settings::RuntimeHotkey>,
     /// Pressed while recording, waiting to come up.
     pressed: Option<crate::app_settings::RuntimeHotkey>,
+    replay: replay::ReplayShortcut,
 }
 
 #[cfg(target_os = "macos")]
@@ -2722,6 +2826,15 @@ impl CaptureShortcut {
         activity: ShortcutActivity,
     ) -> ShortcutAction {
         use crate::suppression::InputEvent;
+        let replay_free = matches!(activity, ShortcutActivity::Free)
+            && self.armed.is_none()
+            && self.pressed.is_none();
+        match self.replay.input(event, hotkeys, replay_free) {
+            replay::ReplayShortcutAction::Begin => return ShortcutAction::ReplayBegin,
+            replay::ReplayShortcutAction::Finish => return ShortcutAction::ReplayFinish,
+            replay::ReplayShortcutAction::Cancel => return ShortcutAction::ReplayCancel,
+            replay::ReplayShortcutAction::None => {}
+        }
         // Escape before anything records takes the press back; once a
         // capture records (started some other way), it only disarms: Escape
         // never ends a recording.
@@ -2840,7 +2953,7 @@ impl CaptureShortcut {
     /// list takes Escape at the session tap.) A recording capture never
     /// takes it, and a send's Undo is a click.
     pub fn takes_escape(&self) -> bool {
-        self.armed() || wants_escape() || drawing()
+        self.armed() || wants_escape() || drawing() || self.replay.takes_escape()
     }
 
     /// Forgets a held key whose release the listener will not see, as while
@@ -2849,6 +2962,7 @@ impl CaptureShortcut {
     pub fn reset(&mut self) {
         self.held = None;
         self.armed = None;
+        self.replay.reset();
         if self.pressed.take().is_some() {
             annotate_key_up();
         }

@@ -57,6 +57,9 @@ pub enum ScrawlCaptureAction {
     /// fire on the press only (GNOME's custom shortcuts, #781).
     Toggle,
     Status,
+    /// Export the last 15 s from the rolling clip buffer into a capture bundle
+    /// (`labs.annotate_replay`, macOS 27+).
+    Replay,
 }
 
 /// The window's panes, by the names `hex window show` takes.

@@ -991,10 +991,7 @@ impl ShortcutSuppression {
                 dictation: hotkey,
                 paste_last: Some(paste_last),
                 paste_meeting: Some(paste_meeting),
-                capture: None,
-                raw_dictation: None,
-                second_dictation: None,
-                cancel: None,
+                ..RuntimeHotkeys::default()
             },
             delivered,
             false,

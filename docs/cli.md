@@ -66,7 +66,7 @@ hex
 │   ├── add <term> [--sounds-like a,b]  add a term, or new spellings to an existing one
 │   └── remove <term>              any case
 ├── annotate (alias capture)       Annotate (features/capture.md)
-│   ├── start|stop|cancel|status   record a capture, end or discard it, or report
+│   ├── start|stop|cancel|replay|status  record a capture, end or discard it, save the last 15 s, or report
 │   ├── list [--limit N]           the newest captures in the captures folder
 │   ├── show <capture>             one capture's words, files, and where it went
 │   ├── send <capture> [--to <session>] [--always]  send it to an OpenCode session
@@ -180,10 +180,15 @@ in every macOS, Linux, and Windows build; with `capture.enabled` off it refuses 
 `hex` process itself and `start`, `stop`, and `cancel` are handed to the
 running Hex's listener, as is `status`. On Windows every `annotate` command
 goes to the running Hex. `capture stop` replies at once with the bundle
-path while the words and files are written in the background; `capture status`
+path while the words and files are written in the background; `capture replay`
+(macOS 27+, Dev Lab `annotate-replay` on) exports the rolling 15 s
+`SCClipBufferingOutput` display buffer to `<bundle>/recording.mp4` and replies
+with the bundle path while keyframes, clipboard copy, and routing finish on the
+same queue (`unsupported` outside macOS 27+, `feature-off` while
+`labs.annotate_replay` is off); `capture status`
 lists bundles still writing and the last outcome (`last`: `bundle`, `stage`
 of `done`, `failed`, or `cancelled`, and for a written bundle `words`, `gaps`,
-and `missing_transcript`, why it has no words). A start while two captures
+and `missing_transcript`, why it has no words). A start or replay while two captures
 are still writing is refused with `busy`. Every action is idempotent.
 
 `<capture>` is a bundle name (`1792933491953.scrawl`, the extension

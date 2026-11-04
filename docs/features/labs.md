@@ -11,7 +11,7 @@ debug, local `HEX_LOCAL_BUILD`, test `HEX_TEST_BUILD`, and dev-channel
 drops it, its gate reads false even when `settings.json` says on, and the
 saved setting is kept untouched. In dev builds a Dev row carries a quiet
 "Dev" tag, and `hex labs` prints each feature's audience. Every feature
-below is `Everyone` today. There is no master switch. **Labs** is always the last item in the
+below is `Everyone` today unless marked `(Dev)`. There is no master switch. **Labs** is always the last item in the
 sidebar and lists every Labs feature as one flat row (name, one-line
 description, toggle), each **off by default**, plus Send feedback and Run
 setup again.
@@ -68,6 +68,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the local API's GET /meetings/events sends each finished meeting's id once its final transcript is written (#964)
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
+├── Annotate replay (Dev) no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
+│                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page, a store (labs/store.rs, labs/drawer.rs)

@@ -1013,6 +1013,8 @@ pub struct RuntimeHotkeys {
     pub paste_meeting: Option<RuntimeHotkey>,
     /// The capture shortcut, while captures are on (`cfg(hex_capture)`).
     pub capture: Option<RuntimeHotkey>,
+    /// Labs › Annotate 15 s replay shortcut (macOS 27+), while on and bound.
+    pub capture_replay: Option<RuntimeHotkey>,
     /// Dictate without processing, while it is bound.
     pub raw_dictation: Option<RuntimeHotkey>,
     /// Labs › Second dictation shortcut (macOS), while it is on and bound.
@@ -1024,12 +1026,13 @@ pub struct RuntimeHotkeys {
 
 impl RuntimeHotkeys {
     /// Every shortcut Hex matches, for suppression and chord evidence.
-    pub fn all(self) -> [Option<RuntimeHotkey>; 6] {
+    pub fn all(self) -> [Option<RuntimeHotkey>; 7] {
         [
             Some(self.dictation),
             self.paste_last,
             self.paste_meeting,
             self.capture,
+            self.capture_replay,
             self.raw_dictation,
             self.second_dictation,
         ]
@@ -1044,6 +1047,7 @@ impl Default for RuntimeHotkeys {
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
             capture: None,
+            capture_replay: None,
             raw_dictation: None,
             second_dictation: None,
             cancel: None,

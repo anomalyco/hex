@@ -798,6 +798,34 @@ hex capture status -> recording (bundle, elapsed), bundles still writing, last o
                       (words, audio gaps, or why it has no transcript)
 Hex quits mid-capture -> cancelled, bundle removed; captures still writing stop
 transcribing between chunks and keep their audio (shutdown waits ≤ 2 s)
+
+15 s replay buffer (Labs, macOS 27+)     // capture.replay; labs.annotate_replay
+├── Off by default (`Audience::Dev`); shown and runnable only when macOS 27's
+│   `SCClipBufferingOutput` and `SCStream`'s clip-buffering selectors exist at
+│   run time (weak Objective-C lookup; older macOS and Linux/Windows neither
+│   link nor offer it). Locked off by `DisableAnnotate` and `DisableLabs`
+├── Off -> no `SCStream`, no worker thread, no display observer, no consent prompt
+├── On (with Annotate on and Scrawl.app not running) -> one worker thread waits
+│   until Screen Recording is already granted (never prompts in the background),
+│   then runs one 15 fps `SCStream` with `SCClipBufferingOutput` on the pointer's
+│   display (≤ 2560 px long edge, cursor hidden, audio off, Hex's `OWN_WINDOWS`
+│   and non-layer-0 overlays excluded unless Show in screen recordings is on)
+│   ├── `replayd` encodes the rolling 15 s H.264 ring out-of-process; macOS keeps
+│   │   the menu-bar screen-recording indicator lit while the stream is active
+│   └── Display plug/unplug (`CGDisplayRegisterReconfigurationCallback`) or a
+│       stopped stream -> reopens on the active display with bounded backoff
+├── `hex capture replay` (`hex annotate replay`) -> exports up to 15 s (`> 15 s`
+│   is rejected by ScreenCaptureKit `-3812`) into `<captures>/<unix ms>.scrawl`
+│   without stopping the buffer, probes and decodes keyframes with `scrawl-helper`,
+│   writes `capture.json` and `scrawl.json` (`missing: "no_audio"`), copies to
+│   the clipboard, and feeds `capture.route`
+└── `capture.replay_hotkey` (unbound by default; Settings › Annotate when the
+    experiment is on, or `hex settings set capture.replay_hotkey`)
+    ├── Tap (< 300 ms) -> exports the silent 15 s clip at once, no mic opened
+    └── Hold (≥ 300 ms) -> exports the frozen 15 s clip at the press and records
+        Hex's microphone timeline with "While dictating" until release + tail;
+        narration is shifted onto the bundle clock after the clip (`video_ms..`),
+        transcribed with word timestamps, and anchored onto the final keyframe
 ```
 
 `scrawl.json` is Scrawl's bundle manifest. Its `transcript.words` are
@@ -820,7 +848,9 @@ Sources: [capture_host.rs](../../src/capture_host.rs), the tap in
 [dictation/audio.rs](../../src/dictation/audio.rs),
 `transcribe_with_words` in [parakeet.rs](../../src/parakeet.rs), routing in
 [capture_host/routing.rs](../../src/capture_host/routing.rs), the CLI's reads in
-[capture_host/library.rs](../../src/capture_host/library.rs), the phone finish
+[capture_host/library.rs](../../src/capture_host/library.rs), the 15 s replay
+buffer in [capture_host/replay.rs](../../src/capture_host/replay.rs) and
+[capture_host/replay/sck.rs](../../src/capture_host/replay/sck.rs), the phone finish
 in [phone.rs](../../crates/capture/src/phone.rs), and the `scrawl-capture`
 control commands in [control.rs](../../src/control.rs).
 
@@ -973,14 +1003,26 @@ Checks:
   (feature builds only, so no goldens: those run on Linux).
 - Settings: every `capture.*` key in `hex settings`
   (`every_persisted_setting_has_a_cli_key`).
+- Replay, in [capture_host/replay.rs](../../src/capture_host/replay.rs) and
+  [capture_host/replay/sck.rs](../../src/capture_host/replay/sck.rs):
+  `empty_audio_produces_no_wav_and_narrated_audio_shifts_after_video`,
+  `capture_manifest_matches_v1_schema_with_and_without_audio`,
+  `encoded_dimensions_stay_even_and_capped_at_2560`,
+  `replay_shortcut_begins_on_press_finishes_on_release_and_cancels_on_escape`,
+  and `error_completion_block_carries_xpc_signature`.
 
 Observed 2026-10-25 on pro (M2 Max), before the real engine, with the
 stand-in: `HEX_EXPERIMENTS=capture hex dev capture-replay` over three
 vocabulary fixtures (6.5 s) loaded Parakeet unified English on Metal and
-wrote 18 words with plausible times. The real engine has not run end to end:
-the unit tests use a fake engine over Scrawl's real bundle writer, and the
-mini (the test Mac) has no Screen Recording grant for a dev build, so neither
-`hex capture` against a live app nor `capture-replay` has recorded a screen.
-The shortcut, tap input, Escape, switching, routing, the iPhone path, Scrawl
-coexistence, and import are covered by unit tests only; none has run against a
-live Hex.
+wrote 18 words with plausible times. The non-replay `hex capture` engine has
+not run end to end in automated tests (unit tests use a fake engine over
+Scrawl's real bundle writer). Observed 2026-11-04 in a macOS 27.0
+(`26A428`) guest VM on Apple Silicon with Developer ID-signed `Hex Test.app`:
+`labs.annotate_replay` opened a 15 fps `1920×1080` `SCClipBufferingOutput`
+stream, exported 15,000 ms silent and 19,581 ms narrated bundles (13 Parakeet
+words anchored on the final keyframe, cursor hidden, Hex chrome excluded,
+clipboard handoff populated) via `hex capture replay`, an `⌥⇧R` tap, and a
+3.5 s `⌥⇧R` hold, recovered across `CGVirtualDisplay` plug/unplug and
+display sleep/wake, and rejected a 16 s request with
+`SCStreamErrorDomain -3812`. The menu-bar screen-recording indicator stays lit
+for the entire lifetime of the rolling buffer.

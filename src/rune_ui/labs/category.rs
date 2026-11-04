@@ -116,7 +116,10 @@ impl Category {
             | Feature::ModelInPlace
             | Feature::PickerDownloaded
             | Feature::ParakeetUltra => Self::Models,
-            Feature::HideMenuBarIcon | Feature::VoiceFilter | Feature::Playground => Self::App,
+            Feature::HideMenuBarIcon
+            | Feature::VoiceFilter
+            | Feature::Playground
+            | Feature::AnnotateReplay => Self::App,
         }
     }
 }
@@ -185,6 +188,10 @@ impl Place {
             Feature::UnloadIdle => Self::Elsewhere(tr("In the background")),
             Feature::VoiceFilter => Self::Pane(Pane::VoiceFilter),
             Feature::Playground => Self::Playground,
+            #[cfg(hex_capture)]
+            Feature::AnnotateReplay => Self::Pane(Pane::Annotate),
+            #[cfg(not(hex_capture))]
+            Feature::AnnotateReplay => Self::Pane(Pane::General),
         }
     }
 

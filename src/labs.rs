@@ -103,10 +103,11 @@ pub enum Feature {
     MeetingNotesVocabulary,
     NotchIndicator,
     MeetingFinishedEvent,
+    AnnotateReplay,
 }
 
 impl Feature {
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 45] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -151,6 +152,7 @@ impl Feature {
         Self::MeetingNotesVocabulary,
         Self::NotchIndicator,
         Self::MeetingFinishedEvent,
+        Self::AnnotateReplay,
     ];
 
     /// The features this OS and build have.
@@ -218,6 +220,7 @@ impl Feature {
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::NotchIndicator => Audience::Everyone,
+            Self::AnnotateReplay => Audience::Dev,
         }
     }
 
@@ -267,7 +270,7 @@ impl Feature {
             | Self::GnomeClipboardRestore
             | Self::MeetingNotesVocabulary
             | Self::NotchIndicator => 20261103,
-            Self::MeetingFinishedEvent => 20261104,
+            Self::MeetingFinishedEvent | Self::AnnotateReplay => 20261104,
         }
     }
 
@@ -287,6 +290,9 @@ impl Feature {
     pub fn for_settings_key(key: &str) -> Option<Self> {
         if key == "labs.unload_idle_minutes" {
             return Some(Self::UnloadIdle);
+        }
+        if key == "capture.replay_hotkey" {
+            return Some(Self::AnnotateReplay);
         }
         Self::ALL
             .into_iter()
@@ -319,6 +325,16 @@ impl Feature {
             | Self::NotchIndicator => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
+            Self::AnnotateReplay => {
+                #[cfg(hex_capture)]
+                {
+                    crate::capture_host::replay_available()
+                }
+                #[cfg(not(hex_capture))]
+                {
+                    false
+                }
+            }
             Self::Playground
             | Self::LiveText
             | Self::VocabularyBiasing
@@ -389,6 +405,7 @@ impl Feature {
             Self::MeetingNotesVocabulary => "meeting-notes-vocabulary",
             Self::NotchIndicator => "notch-indicator",
             Self::MeetingFinishedEvent => "meeting-finished-event",
+            Self::AnnotateReplay => "annotate-replay",
         }
     }
 
@@ -439,6 +456,7 @@ impl Feature {
             Self::MeetingNotesVocabulary => "labs.meeting_notes_vocabulary",
             Self::NotchIndicator => "labs.notch_indicator",
             Self::MeetingFinishedEvent => "labs.meeting_finished_event",
+            Self::AnnotateReplay => "labs.annotate_replay",
         }
     }
 
@@ -559,6 +577,9 @@ impl Feature {
             Self::MeetingFinishedEvent => {
                 "Tell apps on this computer when a meeting's transcript is ready, through the local API's GET /meetings/events (the meeting's id only)"
             }
+            Self::AnnotateReplay => {
+                "Keep a rolling 15-second screen buffer so hex capture replay or capture.replay_hotkey saves what just happened (macOS 27+)"
+            }
         }
     }
 
@@ -613,6 +634,7 @@ impl Feature {
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
+            Self::AnnotateReplay => settings.labs.annotate_replay,
         }
     }
 
@@ -665,6 +687,7 @@ impl Feature {
             &mut labs.meeting_notes_vocabulary,
             &mut labs.notch_indicator,
             &mut labs.meeting_finished_event,
+            &mut labs.annotate_replay,
         ]
     }
 
@@ -717,6 +740,7 @@ impl Feature {
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
+            Self::AnnotateReplay => settings.labs.annotate_replay = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -760,6 +784,7 @@ const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
 const NOTCH_INDICATOR: u64 = 1 << 27;
 const MEETING_FINISHED_EVENT: u64 = 1 << 28;
+const ANNOTATE_REPLAY: u64 = 1 << 29;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -959,6 +984,14 @@ pub fn meeting_finished_event() -> bool {
     on(MEETING_FINISHED_EVENT) && Feature::MeetingFinishedEvent.on_this_os()
 }
 
+/// Annotate's rolling 15 s display replay buffer (`SCClipBufferingOutput`,
+/// macOS 27+; read where the replay worker starts and on each `hex capture
+/// replay`).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn annotate_replay() -> bool {
+    on(ANNOTATE_REPLAY) && Feature::AnnotateReplay.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -1083,6 +1116,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MeetingFinishedEvent,
             settings.meeting_finished_event,
             MEETING_FINISHED_EVENT,
+        ),
+        (
+            Feature::AnnotateReplay,
+            settings.annotate_replay,
+            ANNOTATE_REPLAY,
         ),
     ]
     .into_iter()
@@ -1553,6 +1591,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & MEETING_FINISHED_EVENT, 0);
         assert_eq!(state & NOTCH_INDICATOR, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn annotate_replay_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & ANNOTATE_REPLAY, 0);
+        labs.annotate_replay = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & ANNOTATE_REPLAY, 0);
+        assert_eq!(state & MEETING_FINISHED_EVENT, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

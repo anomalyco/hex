@@ -7,8 +7,8 @@ use rune::{El, row};
 use scrawl_capture::retention::{Policy, Preset};
 
 use super::controls::{
-    ButtonKind, Choice, Paint, button, card, described_row, folding, note, page, section,
-    segmented, select, setting_row, toggle_row,
+    ButtonKind, Choice, Paint, button, card, described_row, folding, icon_button, note, page,
+    section, segmented, select, setting_row, toggle_row,
 };
 use super::general::keys_button;
 use super::lists::permission_control;
@@ -213,6 +213,37 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
         Some((purpose.to_string(), p.muted())),
         keys_button(ui, p, ShortcutTarget::Capture),
     )];
+    #[cfg(target_os = "macos")]
+    if crate::labs::Feature::AnnotateReplay.on_this_os()
+        && crate::labs::Feature::AnnotateReplay.on(&ui.settings)
+    {
+        let mut control = row()
+            .key("capture-replay-shortcut-control")
+            .gap(4.0)
+            .center_y()
+            .child(keys_button(ui, p, ShortcutTarget::CaptureReplay));
+        if ui.settings.capture.replay_hotkey.is_some() {
+            control = control.child(icon_button(
+                p,
+                "clear-capture-replay-shortcut",
+                &rune_theme_opencode::icons::TRASH,
+                tr("Clear shortcut"),
+                |ui: &mut Ui| {
+                    ui.update(|settings| settings.capture.replay_hotkey = None);
+                },
+            ));
+        }
+        rows.push(described_row(
+            p,
+            "capture-replay-shortcut",
+            tr("Replay last 15 s"),
+            Some((
+                tr("Press to save the last 15 s; hold to narrate over it").to_string(),
+                p.muted(),
+            )),
+            control,
+        ));
+    }
     // Linux asks through the desktop's screen-cast portal when a capture
     // starts, and Wayland can't keep an overlay out of a recording.
     if enabled && cfg!(target_os = "macos") && view.screen_needs_restart {
