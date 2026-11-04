@@ -2202,12 +2202,10 @@ fn fun_driver_installed(rt: &rune::Runtime<Ui>) -> bool {
 }
 
 /// A pane longer than the window shows a scroll bar to drag, for a pointer
-/// without a wheel (#1209). It follows the system preference: shown at rest
-/// under Always, overlaid only while scrolling otherwise.
+/// without a wheel (#1209).
 #[test]
 fn a_long_transcript_scrolls_by_dragging_its_scroll_bar() {
     let mut rt = runtime("meetings", true, PANE_SIZE);
-    rt.set_system_scroll_bars(rune::ScrollBars::Always);
     settle(&mut rt);
     let at = |rt: &Runtime<Ui>, path: &str| {
         rt.elements()
