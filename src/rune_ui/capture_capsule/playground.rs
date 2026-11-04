@@ -72,7 +72,12 @@ pub(crate) struct Playground {
 
 /// Opens the playground and runs it until its window closes.
 pub(crate) fn run(rune_args: Vec<String>) {
-    let _ = crate::feedback::preload();
+    // A headless still or clip is silent.
+    if rune::tooling::Args::parse_from(rune_args.clone()).headless() {
+        crate::feedback::set_enabled(false);
+    } else {
+        let _ = crate::feedback::preload();
+    }
     crate::feedback::set_volume(0.5);
     let spec = rune::AppSpec {
         title: "Hex capsule playground",
@@ -167,7 +172,96 @@ const SCENES: &[Scene] = &[
     }),
     // Allow walks it to granted, as System Settings would.
     ("permission", |s| scene(s, &[needs_screen()])),
+    // Timed stories for review clips (`-- --video … --scene clip-…`).
+    ("clip-rule", |s| {
+        clip(s, &[(2.5, routed(rule())), (5.5, Step::Input(Input::Settled))])
+    }),
+    ("clip-pick", |s| {
+        clip(s, &[(2.5, routed(guess())), (3.6, Step::Input(Input::SendRow(0)))])
+    }),
+    ("clip-saved", |s| clip(s, &[(5.0, routed(guess()))])),
+    ("clip-words", |s| {
+        clip(
+            s,
+            &[
+                (
+                    2.5,
+                    Step::Input(Input::Failed(
+                        Failure::Send("SEER".into()),
+                        Some(
+                            "OpenCode said: Unable to read attachment \
+                             file:///Users/alex/captures/2026-11-04/sheet.png"
+                                .into(),
+                        ),
+                    )),
+                ),
+                (5.0, Step::Input(Input::Dismiss)),
+                (5.4, record()),
+                (6.0, Step::Input(stop())),
+                (6.6, done()),
+                (7.0, routed(Route::NoAnswer { recent: recent() })),
+                (9.5, Step::Input(Input::Dismiss)),
+                (9.9, record()),
+                (10.5, Step::Input(stop())),
+                (11.1, done()),
+                (11.5, routed(guess())),
+                (12.0, Step::Input(Input::Shift(true))),
+                (12.4, Step::Input(Input::SendRow(0))),
+                (12.5, Step::Input(Input::Shift(false))),
+                (14.0, Step::Click(Id::Undo)),
+                (14.1, Step::Input(Input::Undone(Undone::TooLate))),
+            ],
+        )
+    }),
+    ("clip-search", |s| {
+        clip(
+            s,
+            &[
+                (2.5, routed(guess())),
+                (3.4, Step::Input(Input::OpenList)),
+                (4.2, Step::Input(Input::Type("x".into()))),
+                (4.5, Step::Input(Input::Type("y".into()))),
+                (4.8, Step::Input(Input::Type("z".into()))),
+                (6.0, Step::Input(Input::Send { always: false })),
+            ],
+        )
+    }),
+    ("clip-undo-lone", |s| {
+        clip(
+            s,
+            &[
+                (2.5, routed(lone_rule())),
+                (5.5, Step::Input(Input::Settled)),
+                (6.2, Step::Click(Id::Undo)),
+                (9.0, Step::Input(Input::SendRow(0))),
+            ],
+        )
+    }),
 ];
+
+/// A capture recorded and written, then `steps` at their times.
+fn clip(s: &mut CapsuleState, steps: &[(f64, Step)]) {
+    if let Some(pg) = s.playground.as_mut() {
+        pg.queue = [
+            (0.3, record()),
+            (1.3, Step::Input(stop())),
+            (2.1, done()),
+        ]
+        .into_iter()
+        .chain(steps.iter().cloned())
+        .collect();
+    }
+}
+
+/// A saved rule with no other session to offer.
+fn lone_rule() -> Route {
+    Route::Rule {
+        to: Dest::new("SEER", "rule: docs.example.com"),
+        suggested: Vec::new(),
+        recent: Vec::new(),
+        site: Some("docs.example.com".into()),
+    }
+}
 
 /// A capture refused for Screen Recording: the permission helper.
 fn needs_screen() -> Step {
