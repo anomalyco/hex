@@ -4,7 +4,7 @@
 // drives it through its local API as `hex dictation` does: `start` as the
 // sentence begins, then `stop --print` in the silence after it, which
 // returns the processed text instead of pasting it. Nothing reaches another
-// app. Only bench builds that have HEX_AUDIO_FIXTURE (#<fixture PR>): an
+// app. Only bench builds that have HEX_AUDIO_FIXTURE (#1230): an
 // older one opens the real microphone, which setup notices too late.
 // - `warm`: the microphone open while idle, the default (`hex-dictation`).
 // - `released`: Release microphone while idle (`hex-dictation-released`).
