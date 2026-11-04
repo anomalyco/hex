@@ -4,7 +4,8 @@
 //! interactive Rune overlay, which on macOS is a non-activating `NSPanel`:
 //! its buttons take clicks while the call app keeps focus and Hex never
 //! activates. An offer that times out only closes; nothing starts or stops
-//! on a timeout.
+//! on a timeout, and the call is offered again once its app releases and
+//! retakes the microphone.
 //!
 //! `macos_rune` and `meeting_runtime` forward controller events; buttons
 //! send `ControllerCommand`s back to the controller.
@@ -614,6 +615,11 @@ impl MeetingCapsules {
                                 title = %candidate.title,
                                 "meeting recording offer timed out"
                             );
+                            // Unanswered: offered again when the call app
+                            // retakes the microphone (#1267).
+                            if candidate.key != "preview" {
+                                capsule.send(ControllerCommand::OfferTimedOut);
+                            }
                         }
                         capsule.close();
                     });

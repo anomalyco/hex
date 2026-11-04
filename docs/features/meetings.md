@@ -170,6 +170,11 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / browser call uses the microp
          │   │   └── not offered for a browser on an unknown page
          │   └── Cancel
          └── 20 s timeout -> Close                     // never records on timeout
+             └── unanswered -> the snooze ends the moment the call app leaves
+                 the microphone, so a call joined after its pre-join screen is
+                 offered again when it retakes it (#1267; check
+                 `a_timed_out_offer_is_offered_again_when_the_call_retakes_the_microphone`;
+                 not observed on a real Meet call)
   -> Same call is snoozed by key and app until off the microphone for 60 s,
      offered or recorded; stopping an automatic recording does not restart it
      └── Absence counts from the last time the call app was on the microphone,

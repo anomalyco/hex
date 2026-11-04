@@ -24,6 +24,9 @@ use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_
 pub(crate) enum ControllerCommand {
     Record(MeetingCandidate),
     Dismiss,
+    /// The offer's capsule closed on its timeout, unanswered: the call is
+    /// offered again once its app releases and retakes the microphone.
+    OfferTimedOut,
     Stop,
     Open(String),
     Summarize(String),
@@ -387,6 +390,7 @@ fn handle_command(
             let _ = events.send(ControllerEvent::OpenMeeting(id));
         }
         ControllerCommand::Summarize(id) => start_notes(id, events),
+        ControllerCommand::OfferTimedOut => detector.offer_timed_out(),
         ControllerCommand::Dismiss | ControllerCommand::Record(_) => {}
     }
 }
