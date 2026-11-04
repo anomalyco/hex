@@ -18,7 +18,7 @@ use rune_kit::{Button, ButtonVariant, ControlSize, SegmentedControl, Switch};
 
 use super::flow::{Action, Cue, Delivered, Dest, Failure, Grant, Input, Route, Undone};
 use super::surface::{Id, PANEL_H, PANEL_W};
-use super::tuning::{self, CapsuleFlow, ListFooter, TopLine, Tuning, flow_label};
+use super::tuning::{self, CapsuleFlow, ListFooter, TopLine, Tuning, UndoRing, flow_label};
 use super::{CapsuleState, Mode, capsule, tone};
 use crate::capture_host::CaptureNeed;
 use crate::rune_ui::controls::{DESCRIPTION, Paint};
@@ -174,10 +174,36 @@ const SCENES: &[Scene] = &[
     ("permission", |s| scene(s, &[needs_screen()])),
     // Timed stories for review clips (`-- --video … --scene clip-…`).
     ("clip-rule", |s| {
-        clip(s, &[(2.5, routed(rule())), (5.5, Step::Input(Input::Settled))])
+        clip(
+            s,
+            &[(2.5, routed(rule())), (5.5, Step::Input(Input::Settled))],
+        )
     }),
     ("clip-pick", |s| {
-        clip(s, &[(2.5, routed(guess())), (3.6, Step::Input(Input::SendRow(0)))])
+        clip(
+            s,
+            &[
+                (2.5, routed(guess())),
+                (3.6, Step::Input(Input::SendRow(0))),
+            ],
+        )
+    }),
+    ("clip-rule-dial", |s| {
+        dial(s);
+        clip(
+            s,
+            &[(2.5, routed(rule())), (5.5, Step::Input(Input::Settled))],
+        )
+    }),
+    ("clip-pick-dial", |s| {
+        dial(s);
+        clip(
+            s,
+            &[
+                (2.5, routed(guess())),
+                (3.6, Step::Input(Input::SendRow(0))),
+            ],
+        )
     }),
     ("clip-saved", |s| clip(s, &[(5.0, routed(guess()))])),
     ("clip-words", |s| {
@@ -239,17 +265,22 @@ const SCENES: &[Scene] = &[
     }),
 ];
 
+/// The Undo chip's countdown as a dial.
+fn dial(s: &mut CapsuleState) {
+    if let Some(pg) = s.playground.as_mut() {
+        let mut tuning = pg.tuning;
+        tuning.undo_ring = UndoRing::Dial;
+        pg.set_tuning(tuning);
+    }
+}
+
 /// A capture recorded and written, then `steps` at their times.
 fn clip(s: &mut CapsuleState, steps: &[(f64, Step)]) {
     if let Some(pg) = s.playground.as_mut() {
-        pg.queue = [
-            (0.3, record()),
-            (1.3, Step::Input(stop())),
-            (2.1, done()),
-        ]
-        .into_iter()
-        .chain(steps.iter().cloned())
-        .collect();
+        pg.queue = [(0.3, record()), (1.3, Step::Input(stop())), (2.1, done())]
+            .into_iter()
+            .chain(steps.iter().cloned())
+            .collect();
     }
 }
 
@@ -958,6 +989,21 @@ fn tuning(p: Paint, pg: &Playground, w: f32, standalone: bool) -> El {
             .build(p.k)
             .key("list-footer"),
     );
+    let rings: Vec<&str> = UndoRing::ALL.iter().map(|m| m.label()).collect();
+    let picked = UndoRing::ALL.iter().position(|m| *m == t.undo_ring);
+    let undo_ring = card("undo-ring-card").child(
+        SegmentedControl::new(&rings, picked)
+            .width(Some(w))
+            .on_pick(|s: &mut CapsuleState, i: usize, _: &mut Tx| {
+                if let Some(pg) = s.playground.as_mut() {
+                    let mut tuning = pg.tuning;
+                    tuning.undo_ring = UndoRing::ALL[i];
+                    pg.set_tuning(tuning);
+                }
+            })
+            .build(p.k)
+            .key("undo-ring"),
+    );
     // Everything changes together: the walls move while the content blurs,
     // scales and fades over them.
     let transition = card("transition-card")
@@ -1110,6 +1156,7 @@ fn tuning(p: Paint, pg: &Playground, w: f32, standalone: bool) -> El {
         .child(section(p, "flow", "Flow after a capture", flow))
         .child(section(p, "top-line", "Top line", top_line))
         .child(section(p, "list-footer", "List footer", list_footer))
+        .child(section(p, "undo-ring", "Undo countdown", undo_ring))
         .child(section(p, "transition", "Transition", transition))
         .child(section(p, "timing", "Timing", timing))
         .child(section(p, "sound", "Sound", sound))

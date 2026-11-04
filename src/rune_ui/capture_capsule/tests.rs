@@ -362,8 +362,9 @@ fn every_state_draws_its_pieces() {
         ("processing", &["processing"]),
         ("saved", &["done", "paste", "inspect", "close"]),
         ("failed", &["done", "close"]),
-        ("rule-sent", &["done", "why", "undo", "close"]),
-        ("rule-final", &["done", "why", "paste", "inspect", "close"]),
+        // A rule's send counts down on the Undo chip, with no words.
+        ("rule-sent", &["done", "undo", "close"]),
+        ("rule-final", &["done", "paste", "inspect", "close"]),
         ("guess", &["done", "ask", "list", "row-SEER", "remembers"]),
         ("guess-five", &["done", "ask", "list", "row-SEER"]),
         ("no-answer", &["done", "why", "ask", "list"]),
@@ -389,7 +390,7 @@ fn every_state_draws_its_pieces() {
         ("list-guess", &["paste", "inspect"]),
         // Trimmed to Search and ✕: the capture is already copied.
         ("guess", &["field", "paste", "inspect", "footer"]),
-        ("rule-sent", &["paste", "ask", "inspect"]),
+        ("rule-sent", &["why", "paste", "ask", "inspect"]),
         ("rule-final", &["ask"]),
         ("sent", &["paste", "inspect"]),
     ];

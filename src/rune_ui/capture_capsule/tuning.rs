@@ -78,6 +78,33 @@ impl ListFooter {
     }
 }
 
+/// How the Undo chip counts its window down, while Kit picks one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UndoRing {
+    /// The chip's own outline drains clockwise from the top.
+    Border,
+    /// A small dial before "Undo" drains clockwise from twelve.
+    Dial,
+}
+
+impl UndoRing {
+    pub(crate) const ALL: [UndoRing; 2] = [UndoRing::Border, UndoRing::Dial];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            UndoRing::Border => "A · Border",
+            UndoRing::Dial => "B · Dial",
+        }
+    }
+
+    fn rust(self) -> &'static str {
+        match self {
+            UndoRing::Border => "UndoRing::Border",
+            UndoRing::Dial => "UndoRing::Dial",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Tuning {
     /// The Undo window: a send, a rule's or a pick's, can be taken back
@@ -109,6 +136,7 @@ pub(crate) struct Tuning {
     pub(crate) content_scale: f32,
     pub(crate) top_line: TopLine,
     pub(crate) list_footer: ListFooter,
+    pub(crate) undo_ring: UndoRing,
     /// The flow after a capture stops: `capture.capsule_flow` in the app,
     /// the playground's switch there.
     pub(crate) flow: CapsuleFlow,
@@ -128,6 +156,7 @@ pub(crate) const DEFAULT: Tuning = Tuning {
     content_scale: 0.92,
     top_line: TopLine::Quiet,
     list_footer: ListFooter::Band,
+    undo_ring: UndoRing::Border,
     flow: CapsuleFlow::List,
 };
 
@@ -185,6 +214,7 @@ impl Tuning {
              \x20   content_scale: {:.3},\n\
              \x20   top_line: {},\n\
              \x20   list_footer: {},\n\
+             \x20   undo_ring: {},\n\
              \x20   flow: CapsuleFlow::{:?},\n\
              }};\n",
             self.undo_s,
@@ -200,6 +230,7 @@ impl Tuning {
             self.content_scale,
             self.top_line.rust(),
             self.list_footer.rust(),
+            self.undo_ring.rust(),
             self.flow,
         )
     }
@@ -219,6 +250,7 @@ mod tests {
             "content_scale: 0.920",
             "top_line: TopLine::Quiet",
             "list_footer: ListFooter::Band",
+            "undo_ring: UndoRing::Border",
             "flow: CapsuleFlow::List",
         ] {
             assert!(rust.contains(field), "{field} missing from\n{rust}");

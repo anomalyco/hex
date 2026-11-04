@@ -144,7 +144,9 @@ pub(crate) fn done_style() -> TextStyle {
 
 /// [`TopLine::Icons`] says nothing for a plain copy: the check is enough.
 pub(crate) fn bare(done: &Done) -> bool {
-    tuning::get().top_line == TopLine::Icons && done.text.is_empty() && done.why.is_none()
+    tuning::get().top_line == TopLine::Icons
+        && (done.text.is_empty() || done.text == super::flow::COPIED)
+        && done.why.is_none()
 }
 
 /// The capsule unfolds from this fraction of its height, anchored on its
@@ -467,7 +469,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Undo,
             String::new(),
-            keyed_width(&[], UNDO_LABEL, MEDIUM),
+            super::undo_ring::chip_width(done.countdown.is_some()),
             false,
         ));
     } else {

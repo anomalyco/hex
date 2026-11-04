@@ -68,11 +68,6 @@ pub(super) fn refine(mut routed: Routed, route: Route, _now: f64, suggest: bool)
     routed
 }
 
-pub(super) fn countdown(routed: &Routed, now: f64) -> Option<String> {
-    let left = 3.0 - (now - routed.at);
-    (!routed.delivered && left > 0.0).then(|| format!("{} s", left.ceil() as u32))
-}
-
 pub(super) fn sections(route: &Route) -> (&[Dest], &[Dest]) {
     match route {
         Route::Rule {
@@ -156,7 +151,7 @@ mod tests {
         let Pres::Done(done) = flow.pres(2.0) else {
             panic!("missing capsule");
         };
-        assert_eq!(done.why.as_deref(), Some("1 s"));
+        assert_eq!(done.countdown, Some(undo_s()));
         let mut unresolved = Flow::new();
         unresolved.input(
             Input::Routed(Route::ResolvingRule {

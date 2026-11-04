@@ -10,7 +10,10 @@ use crate::capture_host::CaptureNeed;
 
 use super::tuning::{self, CapsuleFlow};
 mod routes;
+mod words;
 use routes::{sections, sent_to, short};
+pub(crate) use words::COPIED;
+use words::{NOT_RUNNING, already_sent_to, plain_reason};
 
 /// A send, a rule's or a pick's, can be taken back with the Undo button for this
 /// long (Scrawl's `SMART_SEND_UNDO`).
@@ -377,8 +380,11 @@ pub(crate) struct Done {
     pub(crate) lead: Lead,
     pub(crate) text: String,
     pub(crate) why: Option<String>,
-    /// It can still be taken back: the Undo chip shows, with no countdown.
+    /// It can still be taken back: the Undo chip shows.
     pub(crate) undo: bool,
+    /// When Undo goes, on the flow's clock: the chip's ring drains to it.
+    /// `None` while Undo waits on the router with no window to count.
+    pub(crate) countdown: Option<f64>,
     /// The Send to… chip's label.
     pub(crate) ask: Option<String>,
     /// The capture shortcut opens the search from here: its keycaps sit
@@ -408,6 +414,7 @@ impl Done {
             text: text.into(),
             why: None,
             undo: false,
+            countdown: None,
             ask: None,
             ask_keys: false,
             open: None,
@@ -956,7 +963,7 @@ impl Flow {
                     Failure::Save if switching => Failure::Start,
                     what => what,
                 },
-                why: why.as_deref().map(short_reason),
+                why: why.as_deref().and_then(plain_reason),
             },
             (Phase::Recording { discard_until, .. }, Input::Chips) => Phase::Recording {
                 chips_until: Some(now + tuning::get().chips_open_s),
@@ -1224,7 +1231,7 @@ impl Flow {
                     {
                         for dest in suggested.iter_mut().chain(recent.iter_mut()) {
                             if dest.session == from.session {
-                                dest.why = "has it".into();
+                                dest.why = "already sent".into();
                             }
                         }
                     }
@@ -1266,6 +1273,7 @@ impl Flow {
                             to: from.name,
                             at: now,
                         },
+                        (false, Some(from)) => Phase::Routed(lone_back(&from, now)),
                         _ => Phase::TakenBack { at: now },
                     },
                     Phase::Routed,
@@ -1475,7 +1483,7 @@ impl Flow {
                         };
                     }
                 }
-                due || matches!(&self.phase, Phase::Routed(r) if !r.delivered && matches!(r.route, Route::Rule { .. } | Route::ResolvingRule { .. }) && now - r.at <= 3.0)
+                due
             }
         }
     }
@@ -1488,19 +1496,13 @@ impl Flow {
 
     /// When `tick` next has something to do.
     pub(crate) fn next_due(&self, now: f64) -> Option<f64> {
-        // The Undo chip leaves when the window ends; it counts nothing down.
+        // The Undo chip leaves when the window ends; its ring drains
+        // without a tick.
         let undo_at = |at: f64| {
             let end = at + undo_s();
             (end > now).then_some(end)
         };
         let due = match &self.phase {
-            Phase::Routed(r)
-                if !r.delivered
-                    && matches!(r.route, Route::Rule { .. } | Route::ResolvingRule { .. })
-                    && now - r.at < 3.0 =>
-            {
-                Some(r.at + (now - r.at).floor() + 1.0)
-            }
             Phase::Recording {
                 chips_until,
                 discard_until,
@@ -1529,7 +1531,7 @@ impl Flow {
         // Scrawl's "No speech": a capture with no words still copies.
         if let Pres::Done(done) = &mut pres
             && self.silent
-            && done.text.is_empty()
+            && (done.text.is_empty() || done.text == COPIED)
             && done.why.is_none()
         {
             done.why = Some("no speech".into());
@@ -1561,7 +1563,7 @@ impl Flow {
             Phase::Processing => Pres::Processing,
             Phase::Saved { .. } => Pres::Done(Done {
                 hand_off: true,
-                ..Done::plain(Lead::Check, "")
+                ..Done::plain(Lead::Check, COPIED)
             }),
             Phase::Failed { what, why, .. } => Pres::Done(Done {
                 why: why.clone(),
@@ -1578,20 +1580,20 @@ impl Flow {
             Phase::TakenBack { .. } => Pres::Done(Done::plain(Lead::Check, "Taken back")),
             Phase::Kept { .. } => Pres::Done(Done::plain(Lead::Check, "Kept")),
             Phase::TooLate { to, .. } => Pres::Done(Done {
-                why: Some("too late".into()),
                 hand_off: true,
-                ..Done::plain(Lead::Check, sent_to(to))
+                ..Done::plain(Lead::Check, already_sent_to(to))
             }),
             Phase::Queued { why, .. } => Pres::Done(Done {
                 why: Some(why.clone()),
                 hand_off: true,
                 ..Done::plain(Lead::Check, "")
             }),
-            // A pick went at once: the check, and a plain Undo (no ring,
-            // no drain) while it can still be taken back.
+            // A pick went at once: the check, and Undo with its ring while
+            // it can still be taken back.
             Phase::Sent(sent) => Pres::Done(Done {
-                why: sent.rule_saved.then(|| "saved rule".into()),
+                why: sent.rule_saved.then(|| "always".into()),
                 undo: sent.undoable && undo_left(sent.at),
+                countdown: (sent.undoable && undo_left(sent.at)).then(|| sent.at + undo_s()),
                 hand_off: true,
                 ..Done::plain(Lead::Check, sent_to(&sent.to))
             }),
@@ -1861,7 +1863,12 @@ fn offered_again(route: Route, from: &Dest, too_late: bool, now: f64) -> Option<
             &mut recent
         };
         rows.push(Dest {
-            why: if too_late { "has it" } else { "taken back" }.into(),
+            why: if too_late {
+                "already sent"
+            } else {
+                "taken back"
+            }
+            .into(),
             ..dest
         });
     }
@@ -1884,33 +1891,53 @@ fn offered_again(route: Route, from: &Dest, too_late: bool, now: f64) -> Option<
 }
 
 /// What the capsule shows the moment an Undo of the send to `from` is
-/// asked for: the list again (or "Taken back" with nothing to list), never
-/// gone, whatever the router answers.
+/// asked for: the list again, never gone, whatever the router answers.
 fn taking_back(route: Option<Route>, from: &Dest, now: f64) -> Phase {
-    route
-        .and_then(|route| offered_again(route, from, false, now))
-        .map_or(Phase::TakenBack { at: now }, Phase::Routed)
+    Phase::Routed(
+        route
+            .and_then(|route| offered_again(route, from, false, now))
+            .unwrap_or_else(|| lone_back(from, now)),
+    )
+}
+
+/// Taken back with no other session to offer: the list still comes back,
+/// with `from` alone, so Search can still send it somewhere.
+fn lone_back(from: &Dest, now: f64) -> Routed {
+    Routed {
+        route: Route::Nothing {
+            recent: vec![Dest {
+                why: "taken back".into(),
+                ..from.clone()
+            }],
+        },
+        at: now,
+        open: Some(Open::suggesting()),
+        taken_back: true,
+        already_with: None,
+        taken_from: Some(from.clone()),
+        delivered: false,
+    }
 }
 
 fn routed_done(routed: &Routed, now: f64) -> Done {
     let undo = now - routed.at < undo_s();
+    let countdown = undo.then(|| routed.at + undo_s());
     let base = match &routed.route {
         // Sent nowhere, it waits for a pick: a click on Send to… reopens the list.
         _ if routed.taken_back => Done {
             // Too late, it's where it went: nothing to offer.
             ask: routed.already_with.is_none().then(|| "Send to…".into()),
-            why: routed.already_with.as_ref().map(|_| "too late".into()),
             ..Done::plain(
                 Lead::Check,
                 match &routed.already_with {
-                    Some(to) => sent_to(to),
+                    Some(to) => already_sent_to(to),
                     None => "Taken back".into(),
                 },
             )
         },
         Route::Rule { to, .. } => Done {
-            why: routes::countdown(routed, now).or_else(|| Some("rule".into())),
             undo: undo || !routed.delivered,
+            countdown,
             ..Done::plain(
                 Lead::Check,
                 if routed.delivered {
@@ -1921,8 +1948,8 @@ fn routed_done(routed: &Routed, now: f64) -> Done {
             )
         },
         Route::ResolvingRule { name } => Done {
-            why: routes::countdown(routed, now),
             undo: true,
+            countdown,
             ..Done::plain(Lead::Check, format!("Sending to {}", short(name)))
         },
         // The suggestions are the ask (closed, Send to… opens them).
@@ -1935,14 +1962,17 @@ fn routed_done(routed: &Routed, now: f64) -> Done {
             ..Done::plain(Lead::Check, "")
         },
         Route::NoAnswer { .. } => Done {
-            why: Some("no answer".into()),
+            why: Some("no suggestions".into()),
             ask: Some("Send to…".into()),
-            ..Done::plain(Lead::Check, "")
+            ..Done::plain(Lead::Check, COPIED)
         },
         // Still copied, so Paste and Inspect stay; there's nothing to list.
-        Route::Unreachable { why } => Done {
-            why: Some(short_reason(why)),
-            ..Done::plain(Lead::Warning, "Couldn't reach OpenCode")
+        Route::Unreachable { why } => match plain_reason(why) {
+            Some(why) if why == NOT_RUNNING => Done::plain(Lead::Warning, NOT_RUNNING),
+            why => Done {
+                why,
+                ..Done::plain(Lead::Warning, "Couldn't reach OpenCode")
+            },
         },
     };
     match &routed.open {
@@ -1953,6 +1983,7 @@ fn routed_done(routed: &Routed, now: f64) -> Done {
         Some(open) => Done {
             why: None,
             undo: false,
+            countdown: None,
             ask: None,
             open: Some((open.query.clone(), list(&routed.route, open))),
             ..base
@@ -1976,7 +2007,7 @@ fn offered(base: Done, list: List) -> Done {
         // sends, and the capture is already on the clipboard to paste.
         CapsuleFlow::List => Done {
             text: if base.text.is_empty() {
-                "Copied".into()
+                COPIED.into()
             } else {
                 base.text.clone()
             },
@@ -2016,19 +2047,6 @@ fn offered(base: Done, list: List) -> Done {
             ..base
         },
     }
-}
-
-/// A host error (`{error:#}`, outer context first) as the capsule's reason:
-/// the root cause on its first line, kept to what fits beside the message.
-fn short_reason(error: &str) -> String {
-    const MAX: usize = 32;
-    let line = error.lines().next().unwrap_or_default().trim();
-    let cause = line.rsplit(": ").next().unwrap_or(line).trim();
-    if cause.chars().count() <= MAX {
-        return cause.to_owned();
-    }
-    let cut: String = cause.chars().take(MAX - 1).collect();
-    format!("{}…", cut.trim_end())
 }
 
 #[cfg(test)]
@@ -2255,7 +2273,7 @@ mod tests {
             assert_eq!(flow.pres(6.0), Pres::Processing);
         }
         flow.input(Input::Stage(Stage::Done), 7.0);
-        assert_eq!(done(&flow, 7.0).text, "");
+        assert_eq!(done(&flow, 7.0).text, COPIED);
         assert!(flow.tick(7.0 + tuning::get().done_hold_s));
         assert_eq!(flow.pres(40.0), Pres::Hidden);
     }
@@ -2365,9 +2383,12 @@ mod tests {
         assert_eq!(done(&flow, 10.0).lead, Lead::Check);
         assert_eq!(done(&flow, 10.0).ask, None, "Undo, as a pick has");
         assert_eq!(done(&flow, 15.0).ask, None, "nothing after the window");
-        assert_eq!(done(&flow, 10.0).why.as_deref(), Some("3 s"));
-        assert_eq!(done(&flow, 11.0).why.as_deref(), Some("2 s"));
-        assert_eq!(done(&flow, 12.0).why.as_deref(), Some("1 s"));
+        // No words count it down: the Undo chip's ring drains to the
+        // window's end, the same moment whenever it is asked.
+        assert_eq!(done(&flow, 10.0).why, None);
+        for t in [10.0, 11.0, 12.0] {
+            assert_eq!(done(&flow, t).countdown, Some(10.0 + undo_s()));
+        }
         let actions = flow.input(Input::Undo, 11.0);
         assert_eq!(actions, vec![Action::Undo { to: "SEER".into() }]);
         flow.input(Input::Undone(Undone::TakenBack), 11.4);
@@ -2534,8 +2555,8 @@ mod tests {
             assert_eq!(done(&flow, 1_000.0).text, "Sent to HOME", "{how}");
         }
 
-        // Even with nothing else to offer, it stays until dismissed, and
-        // dismissing says where the bundle is.
+        // Even with nothing else to offer, the list comes back with the
+        // session it was taken from, so Search can still send it.
         let mut flow = Flow::new();
         let lone = Route::Rule {
             to: Dest::new("SEER", "rule"),
@@ -2546,14 +2567,10 @@ mod tests {
         flow.input(Input::Routed(lone), 0.0);
         flow.input(Input::Undo, 1.0);
         flow.input(Input::Undone(Undone::TakenBack), 1.2);
-        assert_eq!(done(&flow, 1.2).text, "Taken back");
-        // Nothing to list: no keys are Hex's, and it leaves by itself.
-        assert_eq!(flow.keys(), None);
-        let brief = tuning::get().brief_hold_s;
-        assert!(!flow.tick(1.0 + brief - 0.1));
-        flow.input(Input::Dismiss, 3.0);
-        let kept = done(&flow, 3.0);
-        assert_eq!((kept.text.as_str(), kept.why.as_deref()), ("Kept", None));
+        assert_eq!(rows(&flow, 1.2), ["SEER"]);
+        assert!(done(&flow, 1.2).open.is_some());
+        assert!(flow.keys().is_some());
+        assert!(!flow.tick(1_000.0), "it waits for a pick");
     }
 
     #[test]
@@ -2643,11 +2660,11 @@ mod tests {
         flow.input(Input::Undo, 1.0);
         flow.input(Input::Undone(Undone::TooLate), 1.2);
         let shown = done(&flow, 1.2);
-        assert_eq!(shown.text, "Sent to SEER");
-        assert_eq!(shown.why.as_deref(), Some("too late"));
+        assert_eq!(shown.text, "Already sent to SEER");
+        assert_eq!(shown.why, None);
         assert_eq!(rows(&flow, 1.2), ["HEX", "HOME", "SEER"]);
         let (_, list) = shown.open.unwrap();
-        assert_eq!(list.rows[2].why, "has it");
+        assert_eq!(list.rows[2].why, "already sent");
         assert!(!flow.tick(1_000.0), "it waits for a pick");
         // Pick 2: a copy goes to #2.
         assert_eq!(
@@ -2666,8 +2683,8 @@ mod tests {
         flow.input(Input::Undone(Undone::TooLate), 1.2);
         flow.input(Input::ClickAway, 2.0);
         let folded = done(&flow, 2.0);
-        assert_eq!(folded.text, "Sent to SEER");
-        assert_eq!(folded.why.as_deref(), Some("too late"));
+        assert_eq!(folded.text, "Already sent to SEER");
+        assert_eq!(folded.why, None);
         assert_eq!(folded.ask, None, "it is where it went");
         flow.input(Input::Dismiss, 3.0);
         assert_eq!(flow.pres(3.0), Pres::Hidden);
@@ -2813,19 +2830,21 @@ mod tests {
         assert!(flow.take_cues().is_empty(), "once");
     }
 
-    /// Rule countdowns wake each second; a picked send keeps its plain Undo.
+    /// An Undo window never wakes the capsule to count: its ring drains on
+    /// its own, so the capsule changes only when the window ends.
     #[test]
-    fn the_rule_countdown_wakes_each_second() {
+    fn an_undo_window_wakes_only_when_it_ends() {
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 10.0);
-        assert_ne!(flow.pres(10.5), flow.pres(10.0 + undo_s() - 0.5));
-        assert_eq!(flow.next_due(10.0), Some(11.0));
-        assert_eq!(flow.next_due(12.0), Some(13.0));
+        flow.input(Input::Settled, 10.2);
+        assert_eq!(flow.pres(10.5), flow.pres(10.0 + undo_s() - 0.5));
+        assert_eq!(flow.next_due(10.5), Some(10.0 + undo_s()));
         assert_ne!(flow.pres(10.0), flow.pres(10.0 + undo_s()));
 
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
         flow.input(Input::SendRow(0), 1.0);
+        assert_eq!(done(&flow, 1.5).countdown, Some(1.0 + undo_s()));
         assert_eq!(flow.pres(1.5), flow.pres(1.0 + undo_s() - 0.5));
         assert_eq!(flow.next_due(1.5), Some(1.0 + undo_s()));
     }
@@ -3262,7 +3281,7 @@ mod tests {
         );
         let sent = done(&flow, 2.0);
         assert_eq!(sent.text, "Sent to HEX");
-        assert_eq!(sent.why.as_deref(), Some("saved rule"));
+        assert_eq!(sent.why.as_deref(), Some("always"));
         assert!(sent.undo);
         assert_eq!(
             flow.click(Id::Undo, 2.5),
@@ -3314,7 +3333,7 @@ mod tests {
             }]
         );
         let shown = done(&flow, 1.0);
-        assert_eq!(shown.why.as_deref(), Some("saved rule"));
+        assert_eq!(shown.why.as_deref(), Some("always"));
     }
 
     #[test]
@@ -3436,7 +3455,7 @@ mod tests {
                 always: Some("problems.kitlangton.com".into())
             }]
         );
-        assert_eq!(done(&flow, 1.0).why.as_deref(), Some("saved rule"));
+        assert_eq!(done(&flow, 1.0).why.as_deref(), Some("always"));
 
         // And in the list an Undo of the rule's send reopens.
         let mut flow = Flow::new();
@@ -3546,7 +3565,7 @@ mod tests {
             0.0,
         );
         let shown = done(&flow, 0.0);
-        assert_eq!(shown.why.as_deref(), Some("no answer"));
+        assert_eq!(shown.why.as_deref(), Some("no suggestions"));
         let (_, list) = shown.open.expect("recent sessions are the suggestions");
         assert_eq!(list.rows().next().unwrap().name, "HOME");
     }
@@ -3563,7 +3582,7 @@ mod tests {
         let shown = done(&flow, 0.0);
         assert_eq!(shown.lead, Lead::Warning);
         assert_eq!(shown.text, "Couldn't reach OpenCode");
-        assert_eq!(shown.why.as_deref(), Some("didn't answer in time"));
+        assert_eq!(shown.why.as_deref(), Some("OpenCode didn't answer"));
         assert_eq!(shown.ask, None);
         assert!(shown.hand_off);
         // Nothing to list, and a stray OpenList opens
@@ -3674,10 +3693,6 @@ mod tests {
         );
         assert_eq!(done(&flow, 12.0).text, "Couldn't send to SEER");
         assert_eq!(done(&flow, 12.0).why.as_deref(), Some("offline"));
-        assert_eq!(
-            short_reason("Screen Recording permission is off for Hex"),
-            "Screen Recording permission is…"
-        );
     }
 
     #[test]
