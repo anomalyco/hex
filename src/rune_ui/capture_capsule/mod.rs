@@ -485,7 +485,8 @@ impl CapsuleState {
             return;
         }
         let now = self.now;
-        self.flow.hover(on, now);
+        let actions = self.flow.hover(on, now);
+        self.dispatch(actions);
         self.present(now);
         self.live.sync(&self.surface);
         tx.wake_after(Duration::ZERO);

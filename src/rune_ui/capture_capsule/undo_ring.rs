@@ -4,7 +4,9 @@
 //! The ring is [`ARCS`] short arcs, each bound to a render-time [`Tween`]
 //! of its opacity: an arc fades out as the hand passes it, so the drain is
 //! smooth with no producer ticking and no view rebuilds. Under Reduce
-//! Motion the arcs go a whole second at a time instead.
+//! Motion the arcs go a whole second at a time instead. While the pointer
+//! holds the countdown the arcs stand still, and a new ring takes over
+//! from what was left once it leaves.
 
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use std::time::Duration;
@@ -29,13 +31,15 @@ const BORDER_STROKE: f32 = 1.5;
 pub(crate) struct Ring {
     /// When the window ends, on the flow's clock.
     end: f64,
+    /// Held by the pointer, with this long left.
+    held: Option<f64>,
     arcs: Vec<Tween<f32>>,
 }
 
 impl Ring {
-    fn new(end: f64, now: f64, reduced: bool) -> Self {
+    fn new(end: f64, held: Option<f64>, now: f64, reduced: bool) -> Self {
         let window = undo_s();
-        let left = (end - now).clamp(0.0, window);
+        let left = held.unwrap_or(end - now).clamp(0.0, window);
         let past = window - left;
         let arcs = (0..ARCS)
             .map(|k| {
@@ -47,28 +51,36 @@ impl Ring {
                 } else {
                     (gone, ARCS as f64 / window)
                 };
-                Tween::linear(
-                    ((gone - past) * rate) as f32,
-                    ((gone - window) * rate) as f32,
-                    Duration::from_secs_f64(left),
-                )
+                let from = ((gone - past) * rate) as f32;
+                if held.is_some() {
+                    Tween::linear(from, from, Duration::from_secs(1))
+                } else {
+                    Tween::linear(
+                        from,
+                        ((gone - window) * rate) as f32,
+                        Duration::from_secs_f64(left),
+                    )
+                }
             })
             .collect();
-        Self { end, arcs }
+        Self { end, held, arcs }
     }
 }
 
 /// Keeps `ring` on the window `pres` counts down: built when one begins,
 /// kept while it runs, dropped when Undo has none.
 pub(crate) fn sync(ring: &mut Option<Ring>, pres: &Pres, now: f64, reduced: bool) {
-    let end = match pres {
-        Pres::Done(done) if done.undo => done.countdown,
-        _ => None,
+    let (end, held) = match pres {
+        Pres::Done(done) if done.undo => (done.countdown, done.held),
+        _ => (None, None),
     };
     match end {
         None => *ring = None,
-        Some(end) if ring.as_ref().is_some_and(|ring| ring.end == end) => {}
-        Some(end) => *ring = Some(Ring::new(end, now, reduced)),
+        Some(end)
+            if ring
+                .as_ref()
+                .is_some_and(|ring| (ring.end, ring.held) == (end, held)) => {}
+        Some(end) => *ring = Some(Ring::new(end, held, now, reduced)),
     }
 }
 
@@ -268,5 +280,28 @@ mod tests {
         assert_eq!(ring.as_ref().map(|r| r.end), Some(9.0));
         sync(&mut ring, &counting(None), 6.0, false);
         assert!(ring.is_none());
+    }
+
+    #[test]
+    fn a_held_ring_stands_still_where_it_was() {
+        use super::super::flow::{Done, Lead};
+        let held = Pres::Done(Done {
+            undo: true,
+            countdown: Some(5.0),
+            held: Some(3.5),
+            ..Done::plain(Lead::Check, "Sending to SEER")
+        });
+        let mut ring = None;
+        sync(&mut ring, &held, 1.5, false);
+        assert_eq!(ring.as_ref().and_then(|r| r.held), Some(3.5));
+        // Let go, it drains again from a new ring on the moved window.
+        let going = Pres::Done(Done {
+            undo: true,
+            countdown: Some(7.5),
+            ..Done::plain(Lead::Check, "Sending to SEER")
+        });
+        sync(&mut ring, &going, 4.0, false);
+        let ring = ring.expect("a ring again");
+        assert_eq!((ring.end, ring.held), (7.5, None));
     }
 }

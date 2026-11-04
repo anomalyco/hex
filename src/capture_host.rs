@@ -284,6 +284,9 @@ pub enum CaptureCommand {
     /// Takes back the newest capture's send: one OpenCode took is
     /// withdrawn unless the session already acted on it.
     Undo,
+    /// The pointer is on the capsule (`true`) or left it: a rule's send
+    /// still waiting out its Undo window pauses while it is there.
+    Hold(bool),
     /// Pastes the newest written capture into the app in front, as
     /// Scrawl's Paste chip does: its contact sheet, then its summary.
     Paste,
@@ -1704,6 +1707,7 @@ impl CaptureHost {
                 Ok(self.route(routing::Job::Send { to, always }))
             }
             CaptureCommand::Undo => Ok(self.route(routing::Job::Undo)),
+            CaptureCommand::Hold(on) => Ok(self.route(routing::Job::Hold(on))),
             CaptureCommand::Paste => self.hand_off(HandOff::Paste),
             CaptureCommand::Inspect => self.hand_off(HandOff::Inspect),
         };

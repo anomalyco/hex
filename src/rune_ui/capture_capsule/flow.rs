@@ -27,6 +27,9 @@ pub(crate) const CHIPS_MIN_S: f64 = 0.9;
 /// The chips never fold under the pointer, and stay this much longer once
 /// it leaves (Scrawl's `REVEAL_LINGER_MS`).
 pub(crate) const CHIPS_LINGER_S: f64 = 1.2;
+/// A countdown the pointer held goes on with at least this long left, so
+/// it never ends the instant the pointer leaves.
+const RESUME_LEFT_S: f64 = 1.0;
 /// The recording's ✕ asks "Discard?" for this long, then the capsule goes
 /// back to recording; never while the pointer is on it, and this much
 /// longer once it leaves.
@@ -287,6 +290,9 @@ pub(crate) enum Action {
     Undo {
         to: String,
     },
+    /// Hold a rule's send while the pointer is on the capsule (`true`),
+    /// or let it go on with the time it had left.
+    Hold(bool),
     /// Send the capture to the session `to`; `always` saves a rule for
     /// `site`.
     Send {
@@ -385,6 +391,9 @@ pub(crate) struct Done {
     /// When Undo goes, on the flow's clock: the chip's ring drains to it.
     /// `None` while Undo waits on the router with no window to count.
     pub(crate) countdown: Option<f64>,
+    /// The pointer holds the countdown: how long it had left. The ring
+    /// stands still until the pointer leaves.
+    pub(crate) held: Option<f64>,
     /// The Send to… chip's label.
     pub(crate) ask: Option<String>,
     /// The capture shortcut opens the search from here: its keycaps sit
@@ -415,6 +424,7 @@ impl Done {
             why: None,
             undo: false,
             countdown: None,
+            held: None,
             ask: None,
             ask_keys: false,
             open: None,
@@ -598,12 +608,25 @@ impl Sent {
     }
 }
 
+/// An Undo countdown the pointer holds: since when, and the window's end
+/// as it stood.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pause {
+    since: f64,
+    end: f64,
+    /// A rule's: the router holds its send too.
+    router: bool,
+}
+
 /// The capsule's state machine.
 #[derive(Clone, Debug)]
 pub(crate) struct Flow {
     phase: Phase,
     /// The pointer is on the capsule.
     hovered: bool,
+    /// The pointer holds the Undo countdown: nothing sends or expires
+    /// until it leaves.
+    pause: Option<Pause>,
     /// No finished capsule leaves before this: a fold or the pointer's
     /// leaving gives it a moment more.
     hold_floor: f64,
@@ -657,6 +680,7 @@ impl Flow {
         Self {
             phase: Phase::Hidden,
             hovered: false,
+            pause: None,
             hold_floor: 0.0,
             phone: false,
             switching: false,
@@ -723,8 +747,9 @@ impl Flow {
         self.cues.extend(cue);
     }
 
-    /// The pointer came onto the capsule or left it.
-    pub(crate) fn hover(&mut self, on: bool, now: f64) {
+    /// The pointer came onto the capsule or left it. On it, an Undo
+    /// countdown holds (and the router holds a rule's send with it).
+    pub(crate) fn hover(&mut self, on: bool, now: f64) -> Vec<Action> {
         self.hovered = on;
         if !on {
             self.hold_floor = self.hold_floor.max(now + CHIPS_LINGER_S);
@@ -744,6 +769,63 @@ impl Flow {
                 *until = until.max(now + DISCARD_LINGER_S);
             }
         }
+        self.hold_countdown(now)
+    }
+
+    /// The Undo window's clock: held, it stands where the pointer stopped it.
+    fn clock(&self, now: f64) -> f64 {
+        self.pause.map_or(now, |pause| pause.since.min(now))
+    }
+
+    /// Where Undo's window ends, as the capsule draws it now.
+    fn countdown(&self, now: f64) -> Option<f64> {
+        match self.pres_of(now) {
+            Pres::Done(done) if done.undo => done.countdown,
+            _ => None,
+        }
+    }
+
+    /// Holds the Undo countdown while the pointer is on the capsule, one
+    /// that starts under it too, and lets it go on with what it had left
+    /// (at least [`RESUME_LEFT_S`]) once the pointer leaves. The router
+    /// holds a rule's send alongside ([`Action::Hold`]); a pick went
+    /// already, so only its Undo waits.
+    fn hold_countdown(&mut self, now: f64) -> Vec<Action> {
+        let end = self.countdown(now);
+        match (self.hovered, end, self.pause) {
+            (true, Some(end), Some(pause)) if pause.end == end => Vec::new(),
+            (true, Some(end), old) => {
+                let router = matches!(self.phase, Phase::Routed(_));
+                self.pause = Some(Pause {
+                    since: now,
+                    end,
+                    router,
+                });
+                match (old.is_some_and(|old| old.router), router) {
+                    (_, true) => vec![Action::Hold(true)],
+                    (true, false) => vec![Action::Hold(false)],
+                    (false, false) => Vec::new(),
+                }
+            }
+            (_, _, Some(pause)) => {
+                self.pause = None;
+                if end == Some(pause.end) {
+                    let left = (pause.end - pause.since).clamp(RESUME_LEFT_S, undo_s());
+                    let by = now + left - pause.end;
+                    match &mut self.phase {
+                        Phase::Routed(routed) => routed.at += by,
+                        Phase::Sent(sent) => sent.at += by,
+                        _ => {}
+                    }
+                }
+                if pause.router {
+                    vec![Action::Hold(false)]
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => Vec::new(),
+        }
     }
 
     pub(crate) fn input(&mut self, input: Input, now: f64) -> Vec<Action> {
@@ -752,6 +834,8 @@ impl Flow {
         self.cue(&before, &actions);
         self.closing(&before);
         self.left_waiting(before, &actions);
+        let mut actions = actions;
+        actions.extend(self.hold_countdown(now));
         actions
     }
 
@@ -1300,6 +1384,8 @@ impl Flow {
         }
         self.closing(&before);
         self.left_waiting(before, &actions);
+        let mut actions = actions;
+        actions.extend(self.hold_countdown(now));
         actions
     }
 
@@ -1448,7 +1534,7 @@ impl Flow {
 
     /// The take-back for a send still waiting out its Undo.
     fn undoable(&self, now: f64) -> Option<Action> {
-        routes::undoable(&self.phase, now)
+        routes::undoable(&self.phase, self.clock(now))
     }
 
     /// Runs what time decides: the chips closing, the Undo window ending,
@@ -1511,6 +1597,8 @@ impl Flow {
                 .flatten()
                 .min_by(f64::total_cmp)
                 .filter(|_| !self.hovered),
+            // A held countdown ends only once the pointer leaves.
+            _ if self.pause.is_some() => None,
             Phase::Routed(Routed {
                 route: Route::Rule { .. },
                 at,
@@ -1528,6 +1616,11 @@ impl Flow {
     /// What the capsule draws at `now`.
     pub(crate) fn pres(&self, now: f64) -> Pres {
         let mut pres = self.pres_of(now);
+        if let (Pres::Done(done), Some(pause)) = (&mut pres, self.pause)
+            && done.countdown == Some(pause.end)
+        {
+            done.held = Some(pause.end - pause.since);
+        }
         // Scrawl's "No speech": a capture with no words still copies.
         if let Pres::Done(done) = &mut pres
             && self.silent
@@ -1540,6 +1633,7 @@ impl Flow {
     }
 
     fn pres_of(&self, now: f64) -> Pres {
+        let now = self.clock(now);
         let undo_left = |at: f64| now - at < undo_s();
         match &self.phase {
             Phase::Hidden => Pres::Hidden,
@@ -2414,6 +2508,53 @@ mod tests {
         let leaves = undo_s().max(3.0 + tuning::get().brief_hold_s);
         assert!(late.tick(leaves));
         assert_eq!(late.pres(leaves), Pres::Hidden);
+    }
+
+    /// The pointer on the capsule holds Undo's countdown (the router holds
+    /// a rule's send with it); leaving lets it go on with what it had left.
+    #[test]
+    fn hover_holds_the_undo_countdown_and_leaving_resumes_it() {
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(rule()), 10.0);
+        assert_eq!(flow.hover(true, 11.5), [Action::Hold(true)]);
+        for t in [12.0, 15.0, 30.0] {
+            let held = done(&flow, t);
+            assert!(held.undo, "Undo never runs out under the pointer");
+            assert_eq!(held.countdown, Some(10.0 + undo_s()));
+            assert_eq!(held.held, Some(undo_s() - 1.5), "the ring stands still");
+        }
+        assert_eq!(flow.next_due(30.0), None);
+        // Two seconds held, it ends two seconds later than it would have.
+        assert_eq!(flow.hover(false, 13.5), [Action::Hold(false)]);
+        let going = done(&flow, 13.5);
+        assert_eq!(going.countdown, Some(10.0 + undo_s() + 2.0));
+        assert_eq!(going.held, None);
+        assert_eq!(flow.next_due(13.5), Some(10.0 + undo_s() + 2.0));
+
+        // A pick's window too, the capsule's alone; one let go near its
+        // end keeps a second.
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::SendRow(0), 1.0);
+        assert!(flow.hover(true, 1.0 + undo_s() - 0.5).is_empty(), "it went");
+        assert!(done(&flow, 20.0).undo);
+        assert!(flow.hover(false, 20.0).is_empty());
+        assert_eq!(done(&flow, 20.0).countdown, Some(20.0 + RESUME_LEFT_S));
+        assert!(done(&flow, 20.0 + RESUME_LEFT_S - 0.01).undo);
+        assert!(!done(&flow, 20.0 + RESUME_LEFT_S).undo);
+
+        // One that starts under the pointer holds from the start, and an
+        // Undo while it's held still counts and lets the router go.
+        let mut flow = Flow::new();
+        flow.hover(true, 0.0);
+        assert!(
+            flow.input(Input::Routed(rule()), 1.0)
+                .contains(&Action::Hold(true))
+        );
+        assert_eq!(done(&flow, 9.0).held, Some(undo_s()));
+        let actions = flow.input(Input::Undo, 9.0);
+        assert_eq!(actions.first(), Some(&Action::Undo { to: "SEER".into() }));
+        assert!(actions.contains(&Action::Hold(false)), "{actions:?}");
     }
 
     /// The pointer on a finished capsule holds it; leaving gives it a moment.

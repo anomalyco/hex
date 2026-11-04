@@ -397,6 +397,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   ends. Reduce Motion steps it a second at a time. Two looks while Kit picks
 │   │   (`UndoRing`, the playground's "Undo countdown"): Border, the chip's own
 │   │   outline, and Dial, a small ring before "Undo"
+│   ├── The pointer on the capsule -> holds the countdown, one that starts
+│   │   under it too: the ring stands still (Reduce Motion too), Undo never
+│   │   runs out, and a rule's send waits (`CaptureCommand::Hold`). Leaving
+│   │   goes on with the time it had left, at least 1 s. A pick already went,
+│   │   so only its Undo waits (`Flow::hold_countdown`)
 ├── A finished capture with nowhere sent yet reads "Copied" from the start
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
 │   │   answer) -> macOS: "Copied", then Search with the capture shortcut's
@@ -740,7 +745,10 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   a Shift pick's): a three-second countdown begins at Written. A folder
 │   │   rule shows its repository while its session resolves; it sends once both
 │   │   the countdown and resolution finish. Undo during the countdown posts
-│   │   nothing. Sending -> Sent, or Queued when OpenCode didn't take it. Whatever
+│   │   nothing. The capsule's `Hold` pauses the countdown while the pointer is
+│   │   on it and resumes it with what it had left (at least 1 s; a hold the
+│   │   capsule never ends lapses after 2 min, and the next capture resumes
+│   │   it). Sending -> Sent, or Queued when OpenCode didn't take it. Whatever
 │   │   autoSend, smartRouting, or jevRouting say, a saved rule sends and
 │   │   nothing else sends on its own. smartRouting off decides with the port
 │   │   ladder, after rules and addresses, on the same look

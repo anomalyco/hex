@@ -31,6 +31,13 @@ mod preparation;
 const RETRY_EVERY: Duration = Duration::from_secs(15);
 /// How long taking back a send may wait on OpenCode.
 const UNDO_DEADLINE: Duration = Duration::from_secs(10);
+/// How long a rule's send waits for Undo before it goes.
+const SEND_HOLD: Duration = Duration::from_secs(3);
+/// A held send resumes with at least this long left, so it never goes the
+/// instant the pointer leaves the capsule.
+const RESUME_LEFT: Duration = Duration::from_secs(1);
+/// A hold the capsule never ends (it closed under the pointer) lapses.
+const HOLD_MAX: Duration = Duration::from_secs(120);
 const QUEUE: usize = 16;
 
 // ---------------------------------------------------------------------------
@@ -259,6 +266,9 @@ pub(super) enum Job {
         always: bool,
     },
     Undo,
+    /// The pointer is on the capsule (`true`) or left it: a rule's send
+    /// waiting out its Undo window pauses there and resumes after.
+    Hold(bool),
     /// `hex capture send`: any capture, to `to` or where its route or its
     /// last send says.
     #[cfg_attr(target_os = "windows", allow(dead_code))]
@@ -379,7 +389,29 @@ struct Routed {
     saved: Option<SavedRule>,
     /// The rule's cancellation window starts at publication, even before folder resolution.
     due: Option<Instant>,
+    /// Since when the capsule holds `due` (the pointer is on it).
+    held: Option<Instant>,
     destination: Option<Destination>,
+}
+
+impl Routed {
+    /// Ends a hold: `due` moves on by the time held, keeping what was left
+    /// (at least [`RESUME_LEFT`], never more than the whole [`SEND_HOLD`]).
+    fn resume(&mut self, now: Instant) {
+        let Some(since) = self.held.take() else {
+            return;
+        };
+        if let Some(due) = &mut self.due {
+            let left = due.saturating_duration_since(since);
+            *due = now + left.clamp(RESUME_LEFT, SEND_HOLD);
+        }
+    }
+
+    /// Whether the capsule still holds its send.
+    fn holding(&self, now: Instant) -> bool {
+        self.held
+            .is_some_and(|since| now.saturating_duration_since(since) < HOLD_MAX)
+    }
 }
 
 /// A rule saved with a send, and what its key held before.
@@ -448,6 +480,7 @@ impl Worker {
             Job::Written { bundle, look } => self.written(bundle, look),
             Job::Send { to, always } => self.chosen(&to, always),
             Job::Undo => self.undo(),
+            Job::Hold(on) => self.hold(on),
             Job::SendBundle {
                 bundle,
                 to,
@@ -626,6 +659,7 @@ impl Worker {
             offered: None,
             saved: None,
             due: None,
+            held: None,
             destination: None,
         });
         self.publish();
@@ -676,6 +710,18 @@ impl Worker {
         self.take_back();
         self.correct(jev::Action::Redirect, "reroute", Some(&dest));
         self.send_current(dest, Some("chosen"));
+    }
+
+    fn hold(&mut self, on: bool) {
+        let Some(current) = &mut self.current else {
+            return;
+        };
+        let now = Instant::now();
+        if on {
+            current.held.get_or_insert(now);
+        } else {
+            current.resume(now);
+        }
     }
 
     fn undo(&mut self) {
@@ -2012,6 +2058,50 @@ mod tests {
                 settle(&mut worker);
                 assert!(worker.current.as_ref().unwrap().sent.is_none());
             }
+        }
+
+        #[test]
+        fn the_capsule_holds_a_rules_send_while_the_pointer_is_on_it() {
+            static POSTS: AtomicU64 = AtomicU64::new(0);
+            fn post(path: &Path, id: &str) -> anyhow::Result<scrawl_capture::handoff::Posted> {
+                POSTS.fetch_add(1, Ordering::Relaxed);
+                posted(path, id)
+            }
+            let router = router_with(|c| {
+                c.apps
+                    .insert("com.example.board".into(), "ses_board".into());
+            });
+            let (look, found) = held_look(router, look::Live::default());
+            let outcomes = SharedOutcomes::default();
+            let mut worker = worker(outcomes.clone());
+            worker.forward = post;
+            let bundle = written("com.example.board");
+            lock(&outcomes).fail(bundle.clone(), "test".into());
+            worker.written(bundle.clone(), look);
+            worker.hold(true);
+            // Its window ran out while the pointer was on the capsule.
+            worker.current.as_mut().unwrap().due = Some(Instant::now());
+            worker.prepared();
+            assert_eq!(POSTS.load(Ordering::Relaxed), 0, "held, it waits");
+            // Held 10 s with 2 s left: it goes 2 s after the pointer leaves.
+            let current = worker.current.as_mut().unwrap();
+            let since = Instant::now() - Duration::from_secs(10);
+            current.held = Some(since);
+            current.due = Some(since + Duration::from_secs(2));
+            worker.hold(false);
+            let current = worker.current.as_ref().unwrap();
+            assert!(current.held.is_none());
+            let left = current
+                .due
+                .unwrap()
+                .saturating_duration_since(Instant::now());
+            assert!(left > Duration::from_millis(1900) && left <= Duration::from_secs(2));
+            worker.prepared();
+            assert_eq!(POSTS.load(Ordering::Relaxed), 0, "not before its time");
+            drop(found);
+            settle(&mut worker);
+            assert_eq!(POSTS.load(Ordering::Relaxed), 1);
+            std::fs::remove_dir_all(bundle.parent().unwrap()).unwrap();
         }
 
         #[test]

@@ -473,6 +473,7 @@ pub(crate) fn act(action: Action) {
             always: always.is_some(),
         })],
         Action::Undo { .. } => vec![command(CaptureCommand::Undo)],
+        Action::Hold(on) => vec![command(CaptureCommand::Hold(on))],
         Action::Pen => {
             crate::capture_host::toggle_pen();
             return;

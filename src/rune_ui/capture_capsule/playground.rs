@@ -42,6 +42,8 @@ const SLIDER_W: f32 = SIDEBAR_W - 2.0 * PAD - 2.0 * CARD_PAD;
 enum Step {
     Input(Input),
     Click(Id),
+    /// The pointer comes onto the capsule or leaves it.
+    Hover(bool),
     /// Starts the whole flow again, when looping.
     Again,
 }
@@ -202,6 +204,19 @@ const SCENES: &[Scene] = &[
             &[
                 (2.5, routed(guess())),
                 (3.6, Step::Input(Input::SendRow(0))),
+            ],
+        )
+    }),
+    // The pointer holds a rule's countdown 1.5 s in, for 2 s: the send
+    // waits, then goes once it leaves, with the 3.5 s it had left.
+    ("clip-hover-pause", |s| {
+        clip(
+            s,
+            &[
+                (2.5, routed(rule())),
+                (4.0, Step::Hover(true)),
+                (6.0, Step::Hover(false)),
+                (7.5, Step::Input(Input::Settled)),
             ],
         )
     }),
@@ -439,6 +454,7 @@ impl Playground {
             | Action::Send { .. }
             | Action::Paste
             | Action::Pen
+            | Action::Hold(_)
             | Action::Inspect => {}
         }
     }
@@ -499,6 +515,10 @@ fn poll(s: &mut CapsuleState, wall: f64, tx: &mut Tx) -> bool {
             Step::Click(id) => {
                 s.now = now;
                 s.click(id, tx);
+            }
+            Step::Hover(on) => {
+                s.now = now;
+                s.hover(super::Part::Pill, on, tx);
             }
             Step::Again => {
                 if let Some(pg) = s.playground.as_mut() {
