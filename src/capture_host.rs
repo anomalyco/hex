@@ -2864,8 +2864,10 @@ pub enum CapsuleKeys {
     /// A capture's suggestions: the capture shortcut, which opens the
     /// search ([`CapsuleKey::Shortcut`]), Shift, and a mouse press
     /// ([`CapsuleKey::Press`]) that may fold them. `cycle`: Return and Tab
-    /// too, for the toast that offers one guess at a time.
-    Suggest { cycle: bool },
+    /// too, for the toast that offers one guess at a time. `search`: the
+    /// pointer moved onto them, so a key that types text
+    /// ([`opens_search`]) starts the search with it.
+    Suggest { cycle: bool, search: bool },
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -2986,7 +2988,11 @@ pub fn list_open() -> bool {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 /// Whether the capsule's suggestions show, taking the capture shortcut.
 pub fn suggesting() -> bool {
-    GRAB_KEYS.load(Ordering::Acquire) == keys_code(Some(CapsuleKeys::Suggest { cycle: false }))
+    GRAB_KEYS.load(Ordering::Acquire)
+        == keys_code(Some(CapsuleKeys::Suggest {
+            cycle: false,
+            search: false,
+        }))
 }
 
 /// Hands `key` to the capsule if its keys include it; false otherwise.
@@ -3009,9 +3015,16 @@ fn takes(keys: CapsuleKeys, key: &CapsuleKey) -> bool {
             CapsuleKeys::Suggest { cycle: true, .. },
             CapsuleKey::Return { shift: false } | CapsuleKey::Tab { .. },
         ) => true,
+        (CapsuleKeys::Suggest { search: true, .. }, CapsuleKey::Text(typed)) => opens_search(typed),
         (CapsuleKeys::List, key) => !matches!(key, CapsuleKey::Shortcut),
         _ => false,
     }
+}
+
+/// Whether `typed` over the suggestions starts a search with it: text
+/// that begins with something other than a space.
+pub fn opens_search(typed: &str) -> bool {
+    typed.chars().next().is_some_and(|c| !c.is_whitespace())
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -5143,8 +5156,11 @@ mod tests {
         assert!(capsule_key(CapsuleKey::Escape));
 
         // Suggestions: the capture shortcut opens the search; never Escape,
-        // and no typing.
-        second.set(CapsuleKeys::Suggest { cycle: false });
+        // and no typing: it is the app's in front.
+        second.set(CapsuleKeys::Suggest {
+            cycle: false,
+            search: false,
+        });
         assert!(suggesting() && !wants_escape() && !list_open());
         assert!(!capsule_key(CapsuleKey::Escape));
         assert!(capsule_key(CapsuleKey::Press), "a press may fold them");
@@ -5153,12 +5169,37 @@ mod tests {
         assert!(!capsule_key(CapsuleKey::Text("1".into())));
         assert!(!capsule_key(CapsuleKey::Tab { shift: false }));
         assert!(!capsule_key(CapsuleKey::Return { shift: false }));
+        // The pointer on them: text starts the search, and nothing else
+        // changes (Escape, Backspace, the arrows, a leading space are still
+        // the app's).
+        second.set(CapsuleKeys::Suggest {
+            cycle: false,
+            search: true,
+        });
+        assert!(suggesting());
+        assert!(capsule_key(CapsuleKey::Text("h".into())));
+        assert!(capsule_key(CapsuleKey::Text("É".into())));
+        assert!(!capsule_key(CapsuleKey::Text(" ".into())));
+        for key in [
+            CapsuleKey::Escape,
+            CapsuleKey::Backspace,
+            CapsuleKey::Up,
+            CapsuleKey::Down,
+            CapsuleKey::Return { shift: false },
+            CapsuleKey::Tab { shift: false },
+        ] {
+            assert!(!capsule_key(key.clone()), "{key:?}");
+        }
         // The toast's one guess at a time: Return sends it, Tab moves on.
-        second.set(CapsuleKeys::Suggest { cycle: true });
+        second.set(CapsuleKeys::Suggest {
+            cycle: true,
+            search: false,
+        });
         assert!(suggesting());
         assert!(capsule_key(CapsuleKey::Tab { shift: false }));
         assert!(capsule_key(CapsuleKey::Return { shift: false }));
         assert!(!capsule_key(CapsuleKey::Return { shift: true }));
+        assert!(!capsule_key(CapsuleKey::Text("h".into())));
         second.set(CapsuleKeys::List);
         assert!(!suggesting());
         assert!(list_open() && !wants_escape());
@@ -5177,6 +5218,8 @@ mod tests {
                 (2, CapsuleKey::Press),
                 (2, CapsuleKey::Shift(true)),
                 (2, CapsuleKey::Shortcut),
+                (2, CapsuleKey::Text("h".into())),
+                (2, CapsuleKey::Text("É".into())),
                 (2, CapsuleKey::Tab { shift: false }),
                 (2, CapsuleKey::Return { shift: false }),
                 (2, CapsuleKey::Text("ho".into())),

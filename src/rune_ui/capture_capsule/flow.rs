@@ -85,6 +85,9 @@ pub(crate) struct Dest {
     /// The session id a send names, so two sessions with one title never
     /// collide.
     pub(crate) session: String,
+    /// The name of the session's folder, when known: the search matches
+    /// it, and a row shows it only when its title alone can't tell it apart.
+    pub(crate) folder: Option<String>,
 }
 
 impl Dest {
@@ -95,6 +98,7 @@ impl Dest {
             session: name.clone(),
             name,
             why: why.into(),
+            folder: None,
         }
     }
 
@@ -103,6 +107,10 @@ impl Dest {
             session: session.into(),
             ..self
         }
+    }
+
+    pub(crate) fn folder(self, folder: Option<String>) -> Self {
+        Self { folder, ..self }
     }
 }
 
@@ -597,6 +605,11 @@ pub(crate) struct Flow {
     phase: Phase,
     /// The pointer is on the capsule.
     hovered: bool,
+    /// The pointer moved on the capsule since its suggestions last
+    /// changed: typing over them searches. Being on it isn't enough, since
+    /// a list that opens or grows under a resting pointer is hovered too,
+    /// while Kit may still be typing in the app in front.
+    aimed: bool,
     /// No finished capsule leaves before this: a fold or the pointer's
     /// leaving gives it a moment more.
     hold_floor: f64,
@@ -650,6 +663,7 @@ impl Flow {
         Self {
             phase: Phase::Hidden,
             hovered: false,
+            aimed: false,
             hold_floor: 0.0,
             phone: false,
             switching: false,
@@ -720,6 +734,7 @@ impl Flow {
     pub(crate) fn hover(&mut self, on: bool, now: f64) {
         self.hovered = on;
         if !on {
+            self.aimed = false;
             self.hold_floor = self.hold_floor.max(now + CHIPS_LINGER_S);
         }
         if let (
@@ -739,7 +754,23 @@ impl Flow {
         }
     }
 
+    /// The pointer moved on the capsule. True when that changes the keys
+    /// it takes.
+    pub(crate) fn pointer_moved(&mut self) -> bool {
+        let before = self.keys();
+        self.aimed = self.hovered;
+        self.keys() != before
+    }
+
     pub(crate) fn input(&mut self, input: Input, now: f64) -> Vec<Action> {
+        // A new capture or a new answer may change the list under a resting
+        // pointer: it has to move again before typing searches.
+        if matches!(
+            input,
+            Input::Stage(_) | Input::Routed(_) | Input::Refined(_) | Input::Undone(_)
+        ) {
+            self.aimed = false;
+        }
         let before = self.phase.clone();
         let actions = self.step(input, now);
         self.cue(&before, &actions);
@@ -1073,6 +1104,14 @@ impl Flow {
                 Phase::Routed(routed)
             }
             (Phase::Routed(mut routed), input @ (Input::Type(_) | Input::Backspace)) => {
+                // Typed over the suggestions: the search opens with it, and
+                // Escape goes back to them.
+                if let (Input::Type(_), Some(open)) = (&input, routed.open.as_mut())
+                    && !open.typing
+                {
+                    open.typing = true;
+                    open.back = true;
+                }
                 if let Some(open) = routed.open.as_mut().filter(|open| open.typing) {
                     match input {
                         Input::Type(typed) => open.query.push_str(&typed),
@@ -1426,6 +1465,7 @@ impl Flow {
             } else {
                 CapsuleKeys::Suggest {
                     cycle: tuning::get().flow == CapsuleFlow::Toast,
+                    search: self.aimed,
                 }
             }),
             Phase::Routed(Routed {
@@ -1721,9 +1761,9 @@ fn hold_until(phase: &Phase) -> Option<f64> {
 }
 
 /// The list for `route`: its suggestions, then the newest sessions, and
-/// searching, every session whose name has the query.
+/// searching, every session with each word of the query in its title,
+/// folder, or id, those with every word in the title first.
 fn list(route: &Route, open: &Open) -> List {
-    let query = open.query.to_lowercase();
     let (suggested, recent) = sections(route);
     let site = match route {
         Route::Guess { site, .. } | Route::Rule { site, .. } => site.clone(),
@@ -1732,11 +1772,7 @@ fn list(route: &Route, open: &Open) -> List {
     let always = site.map(|site| (site, open.shift));
     let every = || suggested.iter().chain(recent);
     let mut list = List {
-        rows: every()
-            .filter(|dest| dest.name.to_lowercase().contains(&query))
-            .take(SUGGEST_ROWS)
-            .cloned()
-            .collect(),
+        rows: matching(every(), &open.query),
         title: if open.typing {
             "All sessions"
         } else {
@@ -1766,6 +1802,52 @@ fn list(route: &Route, open: &Open) -> List {
         row.why = "always".into();
     }
     list
+}
+
+/// The first [`SUGGEST_ROWS`] of `dests` that match `query`, in order but
+/// title matches first. A row names its folder beside its reason when its
+/// title alone doesn't say why it matched, or reads like another row's.
+fn matching<'a>(dests: impl Iterator<Item = &'a Dest>, query: &str) -> Vec<Dest> {
+    let query = query.to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut found: Vec<(bool, &Dest)> = dests
+        .filter_map(|dest| {
+            let title = dest.name.to_lowercase();
+            let folder = dest.folder.as_deref().unwrap_or_default().to_lowercase();
+            let id = dest.session.to_lowercase();
+            let in_title = words.iter().all(|word| title.contains(word));
+            let found = in_title
+                || words.iter().all(|word| {
+                    [&title, &folder, &id]
+                        .iter()
+                        .any(|text| text.contains(word))
+                });
+            found.then_some((in_title, dest))
+        })
+        .collect();
+    found.sort_by_key(|(in_title, _)| !in_title);
+    found.truncate(SUGGEST_ROWS);
+    let alike = |dest: &Dest| {
+        found
+            .iter()
+            .filter(|(_, other)| other.name.to_lowercase() == dest.name.to_lowercase())
+            .count()
+            > 1
+    };
+    found
+        .iter()
+        .map(|&(in_title, dest)| match &dest.folder {
+            Some(folder) if !in_title || alike(dest) => Dest {
+                why: if dest.why.is_empty() {
+                    folder.clone()
+                } else {
+                    format!("{folder} · {}", dest.why)
+                },
+                ..dest.clone()
+            },
+            _ => dest.clone(),
+        })
+        .collect()
 }
 
 fn clamp(routed: &mut Routed) {
@@ -2097,7 +2179,13 @@ mod tests {
             assert_eq!(shown.text, "Send to SEER");
             assert_eq!(shown.why.as_deref(), Some("⏎"));
             assert!(shown.cycle && shown.sends && shown.open.is_none());
-            assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: true }));
+            assert_eq!(
+                flow.keys(),
+                Some(CapsuleKeys::Suggest {
+                    cycle: true,
+                    search: false
+                })
+            );
             flow.input(Input::Cycle(1), 0.5);
             assert_eq!(done(&flow, 0.5).text, "Send to HEX");
             flow.input(Input::Cycle(-1), 0.6);
@@ -2514,7 +2602,10 @@ mod tests {
             // 1-3 pick; Escape stays the app's.
             assert_eq!(
                 flow.keys(),
-                Some(CapsuleKeys::Suggest { cycle: false }),
+                Some(CapsuleKeys::Suggest {
+                    cycle: false,
+                    search: false
+                }),
                 "{how}"
             );
             // The router's answer changes nothing, and nothing times out.
@@ -2573,7 +2664,10 @@ mod tests {
         assert_eq!(list.selected, 0);
         assert_eq!(
             flow.keys(),
-            Some(crate::capture_host::CapsuleKeys::Suggest { cycle: false })
+            Some(crate::capture_host::CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            })
         );
         // It never leaves by itself.
         assert!(flow.next_due(1.2).is_none());
@@ -3008,7 +3102,10 @@ mod tests {
         assert!(flow.input(Input::ClickAway, 0.7).is_empty());
         assert_eq!(
             flow.keys(),
-            Some(CapsuleKeys::Suggest { cycle: false }),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            }),
             "back to the suggestions it opened over"
         );
         assert!(flow.input(Input::ClickAway, 0.75).is_empty());
@@ -3185,7 +3282,13 @@ mod tests {
         assert_eq!(list.selected, 0, "the best is marked");
         assert_eq!(list.footer, Footer::Suggesting);
         assert_eq!(list.always, Some(("problems.kitlangton.com".into(), false)));
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: false }));
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            })
+        );
         assert!(flow.take_cues().is_empty(), "nothing sent, nothing heard");
         flow.tick(4.0);
         assert!(matches!(flow.pres(4.0), Pres::Done(_)), "no countdown runs");
@@ -3231,7 +3334,162 @@ mod tests {
         let (query, list) = done(&flow, 2.0).open.unwrap();
         assert_eq!(query, "", "Escape goes back to the suggestions");
         assert!(list.suggesting());
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: false }));
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            })
+        );
+    }
+
+    /// t1326: typing over the suggestions searched nothing; the letters went
+    /// to the app in front.
+    #[test]
+    fn typing_over_the_suggestions_with_the_pointer_on_them_searches() {
+        use crate::capture_host::CapsuleKeys;
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        flow.hover(true, 0.5);
+        assert!(flow.pointer_moved(), "the pointer on them changes the keys");
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: true
+            })
+        );
+        for typed in ["h", "e", "x"] {
+            flow.input(Input::Type(typed.into()), 1.0);
+        }
+        let (query, list) = done(&flow, 1.0).open.unwrap();
+        assert_eq!(query, "hex");
+        assert_eq!(list.title, "All sessions");
+        assert_eq!(
+            list.rows().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+            ["HEX"]
+        );
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::List),
+            "the search takes typing"
+        );
+        flow.input(Input::Escape, 1.5);
+        let (query, list) = done(&flow, 1.5).open.unwrap();
+        assert_eq!(query, "", "Escape goes back to the suggestions");
+        assert!(list.suggesting());
+    }
+
+    /// Typing is the app's unless the pointer moved onto the suggestions
+    /// since they last changed: a list that opens under a resting pointer
+    /// takes nothing.
+    #[test]
+    fn typing_stays_the_apps_until_the_pointer_moves_onto_the_suggestions() {
+        use crate::capture_host::CapsuleKeys;
+        let quiet = Some(CapsuleKeys::Suggest {
+            cycle: false,
+            search: false,
+        });
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        assert_eq!(flow.keys(), quiet, "the pointer elsewhere");
+        assert!(
+            !flow.pointer_moved(),
+            "a move off the capsule changes nothing"
+        );
+        flow.hover(true, 0.5);
+        assert_eq!(flow.keys(), quiet, "opened under a resting pointer");
+        flow.pointer_moved();
+        assert_ne!(flow.keys(), quiet);
+        flow.hover(false, 1.0);
+        assert_eq!(flow.keys(), quiet, "the pointer left");
+        flow.hover(true, 1.5);
+        flow.pointer_moved();
+        flow.input(Input::Routed(guess()), 2.0);
+        assert_eq!(flow.keys(), quiet, "a new answer under a resting pointer");
+        flow.pointer_moved();
+        assert_ne!(flow.keys(), quiet);
+    }
+
+    fn sessions(dests: &[(&str, &str, &str)]) -> Route {
+        Route::Guess {
+            suggested: dests
+                .iter()
+                .map(|&(name, folder, id)| {
+                    Dest::new(name, "1 h ago")
+                        .session(id)
+                        .folder(Some(folder.into()))
+                })
+                .collect(),
+            recent: Vec::new(),
+            site: None,
+        }
+    }
+
+    fn search(route: Route, query: &str) -> Vec<(String, String)> {
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(route), 0.0);
+        flow.input(Input::OpenList, 0.5);
+        flow.input(Input::Type(query.into()), 1.0);
+        let (_, list) = done(&flow, 1.0).open.unwrap();
+        list.rows()
+            .map(|dest| (dest.name.clone(), dest.why.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn the_search_matches_every_word_in_the_title_folder_or_id() {
+        let route = || {
+            sessions(&[
+                (
+                    "Annotate type to search",
+                    "annotate-type-to-search",
+                    "ses_1",
+                ),
+                ("Fix the capture tap", "hex", "ses_2"),
+                ("Hex release notes", "docs", "ses_3"),
+            ])
+        };
+        let names = |query| -> Vec<String> {
+            search(route(), query)
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        };
+        assert_eq!(
+            names("search ANNOTATE"),
+            ["Annotate type to search"],
+            "any order, any case"
+        );
+        assert_eq!(
+            search(route(), "hex"),
+            [
+                ("Hex release notes".into(), "1 h ago".into()),
+                ("Fix the capture tap".into(), "hex · 1 h ago".into()),
+            ],
+            "titles first, and a folder match names its folder"
+        );
+        assert_eq!(
+            names("capture hex"),
+            ["Fix the capture tap"],
+            "title and folder"
+        );
+        assert_eq!(names("ses_3"), ["Hex release notes"], "the id");
+        assert!(names("hex search").is_empty(), "every word, in one session");
+    }
+
+    #[test]
+    fn a_row_names_its_folder_only_beside_a_row_with_the_same_title() {
+        let route = sessions(&[
+            ("HOME", "home", "ses_1"),
+            ("Hex", "hex", "ses_2"),
+            ("home", "dotfiles", "ses_3"),
+        ]);
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(route), 0.0);
+        let (_, list) = done(&flow, 0.0).open.unwrap();
+        let notes: Vec<_> = list.rows().map(|dest| dest.why.as_str()).collect();
+        assert_eq!(notes, ["home · 1 h ago", "1 h ago", "dotfiles · 1 h ago"]);
     }
 
     #[test]
@@ -3350,7 +3608,13 @@ mod tests {
         let mut flow = Flow::new();
         flow.input(Input::Stage(Stage::Done), 0.0);
         flow.input(Input::Routed(guess()), 0.0);
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: false }));
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            })
+        );
         // Its hold runs out: hidden, and no key is the capsule's.
         assert!(flow.tick(hold + 1.0));
         assert_eq!(flow.pres(hold + 1.0), Pres::Hidden);

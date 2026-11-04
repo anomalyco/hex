@@ -420,7 +420,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   ├── Search or the capture shortcut (⌥⇧S) -> the search: "All
 │   │   │   sessions" over every session the router's look read (its two
 │   │   │   newest pages, every folder's, and any it named), filtered by
-│   │   │   what's typed, five rows at most and never shorter than the
+│   │   │   what's typed: every word, in any case, in the title, the folder's
+│   │   │   name, or the session id, rows with every word in the title first;
+│   │   │   a row names its folder before its note when only the folder or id
+│   │   │   matched, or when another row shows the same title (suggestions
+│   │   │   too). Five rows at most and never shorter than the
 │   │   │   suggestions it opened from; the footer reads "Send ⏎",
 │   │   │   "Remember ⇧⏎", and "New capture ⌥⇧S". Esc or a click away goes
 │   │   │   back to the suggestions; ⌥⇧S in the search records a new capture
@@ -453,6 +457,14 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   │   Esc, so a send is taken back only by clicking Undo
 │   │   ├── A send from the list still undoable -> no keys; Esc goes to the
 │   │   │   app, and the Undo button is the only way back
+│   │   ├── Suggestions, the pointer moved onto them -> also text typed
+│   │   │   without ⌘ or ⌃ (not a leading space), which opens the search
+│   │   │   with it (`CapsuleKeys::Suggest { search }`). Only a move counts:
+│   │   │   suggestions that open or change under a resting pointer, or a
+│   │   │   pointer that left, leave typing with the app in front, so Kit
+│   │   │   typing there never loses a letter. ⌫, ↑↓, ⏎, and Esc stay the
+│   │   │   app's until the search opens
+│   │   │   (`typing_stays_the_apps_until_the_pointer_moves_onto_the_suggestions`)
 │   │   ├── Suggestions -> at the session tap no key at all (the toast's
 │   │   │   ⏎ and ⇥ aside), only a mouse press, which folds them (the click
 │   │   │   still reaches the app) unless the pointer is on the pill or the
@@ -964,7 +976,7 @@ Checks:
   "Copy values" copies its `DEFAULT`). It reads and writes no Hex data and
   records or sends nothing. The whole flow picks the first suggestion;
   its "Saved rule" toggle plays a rule's send, sent at once, instead.
-  `--snap --scene suggestions|shift|sent-rule|search|picked|rule|recording`
+  `--snap --scene suggestions|shift|sent-rule|search|typed|picked|rule|recording`
   renders it. The tones were checked by waveform and level only, never on
   speakers.
 - Picker, in capture_capsule/picker.rs and tests.rs: geometry, label, and

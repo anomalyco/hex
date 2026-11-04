@@ -478,6 +478,17 @@ impl CapsuleState {
         tx.wake_after(Duration::ZERO);
     }
 
+    /// The pointer moved on the capsule: typing over its suggestions may
+    /// search now, so the tap's keys change at once.
+    fn pointer_moved(&mut self, tx: &mut Tx) {
+        if self.flow.pointer_moved() {
+            take_keys(self);
+            tx.wake_after(Duration::ZERO);
+        } else {
+            tx.live_only();
+        }
+    }
+
     /// Moves the surface to what the flow shows. True when it changed.
     fn present(&mut self, now: f64) -> bool {
         let pres = self.with_thumb(self.flow.pres(now));
@@ -953,7 +964,8 @@ fn capsule(p: Paint, surface: &Surface, live: &Animated, cx: &mut Cx<CapsuleStat
         .size(w, h)
         .motion(surface.shell_motion)
         .clip_rounded(corner(h))
-        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::Pill, on, tx));
+        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::Pill, on, tx))
+        .on_pointer_move_local(|s: &mut CapsuleState, _, tx| s.pointer_moved(tx));
     root = root.child(clip.child(inner.child(content)));
     if let Pres::Done(Done {
         open: Some((_, list)),
@@ -1861,6 +1873,7 @@ fn list_panel(p: Paint, body: El, hints: Option<El>, x: f32, w: f32, h: f32, blu
         // Hex's tap reports a press on the list before the list hears it:
         // the pointer being here keeps it from reading as a click away.
         .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::List, on, tx))
+        .on_pointer_move_local(|s: &mut CapsuleState, _, tx| s.pointer_moved(tx))
         .transition(
             Transition::offset(0.0, -LIST_DROP)
                 .combined(Transition::opacity())

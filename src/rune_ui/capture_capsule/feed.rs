@@ -240,7 +240,14 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
         dests
             .iter()
             .map(|dest| {
-                Dest::new(dest.name.clone(), dest.why.clone()).session(dest.session.clone())
+                let folder = dest
+                    .directory
+                    .as_deref()
+                    .and_then(|directory| directory.file_name())
+                    .map(|name| name.to_string_lossy().into_owned());
+                Dest::new(dest.name.clone(), dest.why.clone())
+                    .session(dest.session.clone())
+                    .folder(folder)
             })
             .collect()
     };
@@ -793,6 +800,7 @@ mod tests {
             session: format!("ses_{name}"),
             name: name.into(),
             why: why.into(),
+            directory: None,
         }
     }
 
