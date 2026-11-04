@@ -45,13 +45,25 @@ pub(super) fn order(ui: &Ui) -> Vec<Pane> {
     main_panes(ui)
 }
 
-/// A sidebar item that isn't a pane: Labs, or the playground.
-fn nav_row(p: Paint, key: &'static str, icon: &'static Icon, label: &'static str, on: bool) -> El {
+/// A sidebar item that isn't a pane: Labs, or the playground. Its slot
+/// takes presses in the gaps around it too; assistive technology sees the
+/// item alone, selected while `on`.
+fn nav_row(
+    p: Paint,
+    key: &'static str,
+    icon: &'static Icon,
+    label: &'static str,
+    on: bool,
+    press: impl Fn(&mut Ui, &mut Tx) + 'static,
+) -> El {
     let c = &p.k.c;
+    let press = std::rc::Rc::new(press);
+    let in_slot = press.clone();
     let mut item = row()
         .key(key)
-        .role("button")
+        .role("listitem")
         .label(label)
+        .focus_selected(on)
         .h(NAV_ROW_HEIGHT)
         .px(6.0)
         .gap(8.0)
@@ -59,38 +71,55 @@ fn nav_row(p: Paint, key: &'static str, icon: &'static Icon, label: &'static str
         .radius(p.k.radius.sm)
         .hover(c.hover)
         .press(c.pressed)
-        .child(rune::icon(icon, 16.0).key("icon").color(if on {
-            c.icon_base
-        } else {
-            c.icon_muted
-        }))
-        .child(text(label).key("label").font(p.k.ty.ui).color(if on {
-            c.text_base
-        } else {
-            c.text_muted
-        }));
+        .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| press(ui, tx))
+        .child(
+            rune::icon(icon, 16.0)
+                .key("icon")
+                .color(if on { c.icon_base } else { c.icon_muted })
+                .a11y_hidden(),
+        )
+        .child(
+            text(label)
+                .key("label")
+                .font(p.k.ty.ui)
+                .color(if on { c.text_base } else { c.text_muted })
+                .a11y_hidden(),
+        );
     if on {
         item = item.fill(c.layer_02);
     }
     row()
         .key(format!("{key}-slot"))
+        .role("none")
         .pt(NAV_ROW_GAP / 2.0)
         .pb(NAV_ROW_GAP / 2.0)
+        .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| in_slot(ui, tx))
         .child(item.grow(1.0))
 }
 
 /// The Playground item while Labs › Playground is on: it opens it.
 pub(super) fn playground_nav(ui: &Ui, p: Paint) -> Option<El> {
     ui.settings.labs.playground.then(|| {
-        nav_row(p, "nav-playground", &SPARKLES, "Playground", false)
-            .on_press_tx(|_: &mut Ui, tx: &mut Tx| tx.open_playground())
+        nav_row(
+            p,
+            "nav-playground",
+            &SPARKLES,
+            "Playground",
+            false,
+            |_: &mut Ui, tx: &mut Tx| tx.open_playground(),
+        )
     })
 }
 
 /// The Labs item: opens the Labs page, or goes back to General.
 pub(super) fn nav(ui: &Ui, p: Paint) -> El {
     let on = ui.labs_open;
-    nav_row(p, "nav-labs", &LABS_ICON, tr("Labs"), on).on_press_tx(
+    nav_row(
+        p,
+        "nav-labs",
+        &LABS_ICON,
+        tr("Labs"),
+        on,
         move |ui: &mut Ui, tx: &mut Tx| {
             if on {
                 ui.select_pane(Pane::General, tx);

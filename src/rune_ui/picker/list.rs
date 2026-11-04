@@ -113,9 +113,11 @@ fn group(
     entries: &[&Entry],
     language: &str,
 ) -> El {
-    let mut group = col().key(key.to_owned());
+    let mut group = col().key(key.to_owned()).role("list");
     if !heading.is_empty() {
-        group = group.child(group_label(p, "heading", heading, first).px(0.0));
+        group = group
+            .label(heading)
+            .child(group_label(p, "heading", heading, first).px(0.0));
     }
     for (index, entry) in entries.iter().enumerate() {
         if index > 0 {
@@ -123,10 +125,12 @@ fn group(
                 el().key(format!("rule{index}"))
                     .h(p.hair)
                     .w_full()
-                    .fill(p.k.c.border_weak),
+                    .fill(p.k.c.border_weak)
+                    .a11y_hidden(),
             );
         }
-        group = group.child(model_row(ui, p, entry, language));
+        group = group
+            .child(model_row(ui, p, entry, language).position_in_set(index + 1, entries.len()));
     }
     group
 }
@@ -218,11 +222,13 @@ fn facts_line(entry: &Entry, language: &str) -> String {
 
 fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
     let def = entry.def;
+    // The row is named by the model; its other lines stay readable inside.
     let mut title = row().key("title").gap(8.0).center_y().child(
         text(def.name)
             .key("name")
             .font(p.k.ty.ui_medium)
-            .color(p.text()),
+            .color(p.text())
+            .a11y_hidden(),
     );
     if let Some((role, first)) = facts::list_role(entry) {
         title = title.child(
@@ -319,6 +325,8 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
 
     row()
         .key(format!("model-{}", def.id.as_str()))
+        .role("listitem")
+        .label(def.name)
         .py(12.0)
         .gap(16.0)
         .center_y()

@@ -733,9 +733,11 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             Some(tr("Record a call to see its notes and transcript here.")),
         )
     } else {
-        let mut list = col().key("meetings-list");
+        let mut list = col().key("meetings-list").label(tr("Meetings"));
         let mut day: Option<&str> = None;
-        for (index, meeting) in pane.visible().into_iter().enumerate() {
+        let visible = pane.visible();
+        let count = visible.len();
+        for (index, meeting) in visible.into_iter().enumerate() {
             if day != Some(meeting.day.as_str()) {
                 list = list.child(ld::group(
                     p,
@@ -748,22 +750,25 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             let (meta, meta_ink) = row_meta(pane, meeting, p);
             let completed = meeting.status == Status::Complete && !meeting.turns().is_empty();
             let id = meeting.id.clone();
-            list = list.child(ld::item(
-                p,
-                Item {
-                    key: format!("meeting-{}", meeting.id),
-                    title: meeting.title.clone(),
-                    meta,
-                    meta_ink,
-                    time: meeting.clock.clone(),
-                    hover: completed
-                        .then(|| copy_action(p, pane, meeting, "row"))
-                        .into_iter()
-                        .collect(),
-                    selected: pane.selected.as_deref() == Some(meeting.id.as_str()),
-                },
-                move |ui: &mut Ui| ui.meetings.select(id.clone()),
-            ));
+            list = list.child(
+                ld::item(
+                    p,
+                    Item {
+                        key: format!("meeting-{}", meeting.id),
+                        title: meeting.title.clone(),
+                        meta,
+                        meta_ink,
+                        time: meeting.clock.clone(),
+                        hover: completed
+                            .then(|| copy_action(p, pane, meeting, "row"))
+                            .into_iter()
+                            .collect(),
+                        selected: pane.selected.as_deref() == Some(meeting.id.as_str()),
+                    },
+                    move |ui: &mut Ui| ui.meetings.select(id.clone()),
+                )
+                .position_in_set(index + 1, count),
+            );
         }
         let detail = match pane.selected.as_deref().and_then(|id| pane.meeting(id)) {
             Some(meeting) => detail(ui, p, meeting, layer),
@@ -872,6 +877,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
             .center_y()
             .child(
                 TextInput::new(&pane.rename)
+                    .label(tr("Name"))
                     .width(Some(220.0))
                     .on_edit(|ui: &mut Ui| &mut ui.meetings.rename)
                     .on_submit(|ui: &mut Ui, _| finish_rename(ui))

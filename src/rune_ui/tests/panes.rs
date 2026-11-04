@@ -523,7 +523,7 @@ fn the_microphone_level_follows_the_voice() {
 #[test]
 fn the_shortcut_mode_row_names_the_choice() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
-    let name = |rt: &Runtime<Ui>| element(rt, "shortcut-mode-control").label.clone();
+    let name = |rt: &Runtime<Ui>| a11y_value(rt, "shortcut-mode-control");
     assert_eq!(name(&rt).as_deref(), Some("Hold or double-tap"));
     rt.state.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
     refresh(&mut rt);

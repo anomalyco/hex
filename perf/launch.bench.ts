@@ -7,9 +7,9 @@ const api = { match: "local API started" }
 export default bench({
   targets: {
     // Needs an unlocked session: it ends on the window's first painted frame.
-    window: native("hex", { bridge: false }),
+    window: native("hex"),
     // A login launch with no window. Runs on a locked session too.
-    tray: native("hex", { args: ["--hidden"], window: false, bridge: false }),
+    tray: native("hex", { args: ["--hidden"], window: false }),
   },
   cases: {
     "cold-launch": {

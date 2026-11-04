@@ -430,6 +430,12 @@ substitute for source inspection or a second roadmap.
   `rune_ui/linux_host.rs`, `windows_host.rs`, and `macos_host.rs` connect it to
   each OS's host. Keep shared UI in the pane modules and only OS behavior in
   the hosts.
+- `rune_ui/accessibility_tests`: the window's accessibility tree, which Rune
+  builds with AccessKit for screen readers, Voice Control, and strobe's
+  benches (`docs/features/accessibility.md`). Rows, choices, lists, and
+  icon-only buttons get their names, values, states, and places in Hex's
+  shared pieces (`controls`, `lists`, `list_detail`, `sidebar`); names go
+  through `tr`. Every control in every scene must have a name.
 - `desktop/opencode_catalog`: the OpenCode model catalog as the window shows it:
   loading off the UI thread, the missing/failing notice, model names, search,
   and thinking variants.
@@ -1432,7 +1438,11 @@ through `grep | head`; failures are summarized at the end.
 
 Benchmark with strobe (`docs/perf.md`): `strobe.json` builds `--release`
 with `CARGO_PROFILE_RELEASE_*` env for line tables in `hex.pdb` (no profile
-or feature, so any commit builds), and `perf/*.bench.ts` holds the cases. A
+or feature, so any commit builds), and `perf/*.bench.ts` holds the cases.
+strobe drives the window through its accessibility tree (UI Automation) and
+posted window input, with no bridge or build feature: selectors are element
+keys, so keep the keys benches use stable
+(`docs/features/accessibility.md`). A
 benchmarked copy runs with its own
 `HEX_APPLICATION_SUPPORT_DIR` (a root other than the default also gets its
 own Windows single-instance event), `HEX_DISABLE_UPDATES=1` (no update

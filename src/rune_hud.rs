@@ -24,9 +24,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rune::compose::{Compositor, Frame};
-use rune::{Cx, El, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
+use rune::{Cx, El, LiveRegion, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
 
 use crate::app_settings::IndicatorPosition;
+use crate::desktop::i18n::tr;
 use crate::dictation::indicator::{DictationIndicatorEvent, DotFrame, IndicatorModel};
 use crate::rune_hud::dot_scope::MAX_DOTS;
 #[cfg(not(target_os = "macos"))]
@@ -463,8 +464,18 @@ fn keeps_primary_display(desktops: Option<&str>, wayland: bool) -> bool {
         })
 }
 
-fn view(_: &Hud, _: &mut Cx<Hud>) -> El {
-    el().key("hud").w_full().h_full()
+/// The HUD's one element, which the compositor draws over. Screen readers
+/// read it as a status that announces Recording and Transcribing as they
+/// begin; it takes no input, as the overlay is click-through.
+fn view(hud: &Hud, _: &mut Cx<Hud>) -> El {
+    let status = hud.model.status().map_or("", tr);
+    el().key("hud")
+        .w_full()
+        .h_full()
+        .role("status")
+        .label(status)
+        .description(tr("Dictation"))
+        .live_region(LiveRegion::Polite)
 }
 
 /// `DotUniforms` in `rune_hud.wgsl`.

@@ -13,7 +13,7 @@ use rune_kit::{Placement, Select, SelectAppearance};
 use super::controls::{
     self, ButtonKind, CardRow, DEVICE_SELECT_WIDTH, KeySize, METRICS, Paint, button, card, folding,
     icon_button, icon_described_row, icon_row, icon_toggle_row, key_tray, keycap, note, page,
-    pressable_row, row_switch, section,
+    pressable_row, row_switch, section, value_button, value_font,
 };
 use super::icons::*;
 use super::lists::{PermissionControl, permission_control, slider};
@@ -116,6 +116,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let picker_button = value_button(
         p,
         "transcription-control",
+        tr("Speech model"),
         model.name,
         &rune_theme_opencode::icons::CHEVRON_RIGHT,
         super::picker::open,
@@ -193,6 +194,7 @@ fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             value_button(
                 p,
                 "vocabulary-control",
+                tr("Vocabulary"),
                 &super::vocabulary::summary(ui),
                 &rune_theme_opencode::icons::CHEVRON_RIGHT,
                 super::vocabulary::open,
@@ -467,6 +469,7 @@ fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
             ui,
             p,
             "transcription-language",
+            tr("Language"),
             labels,
             selected,
             |ui, index| {
@@ -575,10 +578,13 @@ fn mic_value(ui: &Ui, p: Paint, microphone: &str, detail: Option<&str>, layer: &
         Some(detail) => format!("{microphone}, {detail}"),
         None => microphone.to_owned(),
     };
+    // Read as the microphone choice with the input in use as its value. The
+    // level bars stay out of the tree: they change many times a second.
     let trigger = row()
         .key("microphone-control")
         .role("button")
-        .label(label)
+        .label(tr("Microphone"))
+        .a11y_value(label)
         .focusable(true)
         .focus_ring(2.0, 0.0, c.border_focus)
         .h(24.0)
@@ -590,18 +596,20 @@ fn mic_value(ui: &Ui, p: Paint, microphone: &str, detail: Option<&str>, layer: &
         .hover(c.hover)
         .press(c.pressed)
         .on_press(|ui: &mut Ui| s::toggle_menu(ui, Menu::Microphone))
-        .child(ui.mic_level.bars(p))
+        .child(ui.mic_level.bars(p).a11y_hidden())
         .child(
             text(detail.unwrap_or(microphone).to_string())
                 .key("value")
                 .font(value_font(p))
                 .color(c.text_base)
-                .truncate(),
+                .truncate()
+                .a11y_hidden(),
         )
         .child(
             rune::icon(p.k.glyph.chevron_down, 16.0)
                 .key("chevron")
-                .color(c.icon_muted),
+                .color(c.icon_muted)
+                .a11y_hidden(),
         );
     let mut menu = rune_kit::Menu::new("microphone-menu")
         .trigger(trigger)
@@ -819,7 +827,7 @@ fn launch_at_login_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
         status,
         Some(LoginItemStatus::Enabled | LoginItemStatus::Disabled)
     ) {
-        row = pressable_row(row).on_press(|ui: &mut Ui| {
+        row = pressable_row(row, ui.platform.login_item_on()).on_press(|ui: &mut Ui| {
             let enabled = !ui.platform.login_item_on();
             ui.ask(PlatformRequest::SetLaunchAtLogin(enabled));
         });
@@ -1103,6 +1111,7 @@ fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             value_button(
                 p,
                 "sound-set-control",
+                tr("Sounds"),
                 tr(settings.sound_theme.name()),
                 &rune_theme_opencode::icons::CHEVRON_RIGHT,
                 super::sound_sets::open,
@@ -1261,6 +1270,7 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
         ui,
         p,
         "speech-engine",
+        tr("Speech engine"),
         vec![tr("Auto"), tr("GPU"), tr("CPU")],
         match device {
             TranscriptionDevice::Auto => 0,
@@ -1326,16 +1336,19 @@ pub(super) fn pick_row(
     pick: fn(&mut Ui, usize),
     layer: &mut Vec<El>,
 ) -> CardRow {
-    let control = pick_select(ui, p, key, labels, selected, pick, layer);
+    let control = pick_select(ui, p, key, title, labels, selected, pick, layer);
     icon_row(p, key, glyph, title, None, control).into()
 }
 
 /// The kit's borderless select, keyed `{key}-control`: the value and a
-/// chevron, no field.
+/// chevron, no field. Assistive technology reads it as `name`, with the
+/// chosen label as its value.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn pick_select(
     ui: &Ui,
     p: Paint,
     key: &'static str,
+    name: &str,
     labels: Vec<&'static str>,
     selected: usize,
     pick: fn(&mut Ui, usize),
@@ -1346,6 +1359,7 @@ pub(super) fn pick_select(
         p,
         Menu::Pick(key),
         format!("{key}-control"),
+        name,
         labels,
         selected,
         pick,
@@ -1360,6 +1374,7 @@ pub(super) fn quiet_select(
     p: Paint,
     menu: Menu,
     key: String,
+    name: &str,
     labels: Vec<&'static str>,
     selected: usize,
     pick: impl Fn(&mut Ui, usize) + 'static,
@@ -1367,6 +1382,7 @@ pub(super) fn quiet_select(
 ) -> El {
     let choices = labels.clone();
     let pick = std::rc::Rc::new(pick);
+    let current = labels.get(selected).copied().unwrap_or_default();
     Select::new(key, &labels)
         .appearance(SelectAppearance::Inline)
         .current(labels.get(selected).copied())
@@ -1381,46 +1397,9 @@ pub(super) fn quiet_select(
             }
         })
         .build(p.k, layer)
+        .label(name)
+        .a11y_value(current)
         .mr(-8.0)
-}
-
-fn value_font(p: Paint) -> rune::TextStyle {
-    p.k.ty.ui_medium.lh(16.0)
-}
-
-/// A value that opens something, drawn like the kit's borderless select.
-pub(super) fn value_button(
-    p: Paint,
-    key: &str,
-    label: &str,
-    glyph: &'static rune::Icon,
-    press: impl Fn(&mut Ui) + 'static,
-) -> El {
-    let c = &p.k.c;
-    row()
-        .key(key)
-        .role("button")
-        .label(label)
-        .focusable(true)
-        .focus_ring(2.0, 0.0, c.border_focus)
-        .h(24.0)
-        .pl(8.0)
-        .pr(4.0)
-        .mr(-9.0)
-        .gap(4.0)
-        .center_y()
-        .radius(p.k.radius.sm)
-        .hover(c.hover)
-        .press(c.pressed)
-        .on_press(press)
-        .child(
-            text(label.to_string())
-                .key("value")
-                .font(value_font(p))
-                .color(c.text_base)
-                .truncate(),
-        )
-        .child(rune::icon(glyph, 16.0).key("chevron").color(c.icon_muted))
 }
 
 /// A shortcut's keys, pressed to record a new one; while recording, the

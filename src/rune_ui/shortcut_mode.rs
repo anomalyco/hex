@@ -8,9 +8,9 @@
 use rune::El;
 
 use super::Ui;
+use super::controls::value_button;
 use super::controls::{Paint, copy_row};
 use super::explainer::{self, Script};
-use super::general::value_button;
 use super::icons::HAND;
 use crate::app_settings::{AppSettings, HotkeyKey};
 use crate::desktop::i18n::{tr, tr_fill};
@@ -126,6 +126,7 @@ pub(super) fn row(ui: &Ui, p: Paint) -> El {
         value_button(
             p,
             "shortcut-mode-control",
+            tr("Shortcut mode"),
             Trigger::of(&ui.settings).name(),
             &rune_theme_opencode::icons::CHEVRON_RIGHT,
             explainer::open,

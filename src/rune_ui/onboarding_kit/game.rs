@@ -800,6 +800,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
             keep: Rc::new(live::on_ui(keep)),
         };
         let field = TextInput::new(&s.practice)
+            .label(tr("Your answer"))
             .on_edit(live::practice)
             .on_change(live::practice_changed)
             .on_submit(|ui: &mut Ui, _: &mut Tx| live::on_ui(answer)(ui));
@@ -816,6 +817,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
             keep: Rc::new(keep),
         };
         let field = TextInput::new(&s.practice)
+            .label(tr("Your answer"))
             .on_edit(|s: &mut Onboard| &mut s.practice)
             .on_change(Onboard::on_practice_change)
             .on_submit(|s: &mut Onboard, _: &mut Tx| answer(s));

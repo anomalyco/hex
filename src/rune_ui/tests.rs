@@ -1,3 +1,4 @@
+use super::accessibility_tests::a11y_value;
 use super::settings::{desktop_shortcut, recorded_binding, validate};
 use super::*;
 use crate::transcription::models::TranscriptionSelection;
@@ -2261,14 +2262,27 @@ fn the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one() {
     assert_eq!(rt.state.found.picked, Some(1));
 }
 
+/// The microphone field's value. An open menu is modal, so the field behind
+/// it leaves the accessibility tree: it is read with the menu closed.
+fn microphone_value(rt: &mut Runtime<Ui>) -> Option<String> {
+    let open = rt.state.open.take();
+    rt.invalidate();
+    settle(rt);
+    let value = a11y_value(rt, "microphone-control");
+    rt.state.open = open;
+    rt.invalidate();
+    settle(rt);
+    value
+}
+
 #[test]
 fn the_microphone_field_names_the_input_in_use() {
-    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control").label;
-    let rt = runtime("mac-settings", true, PANE_SIZE);
-    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
+    let field = microphone_value;
+    let mut rt = runtime("mac-settings", true, TALL_SIZE);
+    assert_eq!(field(&mut rt).as_deref(), Some("System default, Kit Pods"));
 
-    let rt = runtime("mac-microphone-missing", true, PANE_SIZE);
-    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
+    let mut rt = runtime("mac-microphone-missing", true, TALL_SIZE);
+    assert_eq!(field(&mut rt).as_deref(), Some("System default, Kit Pods"));
     let texts = texts(&rt);
     assert!(texts.contains(&"not connected".to_owned()), "{texts:?}");
     assert!(texts.contains(&"Shure MV7 isn't connected; using your Mac's input".to_owned()));
@@ -2277,10 +2291,10 @@ fn the_microphone_field_names_the_input_in_use() {
 #[test]
 fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
     let note = "MacBook Pro Microphone is off while the lid is closed, so Hex listens to Studio Display Microphone";
-    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control").label;
-    let mut rt = runtime("mac-microphone-lid-closed", true, PANE_SIZE);
+    let field = microphone_value;
+    let mut rt = runtime("mac-microphone-lid-closed", true, TALL_SIZE);
     assert_eq!(
-        field(&rt).as_deref(),
+        field(&mut rt).as_deref(),
         Some("System default, Studio Display Microphone")
     );
     let shown = texts(&rt);
@@ -2295,7 +2309,7 @@ fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
     rt.invalidate();
     settle(&mut rt);
     assert_eq!(
-        field(&rt).as_deref(),
+        field(&mut rt).as_deref(),
         Some("System default, Studio Display Microphone")
     );
     assert!(texts(&rt).contains(&note.to_owned()));
@@ -2306,7 +2320,7 @@ fn a_passed_over_bluetooth_default_names_the_input_in_use() {
     let note = "Kit Pods is Bluetooth, so Hex listens to MacBook Pro Microphone";
     let mut rt = runtime("mac-microphone-bluetooth", true, TALL_SIZE);
     assert_eq!(
-        element(&rt, "microphone-control").label.as_deref(),
+        a11y_value(&rt, "microphone-control").as_deref(),
         Some("System default, MacBook Pro Microphone")
     );
     assert!(texts(&rt).contains(&note.to_owned()), "{:?}", texts(&rt));

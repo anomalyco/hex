@@ -364,6 +364,7 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
             select(
                 p,
                 "capture-retention-menu",
+                tr("Keep"),
                 &retention_label(policy),
                 ui.open == Some(Menu::CaptureRetention),
                 choices,

@@ -176,6 +176,31 @@ pub(super) fn title_bar(element: El) -> El {
     }
 }
 
+/// The title bar of the content panel: the title, a view switch that stays
+/// beside it, and the pane's actions on the right. The title is the pane's
+/// level 1 heading.
+pub(super) fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Vec<El>) -> El {
+    title_bar(row())
+        .key("pane-header")
+        .h(52.0)
+        .px(METRICS.gutter)
+        .gap(8.0)
+        .center_y()
+        .child(
+            text(title)
+                .key("pane-title")
+                .role("heading")
+                .level(1)
+                .font(p.k.ty.body_medium)
+                .color(p.text())
+                .shrink()
+                .truncate(),
+        )
+        .children(switch.map(|switch| switch.ml(8.0)))
+        .child(el().key("header-spacer").grow(1.0))
+        .children(actions)
+}
+
 pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
     let mut nav = lists::source_list(col().key("nav"));
     for pane in labs::main_panes(ui) {
@@ -400,6 +425,8 @@ fn version_label() -> String {
 fn nav_slot(p: Paint, pane: Pane, on: bool, above: f32, below: f32) -> El {
     col()
         .key(format!("{}-slot", pane.key()))
+        // Assistive technology sees the item alone.
+        .role("none")
         .pt(above)
         .pb(below)
         .hover_group()
@@ -420,9 +447,10 @@ fn select_on_down(ui: &mut Ui, d: &mut rune::Drag, tx: &mut Tx, pane: Pane) {
 
 fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
     let c = &p.k.c;
+    // A row of the navigation list, selected while its pane shows.
     let mut item = row()
         .key(pane.key())
-        .role("button")
+        .role("listitem")
         .label(pane.title())
         .h(NAV_ROW_HEIGHT)
         .px(6.0)
@@ -440,19 +468,22 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
                 .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
                 .radius(p.k.radius.sm)
                 .fill(c.hover)
-                .group_opacity(0.0, 1.0),
+                .group_opacity(0.0, 1.0)
+                .a11y_hidden(),
         )
-        .child(icon(pane.icon(), 16.0).key("icon").color(if on {
-            c.icon_base
-        } else {
-            c.icon_muted
-        }))
+        .child(
+            icon(pane.icon(), 16.0)
+                .key("icon")
+                .color(if on { c.icon_base } else { c.icon_muted })
+                .a11y_hidden(),
+        )
         .child(
             text(pane.title())
                 .key("label")
                 .font(p.k.ty.ui)
                 .color(if on { c.text_base } else { c.text_muted })
-                .truncate(),
+                .truncate()
+                .a11y_hidden(),
         );
     if on {
         item = item.fill(c.layer_02);
@@ -483,6 +514,7 @@ fn quit_item(p: Paint) -> El {
                 .key("label")
                 .font(p.k.ty.ui)
                 .color(c.text_muted)
-                .truncate(),
+                .truncate()
+                .a11y_hidden(),
         )
 }

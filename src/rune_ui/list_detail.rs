@@ -74,6 +74,8 @@ pub(super) fn notices(children: Vec<El>) -> El {
 pub(super) fn group(p: Paint, key: &str, label: &str, first: bool) -> El {
     text(label)
         .key(key)
+        .role("heading")
+        .level(3)
         .font(p.k.ty.small_medium)
         .color(p.faint())
         .px(METRICS.row_px)
@@ -100,11 +102,19 @@ pub(super) struct Item {
 /// animates.
 pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> El {
     let c = &p.k.c;
+    // A row of the list: its title names it and its meta and time describe
+    // it, so their texts stay out of the tree.
+    let described = [item.meta.as_str(), item.time.as_str()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
     let time = text(item.time)
         .key("time")
         .font(p.k.ty.small)
         .color(p.faint())
-        .align(Align::End);
+        .align(Align::End)
+        .a11y_hidden();
     let end = if item.hover.is_empty() {
         time
     } else {
@@ -120,8 +130,9 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
     };
     let mut row_el = col()
         .key(item.key)
-        .role("button")
+        .role("listitem")
         .label(item.title.clone())
+        .description(described)
         .px(METRICS.row_px)
         .py(9.0)
         .gap(2.0)
@@ -140,7 +151,8 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
                         .color(p.text())
                         .grow(1.0)
                         .shrink()
-                        .truncate(),
+                        .truncate()
+                        .a11y_hidden(),
                 )
                 .child(end),
         )
@@ -149,7 +161,8 @@ pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> 
                 .key("meta")
                 .font(p.k.ty.small)
                 .color(item.meta_ink.unwrap_or(p.muted()))
-                .truncate(),
+                .truncate()
+                .a11y_hidden(),
         );
     if item.selected {
         row_el = row_el.fill(c.layer_02);
@@ -188,6 +201,8 @@ pub(super) fn card_header(title: El, meta: Vec<El>, actions: Vec<El>) -> El {
 pub(super) fn card_title(p: Paint, title: &str) -> El {
     text(title)
         .key("detail-title")
+        .role("heading")
+        .level(2)
         .font(p.k.ty.body_medium)
         .color(p.text())
         .wrap()
@@ -228,7 +243,8 @@ pub(super) fn empty_state(
                 .radius(p.k.radius.lg)
                 .fill(p.k.c.layer_01)
                 .center()
-                .child(icon(glyph, 20.0).key("icon").color(p.k.c.icon_faint)),
+                .child(icon(glyph, 20.0).key("icon").color(p.k.c.icon_faint))
+                .a11y_hidden(),
         )
         .child(
             text(title)
@@ -255,7 +271,8 @@ pub(super) fn facts(p: Paint, facts: Vec<(&str, String)>) -> El {
             list = list.child(
                 el().key(format!("sep{index}"))
                     .h(p.hair)
-                    .fill(p.k.c.border_weak),
+                    .fill(p.k.c.border_weak)
+                    .a11y_hidden(),
             );
         }
         list = list.child(

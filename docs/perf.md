@@ -8,8 +8,11 @@ launches each in a fresh private home, and compares them in alternating runs.
 strobe bench perf/idle.bench.ts --base origin/dev --head .
 strobe bench perf/launch.bench.ts --base origin/dev --head .
 strobe bench perf/idle.bench.ts --check   # one short, untimed pass
-strobe report experiment <exp_…> --format pr   # tables for the PR body
+strobe bench perf/idle.bench.ts --filter "window-closed*" --base origin/dev --head .
+strobe report experiment <exp_…> --format pr   # tables for the PR body, on stdout
 ```
+
+`--filter` takes case names, comma lists, and globs.
 
 Run timed benches on a quiet machine. Close other apps and keep the session
 unlocked.
@@ -25,9 +28,10 @@ unlocked.
   It needs no profile or feature in `Cargo.toml`, so every commit builds the
   same way: a `--base` from before the benches existed, and `--bisect` across
   history. Such a build is never shipped.
-- On a machine whose default Rust toolchain is not MSVC, set
-  `RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc` before you run strobe.
-  Windows builds also need the Vulkan SDK (`docs/windows.md`).
+- On Windows, `build.windows` sets `RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-msvc`,
+  so a machine whose default Rust toolchain is GNU still builds with MSVC
+  (GNU fails with "dlltool not found"). Windows builds also need the Vulkan
+  SDK (`docs/windows.md`).
 
 ## Isolation
 
@@ -82,6 +86,10 @@ The copy loads no model, except in the listening and dictation cases below.
 | `perf/launch.bench.ts` | `hidden-launch` | `launch.ready` | Process start to `local API started`, tray only | runs |
 | `perf/listening.bench.ts` | `listening-at-rest` | `cpu.work` | 8 s listening at rest, microphone released and open | runs |
 | `perf/dictation.bench.ts` | `recording` | `cpu.wakes` | 6 s of one dictation recording a fixture, microphone open and released | runs |
+| `perf/interaction.bench.ts` | `switch-panes` | `ui.cpu` | General → History → Output → General, each click until the next pane's content is in the accessibility tree | waits for an unlock |
+| `perf/interaction.bench.ts` | `history-scroll` | `ui.cpu` | History's list scrolled down 6,000 points and back at 3,000 points a second | waits for an unlock |
+| `perf/interaction.bench.ts` | `history-search` | `ui.cpu` | "cache key" typed into History's search, a key every 120 ms; each key searches 10,000 entries | waits for an unlock |
+| `perf/interaction.bench.ts` | `model-picker` | `ui.cpu` | The speech model picker opened, its list of every model, back to the comparison, and closed | waits for an unlock |
 
 Secondary metrics are thread wakeups (`cpu.wakes`), GPU use, and private
 memory. `strobe query <rec> threads` names the threads; Hex names every
@@ -129,3 +137,35 @@ while a bench runs on a machine in use reaches nothing.
 Only bench builds that have `HEX_AUDIO_FIXTURE`. An older build ignores it
 and opens the real microphone; setup then refuses the block, but only
 after the microphone was open.
+
+## Interaction cases
+
+`perf/interaction.bench.ts` uses the Settings window the way a person does.
+strobe drives it from outside, through what Windows gives assistive
+technology: it finds each control in Hex's accessibility tree (UI
+Automation, which Rune builds with AccessKit) and posts mouse and key input to
+the window. Hex needs no build feature, flag, or bridge for this; a release
+build answers the same way for a screen reader.
+
+- Selectors are element keys, which the tree exposes as UI Automation
+  `AutomationId`s: `nav-history`, `history-search`, `transcription-control`.
+  A key path (`model0/choose-model`) names a key inside a keyed ancestor.
+  `role=<role>` and `text=<name>` also work. Keep the keys these cases use
+  stable; `docs/features/accessibility.md` lists them.
+- Each click waits (`until`) for a key that only the next view has, so a run
+  ends when the change is in the tree, not after a fixed wait.
+- `interaction.*` counts an input only when the accessibility tree changed
+  within a second of it, so the change shows to strobe as well as on screen.
+- The home holds a full History: 10,000 dictations, Hex's cap, from
+  `perf/seeds/history.ts` (written once into `perf/seeds/.generated/history`).
+  The list shows the newest 200, as search results do.
+- Choosing a model is not a case: it downloads or loads a model, which costs
+  the network and the model, not the window. `model-picker` measures the
+  picker's own views.
+- They need an unlocked session: Windows hit-tests every point to the lock
+  screen while it is locked, so strobe refuses pointer input then.
+
+```sh
+strobe bench perf/interaction.bench.ts --base origin/dev --head .
+strobe bench perf/interaction.bench.ts --filter "history-*" --check   # untimed smoke run
+```

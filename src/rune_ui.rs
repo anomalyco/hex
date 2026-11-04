@@ -82,7 +82,7 @@ use host::{Backend, Request, ShortcutTarget};
 use onboarding_kit::live::Page;
 use scenes::{SCENES, Scene, fixture, mac_fixture, portal_fixture};
 use settings::Capture;
-use sidebar::{BuildKind, Pane, sidebar, title_bar};
+use sidebar::{BuildKind, Pane, pane_header, sidebar};
 
 /// How long typing pauses before a text field's edit is saved.
 const DRAFT_DELAY: Duration = Duration::from_millis(250);
@@ -1370,6 +1370,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     };
     let panel = col()
         .key("panel")
+        .role("main")
         .grow(1.0)
         .shrink()
         .mt(8.0)
@@ -1398,9 +1399,11 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
             actions,
         ))
         .child(body);
+    // The OS window is the accessibility tree's root; this box adds nothing
+    // to it.
     let window = row()
         .key("window")
-        .role("window")
+        .role("none")
         .fill(p.k.c.bg_deep)
         .hover_motion_within(Anim::INSTANT, Anim::INSTANT)
         .child(sidebar(ui, p))
@@ -1441,28 +1444,6 @@ fn window_focused(ui: &mut Ui, focused: bool, tx: &mut Tx) {
     }
 }
 
-/// The title bar of the content panel: the title, a view switch that stays
-/// beside it, and the pane's actions on the right.
-fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Vec<El>) -> El {
-    title_bar(row())
-        .key("pane-header")
-        .h(52.0)
-        .px(METRICS.gutter)
-        .gap(8.0)
-        .center_y()
-        .child(
-            text(title)
-                .key("pane-title")
-                .font(p.k.ty.body_medium)
-                .color(p.text())
-                .shrink()
-                .truncate(),
-        )
-        .children(switch.map(|switch| switch.ml(8.0)))
-        .child(el().key("header-spacer").grow(1.0))
-        .children(actions)
-}
-
 /// How far a scroll body's top and bottom edges fade out.
 const SCROLL_FADE: (f32, f32) = (4.0, 24.0);
 
@@ -1497,6 +1478,9 @@ mod tests;
 
 #[cfg(test)]
 mod offscreen;
+
+#[cfg(test)]
+mod accessibility_tests;
 
 #[cfg(test)]
 mod snap_isolation;
