@@ -296,7 +296,7 @@ pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
 /// Always record / Never offer choice; behind Advanced the indicator,
 /// folder, Apple Intelligence notes, and the granted permission.
 pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
-    use super::general::{advanced_open, advanced_toggle};
+    use super::general::advanced_toggle;
     let meetings = &ui.settings.meetings;
     let mut rows = vec![meetings_toggle(ui, p)];
     let mut more = Vec::new();
@@ -496,7 +496,7 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 /// Whether Meetings › Settings shows its Advanced card: the fold is open, or
 /// a failed folder change opened it to show where.
 fn meetings_advanced_shown(ui: &Ui) -> bool {
-    advanced_open(ui, Pane::Meetings) || ui.platform.meeting_folder_error.is_some()
+    super::general::advanced_open(ui, Pane::Meetings) || ui.platform.meeting_folder_error.is_some()
 }
 
 /// Whether Labs › Choose meeting summary model's picker shows: Meetings ›
