@@ -1249,6 +1249,10 @@ Menu bar and Settings                    // maintenance
 Launch Hex                               // maintain.startup
 ├── Setup incomplete / permissions or model missing -> Open setup or Settings
 ├── Show Dock icon on -> Open Settings
+│   └── Started by Launch at login -> No startup window (#1321)
+│       ├── macOS marks the open-application Apple event as a login-item launch
+│       ├── The activation that comes with that launch doesn't reopen the window (#1298)
+│       └── check: login_item_launch_starts_without_the_window (the decision only); not run on a Mac
 └── Show Dock icon off + usable menu-bar item -> No startup window
     ├── Dictation starts independently of the Settings window
     └── Menu-bar Settings / Finder or Spotlight reopen -> Open or focus the window

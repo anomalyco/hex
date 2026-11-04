@@ -58,10 +58,12 @@ use crate::transcription::preparation::TranscriptionPreparation;
 
 mod activation;
 mod control;
+mod launch;
 mod main_menu;
 pub(crate) mod status_item;
 
 use activation::{observe_activation, reopen_on_activation};
+use launch::{LaunchWindow, launched_as_login_item, observe_launch, take_login_launch_activation};
 use main_menu::install_main_menu;
 
 #[cfg(test)]
@@ -473,13 +475,19 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     let _ = WINDOW.set(window.clone());
     // The status item is created inside the loop; Hex can't run without a
     // way back to its window, so a failed item opens the window there.
-    let open_at_launch = settings_error.is_some()
-        || crate::meeting::watcher::should_open_app_on_launch(
+    // With the Dock icon shown, Hex starts windowless and opens the window
+    // once AppKit says the launch wasn't a login item.
+    let launch_window = if settings_error.is_some() {
+        LaunchWindow::Open
+    } else {
+        LaunchWindow::decide(
             settings.show_dock_icon,
             setup_ready,
             onboarding_completed,
             true,
-        );
+        )
+    };
+    let open_at_launch = launch_window == LaunchWindow::Open;
     if let Some(error) = settings_error {
         window.update(move |ui, _| crate::rune_ui::show_error(ui, error));
     }
@@ -577,6 +585,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     // is in place before the loop runs; the rest of `target` waits below.
     let target = MenuTarget::new(mtm);
     observe_termination(&target);
+    if launch_window == LaunchWindow::OpenUnlessLoginItem {
+        observe_launch(&target);
+    }
     // The status item, HUD, and main menu wait for the window's first frame
     // so it reaches the screen without them; a launch without a window sets
     // them up in the loop's first turn. None of these updates change what the
@@ -1391,12 +1402,24 @@ objc2::define_class!(
             with_window(|window| show(window, Destination::Settings));
         }
 
+        /// Observed only when the Dock icon is shown and setup is done: a
+        /// manual launch opens the window, a login-item launch stays quiet.
+        #[unsafe(method(applicationDidFinishLaunching:))]
+        fn application_did_finish_launching(&self, _notification: Option<&AnyObject>) {
+            let login_item = launched_as_login_item();
+            if LaunchWindow::OpenUnlessLoginItem.opens(login_item) {
+                with_window(bring_forward);
+            } else {
+                tracing::info!("launched as a login item; starting without the window");
+            }
+        }
+
         /// ⌘Tab (or any activation) with the window closed opens it where
         /// it was, as clicking the Dock icon does.
         #[unsafe(method(applicationDidBecomeActive:))]
         fn application_did_become_active(&self, _notification: Option<&AnyObject>) {
             let app = NSApplication::sharedApplication(self.mtm());
-            if reopen_on_activation(
+            if !take_login_launch_activation() && reopen_on_activation(
                 app.activationPolicy() == NSApplicationActivationPolicy::Regular,
                 app.keyWindow().is_some(),
                 window_visible(),
