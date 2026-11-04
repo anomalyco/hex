@@ -612,6 +612,9 @@ struct Recording {
     recorded_through: Option<CaptureInstant>,
     /// How much of the recording precedes the press.
     pre_press: Duration,
+    /// Source samples still to arrive that precede the pre-roll, dropped as
+    /// they come (a press ahead of the newest audio).
+    skip_samples: usize,
     press_lead_ms: Option<i64>,
     max_chunk_gap: Duration,
     input_buffer: Vec<f32>,
@@ -684,6 +687,7 @@ impl Recording {
             source_rate,
             recorded_through: None,
             pre_press: Duration::ZERO,
+            skip_samples: 0,
             press_lead_ms: None,
             max_chunk_gap: Duration::ZERO,
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
@@ -728,7 +732,9 @@ impl Recording {
                 .max_chunk_gap
                 .max(captured_from.duration_since(previous));
         }
-        self.push(samples);
+        let skip = self.skip_samples.min(samples.len());
+        self.skip_samples -= skip;
+        self.push(&samples[skip..]);
         self.track_voice();
         self.recorded_through = Some(captured_through);
     }
@@ -866,6 +872,29 @@ impl DictationCapture {
 
     pub fn start_at(&mut self, occurred_at: CaptureInstant) {
         self.start_from_timeline(occurred_at, PRE_ROLL_DURATION, false)
+    }
+
+    /// Starts a shortcut recording at `pressed_at`, which may lie past the
+    /// newest audio: a microphone that delivers large chunks has not yet
+    /// handed over what it captured before the press (#1309). Exactly the
+    /// pre-roll before the press is kept, however large the chunks; what
+    /// precedes it in audio still to arrive is dropped as it comes.
+    #[cfg(any(test, target_os = "linux"))]
+    pub fn start_at_press(&mut self, pressed_at: CaptureInstant) {
+        let Some(through) = self.ring_captured_through else {
+            return self.start(pressed_at);
+        };
+        let Some(ahead) = pressed_at.checked_duration_since(through) else {
+            return self.start_at(pressed_at);
+        };
+        self.start_with_pre_roll(pressed_at, PRE_ROLL_DURATION.saturating_sub(ahead), false);
+        let skip = samples_for(ahead.saturating_sub(PRE_ROLL_DURATION), self.sample_rate);
+        if let Some(recording) = &mut self.recording {
+            recording.pre_press += ahead.min(PRE_ROLL_DURATION);
+            recording.skip_samples = skip;
+            recording.recorded_through = Some(through);
+            recording.press_lead_ms = Some(signed_ms(through, pressed_at));
+        }
     }
 
     pub fn start_programmatic_at(&mut self, occurred_at: CaptureInstant) {
@@ -1430,6 +1459,84 @@ mod tests {
         };
         assert_eq!(clip.duration_ms(), 1_250);
         assert_eq!(clip.samples.first(), Some(&6.0));
+    }
+
+    /// Ingests `count` chunks of `chunk` length after `from`, chunk `n`
+    /// filled with `first + n`; returns the end of the last.
+    fn ingest_chunks(
+        capture: &mut DictationCapture,
+        from: CaptureInstant,
+        chunk: Duration,
+        first: usize,
+        count: usize,
+    ) -> CaptureInstant {
+        let mut through = from;
+        for index in 0..count {
+            through = through + chunk;
+            let samples = samples_for(chunk, 16_000);
+            capture.ingest(&vec![(first + index) as f32; samples], through);
+        }
+        through
+    }
+
+    #[test]
+    fn a_press_inside_a_large_chunk_keeps_exactly_the_pre_roll() {
+        // 500 ms chunks: the press is 300 ms past the newest audio, so 150 ms
+        // of it is kept and the rest of the pre-roll arrives next.
+        let chunk = Duration::from_millis(500);
+        let mut capture = DictationCapture::new(16_000);
+        let through = ingest_chunks(&mut capture, capture_time(), chunk, 1, 2);
+        let pressed = through + Duration::from_millis(300);
+        capture.start_at_press(pressed);
+        assert_eq!(capture.recorded_from(0), [2.0; 2_400]);
+        let through = ingest_chunks(&mut capture, through, chunk, 3, 2);
+        let Finish::Transcribe(clip) = capture.finish(through) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 450 + 700);
+        assert_eq!(clip.press_samples, 7_200);
+        assert_eq!(clip.samples.iter().filter(|&&s| s == 2.0).count(), 2_400);
+
+        // 1 s chunks: the press is 800 ms past the newest audio, so nothing
+        // buffered is kept and the next chunk loses its first 350 ms.
+        let chunk = Duration::from_secs(1);
+        let mut capture = DictationCapture::new(16_000);
+        let through = ingest_chunks(&mut capture, capture_time(), chunk, 1, 1);
+        let pressed = through + Duration::from_millis(800);
+        capture.start_at_press(pressed);
+        assert!(capture.recorded_from(0).is_empty());
+        ingest_chunks(&mut capture, through, chunk, 2, 2);
+        let Finish::Transcribe(clip) = capture.finish(pressed + Duration::from_secs(1)) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 450 + 1_000);
+        assert_eq!(clip.samples.first(), Some(&2.0));
+        assert_eq!(clip.samples.iter().filter(|&&s| s == 2.0).count(), 10_400);
+    }
+
+    #[test]
+    fn a_press_ahead_of_large_chunks_measures_the_hold_from_the_press() {
+        let chunk = Duration::from_secs(1);
+        let mut tap = DictationCapture::new(16_000);
+        let through = ingest_chunks(&mut tap, capture_time(), chunk, 1, 1);
+        let pressed = through + Duration::from_millis(800);
+        tap.start_at_press(pressed);
+        // The next chunk ends 200 ms after the press: not yet a hold.
+        let through = ingest_chunks(&mut tap, through, chunk, 2, 1);
+        assert!(!tap.become_intentional(through));
+        assert!(matches!(
+            tap.finish(pressed + Duration::from_millis(299)),
+            Finish::Discard
+        ));
+
+        let mut held = DictationCapture::new(16_000);
+        let through = ingest_chunks(&mut held, capture_time(), chunk, 1, 1);
+        held.start_at_press(pressed);
+        // Released before the next chunk arrives, yet held long enough.
+        assert!(held.would_transcribe(pressed + MINIMUM_HOLD_DURATION));
+        let through = ingest_chunks(&mut held, through, chunk, 2, 1);
+        assert!(!held.become_intentional(through));
+        assert!(held.become_intentional(pressed + MINIMUM_HOLD_DURATION));
     }
 
     #[test]

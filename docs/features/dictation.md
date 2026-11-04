@@ -415,6 +415,24 @@ locked. Every ALSA stream Hex opens now carries `application.name` and
 in [linux/input_route.rs](../../src/linux/input_route.rs) (property string
 only; not run against PipeWire or an inhibitor).
 
+**Fixed November 4, 2026 (issue 1309):** on Linux (PipeWire), about a second
+of speech or background audio from before the press was transcribed. The
+press was placed at the end of the newest microphone chunk, and ALSA's default
+period can be most of a second, so the 450 ms pre-roll counted from there.
+Hex now asks for a 20 ms period (falling back to the device default), places
+presses and releases on the stream clock (`StreamClock` in
+[linux/dictation.rs](../../src/linux/dictation.rs)), and keeps exactly the
+pre-roll before the press, dropping earlier audio from chunks still to arrive
+(`DictationCapture::start_at_press`). The hold threshold counts from the
+press, and a replaced or reopened stream starts its clock over; a press
+before its first chunk records from that chunk. Checks:
+`a_press_inside_a_large_chunk_keeps_exactly_the_pre_roll` and
+`a_press_ahead_of_large_chunks_measures_the_hold_from_the_press` in
+[dictation.rs](../../src/dictation.rs),
+`a_press_between_large_chunks_is_placed_on_the_stream_clock` and
+`a_reopened_stream_carries_no_old_clock` in linux/dictation.rs (constructed
+chunks; not run against PipeWire or a physical microphone).
+
 **Fixed November 2, 2026 (issue 978):** a Windows paste refused to run when
 the clipboard held only a format Hex can't snapshot (an app's private
 format), failing every dictation with "the current clipboard format cannot be
@@ -621,6 +639,8 @@ These cover gesture decisions, not hardware keyboard-layout or remapping equival
 ```ts
 Keep ready -> Press shortcut                          // dictate.boundaries
   -> Include up to 450 ms of available pre-roll
+  -> Linux: press and release placed on the stream clock (newest chunk's end
+     plus the time since it arrived), so large chunks add no pre-press audio
   -> Delayed handling still uses original event boundaries
   -> Release excludes audio captured after physical release + 200 ms
 
