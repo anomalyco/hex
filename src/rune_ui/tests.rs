@@ -2546,6 +2546,7 @@ fn goldens() {
     check_golden("output-trust", false, PANE_SIZE);
     check_golden("picker-custom-models", false, PANE_SIZE);
     check_golden("picker-found", false, PANE_SIZE);
+    check_golden("vocabulary-budget", false, PANE_SIZE);
 }
 
 mod onboarding_check;

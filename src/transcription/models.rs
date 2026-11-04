@@ -352,6 +352,20 @@ impl ModelDefinition {
         }
     }
 
+    /// How many of `entries`, first in list order, this model's
+    /// transcription reads (`dictation::vocabulary::terms_read`).
+    pub fn vocabulary_terms_read(
+        &self,
+        entries: &[crate::dictation::vocabulary::VocabularyEntry],
+    ) -> usize {
+        match self.runtime {
+            ModelRuntime::Gguf(artifact) => {
+                crate::dictation::vocabulary::terms_read(entries, artifact.architecture)
+            }
+            _ => 0,
+        }
+    }
+
     pub fn uses_vocabulary(&self) -> bool {
         self.vocabulary_use() != VocabularyUse::None
     }

@@ -109,6 +109,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Vocabulary biasing", "Reforço de vocabulário"),
     ("Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way", "Direciona a transcrição do Parakeet para o seu vocabulário; a reescrita e a busca o usam de qualquer forma"),
     ("Transcription uses these only with Labs › Vocabulary biasing on; rewriting and search always do", "A transcrição só os usa com Labs › Reforço de vocabulário ativado; a reescrita e a busca sempre os usam"),
+    ("This model reads the first {read} of {total} terms", "Este modelo lê os primeiros {read} de {total} termos"),
     ("Mouse shortcuts", "Atalhos de mouse"),
     ("Record mouse buttons as shortcuts", "Grava botões do mouse como atalhos"),
     ("While dictating with Pause media: YouTube and other tabs, resumed only if Hex paused them", "Ao ditar com Pausar mídia: YouTube e outras abas, retomadas só se o Hex as tiver pausado"),
