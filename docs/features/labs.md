@@ -990,7 +990,10 @@ it holds at most one of the four HTTP workers. The gates are
 `labs::meeting_finished_event()`, read where the route starts (off: `404
 labs-off`), on each 250 ms pass of an open stream (off ends it), and where
 `meeting::finished_events::publish` is called; with it off, or with nobody
-subscribed, nothing is queued or kept. A failed final pass sends nothing. Not
+subscribed, nothing is queued or kept. A failed final pass sends nothing. A
+client that was offline catches up by subscribing, then listing from its saved
+cursor and deduplicating by id (at least once;
+[streams.md](../streams.md#catching-up-after-being-offline)). Not
 built: the webhook with audio upload, retries, or a command run on finish
 that the issue also asked for. Checks:
 `a_finished_meeting_reaches_the_one_subscriber_as_its_id` and
