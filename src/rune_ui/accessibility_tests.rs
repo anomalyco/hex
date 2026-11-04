@@ -263,7 +263,9 @@ fn settings_reopened_sends_its_whole_tree_to_the_new_adapter() {
     let mut rt = runtime("portal");
     let mut first = rune::AccessibilityLink::new();
     first.activate();
-    let opened = first.service(&mut rt, "Hex").expect("the first window's tree");
+    let opened = first
+        .service(&mut rt, "Hex")
+        .expect("the first window's tree");
     assert!(opened.tree.is_some());
     assert!(rt.accessibility_action("transcription-control", Action::Click, None));
     settle(&mut rt);
@@ -283,7 +285,10 @@ fn settings_reopened_sends_its_whole_tree_to_the_new_adapter() {
     settle(&mut rt);
     let mut reopened = rune::AccessibilityLink::new();
     if let Some(update) = reopened.service(&mut rt, "Hex") {
-        assert!(update.tree.is_some(), "a partial tree before the client asked");
+        assert!(
+            update.tree.is_some(),
+            "a partial tree before the client asked"
+        );
     }
     reopened.activate();
     let update = reopened
