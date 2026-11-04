@@ -286,6 +286,9 @@ mod tests {
         let images = rune::ImageCache::new(std::sync::Arc::new(|| {}));
         let image = images.rgba(w, h, rgba);
         image.wait().unwrap();
+        while image.pixels().size() == (0, 0) {
+            std::thread::yield_now();
+        }
         Shot {
             path: PathBuf::from("/tmp/Hex Screenshot.png"),
             image,
@@ -302,13 +305,14 @@ mod tests {
                 system_dark: dark,
                 scale: 2.0,
             },
-            rune::TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES),
+            rune::text::TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES),
         );
         rt.settle_all();
         rt.frame(0.0);
         let (w, h) = ((SIZE.0 * 2.0) as u32, (SIZE.1 * 2.0) as u32);
         let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
         let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
+        renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
         renderer.prepare(
             &gpu.device,
             &gpu.queue,
