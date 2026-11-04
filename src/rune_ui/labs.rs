@@ -374,7 +374,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         ));
         rows.push(row(
             Feature::MeetingFinishedEvent,
-            &HINTS,
+            Some(&GLOBE),
             tr("Meeting finished event"),
             tr("Tell apps on this computer when a meeting's transcript is ready. They get only the meeting's ID, through Hex's local API"),
         ));

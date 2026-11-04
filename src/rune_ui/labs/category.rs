@@ -81,7 +81,8 @@ impl Category {
             | Feature::StopWhenCallEnds
             | Feature::MovableMeetingCapsules
             | Feature::MeetingSummaryModel
-            | Feature::MeetingNotesVocabulary => Self::Meetings,
+            | Feature::MeetingNotesVocabulary
+            | Feature::MeetingFinishedEvent => Self::Meetings,
             Feature::LiveText
             | Feature::NotchIndicator
             | Feature::SmartSpacing
@@ -142,7 +143,8 @@ impl Place {
             Feature::Meetings
             | Feature::LiveChapters
             | Feature::MeetingSummaryModel
-            | Feature::MeetingNotesVocabulary => Self::Pane(Pane::Meetings),
+            | Feature::MeetingNotesVocabulary
+            | Feature::MeetingFinishedEvent => Self::Pane(Pane::Meetings),
             Feature::StopWhenCallEnds | Feature::MovableMeetingCapsules => {
                 Self::Elsewhere(tr("Meeting capsules"))
             }

@@ -267,6 +267,7 @@ impl Feature {
             | Self::GnomeClipboardRestore
             | Self::MeetingNotesVocabulary
             | Self::NotchIndicator => 20261103,
+            Self::MeetingFinishedEvent => 20261104,
         }
     }
 
