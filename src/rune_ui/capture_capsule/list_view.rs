@@ -317,7 +317,15 @@ pub(super) fn footer_box(p: Paint, hints: El, w: f32, h: f32) -> El {
     }
 }
 
-pub(super) fn list_panel(p: Paint, body: El, hints: Option<El>, x: f32, w: f32, h: f32, blur: f32) -> El {
+pub(super) fn list_panel(
+    p: Paint,
+    body: El,
+    hints: Option<El>,
+    x: f32,
+    w: f32,
+    h: f32,
+    blur: f32,
+) -> El {
     let k = p.k;
     let mut panel = el()
         .key("list")

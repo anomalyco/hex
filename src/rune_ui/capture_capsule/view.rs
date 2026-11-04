@@ -101,7 +101,12 @@ pub(super) fn presence(surface: &Surface, rect: [f32; 4], reduced: bool) -> Tran
 /// The capsule in its `PANEL_W` × `PANEL_H` panel. Its live chips and
 /// buttons and the list are the only `.hit()` boxes: a click anywhere else
 /// on it reaches the app beneath, and hover still comes from the pointer.
-pub(super) fn capsule(p: Paint, surface: &Surface, live: &Animated, cx: &mut Cx<CapsuleState>) -> El {
+pub(super) fn capsule(
+    p: Paint,
+    surface: &Surface,
+    live: &Animated,
+    cx: &mut Cx<CapsuleState>,
+) -> El {
     // The notch is black in either appearance, so what's on it is dark's.
     let p = if surface.anchor == surface::Anchor::Notch {
         Paint::new(true, 1.0 / p.hair)
