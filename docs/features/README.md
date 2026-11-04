@@ -1094,12 +1094,17 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/browser context changes.
 
-Website context per OS: macOS reads no page at all until something uses it: a
-mode chosen by website, an OpenCode rewrite (its prompt names the site), or a
+Website context per OS: no OS reads a page until something uses it: a mode
+chosen by website, an OpenCode rewrite (its prompt names the site), or a
 script transformation (it receives the address)
-(`dictation::config::reads_browser`), so dictation's page reads never prompt
-without one (Meetings and media pause still ask browsers when on). Otherwise
-it asks the front tab of Safari, Orion, Chrome,
+(`dictation::config::reads_browser` on macOS, `ModeRuntime::reads_page` on
+Windows and Linux; a dictation without processing never reads it). On macOS,
+dictation's page reads then never prompt (Meetings and media pause still ask
+browsers when on). Windows starts no UI Automation walk of the browser, and
+Linux asks AT-SPI only for the process of a window the display server names no
+other way. Check: `the_page_is_read_only_when_processing_uses_it` in
+[dictation/modes.rs](../../src/dictation/modes.rs); not run against a live
+browser. When something uses the page, macOS asks the front tab of Safari, Orion, Chrome,
 Brave, Edge, Arc, Vivaldi, Opera, Helium, and Chromium over AppleScript (one
 Automation prompt per browser; a refusal keeps the application context) and
 reads any other app's focused AXWebArea `AXURL` (Firefox, Zen, web views).

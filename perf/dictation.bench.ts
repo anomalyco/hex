@@ -9,8 +9,9 @@
 // - `warm`: the microphone open while idle, the default (`hex-dictation`).
 // - `released`: Release microphone while idle (`hex-dictation-released`).
 import { bench, native } from "@hona/strobe"
-import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
+import { closeSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import { dictationSeed, SILENCE_MS, speechMs } from "./seeds/dictation"
 
 const home = dictationSeed()
@@ -82,6 +83,34 @@ async function recordingBegan(ctx: Ctx, from: number): Promise<void> {
   }
 }
 
+/** Edge, started by the `browser` case's setup. */
+let browser: ReturnType<typeof Bun.spawn> | undefined
+
+/** Puts a browser in front, as when someone dictates into a web page:
+ * Microsoft Edge with its own profile in the copy's home, on a long local
+ * page, brought to the foreground. Windows only, on an unlocked session
+ * (a locked one keeps the lock screen in front). */
+async function browserInFront(ctx: Ctx): Promise<void> {
+  const edge = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+  const page = join(ctx.home, "long-page.html")
+  const rows = Array.from({ length: 3_000 }, (_, i) => `<p>Paragraph ${i} with a <a href="#${i}">link</a> and <button>button ${i}</button></p>`)
+  writeFileSync(page, `<!doctype html><title>Long page</title><body>${rows.join("")}</body>`)
+  browser = Bun.spawn([edge, `--user-data-dir=${join(ctx.home, "edge")}`, "--no-first-run", "--no-default-browser-check", "--new-window", pathToFileURL(page).href])
+  await ctx.page.wait(5_000)
+  // A background process may take the foreground once a key went to it.
+  const script = `
+Add-Type -Name W -Namespace F -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h); [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, System.UIntPtr e); [DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint p);'
+$w = Get-Process msedge | Where-Object { $_.MainWindowTitle -like 'Long page*' } | Select-Object -First 1
+if (-not $w) { 'no window'; exit 1 }
+[F.W]::keybd_event(0x12, 0, 0, [System.UIntPtr]::Zero); [F.W]::keybd_event(0x12, 0, 2, [System.UIntPtr]::Zero)
+[void][F.W]::SetForegroundWindow($w.MainWindowHandle)
+Start-Sleep -Milliseconds 500
+$p = 0; [void][F.W]::GetWindowThreadProcessId([F.W]::GetForegroundWindow(), [ref]$p)
+(Get-Process -Id $p).ProcessName`
+  const front = Bun.spawnSync(["powershell", "-NoProfile", "-Command", script]).stdout.toString().trim()
+  if (front !== "msedge") throw new Error(`the browser case needs Edge in front on an unlocked session; in front: ${front}`)
+}
+
 async function printed(reply: Reply): Promise<string> {
   if (reply.status !== "transcript" || !reply.text) throw new Error(`stop --print answered ${JSON.stringify(reply)}`)
   return reply.text
@@ -115,6 +144,11 @@ export default bench({
     await printed(await stop(ctx))
     fixtureOpened(ctx)
     if (ctx.case === "recording") await start(ctx)
+    if (ctx.case === "browser") await browserInFront(ctx)
+  },
+  teardown() {
+    browser?.kill()
+    browser = undefined
   },
   cases: {
     // Listening between dictations, microphone released: what the loaded
@@ -158,6 +192,21 @@ export default bench({
         await printed(await ctx.phase("finish", () => stop(ctx)))
       },
     },
+    // Release to text with a browser in front (Windows, unlocked): the
+    // dictation case's stop, plus the page read the foreground context
+    // starts for a browser. Nothing set up here uses the page.
+    ...(process.platform === "win32" && {
+      browser: {
+        targets: ["warm"],
+        primary: "phase.finish",
+        metrics: ["cpu.work", "cpu.wakes"],
+        async run(ctx) {
+          await start(ctx)
+          await ctx.page.wait(STOP_AFTER_MS)
+          await printed(await ctx.phase("finish", () => stop(ctx)))
+        },
+      },
+    }),
     // While a dictation records: the audio path, the live stream's
     // inference, and the HUD meter's plumbing. Each run is 6 s of one
     // recording; reset finishes it and starts the next.

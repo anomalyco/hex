@@ -191,15 +191,15 @@ impl DictationOutput {
         started: Instant,
         recording: Option<crate::history::Recording>,
     ) -> Result<String> {
-        let context = crate::linux::context::capture();
+        let modes = self
+            .modes
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let context = crate::linux::context::capture(!raw && modes.reads_page());
         let processed = if raw {
             crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
-            let modes = self
-                .modes
-                .read()
-                .unwrap_or_else(|error| error.into_inner())
-                .clone();
             modes.process(&raw_text, &context, &self.transformations)
         };
         if processed.text.trim().is_empty() {

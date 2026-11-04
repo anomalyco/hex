@@ -875,7 +875,12 @@ fn process_dictation_job(
     let started = Instant::now();
     let printed = job.print.is_some();
     // The context read starts now so the UIA walk overlaps inference.
-    let pending_context = crate::windows::context::begin_capture();
+    let reads_page = !job.raw
+        && mode_runtime
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .reads_page();
+    let pending_context = crate::windows::context::begin_capture(reads_page);
     let inference_started = Instant::now();
     let transcription = job.transcript.wait().map(|transcribed| {
         tracing::info!(
