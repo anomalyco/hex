@@ -782,6 +782,10 @@ Model advertises streaming, GPU device             // dictate.streaming
   │   only, always with the `no` hint, 539 MB; 6.68% WER on FLEURS Norwegian
   │   test against Whisper turbo's 8.94%, Hex's run), then Whisper turbo for
   │   Vocabulary (#1150)
+  ├── en, fr, de, es, pt, it, ja: Granite Speech 5.0 (IBM's TurboCTC, 506 MB,
+  │   no hint) follows without a badge: on FLEURS test it trailed Parakeet
+  │   Unified/v3 in every European language and tied Whisper turbo in Japanese
+  │   (5.04% CER against 5.02%), Hex's run (#1252)
   └── Every other available model follows without a badge, selectable and
       deletable; never auto-switched or auto-downloaded (setup.language-select)
 ```

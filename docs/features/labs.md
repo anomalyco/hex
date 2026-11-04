@@ -463,8 +463,9 @@ toggle off. QwenCleo-ASR 1.7B names its author's 3,699-utterance Egyptian
 Arabic test. ivrit.ai Whisper large-v3-turbo carries Hex's own run of
 transcribe.cpp's WER harness on the FLEURS Hebrew test (18.45% WER, 792
 utterances, batch 1, no timestamps, Radeon 8060S over Vulkan, source revision
-7045d1c), and NB-Whisper Medium Hex's run on the FLEURS Norwegian test (6.68%
-WER, 357 utterances, same conditions); every other figure is English WER with dataset and source
+7045d1c), NB-Whisper Medium Hex's run on the FLEURS Norwegian test (6.68%
+WER, 357 utterances, same conditions), and Granite Speech 5.0 Hex's run on
+the FLEURS English test (4.77% WER, 647 utterances, same conditions); every other figure is English WER with dataset and source
 unrecorded. A "Most accurate" badge stays only when its record is comparable
 (`BenchmarkRecord::comparable`: same metric, language, and a known, equal
 dataset) with every other recommended model's for the saved language, so
@@ -798,7 +799,7 @@ Labs › Keep recordings on                     // labs.keep-recordings
 ├── History card, entry with audio -> "Saved recording" + "Transcribe again" menu
 │   ├── Lists every available model installed for the language it would use
 │   ├── A model that takes a language hint (not Parakeet v3/Ultra, GigaAM,
-│   │   Bark) -> "<model> · Language: <saved language>" menu (Auto when it
+│   │   Granite, Bark) -> "<model> · Language: <saved language>" menu (Auto when it
 │   │   detects, then its languages) + Transcribe; the language applies to
 │   │   that run only, never to settings (#1068)
 │   ├── Choose one -> "Transcribing with <model>…" on a worker: its own
