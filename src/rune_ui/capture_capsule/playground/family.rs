@@ -24,7 +24,7 @@ use super::super::notch;
 use super::super::surface::{MEDIUM, SMALL, STRONG, TIMER, corner, measure};
 use super::super::tuning;
 use super::Paint;
-use crate::rune_hud::dot_scope::{self, Frame, Scope, Stage, demo_level, demo_loudness, palette};
+use crate::rune_hud::dot_scope::{self, Frame, Scope, Stage, demo_level, demo_loudness};
 use crate::rune_hud::hud_placement::{self, ISLAND_PAD, Rect, Screen};
 
 /// The plate's height at full size, one line: both siblings'.
@@ -740,62 +740,9 @@ fn voice(p: Paint, s: &Family, w: f32, h: f32, fit: f32, working: bool, dark: bo
     }
 }
 
-fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
-    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
 /// Dot scope: its simulation's dots, lit as its shader lights them.
 fn braid(s: &Family, w: f32, h: f32, fit: f32, dark: bool) -> El {
-    let scope = &s.scope;
-    let tuning = scope.tuning();
-    let pose = scope.pose();
-    let colors = palette(dark, &pose, tuning.saturation);
-    let decode = |rgb: [f32; 3]| {
-        let [r, g, b] = rgb.map(rune::color::srgb_decode);
-        Color { r, g, b, a: 1.0 }
-    };
-    let (base, core) = (decode(colors.base), decode(colors.core));
-    let (columns, rows) = (scope.columns(), scope.rows());
-    let pitch = tuning.spacing * fit;
-    let radius = h * 0.5;
-    let (unlit, full, curve) = if dark {
-        (0.07, 0.96, 0.9)
-    } else {
-        (0.085, 1.0, 0.75)
-    };
-    let presence = 0.5 + 0.5 * pose.live.max(pose.cool);
-    let mut field = el().size(w, h);
-    for (n, &[power, fresh]) in scope.dots().iter().enumerate() {
-        let (i, j) = (n % columns, n / columns);
-        let x = (i as f32 - (columns as f32 - 1.0) * 0.5) * pitch;
-        let y = (j as f32 - (rows as f32 - 1.0) * 0.5) * pitch;
-        let cap_dx = (x.abs() - (w * 0.5 - radius)).max(0.0);
-        let cap = radius - (cap_dx * cap_dx + y * y).sqrt();
-        let mask = smoothstep(1.4 * fit, 4.6 * fit, cap);
-        if mask <= 0.0 {
-            continue;
-        }
-        let power = power.max(1e-5);
-        let row = y.abs() / radius;
-        let floor = unlit * (1.0 - 0.7 * smoothstep(0.35, 0.95, row)) * presence * pose.grid;
-        let alpha = floor + (full - floor) * power.powf(curve * (1.4 + (1.0 - 1.4) * fresh));
-        let shrink = 1.0 + ((0.82 + 0.18 * fresh) - 1.0) * smoothstep(0.03, 0.2, power);
-        let r = (0.25 + 0.17 * power.powf(0.6)) * shrink * pitch;
-        let lit = (power * power * 1.1).clamp(0.0, 0.9) * (0.3 + 0.7 * fresh);
-        let color = base.mix(core, lit);
-        let a = alpha * mask;
-        if a < 0.01 {
-            continue;
-        }
-        field = field.child(
-            el().absolute(w * 0.5 + x - r, h * 0.5 + y - r)
-                .size(2.0 * r, 2.0 * r)
-                .radius(r)
-                .fill(color.alpha(a)),
-        );
-    }
-    field
+    super::pill::field(&s.scope, w, h, fit, dark, w, &[])
 }
 
 /// The voice's level `ago` seconds back, 0–1.
