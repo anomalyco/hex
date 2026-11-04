@@ -12,6 +12,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::rune_hud::spring::MORPH;
+
 mod scope;
 pub use scope::*;
 
@@ -157,8 +159,8 @@ impl Default for Tuning {
             saturation: 1.0,
             shimmer_pass: 0.55,
             shimmer: 1.0,
-            transition: 0.3,
-            bounce: 0.15,
+            transition: MORPH.duration,
+            bounce: MORPH.bounce,
             auto_level: true,
             auto_release: 3.0,
             noise_floor: -60.0,

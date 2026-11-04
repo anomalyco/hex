@@ -10,6 +10,12 @@ use std::sync::RwLock;
 use rune::Spring;
 
 pub(crate) use crate::app_settings::CapsuleFlow;
+use crate::rune_hud::spring::{self as hud, Spec};
+
+/// One of the HUD family's springs as Rune's.
+pub(crate) const fn spring(spec: Spec) -> Spring {
+    Spring::new(spec.duration, spec.bounce)
+}
 
 /// A flow's name on the playground's switch and in the clips.
 pub(crate) fn flow_label(flow: CapsuleFlow) -> &'static str {
@@ -91,9 +97,10 @@ pub(crate) struct Tuning {
     /// A recording's chips close by themselves this long after a tap.
     pub(crate) chips_open_s: f64,
     /// The walls, and every piece that stays and moves, on every change:
-    /// about 0.3 s with a little bounce, as Dynamic Island's.
+    /// the dictation HUD's morph.
     pub(crate) island: Spring,
-    /// The shell's fade and rise on entry; it leaves on 0.9 of it.
+    /// The shell's rise from its origin pose on entry and its fall back on
+    /// exit; it fades over the same time with no bounce, as the HUD does.
     pub(crate) island_scale: Spring,
     /// The selection highlight trailing a mode change.
     pub(crate) highlight: Spring,
@@ -119,8 +126,8 @@ pub(crate) const DEFAULT: Tuning = Tuning {
     done_hold_s: 25.0,
     brief_hold_s: 4.0,
     chips_open_s: 3.5,
-    island: Spring::new(0.30, 0.12),
-    island_scale: Spring::new(0.28, 0.10),
+    island: spring(hud::MORPH),
+    island_scale: spring(hud::MORPH),
     highlight: Spring::new(0.25, 0.0),
     content_in: Spring::new(0.30, 0.10),
     content_out: Spring::new(0.24, 0.0),
@@ -214,7 +221,7 @@ mod tests {
         let rust = DEFAULT.to_rust();
         for field in [
             "undo_s: 5.00",
-            "island: Spring::new(0.300, 0.120)",
+            "island: Spring::new(0.300, 0.150)",
             "content_in: Spring::new(0.300, 0.100)",
             "content_scale: 0.920",
             "top_line: TopLine::Quiet",
