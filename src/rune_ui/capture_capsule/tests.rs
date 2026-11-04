@@ -664,6 +664,47 @@ fn top_line_from_env() {
     }
 }
 
+/// `HEX_CAPSULE_KEYS_SNAPS=<folder>` writes the send-to list's keys
+/// prototypes (t1339): each direction over each state, light and dark.
+#[test]
+fn capture_capsule_keys_snapshots() {
+    use super::playground::{Keys, keys_state};
+    use super::tuning::{self, ListKeys, Tuning};
+    let Some(folder) = std::env::var_os("HEX_CAPSULE_KEYS_SNAPS") else {
+        return;
+    };
+    let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+        eprintln!("skipping keys snapshots: no GPU adapter");
+        return;
+    };
+    let folder = std::path::PathBuf::from(folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    for (dir, list_keys) in [
+        ("today", ListKeys::Today),
+        ("a", ListKeys::Footer),
+        ("b", ListKeys::Numbers),
+        ("c", ListKeys::Countdown),
+    ] {
+        tuning::set(Tuning {
+            list_keys,
+            ..tuning::get()
+        });
+        for (name, state) in Keys::ALL {
+            let (route, sample, last) = keys_state(state);
+            super::list_keys::set_sample(sample);
+            let mut beats = vec![processing(), In(Input::Routed(route))];
+            beats.extend(last.into_iter().map(In));
+            let pres = after(&beats);
+            for dark in [false, true] {
+                let (w, h, pixels) = render(&gpu, pres.clone(), dark);
+                let theme = if dark { "dark" } else { "light" };
+                let path = folder.join(format!("{dir}-{name}-{theme}.png"));
+                rune::render::write_png(&path, w, h, &pixels).unwrap();
+            }
+        }
+    }
+}
+
 /// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark.
 #[test]
 fn capture_capsule_snapshots() {

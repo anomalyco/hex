@@ -17,8 +17,9 @@ use rune::{Cx, El, KeyEvent, Spring, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, SegmentedControl, Switch};
 
 use super::flow::{Action, Cue, Delivered, Dest, Failure, Grant, Input, Route, Undone};
+use super::list_keys::{self, Sample, ScopeKind};
 use super::surface::{Id, PANEL_H, PANEL_W};
-use super::tuning::{self, CapsuleFlow, ListFooter, TopLine, Tuning, flow_label};
+use super::tuning::{self, CapsuleFlow, ListFooter, ListKeys, TopLine, Tuning, flow_label};
 use super::{CapsuleState, Mode, capsule, tone};
 use crate::capture_host::CaptureNeed;
 use crate::rune_ui::controls::{DESCRIPTION, Paint};
@@ -250,6 +251,105 @@ const SCENES: &[Scene] = &[
             ],
         )
     }),
+    // The send-to list's keys (t1339): each direction over the same states.
+    ("keys-today-site", |s| keys(s, ListKeys::Today, Keys::Site)),
+    ("keys-today-ghostty", |s| {
+        keys(s, ListKeys::Today, Keys::Ghostty)
+    }),
+    ("keys-today-none", |s| {
+        keys(s, ListKeys::Today, Keys::Nothing)
+    }),
+    ("keys-today-shift", |s| {
+        keys(s, ListKeys::Today, Keys::Shift)
+    }),
+    ("keys-today-search", |s| {
+        keys(s, ListKeys::Today, Keys::Search)
+    }),
+    ("keys-today-shift-ghostty", |s| {
+        keys(s, ListKeys::Today, Keys::ShiftGhostty)
+    }),
+    ("keys-today-scope", |s| {
+        keys(s, ListKeys::Today, Keys::Scope)
+    }),
+    ("keys-today-scope-app", |s| {
+        keys(s, ListKeys::Today, Keys::ScopeApp)
+    }),
+    ("keys-today-scope-ghostty", |s| {
+        keys(s, ListKeys::Today, Keys::ScopeGhostty)
+    }),
+    ("keys-today-scope-opencode", |s| {
+        keys(s, ListKeys::Today, Keys::ScopeOpencode)
+    }),
+    ("keys-a-site", |s| keys(s, ListKeys::Footer, Keys::Site)),
+    ("keys-a-ghostty", |s| {
+        keys(s, ListKeys::Footer, Keys::Ghostty)
+    }),
+    ("keys-a-none", |s| keys(s, ListKeys::Footer, Keys::Nothing)),
+    ("keys-a-shift", |s| keys(s, ListKeys::Footer, Keys::Shift)),
+    ("keys-a-search", |s| keys(s, ListKeys::Footer, Keys::Search)),
+    ("keys-a-shift-ghostty", |s| {
+        keys(s, ListKeys::Footer, Keys::ShiftGhostty)
+    }),
+    ("keys-a-scope", |s| keys(s, ListKeys::Footer, Keys::Scope)),
+    ("keys-a-scope-app", |s| {
+        keys(s, ListKeys::Footer, Keys::ScopeApp)
+    }),
+    ("keys-a-scope-ghostty", |s| {
+        keys(s, ListKeys::Footer, Keys::ScopeGhostty)
+    }),
+    ("keys-a-scope-opencode", |s| {
+        keys(s, ListKeys::Footer, Keys::ScopeOpencode)
+    }),
+    ("keys-b-site", |s| keys(s, ListKeys::Numbers, Keys::Site)),
+    ("keys-b-ghostty", |s| {
+        keys(s, ListKeys::Numbers, Keys::Ghostty)
+    }),
+    ("keys-b-none", |s| keys(s, ListKeys::Numbers, Keys::Nothing)),
+    ("keys-b-shift", |s| keys(s, ListKeys::Numbers, Keys::Shift)),
+    ("keys-b-search", |s| {
+        keys(s, ListKeys::Numbers, Keys::Search)
+    }),
+    ("keys-b-shift-ghostty", |s| {
+        keys(s, ListKeys::Numbers, Keys::ShiftGhostty)
+    }),
+    ("keys-b-scope", |s| keys(s, ListKeys::Numbers, Keys::Scope)),
+    ("keys-b-scope-app", |s| {
+        keys(s, ListKeys::Numbers, Keys::ScopeApp)
+    }),
+    ("keys-b-scope-ghostty", |s| {
+        keys(s, ListKeys::Numbers, Keys::ScopeGhostty)
+    }),
+    ("keys-b-scope-opencode", |s| {
+        keys(s, ListKeys::Numbers, Keys::ScopeOpencode)
+    }),
+    ("keys-c-site", |s| keys(s, ListKeys::Countdown, Keys::Site)),
+    ("keys-c-ghostty", |s| {
+        keys(s, ListKeys::Countdown, Keys::Ghostty)
+    }),
+    ("keys-c-none", |s| {
+        keys(s, ListKeys::Countdown, Keys::Nothing)
+    }),
+    ("keys-c-shift", |s| {
+        keys(s, ListKeys::Countdown, Keys::Shift)
+    }),
+    ("keys-c-search", |s| {
+        keys(s, ListKeys::Countdown, Keys::Search)
+    }),
+    ("keys-c-shift-ghostty", |s| {
+        keys(s, ListKeys::Countdown, Keys::ShiftGhostty)
+    }),
+    ("keys-c-scope", |s| {
+        keys(s, ListKeys::Countdown, Keys::Scope)
+    }),
+    ("keys-c-scope-app", |s| {
+        keys(s, ListKeys::Countdown, Keys::ScopeApp)
+    }),
+    ("keys-c-scope-ghostty", |s| {
+        keys(s, ListKeys::Countdown, Keys::ScopeGhostty)
+    }),
+    ("keys-c-scope-opencode", |s| {
+        keys(s, ListKeys::Countdown, Keys::ScopeOpencode)
+    }),
     ("clip-undo-lone", |s| {
         clip(
             s,
@@ -262,6 +362,175 @@ const SCENES: &[Scene] = &[
         )
     }),
 ];
+
+/// A state of the send-to list for the keys prototypes (t1339).
+#[derive(Clone, Copy)]
+pub(crate) enum Keys {
+    /// Suggestions on a website a rule can key.
+    Site,
+    /// Suggestions in a terminal, where no rule can be made today.
+    Ghostty,
+    /// The router had no idea: recent sessions only.
+    Nothing,
+    Shift,
+    Search,
+    ShiftGhostty,
+    /// Shift down with the scopes to pick from: the site, then the app.
+    Scope,
+    ScopeApp,
+    /// A terminal with the proposed folder scope.
+    ScopeGhostty,
+    /// OpenCode with the proposed focused-session scope.
+    ScopeOpencode,
+}
+
+const SITE: &str = "seer.kitlangton.com";
+const SITE_SCOPES: &[(ScopeKind, &str)] = &[
+    (ScopeKind::Page, "seer.kitlangton.com/cards"),
+    (ScopeKind::Site, SITE),
+    (ScopeKind::App, "Brave Browser"),
+    (ScopeKind::Window, "“Seer — t1339”"),
+];
+const TERMINAL_SCOPES: &[(ScopeKind, &str)] = &[
+    (ScopeKind::Folder, "~/code/open-source/hex"),
+    (ScopeKind::Window, "“hex — cargo”"),
+    (ScopeKind::App, "Ghostty"),
+];
+
+const OPENCODE_SCOPES: &[(ScopeKind, &str)] = &[
+    (ScopeKind::Session, "Annotate list keys"),
+    (ScopeKind::App, "OpenCode"),
+];
+
+fn keys_guess(site: Option<&str>) -> Route {
+    Route::Guess {
+        suggested: vec![
+            Dest::new("SEER", "same page"),
+            Dest::new("HEX", "you were just in it"),
+            Dest::new("OPENCODE IOS", "mentioned"),
+        ],
+        recent: vec![
+            Dest::new("RUNE", "2 min ago"),
+            Dest::new("HOME", "yesterday"),
+        ],
+        site: site.map(Into::into),
+    }
+}
+
+fn terminal_guess() -> Route {
+    Route::Guess {
+        suggested: vec![
+            Dest::new("HEX", "same folder"),
+            Dest::new("SEER", "last sent"),
+            Dest::new("RUNE", "mentioned"),
+        ],
+        recent: vec![
+            Dest::new("HOME", "yesterday"),
+            Dest::new("SCRAWL", "2 days ago"),
+        ],
+        site: None,
+    }
+}
+
+impl Keys {
+    pub(crate) const ALL: [(&'static str, Keys); 10] = [
+        ("site", Keys::Site),
+        ("ghostty", Keys::Ghostty),
+        ("none", Keys::Nothing),
+        ("shift", Keys::Shift),
+        ("search", Keys::Search),
+        ("shift-ghostty", Keys::ShiftGhostty),
+        ("scope", Keys::Scope),
+        ("scope-app", Keys::ScopeApp),
+        ("scope-ghostty", Keys::ScopeGhostty),
+        ("scope-opencode", Keys::ScopeOpencode),
+    ];
+}
+
+fn keys(s: &mut CapsuleState, list_keys: ListKeys, state: Keys) {
+    let (route, sample, last) = keys_state(state);
+    list_keys::set_sample(sample);
+    let tuning = Tuning {
+        list_keys,
+        ..tuning::get()
+    };
+    tuning::set(tuning);
+    if let Some(pg) = s.playground.as_mut() {
+        pg.tuning = tuning;
+    }
+    let steps: Vec<Step> = [record(), Step::Input(stop()), done(), routed(route)]
+        .into_iter()
+        .chain(last.into_iter().map(Step::Input))
+        .collect();
+    scene(s, &steps);
+}
+
+/// What `state` routes to, the sample beside it, and the inputs after.
+pub(crate) fn keys_state(state: Keys) -> (Route, Sample, Vec<Input>) {
+    let ghostty = Sample {
+        app: Some("Ghostty"),
+        why_not: "terminal windows all look alike",
+        ..Sample::NONE
+    };
+    match state {
+        Keys::Site => (keys_guess(Some(SITE)), Sample::NONE, vec![]),
+        Keys::Ghostty => (terminal_guess(), ghostty, vec![]),
+        Keys::Nothing => (
+            Route::Nothing {
+                recent: vec![
+                    Dest::new("HOME", "yesterday"),
+                    Dest::new("HEX", "2 days ago"),
+                ],
+            },
+            Sample {
+                jev: false,
+                ..Sample::NONE
+            },
+            vec![],
+        ),
+        Keys::Shift => (
+            keys_guess(Some(SITE)),
+            Sample::NONE,
+            vec![Input::Shift(true)],
+        ),
+        Keys::Search => (keys_guess(Some(SITE)), Sample::NONE, vec![Input::OpenList]),
+        Keys::ShiftGhostty => (
+            terminal_guess(),
+            Sample {
+                shift: true,
+                ..ghostty
+            },
+            vec![],
+        ),
+        Keys::Scope | Keys::ScopeApp => (
+            keys_guess(Some(SITE)),
+            Sample {
+                scopes: SITE_SCOPES,
+                scope: if matches!(state, Keys::Scope) { 1 } else { 2 },
+                ..Sample::NONE
+            },
+            vec![Input::Shift(true)],
+        ),
+        Keys::ScopeOpencode => (
+            terminal_guess(),
+            Sample {
+                scopes: OPENCODE_SCOPES,
+                shift: true,
+                ..Sample::NONE
+            },
+            vec![],
+        ),
+        Keys::ScopeGhostty => (
+            terminal_guess(),
+            Sample {
+                scopes: TERMINAL_SCOPES,
+                shift: true,
+                ..Sample::NONE
+            },
+            vec![],
+        ),
+    }
+}
 
 /// A capture recorded and written, then `steps` at their times.
 fn clip(s: &mut CapsuleState, steps: &[(f64, Step)]) {
@@ -535,6 +804,32 @@ fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
         keys,
         crate::capture_host::CapsuleKeys::List | crate::capture_host::CapsuleKeys::Picker
     );
+    // The keys prototypes (t1339): ⌥1…⌥5 pick a row, Shift is kept even
+    // where no rule can be made, and Tab cycles the rule's scope.
+    if list_keys::active() && (list || suggest) {
+        if let Key::Modifier {
+            modifier: rune::Modifier::ShiftLeft | rune::Modifier::ShiftRight,
+            ..
+        } = &key.key
+        {
+            list_keys::update(|sample| sample.shift = key.mods.shift);
+        }
+        if key.key == Key::Tab && key.mods.shift && list_keys::sample().scopes.len() > 1 {
+            list_keys::update(|sample| {
+                sample.scope = (sample.scope + 1) % sample.scopes.len();
+            });
+            tx.wake_after(Duration::ZERO);
+            return true;
+        }
+        if let Key::Text(t) = &key.key
+            && key.mods.alt
+            && let Some(n) = option_digit(t)
+        {
+            s.inbox.push(Input::SendRow(n));
+            tx.wake_after(Duration::ZERO);
+            return true;
+        }
+    }
     let input = match &key.key {
         Key::Modifier {
             modifier: rune::Modifier::ShiftLeft | rune::Modifier::ShiftRight,
@@ -562,6 +857,15 @@ fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
     s.inbox.push(input);
     tx.wake_after(Duration::ZERO);
     true
+}
+
+/// The row ⌥1…⌥5 (⇧ too) picks, from what the key types on a US layout.
+fn option_digit(t: &str) -> Option<usize> {
+    ["1", "2", "3", "4", "5"]
+        .iter()
+        .position(|d| *d == t)
+        .or_else(|| ["¡", "™", "£", "¢", "∞"].iter().position(|d| *d == t))
+        .or_else(|| ["⁄", "€", "‹", "›", "ﬁ"].iter().position(|d| *d == t))
 }
 
 // ─── View ────────────────────────────────────────────────────────────────────
@@ -983,6 +1287,21 @@ fn tuning(p: Paint, pg: &Playground, w: f32, standalone: bool) -> El {
             .build(p.k)
             .key("list-footer"),
     );
+    let all_keys: Vec<&str> = ListKeys::ALL.iter().map(|m| m.label()).collect();
+    let picked = ListKeys::ALL.iter().position(|m| *m == t.list_keys);
+    let list_keys = card("list-keys-card").child(
+        SegmentedControl::new(&all_keys, picked)
+            .width(Some(w))
+            .on_pick(|s: &mut CapsuleState, i: usize, _: &mut Tx| {
+                if let Some(pg) = s.playground.as_mut() {
+                    let mut tuning = pg.tuning;
+                    tuning.list_keys = ListKeys::ALL[i];
+                    pg.set_tuning(tuning);
+                }
+            })
+            .build(p.k)
+            .key("list-keys"),
+    );
     // Everything changes together: the walls move while the content blurs,
     // scales and fades over them.
     let transition = card("transition-card")
@@ -1135,6 +1454,7 @@ fn tuning(p: Paint, pg: &Playground, w: f32, standalone: bool) -> El {
         .child(section(p, "flow", "Flow after a capture", flow))
         .child(section(p, "top-line", "Top line", top_line))
         .child(section(p, "list-footer", "List footer", list_footer))
+        .child(section(p, "list-keys", "List keys (t1339)", list_keys))
         .child(section(p, "transition", "Transition", transition))
         .child(section(p, "timing", "Timing", timing))
         .child(section(p, "sound", "Sound", sound))

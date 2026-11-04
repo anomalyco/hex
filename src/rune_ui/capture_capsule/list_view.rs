@@ -4,6 +4,9 @@ use super::*;
 
 /// The list hanging under the open capsule, `x` and `w` its shell's.
 pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
+    if super::list_keys::active() {
+        return super::list_keys::view(p, list, x, w, reduced);
+    }
     let k = p.k;
     let h = list_height(list);
     // Rows and headers keep their identity across a filter: the ones that
@@ -386,6 +389,9 @@ pub(super) fn headed(list: &List) -> bool {
 /// The list's height: its header, rows (at least the room it keeps), and
 /// the search's footer.
 pub(crate) fn list_height(list: &List) -> f32 {
+    if super::list_keys::active() {
+        return super::list_keys::height(list);
+    }
     let header = if headed(list) { HEADER_H } else { 0.0 };
     let rows = list
         .rows

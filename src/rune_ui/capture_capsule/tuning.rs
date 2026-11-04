@@ -84,6 +84,49 @@ impl ListFooter {
     }
 }
 
+/// How the send-to list shows its keys (t1339), while Kit picks one. Only
+/// the playground leaves [`ListKeys::Today`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ListKeys {
+    /// As shipped: "⇧ remembers" in the header when a rule can be made,
+    /// and a footer only on the search.
+    Today,
+    /// One footer on every list: Send, Always, Search, with ⇧ dimmed
+    /// where no rule can be made.
+    Footer,
+    /// The footer, and each row's own key at its right (⌥1…⌥5).
+    Numbers,
+    /// The numbered rows, the top one already chosen and counting down.
+    Countdown,
+}
+
+impl ListKeys {
+    pub(crate) const ALL: [ListKeys; 4] = [
+        ListKeys::Today,
+        ListKeys::Footer,
+        ListKeys::Numbers,
+        ListKeys::Countdown,
+    ];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            ListKeys::Today => "Today",
+            ListKeys::Footer => "A · Footer",
+            ListKeys::Numbers => "B · Numbers",
+            ListKeys::Countdown => "C · Countdown",
+        }
+    }
+
+    fn rust(self) -> &'static str {
+        match self {
+            ListKeys::Today => "ListKeys::Today",
+            ListKeys::Footer => "ListKeys::Footer",
+            ListKeys::Numbers => "ListKeys::Numbers",
+            ListKeys::Countdown => "ListKeys::Countdown",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Tuning {
     /// The Undo window: a send, a rule's or a pick's, can be taken back
@@ -116,6 +159,7 @@ pub(crate) struct Tuning {
     pub(crate) content_scale: f32,
     pub(crate) top_line: TopLine,
     pub(crate) list_footer: ListFooter,
+    pub(crate) list_keys: ListKeys,
     /// The flow after a capture stops: `capture.capsule_flow` in the app,
     /// the playground's switch there.
     pub(crate) flow: CapsuleFlow,
@@ -135,6 +179,7 @@ pub(crate) const DEFAULT: Tuning = Tuning {
     content_scale: 0.92,
     top_line: TopLine::Quiet,
     list_footer: ListFooter::Band,
+    list_keys: ListKeys::Today,
     flow: CapsuleFlow::List,
 };
 
@@ -192,6 +237,7 @@ impl Tuning {
              \x20   content_scale: {:.3},\n\
              \x20   top_line: {},\n\
              \x20   list_footer: {},\n\
+             \x20   list_keys: {},\n\
              \x20   flow: CapsuleFlow::{:?},\n\
              }};\n",
             self.undo_s,
@@ -207,6 +253,7 @@ impl Tuning {
             self.content_scale,
             self.top_line.rust(),
             self.list_footer.rust(),
+            self.list_keys.rust(),
             self.flow,
         )
     }
