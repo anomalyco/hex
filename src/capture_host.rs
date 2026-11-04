@@ -1585,10 +1585,7 @@ impl CaptureHost {
             if code == "permission" {
                 return reply;
             }
-            #[cfg(target_os = "macos")]
             crate::feedback::play(crate::feedback::Tone::Error);
-            #[cfg(not(target_os = "macos"))]
-            crate::feedback::play(crate::feedback::Tone::CaptureFailed);
         }
         reply
     }
