@@ -70,7 +70,7 @@ The copy loads no model, except in the listening cases below.
 | --- | --- | --- | --- | --- |
 | `perf/idle.bench.ts` | `window-open` | `cpu.work` | 8 s at rest with the window on General | waits for an unlock |
 | `perf/idle.bench.ts` | `window-closed` | `cpu.work` | 8 s at rest, tray only (`app --hidden`) | runs |
-| `perf/idle.bench.ts` | `window-closed-memory` | `memory.app.private` | The same tray's private memory | runs |
+| `perf/idle.bench.ts` | `window-closed-memory` | `memory.app.private` | The same tray's private memory and dedicated GPU memory (`gpu.vram`) | runs |
 | `perf/launch.bench.ts` | `cold-launch` | `launch.ready` | Process start to the first painted window | waits for an unlock |
 | `perf/launch.bench.ts` | `hidden-launch` | `launch.ready` | Process start to `local API started`, tray only | runs |
 | `perf/listening.bench.ts` | `listening-at-rest` | `cpu.work` | 8 s listening at rest, microphone released and open | runs |
