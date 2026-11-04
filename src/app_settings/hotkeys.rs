@@ -698,6 +698,33 @@ impl HotkeyBinding {
         binding
     }
 
+    /// Command-Shift-4, macOS's own area screenshot (Labs › Screenshots):
+    /// the "4" key's ANSI position, as macOS binds it on every layout.
+    pub fn screenshot_default() -> Self {
+        #[cfg(target_os = "macos")]
+        let binding = Self {
+            modifiers: HotkeyModifiers {
+                command: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: 21,
+                label: "4".into(),
+            }),
+        };
+        #[cfg(not(target_os = "macos"))]
+        let binding = Self::chord(
+            HotkeyModifiers {
+                control: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            "4",
+        );
+        binding
+    }
+
     /// Escape, with no modifier.
     pub fn cancel_default() -> Self {
         #[cfg(target_os = "macos")]

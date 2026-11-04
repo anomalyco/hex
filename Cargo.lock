@@ -2229,6 +2229,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "block2 0.6.2",
+ "capture-core",
  "cc",
  "clap",
  "color-eyre",

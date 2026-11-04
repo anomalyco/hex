@@ -120,6 +120,8 @@ pub(crate) enum ShortcutTarget {
     SecondDictation,
     /// Toggle mode's cancel shortcut.
     Cancel,
+    /// Labs › Screenshots.
+    Screenshot,
 }
 
 /// What the runtime last published for the window and the menu bar.
@@ -504,6 +506,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     #[cfg(hex_capture)]
     let capture_overlays =
         Some(crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
+    // Labs › Screenshots: its own picker and the thumbnail.
+    #[cfg(hex_capture)]
+    crate::screenshots::install(&mut app);
     // `hex dictation` and `hex paste-last` go straight to the listener; the
     // rest reach the main thread's pump.
     let (pump_calls, pump_call_receiver) = mpsc::sync_channel(8);

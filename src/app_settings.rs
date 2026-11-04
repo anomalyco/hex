@@ -23,6 +23,7 @@ mod labs;
 mod meeting_folder;
 mod meetings;
 mod persistence;
+mod screenshots;
 mod shortcut_repair;
 
 #[cfg(hex_capture)]
@@ -34,6 +35,7 @@ pub use hotkeys::*;
 pub use labs::*;
 pub use meeting_folder::default_meeting_output_folder;
 pub use meetings::*;
+pub use screenshots::{ScreenshotSettings, screenshot_hotkey, screenshot_settings};
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
@@ -298,6 +300,8 @@ pub struct AppSettings {
     pub experimental: ExperimentalSettings,
     /// The Labs features' own switches (`crate::labs`).
     pub labs: LabsSettings,
+    /// Labs › Screenshots' shortcut and folder (macOS).
+    pub screenshots: ScreenshotSettings,
     /// Start listening when Hex opens (Windows and Linux, where the
     /// listener can be off).
     pub enable_on_launch: bool,
@@ -417,6 +421,7 @@ impl Default for AppSettings {
             capture_from_other_build: None,
             experimental: ExperimentalSettings::default(),
             labs: LabsSettings::default(),
+            screenshots: ScreenshotSettings::default(),
             enable_on_launch: true,
             paste_with_shift: false,
             gnome_keyboard_shortcuts: false,
@@ -746,6 +751,7 @@ impl AppSettings {
             Ordering::Release,
         );
         crate::labs::apply(&self.labs);
+        screenshots::apply_screenshots(self);
         #[cfg(hex_capture)]
         {
             *CAPTURE_SETTINGS
@@ -1065,6 +1071,8 @@ pub enum HotkeySlot {
     SecondDictation,
     /// Toggle mode's cancel shortcut.
     Cancel,
+    /// Labs › Screenshots (macOS).
+    Screenshot,
 }
 
 impl AppSettings {
@@ -1103,6 +1111,9 @@ impl AppSettings {
         #[cfg(hex_capture)]
         if slot != HotkeySlot::Capture && self.capture_on() {
             others.push(self.capture.hotkey.clone());
+        }
+        if slot != HotkeySlot::Screenshot && cfg!(target_os = "macos") && self.labs.screenshots {
+            others.push(self.screenshots.hotkey.clone());
         }
         hotkey_conflicts(binding, others)
     }

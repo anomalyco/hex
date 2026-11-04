@@ -399,6 +399,8 @@ pub(super) fn conflicts(
         ShortcutTarget::Capture => HotkeySlot::Capture,
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => HotkeySlot::SecondDictation,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::Screenshot => HotkeySlot::Screenshot,
     };
     settings.hotkey_in_use(slot, binding)
 }
@@ -429,6 +431,8 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::Capture => Some(&settings.capture.hotkey),
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey.as_ref(),
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::Screenshot => Some(&settings.screenshots.hotkey),
     }
 }
 
@@ -446,6 +450,8 @@ pub(super) fn set_binding(
         ShortcutTarget::Capture => settings.capture.hotkey = binding,
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey = Some(binding),
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::Screenshot => settings.screenshots.hotkey = binding,
     }
 }
 
@@ -743,7 +749,7 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::Capture => "Annotate",
         // macOS has no shortcuts portal.
         #[cfg(target_os = "macos")]
-        ShortcutTarget::SecondDictation => return None,
+        ShortcutTarget::SecondDictation | ShortcutTarget::Screenshot => return None,
     };
     granted.iter().find(|shortcut| shortcut.name == name)
 }
@@ -1190,6 +1196,8 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
         ShortcutTarget::Capture => "capture-hotkey",
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => "second-dictation-hotkey",
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::Screenshot => "screenshot-hotkey",
     }
 }
 

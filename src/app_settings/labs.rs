@@ -75,6 +75,9 @@ pub struct LabsSettings {
     pub notch_indicator: bool,
     /// The local API's `GET /meetings/events` tells a subscriber each finished meeting's id (issue 964).
     pub meeting_finished_event: bool,
+    /// The screenshot shortcut takes an area or a window (macOS); its
+    /// shortcut and folder are `screenshots.*`.
+    pub screenshots: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -122,6 +125,7 @@ impl Default for LabsSettings {
             meeting_notes_vocabulary: false,
             notch_indicator: false,
             meeting_finished_event: false,
+            screenshots: false,
         }
     }
 }

@@ -221,6 +221,17 @@ const KEYS: &[Key] = &[
          turns it off",
     ),
     key(
+        "screenshots.hotkey",
+        Kind::Shortcut(HotkeySlot::Screenshot),
+        "Labs: the screenshot shortcut, command+shift+4 by default: drag an area, or \
+         press space to pick a window (macOS, with labs.screenshots)",
+    ),
+    optional(
+        "screenshots.folder",
+        Kind::Path,
+        "Labs: folder screenshots are saved to; none uses the Desktop (macOS)",
+    ),
+    key(
         "show_dock_icon",
         Kind::Bool,
         "Keep Hex in the Dock when Settings is closed (macOS)",
@@ -432,6 +443,11 @@ const KEYS: &[Key] = &[
         "labs.meeting_finished_event",
         Kind::Bool,
         "Labs: the local API's GET /meetings/events tells one subscriber each finished meeting's id once its final transcript is written; no transcript, audio, path, or title",
+    ),
+    key(
+        "labs.screenshots",
+        Kind::Bool,
+        "Labs: screenshots.hotkey (command+shift+4) drags out an area or, after space, picks a window; the PNG is copied and saved to screenshots.folder (macOS)",
     ),
     key(
         "labs.gnome_clipboard_restore",
@@ -709,6 +725,12 @@ fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<Contro
             format!("`{name}` belongs to a Labs feature this OS doesn't have"),
         ));
     }
+    if name.starts_with("screenshots.") && !cfg!(target_os = "macos") {
+        return Some(ControlError::new(
+            "unsupported",
+            format!("`{name}` belongs to Labs › Screenshots, which only macOS has"),
+        ));
+    }
     let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
     Some(ControlError::new(
         "unsupported",
@@ -936,6 +958,7 @@ pub fn apply(
         | "raw_dictation_hotkey"
         | "second_dictation_hotkey"
         | "cancel_hotkey"
+        | "screenshots.hotkey"
         | "capture.hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
@@ -946,6 +969,7 @@ pub fn apply(
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
+                HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
             };
@@ -1004,6 +1028,17 @@ pub fn apply(
             return Err(ControlError::new(
                 "shortcut-in-use",
                 "The capture shortcut is already in use; set capture.hotkey to another \
+                 shortcut first",
+            ));
+        }
+        "labs.screenshots"
+            if candidate.labs.screenshots
+                && candidate
+                    .hotkey_in_use(HotkeySlot::Screenshot, &candidate.screenshots.hotkey) =>
+        {
+            return Err(ControlError::new(
+                "shortcut-in-use",
+                "The screenshot shortcut is already in use; set screenshots.hotkey to another \
                  shortcut first",
             ));
         }

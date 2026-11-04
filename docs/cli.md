@@ -71,6 +71,7 @@ hex
 │   ├── show <capture>             one capture's words, files, and where it went
 │   ├── send <capture> [--to <session>] [--always]  send it to an OpenCode session
 │   └── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
+├── screenshot [--pick]           Labs (macOS): shoot the display under the pointer and print the PNG's path; --pick opens the ⌘⇧4 picker
 ├── labs [on|off <feature>]       list Labs features or turn one on/off; edits settings.json (features/labs.md)
 │   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens that lab's drawer in Hex's Labs page
 ├── check-for-updates              check for an update now

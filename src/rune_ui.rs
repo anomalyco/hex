@@ -53,6 +53,8 @@ mod practice;
 mod scenes;
 #[cfg(hex_capture)]
 mod scrawl;
+#[cfg(hex_capture)]
+pub(crate) mod screenshot_thumbnail;
 mod settings;
 mod shortcut_mode;
 mod sidebar;
@@ -460,6 +462,11 @@ pub(crate) fn shortcut_rule(
         // meets the dictation shortcut's rules.
         #[cfg(not(target_os = "macos"))]
         HotkeySlot::SecondDictation => ShortcutTarget::Dictation,
+        #[cfg(target_os = "macos")]
+        HotkeySlot::Screenshot => ShortcutTarget::Screenshot,
+        // Labs › Screenshots is macOS's; elsewhere nothing takes the key.
+        #[cfg(not(target_os = "macos"))]
+        HotkeySlot::Screenshot => return Ok(()),
     };
     host::validate_hotkey(target, binding)
 }

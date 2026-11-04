@@ -116,7 +116,10 @@ impl Category {
             | Feature::ModelInPlace
             | Feature::PickerDownloaded
             | Feature::ParakeetUltra => Self::Models,
-            Feature::HideMenuBarIcon | Feature::VoiceFilter | Feature::Playground => Self::App,
+            Feature::HideMenuBarIcon
+            | Feature::VoiceFilter
+            | Feature::Playground
+            | Feature::Screenshots => Self::App,
         }
     }
 }
@@ -185,6 +188,7 @@ impl Place {
             Feature::UnloadIdle => Self::Elsewhere(tr("In the background")),
             Feature::VoiceFilter => Self::Pane(Pane::VoiceFilter),
             Feature::Playground => Self::Playground,
+            Feature::Screenshots => Self::Elsewhere(tr("Screenshot shortcut")),
         }
     }
 

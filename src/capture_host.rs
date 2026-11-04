@@ -85,7 +85,8 @@ pub use library::{
 };
 pub use permissions::{
     CaptureNeed, NeedState, allow as allow_permission, on_missing,
-    restart as restart_for_permission, state_of as permission_state,
+    report as report_missing_permission, restart as restart_for_permission,
+    state_of as permission_state,
 };
 pub use routing::CaptureRoute;
 pub use routing::{RouteAnswer, RouteDelivery, RouteDest};

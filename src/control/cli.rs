@@ -84,6 +84,15 @@ pub enum ControlCli {
         #[command(flatten)]
         output: Output,
     },
+    /// Take a screenshot of the display under the pointer and print its
+    /// path (Labs › Screenshots, macOS).
+    Screenshot {
+        /// Open the area and window picker instead, as its shortcut does.
+        #[arg(long)]
+        pick: bool,
+        #[command(flatten)]
+        output: Output,
+    },
     /// Read and change any persisted setting, shortcuts included.
     Settings {
         #[command(subcommand)]
@@ -418,6 +427,9 @@ pub fn run(command: ControlCli) -> u8 {
             send(ControlCommand::Dictation { action, print, raw }, output)
         }
         ControlCli::PasteLast { output } => send(ControlCommand::PasteLast, output),
+        ControlCli::Screenshot { pick, output } => {
+            send(ControlCommand::Screenshot { pick }, output)
+        }
         ControlCli::Settings { command } => settings(command),
         ControlCli::Model { command } => match command {
             ModelCommand::List { output } => send(ControlCommand::ModelList, output),
