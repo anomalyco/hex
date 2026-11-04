@@ -51,6 +51,11 @@ Apps -> GET /meetings/events on the local API      // Labs › Meeting finished 
         one SSE event per meeting once its final transcript is written:
         {"type":"meeting.finished","id":"<id>"}, nothing else; one subscriber;
         off -> 404 labs-off (docs/streams.md, labs.md)
+Recordings list icons                               // Labs › Meeting platform icons, off by default (#1290)
+        on -> each row's title gets a small faint icon: Zoom, Google Meet, Teams,
+        Slack, or Webex when the meeting's app names it, else a neutral call
+        icon (FaceTime, Discord, WhatsApp, manual recordings); off -> rows as before
+        (platform_icon in rune_ui/meetings.rs; labs.md)
 ```
 
 Requires the selected local dictation model, Microphone, and System Audio

@@ -104,10 +104,11 @@ pub enum Feature {
     NotchIndicator,
     MeetingFinishedEvent,
     GnomeMeetingCapsules,
+    MeetingPlatformIcons,
 }
 
 impl Feature {
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 46] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -153,6 +154,7 @@ impl Feature {
         Self::NotchIndicator,
         Self::MeetingFinishedEvent,
         Self::GnomeMeetingCapsules,
+        Self::MeetingPlatformIcons,
     ];
 
     /// The features this OS and build have.
@@ -220,6 +222,7 @@ impl Feature {
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::GnomeMeetingCapsules
+            | Self::MeetingPlatformIcons
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -270,7 +273,9 @@ impl Feature {
             | Self::GnomeClipboardRestore
             | Self::MeetingNotesVocabulary
             | Self::NotchIndicator => 20261103,
-            Self::MeetingFinishedEvent | Self::GnomeMeetingCapsules => 20261104,
+            Self::MeetingFinishedEvent
+            | Self::GnomeMeetingCapsules
+            | Self::MeetingPlatformIcons => 20261104,
         }
     }
 
@@ -343,6 +348,7 @@ impl Feature {
             | Self::MeetingSummaryModel
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
+            | Self::MeetingPlatformIcons
             | Self::FillerWords => true,
         }
     }
@@ -395,6 +401,7 @@ impl Feature {
             Self::NotchIndicator => "notch-indicator",
             Self::MeetingFinishedEvent => "meeting-finished-event",
             Self::GnomeMeetingCapsules => "gnome-meeting-capsules",
+            Self::MeetingPlatformIcons => "meeting-platform-icons",
         }
     }
 
@@ -446,6 +453,7 @@ impl Feature {
             Self::NotchIndicator => "labs.notch_indicator",
             Self::MeetingFinishedEvent => "labs.meeting_finished_event",
             Self::GnomeMeetingCapsules => "labs.gnome_meeting_capsules",
+            Self::MeetingPlatformIcons => "labs.meeting_platform_icons",
         }
     }
 
@@ -569,6 +577,9 @@ impl Feature {
             Self::GnomeMeetingCapsules => {
                 "Show the meeting capsules (recording offer, recording indicator) floating over your call on GNOME Wayland, through XWayland while XWayland is running"
             }
+            Self::MeetingPlatformIcons => {
+                "Show a small icon for the app or website each meeting was recorded from, beside its name in Meetings"
+            }
         }
     }
 
@@ -624,6 +635,7 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
+            Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons,
         }
     }
 
@@ -677,6 +689,7 @@ impl Feature {
             &mut labs.notch_indicator,
             &mut labs.meeting_finished_event,
             &mut labs.gnome_meeting_capsules,
+            &mut labs.meeting_platform_icons,
         ]
     }
 
@@ -730,6 +743,7 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
+            Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;

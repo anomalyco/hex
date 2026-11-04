@@ -77,6 +77,8 @@ pub struct LabsSettings {
     pub meeting_finished_event: bool,
     /// The meeting capsules float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux, issue 1274).
     pub gnome_meeting_capsules: bool,
+    /// Each recording in the Meetings list shows its call app's icon, or a neutral one (issue 1290).
+    pub meeting_platform_icons: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -125,6 +127,7 @@ impl Default for LabsSettings {
             notch_indicator: false,
             meeting_finished_event: false,
             gnome_meeting_capsules: false,
+            meeting_platform_icons: false,
         }
     }
 }
