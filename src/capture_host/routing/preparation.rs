@@ -71,8 +71,10 @@ impl Worker {
         let started = Instant::now();
         let pending = self.pending.take();
         if self.current.as_ref().is_some_and(|c| c.due.is_some())
-            && let Some(current) = self.current.take()
+            && let Some(mut current) = self.current.take()
         {
+            // The capsule now shows the new capture: the older send goes on.
+            current.resume(started);
             self.older.push((current, pending));
         }
         let Ok((_, loaded)) = scrawl_capture::handoff::load_bundle(&bundle) else {
@@ -126,7 +128,8 @@ impl Worker {
             sent: None,
             offered: None,
             saved: None,
-            due: (!ruled.clues.is_empty()).then(|| Instant::now() + Duration::from_secs(3)),
+            due: (!ruled.clues.is_empty()).then(|| Instant::now() + SEND_HOLD),
+            held: None,
             destination: answered.send,
         });
         self.publish();
@@ -332,7 +335,7 @@ impl Worker {
                     current.destination = Some(dest);
                     current
                         .due
-                        .get_or_insert_with(|| Instant::now() + Duration::from_secs(3));
+                        .get_or_insert_with(|| Instant::now() + SEND_HOLD);
                 }
                 self.send_due();
             } else if let Some(current) = &mut self.current
@@ -345,8 +348,10 @@ impl Worker {
     }
 
     fn send_due(&mut self) {
+        let now = Instant::now();
         if let Some(current) = &mut self.current
-            && current.due.is_some_and(|due| Instant::now() >= due)
+            && !current.holding(now)
+            && current.due.is_some_and(|due| now >= due)
             && let Some(destination) = current.destination.take()
         {
             current.due = None;

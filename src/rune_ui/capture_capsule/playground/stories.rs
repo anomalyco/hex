@@ -22,7 +22,8 @@ const SIDE_H: f32 = 440.0;
 const GROUP: &str = "Prototypes/Capture capsule";
 
 // One story per scene below; adding a scene means adding its index too.
-const _: () = assert!(SCENES.len() == 10);
+// The eight `clip-…` scenes after them are timed stories for review clips.
+const _: () = assert!(SCENES.len() == 10 + 7);
 
 /// `playground` with the whole flow and every capsule scene as stories.
 pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playground<S> {

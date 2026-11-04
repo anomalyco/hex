@@ -23,6 +23,7 @@ pub(crate) mod picker;
 pub(crate) mod playground;
 pub(crate) mod surface;
 pub(crate) mod tuning;
+mod undo_ring;
 
 // Its scenes and goldens are macOS's chips and labels.
 #[cfg(all(test, target_os = "macos"))]
@@ -42,8 +43,8 @@ use self::flow::{Action, Cue, Done, Flow, Footer, Input, Lead, List, Mode, Pres}
 use self::surface::{
     CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LIST_PAD, LIST_Y, PANEL_H, PANEL_W,
     PROCESSING, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H, THUMB_W,
-    THUMB_X, UNDO_LABEL, chord, clock_style, clock_width, corner, done_style, done_text_x,
-    ellipsize, measure, medium, small,
+    THUMB_X, chord, clock_style, clock_width, corner, done_style, done_text_x, ellipsize, measure,
+    medium, small,
 };
 use self::tuning::ListFooter;
 use super::controls::Paint;
@@ -257,6 +258,8 @@ pub(crate) struct Animated {
     morphs: u32,
     /// The shown capture's first frame, decoded, for [`Lead::Thumbnail`].
     thumb: Option<rune::Image>,
+    /// The Undo chip's countdown, while it has one.
+    ring: Option<undo_ring::Ring>,
 }
 
 impl Animated {
@@ -270,6 +273,7 @@ impl Animated {
             clock: LiveText::new(surface.clock.clone()),
             morphs: surface.morphs,
             thumb: None,
+            ring: None,
         }
     }
 
@@ -407,6 +411,15 @@ impl CapsuleState {
         state.live.thumb = thumb;
         let pres = state.with_thumb(pres);
         state.surface = std::mem::take(&mut state.surface).settled(pres);
+        // An Undo ring two seconds in, so a still shows it draining.
+        if let Pres::Done(Done {
+            countdown: Some(end),
+            ..
+        }) = &state.surface.pres
+        {
+            let now = end - flow::undo_s() + 2.0;
+            undo_ring::sync(&mut state.live.ring, &state.surface.pres, now, false);
+        }
         state.live.meter.publish(0.4);
         // The shimmer's band would leave most of a still's label dim.
         for glyph in &state.live.meter.shimmer {
@@ -472,7 +485,8 @@ impl CapsuleState {
             return;
         }
         let now = self.now;
-        self.flow.hover(on, now);
+        let actions = self.flow.hover(on, now);
+        self.dispatch(actions);
         self.present(now);
         self.live.sync(&self.surface);
         tx.wake_after(Duration::ZERO);
@@ -551,6 +565,7 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
         wake = earliest(wake, Some(whole as f64 + 1.0 - secs));
     }
     s.live.sync(&s.surface);
+    undo_ring::sync(&mut s.live.ring, &s.surface.pres, now, s.surface.reduced);
 
     // The overlay stays up while the capsule leaves, then hides.
     let hidden = matches!(s.surface.pres, Pres::Hidden);
@@ -1219,7 +1234,10 @@ fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
             .child(quiet(p, shown.text(), done_style())),
         // The quiet way out of a send that just went.
         // Click only: Escape meant for another app was taking sends back.
-        Id::Undo => keyed(p, base, &[], UNDO_LABEL, medium()).on_press_tx(press(id)),
+        Id::Undo => {
+            let [_, _, w, h] = shown.rect;
+            undo_ring::chip(p, base, [w, h], live.ring.as_ref()).on_press_tx(press(id))
+        }
         // Search, with the capture shortcut that opens it as Settings draws it.
         Id::Ask
             if matches!(
@@ -1620,10 +1638,24 @@ fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
         }
         body = body.child(entry);
     }
+    if unmatched(list) {
+        body = body.child(
+            row()
+                .key("unmatched")
+                .center_y()
+                .h(ROW_H)
+                .px(ROW_PX)
+                .child(label(UNMATCHED, medium(), p.faint()))
+                .transition(in_place),
+        );
+    }
+    let sendable = !list.rows.is_empty();
     let footer = match (&list.always, list.footer) {
         (_, Footer::Suggesting) => None,
         (Some((site, true)), _) => Some(saving_hint(p, list, site, w)),
-        (_, Footer::Search { remember }) => Some(search_hints(p, remember, w)),
+        (_, Footer::Search { remember }) => {
+            Some(search_hints(p, remember && sendable, sendable, w))
+        }
     };
     list_panel(p, body, footer, x, w, h, blur)
 }
@@ -1631,12 +1663,16 @@ fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
 /// The search's hints, as one quiet line: what each key does, then the
 /// key ("Send ⏎"); the highlighted row already says where. The capture
 /// shortcut, which records anew from here, sits on the right.
-fn search_hints(p: Paint, remember: bool, w: f32) -> El {
+fn search_hints(p: Paint, remember: bool, send: bool, w: f32) -> El {
     const SEND: [&str; 1] = ["⏎"];
     const REMEMBER: [&str; 2] = ["⇧", "⏎"];
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
     let shortcut = surface::shortcut_keycaps();
-    let used = hint_width("Send", &SEND) + HINTS_GAP;
+    let used = if send {
+        hint_width("Send", &SEND) + HINTS_GAP
+    } else {
+        0.0
+    };
     let remember = remember && used + hint_width("Remember", &REMEMBER) <= room;
     let used = used
         + if remember {
@@ -1648,7 +1684,7 @@ fn search_hints(p: Paint, remember: bool, w: f32) -> El {
     row()
         .center_y()
         .gap(HINTS_GAP)
-        .child(hint(p, "Send", &SEND).key("send"))
+        .children(send.then(|| hint(p, "Send", &SEND).key("send")))
         .children(remember.then(|| hint(p, "Remember", &REMEMBER).key("remember")))
         .child(el().grow(1.0))
         .children(capture.then(|| hint(p, "New capture", &shortcut).key("capture")))
@@ -1874,6 +1910,14 @@ fn list_panel(p: Paint, body: El, hints: Option<El>, x: f32, w: f32, h: f32, blu
 
 /// Whether the list shows its header: over rows, or the room a search
 /// keeps for them.
+/// What a search that matches nothing says, in place of its rows.
+const UNMATCHED: &str = "No sessions match";
+
+/// A search that matches nothing: it says so rather than show no rows.
+fn unmatched(list: &List) -> bool {
+    !list.suggesting() && list.rows.is_empty()
+}
+
 fn headed(list: &List) -> bool {
     !list.rows.is_empty() || list.min_rows > 0
 }
@@ -1882,7 +1926,11 @@ fn headed(list: &List) -> bool {
 /// the search's footer.
 pub(crate) fn list_height(list: &List) -> f32 {
     let header = if headed(list) { HEADER_H } else { 0.0 };
-    let rows = list.rows.len().max(list.min_rows) as f32;
+    let rows = list
+        .rows
+        .len()
+        .max(list.min_rows)
+        .max(usize::from(unmatched(list))) as f32;
     let footer = if list.suggesting() {
         LIST_PAD
     } else {
