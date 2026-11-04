@@ -2,7 +2,11 @@
   "$schema": "https://raw.githubusercontent.com/Hona/strobe/main/schema/strobe.v1.json",
   "build": {
     "command": "cargo build --locked --release --bin hex",
-    "output": "{cache}/cargo-target/release/hex.exe",
+    "output": {
+      "windows": "{cache}/cargo-target/release/hex.exe",
+      "macos": "{cache}/cargo-target/release/hex",
+      "linux": "{cache}/cargo-target/release/hex"
+    },
     "env": {
       "CARGO_TARGET_DIR": "{cache}/cargo-target",
       "CARGO_PROFILE_RELEASE_DEBUG": "line-tables-only",
@@ -26,6 +30,7 @@
         "HF_HUB_CACHE": "{home}/.cache/huggingface/hub"
       },
       "unset": ["HEX_*", "WGPU_*", "RUNE_*", "HF_HOME", "RUST_LOG"],
+      "moved": ["~/Library/Application Support/hex"],
       "files": {
         "hex-data/onboarding-complete": "",
         "hex-data/settings.json": {
@@ -35,12 +40,12 @@
         }
       },
       "guard": [
-        { "file": "%APPDATA%/hex/local-api.json", "pid": "pid" },
-        { "file": "%APPDATA%/hex/settings.json" },
-        { "file": "~/Library/Application Support/hex/local-api.json", "pid": "pid" },
-        { "file": "~/Library/Application Support/hex/settings.json" },
-        { "file": "~/.local/share/hex/local-api.json", "pid": "pid" },
-        { "file": "~/.local/share/hex/settings.json" }
+        { "os": "windows", "file": "%APPDATA%/hex/local-api.json", "pid": "pid" },
+        { "os": "windows", "file": "%APPDATA%/hex/settings.json" },
+        { "os": "macos", "file": "~/Library/Application Support/hex/local-api.json", "pid": "pid" },
+        { "os": "macos", "file": "~/Library/Application Support/hex/settings.json" },
+        { "os": "linux", "file": "~/.local/share/hex/local-api.json", "pid": "pid" },
+        { "os": "linux", "file": "~/.local/share/hex/settings.json" }
       ]
     },
     "hex-listening": {
