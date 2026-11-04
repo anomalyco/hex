@@ -35,6 +35,7 @@ pub use hotkeys::*;
 pub use labs::*;
 pub use meeting_folder::default_meeting_output_folder;
 pub use meetings::*;
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use screenshots::{ScreenshotSettings, screenshot_hotkey, screenshot_settings};
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());

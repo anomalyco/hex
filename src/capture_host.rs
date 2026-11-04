@@ -83,6 +83,7 @@ mod sink;
 pub use library::{
     explain as explain_capture, list as list_captures, send as send_capture, show as show_capture,
 };
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use permissions::{
     CaptureNeed, NeedState, allow as allow_permission, on_missing,
     report as report_missing_permission, restart as restart_for_permission,
