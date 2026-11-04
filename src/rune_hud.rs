@@ -21,7 +21,7 @@ pub(crate) mod spring;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rune::compose::{Compositor, Frame};
 use rune::{Cx, El, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
@@ -324,6 +324,50 @@ impl Hud {
     }
 }
 
+/// How long the hidden HUD keeps its GPU surface: the device it holds costs
+/// about 150 MB and the GPU driver's threads waking some 65 times a second.
+const GPU_IDLE: Duration = Duration::from_secs(5 * 60);
+
+/// The format the HUD draws in on Windows and Linux (Rune drops the
+/// surface's sRGB suffix for `srgb_blend`).
+const HUD_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
+
+/// A painter made ahead of the HUD's first frame on a device `prepare_gpu`
+/// was given.
+static PREBUILT: Mutex<Option<(wgpu::Device, Painter)>> = Mutex::new(None);
+
+/// Makes the HUD's pipeline on `device` off the UI thread, for the HUD's next
+/// first frame: compiling it there takes 75 to 115 ms on Windows. Unclaimed,
+/// it goes after a while, since it keeps the device alive.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn prepare_gpu(device: &wgpu::Device) {
+    let lock = || PREBUILT.lock().unwrap_or_else(|error| error.into_inner());
+    if lock().as_ref().is_some_and(|(made, _)| made == device) {
+        return;
+    }
+    let painter = Painter::new(device, HUD_FORMAT);
+    *lock() = Some((device.clone(), painter));
+    let device = device.clone();
+    let _ = std::thread::Builder::new()
+        .name("hud-prepared".into())
+        .spawn(move || {
+            std::thread::sleep(Duration::from_secs(70));
+            let mut slot = lock();
+            if slot.as_ref().is_some_and(|(made, _)| *made == device) {
+                slot.take();
+            }
+        });
+}
+
+/// `prepare_gpu`'s painter, when it was made on `device` for `format`.
+fn prebuilt(device: &wgpu::Device, format: wgpu::TextureFormat) -> Option<Painter> {
+    let mut slot = PREBUILT.lock().unwrap_or_else(|error| error.into_inner());
+    slot.as_ref()
+        .is_some_and(|(made, painter)| made == device && painter.format == format)
+        .then(|| slot.take().map(|(_, painter)| painter))
+        .flatten()
+}
+
 /// Adds the HUD's overlay to the app; send its events through the returned
 /// sender.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
@@ -342,14 +386,19 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             view,
         }
         .options(OverlayOptions {
-            // The first press never waits on the panel or its pipeline.
-            prewarm: cfg!(target_os = "macos"),
+            // The first press never waits on the window: macOS keeps the
+            // panel drawn at alpha zero; elsewhere only the window waits,
+            // and its GPU surface comes with the show (`release_gpu_after`).
+            prewarm: true,
             #[cfg(not(target_os = "macos"))]
             display: display(),
             ..OverlayOptions::default()
         })
         // The shaders write display (sRGB-encoded) values.
         .srgb_blend(true)
+        // A burst of dictations keeps the GPU surface, so each HUD shows at
+        // once; a Hex at rest gives the GPU device back (Windows and Linux).
+        .release_gpu_after(GPU_IDLE)
         .compositor(HudCompositor {
             gpu: None,
             animating: animating.clone(),
@@ -640,7 +689,9 @@ impl Compositor<Hud> for HudCompositor {
             .as_ref()
             .is_none_or(|(device, gpu)| *device != f.device_key() || gpu.format != f.format)
         {
-            self.gpu = Some((f.device_key(), Painter::new(f.device, f.format)));
+            let painter =
+                prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
+            self.gpu = Some((f.device_key(), painter));
         }
         let (_, gpu) = self.gpu.as_ref().expect("created above");
         let uniforms = gpu.write(&drawn, layout, target, |buffer, data| {

@@ -857,6 +857,22 @@ fn process_button(vk: u32, is_down: bool, time: u32) -> Disposition {
             if !modifier_event && is_down {
                 state.mask_release = false;
             }
+            // A dictation shortcut's modifiers are down and its key may
+            // follow: the HUD's GPU device and pipelines start on a thread
+            // now, so the HUD shows at once rather than after them (#1229).
+            if modifier_event
+                && is_down
+                && !state.capture.active
+                && [Some(&state.binding), state.raw.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .any(|binding| state.modifiers.matches(binding))
+            {
+                rune::warm_gpu_with(
+                    crate::rune_hud::Painter::FEATURES,
+                    crate::rune_hud::prepare_gpu,
+                );
+            }
             if modifier_event && crate::capture_host::wants_input() {
                 report_modifiers(&state.modifiers);
             }
