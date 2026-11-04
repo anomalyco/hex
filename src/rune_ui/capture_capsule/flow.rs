@@ -2794,6 +2794,38 @@ mod tests {
         }
     }
 
+    /// A host that named a session by id (an old build, or a rule that only
+    /// knew the id) still reads as a name in the pill, including "too late".
+    #[test]
+    fn a_session_named_by_its_id_reads_as_a_session() {
+        let to = Dest::new("ses_e853b1bd3ffe68OoWKFGtjPy43", "rule")
+            .session("ses_e853b1bd3ffe68OoWKFGtjPy43");
+        let route = Route::Rule {
+            to: to.clone(),
+            suggested: vec![to],
+            recent: Vec::new(),
+            site: None,
+        };
+        assert_eq!(
+            routes::sent_to("ses_e853b1bd3ffe68OoWKFGtjPy43"),
+            "Sent to session"
+        );
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(route), 0.0);
+        assert_eq!(
+            done(&flow, 0.0).text,
+            "Sending to session",
+            "the rule's own send, before OpenCode takes it"
+        );
+        flow.input(Input::Settled, 0.5);
+        assert_eq!(done(&flow, 0.5).text, "Sent to session");
+        flow.input(Input::Undo, 1.0);
+        flow.input(Input::Undone(Undone::TooLate), 1.2);
+        let shown = done(&flow, 1.2);
+        assert_eq!(shown.text, "Sent to session");
+        assert_eq!(shown.why.as_deref(), Some("too late"));
+    }
+
     #[test]
     fn too_late_to_take_back_offers_the_list_for_a_copy() {
         let mut flow = Flow::new();

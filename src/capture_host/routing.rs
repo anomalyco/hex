@@ -536,8 +536,8 @@ impl Worker {
         }
         let dest = match to {
             Some(to) if to.starts_with("ses") => Destination {
+                title: session_name(to, to, &[]),
                 session: to.to_owned(),
-                title: to.to_owned(),
                 via: "chosen".into(),
                 url: None,
                 directory: None,
@@ -821,6 +821,9 @@ impl Worker {
         if let Some(via) = via {
             via.clone_into(&mut dest.via);
         }
+        if let Some(current) = self.current.as_ref() {
+            dest.title = session_name(&dest.session, &dest.title, &current.candidates);
+        }
         self.set_delivery(RouteDelivery::Sending {
             to: dest.title.clone(),
         });
@@ -933,7 +936,9 @@ impl Worker {
         });
         let (session, title) = match found {
             Some(dest) => (dest.session.clone(), dest.name.clone()),
-            None if to.starts_with("ses") => (to.to_owned(), to.to_owned()),
+            None if to.starts_with("ses") => {
+                (to.to_owned(), session_name(to, to, &current.candidates))
+            }
             None => {
                 tracing::info!("the capsule named a session the route doesn't list");
                 return None;
@@ -1177,6 +1182,97 @@ fn forget_rule(saved: &SavedRule) {
     }
 }
 
+/// What the capsule calls a session whose title it never learned.
+const SESSION: &str = "session";
+
+/// Whether `name` is a raw session id rather than a title.
+fn is_session_id(name: &str) -> bool {
+    name.trim().starts_with("ses_")
+}
+
+/// `name` when it is a real name: never the raw `ses…` id the router falls
+/// back to when a session's title wasn't read.
+fn titled(name: &str) -> Option<String> {
+    let name = name.trim();
+    (!name.is_empty() && !is_session_id(name)).then(|| name.to_owned())
+}
+
+/// The name the capsule shows for `session`: the router's name when that is
+/// one, else the title from this capture's sessions, else the title OpenCode
+/// knows it by, else "session". What the capsule shows is never a raw
+/// `ses…` id (Kit, t1311: a rule that named a session by id put one in the
+/// pill).
+fn session_name(session: &str, name: &str, candidates: &[smart::Candidate]) -> String {
+    session_name_by(session, name, candidates, server_title)
+}
+
+/// [`session_name`] with the server lookup passed in.
+fn session_name_by(
+    session: &str,
+    name: &str,
+    candidates: &[smart::Candidate],
+    lookup: impl FnOnce(&str) -> Option<String>,
+) -> String {
+    titled(name)
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|candidate| candidate.id == session)
+                .and_then(|candidate| titled(&candidate.title))
+        })
+        .or_else(|| lookup(session).and_then(|title| titled(&title)))
+        .unwrap_or_else(|| SESSION.to_owned())
+}
+
+/// A session's title from OpenCode, for a route that had only its id (the
+/// early local read, or a saved rule). One bounded request; `None` when it
+/// can't answer (tests never ask).
+fn server_title(session: &str) -> Option<String> {
+    if cfg!(test) {
+        return None;
+    }
+    let mut api = routing::within(routing::Hooks::default().api, routing::SESSIONS_BUDGET);
+    scrawl_capture::opencode::get_session(&mut api, session)
+        .ok()
+        .map(|session| session.title)
+}
+
+/// Names every session an answer lists, and a send's own destination, so
+/// the capsule and the bundle read titles: a rule, or a list read without a
+/// title, would otherwise show the session's `ses…` id.
+fn name_answer(
+    answer: &mut RouteAnswer,
+    send: Option<&mut Destination>,
+    candidates: &[smart::Candidate],
+) {
+    let fix =
+        |dest: &mut RouteDest| dest.name = session_name(&dest.session, &dest.name, candidates);
+    match answer {
+        RouteAnswer::Looking | RouteAnswer::Unreachable { .. } => {}
+        RouteAnswer::Rule {
+            to,
+            suggested,
+            recent,
+            ..
+        } => {
+            fix(to);
+            suggested.iter_mut().chain(recent.iter_mut()).for_each(fix);
+        }
+        RouteAnswer::Guess {
+            suggested, recent, ..
+        } => suggested.iter_mut().chain(recent.iter_mut()).for_each(fix),
+        RouteAnswer::Nothing { recent } | RouteAnswer::NoAnswer { recent } => {
+            recent.iter_mut().for_each(fix);
+        }
+        // Its folder's name is already a name; a session found later is named
+        // by its own answer.
+        RouteAnswer::ResolvingRule { .. } => {}
+    }
+    if let Some(send) = send {
+        send.title = session_name(&send.session, &send.title, candidates);
+    }
+}
+
 /// The answer to show, and the destination of a rule's send.
 fn answer_for(
     decided: Decided,
@@ -1207,7 +1303,7 @@ fn answer_for(
             shown: Some(Shown::guess(why)),
         }
     };
-    match decided {
+    let mut answered = match decided {
         // Only a rule the person saved sends on its own; anything else the
         // router would send is its first suggestion.
         Decided::Judged(smart::Decision::Send { to, instead }) if policy::saved_rule(&to) => {
@@ -1246,7 +1342,12 @@ fn answer_for(
         Decided::Failed => Answered::of(RouteAnswer::NoAnswer {
             recent: recent(&[]),
         }),
-    }
+    };
+    // The early local read, a saved rule, or a list read without a title can
+    // leave a `ses…` id where a name goes; the capsule and the bundle say the
+    // title instead.
+    name_answer(&mut answered.answer, answered.send.as_mut(), candidates);
+    answered
 }
 
 /// What [`answer_for`] made of a decision.
@@ -1395,6 +1496,13 @@ fn deliver(
         );
     }
     router.run(|| {
+        // The bundle and its summary name the session too, so they say its
+        // title rather than a `ses…` id when one reached this far.
+        let titled = Destination {
+            title: session_name(&dest.session, &dest.title, &[]),
+            ..dest.clone()
+        };
+        let dest = &titled;
         let recorded = scrawl_capture::handoff::load_bundle(bundle).and_then(
             |(_, mut loaded): (PathBuf, ScrawlBundle)| {
                 routing::record_destination(bundle, &mut loaded, dest.clone())
@@ -1562,6 +1670,93 @@ mod tests {
             ],
             0,
         )
+    }
+
+    /// Kit's Nov 4 capture: a saved app rule named a session by id before the
+    /// session server answered, and the pill said `Sent to ses_…`. A name is
+    /// a title, or the word "session".
+    #[test]
+    fn a_session_is_named_by_its_title_never_its_id() {
+        let candidates = [candidate("ses_seer", "SEER", 0)];
+        let no_lookup = |_: &str| panic!("a title needs no lookup");
+        assert_eq!(
+            session_name_by("ses_seer", "SEER", &candidates, no_lookup),
+            "SEER"
+        );
+        // A rule that named only the id: the capture's list has the title.
+        assert_eq!(
+            session_name_by("ses_seer", "ses_seer", &candidates, |_| None),
+            "SEER"
+        );
+        // Not in the list: OpenCode's title.
+        assert_eq!(
+            session_name_by("ses_x", "ses_x", &candidates, |_| Some("HOME".into())),
+            "HOME"
+        );
+        // Nowhere at all: "session", never the id.
+        assert_eq!(
+            session_name_by("ses_x", "ses_x", &candidates, |_| None),
+            "session"
+        );
+        assert_eq!(
+            session_name_by("ses_x", "ses_x", &candidates, |_| Some(String::new())),
+            "session"
+        );
+        assert_eq!(session_name("ses_x", "", &candidates), "session");
+        assert_eq!(
+            session_name_by("ses_seer", "SEER", &candidates, |_| Some("HOME".into())),
+            "SEER",
+            "a title already read is kept"
+        );
+    }
+
+    /// The answer and its send carry a name even when the router handed over
+    /// only a session id.
+    #[test]
+    fn a_rule_answer_and_send_are_named_by_title() {
+        let rule = |title: &str| {
+            answer_for(
+                Decided::Judged(smart::Decision::Send {
+                    to: scored_by(
+                        "ses_seer",
+                        title,
+                        smart::Basis::Clue(smart::Source::AppRule),
+                        "routing.apps sends com.kitlangton.seer to ses_seer",
+                    ),
+                    instead: Vec::new(),
+                }),
+                None,
+                None,
+                &[candidate("ses_seer", "SEER", 0)],
+                0,
+            )
+        };
+        for answered in [rule(""), rule("ses_seer")] {
+            let RouteAnswer::Rule { to, .. } = &answered.answer else {
+                panic!("not a rule: {:?}", answered.answer);
+            };
+            assert_eq!(to.name, "SEER", "the pill's name");
+            assert_eq!(
+                answered.send.map(|dest| dest.title),
+                Some("SEER".into()),
+                "the bundle and summary's name"
+            );
+        }
+        // Nothing read and no server: words, never the id.
+        let answered = answer_for(
+            Decided::Judged(smart::Decision::Send {
+                to: scored("ses_seer", ""),
+                instead: Vec::new(),
+            }),
+            None,
+            None,
+            &[],
+            0,
+        );
+        let RouteAnswer::Guess { suggested, .. } = &answered.answer else {
+            panic!("not a guess: {:?}", answered.answer);
+        };
+        assert_eq!(suggested[0].name, "session");
     }
 
     #[test]
@@ -2058,6 +2253,49 @@ mod tests {
                 settle(&mut worker);
                 assert!(worker.current.as_ref().unwrap().sent.is_none());
             }
+        }
+
+        /// A saved app rule to a session id sends before the session server
+        /// answers: the pill, the delivery and the bundle still say a name,
+        /// never `ses_…`.
+        #[test]
+        fn a_rule_sent_before_the_sessions_read_names_a_session_not_its_id() {
+            let router = router_with(|c| {
+                c.apps
+                    .insert("com.example.board".into(), "ses_board".into());
+            });
+            let (look, found) = held_look(router, look::Live::default());
+            let outcomes = SharedOutcomes::default();
+            let mut worker = worker(outcomes.clone());
+            let bundle = written("com.example.board");
+            lock(&outcomes).fail(bundle.clone(), "test".into());
+            worker.written(bundle.clone(), look);
+            // The local read saw nothing, so the rule's send is due at once.
+            worker.current.as_mut().unwrap().due = Some(Instant::now());
+            worker.prepared();
+            let current = worker.current.as_ref().unwrap();
+            assert!(
+                matches!(&current.route.answer, RouteAnswer::Rule { to, .. }
+                    if to.session == "ses_board" && to.name == "session"),
+                "{:?}",
+                current.route.answer
+            );
+            assert_eq!(
+                current.route.delivery,
+                Some(RouteDelivery::Sent {
+                    to: "session".into()
+                }),
+                "the pill's name"
+            );
+            let (_, loaded) = scrawl_capture::handoff::load_bundle(&bundle).unwrap();
+            assert_eq!(
+                loaded.destination.map(|dest| dest.title),
+                Some("session".into()),
+                "the bundle and summary's name"
+            );
+            drop(found);
+            worker.pending = None;
+            std::fs::remove_dir_all(bundle.parent().unwrap()).ok();
         }
 
         #[test]
