@@ -91,18 +91,6 @@ begin
   Result := True;
   { Installs this version whatever is installed now: versions are never
     compared, and the self-updater follows the channel's current release. }
-#if Arch == "x64"
-  { The x64 build decodes on the GPU through Vulkan. Its loader ships with
-    NVIDIA, AMD, and Intel graphics drivers, not with Windows. }
-  if (ExpandConstant('{param:SKIPVULKANCHECK|0}') <> '1') and
-     not FileExists(ExpandConstant('{sys}\vulkan-1.dll')) then
-  begin
-    SuppressibleMsgBox('Hex needs a graphics driver with Vulkan support, and vulkan-1.dll was not found.' + #13#10#13#10 +
-      'Update your NVIDIA, AMD, or Intel graphics driver, then run this installer again.',
-      mbError, MB_OK, IDOK);
-    Result := False;
-  end;
-#endif
 end;
 
 procedure StopManagedHex();

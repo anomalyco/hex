@@ -326,6 +326,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Speech engine", "Moteur vocal"),
     ("Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway.", "Le mode auto utilise le CPU, car il traite la parole plus vite que {device}. Choisissez GPU pour l'utiliser quand même."),
     ("Auto uses the CPU because {device} stopped responding. Choose GPU to try it again.", "Le mode auto utilise le CPU, car {device} a cessé de répondre. Choisissez GPU pour réessayer."),
+    ("Hex uses the CPU because the graphics driver's Vulkan is missing or too old. Update the GPU driver to use the GPU.", "Hex utilise le CPU, car le pilote graphique n'a pas Vulkan ou en a une version trop ancienne. Mettez à jour le pilote GPU pour utiliser le GPU."),
     ("Dictation HUD", "HUD de dictée"),
     ("Call recording", "Enregistrement des appels"),
     ("Check for updates", "Rechercher des mises à jour"),

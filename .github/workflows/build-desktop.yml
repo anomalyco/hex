@@ -229,7 +229,7 @@ jobs:
             bash source/.github/release/check-x86-baseline.sh \
             "$(cygpath -u "$RUNNER_TEMP")/dist/hex-$HEX_VERSION-windows-$HEX_WINDOWS_LABEL.exe" \
             source/target/x86_64-pc-windows-msvc/release/build/transcribe-cpp-sys-*/out/lib/ggml*.lib
-      - name: Check the executable needs no Visual C++ Redistributable
+      - name: Check the executable needs no Visual C++ Redistributable or Vulkan loader
         shell: pwsh
         run: |
           $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
@@ -239,6 +239,10 @@ jobs:
           $imports
           $redist = $imports | Select-String -Pattern 'VCRUNTIME|MSVCP|vcomp'
           if ($redist) { throw "hex.exe imports Visual C++ runtime DLLs: $redist" }
+          # The Vulkan loader comes with the graphics driver: imported at load
+          # time, a missing or Vulkan 1.0 one stops Hex before main (#1240).
+          $static = ($imports -join "`n") -split 'delay load dependencies' | Select-Object -First 1
+          if ($static -match 'vulkan-1\.dll') { throw "hex.exe imports vulkan-1.dll at load time instead of delay-loading it" }
       - id: upload
         uses: ./source/.github/release/upload
         with:

@@ -7,6 +7,7 @@ pub(crate) mod input;
 pub(crate) mod login_item;
 pub(crate) mod paste;
 pub(crate) mod rune;
+pub(crate) mod vulkan;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

@@ -50,9 +50,10 @@ Anomaly's Azure Artifact Signing is configured are Authenticode-signed
 publisher builds SmartScreen reputation, SmartScreen may say it protected your
 PC; choose **More info**, then **Run anyway**.
 
-**x64** decodes on the GPU through Vulkan and needs a current NVIDIA, AMD, or
-Intel graphics driver (it supplies `vulkan-1.dll`); the installer stops with an
-explanation when it is missing. **ARM64** decodes on the CPU. Both are
+**x64** decodes on the GPU through Vulkan 1.2, which a current NVIDIA, AMD, or
+Intel graphics driver supplies (`vulkan-1.dll`). With a missing or older
+driver Hex still starts and decodes on the CPU, and Settings › Speech engine
+says so. **ARM64** decodes on the CPU. Both are
 self-contained: no Visual C++ Redistributable is required. Hex then keeps
 itself current through the signed update feed. Uninstalling removes every
 installed version, the shortcut, and Launch at login, and keeps settings, logs,
