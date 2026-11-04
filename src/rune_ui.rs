@@ -469,15 +469,12 @@ pub(crate) fn shortcut_rule(
         HotkeySlot::Capture => ShortcutTarget::Capture,
         #[cfg(target_os = "macos")]
         HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
-        // Labs › Second dictation shortcut is macOS's; elsewhere a saved one
-        // meets the dictation shortcut's rules.
-        #[cfg(not(target_os = "macos"))]
-        HotkeySlot::SecondDictation => ShortcutTarget::Dictation,
         #[cfg(target_os = "macos")]
         HotkeySlot::Screenshot => ShortcutTarget::Screenshot,
-        // Labs › Screenshots is macOS's; elsewhere nothing takes the key.
+        // Labs › Second dictation shortcut and Screenshots are macOS's;
+        // elsewhere a saved one meets the dictation shortcut's rules.
         #[cfg(not(target_os = "macos"))]
-        HotkeySlot::Screenshot => return Ok(()),
+        HotkeySlot::SecondDictation | HotkeySlot::Screenshot => ShortcutTarget::Dictation,
     };
     host::validate_hotkey(target, binding)
 }
