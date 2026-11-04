@@ -15,6 +15,34 @@ fn switching_to_hex_opens_its_closed_window() {
     assert!(!reopen_on_activation(true, false, true));
 }
 
+/// Setup or a missing menu-bar item always opens the window; otherwise a
+/// shown Dock icon opens it unless macOS started Hex at login (#1321), and a
+/// hidden one never does.
+#[test]
+fn login_item_launch_starts_without_the_window() {
+    for setup_ready in [false, true] {
+        for onboarding_completed in [false, true] {
+            for status_item_available in [false, true] {
+                for show_dock_icon in [false, true] {
+                    let ready = setup_ready && onboarding_completed && status_item_available;
+                    let launch = LaunchWindow::decide(
+                        show_dock_icon,
+                        setup_ready,
+                        onboarding_completed,
+                        status_item_available,
+                    );
+                    assert_eq!(launch.opens(true), !ready, "{launch:?} at login");
+                    assert_eq!(
+                        launch.opens(false),
+                        !ready || show_dock_icon,
+                        "{launch:?} opened by hand"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Hold each preparation until released, observing its exact request and cancellation.
 struct Fixture {
     runtime: Runtime,

@@ -125,15 +125,6 @@ pub struct ListenerConfig {
     pub device: Option<String>,
 }
 
-pub(crate) fn should_open_app_on_launch(
-    show_dock_icon: bool,
-    setup_ready: bool,
-    onboarding_completed: bool,
-    status_item_available: bool,
-) -> bool {
-    show_dock_icon || !setup_ready || !onboarding_completed || !status_item_available
-}
-
 pub(crate) fn controller_loop(
     shutdown: &AtomicBool,
     events: SyncSender<ControllerEvent>,
@@ -1030,42 +1021,6 @@ pub fn probe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn dockless_startup_stays_quiet_only_when_setup_and_menu_bar_are_ready() {
-        for setup_ready in [false, true] {
-            for onboarding_completed in [false, true] {
-                for status_item_available in [false, true] {
-                    assert_eq!(
-                        should_open_app_on_launch(
-                            false,
-                            setup_ready,
-                            onboarding_completed,
-                            status_item_available,
-                        ),
-                        !(setup_ready && onboarding_completed && status_item_available),
-                        "setup_ready={setup_ready}, onboarding_completed={onboarding_completed}, status_item_available={status_item_available}",
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn dock_visible_startup_always_opens_the_app() {
-        for setup_ready in [false, true] {
-            for onboarding_completed in [false, true] {
-                for status_item_available in [false, true] {
-                    assert!(should_open_app_on_launch(
-                        true,
-                        setup_ready,
-                        onboarding_completed,
-                        status_item_available,
-                    ));
-                }
-            }
-        }
-    }
 
     #[test]
     fn only_automatic_recordings_stop_when_the_call_ends_and_only_with_the_lab_on() {
