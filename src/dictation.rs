@@ -38,6 +38,18 @@ use crate::audio::recording_environment::{
 
 const TIMELINE_BUFFER_DURATION: Duration = Duration::from_secs(10);
 const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
+
+/// How much audio a shortcut capture keeps from before its press. Muting or
+/// pausing other audio while dictating takes effect only after the press, so
+/// the audio before it holds whatever was playing (#1309): those captures
+/// keep none. Ducking and doing nothing keep [`PRE_ROLL_DURATION`].
+pub fn hotkey_pre_roll(behavior: crate::app_settings::RecordingAudioBehavior) -> Duration {
+    use crate::app_settings::RecordingAudioBehavior::{DoNothing, Duck, Mute, PauseMedia};
+    match behavior {
+        Mute | PauseMedia => Duration::ZERO,
+        Duck | DoNothing => PRE_ROLL_DURATION,
+    }
+}
 pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
 /// Audio kept after a shortcut release that finishes a capture, because a
 /// release often lands while the last word is still sounding.
@@ -870,27 +882,34 @@ impl DictationCapture {
         self.start_with_pre_roll(now, PRE_ROLL_DURATION, false);
     }
 
+    #[cfg(test)]
     pub fn start_at(&mut self, occurred_at: CaptureInstant) {
-        self.start_from_timeline(occurred_at, PRE_ROLL_DURATION, false)
+        self.start_hotkey_at(occurred_at, PRE_ROLL_DURATION)
+    }
+
+    /// Starts a shortcut recording at `occurred_at`, keeping `pre_roll` of
+    /// the audio before it (see [`hotkey_pre_roll`]).
+    pub fn start_hotkey_at(&mut self, occurred_at: CaptureInstant, pre_roll: Duration) {
+        self.start_from_timeline(occurred_at, pre_roll, false)
     }
 
     /// Starts a shortcut recording at `pressed_at`, which may lie past the
     /// newest audio: a microphone that delivers large chunks has not yet
-    /// handed over what it captured before the press (#1309). Exactly the
-    /// pre-roll before the press is kept, however large the chunks; what
+    /// handed over what it captured before the press (#1309). Exactly
+    /// `pre_roll` before the press is kept, however large the chunks; what
     /// precedes it in audio still to arrive is dropped as it comes.
     #[cfg(any(test, target_os = "linux"))]
-    pub fn start_at_press(&mut self, pressed_at: CaptureInstant) {
+    pub fn start_at_press(&mut self, pressed_at: CaptureInstant, pre_roll: Duration) {
         let Some(through) = self.ring_captured_through else {
             return self.start(pressed_at);
         };
         let Some(ahead) = pressed_at.checked_duration_since(through) else {
-            return self.start_at(pressed_at);
+            return self.start_hotkey_at(pressed_at, pre_roll);
         };
-        self.start_with_pre_roll(pressed_at, PRE_ROLL_DURATION.saturating_sub(ahead), false);
-        let skip = samples_for(ahead.saturating_sub(PRE_ROLL_DURATION), self.sample_rate);
+        self.start_with_pre_roll(pressed_at, pre_roll.saturating_sub(ahead), false);
+        let skip = samples_for(ahead.saturating_sub(pre_roll), self.sample_rate);
         if let Some(recording) = &mut self.recording {
-            recording.pre_press += ahead.min(PRE_ROLL_DURATION);
+            recording.pre_press += ahead.min(pre_roll);
             recording.skip_samples = skip;
             recording.recorded_through = Some(through);
             recording.press_lead_ms = Some(signed_ms(through, pressed_at));
@@ -1487,7 +1506,7 @@ mod tests {
         let mut capture = DictationCapture::new(16_000);
         let through = ingest_chunks(&mut capture, capture_time(), chunk, 1, 2);
         let pressed = through + Duration::from_millis(300);
-        capture.start_at_press(pressed);
+        capture.start_at_press(pressed, PRE_ROLL_DURATION);
         assert_eq!(capture.recorded_from(0), [2.0; 2_400]);
         let through = ingest_chunks(&mut capture, through, chunk, 3, 2);
         let Finish::Transcribe(clip) = capture.finish(through) else {
@@ -1503,7 +1522,7 @@ mod tests {
         let mut capture = DictationCapture::new(16_000);
         let through = ingest_chunks(&mut capture, capture_time(), chunk, 1, 1);
         let pressed = through + Duration::from_millis(800);
-        capture.start_at_press(pressed);
+        capture.start_at_press(pressed, PRE_ROLL_DURATION);
         assert!(capture.recorded_from(0).is_empty());
         ingest_chunks(&mut capture, through, chunk, 2, 2);
         let Finish::Transcribe(clip) = capture.finish(pressed + Duration::from_secs(1)) else {
@@ -1520,7 +1539,7 @@ mod tests {
         let mut tap = DictationCapture::new(16_000);
         let through = ingest_chunks(&mut tap, capture_time(), chunk, 1, 1);
         let pressed = through + Duration::from_millis(800);
-        tap.start_at_press(pressed);
+        tap.start_at_press(pressed, PRE_ROLL_DURATION);
         // The next chunk ends 200 ms after the press: not yet a hold.
         let through = ingest_chunks(&mut tap, through, chunk, 2, 1);
         assert!(!tap.become_intentional(through));
@@ -1531,12 +1550,43 @@ mod tests {
 
         let mut held = DictationCapture::new(16_000);
         let through = ingest_chunks(&mut held, capture_time(), chunk, 1, 1);
-        held.start_at_press(pressed);
+        held.start_at_press(pressed, PRE_ROLL_DURATION);
         // Released before the next chunk arrives, yet held long enough.
         assert!(held.would_transcribe(pressed + MINIMUM_HOLD_DURATION));
         let through = ingest_chunks(&mut held, through, chunk, 2, 1);
         assert!(!held.become_intentional(through));
         assert!(held.become_intentional(pressed + MINIMUM_HOLD_DURATION));
+    }
+
+    #[test]
+    fn muting_or_pausing_while_dictating_keeps_no_pre_roll() {
+        use crate::app_settings::RecordingAudioBehavior::{DoNothing, Duck, Mute, PauseMedia};
+        for (behavior, kept) in [
+            (Mute, 0),
+            (PauseMedia, 0),
+            (Duck, 7_200),
+            (DoNothing, 7_200),
+        ] {
+            let pre_roll = hotkey_pre_roll(behavior);
+            let origin = capture_time();
+            let mut warm = DictationCapture::new(16_000);
+            warm.ingest(&[0.25; 16_000], origin);
+            warm.start_hotkey_at(origin, pre_roll);
+            assert_eq!(warm.recorded_from(0).len(), kept, "{behavior:?}");
+
+            // A press 200 ms past the newest audio: with no pre-roll, the
+            // audio still to arrive before the press is dropped too.
+            let mut ahead = DictationCapture::new(16_000);
+            ahead.ingest(&[0.25; 16_000], origin);
+            let pressed = origin + Duration::from_millis(200);
+            ahead.start_at_press(pressed, pre_roll);
+            ahead.ingest(&[0.5; 8_000], origin + Duration::from_millis(500));
+            let Finish::Transcribe(clip) = ahead.finish(origin + Duration::from_millis(500)) else {
+                panic!("expected transcription")
+            };
+            assert_eq!(clip.press_samples, kept, "{behavior:?}");
+            assert_eq!(clip.samples.len(), kept + 4_800, "{behavior:?}");
+        }
     }
 
     #[test]
