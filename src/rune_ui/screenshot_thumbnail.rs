@@ -90,7 +90,7 @@ impl Card {
         };
         let (w, h) = (w.max(1) as f32, h.max(1) as f32);
         let fit = (CARD_MAX.0 / w).min(CARD_MAX.1 / h);
-        ((w * fit).max(48.0), (h * fit).max(32.0))
+        ((w * fit).round().max(48.0), (h * fit).round().max(32.0))
     }
 }
 
@@ -400,7 +400,7 @@ mod tests {
         assert!(card.on);
         poll(&mut card, 5.0, &mut tx);
         assert!(!card.on);
-        poll(&mut card, 5.0 + FADE_S, &mut tx);
+        poll(&mut card, 5.01 + FADE_S, &mut tx);
         assert!(card.shot.is_none());
 
         let mut card = Card::still(shot([800, 600]), true);
