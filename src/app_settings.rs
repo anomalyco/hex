@@ -39,7 +39,10 @@ pub use meetings::*;
 pub use screenshots::{ScreenshotSettings, screenshot_hotkey, screenshot_settings};
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
-static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
+// Until settings load, "While dictating" is its default, not Mute: the
+// hotkey pre-roll depends on it.
+static RECORDING_AUDIO_BEHAVIOR: AtomicU8 =
+    AtomicU8::new(RecordingAudioBehavior::DoNothing.encoded());
 static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(true);
 static DOUBLE_TAP_ONLY: AtomicBool = AtomicBool::new(false);
 static SHORTCUT_TOGGLE: AtomicBool = AtomicBool::new(false);
