@@ -737,8 +737,7 @@ Model advertises streaming, GPU device             // dictate.streaming
   Release -> Collect the release tail (200 ms, up to 600 ms while speech goes on)
     -> Finish with the complete clip
     -> Feed any unfed remainder
-    -> macOS Unified English: feed 400 ms of silence, as the whole clip gets
-    -> Finalize -> Final text
+    -> Finalize (it decodes a right context of silence past the clip) -> Final text
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
        ├── ≥ 300 ms of speech the stream heard lies > 400 ms past its text's end
@@ -1018,14 +1017,18 @@ policy check, not native inference-quality proof.
 
 **Fixed October 31, 2026 (issue 657):** with Unified English on macOS,
 dictated sentences and questions pasted without their closing full stop or
-question mark. Streamed dictations (the Metal path) finalized with no
-trailing silence at all, and whole clips got only 200 ms. Both now get
-400 ms of silence after the clip (`UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES`;
-the stream hears it through `PauseCap` just before finalizing). Check:
-`a_dictation_stream_hears_trailing_silence_before_it_finalizes` in
-transcription/engine.rs (a fake stream). Not measured on the real model or a
-microphone; Linux and Windows streams are unchanged. Padding is now included in
+question mark. Whole clips got only 200 ms of trailing silence; they now get
+400 ms (`UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES`). Padding is now included in
 `inference_ms`; `prepare_ms` covers clip conversion and diagnostic retention.
+Streams got the same 400 ms through `PauseCap` until November 4, 2026, when
+it was removed: a buffered stream's finalize already decodes a right context
+of silence past the clip, and the extra 400 ms only lengthened the final
+window (sometimes by a whole encoder pass). **Observed November 4, 2026, M4
+MacBook Air (Metal), Unified English Q8, `perf/dictation.bench.ts` on
+`HEX_AUDIO_FIXTURE` (macOS `say` speech):** a statement kept its full stop
+and a question its question mark in every run, with and without the 400 ms
+(released and open microphone, 4 runs each). Linux and Windows streams never
+had it. Not a microphone.
 
 ```ts
 Listening idle                            // dictate.model-memory
