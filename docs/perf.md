@@ -18,7 +18,7 @@ unlocked.
 
 - `strobe.json` builds `hex` with `cargo build --release` into
   `{cache}/cargo-target`, a target folder strobe shares between variants.
-  Today the build output is the Windows executable.
+  The build output is `hex.exe` on Windows and `hex` on macOS and Linux.
 - The build's env keeps release's code and adds line tables in `hex.pdb`, so
   CPU profiles name Hex's functions: `CARGO_PROFILE_RELEASE_DEBUG=line-tables-only`,
   `CARGO_PROFILE_RELEASE_STRIP=false`, and `CARGO_PROFILE_RELEASE_INCREMENTAL=false`.
@@ -60,7 +60,14 @@ own Hex:
   `onboarding-complete` marker skips first-run setup. The two `scrawl-*`
   migrations skip importing Scrawl's settings from your home.
 - `guard` stops a run if your own `settings.json` or `local-api.json`
-  changes, or your Hex exits.
+  changes, or your Hex exits. Each guard names its OS.
+- macOS: a variant runs as a bare `hex` executable, not `Hex.app`, so it has
+  no bundle id and shares no Preferences, saved state, or permissions with
+  your installed Hex. `moved` tells strobe that the copy keeps its data in
+  the private home (`HEX_APPLICATION_SUPPORT_DIR`), not in your
+  `~/Library/Application Support/hex`, so your own Hex there does not stop
+  the bench. strobe brings the copy's window to the front only after a
+  minute without keyboard or mouse input.
 
 The copy loads no model, except in the listening cases below.
 
