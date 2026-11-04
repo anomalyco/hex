@@ -309,6 +309,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     };
     shutdown.store(false, Ordering::Relaxed);
     watch_process();
+    // Observing first means a source change during startup still rebuilds
+    // the snapshot at the pump's first turn.
+    crate::keyboard_input_sources::start(mtm);
     crate::keyboard::initialize_layout()?;
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());
@@ -956,6 +959,9 @@ fn start_main_thread() {
                     let switching = state.pump.runtime.published().is_some_and(|published| {
                         published.settings.keyboard_model_switching.enabled
                     });
+                    if crate::keyboard_input_sources::take_layout_change(mtm) {
+                        refresh_keyboard_layout(mtm);
+                    }
                     crate::keyboard_input_sources::observe(mtm, switching);
                     if let Some(source) = crate::keyboard_input_sources::take_change(mtm) {
                         let _ = state.pump.runtime.send(Request::InputSourceChanged(source));
@@ -983,6 +989,21 @@ fn start_main_thread() {
             _menu_target: target,
         });
     });
+}
+
+/// Rebuilds the keyboard layout snapshot after the selected input source
+/// changed, here on the main thread, so a later ⌘V posts the key that types
+/// V now (t1304). Shortcuts on letter keys follow it; the listener rebinds a
+/// shortcut only once its machine is idle, so a recording goes on.
+fn refresh_keyboard_layout(mtm: MainThreadMarker) {
+    match crate::keyboard::refresh_layout(mtm) {
+        Ok(true) => {
+            tracing::info!("keyboard layout changed");
+            crate::app_settings::refresh_layout_hotkeys();
+        }
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "could not read the new keyboard layout"),
+    }
 }
 
 /// Whether the window is on screen.

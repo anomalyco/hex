@@ -399,6 +399,18 @@ impl HotkeyKey {
         self.label.clone()
     }
 
+    /// The lowercase ASCII letter a keyboard key's keycap shows, if any.
+    #[cfg(target_os = "macos")]
+    fn letter(&self) -> Option<char> {
+        let mut characters = self.label.chars();
+        match (characters.next(), characters.next()) {
+            (Some(letter), None) if letter.is_ascii_alphabetic() => {
+                Some(letter.to_ascii_lowercase())
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn same_key(&self, other: &Self) -> bool {
         if cfg!(target_os = "macos") {
             self.code == other.code
@@ -768,23 +780,58 @@ pub(super) fn scrawl_shortcut(bytes: &[u8]) -> Option<HotkeyBinding> {
 
 #[cfg(target_os = "macos")]
 pub(super) fn paste_key_code() -> u16 {
-    *PASTE_KEY_CODE.get_or_init(|| layout_key_code('v').unwrap_or(9))
+    layout_key_code('v').unwrap_or(9)
 }
 
-/// The active layout's key for `character`. GUI startup snapshots the layout
-/// on the main thread; unit tests run on worker threads, where reaching TIS is
-/// unsupported, so they resolve against the ANSI layout instead.
+/// The active layout's key for `character`.
 #[cfg(target_os = "macos")]
 pub(super) fn layout_key_code(character: char) -> Option<u16> {
-    if cfg!(test) {
-        return match character {
-            'e' => Some(14),
-            's' => Some(1),
-            'v' => Some(9),
-            _ => None,
-        };
+    shortcut_layout_key_code(character, false)
+}
+
+/// The active layout's key for `character` in a shortcut, on the Command
+/// layer when it holds Command. The main thread publishes the layout at
+/// launch and again when the input source changes; unit tests run on worker
+/// threads, where reaching TIS is unsupported, so they resolve against
+/// [`test_layout`] instead.
+#[cfg(target_os = "macos")]
+fn shortcut_layout_key_code(character: char, command: bool) -> Option<u16> {
+    #[cfg(test)]
+    {
+        let _ = command;
+        test_layout::key_code(character)
     }
-    crate::keyboard::key_code_for(character).ok()
+    #[cfg(not(test))]
+    crate::keyboard::shortcut_key_code(character, command).ok()
+}
+
+/// The ANSI layout's letter keys the tests resolve against, or another
+/// layout one test sets on its own thread.
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) mod test_layout {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    thread_local! {
+        static LAYOUT: RefCell<Option<HashMap<char, u16>>> = const { RefCell::new(None) };
+    }
+
+    pub(crate) fn key_code(character: char) -> Option<u16> {
+        LAYOUT.with(|layout| match layout.borrow().as_ref() {
+            Some(layout) => layout.get(&character).copied(),
+            None => match character {
+                'e' => Some(14),
+                's' => Some(1),
+                'v' => Some(9),
+                _ => None,
+            },
+        })
+    }
+
+    /// Resolves letters on `layout` on this thread until it is set again.
+    pub(crate) fn set(layout: impl IntoIterator<Item = (char, u16)>) {
+        LAYOUT.with(|current| *current.borrow_mut() = Some(layout.into_iter().collect()));
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -825,10 +872,23 @@ impl HotkeyBinding {
             })
     }
 
+    /// What the input layers match. On macOS a letter key follows its
+    /// letter: its keycap shows the letter, so it matches the key that types
+    /// it on the layout published now, and keeps its recorded key when the
+    /// layout has none.
     pub fn runtime(&self) -> RuntimeHotkey {
         RuntimeHotkey {
             modifiers: self.modifiers,
-            key_code: self.key.as_ref().map(|key| key.code),
+            key_code: self.key.as_ref().map(|key| {
+                #[cfg(target_os = "macos")]
+                if let Some(letter) = key.letter()
+                    && let Some(code) =
+                        shortcut_layout_key_code(letter, self.modifiers.command.is_some())
+                {
+                    return code;
+                }
+                key.code
+            }),
         }
     }
 
