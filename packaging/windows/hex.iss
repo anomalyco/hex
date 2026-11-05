@@ -2,6 +2,8 @@
 ; that .github/release/install-windows.ps1 creates and src/windows_updater.rs updates:
 ;
 ;   %APPDATA%\hex\versions\<version>\hex.exe
+;   %APPDATA%\hex\versions\<version>\hex.com  (the console entry point)
+;   %APPDATA%\hex\bin\hex.com  (on the user's PATH)
 ;   %APPDATA%\hex\current-version
 ;   %APPDATA%\hex\install.json  (the direct-install receipt)
 ;   Start Menu\Programs\Hex.lnk  (description "Hex managed install")
@@ -12,7 +14,9 @@
 ; install-windows.ps1 -Uninstall.
 ;
 ; Compile with scripts/build-windows-installer.ps1, which passes:
-;   /DAppVersion=2.3.0 /DArch=x64|arm64 /DExecutable=<hex.exe> /DOutputDir=<dir>
+;   /DAppVersion=2.3.0 /DArch=x64|arm64 /DExecutable=<hex.exe> /DConsole=<hex.com>
+;   /DOutputDir=<dir>
+; Console is left out only to wrap a release published before hex.com.
 
 #ifndef AppVersion
   #error Pass /DAppVersion=<version>
@@ -66,10 +70,16 @@ OutputDir={#OutputDir}
 OutputBaseFilename=hex-setup-{#AppVersion}-windows-{#Arch}
 CloseApplications=yes
 RestartApplications=no
+; Adding or removing bin on PATH reaches new terminals without signing out.
+ChangesEnvironment=yes
 MinVersion=10.0
 
 [Files]
 Source: "{#Executable}"; DestDir: "{app}\versions\{#AppVersion}"; DestName: "hex.exe"; Flags: ignoreversion
+#ifdef Console
+Source: "{#Console}"; DestDir: "{app}\versions\{#AppVersion}"; DestName: "hex.com"; Flags: ignoreversion
+Source: "{#Console}"; DestDir: "{app}\bin"; DestName: "hex.com"; Flags: ignoreversion
+#endif
 Source: "..\..\resources\windows\hex.ico"; DestDir: "{app}\uninstall"; Flags: ignoreversion
 
 [Icons]
@@ -81,6 +91,7 @@ Filename: "{app}\versions\{#AppVersion}\hex.exe"; Parameters: "app"; Description
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\versions"
 Type: filesandordirs; Name: "{app}\updates"
+Type: filesandordirs; Name: "{app}\bin"
 Type: files; Name: "{app}\current-version"
 Type: files; Name: "{app}\current-version.partial"
 Type: files; Name: "{app}\install.json"
@@ -147,6 +158,43 @@ begin
     RaiseException('Could not write ' + Path);
 end;
 
+function PathHas(Path, Folder: String): Boolean;
+begin
+  Result := Pos(';' + Lowercase(Folder) + ';', ';' + Lowercase(Path) + ';') > 0;
+end;
+
+{ Puts bin, where hex.com lives, on the user's PATH, so a terminal runs `hex`
+  as the console program that waits for hex.exe. }
+procedure AddBinToPath();
+var
+  Path, Bin: String;
+begin
+  Bin := ExpandConstant('{app}\bin');
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', Path) then
+    Path := '';
+  if PathHas(Path, Bin) then
+    exit;
+  if (Path <> '') and (Copy(Path, Length(Path), 1) <> ';') then
+    Path := Path + ';';
+  RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Path + Bin);
+end;
+
+procedure RemoveBinFromPath();
+var
+  Path, Bin: String;
+  At: Integer;
+begin
+  Bin := ExpandConstant('{app}\bin');
+  if not RegQueryStringValue(HKCU, 'Environment', 'Path', Path) then
+    exit;
+  Path := ';' + Path + ';';
+  At := Pos(';' + Lowercase(Bin) + ';', Lowercase(Path));
+  if At = 0 then
+    exit;
+  Delete(Path, At, Length(Bin) + 1);
+  RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Copy(Path, 2, Length(Path) - 2));
+end;
+
 { Point current-version at this version only once its files are in place,
   then mark the install as direct so the app updates itself
   (docs/plans/release-service.md). }
@@ -161,6 +209,9 @@ begin
     StringChangeEx(Root, '\', '\\', True);
     WriteUtf8Atomically(ExpandConstant('{app}\install.json'),
       '{"app":"hex","artifact":"desktop","channel":"stable","method":"direct","root":"' + Root + '"}');
+#ifdef Console
+    AddBinToPath();
+#endif
   end;
 end;
 
@@ -176,5 +227,6 @@ begin
     if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Hex', Command) and
        (Pos(LowerCase(ExpandConstant('{app}\versions\')), LowerCase(Command)) > 0) then
       RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Hex');
+    RemoveBinFromPath();
   end;
 end;

@@ -1,5 +1,6 @@
 # Checks the Authenticode signatures CI applied through Azure Artifact
-# Signing to every executable and installer in the given folders. Run after
+# Signing to every executable (.exe and hex.com) and installer in the given
+# folders. Run after
 # both the executables and the installers are signed.
 #
 #   .github/release/verify-authenticode.ps1 -Folders work
@@ -9,7 +10,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-$files = @($Folders | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter '*.exe' })
+$files = @($Folders | ForEach-Object { Get-ChildItem -LiteralPath $_ | Where-Object Extension -in '.exe', '.com' })
 if ($files.Count -eq 0) { throw "No executables in $($Folders -join ', ')." }
 foreach ($file in $files) {
     $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName

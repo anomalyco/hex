@@ -1,7 +1,7 @@
 name: Windows installers
 
 # Builds hex-setup-<version>-windows-<x64|arm64>.exe (packaging/windows/hex.iss)
-# around the Windows executables in the artifacts that match `pattern`, then
+# around the Windows executables (hex.exe and hex.com) in the artifacts that match `pattern`, then
 # installs, reinstalls, installs over another version, and uninstalls each
 # silently on native x64 and ARM64 runners. Release passes the signed
 # executables and signs the installers afterwards; Test builds passes the
@@ -65,7 +65,9 @@ jobs:
             $label = if ($arch -eq 'x86_64') { 'x64' } else { 'arm64' }
             $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-$label.exe")
             if ($exe.Count -ne 1) { throw "Expected one hex-$env:HEX_VERSION-windows-$label.exe, found $($exe.Count)." }
-            scripts/build-windows-installer.ps1 -Executable $exe[0].FullName -Version $env:HEX_VERSION -Arch $arch -OutDir $out
+            $console = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-$label.com")
+            if ($console.Count -ne 1) { throw "Expected one hex-$env:HEX_VERSION-windows-$label.com, found $($console.Count)." }
+            scripts/build-windows-installer.ps1 -Executable $exe[0].FullName -Console $console[0].FullName -Version $env:HEX_VERSION -Arch $arch -OutDir $out
           }
           Get-ChildItem $out | Where-Object { $_.Name -notlike 'hex-setup-*.exe' } | Remove-Item -Recurse -Force
       - id: upload
@@ -103,8 +105,9 @@ jobs:
         shell: pwsh
         run: |
           $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
+          $console = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-$env:HEX_VERSION-windows-${{ matrix.label }}.com")[0].FullName
           $setup = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "hex-setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
-          scripts/test-windows-installer.ps1 -Installer $setup -Executable $exe -Version $env:HEX_VERSION
+          scripts/test-windows-installer.ps1 -Installer $setup -Executable $exe -Console $console -Version $env:HEX_VERSION
       - name: Upload installer logs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

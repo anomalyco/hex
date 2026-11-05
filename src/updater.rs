@@ -660,6 +660,14 @@ fn check(
         }
         Decision::None { .. } => {
             transport::prune(&updates, None);
+            #[cfg(target_os = "windows")]
+            if matches!(method, Method::Direct { .. }) && platform::console_missing() {
+                let installed = download_console(&manifest, &manifest_url, &user_agent, &updates)
+                    .and_then(|file| file.map_or(Ok(()), |file| platform::install_console(&file)));
+                if let Err(error) = installed {
+                    tracing::warn!(error = %format!("{error:#}"), "could not add hex.com to this install");
+                }
+            }
             Ok(State::Current)
         }
         Decision::Notify {
@@ -709,8 +717,12 @@ fn check(
             #[cfg(target_os = "linux")]
             verify_linux_signature(&manifest, &manifest_url, &user_agent, &target, &updates)?;
             let file = transport::download(&url, &user_agent, &target, &updates)?;
-            let staged = platform::stage(&file, &version)
-                .wrap_err_with(|| format!("could not stage Hex {version}"))?;
+            #[cfg(target_os = "windows")]
+            let staged = download_console(&manifest, &manifest_url, &user_agent, &updates)
+                .and_then(|console| platform::stage(&file, console.as_deref(), &version));
+            #[cfg(not(target_os = "windows"))]
+            let staged = platform::stage(&file, &version);
+            let staged = staged.wrap_err_with(|| format!("could not stage Hex {version}"))?;
             *lock(&shared.staged) = Some(StagedUpdate {
                 staged,
                 sha256: target.sha256,
@@ -761,6 +773,26 @@ fn verify_linux_signature(
         .ok_or_else(|| eyre!("the signature URL {} is not usable", signature.url))?;
     let file = transport::download(&url, user_agent, signature, updates)?;
     platform::verify_signature(&target.sha256, &std::fs::read(file)?)
+}
+
+/// The release's `hex.com` (`<target>-cli`), checked against the manifest's
+/// size and SHA-256; none when the release has no console entry point.
+#[cfg(target_os = "windows")]
+fn download_console(
+    manifest: &str,
+    manifest_url: &str,
+    user_agent: &str,
+    updates: &Path,
+) -> Result<Option<PathBuf>> {
+    let Some(manifest) = protocol::parse_manifest(manifest) else {
+        return Ok(None);
+    };
+    let Some(target) = manifest.release.target(platform::CONSOLE_TARGET) else {
+        return Ok(None);
+    };
+    let url = protocol::resolve_url(manifest_url, &target.url)
+        .ok_or_else(|| eyre!("the hex.com URL {} is not usable", target.url))?;
+    transport::download(&url, user_agent, target, updates).map(Some)
 }
 
 /// Whether `decision` replaces the staged update: only a different release
