@@ -1038,6 +1038,7 @@ Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes ou
 Foreground context -> Select processing
 ├── Matching website                     // macOS: scriptable browsers, then AXWebArea; Windows: UIA; Linux: AT-SPI
 ├── Otherwise matching application
+├── Hex itself in front                  // application only: Hex never reads its own AX tree (#1402)
 └── Otherwise Global
 
 Selected mode                            // replaces Global's rewrite and transformations
@@ -1130,6 +1131,11 @@ document's `DocURL` (Firefox) or `URI` (Chromium, only with
 (ignored, manual) printed `google-chrome-stable` with `https://example.com/path`
 under headless Sway and `chrome` with the page under its XWayland, and `hex`
 on niri (Oct 30); the macOS adapters are compiled on CI only and not run.
+With Hex's own window frontmost, its application name still matches but no
+Accessibility tree of its own process is read, so its main thread owns that
+tree alone (#1402); `hex_never_reads_its_own_accessibility_tree` in
+[accessibility.rs](../../src/accessibility.rs) covers the skip (macOS only),
+though the race it prevents is not reproduced in a test.
 
 OpenCode transformation talks only to an already running OpenCode service,
 found through its registration file ([desktop/opencode_service.rs](../../src/desktop/opencode_service.rs));
