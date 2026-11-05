@@ -3,8 +3,11 @@
 //! - The main thread runs Rune's event loop (`rune::App`, windowless and
 //!   kept running, as an accessory app) and, beside it on the same AppKit
 //!   run loop, the native status item, the updater, the main menu, the Dock
-//!   reopen handler, and the Metal dictation HUD. A 16 ms main-loop timer
-//!   ([`Pump`]) drives them, so they keep working with no window open.
+//!   reopen handler, and the Metal dictation HUD. A main-loop timer
+//!   ([`Pump`]) drives them, so they keep working with no window open: every
+//!   frame (16 ms) while the HUD animates, otherwise every 250 ms, and
+//!   whatever sends it work (HUD events, menu actions, control calls,
+//!   meeting events, input-source changes) wakes it at once ([`wake_pump`]).
 //! - The runtime thread owns model preparation, starts the listener once
 //!   setup is ready, and publishes the listener, model, update, and settings
 //!   state the window shows ([`RuntimeHandle`]).
@@ -61,18 +64,23 @@ mod control;
 mod launch;
 mod main_menu;
 pub(crate) mod status_item;
+mod wake;
 
 use activation::{observe_activation, reopen_on_activation};
 use launch::{LaunchWindow, launched_as_login_item, observe_launch, take_login_launch_activation};
 use main_menu::install_main_menu;
+use wake::{pump_now, relay, start_pump_timer};
+
+pub(crate) use wake::wake_pump;
+
+#[cfg(test)]
+use wake::pump_interval;
 
 #[cfg(test)]
 mod tests;
 
 /// How often the runtime refreshes while nothing is asked.
 const RUNTIME_TICK: Duration = Duration::from_millis(250);
-/// The main-loop timer: the HUD follows the pointer and channels drain.
-const PUMP_INTERVAL: f64 = 0.016;
 /// Seconds a window opened at launch has to draw its first frame before the
 /// status item, HUD, and menu are set up anyway.
 const LAUNCH_SETUP_DEADLINE: f64 = 1.0;
@@ -536,13 +544,17 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         .name("hex-control".into())
         .spawn(move || {
             for call in control_receiver {
-                if let Some(call) = control::answer_off_main(&control_runtime, call)
-                    && pump_calls.send(call).is_err()
-                {
-                    return;
+                if let Some(call) = control::answer_off_main(&control_runtime, call) {
+                    if pump_calls.send(call).is_err() {
+                        return;
+                    }
+                    wake_pump();
                 }
             }
         })?;
+    // The pump idles between events, so its other senders wake it.
+    let controller_events = relay("hex-meeting-events", controller_events, 32)?;
+    let developer_receiver = relay("hex-developer-calls", developer_receiver, 8)?;
     let pump = Pump {
         window: window.clone(),
         capsules,
@@ -888,6 +900,8 @@ struct PumpState {
     /// Created on the main thread, so it stays out of the `Send` [`Pump`].
     indicator: DictationIndicatorUi,
     timer: Retained<NSTimer>,
+    /// The timer runs every frame, not at the idle interval ([`wake`]).
+    fast: bool,
     _menu_target: Retained<MenuTarget>,
 }
 
@@ -939,7 +953,9 @@ fn start_main_thread() {
     let Some(Launch { mut pump, target }) = LAUNCH.with(|slot| slot.borrow_mut().take()) else {
         return;
     };
-    pump.status_actions = match crate::macos_rune::status_item::install() {
+    pump.status_actions = match crate::macos_rune::status_item::install().and_then(|actions| {
+        relay("hex-status-actions", actions, 8).map_err(color_eyre::Report::from)
+    }) {
         Ok(actions) => Some(actions),
         Err(error) => {
             tracing::error!(%error, "could not install Hex status item; opening the window");
@@ -971,43 +987,19 @@ fn start_main_thread() {
             andEventID: REOPEN_APPLICATION,
         ];
     }
-    let block = RcBlock::new(|_: std::ptr::NonNull<NSTimer>| {
-        PUMP.with(|slot| {
-            if let Some(state) = slot.borrow_mut().as_mut() {
-                if let Some(mtm) = MainThreadMarker::new() {
-                    let switching = state.pump.runtime.published().is_some_and(|published| {
-                        published.settings.keyboard_model_switching.enabled
-                    });
-                    if crate::keyboard_input_sources::take_layout_change(mtm) {
-                        refresh_keyboard_layout(mtm);
-                    }
-                    crate::keyboard_input_sources::observe(mtm, switching);
-                    if let Some(source) = crate::keyboard_input_sources::take_change(mtm) {
-                        let _ = state.pump.runtime.send(Request::InputSourceChanged(source));
-                    }
-                }
-                state.pump.tick(&mut state.indicator);
-            }
-        });
-    });
-    // SAFETY: the timer runs its block on this (main) thread's run loop.
-    let timer = unsafe {
-        NSTimer::scheduledTimerWithTimeInterval_repeats_block(PUMP_INTERVAL, true, &block)
-    };
-    // Keep firing while a menu is open (event-tracking run loop mode).
-    // SAFETY: adding a scheduled timer to the main run loop's common modes.
-    unsafe {
-        let run_loop = objc2_foundation::NSRunLoop::mainRunLoop();
-        run_loop.addTimer_forMode(&timer, objc2_foundation::NSRunLoopCommonModes);
-    }
+    let fast = indicator.animating();
+    let timer = start_pump_timer(fast);
     PUMP.with(|slot| {
         *slot.borrow_mut() = Some(PumpState {
             pump,
             indicator,
             timer,
+            fast,
             _menu_target: target,
         });
     });
+    // Anything sent before the pump existed is drained now.
+    pump_now();
 }
 
 /// Rebuilds the keyboard layout snapshot after the selected input source
