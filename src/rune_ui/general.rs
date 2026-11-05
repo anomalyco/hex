@@ -334,26 +334,32 @@ pub(super) fn shortcut_rows(
 /// picker fades and the recorder, pinned to the right, grows over it, so
 /// neither moves.
 fn recorder(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
-    let Some(side) = picker_side(ui, target) else {
+    // The same structure with or without a picker, so the recorder keeps
+    // its place when a saved chord takes the picker away.
+    if target != ShortcutTarget::Dictation || !ui.platform.caps.modifier_sides {
         return keys_button(ui, p, target);
-    };
-    let mut picker = side_picker(p, side);
-    if shown_side(ui, target).is_none() {
-        picker = picker.opacity(0.0).inert().a11y_hidden();
     }
+    let side = picker_side(ui, target);
+    let picker = side.map(|side| {
+        let picker = side_picker(p, side);
+        match shown_side(ui, target) {
+            Some(_) => picker,
+            None => picker.opacity(0.0).inert().a11y_hidden(),
+        }
+    });
     // The recorder at rest, unseen, holds the picker in place.
     let room = row()
         .key("recorder-room")
         .padding(2.0)
         .mr(-3.0)
-        .child(shortcut_keys(ui, p, target, true))
+        .child(shortcut_keys(ui, p, target, side.is_some()))
         .opacity(0.0)
         .a11y_hidden();
     row()
         .key("dictation-recorder")
         .gap(4.0)
         .center_y()
-        .child(picker)
+        .children(picker)
         .child(room)
         .child(keys_button(ui, p, target).pin(None, Some(0.0), Some(0.0), None))
 }
@@ -1329,7 +1335,12 @@ pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
                     .key("saved")
                     .color(p.success())
             }))
-            .child(shortcut_keys(ui, p, target, shown_side(ui, target).is_some())),
+            .child(shortcut_keys(
+                ui,
+                p,
+                target,
+                shown_side(ui, target).is_some(),
+            )),
     };
     let mut button = row()
         .key(s::hotkey_key(target))
