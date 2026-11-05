@@ -34,13 +34,14 @@ impl Stamp {
     }
 }
 
-/// `Hex Screenshot 2026-11-04 at 14.03.22`, then ` (2)`, ` (3)`… for
-/// `copy` past the first.
+/// A shot's file name, as [`name_as`] names it.
+#[cfg(test)]
 pub(crate) fn file_name(at: Stamp, copy: u32) -> String {
     name_as("Hex Screenshot", "png", at, copy)
 }
 
-/// [`file_name`] for any `stem` and `extension`.
+/// `<stem> 2026-11-04 at 14.03.22.<extension>`, then ` (2)`, ` (3)`… for
+/// `copy` past the first.
 fn name_as(stem: &str, extension: &str, at: Stamp, copy: u32) -> String {
     let Stamp {
         year,

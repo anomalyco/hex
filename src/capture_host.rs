@@ -1179,10 +1179,7 @@ impl Feed {
 static FEED: Feed = Feed::new();
 
 /// The current capture snapshot.
-#[expect(
-    dead_code,
-    reason = "the capture capsule subscribes next (scrawl-capsule)"
-)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn snapshot() -> CaptureSnapshot {
     FEED.snapshot()
 }
