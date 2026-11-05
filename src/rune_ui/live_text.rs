@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use rune::{
     Anim, Cx, El, OverlayHandle, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, row,
@@ -128,13 +129,10 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
             if shown.swap(false, Ordering::AcqRel) {
                 // Hidden from the same queue that shows it, so a recording
                 // that ends as its plate appears never leaves it showing.
+                // Its last words stay while it fades (macOS and Windows);
+                // the next appearance replaces them first.
                 let handle = overlay.clone();
-                overlay.update(move |plate, tx| {
-                    plate.stable.clear();
-                    plate.tentative.clear();
-                    tx.instant();
-                    handle.hide();
-                });
+                overlay.update(move |_, _| handle.fade_out(FADE));
             }
             return;
         };
@@ -153,6 +151,9 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
         });
     });
 }
+
+/// How long the plate fades out once a dictation stops publishing.
+const FADE: Duration = Duration::from_millis(150);
 
 /// The model's first update often has no words yet.
 fn is_blank(partial: &Partial) -> bool {
