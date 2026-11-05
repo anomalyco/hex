@@ -75,7 +75,11 @@ pub(crate) fn event_summary(event: &VoiceEvent) -> String {
             ..
         } => match phase {
             TranscriptPhase::Started => "Speech recognition started".into(),
+            TranscriptPhase::Updated if text.is_empty() => "Heard speech so far".into(),
             TranscriptPhase::Updated => format!("Heard \"{text}\" so far"),
+            TranscriptPhase::Completed if text.is_empty() => {
+                format!("Transcribed in {latency_ms} ms")
+            }
             TranscriptPhase::Completed => format!("Heard \"{text}\" in {latency_ms} ms"),
         },
         VoiceEvent::Command {

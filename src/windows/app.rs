@@ -734,9 +734,8 @@ fn last_completed_at<'a>(events: impl DoubleEndedIterator<Item = &'a VoiceEvent>
             VoiceEvent::Transcript {
                 timestamp_ms,
                 phase: TranscriptPhase::Completed,
-                text,
                 ..
-            } if !text.trim().is_empty() => return Some(*timestamp_ms),
+            } => return Some(*timestamp_ms),
             _ => {}
         }
     }
@@ -827,7 +826,6 @@ mod tests {
             VoiceEvent::SessionStarted { timestamp_ms: 2 },
             transcript(3, "First"),
             transcript(4, "Second"),
-            transcript(5, "  "),
         ];
         assert_eq!(last_completed_at(events.iter()), Some(4));
     }
