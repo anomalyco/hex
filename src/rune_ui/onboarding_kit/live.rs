@@ -59,6 +59,9 @@ pub(crate) struct Live {
     pub(crate) using_file: bool,
     pub(crate) microphone: ItemStatus,
     pub(crate) accessibility: ItemStatus,
+    /// General's "Turn off the mic when not dictating" was on when the
+    /// first run opened, so the microphone opens only while you dictate.
+    pub(crate) release_microphone: bool,
     /// Every permission is on and one applies only after Hex restarts.
     pub(crate) restart: bool,
     /// macOS asks for Microphone and Accessibility; Windows only shows the
@@ -233,6 +236,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         using_file: false,
         microphone: ItemStatus::Todo,
         accessibility: ItemStatus::Todo,
+        release_microphone: ui.settings.release_microphone_while_idle,
         restart: false,
         accessibility_row: ui.platform.caps.permissions,
         accessibility_renamed: ui.platform.accessibility_renamed,
