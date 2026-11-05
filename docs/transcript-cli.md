@@ -79,6 +79,13 @@ The default and `--md` return full Markdown with metadata, stored notes, and
 speaker turns. `--json` returns transcript entries with relative millisecond
 offsets. No notes or transcripts are generated.
 
+With Labs › Speakers in meetings (`labs.meeting_speakers`), a meeting whose
+voices were told apart labels its other-side turns `Speaker 1`, `Speaker 2`, …
+or the names given in the Meetings pane instead of `Them`, in Markdown, search
+passages, subtitles, and MCP. JSON adds an additive `speaker` number to those
+entries and a top-level `speakers` list (`{"speaker": 1, "name": "Speaker 1"}`);
+meetings without speakers are unchanged, so the version stays 1.
+
 `--from` and `--to` limit `show` to part of the meeting, with either output.
 They take offsets into the meeting as `mm:ss` (minutes may exceed 59, as in
 `113:03`), `h:mm:ss`, or seconds (`90`, `1.14`, `90s`, `1.5m`), rounded to the

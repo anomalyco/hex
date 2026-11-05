@@ -22,7 +22,7 @@ use super::transcript::{RollingLine, RollingView};
 use super::{
     Chapter, MeetingManifest, MeetingSource, MeetingStatus, TranscriptEntry, chapter_entries,
     coalesce_transcript, display_title, format_duration, notes_markdown, recovered_status,
-    section_markdown, transcript_markdown,
+    section_markdown,
 };
 use crate::dictation::vocabulary::VocabularyEntry;
 
@@ -201,6 +201,8 @@ enum PassageKind {
 }
 
 struct Passage {
+    /// Who said it: "You", "Them", a told-apart speaker, or "Notes".
+    label: String,
     kind: PassageKind,
     start_ms: u64,
     text: String,
@@ -221,8 +223,13 @@ impl Passage {
         for token in &tokens {
             *frequencies.entry(token.stem.clone()).or_insert(0) += 1;
         }
+        let label = match kind {
+            PassageKind::Speech(source) => source.label(),
+            PassageKind::Notes => "Notes",
+        };
         Self {
             kind,
+            label: label.into(),
             start_ms,
             text,
             tokens,
@@ -230,11 +237,8 @@ impl Passage {
         }
     }
 
-    fn speaker(&self) -> &'static str {
-        match self.kind {
-            PassageKind::Speech(source) => source.label(),
-            PassageKind::Notes => "Notes",
-        }
+    fn speaker(&self) -> &str {
+        &self.label
     }
 }
 
@@ -569,7 +573,7 @@ with get_transcript or search_transcripts for details, decisions, and action ite
         let transcript = if entries.is_empty() && range.is_bounded() {
             "No transcript entries in this range.".into()
         } else {
-            transcript_markdown(&entries)
+            super::transcript_markdown_with(&entries, meeting.manifest.speakers.as_ref())
         };
         let _ = write!(output, "\n## Transcript\n\n{transcript}\n");
         Ok(output)
@@ -810,12 +814,14 @@ fn file_name(path: &Path) -> String {
 }
 
 fn passages(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> Vec<Passage> {
-    let mut groups: Vec<(MeetingSource, u64, u64, usize, String)> = Vec::new();
+    // (voice, start, end, words, text)
+    type Group = ((MeetingSource, Option<u32>), u64, u64, usize, String);
+    let mut groups: Vec<Group> = Vec::new();
     for entry in entries {
         let text = entry.text.trim();
         let words = text.split_whitespace().count();
-        if let Some((source, _, end, count, joined)) = groups.last_mut()
-            && *source == entry.source
+        if let Some((voice, _, end, count, joined)) = groups.last_mut()
+            && *voice == (entry.source, entry.speaker)
             && entry.start_ms.saturating_sub(*end) <= TURN_GAP_MS
             && *count + words <= PASSAGE_WORDS
         {
@@ -825,7 +831,7 @@ fn passages(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> Vec<Pass
             *count += words;
         } else {
             groups.push((
-                entry.source,
+                (entry.source, entry.speaker),
                 entry.start_ms,
                 entry.end_ms,
                 words,
@@ -835,7 +841,10 @@ fn passages(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> Vec<Pass
     }
     let mut passages = groups
         .into_iter()
-        .map(|(source, start, _, _, text)| Passage::new(PassageKind::Speech(source), start, text))
+        .map(|((source, speaker), start, _, _, text)| Passage {
+            label: super::speaker_label(source, speaker, manifest.speakers.as_ref()),
+            ..Passage::new(PassageKind::Speech(source), start, text)
+        })
         .collect::<Vec<_>>();
     if let Some(notes) = &manifest.notes {
         let text = format!("{}. {}", notes.title.trim(), notes.summary.trim());
@@ -1956,6 +1965,7 @@ fn render_transcript(meeting: &Meeting, window: TranscriptWindow, now_ms: u64) -
         match turns.last_mut() {
             Some(turn)
                 if turn.source == entry.source
+                    && turn.speaker == entry.speaker
                     && entry.start_ms.saturating_sub(turn.end_ms) <= TURN_GAP_MS =>
             {
                 turn.text.push(' ');
@@ -1988,7 +1998,11 @@ fn render_transcript(meeting: &Meeting, window: TranscriptWindow, now_ms: u64) -
             "[{} · {}] {}: {}",
             format_duration(turn.start_ms),
             clock_seconds(meeting.start_ms() + turn.start_ms),
-            turn.source.label(),
+            super::speaker_label(
+                turn.source,
+                turn.speaker,
+                meeting.manifest.speakers.as_ref()
+            ),
             turn.text
         );
     }

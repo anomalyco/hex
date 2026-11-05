@@ -567,7 +567,8 @@ impl MeetingCapsules {
                 self.close_recording();
                 self.show_panel(Kind::Ready(manifest.clone()), Some(READY_TIMEOUT));
             }
-            ControllerEvent::NotesFinished(manifest) => {
+            ControllerEvent::NotesFinished(manifest)
+            | ControllerEvent::SpeakersFinished(manifest) => {
                 let manifest = manifest.clone();
                 self.panel.update(move |capsule, _| {
                     if let Some(Kind::Ready(ready)) = &mut capsule.kind
@@ -1507,6 +1508,7 @@ mod tests {
 
     fn call() -> Vec<TranscriptEntry> {
         let entry = |source, start_ms, text: &str| TranscriptEntry {
+            speaker: None,
             source,
             start_ms,
             end_ms: start_ms + 2_000,

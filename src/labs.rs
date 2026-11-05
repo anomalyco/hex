@@ -107,12 +107,13 @@ pub enum Feature {
     MeetingPlatformIcons,
     Screenshots,
     FollowLiveTranscript,
+    MeetingSpeakers,
     CollapsibleMeetingSections,
     AnnotateReplay,
 }
 
 impl Feature {
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 51] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -161,6 +162,7 @@ impl Feature {
         Self::MeetingPlatformIcons,
         Self::Screenshots,
         Self::FollowLiveTranscript,
+        Self::MeetingSpeakers,
         Self::CollapsibleMeetingSections,
         Self::AnnotateReplay,
     ];
@@ -233,6 +235,7 @@ impl Feature {
             | Self::MeetingPlatformIcons
             | Self::Screenshots
             | Self::FollowLiveTranscript
+            | Self::MeetingSpeakers
             | Self::CollapsibleMeetingSections
             | Self::AnnotateReplay
             | Self::NotchIndicator => Audience::Everyone,
@@ -290,6 +293,7 @@ impl Feature {
             | Self::MeetingPlatformIcons
             | Self::Screenshots
             | Self::FollowLiveTranscript
+            | Self::MeetingSpeakers
             | Self::CollapsibleMeetingSections
             | Self::AnnotateReplay => 20261104,
         }
@@ -380,6 +384,7 @@ impl Feature {
             | Self::MeetingFinishedEvent
             | Self::MeetingPlatformIcons
             | Self::FollowLiveTranscript
+            | Self::MeetingSpeakers
             | Self::CollapsibleMeetingSections
             | Self::FillerWords => true,
         }
@@ -436,6 +441,7 @@ impl Feature {
             Self::MeetingPlatformIcons => "meeting-platform-icons",
             Self::Screenshots => "screenshots",
             Self::FollowLiveTranscript => "follow-live-transcript",
+            Self::MeetingSpeakers => "meeting-speakers",
             Self::CollapsibleMeetingSections => "collapsible-meeting-sections",
             Self::AnnotateReplay => "annotate-replay",
         }
@@ -492,6 +498,7 @@ impl Feature {
             Self::MeetingPlatformIcons => "labs.meeting_platform_icons",
             Self::Screenshots => "labs.screenshots",
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
+            Self::MeetingSpeakers => "labs.meeting_speakers",
             Self::CollapsibleMeetingSections => "labs.collapsible_meeting_sections",
             Self::AnnotateReplay => "labs.annotate_replay",
         }
@@ -626,6 +633,9 @@ impl Feature {
             Self::FollowLiveTranscript => {
                 "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
             }
+            Self::MeetingSpeakers => {
+                "After a meeting, Hex tells the other voices apart on this computer and labels their lines Speaker 1, Speaker 2, and so on. Rename them in each meeting. Downloads a 140 MB speaker model when turned on"
+            }
             Self::CollapsibleMeetingSections => {
                 "Fold the summary, chapters, and day groups in Meetings"
             }
@@ -690,6 +700,7 @@ impl Feature {
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons,
             Self::Screenshots => settings.labs.screenshots,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
+            Self::MeetingSpeakers => settings.labs.meeting_speakers,
             Self::CollapsibleMeetingSections => settings.labs.collapsible_meeting_sections,
             Self::AnnotateReplay => settings.labs.annotate_replay,
         }
@@ -748,6 +759,7 @@ impl Feature {
             &mut labs.meeting_platform_icons,
             &mut labs.screenshots,
             &mut labs.follow_live_transcript,
+            &mut labs.meeting_speakers,
             &mut labs.collapsible_meeting_sections,
             &mut labs.annotate_replay,
         ]
@@ -806,6 +818,7 @@ impl Feature {
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
+            Self::MeetingSpeakers => settings.labs.meeting_speakers = on,
             Self::CollapsibleMeetingSections => {
                 settings.labs.collapsible_meeting_sections = on;
             }
@@ -855,6 +868,7 @@ const NOTCH_INDICATOR: u64 = 1 << 27;
 const MEETING_FINISHED_EVENT: u64 = 1 << 28;
 const GNOME_MEETING_CAPSULES: u64 = 1 << 29;
 const SCREENSHOTS: u64 = 1 << 30;
+const MEETING_SPEAKERS: u64 = 1 << 32;
 const ANNOTATE_REPLAY: u64 = 1 << 31;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
@@ -1069,6 +1083,13 @@ pub fn screenshots() -> bool {
     on(SCREENSHOTS) && Feature::Screenshots.on_this_os()
 }
 
+/// A published meeting's other voices are told apart, and the speaker model
+/// downloads (every OS with meetings; read by the meeting controller at each
+/// publication and on each pass).
+pub fn meeting_speakers() -> bool {
+    on(MEETING_SPEAKERS) && Feature::MeetingSpeakers.on_this_os()
+}
+
 /// Annotate's rolling 15 s display replay buffer (`SCClipBufferingOutput`,
 /// macOS 27+; read where the replay worker starts and on each `hex capture
 /// replay`).
@@ -1213,6 +1234,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             GNOME_MEETING_CAPSULES,
         ),
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
+        (
+            Feature::MeetingSpeakers,
+            settings.meeting_speakers,
+            MEETING_SPEAKERS,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))

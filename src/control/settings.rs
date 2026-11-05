@@ -480,6 +480,11 @@ const KEYS: &[Key] = &[
         "Labs: the summary, chapters, and day groups in Meetings fold and unfold with a click; folds last until Hex quits",
     ),
     key(
+        "labs.meeting_speakers",
+        Kind::Bool,
+        "Labs: after a meeting, Hex tells the other voices apart on this computer and labels their lines Speaker 1, Speaker 2, and so on; downloads a speaker model when turned on",
+    ),
+    key(
         "labs.output_fixes",
         Kind::Bool,
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
@@ -714,6 +719,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.meeting_finished_event", "meetings"),
     ("labs.meeting_platform_icons", "meetings"),
     ("labs.follow_live_transcript", "meetings"),
+    ("labs.meeting_speakers", "meetings"),
     ("labs.collapsible_meeting_sections", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),

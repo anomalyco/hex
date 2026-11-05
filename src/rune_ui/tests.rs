@@ -2557,6 +2557,8 @@ fn goldens() {
     // A list longer than the window fades at its scrolling edge (#840).
     check_golden("language-menu", false, GOLDEN_SIZE);
     check_golden("meetings-platform-icons", false, PANE_SIZE);
+    check_golden("meetings-speakers", false, PANE_SIZE);
+    check_golden("meetings-speakers", true, PANE_SIZE);
     check_golden("modes-opencode-not-running", false, PANE_SIZE);
     check_golden("output-trust", false, PANE_SIZE);
     check_golden("picker-custom-models", false, PANE_SIZE);

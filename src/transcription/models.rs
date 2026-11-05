@@ -397,6 +397,21 @@ pub const SPEECH_DETECTOR_ARTIFACT: GgufArtifact = GgufArtifact {
 #[cfg_attr(test, allow(dead_code))]
 const SPEECH_DETECTOR_NAME: &str = "the speech detector";
 
+/// Streaming Sortformer v2.1 (four speakers). Labs › Speakers in meetings
+/// tells a meeting's other voices apart with it; it downloads only once that
+/// Lab is on.
+pub const SPEAKER_MODEL_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "diar_streaming_sortformer_4spk-v2.1-Q8_0.gguf",
+    revision: "60ebab3ef7cae9869be0abcde13360347e96ba03",
+    repository: "handy-computer/diar_streaming_sortformer_4spk-v2.1-gguf",
+    bytes: 139_310_336,
+    sha256: "a5dacdc650790266c7a362e54e6bf51952015487edaa606c4e11632bc32442a9",
+    architecture: "sortformer",
+    variant: "diar_streaming_sortformer_4spk-v2.1",
+};
+#[cfg_attr(test, allow(dead_code))]
+const SPEAKER_MODEL_NAME: &str = "the speaker model";
+
 pub const MODELS: &[ModelDefinition] = &[
     ModelDefinition {
         id: TranscriptionModelId::ParakeetUnifiedEnglish,
@@ -1136,6 +1151,30 @@ pub fn speech_detector_path() -> Result<PathBuf> {
 pub fn speech_detector_installed() -> bool {
     speech_detector_path()
         .and_then(|path| Ok(fs::metadata(path)?.len() == SPEECH_DETECTOR_ARTIFACT.bytes))
+        .unwrap_or(false)
+}
+
+/// Downloads the meeting speaker model unless a verified copy is installed.
+#[cfg_attr(test, allow(dead_code))]
+pub fn download_speaker_model(canceled: &AtomicBool) -> Result<PathBuf> {
+    download_artifact(
+        &SPEAKER_MODEL_ARTIFACT,
+        SPEAKER_MODEL_NAME,
+        canceled,
+        &AtomicU64::new(0),
+        &AtomicU8::new(ModelPreparationStage::Downloading as u8),
+    )
+}
+
+pub fn speaker_model_path() -> Result<PathBuf> {
+    Ok(models_dir()?.join(SPEAKER_MODEL_ARTIFACT.filename))
+}
+
+/// Whether the speaker model is installed at its pinned size. Its checksum
+/// is checked when it downloads.
+pub fn speaker_model_installed() -> bool {
+    speaker_model_path()
+        .and_then(|path| Ok(fs::metadata(path)?.len() == SPEAKER_MODEL_ARTIFACT.bytes))
         .unwrap_or(false)
 }
 

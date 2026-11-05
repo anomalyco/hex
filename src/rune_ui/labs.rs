@@ -422,6 +422,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."),
         ));
         rows.push(row(
+            Feature::MeetingSpeakers,
+            None,
+            tr("Speakers in meetings"),
+            tr("After a meeting, tell the other voices apart on this computer and label their lines Speaker 1, Speaker 2, and so on. Rename them in each meeting. Downloads a 140 MB speaker model"),
+        ));
+        rows.push(row(
             Feature::CollapsibleMeetingSections,
             None,
             tr("Collapsible meeting sections"),
@@ -766,6 +772,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingPlatformIcons => "lab-meeting-platform-icons",
         Feature::Screenshots => "lab-screenshots",
         Feature::FollowLiveTranscript => "lab-follow-live-transcript",
+        Feature::MeetingSpeakers => "lab-meeting-speakers",
         Feature::CollapsibleMeetingSections => "lab-collapsible-meeting-sections",
         Feature::AnnotateReplay => "lab-annotate-replay",
     }

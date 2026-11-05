@@ -66,6 +66,22 @@ Live transcript scrolling                           // Labs › Follow live tran
         stay in view; scrolling up stops following, scrolling back to the
         bottom follows again. Finished meetings and off -> scroll by hand as before
         (follows_live_transcript in rune_ui/meetings.rs; not observed on a real call)
+Speakers                                            // Labs › Speakers in meetings, off by default
+        on -> the speaker model downloads (pinned SHA-256, 140 MB) on the
+        controller's tick; after final publication the system track is told
+        apart in 10 min chunks (60 s overlap, stitched by shared activity) as
+        background work that yields to dictation, before notes run
+        ├── each Them line -> its majority voice, "Speaker N" numbered by first
+        │   line; the microphone stays You
+        ├── manifest `speakers` {model, count, names}; failure -> `speakers_error`,
+        │   the transcript stays as it was
+        ├── pane: Speakers section with Rename per voice (manifest `names`);
+        │   the export's Transcript section is rewritten only while it still
+        │   matches the copy Hex wrote
+        └── hex meetings show (+ --json `speakers`), MCP, Option-Control-V and
+            notes use the labels
+        Delete and expiry wait while a run goes
+        (meeting/speakers.rs, rune_ui/meeting_speakers.rs)
 Folding sections                                    // Labs › Collapsible meeting sections, off by default (#1348)
         on -> each day heading in the list (Today, Yesterday, a date) and the
         detail's Summary and Chapters labels are buttons with a chevron
@@ -1409,6 +1425,10 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - Titles and summaries have not run after a real recording in the app; the CLI
   path exercised the real model, and the provisional-title thread, its manifest
   write, and the menu/pane refresh are unexercised in a live recording.
+- Speakers in meetings (Labs) has not run on a real call: the model told a
+  synthetic three-voice call apart (10 of 10 turns), but two women's voices
+  from one TTS engine merged into one speaker. It finds at most 4 voices per
+  10 min chunk.
 - Live chapters (Labs) have not run in a real recording: the worker,
   manifest writes, title updates, menu bar Copy Section, and the boundary pass
   after publication ran only in unit tests and the debug CLI over one synthetic

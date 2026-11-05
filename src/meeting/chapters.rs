@@ -407,7 +407,7 @@ pub(super) fn pass_window(
             format!(
                 "[{}] {}: {}",
                 format_duration(turn.start_ms),
-                turn.source.label(),
+                super::speaker_label(turn.source, turn.speaker, None),
                 truncate_words(turn.text.trim(), max_chars)
             )
         })
@@ -702,7 +702,7 @@ fn sections(entries: &[TranscriptEntry], chapters: &[Chapter], max_chars: usize)
                         "L{} [{}] {}: {}",
                         index + 1,
                         format_duration(entry.start_ms),
-                        entry.source.label(),
+                        super::speaker_label(entry.source, entry.speaker, None),
                         truncate_words(entry.text.trim(), REFINE_LINE_CHARS)
                     ),
                 })

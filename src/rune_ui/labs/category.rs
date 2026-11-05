@@ -85,6 +85,7 @@ impl Category {
             | Feature::MeetingFinishedEvent
             | Feature::MeetingPlatformIcons
             | Feature::FollowLiveTranscript
+            | Feature::MeetingSpeakers
             | Feature::CollapsibleMeetingSections
             | Feature::GnomeMeetingCapsules => Self::Meetings,
             Feature::LiveText
@@ -155,6 +156,7 @@ impl Place {
             | Feature::MeetingFinishedEvent
             | Feature::MeetingPlatformIcons
             | Feature::FollowLiveTranscript
+            | Feature::MeetingSpeakers
             | Feature::CollapsibleMeetingSections => Self::Pane(Pane::Meetings),
             Feature::StopWhenCallEnds
             | Feature::MovableMeetingCapsules

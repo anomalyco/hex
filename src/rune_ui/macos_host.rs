@@ -651,6 +651,11 @@ impl MacHost {
             MeetingRequest::Rename { id, title } => crate::meeting::rename(&id, &title)
                 .map(|_| ())
                 .map_err(|error| format!("{error:#}")),
+            MeetingRequest::RenameSpeaker { id, speaker, name } => {
+                crate::meeting::rename_speaker(&id, speaker, &name)
+                    .map(|_| ())
+                    .map_err(|error| format!("{error:#}"))
+            }
             MeetingRequest::Trash(id) => {
                 crate::meeting::trash(&id).map_err(|error| format!("{error:#}"))
             }

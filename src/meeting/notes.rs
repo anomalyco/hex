@@ -57,11 +57,11 @@ pub(super) const NOTES_START: &str = "<!-- hex:notes -->";
 pub(super) const NOTES_END: &str = "<!-- /hex:notes -->";
 
 const NOTES_INSTRUCTIONS: &str = "You title and summarize meeting transcripts. Each line starts \
-with a timestamp and a speaker label: You is the person who recorded the meeting, and Them is \
-one or more other participants. A long meeting is excerpted, and […] marks skipped parts. Write \
-one short, specific title for the whole meeting and a summary of at most two short sentences \
-on the main topics and outcomes. Use only what the transcript says; never invent names, dates, \
-or numbers.";
+with a timestamp and a speaker label: You is the person who recorded the meeting, Them is one \
+or more other participants, and Speaker 1, Speaker 2, and so on each name one of them. A long \
+meeting is excerpted, and […] marks skipped parts. Write one short, specific title for the \
+whole meeting and a summary of at most two short sentences on the main topics and outcomes. Use \
+only what the transcript says; never invent names, dates, or numbers.";
 
 const TITLE_INSTRUCTIONS: &str = "You name meetings from the first part of their transcript. \
 Each line starts with a timestamp and a speaker label: You is the person who recorded the \
@@ -138,7 +138,7 @@ fn transcript_lines(entries: &[TranscriptEntry]) -> Vec<String> {
         let prefix = format!(
             "[{}] {}: ",
             format_duration(turn.start_ms),
-            turn.source.label()
+            super::speaker_label(turn.source, turn.speaker, None)
         );
         let mut line = prefix.clone();
         for word in turn.text.split_whitespace() {
@@ -718,6 +718,36 @@ pub(super) fn retitle_markdown_file(
     })
 }
 
+/// Replaces the exported file's `## Transcript` section, which runs to its
+/// end, with `section`. Only a file that is still the copy Hex wrote is
+/// rewritten: the user's edits to a transcript are never overwritten.
+pub(super) fn replace_transcript_section(
+    path: &Path,
+    written: &mut Option<String>,
+    section: &str,
+) -> Result<()> {
+    let original =
+        fs::read_to_string(path).wrap_err_with(|| format!("could not read {}", path.display()))?;
+    if written.as_deref() != Some(super::text_sha256(original.as_bytes()).as_str()) {
+        return Err(eyre!("the Markdown changed since Hex wrote it"));
+    }
+    rewrite_markdown_file(path, written, |markdown| {
+        apply_transcript_section(markdown, section)
+    })
+}
+
+fn apply_transcript_section(markdown: &str, section: &str) -> String {
+    let start = if markdown.starts_with("## Transcript\n") {
+        Some(0)
+    } else {
+        markdown.find("\n## Transcript\n").map(|at| at + 1)
+    };
+    match start {
+        Some(start) => format!("{}{section}", &markdown[..start]),
+        None => markdown.to_string(),
+    }
+}
+
 /// Applies the notes to the exported file in place, keeping its name.
 fn update_markdown_file(
     path: &Path,
@@ -930,6 +960,7 @@ pub(super) fn entries_from_markdown(markdown: &str) -> Vec<TranscriptEntry> {
             });
         if let Some((source, start_ms)) = header {
             entries.push(TranscriptEntry {
+                speaker: None,
                 source,
                 start_ms,
                 end_ms: start_ms,
@@ -1050,6 +1081,7 @@ mod tests {
 
     fn entry(source: MeetingSource, start_ms: u64, text: &str) -> TranscriptEntry {
         TranscriptEntry {
+            speaker: None,
             source,
             start_ms,
             end_ms: start_ms + 1_000,
@@ -1566,12 +1598,14 @@ mod tests {
             entries,
             [
                 TranscriptEntry {
+                    speaker: None,
                     source: MeetingSource::Microphone,
                     start_ms: 1_000,
                     end_ms: 4_000,
                     text: "Hi.".into()
                 },
                 TranscriptEntry {
+                    speaker: None,
                     source: MeetingSource::System,
                     start_ms: 4_000,
                     end_ms: 4_400,

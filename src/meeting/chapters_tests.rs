@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicUsize;
 
 fn entry(source: MeetingSource, start_ms: u64, text: &str) -> TranscriptEntry {
     TranscriptEntry {
+        speaker: None,
         source,
         start_ms,
         end_ms: start_ms + 5_000,

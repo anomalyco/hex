@@ -84,6 +84,9 @@ pub struct LabsSettings {
     pub screenshots: bool,
     /// A recording meeting's transcript scrolls to its newest line, until scrolled up (issue 1332).
     pub follow_live_transcript: bool,
+    /// A published meeting's other voices are told apart as Speaker 1,
+    /// Speaker 2, and so on (Labs › Speakers in meetings).
+    pub meeting_speakers: bool,
     /// Meetings' summary, chapters, and day groups fold and unfold (issue 1348).
     pub collapsible_meeting_sections: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
@@ -140,6 +143,7 @@ impl Default for LabsSettings {
             meeting_platform_icons: false,
             screenshots: false,
             follow_live_transcript: false,
+            meeting_speakers: false,
             collapsible_meeting_sections: false,
         }
     }

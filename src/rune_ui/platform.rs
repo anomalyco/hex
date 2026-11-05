@@ -553,7 +553,16 @@ impl PlatformState {
 pub(super) enum MeetingRequest {
     Start,
     Stop,
-    Rename { id: String, title: String },
+    Rename {
+        id: String,
+        title: String,
+    },
+    /// Names one of a meeting's told-apart speakers; empty clears it.
+    RenameSpeaker {
+        id: String,
+        speaker: u32,
+        name: String,
+    },
     Trash(String),
     Summarize(String),
     Reveal(String),

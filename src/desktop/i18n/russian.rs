@@ -16,6 +16,13 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex picks a fast model", "Hex выбирает быструю модель"),
+    ("Speakers in meetings", "Говорящие на встречах"),
+    ("After a meeting, tell the other voices apart on this computer and label their lines Speaker 1, Speaker 2, and so on. Rename them in each meeting. Downloads a 140 MB speaker model", "После встречи различает на этом компьютере остальные голоса и подписывает их реплики как Говорящий 1, Говорящий 2 и так далее. Их можно переименовать в каждой встрече. Загружает модель говорящих размером 140 МБ"),
+    ("Speaker {}", "Говорящий {}"),
+    ("Speakers", "Говорящие"),
+    ("Speakers could not be told apart.", "Не удалось различить говорящих."),
+    ("Telling the speakers apart…", "Различаем говорящих…"),
+    ("Rename speaker", "Переименовать говорящего"),
     ("Collapsible meeting sections", "Сворачиваемые разделы встреч"),
     ("Fold the summary, chapters, and day groups in Meetings", "Сворачивайте сводку, главы и группы по дням во Встречах"),
     ("Follow live transcript", "Следить за расшифровкой в реальном времени"),
