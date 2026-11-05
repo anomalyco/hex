@@ -462,7 +462,7 @@ mod tests {
         let [Step::Remap(first), Step::Remap(second)] = &steps[..] else {
             panic!("expected two remap runs: {steps:?}");
         };
-        assert_eq!(first.assignments, [(200, 0xe9), (201, 0x6f22)]);
+        assert_eq!(first.assignments, [(200, 0xe9), (201, 0x0100_0000 | 0x6f22)]);
         assert_eq!(first.presses, [200, 201]);
         assert_eq!(second.assignments, [(200, 0x0100_0000 | 0x1f600)]);
         assert_eq!(second.presses, [200]);
