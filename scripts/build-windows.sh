@@ -63,7 +63,8 @@ if [ "$arch" = aarch64 ]; then
 fi
 # Cargo reads .cargo/config.toml (the static Windows runtime) from the
 # working directory, not from --manifest-path.
-(cd "$root" && TRANSCRIBE_CMAKE_ARGS="$cmake_args" cargo build --locked --release --target "$triple" -p hex -p hex-console)
+(cd "$root" && TRANSCRIBE_CMAKE_ARGS="$cmake_args" cargo build --locked --release --target "$triple")
+(cd "$root" && cargo build --locked --release --target "$triple" -p hex-console)
 executable="$dist/hex-$version-windows-$label.exe"
 console="$dist/hex-$version-windows-$label.com"
 cp "$target_dir/$triple/release/hex.exe" "$executable"
