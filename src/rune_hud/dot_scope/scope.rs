@@ -399,6 +399,9 @@ pub struct Scope {
     dots: Vec<[f32; 2]>,
     ys: [Vec<f32>; 2],
     brightness: [Vec<f32>; 2],
+    /// How far each column's traces lie flat on the middle row, 0–1,
+    /// spread across the field; empty is none.
+    flat: Vec<f32>,
     grid: f32,
     width: Spring,
     opacity: Spring,
@@ -438,6 +441,7 @@ impl Scope {
             dots: Vec::new(),
             ys: [Vec::new(), Vec::new()],
             brightness: [Vec::new(), Vec::new()],
+            flat: Vec::new(),
             grid: 0.0,
             width: Spring::at(START_WIDTH),
             opacity: Spring::at(0.0),
@@ -470,6 +474,32 @@ impl Scope {
 
     pub fn tuning(&self) -> Tuning {
         self.tuning
+    }
+
+    /// Lays the traces flat on the middle row, `per_column` (0–1) of the
+    /// way, spread evenly from the field's left column to its right: one
+    /// value flattens it all, and a little below zero (a spring's
+    /// overshoot) swings them a little wider. Empty, the default, leaves
+    /// them as they are. For prototypes of a quieter silence; the HUD
+    /// never sets it.
+    pub fn set_flat(&mut self, per_column: &[f32]) {
+        self.flat.clear();
+        self.flat
+            .extend(per_column.iter().map(|f| f.clamp(-0.5, 1.0)));
+    }
+
+    /// How flat the traces lie at sample `s` of `samples`.
+    fn flat_at(&self, s: usize, samples: usize) -> f32 {
+        match self.flat.len() {
+            0 => 0.0,
+            1 => self.flat[0],
+            n => {
+                let at = s as f32 / (samples - 1).max(1) as f32 * (n - 1) as f32;
+                let i = (at.floor() as usize).min(n - 2);
+                let k = at - i as f32;
+                self.flat[i] + (self.flat[i + 1] - self.flat[i]) * k
+            }
+        }
     }
 
     /// The 0–1 level the voice follows now, before the gain.
@@ -809,6 +839,11 @@ impl Scope {
         };
         let rest = (0.55 + 0.35 * breath) * (0.4 + 0.6 * self.live) * scan.helix;
         let half_width = width / 2.0;
+        let flat: Vec<f32> = if self.flat.is_empty() {
+            Vec::new()
+        } else {
+            (0..samples).map(|s| self.flat_at(s, samples)).collect()
+        };
         for k in 0..2 {
             let trace = &self.traces[k];
             let sign = if k == 0 { 1.0 } else { -1.0 };
@@ -840,7 +875,7 @@ impl Scope {
                     * (TAU * self.tuning.helix_cycles * xn - self.carrier).sin();
                 let y =
                     half * ((helix + half * 0.7 * spread * reach) / half).tanh() * ends * amplitude;
-                ys[s] = mid - sign * y;
+                ys[s] = mid - sign * y * (1.0 - flat.get(s).copied().unwrap_or(0.0));
                 let spatial = (0.3 + 0.7 * (a * 1.8).min(1.0)) * (0.45 + 0.55 * ends);
                 brightness[s] = spatial * amplitude + 0.36 * (bright - amplitude).max(0.0);
             }
@@ -1315,5 +1350,33 @@ mod tests {
         assert!((grey.base[0] - grey.base[2]).abs() < 1e-6);
         let cool = palette(false, &Pose { cool: 1.0, ..pose }, 1.0);
         assert_eq!(cool.base, [0.40, 0.47, 0.58]);
+    }
+
+    #[test]
+    fn flat_traces_lie_on_the_middle_row_and_none_changes_nothing() {
+        let mut plain = Scope::new(fixed());
+        let mut zero = Scope::new(fixed());
+        zero.set_flat(&vec![0.0; zero.columns()]);
+        let mut flat = Scope::new(fixed());
+        flat.set_flat(&[1.0]);
+        for scope in [&mut plain, &mut zero, &mut flat] {
+            run(scope, 1.5, recording(0.8));
+        }
+        assert_eq!(plain.dots(), zero.dots());
+        let (wide, narrow) = (spread(&plain), spread(&flat));
+        assert!(narrow < 0.75 * wide, "{narrow} vs {wide}");
+        // Each column's brightest dot is on the middle row.
+        let (columns, mid) = (flat.columns(), flat.rows() / 2);
+        for i in 0..columns {
+            let column: Vec<f32> = (0..flat.rows())
+                .map(|j| flat.dots()[j * columns + i][0])
+                .collect();
+            let brightest = column
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(j, _)| j);
+            assert_eq!(brightest, Some(mid), "column {i}: {column:?}");
+        }
     }
 }

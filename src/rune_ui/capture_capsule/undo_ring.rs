@@ -139,6 +139,18 @@ impl Ring {
     }
 }
 
+impl Ring {
+    /// A ring standing still with `left` (0–1) of the window to go, its
+    /// line at `alpha`, for a prototype that draws each frame itself.
+    pub(crate) fn still(left: f64, alpha: f32, reduced: bool) -> Self {
+        let left = left.clamp(0.0, 1.0) * undo_s();
+        let mut ring = Self::new(0.0, Some(left), 0.0, reduced);
+        let shown = (left / FADE_S).min(1.0) as f32 * alpha.clamp(0.0, 1.0);
+        ring.fade = Tween::linear(shown, shown, Duration::ZERO);
+        ring
+    }
+}
+
 /// Keeps `ring` on the window `pres` counts down: built when one begins,
 /// kept while it runs, dropped when Undo has none.
 pub(crate) fn sync(ring: &mut Option<Ring>, pres: &Pres, now: f64, reduced: bool) {
