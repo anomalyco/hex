@@ -204,6 +204,9 @@ fn history_lists_its_entries_with_their_place() {
 #[test]
 fn settings_switches_say_whether_they_are_on() {
     let mut rt = runtime("portal");
+    rt.state.advanced.push(Pane::General);
+    rt.invalidate();
+    settle(&mut rt);
     let release = rt.state.settings.release_microphone_while_idle;
     let row = node(&rt, "microphone-mode");
     assert_eq!(row["role"], "switch");

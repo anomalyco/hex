@@ -6,7 +6,7 @@ with ALSA compatibility. Inference uses Vulkan when available and can fall back
 to the CPU. A GPU that hangs or fails while transcribing is remembered for
 its current driver, and Auto transcribes on the CPU on it until the driver
 changes. An integrated GPU slow enough to miss streaming deadlines is timed
-against the CPU once, and Auto keeps whichever is faster. General › Advanced ›
+against the CPU once, and Auto keeps whichever is faster. General › Microphone, sound and window ›
 **Speech engine** picks Auto, GPU, or CPU
 (`hex settings set transcription_device cpu`). The window still needs a Vulkan driver, even with CPU
 inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your GPU
@@ -352,7 +352,7 @@ only. Pick that microphone in General's **Microphone** list, or make it the
 system's default input (for example with `wpctl set-default`), so nothing
 opens the headset's microphone.
 
-General › Advanced's Bluetooth option (`avoid_bluetooth_microphone`, on by
+General's "Use another microphone with headsets" option (`avoid_bluetooth_microphone`, on by
 default) helps only part of the way:
 
 - It applies only while the microphone is **System default** and the default
@@ -509,9 +509,9 @@ older settings. A start sound is queued immediately when the shortcut starts cap
 a stop sound marks the end of a retained recording (not completed transcription
 or paste), and a cancel sound acknowledges cancellation of an active capture.
 Brief taps still play the start sound, but recordings shorter than 300 ms remain
-discarded and do not play the stop sound. **Sound volume** in Settings
-offers Off, 25%, 50%, 75%, and 100%; changes save immediately without restarting
-the listener and preview the start sound unless set to Off. `hex dictate` uses
+discarded and do not play the stop sound. The **Volume** slider in General's Sounds sheet
+moves in 5% steps, and dragging it to the left end turns sounds off; changes save
+immediately without restarting the listener and preview the start sound unless off. `hex dictate` uses
 the same saved volume. Playback uses the default audio output through a bounded
 background worker; unavailable audio output does not prevent dictation.
 

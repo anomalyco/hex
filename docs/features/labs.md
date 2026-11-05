@@ -211,7 +211,7 @@ next. Check: `unload_idle_carries_its_minutes` in [labs.rs](../../src/labs.rs);
 the unload and reload themselves have no automated check.
 
 Restore shortcut default (`restore-shortcut-default`, issue 613): while on,
-General › Advanced › Paste last dictation shows a Restore default shortcut
+General › Pasting › Paste last dictation shows a Restore default shortcut
 button (`restore-paste-last`) whenever the shortcut is not its default
 (Option-Shift-V on macOS, Ctrl+Alt+V elsewhere), and a cleared shortcut's
 row reads "Default shortcut: …". Pressing it saves the default through the
@@ -1340,7 +1340,7 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   so.
 - Terminal paste (Windows): paste with Ctrl+Shift+V instead of Ctrl+V for
   apps that ignore a synthetic Ctrl+V (issue 477 / PR 478). Its toggle is the
-  shared `paste_with_shift`; Linux keeps it as a General › Advanced row.
+  shared `paste_with_shift`; Linux keeps it as a General › Pasting row.
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,

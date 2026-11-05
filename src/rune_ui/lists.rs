@@ -666,11 +666,44 @@ pub(super) fn slider_in<S: 'static>(
     width: f32,
     set: impl Fn(&mut S, f32, bool) + 'static,
 ) -> El {
+    let shown = value.clamp(0.0, 1.0);
+    col()
+        .key(key)
+        .w(width)
+        .gap(4.0)
+        .child(
+            row()
+                .key("heading")
+                .justify_between()
+                .child(text(label).key("label").font(DESCRIPTION).color(p.muted()))
+                .child(
+                    text(display.clone())
+                        .key("value")
+                        .font(p.k.ty.mono)
+                        .color(p.faint()),
+                )
+                // The slider reads its name and value.
+                .a11y_hidden(),
+        )
+        .child(slider_track(p, "track", label, shown, display, width, set))
+}
+
+/// A [`slider`]'s track alone, for a row whose own lines name it and show
+/// its value.
+pub(super) fn slider_track<S: 'static>(
+    p: Paint,
+    key: &str,
+    label: &str,
+    value: f32,
+    display: String,
+    width: f32,
+    set: impl Fn(&mut S, f32, bool) + 'static,
+) -> El {
     let c = &p.k.c;
     let value = value.clamp(0.0, 1.0);
     let knob = 14.0;
-    let track = row()
-        .key("track")
+    row()
+        .key(key)
         .role("slider")
         .label(label)
         .range_value(f64::from(value), 0.0, 1.0)
@@ -713,24 +746,5 @@ pub(super) fn slider_in<S: 'static>(
                 .fill(c.knob)
                 .border(p.hair.max(0.5), c.border_strong)
                 .a11y_hidden(),
-        );
-    col()
-        .key(key)
-        .w(width)
-        .gap(4.0)
-        .child(
-            row()
-                .key("heading")
-                .justify_between()
-                .child(text(label).key("label").font(DESCRIPTION).color(p.muted()))
-                .child(
-                    text(display)
-                        .key("value")
-                        .font(p.k.ty.mono)
-                        .color(p.faint()),
-                )
-                // The slider reads its name and value.
-                .a11y_hidden(),
         )
-        .child(track)
 }

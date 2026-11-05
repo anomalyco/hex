@@ -191,7 +191,7 @@ fn a_refused_portal_shortcut_says_how_to_free_it() {
     assert!(rt.find("dictation-hotkey").is_some());
     assert!(rt.find("basics/refused").is_some());
     open_advanced(&mut rt, Pane::General);
-    assert!(rt.find("output/card/refused").is_none());
+    assert!(rt.find("pasting/card/refused").is_none());
 }
 
 /// #635: Hyprland's portal names no trigger, since its config binds the
@@ -280,7 +280,7 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
     rt.invalidate();
     rt.frame(0.0);
     open_advanced(&mut rt, Pane::General);
-    assert!(rt.find("output/card/refused").is_some());
+    assert!(rt.find("pasting/card/refused").is_some());
     assert!(rt.find("basics/refused").is_none());
 }
 
@@ -477,14 +477,16 @@ fn enabling_sends_the_listener_action() {
 }
 
 #[test]
-fn the_microphone_switch_sits_beside_the_picker_and_needs_no_confirmation() {
-    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+fn the_microphone_switch_sits_under_the_disclosure_and_needs_no_confirmation() {
+    let mut rt = runtime("portal", true, TALL_SIZE);
+    assert!(rt.find("microphone-mode").is_none(), "folded at first");
+    open_advanced(&mut rt, Pane::General);
     assert!(
-        rt.find("basics/microphone-mode").is_some(),
-        "in General, not Advanced"
+        rt.find("microphone-and-model/card/microphone-mode")
+            .is_some()
     );
-    let ready = "The mic stays ready so dictation starts instantly; your system shows it in use";
-    let released = "The mic opens only while you dictate; the first moment can be clipped";
+    let ready = "Off: dictation starts instantly; your system shows the mic in use";
+    let released = "On: the mic opens as you dictate; the first moment can be clipped";
     assert!(texts(&rt).iter().any(|text| text == ready));
     tap(&mut rt, "microphone-mode");
     assert!(rt.state.settings.release_microphone_while_idle);
@@ -2000,11 +2002,12 @@ fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
 }
 
 /// The Sounds row opens the sheet. A set's play button plays its dictation
-/// without choosing it, and pressing it again stops it; a chip plays one
-/// sound; picking a set saves it and plays it; Escape closes the sheet.
+/// without choosing it, and pressing it again stops it; picking a set saves
+/// it and plays it; the volume slider saves where it lets go, zero turning
+/// the sounds off; Escape closes the sheet.
 #[test]
 fn the_sound_sets_sheet_plays_and_chooses_sets() {
-    use crate::feedback::{Audition, Cue, SoundSet};
+    use crate::feedback::SoundSet;
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     assert_eq!(rt.state.settings.sound_theme, SoundSet::Classic);
     open_advanced(&mut rt, Pane::General);
@@ -2012,37 +2015,44 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
     assert!(rt.state.sound_sets.open);
     let playing = |rt: &Runtime<Ui>| rt.state.sound_sets.playing();
 
-    tap(&mut rt, "set-click/top/play");
-    assert_eq!(playing(&rt), Some((SoundSet::Click, Audition::Dictation)));
+    tap(&mut rt, "set-click/play");
+    assert_eq!(playing(&rt), Some(SoundSet::Click));
     assert_eq!(rt.state.settings.sound_theme, SoundSet::Classic);
-    tap(&mut rt, "set-click/top/play");
+    tap(&mut rt, "set-click/play");
     assert_eq!(playing(&rt), None);
-
-    // A single sound plays for under a second, so look before settling.
-    let (x, y) = rt.find("stage/cues/Stop").unwrap();
-    rt.pointer_down(x, y);
-    rt.pointer_up(x, y);
-    rt.frame(1.0 / 60.0);
-    assert_eq!(
-        playing(&rt),
-        Some((SoundSet::Classic, Audition::Cue(Cue::Stop)))
-    );
 
     tap(&mut rt, "set-wood");
     assert_eq!(rt.state.settings.sound_theme, SoundSet::Wood);
-    assert_eq!(playing(&rt), Some((SoundSet::Wood, Audition::Dictation)));
-    // The stage holds the HUD's window as the start sound plays.
-    for _ in 0..6 {
-        rt.frame(1.0 / 60.0);
-    }
-    let (window, _) = rt.presented("sound-sets-hud").expect("the HUD's window");
-    assert!(window[2] > 0.0 && window[3] > 0.0);
+    assert_eq!(playing(&rt), Some(SoundSet::Wood));
+    assert!(rt.find("set-wood/check/mark").is_some());
+    assert!(rt.find("set-classic/check/mark").is_none());
+
+    // Dragged to the left end, the sounds turn off and keep their volume.
+    let volume = rt.state.settings.sound_effect_volume;
+    let track = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("sound-volume-slider"))
+        .unwrap()
+        .rect;
+    let y = track[1] + track[3] / 2.0;
+    rt.pointer_down(track[0] + track[2] / 2.0, y);
+    rt.pointer_move(track[0] - 40.0, y);
+    rt.pointer_up(track[0] - 40.0, y);
+    settle(&mut rt);
+    assert!(!rt.state.settings.sound_effects);
+    assert_eq!(rt.state.settings.sound_effect_volume, volume);
+    rt.pointer_down(track[0] + track[2] * 0.75, y);
+    rt.pointer_up(track[0] + track[2] * 0.75, y);
+    settle(&mut rt);
+    assert!(rt.state.settings.sound_effects);
+    assert!(rt.state.settings.sound_effect_volume > volume);
 
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
     assert!(!rt.state.sound_sets.open);
     assert_eq!(playing(&rt), None);
-    assert!(texts(&rt).iter().any(|text| text == "Wood"));
+    assert!(texts(&rt).iter().any(|text| text.starts_with("Wood · ")));
 }
 
 #[test]

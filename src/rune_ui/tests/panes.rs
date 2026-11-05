@@ -531,8 +531,8 @@ fn general_hides_advanced_options_until_asked() {
     tap(&mut rt, "advanced-toggle");
     assert!(rt.find("avoid-bluetooth-microphone").is_none());
     assert!(
-        rt.find("microphone-mode").is_some(),
-        "the mic switch is in General"
+        rt.find("microphone-mode").is_none(),
+        "the mic switch folds with the rest"
     );
 }
 
@@ -724,17 +724,28 @@ fn the_shortcut_row_holds_still_through_every_face_and_side() {
             .find(|e| e.key.as_deref() == Some(key));
         found.unwrap_or_else(|| panic!("no {key}")).rect
     }
-    /// The side select's right edge and top, and the recorder's right edge.
-    fn place(rt: &Runtime<Ui>) -> ((f32, f32), f32) {
+    /// The side picker's right edge and top while it shows, and the
+    /// recorder's right edge.
+    fn place(rt: &Runtime<Ui>) -> ((Option<f32>, Option<f32>), f32) {
         let recorder = rect(rt, "dictation-hotkey");
-        let side = rect(rt, "dictation-side-control-trigger");
-        ((side[0] + side[2], side[1]), recorder[0] + recorder[2])
+        let side = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("dictation-side"))
+            .map(|e| e.rect);
+        (
+            (side.map(|s| s[0] + s[2]), side.map(|s| s[1])),
+            recorder[0] + recorder[2],
+        )
     }
     fn watch(rt: &mut Runtime<Ui>, at_rest: ((f32, f32), f32), reduced: bool) {
         for _ in 0..45 {
             rt.frame(1.0 / 60.0);
             let ((side, top), edge) = place(rt);
-            assert_eq!((side, top), at_rest.0, "the side select moved");
+            // The recorder takes the picker's place while it records.
+            if let Some((side, top)) = side.zip(top) {
+                assert_eq!((side, top), at_rest.0, "the side picker moved");
+            }
             assert!(
                 (edge - at_rest.1).abs() < 0.05,
                 "the recorder moved: {edge}"
@@ -759,10 +770,10 @@ fn the_shortcut_row_holds_still_through_every_face_and_side() {
     for reduced in [false, true] {
         let mut rt = runtime("shortcut-row", true, TALL_SIZE);
         rt.set_system_reduced_motion(reduced);
-        open_advanced(&mut rt, Pane::General);
-        let at_rest = place(&rt);
+        let ((side, top), edge) = place(&rt);
+        let at_rest = ((side.expect("a side picker"), top.unwrap()), edge);
         for side in [1, 2, 0] {
-            pick(&mut rt, "dictation-side", side);
+            tap(&mut rt, &format!("dictation-side/segment{side}"));
             settle(&mut rt);
             watch(&mut rt, at_rest, reduced);
         }
@@ -2156,7 +2167,12 @@ fn activity_lists_events_and_shows_the_raw_one() {
 fn modifier_only_shortcuts_choose_their_side() {
     use crate::app_settings::ModifierSide;
     let mut rt = runtime("mac-settings-sides", true, (980.0, 2400.0));
-    pick(&mut rt, "dictation-side", 2);
+    assert!(
+        rt.find("dictation-shortcut-control/dictation-side")
+            .is_some(),
+        "in the Shortcut row"
+    );
+    tap(&mut rt, "dictation-side/segment2");
     assert_eq!(
         rt.state.settings.dictation_hotkey.modifiers.option,
         Some(ModifierSide::Right)

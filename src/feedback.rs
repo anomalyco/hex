@@ -447,6 +447,7 @@ impl SoundSet {
 
     /// Whether the set plays a sound for `cue`. Classic and Thock have no done
     /// sound; Classic's error is macOS Basso, or Signature's elsewhere.
+    #[cfg(test)]
     pub fn has(self, cue: Cue) -> bool {
         cue != Cue::Done || BUNDLED_SETS[self as usize].done.is_some()
     }
@@ -464,8 +465,7 @@ impl SoundSet {
     }
 }
 
-/// A moment of dictation that has its own sound, as the sound picker plays
-/// them one at a time.
+/// A moment of dictation that has its own sound.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Cue {
     Start,
@@ -474,18 +474,9 @@ pub enum Cue {
     Error,
 }
 
+#[cfg(test)]
 impl Cue {
     pub const ALL: [Self; 4] = [Self::Start, Self::Stop, Self::Done, Self::Error];
-
-    /// The English label the sound picker shows, translated where shown.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Start => "Start",
-            Self::Stop => "Stop",
-            Self::Done => "Done",
-            Self::Error => "Error",
-        }
-    }
 }
 
 /// What the sound picker plays of a set.

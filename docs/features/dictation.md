@@ -1220,7 +1220,7 @@ differently from a paste. Remove the typing path once Chrome 157 is the floor.
 waits for Shift, Alt, and Win to come up, sends Ctrl+V, and restores the
 previous clipboard 500 ms later unless a newer paste or another app changed it.
 Labs › Terminal paste (`paste_with_shift`, off by default; on Linux it is a
-General › Advanced row) sends Ctrl+Shift+V instead, for apps that ignore
+General › Pasting row) sends Ctrl+Shift+V instead, for apps that ignore
 a synthetic Ctrl+V (the herdr desktop app). Shift goes down after Ctrl and up
 before it; a Ctrl the user still holds is never pressed or released by Hex. A
 saved change applies to the next paste without restarting the listener.
@@ -1305,24 +1305,17 @@ the display and rectangle again, as Linux and Windows already do. Not run on a
 two-display Mac; the misplacement inside Rune itself is not addressed here.
 
 ```ts
-Settings > Sounds (next to Sound volume)                    // dictate.sound-set
+Settings > General > Sounds (in the fold, While you dictate) // dictate.sound-set
 ├── Default / older settings -> Classic
-├── Row shows the saved set -> Opens the Sounds sheet
-│   ├── Stage -> Hex's own HUD, where this OS puts it, does what it does
-│   │   │          at each sound of a short dictation
-│   │   ├── Where -> Indicator position: top / bottom; Off shows none
-│   │   ├── Start (0 s) -> Recording, with a demo voice's level
-│   │   ├── Stop (1.4 s) -> Transcribing
-│   │   └── Done (2.1 s) -> Done look, then it leaves
-│   ├── Lone Error (macOS) -> Failed look 0.6 s (Dot scope coral), then leaves
-│   ├── Chips -> Start / Stop / Done / Error (macOS) play one sound
-│   │   └── Set has no such sound (Classic's or Thock's done) -> Chip faint and inert
-│   ├── Each set -> Name, what it sounds like, play button
+├── Row shows "<set> · <volume>%", or "Off" -> Opens the Sounds sheet
+│   ├── Volume slider -> 5% steps; its line says "50% · drag to the left to turn sounds off"
+│   │   ├── Release at 0 -> Sounds off (`sound_effects` false); the last volume is kept
+│   │   └── Release above 0 -> Save; preview one start tone
+│   ├── Each set -> ✓ on the chosen one, name, what it sounds like, play button
 │   │   ├── Play -> Plays its dictation without choosing it; again stops it
 │   │   └── Press the set -> Save and apply live; play its dictation
 │   ├── Any playback -> Stops the one before it (20 ms fade)
-│   ├── Sound volume -> Plays at it; Off plays nothing, the HUD still shows
-│   └── Close / Escape / scrim / leaving the pane -> Stops playback
+│   └── Done / Escape / scrim / leaving the pane -> Stops playback
 ├── hex settings set sound_theme <signature|classic|click|soft|wood|analog|thock>
 └── Every set -> Same loudness per sound at a given volume
 ```
@@ -1331,17 +1324,10 @@ The sheet is a modal like the shortcut explainer, opened from a
 `sheet_button` because its choices need room to be heard, not a menu. Checks:
 `auditions_play_each_sound_at_its_moment`,
 `stopping_an_audition_fades_all_of_it`,
-`each_moment_shows_from_its_sound_to_the_next`,
-`the_hud_shows_a_dictation_and_then_leaves`,
-`a_lone_sound_shows_its_moment_and_leaves`,
-`dot_scope_turns_coral_on_failure`,
-`the_sound_sets_sheet_plays_and_chooses_sets` (Linux), and the `sound-sets`,
-and `sound-sets-playing` goldens. The stage
-replays Hex's HUD on the sheet's clock: `dictation/indicator`'s model, drawn
-by the window's compositor with `rune_hud`'s painter and `rune_hud.wgsl`, as
-the real overlay draws it. It is a preview, not the overlay: Dot scope's
-in-bar and notch placements show below the menu bar, the voice is HUD Lab's
-demo, not the microphone, and it ignores Reduce Motion.
+`the_sound_sets_sheet_plays_and_chooses_sets` (Linux), and the `sound-sets`
+and `sound-sets-playing` goldens. Until November 2026 the sheet also replayed
+Hex's HUD on a stage above the sets, with Start / Stop / Done / Error chips;
+the volume slider took its place.
 
 Hex signature (2026-10-27) is one kalimba-like FM voice playing one motif,
 D-B-A-D (a sixth, since "hex" is six): start D5 to B5 (116 ms), stop B5 to A5
@@ -1360,7 +1346,7 @@ restored from git; it has no done tone, errors play macOS Basso as they
 did, and onboarding success plays its stop sound (the other sets have their own).
 The done sound of every set plays only when the paste lands at least
 `DONE_MIN_AFTER_STOP` (2 s) after the stop sound, as after a slow rewrite; the
-Sounds sheet's demo still plays it. Checked by `done_plays_only_after_a_slow_paste`.
+Sounds sheet's play button still plays it. Checked by `done_plays_only_after_a_slow_paste`.
 
 Each set is a folder in `resources/audio/sounds/` made by
 [`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)

@@ -252,21 +252,19 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
     app
 }
 
-/// The window's compositor: the UI (through the first run's GPU stage or
-/// the practice game's strike and burn while they show), then the Sounds
-/// sheet's HUD over its stage.
+/// The window's compositor: the UI, through the first run's GPU stage or
+/// the practice game's strike and burn while they show.
 #[derive(Default)]
 pub(crate) struct WindowCompositor {
     onboarding: Option<onboarding_kit::gpu_stage::OnboardingGpu>,
     game: Option<onboarding_kit::game_fx::GameFx>,
-    sounds: sound_sets::Preview,
     /// The device whose backend `process.log` names.
     logged: Option<rune::compose::DeviceKey>,
 }
 
 impl rune::compose::Compositor<Ui> for WindowCompositor {
     fn features(&self) -> wgpu::Features {
-        // The Sounds sheet's HUD, and one device shared with the HUD overlay.
+        // One device shared with the HUD overlay.
         crate::rune_hud::Painter::FEATURES
     }
 
@@ -302,7 +300,6 @@ impl rune::compose::Compositor<Ui> for WindowCompositor {
         } else {
             f.draw_ui();
         }
-        self.sounds.render(f);
     }
 }
 
@@ -1365,7 +1362,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= general::poll_level(ui, clock, tx);
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     changed |= explainer::poll(ui, clock, visible, tx);
-    changed |= sound_sets::poll(ui, clock, visible, tx);
+    changed |= sound_sets::poll(ui, clock, tx);
     changed | settings::advance_capture(ui, clock, tx)
 }
 
