@@ -22,9 +22,8 @@ const SIDE_H: f32 = 440.0;
 const GROUP: &str = "Prototypes/Capture capsule";
 
 // One story per scene below; adding a scene means adding its index too.
-// The `clip-…` scenes after them are timed stories for review clips.
-const _: () = assert!(SCENES.len() == 11 + 13);
-const _: () = assert!(FLOWS.len() == CapsuleFlow::ALL.len());
+// The eight `clip-…` scenes after them are timed stories for review clips.
+const _: () = assert!(SCENES.len() == 11 + 7);
 
 /// `playground` with the whole flow and every capsule scene as stories.
 pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playground<S> {
@@ -78,6 +77,7 @@ const FLOWS: [(&str, CapsuleFlow); 5] = [
     ("cursor", CapsuleFlow::Cursor),
     ("notch", CapsuleFlow::Notch),
 ];
+const _: () = assert!(FLOWS.len() == CapsuleFlow::ALL.len());
 
 /// The capsule's notch flow on a MacBook's notch and on a flat display's
 /// pretend one, at their real sizes in points.

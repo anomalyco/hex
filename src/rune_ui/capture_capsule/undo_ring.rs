@@ -3,12 +3,13 @@
 //!
 //! The ring is one line along the outline, trimmed to the time left by a
 //! render-time [`Tween`] (`live_trim`), so it drains every frame with no
-//! producer ticking and no view rebuilds. The look's other layers (a bright
-//! head, a glow, a fade into the track) are the same line trimmed to spans
-//! that travel with its moving end. The last moment fades it out, so
-//! nothing pops at the end. While the pointer holds the countdown every
-//! layer stands still, and a new ring takes over from what was left once
-//! it leaves. Under Reduce Motion it drains as the plain line alone.
+//! producer ticking and no view rebuilds. A bright head rides its moving
+//! end, and a soft glow trails behind the head over the outline it just
+//! gave up: the same line, trimmed to spans that travel with the end. The
+//! last moment fades it out, so nothing pops at the end. While the pointer
+//! holds the countdown every layer stands still, and a new ring takes over
+//! from what was left once it leaves. Under Reduce Motion it drains as the
+//! plain line alone.
 
 use std::f32::consts::{FRAC_PI_2, PI};
 use std::time::Duration;
@@ -19,7 +20,6 @@ use rune::{Color, El, LineCap, Shape, Tween, canvas, el};
 use super::super::controls::Paint;
 use super::flow::{Pres, undo_s};
 use super::surface::{CHIP_RADIUS, HINT_GAP, medium, undo_label};
-use super::tuning::{self, RingLook};
 
 const STROKE: f32 = 1.5;
 /// How strongly the track shows the whole outline, under the line.
@@ -28,32 +28,29 @@ const TRACK: f32 = 0.09;
 const FADE_S: f64 = 0.18;
 /// Points along each rounded corner.
 const CORNER_STEPS: usize = 16;
+/// How much stronger the glow is on a light ground, where it takes the
+/// accent: a blurred tint shows less over white than light does over dark.
+const LIGHT_GLOW: f32 = 1.6;
 
 /// One layer of the ring: the outline from `from` to `to` past the moving
-/// end (fractions of the way round, or of what is left when `along`;
-/// `None` is the top centre, where the line ends), in `ink`.
+/// end (fractions of the way round; `None` is the top centre, where the
+/// line ends), in `ink`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Layer {
     from: f32,
     to: Option<f32>,
-    along: bool,
     ink: Ink,
     width: f32,
     /// Gaussian blur, in points; a blurred layer shows through its own
     /// opacity, `amount`.
     blur: f32,
-    cap: LineCap,
 }
 
 impl Layer {
     /// Where this layer runs with the moving end `at` of the way round.
     /// Linear in `at`, so one linear tween carries it to the end.
     fn span(&self, at: f32) -> [f32; 2] {
-        let scale = if self.along { 1.0 - at } else { 1.0 };
-        [
-            at + self.from * scale,
-            self.to.map_or(1.0, |to| at + to * scale),
-        ]
+        [at + self.from, self.to.map_or(1.0, |to| at + to)]
     }
 }
 
@@ -63,85 +60,44 @@ enum Ink {
     Line(f32),
     /// The brightest text ink, `amount` of the way from the ground.
     Bright(f32),
+    /// The glow: light on a dark ground, the accent on a light one, at
+    /// `amount` opacity.
+    Glow(f32),
 }
 
 /// The plain line: from the moving end to the top centre.
 const LINE: Layer = Layer {
     from: 0.0,
     to: None,
-    along: false,
     ink: Ink::Line(1.0),
     width: STROKE,
     blur: 0.0,
-    cap: LineCap::Round,
 };
 
-/// The bands [`RingLook::Fade`] dims the line in, how far along what is
-/// left they reach, and how faint the moving end gets.
-const FADE_BANDS: usize = 24;
-const FADE_REACH: f32 = 0.6;
-const FADE_FLOOR: f32 = 0.22;
-
-fn layers(look: RingLook, reduced: bool) -> Vec<Layer> {
+fn layers(reduced: bool) -> Vec<Layer> {
     if reduced {
         return vec![LINE];
     }
-    match look {
-        RingLook::Comet => vec![
+    // A glow the moving end leaves behind it, over the outline it just gave
+    // up, brightest where it is; then the line and its head.
+    [(0.03, 0.2), (0.08, 0.12), (0.16, 0.07), (0.28, 0.04)]
+        .into_iter()
+        .map(|(reach, amount)| Layer {
+            from: -reach,
+            to: Some(0.0),
+            ink: Ink::Glow(amount),
+            width: 3.0,
+            blur: 1.8,
+        })
+        .chain([
             LINE,
             Layer {
-                to: Some(0.03),
+                to: Some(0.015),
                 ink: Ink::Bright(0.9),
                 ..LINE
             },
-            Layer {
-                from: -0.006,
-                to: Some(0.012),
-                ink: Ink::Bright(0.22),
-                width: 2.5,
-                blur: 1.4,
-                ..LINE
-            },
-        ],
-        // A glow the moving end leaves behind it, over the outline it just
-        // gave up, brightest where it is.
-        RingLook::Glow => [(0.03, 0.2), (0.08, 0.12), (0.16, 0.07), (0.28, 0.04)]
-            .into_iter()
-            .map(|(reach, amount)| Layer {
-                from: -reach,
-                to: Some(0.0),
-                ink: Ink::Bright(amount),
-                width: 3.0,
-                blur: 1.8,
-                ..LINE
-            })
-            .chain([
-                LINE,
-                Layer {
-                    to: Some(0.015),
-                    ink: Ink::Bright(0.9),
-                    ..LINE
-                },
-            ])
-            .collect(),
-        RingLook::Fade => (0..FADE_BANDS)
-            .map(|k| {
-                let t = k as f32 / FADE_BANDS as f32;
-                let eased = t * t * (3.0 - 2.0 * t);
-                Layer {
-                    from: t * FADE_REACH,
-                    along: true,
-                    ink: Ink::Line(FADE_FLOOR + (1.0 - FADE_FLOOR) * eased),
-                    cap: if k == 0 {
-                        LineCap::Round
-                    } else {
-                        LineCap::Butt
-                    },
-                    ..LINE
-                }
-            })
-            .collect(),
-    }
+        ])
+        .collect()
 }
 
 /// The live ring for one Undo window.
@@ -164,7 +120,7 @@ impl Ring {
             Some(_) => Tween::linear(from, from, Duration::ZERO),
             None => Tween::linear(from, to, Duration::from_secs_f64(over)),
         };
-        let layers = layers(tuning::get().ring, reduced)
+        let layers = layers(reduced)
             .into_iter()
             .map(|layer| (layer, track(layer.span(past), layer.span(1.0), left)))
             .collect();
@@ -232,24 +188,21 @@ fn border(p: Paint, [w, h]: [f32; 2], ground: Color, ring: &Ring) -> El {
         LineCap::Round,
         tint(ground, p.text(), TRACK),
     );
-    // A glow on a light ground is a shadow; it stays fainter there.
-    let glow = if ground.luminance() > 0.5 { 0.5 } else { 1.0 };
+    let light = ground.luminance() > 0.5;
     let mut lines = el().absolute(0.0, 0.0).size(w, h).live_opacity(&ring.fade);
     for (spec, span) in &ring.layers {
-        let (ink, amount) = match spec.ink {
-            Ink::Line(a) => (p.muted(), a),
-            Ink::Bright(a) => (p.text(), a),
-        };
-        let color = if spec.blur > 0.0 {
-            ink
-        } else {
-            tint(ground, ink, amount)
+        let color = match spec.ink {
+            Ink::Line(amount) => tint(ground, p.muted(), amount),
+            Ink::Bright(amount) => tint(ground, p.text(), amount),
+            Ink::Glow(_) if light => p.accent(),
+            Ink::Glow(_) => p.text(),
         };
         let mut line =
-            layer(Shape::new().stroke_with(path.clone(), false, spec.width, spec.cap, color))
+            layer(Shape::new().stroke_with(path.clone(), false, spec.width, LineCap::Round, color))
                 .live_trim(span);
-        if spec.blur > 0.0 {
-            line = line.blur(spec.blur).opacity(amount * glow);
+        if let Ink::Glow(amount) = spec.ink {
+            let amount = if light { amount * LIGHT_GLOW } else { amount };
+            line = line.blur(spec.blur).opacity(amount);
         }
         lines = lines.child(line);
     }
@@ -370,15 +323,13 @@ mod tests {
     }
 
     #[test]
-    fn every_look_keeps_one_line_to_the_top_and_reduce_motion_keeps_only_it() {
-        for look in RingLook::ALL {
-            let all = layers(look, false);
-            assert!(
-                all.iter().any(|l| l.from == 0.0 && l.to.is_none()),
-                "{look:?}"
-            );
-            assert_eq!(layers(look, true), vec![LINE]);
-        }
+    fn the_ring_keeps_one_line_to_the_top_and_reduce_motion_keeps_only_it() {
+        assert!(
+            layers(false)
+                .iter()
+                .any(|l| l.from == 0.0 && l.to.is_none())
+        );
+        assert_eq!(layers(true), vec![LINE]);
     }
 
     #[test]

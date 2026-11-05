@@ -18,7 +18,7 @@ use rune_kit::{Button, ButtonVariant, ControlSize, SegmentedControl, Switch};
 
 use super::flow::{Action, Cue, Delivered, Dest, Failure, Grant, Input, Route, Undone};
 use super::surface::{Id, PANEL_H, PANEL_W};
-use super::tuning::{self, CapsuleFlow, ListFooter, RingLook, TopLine, Tuning, flow_label};
+use super::tuning::{self, CapsuleFlow, ListFooter, TopLine, Tuning, flow_label};
 use super::{CapsuleState, Mode, capsule, tone};
 use crate::capture_host::CaptureNeed;
 use crate::rune_ui::controls::{DESCRIPTION, Paint};
@@ -218,19 +218,6 @@ const SCENES: &[Scene] = &[
             ],
         )
     }),
-    // The countdown ring in each look, while Kit picks one.
-    ("clip-ring-comet", |s| ring_clip(s, RingLook::Comet, false)),
-    ("clip-ring-glow", |s| ring_clip(s, RingLook::Glow, false)),
-    ("clip-ring-fade", |s| ring_clip(s, RingLook::Fade, false)),
-    ("clip-ring-comet-hold", |s| {
-        ring_clip(s, RingLook::Comet, true)
-    }),
-    ("clip-ring-glow-hold", |s| {
-        ring_clip(s, RingLook::Glow, true)
-    }),
-    ("clip-ring-fade-hold", |s| {
-        ring_clip(s, RingLook::Fade, true)
-    }),
     ("clip-saved", |s| clip(s, &[(5.0, routed(guess()))])),
     ("clip-words", |s| {
         clip(
@@ -298,32 +285,6 @@ fn clip(s: &mut CapsuleState, steps: &[(f64, Step)]) {
             .into_iter()
             .chain(steps.iter().cloned())
             .collect();
-    }
-}
-
-/// A rule's countdown in `look`, held by the pointer midway with `hold`.
-fn ring_clip(s: &mut CapsuleState, look: RingLook, hold: bool) {
-    if let Some(pg) = s.playground.as_mut() {
-        pg.set_tuning(Tuning {
-            ring: look,
-            ..pg.tuning
-        });
-    }
-    if hold {
-        clip(
-            s,
-            &[
-                (2.5, routed(rule())),
-                (4.0, Step::Hover(true)),
-                (6.0, Step::Hover(false)),
-                (7.5, Step::Input(Input::Settled)),
-            ],
-        );
-    } else {
-        clip(
-            s,
-            &[(2.5, routed(rule())), (5.5, Step::Input(Input::Settled))],
-        );
     }
 }
 
@@ -1054,21 +1015,6 @@ fn tuning(p: Paint, pg: &Playground, w: f32, standalone: bool) -> El {
             .build(p.k)
             .key("list-footer"),
     );
-    let looks: Vec<&str> = RingLook::ALL.iter().map(|m| m.label()).collect();
-    let picked = RingLook::ALL.iter().position(|m| *m == t.ring);
-    let ring = card("ring-card").child(
-        SegmentedControl::new(&looks, picked)
-            .width(Some(w))
-            .on_pick(|s: &mut CapsuleState, i: usize, _: &mut Tx| {
-                if let Some(pg) = s.playground.as_mut() {
-                    let mut tuning = pg.tuning;
-                    tuning.ring = RingLook::ALL[i];
-                    pg.set_tuning(tuning);
-                }
-            })
-            .build(p.k)
-            .key("ring"),
-    );
     // Everything changes together: the walls move while the content blurs,
     // scales and fades over them.
     let transition = card("transition-card")
@@ -1221,7 +1167,6 @@ fn tuning(p: Paint, pg: &Playground, w: f32, standalone: bool) -> El {
         .child(section(p, "flow", "Flow after a capture", flow))
         .child(section(p, "top-line", "Top line", top_line))
         .child(section(p, "list-footer", "List footer", list_footer))
-        .child(section(p, "ring", "Undo countdown", ring))
         .child(section(p, "transition", "Transition", transition))
         .child(section(p, "timing", "Timing", timing))
         .child(section(p, "sound", "Sound", sound))

@@ -84,29 +84,6 @@ impl ListFooter {
     }
 }
 
-/// How the Undo chip's countdown line looks, while Kit picks one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RingLook {
-    /// A crisp line whose moving end carries a small bright head.
-    Comet,
-    /// The line with a soft glow at its moving end, fading along it.
-    Glow,
-    /// The line dimming into the track toward the end about to go.
-    Fade,
-}
-
-impl RingLook {
-    pub(crate) const ALL: [RingLook; 3] = [RingLook::Comet, RingLook::Glow, RingLook::Fade];
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            RingLook::Comet => "A · Comet",
-            RingLook::Glow => "B · Glow",
-            RingLook::Fade => "C · Fade",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Tuning {
     /// The Undo window: a send, a rule's or a pick's, can be taken back
@@ -142,7 +119,6 @@ pub(crate) struct Tuning {
     /// The flow after a capture stops: `capture.capsule_flow` in the app,
     /// the playground's switch there.
     pub(crate) flow: CapsuleFlow,
-    pub(crate) ring: RingLook,
 }
 
 pub(crate) const DEFAULT: Tuning = Tuning {
@@ -160,7 +136,6 @@ pub(crate) const DEFAULT: Tuning = Tuning {
     top_line: TopLine::Quiet,
     list_footer: ListFooter::Band,
     flow: CapsuleFlow::List,
-    ring: RingLook::Comet,
 };
 
 static CURRENT: RwLock<Tuning> = RwLock::new(DEFAULT);
@@ -218,7 +193,6 @@ impl Tuning {
              \x20   top_line: {},\n\
              \x20   list_footer: {},\n\
              \x20   flow: CapsuleFlow::{:?},\n\
-             \x20   ring: RingLook::{:?},\n\
              }};\n",
             self.undo_s,
             self.done_hold_s,
@@ -234,7 +208,6 @@ impl Tuning {
             self.top_line.rust(),
             self.list_footer.rust(),
             self.flow,
-            self.ring,
         )
     }
 }
@@ -254,7 +227,6 @@ mod tests {
             "top_line: TopLine::Quiet",
             "list_footer: ListFooter::Band",
             "flow: CapsuleFlow::List",
-            "ring: RingLook::Comet",
         ] {
             assert!(rust.contains(field), "{field} missing from\n{rust}");
         }
