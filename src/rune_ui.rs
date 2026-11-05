@@ -694,7 +694,7 @@ pub(crate) struct Ui {
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
-    /// The Labs store's search, tab, chip, and open drawer.
+    /// The Labs store's search, tab, and chip.
     lab_store: labs::Store,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
@@ -1193,9 +1193,6 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     } else if ui.picker.open {
         picker::close(ui);
         true
-    } else if ui.labs_open && ui.lab_store.drawer.is_some() {
-        labs::close_drawer(ui);
-        true
     } else if ui.open.is_some() {
         ui.open = None;
         true
@@ -1447,9 +1444,6 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     }
     if let Some(modal) = vocabulary::modal(ui, p) {
         layer.extend(modal);
-    }
-    if let Some(drawer) = labs::drawer(ui, p) {
-        layer.extend(drawer);
     }
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);

@@ -23,8 +23,9 @@ feedback and Run setup again.
 ```ts
 Feature             Pane  Toggle (settings.json, hex settings)   On: what it does
 ├── Meetings (beta) yes   meetings.enabled             (macOS)   Meetings joins the sidebar: call detection, recording, transcripts
-├── Voice Filter    yes   experimental.hex_microphone  (macOS, Linux) Voice Filter joins the sidebar; feeds the Hex Microphone (macOS driver, Linux PipeWire source)
-├── Playground      yes   labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
+├── Voice Filter (Dev) yes experimental.hex_microphone (macOS, Linux) Voice Filter joins the sidebar; feeds the Hex Microphone (macOS driver, Linux PipeWire source)
+│                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
+├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
@@ -106,7 +107,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
                                          Java games (javaw/java, e.g. Minecraft) still get Ctrl+V (#1362)
                                          // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
 
-Settings › Labs                          // labs.page, a store (labs/store.rs, labs/drawer.rs)
+Settings › Labs                          // labs.page, a store (labs/store.rs)
 ├── Header -> "Labs", Search N labs (⌘F focuses it), Discover | Turned on · N
 ├── Group chips with counts -> All, Dictation, Output, History, Meetings, Annotate, Shortcuts, Models
 │   (labs/group.rs; a group this OS has no lab in hides)
@@ -122,15 +123,17 @@ Settings › Labs                          // labs.page, a store (labs/store.rs,
 │   // checks: labs_groups_fold_and_remember_it, labs_groups_follow_each_os (tests/panes.rs);
 │   // every_group_has_a_feature_and_round_trips_its_id (labs/group.rs);
 │   // goldens mac-labs (light, dark), windows-labs, linux-labs, mac-labs-link
-├── Card -> neutral icon tile, name with New / Dev tags on one line, up to two lines of description, a switch
+├── Card -> neutral icon tile, name with New / Dev tags on one line, up to two lines of description, a switch;
+│   pressing the card itself does nothing (there is no drawer)
 │   ├── The switch (key lab-<id>) -> flips the lab, saved at once
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
 │   └── Voice Filter while its driver is installed, or a managed or locked lab -> its switch is disabled
-├── Card body -> a drawer from the right over a dim: big tile, name, group, description,
-│   a preview placeholder, "Shows up in …" (a link when it's a pane), Send feedback, On / Off and the lab's switch;
-│   Unload model when idle also shows Unload after. Escape, ✕ or the dim closes it
+├── A lab's own settings show on its card while it's on -> Unload model when idle: Unload after (5/15/30/60 min);
+│   Screenshots: its shortcut, Saves to, and the macOS-takes-this-shortcut note with Open Keyboard Settings.
+│   Annotate 15 s replay's shortcut lives in Annotate's pane
+│   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on; scenes mac-labs-settings, mac-labs-screenshots
 ├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<group id> and ?search=<text>
-│   set the store; hex://labs/<lab> also opens that lab's drawer. It never turns a lab on. An unknown
+│   set the store; hex://labs/<lab> also selects that lab's group chip (unless ?category names one). It never turns a lab on. An unknown
 │   or absent name -> the page opens and process.log notes it. hex://settings/<pane>
 │   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
 │   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
@@ -140,20 +143,20 @@ Settings › Labs                          // labs.page, a store (labs/store.rs,
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature this build has: name, on/off, audience, description, its hex settings key
-├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build), which opens its drawer
+├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build), which opens Labs on its group
 ├── on <feature> | off <feature> -> a running Hex saves and applies it (hex settings set); otherwise settings.json
-├── off voice-filter with the driver installed -> refused: uninstall the driver
+├── off voice-filter with the driver installed -> refused: uninstall the driver (dev builds; stable has no voice-filter)
 └── hex experiments … -> points at hex labs
 
 hex settings set labs.live_text true     // macOS: through the running Hex
 ```
 
 Checks: `rune_ui::deep_link` tests (parser, query, every feature's link reads
-back); the labs store tests in tests/panes.rs (links, card and drawer toggles,
+back); the labs store tests in tests/panes.rs (links, card toggles, a lab's own settings on its card, the stable build's missing Dev labs,
 filters, ⌘F, a lone card's width, group folds and each OS's groups) and the
 `mac-labs`, `mac-labs-link`, `windows-labs`, and `linux-labs` goldens (Linux).
 Scenes: `mac-labs`, `mac-labs-on`, `mac-labs-category`, `mac-labs-search`,
-`mac-labs-drawer`, `mac-labs-link`, `windows-labs`, `linux-labs`. Not yet observed: the store in a running
+`mac-labs-settings`, `mac-labs-screenshots`, `mac-labs-link`, `windows-labs`, `linux-labs`. Not yet observed: the store in a running
 Hex.
 
 Settings saved before this model may carry `labs.enabled`; it is read and
@@ -200,7 +203,7 @@ still reaches the app. Check:
 observed: a real two-display Mac dragging windows with Hex running.
 
 Unload model when idle (`unload-idle`, issue 442 from @theoneand33): while
-on, its row shows "Unload after" (5, 15, 30, or 60 minutes; default 15).
+on, its card shows "Unload after" (5, 15, 30, or 60 minutes; default 15).
 `transcription/engine`'s worker unloads a loaded GGUF model once no command
 has reached it for that long and nothing records (`audio::idle_sleep::held()`: a
 dictation past its hold or a meeting; a macOS capture from its press via
@@ -944,7 +947,7 @@ row renders only in macOS builds, so no golden changes.
 
 Screenshots (`screenshots`, macOS only, group Annotate): for people who
 miss CleanShot's ⌘⇧4. While on, the shortcut (`screenshots.hotkey`,
-default ⌘⇧4; the drawer's recorder changes it and refuses one another Hex
+default ⌘⇧4; the card's recorder changes it and refuses one another Hex
 shortcut uses) opens a second copy of Annotate's capture picker
 (`PickerOverlay::install_as` in
 [capture_capsule/picker.rs](../../src/rune_ui/capture_capsule/picker.rs)):
@@ -1024,7 +1027,7 @@ macOS matches its own screenshot shortcuts (Keyboard Shortcuts ›
 Screenshots, ⌘⇧4 among them) in the window server before any app's event
 tap, so while that system shortcut is on, Hex never sees the press. Hex
 reads `com.apple.symbolichotkeys` (`screenshots::system_shortcut`) and,
-when the system takes Hex's chord, the drawer says so with Open Keyboard
+when the system takes Hex's chord, the card says so with Open Keyboard
 Settings, which opens that pane; turning macOS's shortcut off, or
 choosing another chord, hands it to Hex.
 
@@ -1050,7 +1053,7 @@ layout, each tool's drag, text, undo, the list's search, and both exports
 without one) in [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
 and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/screenshot_thumbnail/editor/marks.rs);
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
-the drawer renders as `--scene mac-labs-screenshots`. Not yet observed: a
+its card renders as `--scene mac-labs-screenshots`. Not yet observed: a
 real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
 clipboard paste, the thumbnail's drag, the editor on a real display
 (its keys, Copy, Save, and a session receiving a sent shot), and whether a session
@@ -1065,8 +1068,8 @@ list it) while both `labs.annotate_replay` and `capture.enabled` are on and
 Screen Recording is granted. Because an active `SCStream` feeds `replayd`,
 macOS shows its purple screen-recording indicator the whole time the lab is
 on, which the Labs store card states plainly. `hex capture replay` (or a tap
-on `capture.replay_hotkey`, unbound by default and recordable in the lab's
-drawer or Settings › Annotate) exports the last 15 seconds into a normal
+on `capture.replay_hotkey`, unbound by default and recordable in
+Settings › Annotate) exports the last 15 seconds into a normal
 `.scrawl` bundle; holding `capture.replay_hotkey` (≥ 300 ms) freezes the clip
 at the press and records microphone narration shifted onto the bundle clock
 after it. Details, checks, and live macOS 27.0 measurements:

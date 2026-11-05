@@ -623,10 +623,11 @@ pub(super) const SCENES: &[Scene] = &[
         ui.pane = Pane::HudLab;
     }),
     ("mac-labs", labs_with_some_on),
+    // Where hex://labs/vocabulary-biasing lands: its group's chip.
     ("mac-labs-link", |ui| {
         *ui = mac_fixture();
         ui.labs_open = true;
-        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::VocabularyBiasing));
+        ui.lab_store.group = Some(crate::labs::Feature::VocabularyBiasing.group());
     }),
     ("mac-labs-on", |ui| {
         labs_with_some_on(ui);
@@ -640,15 +641,18 @@ pub(super) const SCENES: &[Scene] = &[
         labs_with_some_on(ui);
         ui.lab_store.search = rune::TextEdit::new("paste".to_string());
     }),
-    ("mac-labs-drawer", |ui| {
+    // A lab's own settings on its card while it's on.
+    ("mac-labs-settings", |ui| {
         labs_with_some_on(ui);
-        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::LiveText));
+        ui.settings.labs.unload_idle = true;
+        ui.lab_store.group = Some(crate::labs::Feature::UnloadIdle.group());
     }),
-    // Labs › Screenshots' drawer (macOS only: elsewhere the lab has no row).
+    // Labs › Screenshots' card while on (macOS only: elsewhere the lab has
+    // no row).
     ("mac-labs-screenshots", |ui| {
         labs_with_some_on(ui);
         ui.settings.labs.screenshots = true;
-        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::Screenshots));
+        ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
     }),
     // Labs on Windows and Linux: only their OS's labs, groups holding a
     // lab that's on open.

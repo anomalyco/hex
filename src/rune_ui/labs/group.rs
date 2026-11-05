@@ -1,13 +1,12 @@
-//! What each lab is about: its group (the store's headers, chips and
-//! default icons) and where it shows up once on.
+//! Each lab's group: the store's headers, chips, and default icons.
 
 use rune::Icon;
 
 use super::super::icons::{CAMERA, KEYBOARD, MIC, PASTE, ZAP};
 use super::super::{Pane, Ui};
-use super::{Lab, Row, shown};
+use super::{Row, shown};
 use crate::desktop::i18n::tr;
-use crate::labs::{Feature, Group};
+use crate::labs::Group;
 
 /// A group's header and chip.
 pub(super) fn name(group: Group) -> &'static str {
@@ -62,89 +61,5 @@ pub(super) fn icon(group: Group) -> &'static Icon {
         Group::Annotate => &CAMERA,
         Group::Shortcuts => &KEYBOARD,
         Group::Models => &ZAP,
-    }
-}
-
-/// Where a lab shows up once it is on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Place {
-    /// A pane, linked while the sidebar shows it.
-    Pane(Pane),
-    /// The playground window.
-    Playground,
-    /// Somewhere no link reaches, already translated.
-    Elsewhere(&'static str),
-}
-
-impl Place {
-    pub(super) fn of(lab: Lab) -> Self {
-        let feature = match lab {
-            Lab::Feature(feature) => feature,
-            #[cfg(hex_capture)]
-            Lab::Annotate => return Self::Pane(Pane::Annotate),
-        };
-        match feature {
-            Feature::Meetings
-            | Feature::LiveChapters
-            | Feature::MeetingSummaryModel
-            | Feature::MeetingNotesVocabulary
-            | Feature::MeetingFinishedEvent
-            | Feature::MeetingPlatformIcons
-            | Feature::FollowLiveTranscript
-            | Feature::CollapsibleMeetingSections => Self::Pane(Pane::Meetings),
-            Feature::StopWhenCallEnds
-            | Feature::MovableMeetingCapsules
-            | Feature::GnomeMeetingCapsules => Self::Elsewhere(tr("Meeting capsules")),
-            // A command, so never translated.
-            Feature::SubtitleExport => Self::Elsewhere("hex meetings show"),
-            Feature::LiveText | Feature::NotchIndicator => {
-                Self::Elsewhere(tr("Dictation indicator"))
-            }
-            Feature::SmartSpacing
-            | Feature::SpokenFormatting
-            | Feature::SpokenSymbols
-            | Feature::FillerWords
-            | Feature::KeepOnClipboard
-            | Feature::CopyOnly
-            | Feature::SkipPauses
-            | Feature::VocabularyBiasing
-            | Feature::GnomeClipboardRestore
-            | Feature::TerminalPaste => Self::Elsewhere(tr("Every dictation")),
-            Feature::PauseBrowser
-            | Feature::MouseShortcuts
-            | Feature::SidedChords
-            | Feature::StandaloneSpecialKeys
-            | Feature::SectionKeyAlone
-            | Feature::SecondDictationShortcut
-            | Feature::TapOrHold
-            | Feature::RestoreShortcutDefault
-            | Feature::ShareShortcut => Self::Pane(Pane::General),
-            Feature::KeepRecordings | Feature::HistoryStats => Self::Pane(Pane::History),
-            Feature::OutputFixes => Self::Pane(Pane::Output),
-            Feature::RecentDictations | Feature::HideMenuBarIcon => Self::Elsewhere(tr("Menu bar")),
-            Feature::KeyboardModelSwitching
-            | Feature::PickerSortFilter
-            | Feature::BenchmarkDetails
-            | Feature::PickerActiveFirst
-            | Feature::ModelInPlace
-            | Feature::PickerDownloaded
-            | Feature::ParakeetUltra => Self::Elsewhere(tr("Model picker")),
-            Feature::UnloadIdle => Self::Elsewhere(tr("In the background")),
-            Feature::VoiceFilter => Self::Pane(Pane::VoiceFilter),
-            Feature::Playground => Self::Playground,
-            Feature::Screenshots => Self::Elsewhere(tr("Screenshot shortcut")),
-            #[cfg(hex_capture)]
-            Feature::AnnotateReplay => Self::Pane(Pane::Annotate),
-            #[cfg(not(hex_capture))]
-            Feature::AnnotateReplay => Self::Pane(Pane::General),
-        }
-    }
-
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::Pane(pane) => pane.title(),
-            Self::Playground => "Playground",
-            Self::Elsewhere(label) => label,
-        }
     }
 }

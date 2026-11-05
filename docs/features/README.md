@@ -732,7 +732,7 @@ latency measurement.
 Sidebar                                  // settings.nav
 ├── General, Output, History, then each feature that is on: Meetings and
 │   Voice Filter (Labs toggles), Annotate, Playground (Labs, an item)
-└── Labs -> a store of unfinished features, each off by default: search, categories, cards, a drawer per lab; hex://labs/<feature> opens its drawer (labs.md)
+└── Labs -> a store of unfinished features, each off by default: search, categories, cards with their own settings inline; hex://labs/<feature> opens its group (labs.md)
     // Command-1…9 follow the panes' order (labs::order)
 
 General                                  // settings

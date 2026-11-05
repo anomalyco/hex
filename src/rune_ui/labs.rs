@@ -1,12 +1,11 @@
 //! Labs: one sidebar item that opens a store of every Labs feature
 //! (`crate::labs`), each off by default. Discover shows what's new, then
-//! every lab as a card under its group's collapsible header, Turned on
-//! what's on, and a card opens a drawer that
-//! says where the lab shows up. A feature with its own pane (Meetings,
+//! every lab as a card under its group's collapsible header, and Turned on
+//! what's on. Each card shows its description and switch, and while on any
+//! settings the lab has of its own. A feature with its own pane (Meetings,
 //! Voice Filter, Playground) joins the main sidebar while on and is hidden
 //! while off.
 
-mod drawer;
 mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
 mod screenshots;
@@ -14,7 +13,6 @@ mod store;
 
 use rune::{El, Icon, TextEdit, Tx, row, text};
 
-pub(super) use self::drawer::drawer;
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
 use super::icons::{BOOK, CAMERA, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
@@ -99,9 +97,10 @@ fn nav_row(
         .child(item.grow(1.0))
 }
 
-/// The Playground item while Labs › Playground is on: it opens it.
+/// The Playground item while Labs › Playground is on (dev builds only): it
+/// opens it.
 pub(super) fn playground_nav(ui: &Ui, p: Paint) -> Option<El> {
-    ui.settings.labs.playground.then(|| {
+    (Feature::Playground.shipped() && ui.settings.labs.playground).then(|| {
         nav_row(
             p,
             "nav-playground",
@@ -187,14 +186,13 @@ pub(super) enum Tab {
     On,
 }
 
-/// What the Labs store shows: its search, tab, chip, and open drawer.
+/// What the Labs store shows: its search, tab, and chip.
 #[derive(Default)]
 pub(super) struct Store {
     pub(super) search: TextEdit,
     pub(super) tab: Tab,
     /// The chip selected: only this group's labs show.
     pub(super) group: Option<Group>,
-    pub(super) drawer: Option<Lab>,
 }
 
 impl Store {
@@ -210,7 +208,7 @@ impl Store {
 )]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct LabsLink {
-    /// The lab whose drawer opens, by its id.
+    /// The lab to show, by its id: its group's chip is selected.
     pub(crate) lab: Option<String>,
     /// Turned on instead of Discover (`?tab=on`).
     pub(crate) turned_on: bool,
@@ -220,9 +218,10 @@ pub(crate) struct LabsLink {
     pub(crate) search: Option<String>,
 }
 
-/// A deep link: the Labs store on its tab, chip, and search, with a lab's
-/// drawer open when it names one. It never turns a lab on. An unknown lab
-/// or category, or a lab this OS has no card for, is logged and skipped.
+/// A deep link: the Labs store on its tab, chip, and search. A lab it names
+/// selects that lab's group chip unless the link names a category. It never
+/// turns a lab on. An unknown lab or category, or a lab this OS has no card
+/// for, is logged and skipped.
 #[cfg_attr(
     not(any(target_os = "macos", all(test, target_os = "linux"))),
     allow(dead_code)
@@ -247,7 +246,8 @@ pub(super) fn reveal(ui: &mut Ui, link: &LabsLink, tx: &mut Tx) {
     }
     let Some(id) = &link.lab else { return };
     match shown(ui).into_iter().find(|row| row.lab.id() == id) {
-        Some(row) => ui.lab_store.drawer = Some(row.lab),
+        Some(row) if link.category.is_none() => ui.lab_store.group = Some(row.group),
+        Some(_) => {}
         None => tracing::warn!(feature = %id, "a Labs link named no feature this Hex has"),
     }
 }
@@ -259,17 +259,8 @@ fn open(ui: &mut Ui, tx: &mut Tx) {
     tx.settle();
 }
 
-fn open_drawer(ui: &mut Ui, lab: Lab) {
-    ui.lab_store.drawer = Some(lab);
-}
-
-pub(super) fn close_drawer(ui: &mut Ui) {
-    ui.lab_store.drawer = None;
-}
-
 /// ⌘F (Ctrl+F off macOS) on the Labs page puts the caret in its search.
 pub(super) fn focus_search(ui: &mut Ui) {
-    ui.lab_store.drawer = None;
     ui.lab_store.search.focused = true;
 }
 
@@ -808,8 +799,38 @@ fn flip(ui: &mut Ui, lab: Lab) {
     }
 }
 
-/// How long the model sits unused before it unloads, in its drawer while
-/// on.
+/// A lab's own settings, on its card while it's on: how long the model sits
+/// unused before it unloads, or the screenshot shortcut and folder.
+fn extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
+    if !entry.on {
+        return None;
+    }
+    match entry.lab {
+        Lab::Feature(Feature::UnloadIdle) => Some(
+            row()
+                .key("unload-after")
+                .gap(8.0)
+                .center_y()
+                .flex_wrap()
+                .child(
+                    text(tr("Unload after"))
+                        .key("label")
+                        .font(controls::DESCRIPTION)
+                        .color(p.muted()),
+                )
+                .child(unload_after(ui, p)),
+        ),
+        #[cfg(all(target_os = "macos", hex_capture))]
+        Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
+            ui,
+            p,
+            crate::screenshots::system_takes_shortcut(),
+        )),
+        _ => None,
+    }
+}
+
+/// How long the model sits unused before it unloads.
 fn unload_after(ui: &Ui, p: Paint) -> El {
     use crate::app_settings::UNLOAD_IDLE_MINUTES;
     let labels: Vec<String> = UNLOAD_IDLE_MINUTES

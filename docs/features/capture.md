@@ -860,7 +860,7 @@ transcribing between chunks and keep their audio (shutdown waits ≤ 2 s)
 │   without stopping the buffer, probes and decodes keyframes with `scrawl-helper`,
 │   writes `capture.json` and `scrawl.json` (`missing: "no_audio"`), copies to
 │   the clipboard, and feeds `capture.route`
-└── `capture.replay_hotkey` (unbound by default; recordable in the lab's drawer,
+└── `capture.replay_hotkey` (unbound by default; recordable in
     Settings › Annotate while the lab is on, or `hex settings set capture.replay_hotkey`)
     ├── Tap (< 300 ms) -> exports the silent 15 s clip at once, no mic opened
     └── Hold (≥ 300 ms) -> exports the frozen 15 s clip at the press and records

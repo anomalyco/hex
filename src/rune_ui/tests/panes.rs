@@ -1831,8 +1831,7 @@ fn labs_lists_every_toggle_off_by_default() {
 }
 
 #[test]
-fn a_labs_link_opens_its_labs_drawer_and_leaves_it_off() {
-    use super::super::labs::Lab;
+fn a_labs_link_shows_its_labs_group_and_leaves_it_off() {
     use super::super::labs::LabsLink;
     use crate::labs::Feature;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
@@ -1845,19 +1844,30 @@ fn a_labs_link_opens_its_labs_drawer_and_leaves_it_off() {
     rt.update(|ui, tx| super::super::labs::reveal(ui, &link, tx));
     settle(&mut rt);
     assert!(rt.state.labs_open);
-    assert_eq!(rt.state.lab_store.drawer, Some(Lab::Feature(feature)));
-    assert!(rt.find("lab-drawer").is_some());
+    assert_eq!(rt.state.lab_store.group, Some(feature.group()));
+    assert!(rt.find("lab-card-vocabulary-biasing").is_some());
     assert!(!feature.on(&rt.state.settings), "a link never flips it");
-    key(&mut rt, Key::Escape, Mods::default());
-    assert!(
-        rt.state.lab_store.drawer.is_none(),
-        "Escape closes the drawer"
-    );
-    assert!(rt.state.labs_open, "and leaves Labs open");
 }
 
 #[test]
-fn a_labs_link_to_an_unknown_name_opens_labs_without_a_drawer() {
+fn a_labs_link_keeps_the_category_it_names() {
+    use super::super::labs::LabsLink;
+    let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
+    let link = LabsLink {
+        lab: Some(crate::labs::Feature::VocabularyBiasing.name().into()),
+        category: Some("shortcuts".into()),
+        ..LabsLink::default()
+    };
+    rt.update(|ui, tx| super::super::labs::reveal(ui, &link, tx));
+    settle(&mut rt);
+    assert_eq!(
+        rt.state.lab_store.group,
+        Some(crate::labs::Group::Shortcuts)
+    );
+}
+
+#[test]
+fn a_labs_link_to_an_unknown_name_opens_labs_on_every_group() {
     use super::super::labs::LabsLink;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
     let link = LabsLink {
@@ -1868,7 +1878,6 @@ fn a_labs_link_to_an_unknown_name_opens_labs_without_a_drawer() {
     rt.update(|ui, tx| super::super::labs::reveal(ui, &link, tx));
     settle(&mut rt);
     assert!(rt.state.labs_open);
-    assert!(rt.state.lab_store.drawer.is_none());
     assert!(rt.state.lab_store.group.is_none());
 }
 
@@ -1892,30 +1901,35 @@ fn a_labs_link_sets_the_stores_tab_chip_and_search() {
 }
 
 #[test]
-fn a_labs_card_opens_its_drawer_and_its_switch_turns_it_on() {
-    use super::super::labs::Lab;
+fn a_labs_card_shows_its_description_and_its_switch_turns_it_on() {
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
     unfold_labs(&mut rt);
     let feature = Feature::SubtitleExport;
+    assert!(rt.find("lab-card-subtitle-export").is_some());
     tap(&mut rt, "lab-card-subtitle-export");
-    assert_eq!(rt.state.lab_store.drawer, Some(Lab::Feature(feature)));
     assert!(
         !feature.on(&rt.state.settings),
-        "opening a card flips nothing"
+        "pressing a card flips nothing"
     );
-    tap(&mut rt, "lab-drawer-toggle");
-    assert!(
-        feature.on(&rt.state.settings),
-        "the drawer's switch turns it on"
-    );
-    tap(&mut rt, "lab-drawer-close");
-    assert!(rt.state.lab_store.drawer.is_none());
     tap(&mut rt, "lab-subtitle-export");
     assert!(
-        !feature.on(&rt.state.settings),
-        "the card's switch turns it off"
+        feature.on(&rt.state.settings),
+        "the card's switch turns it on"
     );
+    tap(&mut rt, "lab-subtitle-export");
+    assert!(!feature.on(&rt.state.settings), "and off");
+}
+
+#[test]
+fn unload_when_idle_shows_its_minutes_on_its_card_while_on() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(crate::labs::Feature::UnloadIdle.group()));
+    settle(&mut rt);
+    assert!(rt.find("unload-idle-minutes").is_none(), "hidden while off");
+    tap(&mut rt, "lab-unload-idle");
+    assert!(rt.state.settings.labs.unload_idle);
+    assert!(rt.find("unload-idle-minutes").is_some());
 }
 
 #[test]
@@ -2112,33 +2126,6 @@ fn shows_on(rt: &Runtime<Ui>, key: &str) -> bool {
     thumb[0] + thumb[2] / 2.0 > track[0] + track[2] / 2.0
 }
 
-/// Every card's switch matches its drawer's.
-#[test]
-fn a_labs_drawer_agrees_with_its_card() {
-    let mut rt = runtime("mac-labs-drawer", true, (980.0, 4000.0));
-    unfold_labs(&mut rt);
-    assert!(shows_on(&rt, "lab-drawer-toggle"), "Live text is on");
-    key(&mut rt, Key::Escape, Mods::default());
-    assert!(shows_on(&rt, "lab-live-text"), "and its card says so");
-    let ids: Vec<String> = rt
-        .elements()
-        .into_iter()
-        .filter_map(|e| e.key?.strip_prefix("lab-card-").map(str::to_string))
-        .collect();
-    assert!(ids.len() > 20, "{ids:?}");
-    for id in ids {
-        let card_on = shows_on(&rt, &format!("lab-{id}"));
-        tap(&mut rt, &format!("lab-card-{id}"));
-        assert_eq!(
-            shows_on(&rt, "lab-drawer-toggle"),
-            card_on,
-            "{id}: the drawer agrees with the card"
-        );
-        key(&mut rt, Key::Escape, Mods::default());
-        assert!(rt.state.lab_store.drawer.is_none());
-    }
-}
-
 #[test]
 fn command_f_searches_labs() {
     let mut rt = runtime("mac-labs", true, PANE_SIZE);
@@ -2327,8 +2314,12 @@ fn an_installed_driver_keeps_the_voice_filter_on() {
         !rt.state.settings.experimental.hex_microphone,
         "the toggle is locked"
     );
-    assert!(rt.state.lab_store.drawer.is_some(), "its drawer says why");
-    key(&mut rt, Key::Escape, Mods::default());
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|t| t.starts_with("On while the Hex Microphone driver is installed")),
+        "its card says why"
+    );
     assert!(rt.find("nav-voice-filter").is_some());
 
     if let Some(driver) = &mut rt.state.platform.hex_microphone {
@@ -2344,6 +2335,49 @@ fn an_installed_driver_keeps_the_voice_filter_on() {
         rt.state.settings.experimental.hex_microphone,
         "without the driver the toggle works"
     );
+}
+
+#[test]
+fn a_stable_build_offers_only_uninstall_for_an_installed_driver() {
+    let _stable = crate::dev_build::pretend_stable();
+    let mut rt = runtime("mac-voice-filter", true, (980.0, 1400.0));
+    assert!(fun_driver_installed(&rt));
+    refresh(&mut rt);
+    assert!(
+        rt.find("nav-voice-filter").is_some(),
+        "the driver keeps its pane"
+    );
+    assert!(rt.find("hex-mic-driver").is_some());
+    assert!(rt.find("fun-mode").is_none(), "but no filter to tune");
+    assert!(rt.find("fun-try-it").is_none());
+    tap(&mut rt, "uninstall");
+    assert!(matches!(
+        asked(&rt).last(),
+        Some(PlatformRequest::UninstallHexMicrophone)
+    ));
+    if let Some(driver) = &mut rt.state.platform.hex_microphone {
+        driver.driver_bundle_installed = false;
+    }
+    refresh(&mut rt);
+    assert!(
+        rt.find("nav-voice-filter").is_none(),
+        "gone once uninstalled, though its setting is on"
+    );
+}
+
+#[test]
+fn a_stable_build_has_no_playground_or_voice_filter_lab() {
+    let _stable = crate::dev_build::pretend_stable();
+    let mut rt = runtime("mac-settings", true, (980.0, 4000.0));
+    rt.state.settings.labs.playground = true;
+    rt.state.settings.experimental.hex_microphone = true;
+    refresh(&mut rt);
+    assert!(rt.find("nav-playground").is_none());
+    open_labs(&mut rt);
+    unfold_labs(&mut rt);
+    assert!(rt.find("lab-live-text").is_some());
+    assert!(rt.find("lab-playground").is_none());
+    assert!(rt.find("lab-voice-filter").is_none());
 }
 
 fn fun_driver_installed(rt: &rune::Runtime<Ui>) -> bool {
