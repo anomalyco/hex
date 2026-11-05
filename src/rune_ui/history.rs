@@ -27,6 +27,9 @@ pub(super) struct HistoryPane {
     search: TextEdit,
     /// The query the entries were loaded for.
     searched: String,
+    /// The store's revision the entries were loaded at; `None` before the
+    /// first load.
+    revision: Option<u64>,
     pub(super) selected: Option<u64>,
     pub(super) clear_armed: bool,
     pub(super) copied: Option<u64>,
@@ -103,7 +106,9 @@ impl HistoryPane {
         let Some(store) = &self.store else {
             return;
         };
-        self.entries = store.search(&self.searched);
+        let (revision, entries) = store.search_at(&self.searched);
+        self.revision = Some(revision);
+        self.entries = entries;
         if self
             .selected
             .is_some_and(|id| !self.entries.iter().any(|entry| entry.id == id))
@@ -121,16 +126,21 @@ impl HistoryPane {
         };
     }
 
-    /// While the pane shows, picks up new dictations and search edits. The
-    /// stats are summed again only when the entries or the toggle changed.
+    /// While the pane shows, picks up new dictations and search edits. It
+    /// searches again only when the query or the store's revision changed,
+    /// and sums the stats again only when the entries or the toggle changed.
     pub(super) fn poll(&mut self, visible: bool) -> bool {
         let answered = self.poll_again();
-        if !visible || self.store.is_none() {
+        let Some(store) = self.store.as_ref().filter(|_| visible) else {
             return answered;
+        };
+        let stale = self.search.text != self.searched || self.revision != Some(store.revision());
+        let mut changed = false;
+        if stale {
+            let previous = std::mem::take(&mut self.entries);
+            self.reload_entries();
+            changed = self.entries != previous;
         }
-        let previous = std::mem::take(&mut self.entries);
-        self.reload_entries();
-        let changed = self.entries != previous;
         if changed || self.stats.is_some() != crate::labs::history_stats() {
             self.reload_stats();
             return true;
