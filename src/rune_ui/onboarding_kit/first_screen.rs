@@ -1,107 +1,46 @@
-//! More on `"Setting up Hex"` than a title and a percentage: a bigger HUD,
-//! what comes next while the model downloads, or both. Prototypes, each a
-//! story variant, until one is picked; the first run shows today's page.
+//! More on `"Setting up Hex"` than a title and a percentage: the details a
+//! download page owes you, how much is down and that your voice stays on
+//! this Mac. A prototype story variant until it's picked; the first run
+//! shows today's page.
 
-use rune::{El, TextStyle, col, el, icon, row, text};
+use rune::{El, TextStyle, Transition, icon, row, text};
 use rune_kit::glyphs;
 
 use super::super::controls::Paint;
-use super::stories::Onboard;
+use super::fixture::Download;
+use super::stories::{Onboard, Step};
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum FirstScreen {
-    #[default]
-    Today,
-    BigHud,
-    UpNext,
-    Both,
+const WINDOW: [f32; 2] = [980.0, 760.0];
+const NOTE_FROM_BOTTOM: f32 = 40.0;
+
+/// How much of the model is down, beside its percentage: `"190 of 610 MB"`.
+pub(super) fn amount(p: Paint, s: &Onboard, d: Download) -> Option<El> {
+    (s.download_details && !d.done() && d.total > 0).then(|| {
+        let mb = |bytes: u64| (bytes as f64 / 1_000_000.0).round() as u64;
+        text(format!("{} of {} MB", mb(d.downloaded), mb(d.total)))
+            .key("amount")
+            .font(TextStyle::new(13.0, 420.0).lh(18.0).features("'tnum' 1"))
+            .color(p.muted())
+    })
 }
 
-const TODAY_HUD: f32 = 1.24;
-const BIG_HUD: f32 = 2.2;
-const CARD_W: f32 = 196.0;
-
-/// How big the HUD above `"Setting up Hex"` draws.
-pub(super) fn hud_scale(s: &Onboard) -> f32 {
-    match s.first_screen {
-        FirstScreen::BigHud | FirstScreen::Both => BIG_HUD,
-        FirstScreen::Today | FirstScreen::UpNext => TODAY_HUD,
-    }
-}
-
-/// The three steps after the download, quiet under its progress.
-pub(super) fn up_next(p: Paint, s: &Onboard) -> Option<El> {
-    if !matches!(s.first_screen, FirstScreen::UpNext | FirstScreen::Both) {
-        return None;
-    }
-    let steps = [
-        (&glyphs::CURSOR_TEXT, "Watch Hex work", "A quick demo"),
-        (&glyphs::MIC, "Allow the microphone", "One macOS prompt"),
-        (&glyphs::KEYBOARD, "Try it yourself", "Hold a key and talk"),
-    ];
-    let cards = steps
-        .into_iter()
-        .enumerate()
-        .map(|(i, (glyph, title, line))| {
-            s.motion
-                .staggered(card(p, i, glyph, title, line), 3.0 + i as f32, 8.0)
-        });
-    Some(
-        col()
-            .key("up-next")
-            .gap(10.0)
-            .items_center()
-            .pt(18.0)
+/// One quiet line at the foot of the window: why there's a download.
+pub(super) fn note(p: Paint, s: &Onboard) -> Option<El> {
+    (s.download_details && matches!(s.step, Step::Pick | Step::Started)).then(|| {
+        let quiet = p.muted();
+        row()
+            .key("first-note")
+            .absolute(0.0, WINDOW[1] - NOTE_FROM_BOTTOM - 18.0)
+            .w(WINDOW[0])
+            .gap(6.0)
+            .center()
+            .transition(Transition::opacity())
+            .child(icon(&glyphs::LOCK, 13.0).key("lock").color(quiet))
             .child(
-                s.motion.staggered(
-                    text("While it downloads")
-                        .key("up-next-label")
-                        .font(TextStyle::new(12.0, 520.0).lh(16.0))
-                        .color(p.muted()),
-                    2.5,
-                    6.0,
-                ),
+                text("Hex hears you on this Mac. Your voice never leaves it.")
+                    .key("words")
+                    .font(TextStyle::new(13.0, 420.0).lh(18.0))
+                    .color(quiet),
             )
-            .child(row().key("up-next-cards").gap(12.0).children(cards)),
-    )
-}
-
-fn card(p: Paint, i: usize, glyph: &'static rune::Icon, title: &str, line: &str) -> El {
-    let k = p.k;
-    row()
-        .key(format!("next-{i}"))
-        .w(CARD_W)
-        .gap(10.0)
-        .padding(12.0)
-        .center_y()
-        .radius(12.0)
-        .fill(k.c.surface_raised)
-        .border(p.hair, k.c.border_weak)
-        .child(
-            el().key("glyph")
-                .size(30.0, 30.0)
-                .radius(9.0)
-                .fill(k.c.bg_base)
-                .border(p.hair, k.c.border_weak)
-                .center()
-                .child(icon(glyph, 15.0).key("icon").color(p.text())),
-        )
-        .child(
-            col()
-                .key("words")
-                .gap(1.0)
-                .shrink()
-                .child(
-                    text(title.to_string())
-                        .key("title")
-                        .font(TextStyle::new(13.0, 560.0).lh(18.0))
-                        .color(p.text()),
-                )
-                .child(
-                    text(line.to_string())
-                        .key("line")
-                        .font(TextStyle::new(12.0, 420.0).lh(16.0))
-                        .color(p.muted()),
-                ),
-        )
+    })
 }

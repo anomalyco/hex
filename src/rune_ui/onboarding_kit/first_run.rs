@@ -89,7 +89,8 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             .unwrap_or_else(|| try_page(p, s)),
         Step::Ready => ready_page(p, s),
     };
-    vec![
+    let note = super::first_screen::note(p, s);
+    [
         top,
         col()
             .key("middle")
@@ -100,6 +101,9 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             .pb(TOP_BAR)
             .child(page),
     ]
+    .into_iter()
+    .chain(note)
+    .collect()
 }
 
 /// Skip, quiet in the top-right corner of the optional pages only: the
@@ -456,7 +460,8 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .motion(FLY)
         .width_leads()
         .child(hex_meter(p, "meter", 18.0, d.fraction(), s.closed))
-        .child(status_inner);
+        .child(status_inner)
+        .children(super::first_screen::amount(p, s, d));
     // "Almost ready" receives the download back from the top bar as a
     // quiet bar, by that flight rather than a staggered entrance, with
     // "Watch another one" beside it.
@@ -524,18 +529,13 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
                 } else {
                     "download-hud"
                 },
-                if waiting {
-                    1.24
-                } else {
-                    super::first_screen::hud_scale(s)
-                },
+                1.24,
                 s,
             ),
             s,
         ))
         .child(after_flight(head, s))
         .child(progress_capsule)
-        .children(super::first_screen::up_next(p, s).filter(|_| !waiting && retry.is_none()))
         .children(retry)
         .children(without_model(p, s))
 }
