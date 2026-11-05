@@ -100,11 +100,48 @@ fn column_for_code(code: &str) -> u8 {
 /// Resolve and activate the persisted language choice; `None` follows the
 /// system locale. Safe to call again whenever the setting changes.
 pub(crate) fn apply(setting: Option<&str>) {
+    let locale = preferred_locale();
     let code = match setting {
         Some(code) => column_for_code(code),
-        None => column_for_language_tag(&preferred_locale()),
+        None => column_for_language_tag(&locale),
     };
     set_current(code);
+    // Tests keep a language per thread; Rune's is the process's.
+    #[cfg(not(test))]
+    rune::text::set_language(text_language(code, &locale));
+}
+
+/// The language Rune shapes text in, which picks the fonts Han characters
+/// fall back to (#1382): the interface language when it's Chinese or
+/// Japanese, otherwise a Chinese, Japanese, or Korean system locale (Hex has
+/// no Korean interface), so text in it keeps its own forms.
+fn text_language(column: u8, locale: &str) -> Option<&'static str> {
+    let tag = locale.split(['.', '@']).next().unwrap_or_default();
+    let chinese = |traditional: bool| match traditional {
+        true if hong_kong(tag) => "zh-HK",
+        true => "zh-Hant",
+        false => "zh-Hans",
+    };
+    match column {
+        2 => return Some("ja"),
+        1 => return Some("zh-Hans"),
+        TRADITIONAL_CHINESE_COLUMN => return Some(chinese(true)),
+        _ => {}
+    }
+    match primary_subtag(tag)?.as_str() {
+        "ja" => Some("ja"),
+        "ko" => Some("ko"),
+        "zh" => Some(chinese(is_traditional_chinese(tag))),
+        _ => None,
+    }
+}
+
+/// Whether a Chinese locale is Hong Kong's or Macau's, which draw some
+/// characters unlike Taiwan.
+fn hong_kong(tag: &str) -> bool {
+    tag.split(['-', '_'])
+        .skip(1)
+        .any(|subtag| matches!(subtag.trim().to_ascii_lowercase().as_str(), "hk" | "mo"))
 }
 
 /// The column for a system locale such as `zh-Hans-CN`, `zh_TW.UTF-8`, or
@@ -1492,6 +1529,20 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
 mod tests {
     use super::TRANSLATIONS;
     use super::{language_from_env, primary_subtag};
+
+    /// Han text follows the interface language, else a CJK system locale.
+    #[test]
+    fn text_language_follows_the_interface_language() {
+        use super::{ENGLISH, TRADITIONAL_CHINESE_COLUMN, column_for_code, text_language};
+        assert_eq!(text_language(column_for_code("ja"), "en-US"), Some("ja"));
+        assert_eq!(text_language(column_for_code("zh"), "ja-JP"), Some("zh-Hans"));
+        assert_eq!(text_language(TRADITIONAL_CHINESE_COLUMN, "zh-Hant-TW"), Some("zh-Hant"));
+        assert_eq!(text_language(TRADITIONAL_CHINESE_COLUMN, "zh_HK.UTF-8"), Some("zh-HK"));
+        assert_eq!(text_language(ENGLISH, "ko-KR"), Some("ko"));
+        assert_eq!(text_language(ENGLISH, "ja_JP.UTF-8"), Some("ja"));
+        assert_eq!(text_language(ENGLISH, "zh-Hant-TW"), Some("zh-Hant"));
+        assert_eq!(text_language(column_for_code("de"), "de-DE"), None);
+    }
 
     #[test]
     fn system_language_tags_choose_their_interface_column() {
