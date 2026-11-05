@@ -1,9 +1,11 @@
 #!/bin/sh
-# Build one Windows release executable, dist/hex-<version>-windows-<x64|arm64>.exe,
-# from Git Bash on Windows: HEX_WINDOWS_ARCH=x86_64 (default; Vulkan SDK
-# required) or aarch64 (clang-cl and Ninja, best on an ARM64 host). CI then
-# Authenticode-signs it and wraps it in the Setup.exe installer; the Release
-# workflow publishes both (docs/plans/release-service.md).
+# Build one Windows release, dist/hex-<version>-windows-<x64|arm64>.exe (the
+# GUI app) and .com (crates/console, the console entry point installed as
+# hex.com beside it), from Git Bash on Windows: HEX_WINDOWS_ARCH=x86_64
+# (default; Vulkan SDK required) or aarch64 (clang-cl and Ninja, best on an
+# ARM64 host). CI then Authenticode-signs both and wraps them in the Setup.exe
+# installer; the Release workflow publishes all three
+# (docs/plans/release-service.md).
 set -eu
 
 script_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -62,12 +64,21 @@ fi
 # Cargo reads .cargo/config.toml (the static Windows runtime) from the
 # working directory, not from --manifest-path.
 (cd "$root" && TRANSCRIBE_CMAKE_ARGS="$cmake_args" cargo build --locked --release --target "$triple")
+(cd "$root" && cargo build --locked --release --target "$triple" -p hex-console)
 executable="$dist/hex-$version-windows-$label.exe"
+console="$dist/hex-$version-windows-$label.com"
 cp "$target_dir/$triple/release/hex.exe" "$executable"
+cp "$target_dir/$triple/release/hex-console.exe" "$console"
 test "$(head -c 2 "$executable")" = MZ
+test "$(head -c 2 "$console")" = MZ
 # An executable for the other architecture cannot run here; the installer
-# test checks it on its own runner.
+# test checks it on its own runner. hex.com runs the hex.exe beside it, as
+# installed.
 if [ "$(uname -m)" = "$arch" ]; then
-  test "$("$executable" --version | awk 'NF { value=$NF } END { print value }')" = "$version"
+  pair=$(mktemp -d)
+  cp "$executable" "$pair/hex.exe"
+  cp "$console" "$pair/hex.com"
+  test "$("$pair/hex.com" --version | awk 'NF { value=$NF } END { print value }')" = "$version"
+  rm -rf "$pair"
 fi
 echo "$executable"

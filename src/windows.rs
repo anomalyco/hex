@@ -245,10 +245,11 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
 
 /// hex.exe is a GUI program, so Windows gives it no console of its own and
 /// an Explorer, Start menu, or login launch shows no terminal window. Run
-/// from a terminal, it joins that terminal's console and points any standard
-/// handle it wasn't given there, so commands, `--help`, and startup errors
-/// print as before. Handles the caller redirected (a pipe, a file, NUL) stay.
-/// The shell doesn't wait for a GUI program unless it reads its output.
+/// from a terminal, usually through `hex.com` (crates/console), which waits
+/// for it, it joins its parent's console, so Ctrl+C reaches it, and points
+/// any standard handle it wasn't given there, so commands, `--help`, and
+/// startup errors print. Handles it was given (hex.com's, a pipe, a file,
+/// NUL) stay.
 pub(crate) fn attach_parent_console() {
     use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
@@ -267,7 +268,7 @@ pub(crate) fn attach_parent_console() {
         .filter(|&id| missing(id))
         .collect();
     // SAFETY: no pointers; fails when the parent has no console.
-    if missing.is_empty() || unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
+    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
         return;
     }
     for id in missing {
