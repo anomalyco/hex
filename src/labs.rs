@@ -115,7 +115,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 48] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -1730,7 +1730,7 @@ mod tests {
     #[test]
     fn retired_switches_are_read_and_ignored() {
         let settings: AppSettings = serde_json::from_str(
-            r#"{"labs": {"enabled": true, "collapsible_meeting_sections": true, "live_text": true}}"#,
+            r#"{"labs": {"enabled": true, "collapsible_meeting_sections": true, "meeting_platform_icons": true, "live_text": true}}"#,
         )
         .unwrap();
         assert!(settings.labs.live_text);
@@ -1738,5 +1738,6 @@ mod tests {
         let json = serde_json::to_value(&settings).unwrap();
         assert!(json["labs"].get("enabled").is_none());
         assert!(json["labs"].get("collapsible_meeting_sections").is_none());
+        assert!(json["labs"].get("meeting_platform_icons").is_none());
     }
 }
