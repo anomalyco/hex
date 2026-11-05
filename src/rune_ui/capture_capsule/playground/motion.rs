@@ -57,8 +57,9 @@ const LINE_W: f32 = 1.25;
 
 /// The entrance: the pill comes in here.
 const T_IN: f32 = 0.4;
-/// The finish, seconds into its clip.
-const T_STOP: f32 = 1.1;
+/// The finish, seconds into its clip: after the voice has spoken and gone
+/// quiet again, so the pill finishes from I3's line.
+const T_STOP: f32 = 3.3;
 const T_WIDEN: f32 = T_STOP + 0.12;
 const T_COUNT: f32 = T_WIDEN + 0.28;
 const COUNTDOWN: f32 = 3.0;
@@ -120,7 +121,7 @@ impl Section {
         match self {
             Self::Entrance => (1.0, 2.6),
             Self::Silence => (2.0, 4.4),
-            Self::Finish => (0.0, 0.9),
+            Self::Finish => (0.4, 2.0),
         }
     }
 
@@ -186,8 +187,8 @@ pub(super) struct Motion {
 
 impl Motion {
     pub(super) fn new(section: Section, reduced: bool) -> Self {
-        // The silence clip opens in silence, already flat.
-        let start = if section == Section::Silence {
+        // The silence and finish clips open in silence, already flat.
+        let start = if section != Section::Entrance {
             1.0
         } else {
             0.0
@@ -264,12 +265,10 @@ impl Motion {
         };
         let f1 = self.after(t - T_STOP, 0.22, 0.0);
         for lane in &mut self.lanes {
+            // The finish clips rest in I3, the silence Kit picked.
+            let from_centre = lane.variant == Variant::I3 || self.section == Section::Finish;
             match lane.variant {
-                Variant::I2 | Variant::I4 => {
-                    lane.flat.step_to(silent, spec(silent), dt);
-                    lane.scope.set_flat(&[lane.flat.x]);
-                }
-                Variant::I3 => {
+                _ if from_centre => {
                     let n = lane.columns.len();
                     let pitch = lane.scope.tuning().spacing;
                     for (i, column) in lane.columns.iter_mut().enumerate() {
@@ -278,10 +277,15 @@ impl Motion {
                         let to = history_at(&self.history, t - delay);
                         column.step_to(to, spec(to), dt);
                     }
-                    let flat: Vec<f32> = lane.columns.iter().map(|c| c.x).collect();
+                    // F1's thread lays down whatever is still standing.
+                    let f1 = if lane.variant == Variant::F1 { f1 } else { 0.0 };
+                    let flat: Vec<f32> = lane.columns.iter().map(|c| c.x.max(f1)).collect();
                     lane.scope.set_flat(&flat);
                 }
-                Variant::F1 => lane.scope.set_flat(&[f1]),
+                Variant::I2 | Variant::I4 => {
+                    lane.flat.step_to(silent, spec(silent), dt);
+                    lane.scope.set_flat(&[lane.flat.x]);
+                }
                 _ => {}
             }
             lane.scope.advance(dt, frame(level, reduced));
@@ -611,31 +615,7 @@ impl Motion {
                 Box::new(move |_, _| (1.0 - f, 0.0))
             }
             Variant::I3 => {
-                let at = |x: f32| {
-                    let c = ((x / pitch) + (columns as f32 - 1.0) * 0.5)
-                        .clamp(0.0, columns as f32 - 1.0);
-                    let i = (c.floor() as usize).min(columns.saturating_sub(2));
-                    let k = c - i as f32;
-                    let f = lerp(lane.columns[i].x, lane.columns[i + 1].x, k).clamp(0.0, 1.0);
-                    (f, c / (columns as f32 - 1.0))
-                };
-                let out = [0.0, 0.25, 0.5, 0.7, 0.82, 0.9, 0.96, 1.0];
-                let alpha = |x: f32| {
-                    let (f, u) = at(x);
-                    LINE_ALPHA * f * edge(u)
-                };
-                // Two halves meeting on a whole point in the middle, each
-                // its own gradient.
-                extra.push(soft_line(
-                    FIELD_CX - half,
-                    FIELD_CX,
-                    &out.map(|d| 1.0 - d),
-                    ink,
-                    |s| alpha(-(1.0 - s) * half),
-                ));
-                extra.push(soft_line(FIELD_CX, FIELD_CX + half, &out, ink, |d| {
-                    alpha(d * half)
-                }));
+                extra.extend(centre_line(p, lane, 1.0));
                 let flats: Vec<f32> = lane.columns.iter().map(|c| c.x.clamp(0.0, 1.0)).collect();
                 Box::new(move |c, _| (1.0 - flats[c], 0.0))
             }
@@ -758,19 +738,26 @@ impl Motion {
         layer.rect = rect;
         layer.radius = radius;
 
-        // The pill's content.
+        // The pill's content, resting in I3 until F1's thread takes over
+        // its line.
         let gone = out;
-        let content = pill(
+        let flats: Vec<f32> = lane
+            .columns
+            .iter()
+            .map(|c| c.x.max(flat).clamp(0.0, 1.0))
+            .collect();
+        let mut content = pill(
             p,
             lane,
             1.0,
             1.0,
-            move |_, _| (1.0 - flat, 0.0),
+            move |c, _| (1.0 - flats[c], 0.0),
             Stop {
                 scale: pressed,
                 ..Stop::rest()
             },
         );
+        content.extend(centre_line(p, lane, 1.0 - flat));
         if gone < 0.999 {
             let mut group = el()
                 .key("pill")
@@ -946,6 +933,36 @@ impl Motion {
         out.push(dot("flyer", at(self.t), 1.6, shown));
         out
     }
+}
+
+/// I3's line at `strength`: two halves meeting on a whole point in the
+/// middle, each its own gradient, as bright as each point is flat.
+fn centre_line(p: Paint, lane: &Lane, strength: f32) -> Vec<El> {
+    if strength <= 0.002 {
+        return Vec::new();
+    }
+    let ink = ink(p, &lane.scope);
+    let columns = lane.scope.columns();
+    let pitch = lane.scope.tuning().spacing;
+    let half = (columns as f32 - 1.0) * 0.5 * pitch + pitch * 0.5;
+    let at = |x: f32| {
+        let c = ((x / pitch) + (columns as f32 - 1.0) * 0.5).clamp(0.0, columns as f32 - 1.0);
+        let i = (c.floor() as usize).min(columns.saturating_sub(2));
+        let k = c - i as f32;
+        let f = lerp(lane.columns[i].x, lane.columns[i + 1].x, k).clamp(0.0, 1.0);
+        (f, c / (columns as f32 - 1.0))
+    };
+    let out = [0.0, 0.25, 0.5, 0.7, 0.82, 0.9, 0.96, 1.0];
+    let alpha = |x: f32| {
+        let (f, u) = at(x);
+        LINE_ALPHA * strength * f * edge(u)
+    };
+    vec![
+        soft_line(FIELD_CX - half, FIELD_CX, &out.map(|d| 1.0 - d), ink, |s| {
+            alpha(-(1.0 - s) * half)
+        }),
+        soft_line(FIELD_CX, FIELD_CX + half, &out, ink, |d| alpha(d * half)),
+    ]
 }
 
 /// The record dot, the voice and Stop, in the lane's points. `vis` takes
@@ -1330,6 +1347,21 @@ mod tests {
         let columns = &m.lanes[2].columns;
         let (middle, end) = (columns[columns.len() / 2].x, columns[0].x);
         assert!(middle > end + 0.2, "{middle} vs {end}");
+    }
+
+    #[test]
+    fn every_finish_starts_from_i3s_line() {
+        let mut m = Motion::new(Section::Finish, false);
+        while m.t < T_STOP - 0.01 {
+            m.advance(1.0 / 240.0, false);
+        }
+        for lane in &m.lanes {
+            assert!(
+                lane.columns.iter().all(|c| c.x > 0.95),
+                "{:?}",
+                lane.variant
+            );
+        }
     }
 
     #[test]
