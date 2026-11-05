@@ -1,6 +1,6 @@
-//! The History pane: retained dictations (newest first) with search, the
-//! retention choice, two-step Clear all, and a detail view with Copy and
-//! Delete. It shares the host's store, which the listener records into.
+//! The History pane: retained dictations (newest first) with search, one
+//! menu for retention, Keep recordings, and two-step Clear all history, and
+//! a detail view with Copy and Delete. It shares the host's store, which the listener records into.
 //! With Labs › Keep recordings on, an entry that kept its audio offers
 //! Transcribe again with any installed model, run on a worker; Replace keeps
 //! the earlier transcripts as versions to copy or switch back to. Every
@@ -9,7 +9,7 @@
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use rune::{El, TextEdit, Tx, col, row, text};
-use rune_kit::{Select, SelectAppearance, TextInput};
+use rune_kit::{Menu as KitMenu, MenuItem, Placement, Select, SelectAppearance, TextInput};
 
 use super::controls::{ButtonKind, Paint, button};
 use super::list_detail::{self as ld, Item};
@@ -433,7 +433,7 @@ fn delete(ui: &mut Ui, id: u64) {
     }
 }
 
-/// The header actions (retention, Clear all) and the list + detail body.
+/// The header's retention menu and the list + detail body.
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     let pane = &ui.history;
     let actions = header_actions(ui, p, layer);
@@ -558,54 +558,94 @@ fn stats_block(p: Paint, stats: &HistoryStats) -> El {
         }))
 }
 
-/// Retention as a borderless menu, and Clear all beside it while there is
-/// something to clear.
+/// What the retention menu's trigger says: how long History keeps
+/// dictations, or that it is off.
+fn kept_label(retention: HistoryRetention) -> String {
+    match retention {
+        HistoryRetention::Off => tr("History off").to_string(),
+        HistoryRetention::Forever => tr("Kept forever").to_string(),
+        other => tr_fill("Kept {}", tr(other.label())),
+    }
+}
+
+/// One menu for everything about keeping: how long, Labs › Keep recordings
+/// where that lab shows, and Clear all history… last. Once Clear all is
+/// chosen, the menu gives way to its confirmation until it is answered.
 fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
-    let labels: Vec<&str> = HistoryRetention::ALL
-        .iter()
-        .map(|r| tr(r.label()))
-        .collect();
-    let current = tr_fill("Keep: {}", tr(ui.settings.history_retention.label()));
-    let retention = Select::new("history-retention", &labels)
+    if ui.history.clear_armed {
+        return vec![
+            button(
+                p,
+                "history-confirm-clear",
+                tr("Clear all history"),
+                ButtonKind::Danger,
+                |ui: &mut Ui, _| clear(ui),
+            ),
+            button(
+                p,
+                "history-cancel-clear",
+                tr("Cancel"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| ui.history.clear_armed = false,
+            ),
+        ];
+    }
+    let saved = ui.settings.history_retention;
+    let open = ui.open == Some(Menu::HistoryRetention);
+    let current = kept_label(saved);
+    let trigger = Select::new::<&str>("history-retention-field", &[])
         .appearance(SelectAppearance::Inline)
         .current(Some(&current))
-        .open(ui.open == Some(Menu::HistoryRetention))
+        .open(open)
         .on_toggle(|ui: &mut Ui| {
             ui.open = (ui.open != Some(Menu::HistoryRetention)).then_some(Menu::HistoryRetention);
         })
-        .on_close(|ui: &mut Ui| ui.open = None)
-        .on_choose(|ui: &mut Ui, choice: &str, _: &mut Tx| {
-            if let Some(retention) = HistoryRetention::ALL
-                .into_iter()
-                .find(|r| tr(r.label()) == choice)
-            {
-                set_retention(ui, retention);
-            }
-        })
-        .build(p.k, layer)
+        .trigger(p.k)
         .label(tr("History retention"))
-        .a11y_value(tr(ui.settings.history_retention.label()));
-    let mut actions = vec![retention];
-    if !ui.history.entries.is_empty() || ui.history.clear_armed {
-        actions.push(if ui.history.clear_armed {
-            button(
-                p,
-                "history-clear",
-                tr("Really clear all?"),
-                ButtonKind::Danger,
-                |ui: &mut Ui, _| clear(ui),
-            )
-        } else {
-            button(
-                p,
-                "history-clear",
-                tr("Clear all"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| clear(ui),
-            )
-        });
+        .a11y_value(current.clone());
+    let mut menu = KitMenu::new("history-retention")
+        .trigger(trigger)
+        .placement(Placement::BottomEnd)
+        .gutter(4.0)
+        .min_width(320.0)
+        .open(open)
+        .on_close(|ui: &mut Ui| ui.open = None);
+    for retention in HistoryRetention::ALL {
+        let mut item = MenuItem::new(tr(retention.label())).checked(saved == retention);
+        if retention.is_off() {
+            item = item.description(tr("Keeps no new dictations"));
+        }
+        menu = menu.item(item.on_select(move |ui: &mut Ui| set_retention(ui, retention)));
     }
-    actions
+    let keep_audio = crate::labs::Feature::KeepRecordings;
+    if keep_audio
+        .audience()
+        .reaches(crate::dev_build::is_dev_build())
+        && keep_audio.managed().is_none()
+    {
+        menu = menu.separator().item(
+            MenuItem::new(tr("Keep audio too"))
+                .badge(tr("Lab"))
+                .description(tr("Lets you transcribe a dictation again"))
+                .checked(ui.settings.labs.keep_recordings)
+                .on_select(move |ui: &mut Ui| {
+                    ui.open = None;
+                    let on = !ui.settings.labs.keep_recordings;
+                    ui.update(|settings| keep_audio.set(settings, on));
+                }),
+        );
+    }
+    let nothing = ui.history.entries.is_empty() && ui.history.searched.trim().is_empty();
+    menu = menu.separator().item(
+        MenuItem::new(tr("Clear all history…"))
+            .danger(true)
+            .disabled(nothing)
+            .on_select(|ui: &mut Ui| {
+                ui.open = None;
+                clear(ui);
+            }),
+    );
+    vec![menu.build(p.k, layer)]
 }
 
 /// Copy as an icon: a row's hover action, or the card's.
