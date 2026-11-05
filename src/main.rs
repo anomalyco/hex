@@ -66,6 +66,7 @@ mod screenshots;
 #[cfg(target_os = "macos")]
 mod suppression;
 mod transcription;
+mod typing;
 mod updater;
 #[cfg(target_os = "windows")]
 mod windows;

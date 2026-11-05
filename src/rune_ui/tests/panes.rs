@@ -369,7 +369,7 @@ fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
 
 #[test]
 fn contributed_options_are_labs_toggles_off_by_default() {
-    let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
+    let mut rt = runtime("mac-settings", true, (980.0, 2400.0));
     open_labs(&mut rt);
     for row in [
         "lab-mouse-shortcuts",
@@ -381,6 +381,14 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-spoken-symbols",
     ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
+    }
+    if crate::typing::available() {
+        assert!(rt.find("lab-type-dictations").is_some());
+        assert!(!rt.state.settings.labs.type_dictations);
+        tap(&mut rt, "lab-type-dictations");
+        assert!(rt.state.settings.labs.type_dictations);
+        tap(&mut rt, "lab-type-dictations");
+        assert!(!rt.state.settings.labs.type_dictations);
     }
     assert!(!rt.state.settings.labs.spoken_formatting);
     tap(&mut rt, "lab-spoken-formatting");
@@ -414,6 +422,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
     assert!(rt.find("lab-spoken-symbols").is_some(), "every OS");
+    if crate::typing::available() {
+        assert!(rt.find("lab-type-dictations").is_some(), "every OS with a typing path");
+    }
     assert!(!rt.state.settings.share_dictation_shortcut);
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);

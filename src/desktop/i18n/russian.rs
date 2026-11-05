@@ -133,6 +133,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Leave the dictation on the clipboard after pasting instead of restoring what was there", "После вставки оставляет диктовку в буфере обмена вместо восстановления прежнего содержимого"),
     ("Copy dictation only", "Только копировать диктовку"),
     ("Put the dictation on the clipboard instead of pasting it", "Помещает диктовку в буфер обмена вместо вставки"),
+    ("Type dictations instead of pasting", "Вводить диктовку вместо вставки"),
+    ("Type each dictation as keystrokes, so the clipboard is never touched", "Вводит каждую диктовку нажатиями клавиш, не трогая буфер обмена"),
     ("Spoken formatting", "Голосовое форматирование"),
     ("Say \"new line\", \"new paragraph\", \"open quote\", or \"close quote\" to insert line breaks and quotation marks", "Скажите «new line», «new paragraph», «open quote» или «close quote», чтобы вставить переносы строк и кавычки"),
     ("Spoken symbols", "Голосовые символы"),

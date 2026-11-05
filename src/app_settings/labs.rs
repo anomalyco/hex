@@ -86,6 +86,8 @@ pub struct LabsSettings {
     pub follow_live_transcript: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
+    /// A dictation is typed as keystrokes instead of pasted, so the clipboard is never touched (issue 1398).
+    pub type_dictations: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -142,6 +144,7 @@ impl Default for LabsSettings {
             meeting_platform_icons: false,
             screenshots: false,
             follow_live_transcript: false,
+            type_dictations: false,
             groups: std::collections::BTreeMap::new(),
         }
     }

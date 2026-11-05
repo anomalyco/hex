@@ -719,6 +719,12 @@ impl Keymap {
             .ok_or_else(|| eyre!("active X11 keymap has no key for keysym {keysym:#x}"))
     }
 
+    /// The keycode range and its keysyms, one row per keycode; typing reads
+    /// it to find the layout's own keys and the free keycodes.
+    pub(crate) fn mapping(&self) -> (u8, usize, &[u32]) {
+        (self.min, self.symbols_per_keycode, &self.symbols)
+    }
+
     pub(crate) fn modifier_for(
         &self,
         connection: &RustConnection,

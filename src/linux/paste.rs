@@ -23,7 +23,7 @@ use crate::linux::remote_desktop::RemoteDesktop;
 use crate::linux::session::LinuxSession;
 
 const XK_V: u32 = 0x76;
-const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
+pub(super) const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
 const PORTAL_FOCUS_SETTLE: Duration = Duration::from_millis(250);
 /// How long an existing portal session waits after setting the clipboard
@@ -37,7 +37,7 @@ const PORTAL_IDLE: Duration = Duration::from_secs(15);
 /// on macOS. Nothing acknowledges that the target read the paste.
 const RESTORE_DELAY: Duration = Duration::from_millis(500);
 /// How long an X11 paste waits for modifiers no Hex shortcut holds.
-const MODIFIER_WAIT_LIMIT: Duration = Duration::from_secs(2);
+pub(super) const MODIFIER_WAIT_LIMIT: Duration = Duration::from_secs(2);
 
 pub(crate) struct LinuxPaster {
     backend: Backend,
@@ -187,7 +187,7 @@ pub(crate) fn pastes_through_portal() -> bool {
     LinuxSession::detect().is_wayland() && !wtype_pastes()
 }
 
-fn wtype_pastes() -> bool {
+pub(super) fn wtype_pastes() -> bool {
     offers_virtual_keyboard() && on_path("wtype")
 }
 
@@ -308,6 +308,24 @@ impl LinuxPaster {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
         self.paste_as(Mime::Text, text.as_bytes())
+    }
+
+    /// Labs › Type dictations instead of pasting: types `text` as
+    /// keystrokes, never touching the clipboard. X11 uses XTest; Wayland
+    /// uses `wtype`, which is the only typing path there.
+    pub(crate) fn type_text(&mut self, text: &str) -> Result<()> {
+        if text.trim().is_empty() {
+            return Err(eyre!("refusing to type an empty transcript"));
+        }
+        match &mut self.backend {
+            Backend::X11(_) => {
+                crate::linux::typing::type_x11(text, &self.stop, &self.keys)
+            }
+            Backend::Wayland(_) => {
+                self.keys.settle(&self.stop)?;
+                crate::linux::typing::type_wayland(text, &self.stop)
+            }
+        }
     }
 
     /// Pastes a PNG (a capture's contact sheet) where the focus is, as the
@@ -533,7 +551,7 @@ fn paste_keys(with_shift: bool) -> Vec<String> {
 /// and the paste goes ahead: XWayland's modifier state goes stale while a
 /// Wayland window has focus and only a later key event clears it, which
 /// held accepted output back for a minute (#733).
-fn wait_for_modifiers(
+pub(super) fn wait_for_modifiers(
     stop: &AtomicBool,
     limit: Duration,
     shortcut_held: impl Fn() -> bool,
@@ -558,7 +576,7 @@ fn wait_for_modifiers(
     }
 }
 
-fn run_helper(
+pub(super) fn run_helper(
     mut command: Command,
     input: &[u8],
     stop: &AtomicBool,

@@ -455,6 +455,11 @@ const KEYS: &[Key] = &[
         "Labs: keep a rolling 15-second screen buffer so hex capture replay or capture.replay_hotkey saves what just happened; macOS shows the screen-recording dot the whole time it's on (macOS 27+)",
     ),
     key(
+        "labs.type_dictations",
+        Kind::Bool,
+        "Labs: type each dictation as keystrokes instead of pasting it, so the clipboard is never touched; Paste last dictation still pastes",
+    ),
+    key(
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
