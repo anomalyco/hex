@@ -1192,13 +1192,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   crates.io; never run `cargo publish`. Hex depends on `rune`, `rune-kit`,
   `rune-theme-opencode`, and (with `capture`) `rune-motion` at one pinned Git
   rev in `Cargo.toml` and `Cargo.lock`; every pin bump
-  must also update `cargoLock.outputHashes."rune-0.0.1"` in `nix/package.nix`
-  and keep `windows` 0.62.2 for `gpu-allocator` in `Cargo.lock`.
+  must also update `cargoGitDependencies."rune-0.0.1"` (its rev and output hash)
+  in `nix/package.nix` and keep `windows` 0.62.2 for `gpu-allocator` in
+  `Cargo.lock`.
 - At the start of each work round, bump Hex's Rune pin to Rune's `dev` head:
   read the `## dev` section of Rune's `CHANGELOG.md` since the current pin,
-  adapt to its breaking changes, update `nix/package.nix`'s outputHash, and
-  run `scripts/check rune_ui`, goldens included. If Rune itself breaks, report
-  it to Rune rather than working around it.
+  adapt to its breaking changes, update Rune's rev and output hash in
+  `nix/package.nix`, and run `scripts/check rune_ui`, goldens included. If Rune
+  itself breaks, report it to Rune rather than working around it.
 - Hex runs as one long-lived process per user and data root on every OS: a
   menu-bar process on macOS (`macos_rune`, native `NSStatusItem`, native Metal
   `NSPanel` HUD, Rune meeting-capsule overlays), a tray process on Windows
