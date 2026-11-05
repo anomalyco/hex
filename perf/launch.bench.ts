@@ -3,6 +3,8 @@
 import { bench, native } from "@hona/strobe"
 
 const api = { match: "local API started" }
+// The window's compositor logs its first frame and the backend it drew with.
+const drawn = { match: "window draws" }
 
 export default bench({
   targets: {
@@ -22,6 +24,18 @@ export default bench({
         until: { window: "painted" },
         // The local API starts on its own thread while the window opens.
         milestones: { api },
+      },
+    },
+    // To the window's first frame drawn, from Hex's own log: needs no screen
+    // capture (macOS refuses `painted` without Screen Recording). It covers
+    // the GPU device and pipelines the window draws with.
+    "first-frame": {
+      targets: ["window"],
+      primary: "launch.ready",
+      metrics: ["launch.api", "cpu.work", "memory.app.private"],
+      launch: {
+        until: { milestone: "drawn" },
+        milestones: { drawn, api },
       },
     },
     // To the local API answering: the runtime, tray, and overlays are up.
