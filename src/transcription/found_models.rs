@@ -382,14 +382,33 @@ pub fn adopted_catalog(model: &ModelDefinition) -> Option<PathBuf> {
 }
 
 /// The cached file this catalog model could use instead of a download: one
-/// already adopted, else an exact match the last scan found.
+/// already adopted, else an exact match the last scan found that the person
+/// hasn't forgotten.
 pub fn catalog_candidate(model: &ModelDefinition) -> Option<PathBuf> {
     adopted_catalog(model).or_else(|| {
         last()
             .into_iter()
-            .find(|found| found.catalog == Some(model.id))
+            .find(|found| found.catalog == Some(model.id) && !is_forgotten(model, &found.path))
             .map(|found| found.path)
     })
+}
+
+/// Hex's note of the found file the person forgot for a catalog model, so
+/// the next scan doesn't count it as downloaded again.
+fn forgotten_file(model: &ModelDefinition) -> Result<PathBuf> {
+    Ok(models_dir()?
+        .join("found")
+        .join(format!("{}.forgotten.json", model.id.as_str())))
+}
+
+fn forgotten(model: &ModelDefinition) -> Option<PathBuf> {
+    let data = fs::read(forgotten_file(model).ok()?).ok()?;
+    serde_json::from_slice(&data).ok()
+}
+
+/// Whether the person forgot `path`, a found copy of `model`.
+pub fn is_forgotten(model: &ModelDefinition, path: &Path) -> bool {
+    forgotten(model).is_some_and(|forgotten| forgotten == path)
 }
 
 /// Whether the adopted file still holds the receipt of Hex's full check.
@@ -443,16 +462,32 @@ pub fn adopt_catalog(
             receipt: Receipt::of(path, sha256)?,
         },
     )?;
+    if let Ok(note) = forgotten_file(model) {
+        let _ = fs::remove_file(note);
+    }
     tracing::info!(model = model.id.as_str(), path = %path.display(), "using a speech model found on this computer");
     Ok(path.to_path_buf())
 }
 
-/// Forgets an adopted catalog model; the file stays where it is.
+/// Forgets a catalog model found on this computer: Hex's record goes and
+/// the file no longer counts as downloaded; the file stays where it is.
 pub fn forget_catalog(model: &ModelDefinition) -> Result<()> {
-    match fs::remove_file(adopted_file(model)?) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
-        _ => Ok(()),
+    let candidate = catalog_candidate(model);
+    if let Err(error) = fs::remove_file(adopted_file(model)?)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(error.into());
     }
+    if let Some(path) = candidate {
+        let note = forgotten_file(model)?;
+        fs::create_dir_all(
+            note.parent()
+                .ok_or_else(|| eyre!("no folder for {}", note.display()))?,
+        )?;
+        super::models::write_json_atomically(&note, &path)?;
+        tracing::info!(model = model.id.as_str(), path = %path.display(), "forgot a speech model found on this computer");
+    }
+    Ok(())
 }
 
 /// The largest memory a GPU here reports, read once.
@@ -687,6 +722,63 @@ mod tests {
         assert!(!super::super::custom_models::uses_path(&path));
         assert!(path.is_file(), "forgetting leaves the file");
         assert_eq!(snapshot_of(&hub), before, "the cache is never written");
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(hub).unwrap();
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    #[test]
+    fn forgetting_a_found_catalog_model_stops_counting_it_as_downloaded() {
+        let hub = temporary("forget");
+        let models = temporary("forget-models");
+        super::super::models::set_test_models_dir(Some(models.clone()));
+        let (model, artifact) = MODELS
+            .iter()
+            .filter(|model| !model.id.is_custom())
+            .filter_map(|model| match model.runtime {
+                ModelRuntime::Gguf(artifact) => Some((model, artifact)),
+                ModelRuntime::AppleSpeech => None,
+            })
+            .min_by_key(|(_, artifact)| artifact.bytes)
+            .unwrap();
+        let path = cache(
+            &hub,
+            artifact.repository,
+            artifact.revision,
+            artifact.filename,
+            artifact.sha256,
+            None,
+            artifact.bytes,
+        );
+        let found = catalog_found(
+            &path,
+            artifact.repository,
+            artifact.revision,
+            artifact.filename.to_owned(),
+            artifact.bytes,
+            Some(artifact.sha256.to_owned()),
+            model.id,
+        );
+        CACHE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .last
+            .push(found);
+        assert_eq!(catalog_candidate(model), Some(path.clone()));
+        assert!(super::super::models::is_in_place(model));
+        let before = snapshot_of(&hub);
+        // The picker's Forget on an unused found model.
+        super::super::models::remove_installed(model).unwrap();
+        assert!(is_forgotten(model, &path));
+        assert_eq!(catalog_candidate(model), None);
+        assert!(!super::super::models::is_in_place(model));
+        assert!(!super::super::models::is_installed(model, "en"));
+        assert_eq!(snapshot_of(&hub), before, "the cache is never written");
+        CACHE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .last
+            .retain(|found| found.path != path);
         super::super::models::set_test_models_dir(None);
         fs::remove_dir_all(hub).unwrap();
         fs::remove_dir_all(models).unwrap();

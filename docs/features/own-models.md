@@ -112,7 +112,9 @@ Picker opens, or onboarding starts -> one scan (found_models::scan)   // setup.f
 ├── A failed check or load -> "Model could not be used." with the reason; the
 │   selection and any recorded audio stay as they were
 └── Delete/Remove on a found file -> Forget: Hex's record goes, the file stays.
-    Hex never writes, moves, or deletes inside the cache
+    Hex never writes, moves, or deletes inside the cache. A forgotten catalog
+    file is noted in models/found/<model>.forgotten.json, so later scans no
+    longer count it as downloaded and its row offers Download (#1366)
 ```
 
 `hex model list` scans too and shows each model's source: `download`, `hex`,
@@ -161,7 +163,8 @@ samples. Not observed: macOS (Metal) and Windows at all, a plain-copy cache
 without symlinks, and the GPU memory warning on a small GPU.
 
 Checks: `transcription::found_models::tests` (scan, cache, catalog match,
-in-place use and forgetting, the full check refusing a mismatched file),
+in-place use and forgetting, a forgotten catalog file no longer counting as
+downloaded, the full check refusing a mismatched file),
 `transcription::gguf_header::tests`, `transcription::custom_models::tests`
 (including `a_relinked_copy_reads_as_changed_and_check_again_accepts_only_the_same_contents`,
 `a_receipt_survives_a_renumbered_volume_but_not_another_file`, and `a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`),
