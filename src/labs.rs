@@ -114,7 +114,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 47] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
