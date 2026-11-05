@@ -50,8 +50,6 @@ pub struct LabsSettings {
     pub history_stats: bool,
     pub recent_dictations: bool,
     pub skip_pauses: bool,
-    /// An automatic meeting recording stops after its call ends (macOS, issue 835).
-    pub stop_when_call_ends: bool,
     /// Output's Try card offers Vocabulary and Fix this beside its result (issue 989).
     pub output_fixes: bool,
     /// The speech model picker lists the model in use first (issue 1019).
@@ -125,7 +123,6 @@ impl Default for LabsSettings {
             history_stats: false,
             recent_dictations: false,
             skip_pauses: false,
-            stop_when_call_ends: false,
             output_fixes: false,
             picker_active_first: false,
             model_in_place: false,

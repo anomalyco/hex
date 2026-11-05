@@ -2,6 +2,7 @@
 //! opens.
 
 use super::*;
+use meeting_capsules::call_ended::Variant;
 
 /// A named starting state for `--scene`.
 pub(super) type Scene = (&'static str, fn(&mut Ui));
@@ -533,6 +534,35 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings.rename = TextEdit::new("Arcade launch plan");
         ui.pane = Pane::Meetings;
     }),
+    // The call-ended capsule's three designs (#835): as it opens, halfway
+    // through its countdown, and for a recording the user started.
+    ("call-ended-ring", |ui| {
+        call_ended_scene(ui, Variant::Ring, Some(30.0))
+    }),
+    ("call-ended-ring-mid", |ui| {
+        call_ended_scene(ui, Variant::Ring, Some(CALL_ENDED_MID))
+    }),
+    ("call-ended-ring-manual", |ui| {
+        call_ended_scene(ui, Variant::Ring, None)
+    }),
+    ("call-ended-bar", |ui| {
+        call_ended_scene(ui, Variant::Bar, Some(30.0))
+    }),
+    ("call-ended-bar-mid", |ui| {
+        call_ended_scene(ui, Variant::Bar, Some(CALL_ENDED_MID))
+    }),
+    ("call-ended-bar-manual", |ui| {
+        call_ended_scene(ui, Variant::Bar, None)
+    }),
+    ("call-ended-outline", |ui| {
+        call_ended_scene(ui, Variant::Outline, Some(30.0))
+    }),
+    ("call-ended-outline-mid", |ui| {
+        call_ended_scene(ui, Variant::Outline, Some(CALL_ENDED_MID))
+    }),
+    ("call-ended-outline-manual", |ui| {
+        call_ended_scene(ui, Variant::Outline, None)
+    }),
     ("meetings-failed", |ui| {
         *ui = mac_fixture();
         ui.meetings.select("preview-failed".into());
@@ -826,6 +856,19 @@ pub(super) fn mac_fixture() -> Ui {
 /// Meetings › Settings with Advanced open, Summarize with OpenCode and Labs ›
 /// Choose meeting summary model on, a model saved, and `models` as the
 /// OpenCode catalog.
+/// Seconds left in a `-mid` call-ended scene: past halfway.
+const CALL_ENDED_MID: f64 = 12.0;
+
+/// The call-ended capsule after a Teams call, with `left` of its countdown.
+fn call_ended_scene(ui: &mut Ui, variant: Variant, left: Option<f64>) {
+    *ui = Ui::fixture_base();
+    ui.capsule_preview = Some(meeting_capsules::call_ended::Preview::new(
+        variant,
+        "Microsoft Teams",
+        left,
+    ));
+}
+
 fn summary_model_scene(ui: &mut Ui, models: models::Models) {
     *ui = mac_fixture();
     ui.settings.labs.meeting_summary_model = true;

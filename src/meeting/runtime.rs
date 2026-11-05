@@ -210,7 +210,8 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
         ControllerEvent::CallEnded { app, .. } => {
             tracing::info!(%app, "the call ended; the recording continues until Stop");
         }
-        ControllerEvent::Offer(_)
+        ControllerEvent::CallResumed
+        | ControllerEvent::Offer(_)
         | ControllerEvent::Reminder { .. }
         | ControllerEvent::ReminderWithdrawn { .. }
         | ControllerEvent::NotesStarted

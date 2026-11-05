@@ -42,8 +42,8 @@ pub(crate) enum ControllerCommand {
     /// Not now, or Don't record: the meeting's call is neither offered nor
     /// recorded automatically.
     DismissReminder(CalendarMeeting),
-    /// Keep recording on the call-ended capsule: Labs › Stop when the call
-    /// ends doesn't stop this absence (it arms again if the call app comes
+    /// Keep recording on the call-ended capsule: an automatic recording
+    /// doesn't stop for this absence (it arms again if the call app comes
     /// back and leaves again).
     KeepRecording,
 }
@@ -75,13 +75,15 @@ pub(crate) enum ControllerEvent {
     Chapters(Vec<meeting::Chapter>),
     OpenMeeting(String),
     Transcribing,
-    /// `auto_stop` when the recording stops on its own after
-    /// [`crate::meeting::detection::AUTO_STOP_GRACE`] (Labs › Stop when the
-    /// call ends).
+    /// `stops_at` when the recording stops on its own then, after
+    /// [`crate::meeting::detection::AUTO_STOP_GRACE`]: a recording Hex
+    /// started on its own.
     CallEnded {
         app: String,
-        auto_stop: bool,
+        stops_at: Option<Instant>,
     },
+    /// The call app came back before an automatic stop: nothing stops.
+    CallResumed,
     Finished(Box<meeting::MeetingManifest>),
     Failed {
         title: String,
@@ -97,7 +99,7 @@ struct ActiveRecording {
     app_label: String,
     automatic: bool,
     presence: CallPresence,
-    /// Labs › Stop when the call ends, armed while the call is over.
+    /// The automatic stop, armed while the call is over.
     auto_stop: AutoStop,
     stop: Arc<AtomicBool>,
     updates: Receiver<meeting::RecordingUpdate>,
@@ -712,7 +714,9 @@ fn poll_recording(
         && let Some(application) = active.application.as_deref()
     {
         // A failed query must not end the controller while it owns a recording.
-        let auto_stop = stops_when_call_ends(active.automatic, crate::labs::stop_when_call_ends());
+        // Only a recording Hex started on its own (Always record) stops
+        // when its call ends; one the user started runs until Stop.
+        let auto_stop = active.automatic;
         let on_microphone = match active_microphone_applications() {
             Ok(applications) => applications
                 .iter()
@@ -728,8 +732,9 @@ fn poll_recording(
         if present {
             detector.keep_snooze_alive();
         }
-        if present || !auto_stop {
-            active.auto_stop.disarm();
+        if (present || !auto_stop) && active.auto_stop.disarm() && present {
+            tracing::info!(application, "the call came back; the recording continues");
+            let _ = events.send(ControllerEvent::CallResumed);
         }
         if active.presence.observe(present) {
             tracing::info!(
@@ -737,12 +742,10 @@ fn poll_recording(
                 auto_stop,
                 "meeting application released the microphone"
             );
-            if auto_stop {
-                active.auto_stop.arm();
-            }
+            let stops_at = auto_stop.then(|| active.auto_stop.arm());
             let _ = events.send(ControllerEvent::CallEnded {
                 app: active.app_label.clone(),
-                auto_stop,
+                stops_at,
             });
         }
         if active.auto_stop.due() {
@@ -756,13 +759,6 @@ fn poll_recording(
         }
     }
     Ok(())
-}
-
-/// Whether a recording stops on its own once its call ends: only one Hex
-/// started automatically (Always record), and only with Labs › Stop when
-/// the call ends on. Manual and offered recordings never do.
-fn stops_when_call_ends(automatic: bool, lab_on: bool) -> bool {
-    automatic && lab_on
 }
 
 /// Whether the call app still plays audio; a failed read counts as playing,
@@ -1021,16 +1017,6 @@ pub fn probe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn only_automatic_recordings_stop_when_the_call_ends_and_only_with_the_lab_on() {
-        assert!(stops_when_call_ends(true, true));
-        // Manual, offered, and calendar recordings never stop on their own.
-        assert!(!stops_when_call_ends(false, true));
-        // The toggle off leaves every recording running until Stop.
-        assert!(!stops_when_call_ends(true, false));
-        assert!(!stops_when_call_ends(false, false));
-    }
 
     #[test]
     fn keep_recording_disarms_a_pending_automatic_stop() {

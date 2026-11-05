@@ -698,6 +698,8 @@ pub(crate) struct Ui {
     lab_store: labs::Store,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
+    /// A scene drawing the call-ended capsule in place of the window.
+    capsule_preview: Option<meeting_capsules::call_ended::Preview>,
     capture: Capture,
     vocabulary: vocabulary::VocabularyEditor,
     /// The model the service was last seen preparing, and since when.
@@ -813,6 +815,7 @@ impl Ui {
             labs_open: false,
             lab_store: labs::Store::default(),
             build_preview: None,
+            capsule_preview: None,
             capture: Capture::Idle,
             vocabulary,
             preparing: None,
@@ -1205,33 +1208,6 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
-/// Linux and Windows: the listing and a chosen transcript folder, from the
-/// meetings the window keeps itself.
-#[cfg(not(target_os = "macos"))]
-fn local_meetings(ui: &mut Ui) -> bool {
-    let mut changed = false;
-    if ui.pane == Pane::Meetings
-        && meetings::available(ui)
-        && let Some(listed) = ui.meetings.local.meetings()
-    {
-        ui.meetings.adopt(listed);
-        changed = true;
-    }
-    match ui.meetings.local.chosen_folder() {
-        Some(Ok(folder)) => {
-            ui.platform.meeting_folder_error = None;
-            ui.update(|settings| settings.meetings.output_folder = Some(folder));
-            changed = true;
-        }
-        Some(Err(error)) => {
-            ui.platform.meeting_folder_error = Some(error);
-            changed = true;
-        }
-        None => {}
-    }
-    changed
-}
-
 fn setup(ui: &mut Ui, waker: Waker) {
     ui.modes.waker = Some(waker.clone());
     ui.modes.icon_cache = Some(rune::ImageCache::new(waker.clone()));
@@ -1254,6 +1230,9 @@ fn setup(ui: &mut Ui, waker: Waker) {
 /// capture, model preparation, the OpenCode catalog, history, and setup, and
 /// saves paused text edits. True when anything shown changed.
 fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
+    if let Some(preview) = &mut ui.capsule_preview {
+        return preview.poll(clock, tx);
+    }
     if clock >= ui.tick_at && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible) {
         ui.tick_at = clock + WINDOW_TICK.as_secs_f64();
         tx.wake_after(WINDOW_TICK);
@@ -1321,7 +1300,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     }
     #[cfg(not(target_os = "macos"))]
     if matches!(ui.host, platform::PlatformHost::Local(_)) {
-        changed |= local_meetings(ui);
+        changed |= meetings::local_meetings(ui);
     }
     changed |= ui
         .activity
@@ -1374,6 +1353,9 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
 
 fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
+    if let Some(preview) = &ui.capsule_preview {
+        return rune_kit::root(preview.view::<Ui>(p, cx.is_reduced_motion()), Vec::new());
+    }
     // The native title bar takes the window's background, so it follows a
     // system theme switch along with the rest of the window.
     #[cfg(target_os = "windows")]

@@ -734,8 +734,9 @@ fn flush(rt: &mut Runtime<Ui>) {
 /// A shown window keeps drawing while its runtime animates, has input queued
 /// or has live values pending (Rune's `Host::redraw`). Five seconds after
 /// mounting, with nothing changing, the only motion left in any scene is the
-/// pulsing dot of something live, Output's turning spark, or the
-/// shortcut explainer's looping demo, and under Reduce Motion, which stills
+/// pulsing dot of something live, Output's turning spark, a call-ended
+/// countdown's drain, or the shortcut explainer's looping demo, and under
+/// Reduce Motion, which stills
 /// them all, no scene asks for another frame.
 #[test]
 fn every_scene_stops_asking_for_frames() {
@@ -754,6 +755,8 @@ fn every_scene_stops_asking_for_frames() {
                 rt.elements()
                     .into_iter()
                     .filter(|e| e.moving && !matches!(e.key.as_deref(), Some("dot")) && !spark(e))
+                    // A call-ended countdown drains for its whole 30 s.
+                    .filter(|e| !e.path.contains("/drain"))
                     .map(|e| format!("{scene}: {}", e.path)),
             );
         }

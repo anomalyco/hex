@@ -56,7 +56,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Dictation stats no    labs.history_stats           History shows a summary of retained dictations; hex history stats prints it (#790)
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
-├── Stop when the call ends no labs.stop_when_call_ends (macOS) a recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet (#835)
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
@@ -724,30 +723,11 @@ Not yet observed: a real dictation with the toggle on in Hex (the reporter
 measured their own branch on an i5-8259U); the Labs page goldens need
 regenerating on Linux with the new row.
 
-Stop when the call ends (`stop-when-call-ends`, issue 835, macOS like
-Meetings; its row shows wherever Meetings does, in macOS builds): for an
-Always record call that keeps recording after hang-up. The gate,
-`labs::stop_when_call_ends()`, is read on each pass of the meeting
-controller (`poll_recording` in
-[meeting/watcher.rs](../../src/meeting/watcher.rs)), and only for a recording
-Hex started on its own. While on, the call app counts as present while it
-holds the microphone or any of its Core Audio processes has output running
-(`microphone_activity::application_running_output`), since WhatsApp keeps
-the microphone while muted and closes both on hang-up. Once both are off for
-about 3 s, the "left the call" capsule says "Hex stops recording in 30 s
-unless you keep recording."; Keep recording sends
-`ControllerCommand::KeepRecording`, which drops the stop for this absence, and
-the call app coming back drops it too. After 30 s (`AUTO_STOP_GRACE`,
-`AutoStop` in [meeting/detection.rs](../../src/meeting/detection.rs)) the
-controller stops the recording as Stop & Transcribe does and logs it. Manual,
-offered, and calendar recordings never stop, and off, nothing reads the
-output and the capsule and controller are exactly as before. Not built: the
-leave-call button as a signal, per-app rules, and holding off while the
-network is down. Checks: `stop_when_call_ends_is_its_own_bit_and_off_by_default`
-in [labs.rs](../../src/labs.rs) and the auto-stop checks listed in
-[meetings.md](meetings.md#record). Not yet observed: a real WhatsApp, Zoom,
-or Teams call on a Mac with the toggle on; the row renders only in macOS
-builds, so no golden changes.
+Stop when the call ends (`stop-when-call-ends`, issue 835) graduated: a
+recording Hex started on its own always stops 30 s after its call ends unless
+the person keeps recording ([meetings.md](meetings.md#record)).
+`hex labs on|off stop-when-call-ends` still answers with that and exits 0
+(`labs::GRADUATED`); the saved `labs.stop_when_call_ends` key is ignored.
 
 Fix results in Output (`output-fixes`, issue 989, every OS): for a Try
 result in Settings › Output that comes out wrong. While on, the Try card
@@ -1085,7 +1065,7 @@ panel capsules that sit over another app's window controls or toolbar. The
 gate, `labs::movable_meeting_capsules()`, is read each time a panel capsule
 shows (`MeetingCapsules::show_panel` in
 [rune_ui/meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs)). While
-on, the panel (offer, reminder, left the call, Meeting transcript ready,
+on, the panel (offer, reminder, call ended, Meeting transcript ready,
 Recording automatically) opens in the saved
 `meetings.recording_indicator_corner` and its body drags like the recording
 capsule's: it follows the pointer, snaps to the corner nearest its centre

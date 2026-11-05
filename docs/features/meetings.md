@@ -3,8 +3,8 @@
 Record a call locally: Hex captures the other participants (system audio) and
 you (microphone) as separate tracks, transcribes them on this Mac, and saves a
 Markdown transcript with `You` and `Them` turns. Recording starts automatically
-only for calls from a website or app set to Always record, and never stops
-automatically unless Labs › Stop when the call ends is on (see
+only for calls from a website or app set to Always record, and only such a
+recording stops on its own, 30 s after its call ends (see
 [meetings.auto-stop](#record)). This map describes macOS; [Linux and Windows](#linux-and-windows)
 lists where they differ.
 
@@ -529,11 +529,15 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
   -> Settings window may stay closed
 
 Detected app leaves the microphone for about 3 s     // meetings.call-ended
-  -> "Zoom left the call" capsule: Keep recording / Stop & transcribe
-  -> No timeout; nothing stops automatically
+  -> "Zoom call ended" capsule (rune_ui/meeting_capsules/call_ended.rs): the
+     call app's icon, "Hex is still recording.", Keep recording / Stop &
+     transcribe
+  -> No timeout for a recording the user started; nothing stops automatically
+  -> Three designs while one is chosen, by HEX_CALL_ENDED_VARIANT (ring,
+     default; bar; outline); scenes call-ended-{ring,bar,outline}[-mid|-manual]
 
 Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.panel-drag
-  The panel capsules: offer, reminder, left the call, Meeting transcript
+  The panel capsules: offer, reminder, call ended, Meeting transcript
   ready, Recording automatically
   -> On: each opens in the saved recording_indicator_corner (read as it shows)
      ├── Drag its body -> follows the pointer; release -> snaps to the corner
@@ -549,20 +553,26 @@ Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.pan
   around it (#1305); a click on the body outside its buttons still stops
   there
 
-Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-stop
+Stop when the call ends (macOS; #835, graduated from Labs) // meetings.auto-stop
   Only a recording Hex started on its own (Always record); manual, offered,
   and calendar recordings are never stopped
   -> The call app counts as present while it holds the microphone OR any of
      its Core Audio processes plays output (WhatsApp keeps the microphone
      while muted; its output stays open until hang-up)
-  -> Both off for about 3 s -> capsule says "Hex stops recording in 30 s
-     unless you keep recording."
-     ├── App back on the microphone or output within 30 s -> nothing stops
+  -> Both off for about 3 s -> "Teams call ended" capsule counts down
+     "Recording stops in 30 s", with a drain that empties as it goes
+     (ControllerEvent::CallEnded carries the stop's Instant); the count
+     changes once a second, the drain every frame, and it fades over its
+     last 0.18 s; under Reduce Motion it steps with the count, no head
+     ├── App back on the microphone or output within 30 s -> nothing stops;
+     │   CallResumed closes the capsule
      ├── Keep recording -> nothing stops for this absence; leaving again re-arms
-     ├── Stop & transcribe -> stops now
+     ├── Stop now -> Stop & Transcribe now
      └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
          "meeting recording stopped automatically after its call ended"
-  -> Off -> exactly as above: microphone only, nothing stops
+  Checks: an_automatic_stop_says_so_and_keep_recording_cancels_it,
+  the_call_ended_lines_fit_beside_its_buttons (rune_ui/meeting_capsules.rs),
+  call_ended.rs's tests; not observed on a real call
 
 Capture sources (meeting/capture.rs)                // meetings.capture
 ├── Microphone -> dictation's input (saved device, else System default) via cpal, resampled to 16 kHz
@@ -642,7 +652,7 @@ showed the recording capsule (Open opened the meeting while it kept
 recording; Stop transcribed) and the ready capsule (Copy copied the
 Markdown). Before that day's fix the recording capsule never appeared: it
 closed and reopened in one overlay batch, and the hide ran last. The offer,
-"left the call", "…" choices, and automatic-recording capsules remain unseen
+"call ended", "…" choices, and automatic-recording capsules remain unseen
 on screen. The ready and automatic-recording capsules' ✕ (#996) is checked by
 `dismissing_a_ready_transcript_only_closes_it` and
 `dismissing_an_automatic_recording_never_stops_it`, and drawn by

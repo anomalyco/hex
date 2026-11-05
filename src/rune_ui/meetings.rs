@@ -676,6 +676,33 @@ fn recording_action(ui: &Ui, p: Paint) -> El {
 
 /// A row's state line: what went wrong or is happening, else the app and
 /// length.
+/// Linux and Windows: the listing and a chosen transcript folder, from the
+/// meetings the window keeps itself.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn local_meetings(ui: &mut Ui) -> bool {
+    let mut changed = false;
+    if ui.pane == super::Pane::Meetings
+        && available(ui)
+        && let Some(listed) = ui.meetings.local.meetings()
+    {
+        ui.meetings.adopt(listed);
+        changed = true;
+    }
+    match ui.meetings.local.chosen_folder() {
+        Some(Ok(folder)) => {
+            ui.platform.meeting_folder_error = None;
+            ui.update(|settings| settings.meetings.output_folder = Some(folder));
+            changed = true;
+        }
+        Some(Err(error)) => {
+            ui.platform.meeting_folder_error = Some(error);
+            changed = true;
+        }
+        None => {}
+    }
+    changed
+}
+
 fn row_meta(pane: &MeetingsPane, meeting: &Meeting, p: Paint) -> (String, Option<rune::Color>) {
     let (state, ink) = match meeting.status {
         Status::Recording if pane.stop_pending => (Some(tr("Transcribing")), None),
