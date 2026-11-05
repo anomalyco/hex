@@ -1283,6 +1283,7 @@ impl Outcomes {
             .count()
     }
 
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     fn started(&mut self, bundle: PathBuf, since: CaptureInstant, target: TargetKind) {
         self.start(bundle, since, target, false);
     }
