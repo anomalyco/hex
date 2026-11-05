@@ -1,6 +1,6 @@
 //! The meeting capsules on Rune: the calendar meeting reminder, the
-//! recording offer, "left the call", the ready transcript, and the recording
-//! capsule. Each is an
+//! recording offer, "call ended" (`call_ended`), the ready transcript, and
+//! the recording capsule. Each is an
 //! interactive Rune overlay, which on macOS is a non-activating `NSPanel`:
 //! its buttons take clicks while the call app keeps focus and Hex never
 //! activates. An offer that times out only closes; nothing starts or stops
@@ -47,6 +47,9 @@ use crate::meeting::detection::MeetingCandidate;
 use crate::meeting::watcher::{ControllerCommand, ControllerEvent};
 use crate::meeting::{self, MeetingManifest, TranscriptEntry};
 
+pub(super) mod call_ended;
+use call_ended::{Countdown, Variant};
+
 /// The offer, call ended, and ready capsules.
 const MEETING_PANEL_WIDTH: f32 = 420.0;
 /// The offer's "…" choices need room for three buttons beside the name.
@@ -58,9 +61,6 @@ const ACTIONS_INSET: f32 = 8.0;
 const PILL_RADIUS: f32 = 999.0;
 /// The reminder: the meeting's title beside up to three buttons.
 const REMINDER_PANEL_WIDTH: f32 = 520.0;
-/// "Microsoft Teams left the call" beside Keep recording and Stop &
-/// transcribe (#835).
-const CALL_ENDED_PANEL_WIDTH: f32 = 520.0;
 /// How often an open reminder recounts "Starts in N min".
 const REMINDER_TICK: Duration = Duration::from_secs(5);
 /// The recording capsule's window, as wide as the open pill.
@@ -99,11 +99,12 @@ enum Kind {
         automatic: bool,
     },
     Offer(MeetingCandidate),
-    /// `auto_stop` when the recording stops on its own after a grace (Labs
-    /// › Stop when the call ends); Keep recording then cancels that.
+    /// `stops` when the recording stops on its own then, after a grace;
+    /// Keep recording cancels that.
     CallEnded {
         app: String,
-        auto_stop: bool,
+        variant: Variant,
+        stops: Option<(Instant, Countdown)>,
     },
     Ready(Box<MeetingManifest>),
     /// An automatic recording while the recording indicator is off.
@@ -269,7 +270,7 @@ impl Capsule {
         match &self.kind {
             Some(Kind::Recording { .. }) => (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT),
             Some(Kind::Offer(_)) if self.more_open => (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT),
-            Some(kind) => (panel_width(kind), MEETING_PANEL_HEIGHT),
+            Some(kind) => panel_size(kind),
             None => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
         }
     }
@@ -553,15 +554,31 @@ impl MeetingCapsules {
                     }
                 });
             }
-            ControllerEvent::CallEnded { app, auto_stop } => {
+            ControllerEvent::CallEnded { app, stops_at } => {
                 self.close_recording();
                 self.show_panel(
                     Kind::CallEnded {
                         app: app.clone(),
-                        auto_stop: *auto_stop,
+                        variant: Variant::current(),
+                        stops: stops_at.map(|at| {
+                            (
+                                at,
+                                Countdown::new(at.saturating_duration_since(Instant::now())),
+                            )
+                        }),
                     },
                     None,
                 );
+            }
+            ControllerEvent::CallResumed => {
+                let (generation, panel) = (self.generation.clone(), self.panel.clone());
+                self.panel.update(move |capsule, _| {
+                    if matches!(capsule.kind, Some(Kind::CallEnded { .. })) {
+                        generation.fetch_add(1, Ordering::SeqCst);
+                        capsule.kind = None;
+                        panel.hide();
+                    }
+                });
             }
             ControllerEvent::Finished(manifest) => {
                 self.close_recording();
@@ -587,6 +604,13 @@ impl MeetingCapsules {
     fn show_panel(&self, kind: Kind, timeout: Option<Duration>) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let reminder = matches!(kind, Kind::Reminder { .. });
+        let stops_at = match &kind {
+            Kind::CallEnded {
+                stops: Some((at, _)),
+                ..
+            } => Some(*at),
+            _ => None,
+        };
         // With Labs › Movable meeting capsules the panel shows in the saved
         // capsule corner; otherwise in the top right, as it always has.
         let movable = crate::labs::movable_meeting_capsules();
@@ -596,8 +620,7 @@ impl MeetingCapsules {
             MeetingIndicatorCorner::TopRight
         };
         place_capsule(&self.panel, corner, 0.0, 0.0);
-        self.panel
-            .resize((panel_width(&kind), MEETING_PANEL_HEIGHT));
+        self.panel.resize(panel_size(&kind));
         self.panel.update(move |capsule, tx| {
             capsule.kind = Some(kind);
             capsule.more_open = false;
@@ -615,6 +638,26 @@ impl MeetingCapsules {
             std::thread::spawn(move || {
                 while current.load(Ordering::SeqCst) == generation && Instant::now() < until {
                     std::thread::sleep(REMINDER_TICK);
+                    panel.update(|_, _| {});
+                }
+            });
+        }
+        if let Some(stops_at) = stops_at {
+            // Recount "Recording stops in N s" as each second passes; the
+            // drain moves on its own.
+            let (panel, current) = (self.panel.clone(), self.generation.clone());
+            std::thread::spawn(move || {
+                while current.load(Ordering::SeqCst) == generation {
+                    let left = stops_at.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    let fraction = left.as_secs_f64().fract();
+                    std::thread::sleep(Duration::from_secs_f64(if fraction > 0.0 {
+                        fraction
+                    } else {
+                        1.0
+                    }));
                     panel.update(|_, _| {});
                 }
             });
@@ -840,47 +883,45 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
             }));
             (p.muted(), candidate.offer_title(), String::new(), actions)
         }
-        Kind::CallEnded { app, auto_stop } => (
-            p.danger(),
-            tr_fill("{} left the call", app),
-            if *auto_stop {
-                tr("Hex stops recording in 30 s unless you keep recording.")
-            } else {
-                tr("Hex is still recording.")
-            }
-            .to_owned(),
-            vec![
-                button(p, "keep-recording", tr("Keep recording"), false, |c| {
-                    if matches!(
-                        c.kind,
-                        Some(Kind::CallEnded {
-                            auto_stop: true,
-                            ..
-                        })
-                    ) {
+        Kind::CallEnded {
+            app,
+            variant,
+            stops,
+        } => {
+            let countdown = stops
+                .as_ref()
+                .map(|(at, countdown)| (countdown, at.saturating_duration_since(Instant::now())));
+            let body = call_ended::body(
+                p,
+                *variant,
+                call_ended::Content { app, countdown },
+                cx.is_reduced_motion(),
+                |c: &mut Capsule| {
+                    if matches!(c.kind, Some(Kind::CallEnded { stops: Some(_), .. })) {
                         c.send(ControllerCommand::KeepRecording);
                     }
                     c.close();
-                }),
-                button(p, "stop-meeting", tr("Stop & transcribe"), true, |c| {
+                },
+                |c: &mut Capsule| {
                     if c.send(ControllerCommand::Stop) {
                         c.close();
                     }
-                }),
-            ],
-        ),
+                },
+            );
+            return panel_capsule(body, capsule.movable);
+        }
         Kind::Ready(manifest) => ready(p, manifest, capsule.copied),
     };
     pill(p, dot, &title, &subtitle, actions, capsule.movable)
 }
 
-/// The panel capsule's width for `kind`, room for its title beside its
+/// The panel capsule's window for `kind`, room for its title beside its
 /// buttons.
-fn panel_width(kind: &Kind) -> f32 {
+fn panel_size(kind: &Kind) -> (f32, f32) {
     match kind {
-        Kind::Reminder { .. } => REMINDER_PANEL_WIDTH,
-        Kind::CallEnded { .. } => CALL_ENDED_PANEL_WIDTH,
-        _ => MEETING_PANEL_WIDTH,
+        Kind::Reminder { .. } => (REMINDER_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
+        Kind::CallEnded { variant, .. } => variant.size(),
+        _ => (MEETING_PANEL_WIDTH, MEETING_PANEL_HEIGHT),
     }
 }
 
@@ -1167,9 +1208,9 @@ fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automat
     .child(pill)
 }
 
-/// The panel capsule (reminder, offer, call ended, ready): status dot, two
-/// truncated lines, and its actions, in a rounded rectangle. A `movable`
-/// one drags to another corner like the recording capsule.
+/// The panel capsule (reminder, offer, ready): status dot, two truncated
+/// lines, and its actions, in a rounded rectangle. A `movable` one drags to
+/// another corner like the recording capsule.
 fn pill(
     p: Paint,
     dot: rune::Color,
@@ -1178,11 +1219,17 @@ fn pill(
     actions: Vec<El>,
     movable: bool,
 ) -> El {
-    // Only the body takes the pointer, not the window's margin around it.
     let body = pill_body(p, status_dot(dot), title, subtitle, panel_radius(p))
         .w_full()
-        .child(row().key("actions").gap(8.0).children(actions))
-        .hit();
+        .child(row().key("actions").gap(8.0).children(actions));
+    panel_capsule(body, movable)
+}
+
+/// A panel capsule's `body` in its window. A `movable` one drags to another
+/// corner.
+fn panel_capsule(body: El, movable: bool) -> El {
+    // Only the body takes the pointer, not the window's margin around it.
+    let body = body.hit();
     let body = if movable {
         body.cursor(Cursor::Grab)
             .on_drag(|c: &mut Capsule, drag, tx| c.drag(drag, tx))
@@ -1262,7 +1309,7 @@ mod tests {
     const MENU: (f32, f32) = (MEETING_MENU_WIDTH, MEETING_PANEL_HEIGHT);
     const RECORDING: (f32, f32) = (RECORDING_PANEL_WIDTH, RECORDING_PANEL_HEIGHT);
     const REMINDER: (f32, f32) = (REMINDER_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
-    const CALL_ENDED: (f32, f32) = (CALL_ENDED_PANEL_WIDTH, MEETING_PANEL_HEIGHT);
+    const CALL_ENDED: (f32, f32) = (460.0, MEETING_PANEL_HEIGHT);
 
     /// "Design sync" a minute from now, with a Zoom link or none.
     fn design_sync(link: bool) -> CalendarMeeting {
@@ -1847,9 +1894,18 @@ mod tests {
     }
 
     fn call_ended() -> Kind {
+        call_ended_as(Variant::Ring, None)
+    }
+
+    /// "Microsoft Teams" ended, with `left` until the recording stops.
+    fn call_ended_as(variant: Variant, left: Option<u64>) -> Kind {
         Kind::CallEnded {
             app: MeetingSource::Teams.label().into(),
-            auto_stop: false,
+            variant,
+            stops: left.map(|left| {
+                let left = Duration::from_secs(left);
+                (Instant::now() + left, Countdown::new(left))
+            }),
         }
     }
 
@@ -1898,15 +1954,10 @@ mod tests {
 
     #[test]
     fn an_automatic_stop_says_so_and_keep_recording_cancels_it() {
-        let auto = Kind::CallEnded {
-            app: MeetingSource::WhatsApp.label().into(),
-            auto_stop: true,
-        };
+        let auto = call_ended_as(Variant::Ring, Some(30));
         let (mut rt, commands, _) = runtime(auto, false, true, CALL_ENDED);
-        assert!(
-            texts(&rt)
-                .contains(&"Hex stops recording in 30 s unless you keep recording.".to_string())
-        );
+        assert!(texts(&rt).contains(&"Recording stops in 30 s".to_string()));
+        assert!(texts(&rt).contains(&"Stop now".to_string()));
         tap(&mut rt, "keep-recording");
         assert!(matches!(
             commands.try_recv(),
@@ -1914,7 +1965,7 @@ mod tests {
         ));
         assert!(rt.state.kind.is_none());
 
-        // Without the lab, Keep recording only closes the capsule.
+        // For a recording the user started, Keep recording only closes it.
         let (mut rt, commands, _) = runtime(call_ended(), false, true, CALL_ENDED);
         assert!(texts(&rt).contains(&"Hex is still recording.".to_string()));
         tap(&mut rt, "keep-recording");
@@ -1922,25 +1973,39 @@ mod tests {
     }
 
     #[test]
-    fn the_call_ended_title_fits_beside_its_buttons() {
-        let kind = call_ended();
-        assert_eq!(panel_width(&kind), CALL_ENDED.0);
-        let (mut rt, _, _) = runtime(kind, false, false, CALL_ENDED);
-        rt.settle_all();
-        rt.frame(0.0);
-        let title = rt
-            .elements()
-            .into_iter()
-            .find(|e| e.key.as_deref() == Some("title"))
-            .unwrap();
-        assert_eq!(title.text.as_deref(), Some("Microsoft Teams left the call"));
-        let style = rune_theme_opencode::kit(false).ty.ui_medium;
-        let (width, _) = rt.text.measure("Microsoft Teams left the call", style, 2.0);
-        assert!(
-            width <= title.rect[2] + 0.5,
-            "title needs {width} pt, has {}",
-            title.rect[2]
-        );
+    fn the_call_ended_lines_fit_beside_its_buttons() {
+        let style = rune_theme_opencode::kit(false).ty;
+        for variant in Variant::ALL {
+            for left in [Some(30), None] {
+                let kind = call_ended_as(variant, left);
+                let size = panel_size(&kind);
+                let (mut rt, _, _) = runtime(kind, false, false, size);
+                rt.settle_all();
+                rt.frame(0.0);
+                for (key, font) in [("title", style.ui_medium), ("subtitle", style.small)] {
+                    let line = rt
+                        .elements()
+                        .into_iter()
+                        .find(|e| e.key.as_deref() == Some(key))
+                        .unwrap();
+                    let words = line.text.clone().unwrap();
+                    let (width, _) = rt.text.measure(&words, font, 2.0);
+                    assert!(
+                        width <= line.rect[2] + 0.5,
+                        "{variant:?} {words:?} needs {width} pt, has {}",
+                        line.rect[2]
+                    );
+                }
+                let title = rt
+                    .elements()
+                    .into_iter()
+                    .find(|e| e.key.as_deref() == Some("title"));
+                assert_eq!(
+                    title.and_then(|e| e.text).as_deref(),
+                    Some("Teams call ended")
+                );
+            }
+        }
     }
 
     /// No `--snap` scene draws an overlay, so this renders the capsules to
@@ -1970,6 +2035,24 @@ mod tests {
             ("reminder-no-link", reminder(false, false), false, REMINDER),
             ("reminder-automatic", reminder(true, true), false, REMINDER),
             ("call-ended", call_ended(), false, CALL_ENDED),
+            (
+                "call-ended-ring",
+                call_ended_as(Variant::Ring, Some(30)),
+                false,
+                Variant::Ring.size(),
+            ),
+            (
+                "call-ended-bar",
+                call_ended_as(Variant::Bar, Some(30)),
+                false,
+                Variant::Bar.size(),
+            ),
+            (
+                "call-ended-outline",
+                call_ended_as(Variant::Outline, Some(30)),
+                false,
+                Variant::Outline.size(),
+            ),
             (
                 "recording-automatic",
                 Kind::Recording {

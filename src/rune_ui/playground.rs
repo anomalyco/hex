@@ -170,6 +170,33 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-failed", "Window/Meetings/Failed"),
     ("meetings-empty", "Window/Meetings/Empty"),
     ("meetings-platform-icons", "Window/Meetings/Platform icons"),
+    ("call-ended-ring", "Window/Meetings/Call ended · Ring"),
+    (
+        "call-ended-ring-mid",
+        "Window/Meetings/Call ended · Ring, 12 s left",
+    ),
+    (
+        "call-ended-ring-manual",
+        "Window/Meetings/Call ended · Ring, no countdown",
+    ),
+    ("call-ended-bar", "Window/Meetings/Call ended · Bar"),
+    (
+        "call-ended-bar-mid",
+        "Window/Meetings/Call ended · Bar, 12 s left",
+    ),
+    (
+        "call-ended-bar-manual",
+        "Window/Meetings/Call ended · Bar, no countdown",
+    ),
+    ("call-ended-outline", "Window/Meetings/Call ended · Outline"),
+    (
+        "call-ended-outline-mid",
+        "Window/Meetings/Call ended · Outline, 12 s left",
+    ),
+    (
+        "call-ended-outline-manual",
+        "Window/Meetings/Call ended · Outline, no countdown",
+    ),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
     ("meetings-summary-model", "Window/Meetings/Summary model"),

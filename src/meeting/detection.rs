@@ -270,31 +270,31 @@ impl CallPresence {
     }
 }
 
-/// How long an automatic recording keeps going after its call ended, under
-/// Labs › Stop when the call ends (#835).
+/// How long an automatic recording keeps going after its call ended (#835).
 pub const AUTO_STOP_GRACE: Duration = Duration::from_secs(30);
 
-/// Labs › Stop when the call ends: the deadline at which a recording Hex
-/// started on its own stops, armed when [`CallPresence`] reports the call
-/// ended and dropped when the call app comes back or the user keeps
-/// recording.
+/// The deadline at which a recording Hex started on its own stops, armed
+/// when [`CallPresence`] reports the call ended and dropped when the call
+/// app comes back or the user keeps recording.
 #[derive(Default)]
 pub struct AutoStop {
     deadline: Option<Instant>,
 }
 
 impl AutoStop {
-    /// The call ended: stop after the grace.
-    pub fn arm(&mut self) {
-        self.arm_at(Instant::now());
+    /// The call ended: stop after the grace. Returns when.
+    pub fn arm(&mut self) -> Instant {
+        self.arm_at(Instant::now())
     }
 
-    fn arm_at(&mut self, now: Instant) {
-        self.deadline = Some(now + AUTO_STOP_GRACE);
+    fn arm_at(&mut self, now: Instant) -> Instant {
+        let deadline = now + AUTO_STOP_GRACE;
+        self.deadline = Some(deadline);
+        deadline
     }
 
-    /// The call app came back, the user kept recording, or the toggle is
-    /// off: nothing stops. Returns whether a stop was pending.
+    /// The call app came back, the user kept recording, or the user started
+    /// the recording: nothing stops. Returns whether a stop was pending.
     pub fn disarm(&mut self) -> bool {
         self.deadline.take().is_some()
     }

@@ -8,8 +8,7 @@
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard or only copying it (macOS), a second dictation shortcut
-//! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
-//! recording when its call ends (macOS), and Terminal paste
+//! (macOS), Toggle's tap or hold (macOS, Linux), and Terminal paste
 //! and shortcut sharing on Windows) is just its toggle.
 //!
 //! Each feature has an audience (`Feature::audience`): `Everyone` ships in
@@ -94,7 +93,6 @@ pub enum Feature {
     HistoryStats,
     RecentDictations,
     SkipPauses,
-    StopWhenCallEnds,
     OutputFixes,
     PickerActiveFirst,
     ModelInPlace,
@@ -117,7 +115,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 49] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -148,7 +146,6 @@ impl Feature {
         Self::HistoryStats,
         Self::RecentDictations,
         Self::SkipPauses,
-        Self::StopWhenCallEnds,
         Self::OutputFixes,
         Self::PickerActiveFirst,
         Self::ModelInPlace,
@@ -223,7 +220,6 @@ impl Feature {
             | Self::HistoryStats
             | Self::RecentDictations
             | Self::SkipPauses
-            | Self::StopWhenCallEnds
             | Self::OutputFixes
             | Self::PickerActiveFirst
             | Self::ModelInPlace
@@ -279,8 +275,7 @@ impl Feature {
             | Self::HistoryStats
             | Self::RecentDictations
             | Self::SkipPauses => 20261101,
-            Self::StopWhenCallEnds
-            | Self::OutputFixes
+            Self::OutputFixes
             | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::PickerDownloaded
@@ -333,7 +328,6 @@ impl Feature {
             Self::Meetings
             | Self::LiveChapters
             | Self::SubtitleExport
-            | Self::StopWhenCallEnds
             | Self::MovableMeetingCapsules => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
@@ -425,7 +419,6 @@ impl Feature {
             Self::HistoryStats => "history-stats",
             Self::RecentDictations => "recent-dictations",
             Self::SkipPauses => "skip-pauses",
-            Self::StopWhenCallEnds => "stop-when-call-ends",
             Self::OutputFixes => "output-fixes",
             Self::PickerActiveFirst => "picker-active-first",
             Self::ModelInPlace => "model-in-place",
@@ -481,7 +474,6 @@ impl Feature {
             Self::HistoryStats => "labs.history_stats",
             Self::RecentDictations => "labs.recent_dictations",
             Self::SkipPauses => "labs.skip_pauses",
-            Self::StopWhenCallEnds => "labs.stop_when_call_ends",
             Self::OutputFixes => "labs.output_fixes",
             Self::PickerActiveFirst => "labs.picker_active_first",
             Self::ModelInPlace => "labs.model_in_place",
@@ -581,9 +573,6 @@ impl Feature {
             Self::SkipPauses => {
                 "Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"
             }
-            Self::StopWhenCallEnds => {
-                "Stop a meeting recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"
-            }
             Self::OutputFixes => {
                 "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
             }
@@ -679,7 +668,6 @@ impl Feature {
             Self::HistoryStats => settings.labs.history_stats,
             Self::RecentDictations => settings.labs.recent_dictations,
             Self::SkipPauses => settings.labs.skip_pauses,
-            Self::StopWhenCallEnds => settings.labs.stop_when_call_ends,
             Self::OutputFixes => settings.labs.output_fixes,
             Self::PickerActiveFirst => settings.labs.picker_active_first,
             Self::ModelInPlace => settings.labs.model_in_place,
@@ -737,7 +725,6 @@ impl Feature {
             &mut labs.history_stats,
             &mut labs.recent_dictations,
             &mut labs.skip_pauses,
-            &mut labs.stop_when_call_ends,
             &mut labs.output_fixes,
             &mut labs.picker_active_first,
             &mut labs.model_in_place,
@@ -796,7 +783,6 @@ impl Feature {
             Self::HistoryStats => settings.labs.history_stats = on,
             Self::RecentDictations => settings.labs.recent_dictations = on,
             Self::SkipPauses => settings.labs.skip_pauses = on,
-            Self::StopWhenCallEnds => settings.labs.stop_when_call_ends = on,
             Self::OutputFixes => settings.labs.output_fixes = on,
             Self::PickerActiveFirst => settings.labs.picker_active_first = on,
             Self::ModelInPlace => settings.labs.model_in_place = on,
@@ -851,7 +837,6 @@ const SKIP_PAUSES: u64 = 1 << 16;
 const PARAKEET_ULTRA: u64 = 1 << 17;
 const HISTORY_STATS: u64 = 1 << 18;
 const RECENT_DICTATIONS: u64 = 1 << 19;
-const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
@@ -995,14 +980,6 @@ pub fn recent_dictations() -> bool {
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn skip_pauses() -> bool {
     on(SKIP_PAUSES) && Feature::SkipPauses.on_this_os()
-}
-
-/// A meeting recording Hex started on its own stops once its call app has
-/// left the microphone and gone quiet for a grace period (macOS; read on
-/// each pass of the meeting controller).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn stop_when_call_ends() -> bool {
-    on(STOP_WHEN_CALL_ENDS) && Feature::StopWhenCallEnds.on_this_os()
 }
 
 /// A dictation saved to History keeps its 16 kHz audio, and History offers
@@ -1165,11 +1142,6 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
         ),
         (Feature::SkipPauses, settings.skip_pauses, SKIP_PAUSES),
         (
-            Feature::StopWhenCallEnds,
-            settings.stop_when_call_ends,
-            STOP_WHEN_CALL_ENDS,
-        ),
-        (
             Feature::KeepRecordings,
             settings.keep_recordings,
             KEEP_RECORDINGS,
@@ -1330,10 +1302,16 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
 
 /// The feature `name` names, if this OS has it and `reaches` admits it.
 /// Features that left Labs: `hex labs` still knows their names.
-const GRADUATED: [(&str, &str); 1] = [(
-    "custom-models",
-    "custom-models graduated: adding a model file and models found on this computer are always on now",
-)];
+const GRADUATED: [(&str, &str); 2] = [
+    (
+        "custom-models",
+        "custom-models graduated: adding a model file and models found on this computer are always on now",
+    ),
+    (
+        "stop-when-call-ends",
+        "stop-when-call-ends graduated: a recording Hex started on its own always stops 30 s after its call ends, unless you keep recording",
+    ),
+];
 
 fn resolve(name: &str, reaches: impl Fn(Feature) -> bool + Copy) -> Result<Feature> {
     if let Some((_, note)) = GRADUATED.iter().find(|(graduated, _)| *graduated == name) {
@@ -1625,18 +1603,6 @@ mod tests {
     }
 
     #[test]
-    fn stop_when_call_ends_is_its_own_bit_and_off_by_default() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, |_| true) & STOP_WHEN_CALL_ENDS, 0);
-        labs.stop_when_call_ends = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & STOP_WHEN_CALL_ENDS, 0);
-        assert_eq!(state & RECENT_DICTATIONS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
-    }
-
-    #[test]
     fn keep_recordings_is_its_own_bit_and_off_by_default() {
         let mut labs = LabsSettings::default();
         assert_eq!(encode_where(&labs, |_| true) & KEEP_RECORDINGS, 0);
@@ -1644,7 +1610,7 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & KEEP_RECORDINGS, 0);
-        assert_eq!(state & STOP_WHEN_CALL_ENDS, 0);
+        assert_eq!(state & RECENT_DICTATIONS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

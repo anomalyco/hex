@@ -72,7 +72,6 @@ impl Feature {
             Self::Meetings
             | Self::LiveChapters
             | Self::SubtitleExport
-            | Self::StopWhenCallEnds
             | Self::MovableMeetingCapsules
             | Self::MeetingSummaryModel
             | Self::MeetingNotesVocabulary

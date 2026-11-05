@@ -420,11 +420,6 @@ const KEYS: &[Key] = &[
         "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",
     ),
     key(
-        "labs.stop_when_call_ends",
-        Kind::Bool,
-        "Labs: a meeting recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet, unless you keep recording (macOS)",
-    ),
-    key(
         "labs.movable_meeting_capsules",
         Kind::Bool,
         "Labs: drag meeting capsules such as Meeting transcript ready out of the way; they show in the corner you left them, shared with the recording capsule (macOS)",
@@ -707,7 +702,6 @@ const NEEDS: &[(&str, &str)] = &[
     ("meetings.", "meetings"),
     ("labs.live_chapters", "meetings"),
     ("labs.subtitle_export", "meetings"),
-    ("labs.stop_when_call_ends", "meetings"),
     ("labs.movable_meeting_capsules", "meetings"),
     ("labs.meeting_summary_model", "meetings"),
     ("labs.meeting_notes_vocabulary", "meetings"),
