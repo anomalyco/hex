@@ -2003,6 +2003,100 @@ fn new_in_labs_isnt_repeated_in_the_grid() {
     }
 }
 
+/// Groups start folded unless they hold a lab that's on, fold and unfold
+/// from their header, remember it, and stay open while their last lab
+/// turns off. A search shows every match whatever the folds.
+#[test]
+fn labs_groups_fold_and_remember_it() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    assert!(
+        rt.find("lab-card-live-text").is_some(),
+        "Dictation holds Live text, on"
+    );
+    assert!(
+        rt.find("lab-card-unload-idle").is_none(),
+        "Models holds nothing on"
+    );
+    tap(&mut rt, "group-models");
+    assert!(rt.find("lab-card-unload-idle").is_some());
+    assert_eq!(rt.state.settings.labs.groups.get("models"), Some(&true));
+    tap(&mut rt, "group-dictation");
+    assert!(rt.find("lab-card-live-text").is_none());
+    assert_eq!(rt.state.settings.labs.groups.get("dictation"), Some(&false));
+    tap(&mut rt, "nav-general");
+    tap(&mut rt, "nav-labs");
+    assert!(rt.find("lab-card-unload-idle").is_some(), "remembered");
+    assert!(rt.find("lab-card-live-text").is_none(), "remembered");
+
+    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("live text".to_string()));
+    settle(&mut rt);
+    assert!(
+        rt.find("lab-card-live-text").is_some(),
+        "a search shows folded matches"
+    );
+    assert!(
+        rt.find("group-dictation-slot").is_none(),
+        "under a plain heading"
+    );
+
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.state.settings.labs.unload_idle = true;
+    refresh(&mut rt);
+    tap(&mut rt, "lab-unload-idle");
+    assert!(!rt.state.settings.labs.unload_idle);
+    assert!(
+        rt.find("lab-card-unload-idle").is_some(),
+        "turning off a group's last lab leaves it open"
+    );
+    assert_eq!(rt.state.settings.labs.groups.get("models"), Some(&true));
+}
+
+/// Each OS shows only its labs, and a group with none of them hides.
+#[test]
+fn labs_groups_follow_each_os() {
+    let cards = |rt: &Runtime<Ui>| -> Vec<String> {
+        rt.elements()
+            .into_iter()
+            .filter_map(|e| e.key?.strip_prefix("lab-card-").map(str::to_string))
+            .collect()
+    };
+    for (scene, has, lacks) in [
+        ("windows-labs", "terminal-paste", "mouse-shortcuts"),
+        ("linux-labs", "section-key", "terminal-paste"),
+        ("mac-labs", "mouse-shortcuts", "section-key"),
+    ] {
+        let mut rt = runtime(scene, true, (980.0, 4000.0));
+        unfold_labs(&mut rt);
+        let shown = cards(&rt);
+        assert!(shown.contains(&has.to_string()), "{scene} shows {has}");
+        assert!(!shown.contains(&lacks.to_string()), "{scene} hides {lacks}");
+        for group in crate::labs::Group::ALL {
+            let any = shown.iter().any(|id| {
+                crate::labs::Feature::from_name(id)
+                    .map_or(crate::labs::Group::Annotate, |feature| feature.group())
+                    == group
+            });
+            assert_eq!(
+                rt.find(&format!("group-{}", group.id())).is_some(),
+                any,
+                "{scene}: {} shows only with a lab",
+                group.id()
+            );
+        }
+    }
+    let rt = runtime("windows-labs", true, (980.0, 4000.0));
+    assert!(rt.find("group-output").is_some());
+    assert!(
+        rt.find("lab-card-terminal-paste").is_some(),
+        "Output holds Terminal paste, on"
+    );
+    assert!(rt.find("lab-card-spoken-formatting").is_some());
+    assert!(
+        rt.find("lab-card-unload-idle").is_none(),
+        "Models is folded"
+    );
+}
+
 /// Whether the switch keyed `key` is on: its thumb sits past the track's
 /// middle.
 fn shows_on(rt: &Runtime<Ui>, key: &str) -> bool {
