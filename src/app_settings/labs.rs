@@ -88,6 +88,10 @@ pub struct LabsSettings {
     pub collapsible_meeting_sections: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
+    /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
+    /// id; a group not here is open while it holds a lab that's on.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub groups: std::collections::BTreeMap<String, bool>,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -141,6 +145,7 @@ impl Default for LabsSettings {
             screenshots: false,
             follow_live_transcript: false,
             collapsible_meeting_sections: false,
+            groups: std::collections::BTreeMap::new(),
         }
     }
 }

@@ -50,8 +50,10 @@ publish() {
     "macos-arm64=hex-$version-macos-arm64.zip=Hex.zip" \
     "macos-arm64-dmg=hex-$version-macos-arm64.dmg=Hex.dmg" \
     "windows-x64=hex-$version-windows-x64.exe=hex.exe" \
+    "windows-x64-cli=hex-$version-windows-x64.com=hex.com" \
     "windows-x64-setup=hex-setup-$version-windows-x64.exe=HexSetup.exe" \
     "windows-arm64=hex-$version-windows-arm64.exe=hex.exe" \
+    "windows-arm64-cli=hex-$version-windows-arm64.com=hex.com" \
     "windows-arm64-setup=hex-setup-$version-windows-arm64.exe=HexSetup.exe" \
     "linux-x64=hex-$version-linux-x64=hex" \
     "linux-x64-sig=hex-$version-linux-x64.sig=hex.sig" \

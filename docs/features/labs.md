@@ -11,10 +11,14 @@ debug, local `HEX_LOCAL_BUILD`, test `HEX_TEST_BUILD`, and dev-channel
 drops it, its gate reads false even when `settings.json` says on, and the
 saved setting is kept untouched. In dev builds a Dev row carries a quiet
 "Dev" tag, and `hex labs` prints each feature's audience. Every feature
-below is `Everyone` today unless marked `(Dev)`. There is no master switch. **Labs** is always the last item in the
-sidebar and lists every Labs feature as one flat row (name, one-line
-description, toggle), each **off by default**, plus Send feedback and Run
-setup again.
+below is `Everyone` today unless marked `(Dev)`. Each feature also has a
+**group** (`labs::Feature::group` in `src/labs/group.rs`, one exhaustive
+`match`, so a new feature must choose): Dictation, Output (paste, formatting,
+spoken punctuation), History, Meetings, Annotate, Shortcuts, or Models. There
+is no master switch. **Labs** is always the last item in the sidebar and lists
+every Labs feature this OS has as a card (name, one-line description, toggle)
+under its group's collapsible header, each **off by default**, plus Send
+feedback and Run setup again.
 
 ```ts
 Feature             Pane  Toggle (settings.json, hex settings)   On: what it does
@@ -98,29 +102,39 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
 │                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
 │                                        macOS keeps its screen-recording dot lit the whole time it is on
-└── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
+└── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General);
+                                         Java games (javaw/java, e.g. Minecraft) still get Ctrl+V (#1362)
+                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
 
 Settings › Labs                          // labs.page, a store (labs/store.rs, labs/drawer.rs)
 ├── Header -> "Labs", Search N labs (⌘F focuses it), Discover | Turned on · N
-├── Category chips with counts -> All, Dictation, Shortcuts, Clipboard, Meetings, Models, App
-│   (labs/category.rs; a category this OS has no lab in hides)
-├── Discover, no chip or search -> New in Labs: the two newest labs,
-│   then All labs without them; a lab added on the newest date among those shown carries New
-├── A chip, a search (name, description, category), or Turned on -> only the matching cards;
-│   none -> "No labs match" / "Nothing turned on yet"
+├── Group chips with counts -> All, Dictation, Output, History, Meetings, Annotate, Shortcuts, Models
+│   (labs/group.rs; a group this OS has no lab in hides)
+├── Discover, no chip or search -> New in Labs: the two newest labs, then every other lab
+│   under its group's header; a lab added on the newest date among those shown carries New
+├── Group header (key group-<id>) -> name, card count, chevron; a group with no card here hides
+│   ├── Press -> folds or unfolds it, saved at once in labs.groups (settings.json, not a hex settings key)
+│   ├── Never pressed -> open while it holds a lab that's on, folded otherwise
+│   └── Turning off a group's last lab -> the group stays open (it is saved open first)
+├── A chip, a search (name, description, group), or Turned on -> only the matching cards,
+│   still under their headers; a chip or search shows every match whatever the folds,
+│   under a plain heading; none -> "No labs match" / "Nothing turned on yet"
+│   // checks: labs_groups_fold_and_remember_it, labs_groups_follow_each_os (tests/panes.rs);
+│   // every_group_has_a_feature_and_round_trips_its_id (labs/group.rs);
+│   // goldens mac-labs (light, dark), windows-labs, linux-labs, mac-labs-link
 ├── Card -> neutral icon tile, name with New / Dev tags on one line, up to two lines of description, a switch
 │   ├── The switch (key lab-<id>) -> flips the lab, saved at once
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
 │   └── Voice Filter while its driver is installed, or a managed or locked lab -> its switch is disabled
-├── Card body -> a drawer from the right over a dim: big tile, name, category, description,
+├── Card body -> a drawer from the right over a dim: big tile, name, group, description,
 │   a preview placeholder, "Shows up in …" (a link when it's a pane), Send feedback, On / Off and the lab's switch;
 │   Unload model when idle also shows Unload after. Escape, ✕ or the dim closes it
-├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<id> and ?search=<text>
+├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<group id> and ?search=<text>
 │   set the store; hex://labs/<lab> also opens that lab's drawer. It never turns a lab on. An unknown
 │   or absent name -> the page opens and process.log notes it. hex://settings/<pane>
 │   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
 │   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
-├── Annotate is listed as a lab (App) wherever Hex has the Annotate pane; its switch flips capture.enabled
+├── Annotate is listed as a lab (Annotate group) wherever Hex has the Annotate pane; its switch flips capture.enabled
 └── Footer -> "Unfinished features. They may change or break.", Run setup again (replays the onboarding,
     below), Send feedback -> https://github.com/anomalyco/hex/issues/new
 
@@ -136,9 +150,10 @@ hex settings set labs.live_text true     // macOS: through the running Hex
 
 Checks: `rune_ui::deep_link` tests (parser, query, every feature's link reads
 back); the labs store tests in tests/panes.rs (links, card and drawer toggles,
-filters, ⌘F, a lone card's width) and the `mac-labs-link` golden (Linux). Scenes:
-`mac-labs`, `mac-labs-on`, `mac-labs-category`, `mac-labs-search`,
-`mac-labs-drawer`, `mac-labs-link`. Not yet observed: the store in a running
+filters, ⌘F, a lone card's width, group folds and each OS's groups) and the
+`mac-labs`, `mac-labs-link`, `windows-labs`, and `linux-labs` goldens (Linux).
+Scenes: `mac-labs`, `mac-labs-on`, `mac-labs-category`, `mac-labs-search`,
+`mac-labs-drawer`, `mac-labs-link`, `windows-labs`, `linux-labs`. Not yet observed: the store in a running
 Hex.
 
 Settings saved before this model may carry `labs.enabled`; it is read and
@@ -148,7 +163,9 @@ features on (`Labs` line on macOS, `labs` array in the macOS and Linux JSON,
 
 Every toggle applies at once, from the window or `hex labs on|off` (issue
 568, from @maharshi365): Live text is asked as each dictation starts and its
-plate is always installed (prewarmed only when Live text is on at launch);
+plate is always installed (prewarmed on macOS whatever the setting, so a
+plate turned on after launch never flashes the last dictation's words,
+#1075; elsewhere only when Live text is on at launch);
 the window always attaches the playground with Rune's own ⇧⌘D off, and its
 sidebar item, ⇧⌘D, the macOS View menu, and story links open it only while
 the toggle is on. Live chapters are read when a recording starts. Nothing
@@ -925,7 +942,7 @@ dictation through the ears on a Mac with the lab on (`hex dev hud` drives
 them in a debug build), and the failure glyph, which no render covers yet; the
 row renders only in macOS builds, so no golden changes.
 
-Screenshots (`screenshots`, macOS only, category App): for people who
+Screenshots (`screenshots`, macOS only, group Annotate): for people who
 miss CleanShot's ⌘⇧4. While on, the shortcut (`screenshots.hotkey`,
 default ⌘⇧4; the drawer's recorder changes it and refuses one another Hex
 shortcut uses) opens a second copy of Annotate's capture picker
@@ -1065,7 +1082,7 @@ tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
 symbolic hotkeys are dispatched, not tested). The row renders only in
 macOS builds, so the settings goldens don't change.
 
-Annotate 15 s replay (`annotate-replay`, macOS 27+ only, category App): keeps
+Annotate 15 s replay (`annotate-replay`, macOS 27+ only, group Annotate): keeps
 a rolling 15-second display buffer through `SCClipBufferingOutput` (resolved
 at run time through Objective-C, so macOS 26 and earlier neither link nor
 list it) while both `labs.annotate_replay` and `capture.enabled` are on and

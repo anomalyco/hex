@@ -28,13 +28,20 @@ pub(crate) enum LaunchWindow {
 }
 
 impl LaunchWindow {
+    /// `hidden` is `hex app --hidden`: menu-bar only, as on Linux and
+    /// Windows, even before setup, since the menu bar opens the window.
     pub(crate) fn decide(
+        hidden: bool,
         show_dock_icon: bool,
         setup_ready: bool,
         onboarding_completed: bool,
         status_item_available: bool,
     ) -> Self {
-        if !setup_ready || !onboarding_completed || !status_item_available {
+        if !status_item_available {
+            Self::Open
+        } else if hidden {
+            Self::Quiet
+        } else if !setup_ready || !onboarding_completed {
             Self::Open
         } else if show_dock_icon {
             Self::OpenUnlessLoginItem

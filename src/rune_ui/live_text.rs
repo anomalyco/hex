@@ -97,8 +97,10 @@ pub(crate) fn refollow_pointer() {
 pub(crate) type Place = fn() -> Spot;
 
 /// Adds the plate to the app. It shows only while a dictation publishes its
-/// text (Labs › Live text, applied at once), so it's prewarmed only when
-/// Live text is on at launch.
+/// text (Labs › Live text, applied at once). On macOS it's always
+/// prewarmed, since Live text may be turned on after launch and an
+/// unprewarmed plate reappears for a frame with the last dictation's words
+/// (#1075); elsewhere only when Live text is on at launch.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
     let spec = OverlaySpec {
         name: "Hex live text",
@@ -112,7 +114,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
         view,
     }
     .options(OverlayOptions {
-        prewarm: crate::labs::live_text(),
+        prewarm: cfg!(target_os = "macos") || crate::labs::live_text(),
         #[cfg(not(target_os = "macos"))]
         display: crate::rune_hud::display(),
         ..Default::default()

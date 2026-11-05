@@ -30,7 +30,9 @@ have detailed maps.
 automation (strobe's benches) read from the window, the HUD, and the capsules.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
-[Labs](labs.md) is one switch, on by default, for every unfinished feature.
+[Labs](labs.md) gives every unfinished feature its own switch, off by
+default, listed under collapsible groups (Dictation, Output, History,
+Meetings, Annotate, Shortcuts, Models) with only this OS's labs.
 Its Restore shortcut default toggle (off by default) puts a Restore default
 button beside Paste last dictation's shortcut (#613); its Sort and filter
 models toggle (off by default) adds a sort and a saved-language filter to the
@@ -786,6 +788,11 @@ General                                  // settings
 │       // Interface language System: macOS's first preferred language (zh-Hans -> 简体中文,
 │       // zh-Hant, zh-TW, zh-HK, zh-MO -> 繁體中文), Linux LC_ALL/LC_MESSAGES/LANG
 │       // (zh_TW.UTF-8 -> 繁體中文), Windows the user locale; unknown -> English
+│       // Text language (rune::text::set_language): 日本語 -> ja, 简体中文 -> zh-Hans,
+│       // 繁體中文 -> zh-Hant (zh-HK in Hong Kong/Macau); another interface on a
+│       // ja/ko/zh system locale -> that locale. Han text falls back to its fonts
+│       // (Hiragino Sans, Yu Gothic, Noto Sans CJK JP for ja) and shapes with its
+│       // locl forms (#1382)
 ├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Labs > Share dictation shortcut with other apps (Windows, off)
@@ -1252,6 +1259,8 @@ Menu bar and Settings                    // maintenance
 
 ```ts
 Launch Hex                               // maintain.startup
+├── `hex app --hidden` + usable menu-bar item -> No startup window, even before setup
+│   └── check: login_item_launch_starts_without_the_window (the decision only); not run on a Mac
 ├── Setup incomplete / permissions or model missing -> Open setup or Settings
 ├── Show Dock icon on -> Open Settings
 │   └── Started by Launch at login -> No startup window (#1321)

@@ -14,8 +14,10 @@ https://anoma.ly/release/hex/              the service (its dev stage, dev.anoma
       ├─ macos-arm64          Hex.zip         ditto zip, root Hex.app (updater)
       ├─ macos-arm64-dmg      Hex.dmg         notarized DMG (download page)
       ├─ windows-x64          hex.exe         bare executable (updater)
+      ├─ windows-x64-cli      hex.com         console entry point beside hex.exe (updater)
       ├─ windows-x64-setup    HexSetup.exe    Inno Setup installer (download page)
       ├─ windows-arm64        hex.exe
+      ├─ windows-arm64-cli    hex.com
       ├─ windows-arm64-setup  HexSetup.exe
       ├─ linux-x64            hex             bare executable (updater, installer, AUR)
       ├─ linux-x64-deb        hex.deb         Debian/Ubuntu package (package manager updates it)

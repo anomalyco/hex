@@ -17,6 +17,7 @@ for file in "$in"/*/*; do
       "hex-$v-linux-arm64" | "hex-$v-linux-arm64.deb" | "hex-$v-linux-arm64.rpm" | \
       "hex-$v-macos-arm64.zip" | "hex-$v-macos-arm64.dmg" | \
       "hex-$v-windows-x64.exe" | "hex-$v-windows-arm64.exe" | \
+      "hex-$v-windows-x64.com" | "hex-$v-windows-arm64.com" | \
       "hex-setup-$v-windows-x64.exe" | "hex-setup-$v-windows-arm64.exe") ;;
     *) die "$name is not a release file of Hex $v." ;;
   esac

@@ -43,8 +43,9 @@ updating itself from the Dev channel; afterwards, the stable release.
 
 [anoma.ly/hex](https://anoma.ly/hex/) picks the right one. The
 installer needs no administrator rights: it installs for the current user,
-adds Hex to the Start menu and to **Settings › Apps** for uninstalling, and
-opens Hex, whose first run downloads a speech model. Releases built once
+adds Hex to the Start menu, to **Settings › Apps** for uninstalling, and
+`hex` to PATH for terminals, and opens Hex, whose first run downloads a speech
+model. Releases built once
 Anomaly's Azure Artifact Signing is configured are Authenticode-signed
 ([windows-signing.md](windows-signing.md)). Until then, and while a new
 publisher builds SmartScreen reputation, SmartScreen may say it protected your
@@ -67,6 +68,16 @@ powershell -ExecutionPolicy Bypass -Command "iwr https://anoma.ly/hex/files/inst
 ```
 
 Uninstall a script install with `install-windows.ps1 -Uninstall`.
+
+The managed layout is `%APPDATA%\hex\versions\<version>\` holding `hex.exe`,
+the app, a GUI program so launching Hex opens no console window, and
+`hex.com`, its console entry point, which runs `hex.exe` with the same
+arguments, waits for it, and returns its exit code (`hex` and `hex app` only
+start the app and return). Shortcuts, Launch at login,
+and the Start menu open `hex.exe`. `%APPDATA%\hex\bin\hex.com`, a copy that
+runs the version `current-version` names, is on the user's PATH, and a
+terminal resolves `hex` to it before any `hex.exe` because PATHEXT lists
+`.COM` first. Terminals opened before the install need reopening to see PATH.
 
 ## Known Issues
 
@@ -175,8 +186,10 @@ discarded. `--device` accepts a case-insensitive fragment from `devices`.
 Runtime data is stored under `%APPDATA%\hex`. Observations are in
 `logs\live.ndjson`, and native/runtime diagnostics are in `logs\process.log`,
 including every panic with its thread and backtrace. A worker that stops
-unexpectedly leaves its cause there. The app detaches from its console at
-launch, so it has no stdout or stderr.
+unexpectedly leaves its cause there. `hex.exe` is a GUI program, so a launch
+from Explorer, the Start menu, or login opens no console window. Run from a
+terminal, it prints startup errors there, then the app leaves the terminal and
+has no stdout or stderr.
 Successful pasted dictations are retained, subject to the selected retention
 window and hard size limits, in `history.json`. Captured audio is never retained
 by default.

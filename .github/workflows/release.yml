@@ -309,7 +309,8 @@ jobs:
           name: sign-macos
           path: ${{ runner.temp }}/out
 
-  # Authenticode-signs both executables through Azure Artifact Signing.
+  # Authenticode-signs both architectures' hex.exe and hex.com through Azure
+  # Artifact Signing.
   # Without the Azure values, dev and check go on without Windows; stable
   # fails.
   sign-windows:
@@ -362,7 +363,7 @@ jobs:
         if: steps.credentials.outputs.available == 'true'
         run: |
           temp=$(cygpath -u "$RUNNER_TEMP")
-          mkdir -p "$temp/work" && cp "$temp"/in/build-windows-*/*.exe "$temp/work/"
+          mkdir -p "$temp/work" && cp "$temp"/in/build-windows-*/*.exe "$temp"/in/build-windows-*/*.com "$temp/work/"
       - &azure-login
         name: Sign in to Azure
         if: steps.credentials.outputs.available == 'true'
@@ -380,7 +381,7 @@ jobs:
           signing-account-name: ${{ env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
           files-folder: ${{ runner.temp }}\work
-          files-folder-filter: exe
+          files-folder-filter: exe,com
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256

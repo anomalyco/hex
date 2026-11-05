@@ -1,0 +1,13 @@
+[package]
+name = "hex-console"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "hex.com: the console entry point beside the GUI hex.exe on Windows"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+[lints]
+workspace = true

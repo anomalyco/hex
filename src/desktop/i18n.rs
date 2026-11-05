@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 mod french;
 mod portuguese;
 mod russian;
+mod text_language;
 mod traditional_chinese;
 
 /// A persisted interface-language code (`None` follows the system) and its
@@ -100,11 +101,15 @@ fn column_for_code(code: &str) -> u8 {
 /// Resolve and activate the persisted language choice; `None` follows the
 /// system locale. Safe to call again whenever the setting changes.
 pub(crate) fn apply(setting: Option<&str>) {
+    let locale = preferred_locale();
     let code = match setting {
         Some(code) => column_for_code(code),
-        None => column_for_language_tag(&preferred_locale()),
+        None => column_for_language_tag(&locale),
     };
     set_current(code);
+    // Tests keep a language per thread; Rune's is the process's.
+    #[cfg(not(test))]
+    rune::text::set_language(text_language::for_interface(code, &locale));
 }
 
 /// The column for a system locale such as `zh-Hans-CN`, `zh_TW.UTF-8`, or
@@ -1419,11 +1424,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Turned on · {}", ["Włączone · {}", "已开启 · {}", "オン · {}", "Aktiviert · {}", "Activados · {}", "Увімкнені · {}"]),
     ("Search {} labs", ["Szukaj wśród {} eksperymentów", "搜索 {} 项实验功能", "{} 件のラボを検索", "{} Labs durchsuchen", "Buscar en {} labs", "Пошук серед {} експериментів"]),
     ("All", ["Wszystkie", "全部", "すべて", "Alle", "Todos", "Усі"]),
-    ("Clipboard", ["Schowek", "剪贴板", "クリップボード", "Zwischenablage", "Portapapeles", "Буфер обміну"]),
     ("Models", ["Modele", "模型", "モデル", "Modelle", "Modelos", "Моделі"]),
-    ("App", ["Aplikacja", "应用", "アプリ", "App", "App", "Застосунок"]),
     ("New in Labs", ["Nowości w Laboratorium", "实验室新功能", "ラボの新機能", "Neu in Labs", "Novedades en Labs", "Нове в Лабораторії"]),
-    ("All labs", ["Wszystkie eksperymenty", "全部实验功能", "すべてのラボ", "Alle Labs", "Todos los labs", "Усі експерименти"]),
     ("New", ["Nowe", "新", "新着", "Neu", "Nuevo", "Нове"]),
     ("On", ["Wł.", "已开", "オン", "An", "Activado", "Увімк."]),
     ("Unfinished features. They may change or break.", ["Niedokończone funkcje. Mogą się zmienić lub zepsuć.", "未完成的功能，可能会变化或出错。", "未完成の機能です。変更されたり動かなくなったりすることがあります。", "Unfertige Funktionen. Sie können sich ändern oder kaputtgehen.", "Funciones sin terminar. Pueden cambiar o fallar.", "Незавершені функції. Вони можуть змінитися або зламатися."]),
@@ -1647,7 +1649,7 @@ mod tests {
         include_str!("../rune_ui/history.rs"),
         include_str!("../rune_ui/hud_lab.rs"),
         include_str!("../rune_ui/labs.rs"),
-        include_str!("../rune_ui/labs/category.rs"),
+        include_str!("../rune_ui/labs/group.rs"),
         include_str!("../rune_ui/labs/drawer.rs"),
         include_str!("../rune_ui/labs/screenshots.rs"),
         include_str!("../rune_ui/labs/store.rs"),

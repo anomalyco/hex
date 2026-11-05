@@ -1,19 +1,19 @@
 //! Labs: one sidebar item that opens a store of every Labs feature
-//! (`crate::labs`), each off by default. Discover shows what's new and
-//! every lab as a card, Turned on what's on, and a card opens a drawer that
+//! (`crate::labs`), each off by default. Discover shows what's new, then
+//! every lab as a card under its group's collapsible header, Turned on
+//! what's on, and a card opens a drawer that
 //! says where the lab shows up. A feature with its own pane (Meetings,
 //! Voice Filter, Playground) joins the main sidebar while on and is hidden
 //! while off.
 
-mod category;
 mod drawer;
+mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
 mod screenshots;
 mod store;
 
 use rune::{El, Icon, TextEdit, Tx, row, text};
 
-pub(super) use self::category::Category;
 pub(super) use self::drawer::drawer;
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
@@ -21,7 +21,7 @@ use super::icons::{BOOK, CAMERA, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIM
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
 use crate::desktop::i18n::{tr, tr_fill};
-use crate::labs::Feature;
+use crate::labs::{Feature, Group};
 
 pub(super) static LABS_ICON: Icon = Icon {
     name: "hex-labs",
@@ -192,7 +192,8 @@ pub(super) enum Tab {
 pub(super) struct Store {
     pub(super) search: TextEdit,
     pub(super) tab: Tab,
-    pub(super) category: Option<Category>,
+    /// The chip selected: only this group's labs show.
+    pub(super) group: Option<Group>,
     pub(super) drawer: Option<Lab>,
 }
 
@@ -236,8 +237,8 @@ pub(super) fn reveal(ui: &mut Ui, link: &LabsLink, tx: &mut Tx) {
         Tab::Discover
     };
     if let Some(id) = &link.category {
-        match Category::from_id(id) {
-            Some(category) => store.category = Some(category),
+        match Group::from_id(id) {
+            Some(group) => store.group = Some(group),
             None => tracing::warn!(category = %id, "a Labs link named no category"),
         }
     }
@@ -282,7 +283,7 @@ struct Row {
     /// Can't be switched: on while an installed Hex Microphone driver or
     /// the dictation model needs it, off under an organization's lock.
     locked: bool,
-    category: Category,
+    group: Group,
 }
 
 /// The labs this OS and build show, in the store's order.
@@ -298,15 +299,15 @@ fn rows(ui: &Ui) -> Vec<Row> {
     let settings = &ui.settings;
     let row = |feature: Feature, icon: Option<&'static Icon>, title, about| {
         let lab = Lab::Feature(feature);
-        let category = Category::of(lab);
+        let group = feature.group();
         Row {
             lab,
-            icon: icon.unwrap_or_else(|| category.icon()),
+            icon: icon.unwrap_or_else(|| group::icon(group)),
             title,
             about,
             on: feature.on(settings),
             locked: false,
-            category,
+            group,
         }
     };
     // An organization's lock shows the row off, disabled, and says why.
@@ -705,7 +706,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
             },
             on: !locked && ui.settings.capture.enabled,
             locked,
-            category: Category::of(Lab::Annotate),
+            group: Group::Annotate,
         });
     }
     rows
@@ -775,7 +776,12 @@ fn flip(ui: &mut Ui, lab: Lab) {
     let feature = match lab {
         Lab::Feature(feature) => feature,
         #[cfg(hex_capture)]
-        Lab::Annotate => return super::scrawl::toggle(ui),
+        Lab::Annotate => {
+            if ui.settings.capture.enabled {
+                group::keep_open(ui, Group::Annotate);
+            }
+            return super::scrawl::toggle(ui);
+        }
     };
     if feature.managed().is_some() {
         return;
@@ -787,6 +793,9 @@ fn flip(ui: &mut Ui, lab: Lab) {
     // Parakeet Ultra stays on while it dictates; its card says why.
     if !on && feature.off_refusal(&ui.settings).is_some() {
         return;
+    }
+    if !on {
+        group::keep_open(ui, feature.group());
     }
     ui.update(|settings| feature.set(settings, on));
     match feature {

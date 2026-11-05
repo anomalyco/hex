@@ -266,7 +266,7 @@ mod windows {
         let staging = updates.join("hex.exe.staging");
         let _ = fs::remove_file(&staging);
         fs::copy(std::env::current_exe()?, &staging).wrap_err("could not copy Hex")?;
-        let executable = super::super::platform::activate(root, crate::VERSION, &staging)?;
+        let executable = super::super::platform::activate(root, crate::VERSION, &staging, None)?;
         write_receipt(root)?;
         if super::super::receipt_channel(root).is_none() {
             bail!("the managed install's receipt does not verify");

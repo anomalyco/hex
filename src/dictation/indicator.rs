@@ -101,7 +101,10 @@ mod macos {
 
     impl DictationIndicatorSender {
         pub fn send(&self, event: DictationIndicatorEvent) {
-            let _ = self.0.send(event);
+            if self.0.send(event).is_ok() {
+                // The pump idles between events; this wakes it at once.
+                crate::macos_rune::wake_pump();
+            }
         }
 
         pub fn meter(&self, samples: &[f32]) {
