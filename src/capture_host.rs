@@ -271,6 +271,10 @@ pub enum TargetKind {
 pub enum CaptureCommand {
     /// Starts a capture on the picker's pick; nothing while one records.
     Start(CaptureTarget),
+    /// Labs › Screenshots' recording: a capture of `target` that, once
+    /// written, goes to the screenshot card ([`on_clip_written`]) rather
+    /// than the clipboard and the router.
+    Clip(CaptureTarget),
     /// Looks for a cabled iPhone off the listener's thread;
     /// [`CaptureSnapshot::phone`] follows. Each start also looks.
     FindPhone,
@@ -1025,6 +1029,8 @@ struct Active {
     collector: JoinHandle<()>,
     /// "While dictating", held until the capture stops.
     quiet: Option<Quiet>,
+    /// A Screenshots recording ([`CaptureCommand::Clip`]).
+    clip: bool,
 }
 
 /// A stopped capture and its audio, waiting for the finisher.
@@ -1068,6 +1074,9 @@ pub struct RecordingCapture {
     /// The capture recorded a click, scroll, or ink stroke: the person got
     /// to work, so the capsule's switch chips fold.
     pub worked: bool,
+    /// A Screenshots recording: once stopped, the screenshot card shows it
+    /// and the capsule folds.
+    pub clip: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1237,6 +1246,8 @@ struct Unfinished {
     /// Dropped for another target: views never see it again, and it
     /// settles no outcome.
     discarded: bool,
+    /// A Screenshots recording ([`CaptureCommand::Clip`]).
+    clip: bool,
 }
 
 impl Default for Outcomes {
@@ -1271,6 +1282,10 @@ impl Outcomes {
     }
 
     fn started(&mut self, bundle: PathBuf, since: CaptureInstant, target: TargetKind) {
+        self.start(bundle, since, target, false);
+    }
+
+    fn start(&mut self, bundle: PathBuf, since: CaptureInstant, target: TargetKind, clip: bool) {
         self.unfinished.push(Unfinished {
             bundle,
             since,
@@ -1279,8 +1294,16 @@ impl Outcomes {
             target,
             worked: false,
             discarded: false,
+            clip,
         });
         self.publish();
+    }
+
+    /// Whether `bundle` is a Screenshots recording still unsettled.
+    fn is_clip(&self, bundle: &Path) -> bool {
+        self.unfinished
+            .iter()
+            .any(|unfinished| unfinished.bundle == bundle && unfinished.clip)
     }
 
     fn stopped(&mut self, bundle: &Path, end: End) {
@@ -1411,6 +1434,7 @@ impl Outcomes {
                         screen: unfinished.screen,
                         target: unfinished.target,
                         worked: unfinished.worked,
+                        clip: unfinished.clip,
                     });
                 }
                 Some((stage, cancelling)) => snapshot.finishing.push(FinishingCapture {
@@ -1751,13 +1775,17 @@ impl CaptureHost {
         let now = CaptureInstant::now();
         self.reap(now, audio);
         let result = match action {
-            ScrawlCaptureAction::Start => self.begin(now, audio, CaptureTarget::Pointer, None),
+            ScrawlCaptureAction::Start => {
+                self.begin(now, audio, CaptureTarget::Pointer, None, false)
+            }
             ScrawlCaptureAction::Stop => self.end(now, audio, End::Finish),
             ScrawlCaptureAction::Cancel => self.end(now, audio, End::Cancel),
             ScrawlCaptureAction::Toggle if self.recording_since(audio).is_some() => {
                 self.end(now, audio, End::Finish)
             }
-            ScrawlCaptureAction::Toggle => self.begin(now, audio, CaptureTarget::Pointer, None),
+            ScrawlCaptureAction::Toggle => {
+                self.begin(now, audio, CaptureTarget::Pointer, None, false)
+            }
             ScrawlCaptureAction::Status => Ok(self.report(false, None)),
             ScrawlCaptureAction::Replay => {
                 let busy = self.active.is_some();
@@ -1784,7 +1812,8 @@ impl CaptureHost {
         let now = CaptureInstant::now();
         self.reap(now, audio);
         let result = match command {
-            CaptureCommand::Start(target) => self.begin(now, audio, target, None),
+            CaptureCommand::Start(target) => self.begin(now, audio, target, None, false),
+            CaptureCommand::Clip(target) => self.begin(now, audio, target, None, true),
             CaptureCommand::FindPhone => {
                 self.find_phone();
                 Ok(self.report(false, None))
@@ -1900,9 +1929,10 @@ impl CaptureHost {
         let discarded = self.active.as_ref().map(|active| active.bundle.clone());
         // Output stays muted or media paused from one capture to the next.
         let quiet = self.active.as_mut().and_then(|active| active.quiet.take());
+        let clip = self.active.as_ref().is_some_and(|active| active.clip);
         let switched = self
             .end(now, audio, End::Discard)
-            .and_then(|_| self.begin(now, audio, target, quiet));
+            .and_then(|_| self.begin(now, audio, target, quiet, clip));
         let mut outcomes = lock(&self.outcomes);
         if let (Some(bundle), true) = (discarded, self.active.is_none()) {
             let error = match &switched {
@@ -1948,13 +1978,15 @@ impl CaptureHost {
     }
 
     /// Starts a capture, holding "While dictating" with `quiet` when a
-    /// switch carries the previous capture's session over.
+    /// switch carries the previous capture's session over; `clip` makes it
+    /// a Screenshots recording.
     fn begin(
         &mut self,
         now: CaptureInstant,
         audio: &impl AudioTimeline,
         target: CaptureTarget,
         quiet: Option<Quiet>,
+        clip: bool,
     ) -> Result<ControlReply> {
         if self.active.is_some() || self.replay.is_narrating() {
             return Ok(self.report(false, None));
@@ -1988,7 +2020,7 @@ impl CaptureHost {
         }
         // Unfinished from here until its collector or the finisher settles
         // it, whatever stop or cancel does meanwhile.
-        lock(&self.outcomes).started(bundle.clone(), now, target.kind());
+        lock(&self.outcomes).start(bundle.clone(), now, target.kind(), clip);
         self.input.recording(Some(&bundle));
         let (seal, sealed) = mpsc::sync_channel(1);
         let collector = {
@@ -2021,6 +2053,7 @@ impl CaptureHost {
             seal,
             collector,
             quiet: quiet.or_else(|| self.quiet()),
+            clip,
         });
         self.find_phone();
         Ok(self.report(true, None))
@@ -3265,7 +3298,15 @@ fn finish_captures(
         let finished = capture.finish(audio);
         let look = look.recv().ok();
         restrict_bundle(&bundle);
+        let clip = lock(outcomes).is_clip(&bundle);
         match finished {
+            Ok(written) if clip => {
+                tracing::info!(bundle = %bundle.display(), words = written.words, "recording finished");
+                lock(outcomes).settle(bundle.clone(), Stage::Done, Some(written));
+                if let Some(written) = CLIP_WRITTEN.get() {
+                    written(bundle);
+                }
+            }
             Ok(written) => {
                 tracing::info!(
                     bundle = %bundle.display(),
@@ -3293,6 +3334,17 @@ fn finish_captures(
             }
         }
     }
+}
+
+/// Who learns of each written Screenshots recording, on the
+/// `capture-finish` thread: it must only hand the bundle on.
+static CLIP_WRITTEN: OnceLock<fn(PathBuf)> = OnceLock::new();
+
+/// Sends each written Screenshots recording to `written`; the first caller
+/// wins.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn on_clip_written(written: fn(PathBuf)) {
+    let _ = CLIP_WRITTEN.set(written);
 }
 
 /// What the capsule's Paste and Inspect do with the newest written capture.
@@ -3450,7 +3502,11 @@ fn collect(
         }
     };
     let mut timeline = Timeline::new(t0);
-    let prepared = capture.route_context().and_then(routing::look);
+    // A Screenshots recording goes to its card, never the router.
+    let routed = !lock(outcomes).is_clip(&bundle);
+    let prepared = routed
+        .then(|| capture.route_context().and_then(routing::look))
+        .flatten();
     let mut checked = Instant::now();
     loop {
         let chunk = match chunks.recv_timeout(SCREEN_CHECK) {
@@ -3505,7 +3561,9 @@ fn collect(
                 Ok(()) => {
                     // Reuse recording-time preparation; adapters without an
                     // early context start their look once the capture queues.
-                    if let Some(look) = prepared.or_else(|| context.and_then(routing::look)) {
+                    if let Some(look) = prepared
+                        .or_else(|| routed.then(|| context.and_then(routing::look)).flatten())
+                    {
                         let _ = give_look.send(look);
                     }
                     return;
@@ -5422,6 +5480,7 @@ mod tests {
                 screen: false,
                 target: TargetKind::Pointer,
                 worked: false,
+                clip: false,
             })
         );
         outcomes.progress(&one, Stage::Recording);

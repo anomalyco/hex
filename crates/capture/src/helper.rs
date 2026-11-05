@@ -304,6 +304,30 @@ pub fn shrink(movie: &Path, out: &Path, max_edge: u32) -> Result<crate::retentio
     )
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Trimmed {
+    pub duration_ms: u64,
+}
+
+/// Copies `movie` from `from_ms` to `to_ms` into `out` as an MPEG-4, without re-encoding.
+pub fn trim(movie: &Path, out: &Path, from_ms: u64, to_ms: u64) -> Result<Trimmed> {
+    let (from, to) = (from_ms.to_string(), to_ms.to_string());
+    run(
+        &[
+            os("trim"),
+            movie.as_os_str(),
+            os("--out"),
+            out.as_os_str(),
+            os("--from"),
+            os(&from),
+            os("--to"),
+            os(&to),
+        ],
+        Duration::from_secs(300),
+    )
+}
+
 /// Mixes a movie's audio to 16 kHz mono WAV, aligned to the movie's start.
 pub fn export_audio(movie: &Path, wav: &Path) -> Result<()> {
     let _: serde_json::Value = run(

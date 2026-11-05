@@ -5,6 +5,10 @@
 //! a few seconds on, unless the pointer is on it or someone talks over it:
 //! a dictation while it shows opens the shot in the editor with the words
 //! (`screenshots::narration`).
+//!
+//! A Screenshots recording lands here too, as its first frame with its
+//! length; a click opens it in the editor to trim, and a drag carries out
+//! its movie.
 
 pub(crate) mod editor;
 
@@ -69,10 +73,19 @@ fn shown() -> std::sync::MutexGuard<'static, Option<PathBuf>> {
 
 /// The shot the card shows.
 pub(crate) struct Shot {
+    /// The PNG, or a recording's capture folder.
     pub(crate) path: PathBuf,
     pub(crate) image: rune::Image,
     /// Its size in pixels.
     pub(crate) size: [u32; 2],
+    pub(crate) recording: Option<Recording>,
+}
+
+/// What a recording's card adds to its first frame.
+#[derive(Clone, Debug)]
+pub(crate) struct Recording {
+    pub(crate) movie: PathBuf,
+    pub(crate) duration_ms: u64,
 }
 
 #[derive(Default)]
@@ -113,8 +126,10 @@ impl Card {
     }
 
     fn open(&mut self, tx: &mut Tx) {
-        if let Some(shot) = &self.shot {
-            editor::open(shot.path.clone());
+        match &self.shot {
+            Some(shot) if shot.recording.is_some() => editor::open_recording(shot.path.clone()),
+            Some(shot) => editor::open(shot.path.clone()),
+            None => {}
         }
         self.close(tx);
     }
@@ -197,6 +212,31 @@ impl Thumbnail {
     /// already small), in place of any before it. Safe from any thread;
     /// waits for the decode.
     pub(crate) fn show(&self, path: PathBuf, width: u32, height: u32, rgba: Vec<u8>) {
+        self.present(path, None, width, height, rgba);
+    }
+
+    /// Shows the recording in the capture folder `bundle`, from its first
+    /// frame, as [`Self::show`] does a shot. Nothing talks over it: it
+    /// already has its words.
+    pub(crate) fn show_recording(
+        &self,
+        bundle: PathBuf,
+        recording: Recording,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    ) {
+        self.present(bundle, Some(recording), width, height, rgba);
+    }
+
+    fn present(
+        &self,
+        path: PathBuf,
+        recording: Option<Recording>,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    ) {
         let images = rune::ImageCache::new(std::sync::Arc::new(|| {}));
         let image = images.rgba(width, height, rgba);
         if image.wait().is_err() {
@@ -204,12 +244,13 @@ impl Thumbnail {
         }
         let handle = self.overlay.clone();
         self.overlay.update(move |s, tx| {
-            *shown() = Some(path.clone());
+            *shown() = recording.is_none().then(|| path.clone());
             s.listen = Listen::Idle;
             s.shot = Some(Shot {
                 path,
                 image,
                 size: [width, height],
+                recording,
             });
             s.on = true;
             s.hovered = false;
@@ -285,9 +326,13 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .cursor(Cursor::Pointer)
         .on_press_tx(|s: &mut Card, tx| s.open(tx))
         .drag_out(|s: &Card| {
-            s.shot
-                .as_ref()
-                .map(|shot| rune::DragItem::new().file(shot.path.clone()))
+            s.shot.as_ref().map(|shot| {
+                let file = shot
+                    .recording
+                    .as_ref()
+                    .map_or(&shot.path, |recording| &recording.movie);
+                rune::DragItem::new().file(file.clone())
+            })
         })
         .child(
             el().absolute(0.0, 0.0)
@@ -308,7 +353,11 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .opacity_motion(FADE);
     // In from past the display's right edge, leaning back about the corner
     // it rests in, and out the same way; Reduce Motion only fades.
-    let listening = listening(p, s.listen).map(|pill| {
+    let length = shot
+        .recording
+        .as_ref()
+        .map(|recording| length(p, recording.duration_ms));
+    let listening = listening(p, s.listen).or(length).map(|pill| {
         pill.key("listening")
             .absolute(PAD + CLOSE_INSET, PAD + h - CLOSE_INSET - LISTEN_H)
     });
@@ -344,15 +393,19 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
     })
 }
 
-/// The pill on the card while someone talks over it: the recording dot and
-/// "Listening…", then "Processing…".
-fn listening(p: Paint, listen: Listen) -> Option<El> {
+/// A recording's length, in the pill's place.
+fn length(p: Paint, duration_ms: u64) -> El {
+    pill(p).child(
+        rune::text(editor::clip::duration_label(duration_ms))
+            .font(super::capture_capsule::surface::small())
+            .color(p.text())
+            .single_line(),
+    )
+}
+
+/// The card's pill: the listening one's, or a recording's length.
+fn pill(p: Paint) -> El {
     let k = p.k;
-    let (dot, label) = match listen {
-        Listen::Idle => return None,
-        Listen::Recording => (Some(p.danger()), tr("Listening…")),
-        Listen::Transcribing => (None, super::capture_capsule::surface::processing()),
-    };
     let mut pill = rune::row()
         .h(LISTEN_H)
         .px(8.0)
@@ -363,6 +416,18 @@ fn listening(p: Paint, listen: Listen) -> Option<El> {
     for shadow in &k.elevation.floating {
         pill = pill.box_shadow(*shadow);
     }
+    pill
+}
+
+/// The pill on the card while someone talks over it: the recording dot and
+/// "Listening…", then "Processing…".
+fn listening(p: Paint, listen: Listen) -> Option<El> {
+    let (dot, label) = match listen {
+        Listen::Idle => return None,
+        Listen::Recording => (Some(p.danger()), tr("Listening…")),
+        Listen::Transcribing => (None, super::capture_capsule::surface::processing()),
+    };
+    let mut pill = pill(p);
     if let Some(dot) = dot {
         pill = pill.child(status_dot(dot));
     }
@@ -392,6 +457,7 @@ mod tests {
             path: PathBuf::from("/tmp/Hex Screenshot.png"),
             image,
             size,
+            recording: None,
         }
     }
 
@@ -420,6 +486,7 @@ mod tests {
             path: PathBuf::from("/tmp/Hex Screenshot.png"),
             image,
             size,
+            recording: None,
         }
     }
 
@@ -469,17 +536,23 @@ mod tests {
         };
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
         let mut misses = Vec::new();
-        for (name, hovered, listen) in [
-            ("rest", false, Listen::Idle),
-            ("hover", true, Listen::Idle),
-            ("listening", false, Listen::Recording),
+        for (name, hovered, listen, recording) in [
+            ("rest", false, Listen::Idle, false),
+            ("hover", true, Listen::Idle, false),
+            ("listening", false, Listen::Recording, false),
+            ("recording", false, Listen::Idle, true),
         ] {
             for dark in [false, true] {
                 let theme = if dark { "dark" } else { "light" };
                 let name = format!("screenshot-thumbnail-{name}-{theme}");
+                let mut shot = desktop([1440, 900]);
+                shot.recording = recording.then(|| Recording {
+                    movie: PathBuf::from("/tmp/recording.mp4"),
+                    duration_ms: 12_400,
+                });
                 let card = Card {
                     listen,
-                    ..Card::still(desktop([1440, 900]), hovered)
+                    ..Card::still(shot, hovered)
                 };
                 let (w, h, pixels) = render(&gpu, card, dark);
                 if let Some(renders) = std::env::var_os("HEX_GOLDEN_RENDERS") {

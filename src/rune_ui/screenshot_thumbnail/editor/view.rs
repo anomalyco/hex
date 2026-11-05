@@ -9,6 +9,7 @@ use rune::{
 };
 use rune_kit::{Button, ButtonVariant, ControlSize};
 
+use super::clip::{Clip, duration_label};
 use super::marks::{self, Mark, Tool};
 use super::{
     Editor, Layout, Listen, Out, PAD, SendList, Sessions, Shot, Talk, clamp_panel, matching, talk,
@@ -77,7 +78,7 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
         .w_full()
         .h_full()
         .hover_motion_within(Anim::INSTANT, Anim::INSTANT);
-    let Some(shot) = s.shot.as_ref().filter(|_| s.on) else {
+    let Some(shot) = s.picture().filter(|_| s.on) else {
         return root;
     };
     let k = p.k;
@@ -90,7 +91,11 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
         .radius(RADIUS)
         .fill(k.c.bg_base)
         .role("dialog")
-        .label(tr("Screenshot"));
+        .label(if s.clip.is_some() {
+            tr("Screen recording")
+        } else {
+            tr("Screenshot")
+        });
     for shadow in &k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
@@ -133,8 +138,11 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
                 .border(p.hair, k.c.border_weak),
         )
         .child(toolbar(p, s, w - 2.0 * PAD).absolute(PAD, PAD))
-        .child(canvas_el(p, s, shot, layout))
-        .child(words_el(p, s, layout));
+        .child(canvas_el(p, s, shot, layout));
+    if let Some(clip) = &s.clip {
+        panel = panel.child(strip_el(p, clip, layout));
+    }
+    let mut panel = panel.child(words_el(p, s, layout));
     if let Some(list) = &s.send {
         panel = panel.child(send_list(p, list).absolute(w - PAD - LIST_W, PAD + CHIP_H + 4.0));
     }
@@ -160,17 +168,22 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
         .fill(k.c.layer_02)
         .pixels_fit(shot.image.pixels(), rune::SurfaceFit::Fit)
         .clip_rounded(INNER_RADIUS)
-        .instant_changes()
-        .hit()
-        .cursor(cursor)
-        .on_drag(move |s: &mut Editor, d: &mut Drag, tx: &mut Tx| {
-            if d.phase == Phase::Down {
-                s.send = None;
-                s.keys();
-            }
-            s.draw(d.phase, [d.x / fit, d.y / fit]);
-            tx.wake_after(Duration::ZERO);
-        });
+        .instant_changes();
+    // A recording's frame takes no marks.
+    if s.clip.is_none() {
+        image =
+            image
+                .hit()
+                .cursor(cursor)
+                .on_drag(move |s: &mut Editor, d: &mut Drag, tx: &mut Tx| {
+                    if d.phase == Phase::Down {
+                        s.send = None;
+                        s.keys();
+                    }
+                    s.draw(d.phase, [d.x / fit, d.y / fit]);
+                    tx.wake_after(Duration::ZERO);
+                });
+    }
     let marks = s
         .marks
         .iter()
@@ -231,11 +244,23 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
 }
 
 /// The tools on the left; a note, Copy, Save, Send to…, and ✕ on the
-/// right. Its empty middle moves the panel.
+/// right. Its empty middle moves the panel. A recording has the span kept
+/// in place of the tools, and no Copy: Save is its main action.
 fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
     let k = p.k;
     let mut bar = row().center_y().gap(2.0).size(w, CHIP_H);
-    for tool in Tool::ALL {
+    if let Some(clip) = &s.clip {
+        let [from, to] = clip.trim;
+        bar = bar.child(
+            text(format!("{} – {}", duration_label(from), duration_label(to)))
+                .key("span")
+                .font(medium())
+                .color(p.muted())
+                .single_line()
+                .px(CHIP_PX - 4.0),
+        );
+    }
+    for tool in Tool::ALL.into_iter().filter(|_| s.clip.is_none()) {
         let lit = s.tool == tool;
         let ink = if lit { p.text() } else { p.muted() };
         let mut chip = chip(p)
@@ -268,16 +293,23 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
                     .truncate(),
             ),
     );
+    if s.clip.is_none() {
+        bar = bar.child(push(
+            k,
+            Button::new(tr("Copy"))
+                .variant(ButtonVariant::Contrast)
+                .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Copy, tx)),
+        ));
+    }
+    let save = if s.clip.is_some() {
+        ButtonVariant::Contrast
+    } else {
+        ButtonVariant::Ghost
+    };
     bar.child(push(
         k,
-        Button::new(tr("Copy"))
-            .variant(ButtonVariant::Contrast)
-            .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Copy, tx)),
-    ))
-    .child(push(
-        k,
         Button::new(tr("Save"))
-            .variant(ButtonVariant::Ghost)
+            .variant(save)
             .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Save, tx)),
     ))
     .child(push(
@@ -304,6 +336,27 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
 fn words_el(p: Paint, s: &Editor, layout: Layout) -> El {
     let k = p.k;
     let [x, y, w, h] = layout.words;
+    if s.clip.is_some() {
+        let words = s.words();
+        let words = if words.is_empty() {
+            text(tr("Nothing was said")).color(p.faint())
+        } else {
+            text(words.into_owned()).color(p.text())
+        };
+        return row()
+            .key("words")
+            .absolute(x, y)
+            .size(w, h)
+            .py(super::WORDS_PY)
+            .center_y()
+            .child(
+                words
+                    .font(medium())
+                    .max_lines(super::WORDS_LINES)
+                    .grow(1.0)
+                    .min_w(0.0),
+            );
+    }
     let recording = s.listen == Listen::Recording;
     let mic_label = if recording {
         tr("Finish talking")
@@ -377,6 +430,90 @@ fn words_el(p: Paint, s: &Editor, layout: Layout) -> El {
         );
     }
     bar
+}
+
+/// A handle's width, at each end of the span kept.
+const HANDLE_W: f32 = 8.0;
+
+/// A recording's filmstrip: its frames side by side, the span kept framed
+/// between two handles and the rest shaded. A drag moves the nearer handle
+/// and shows the frame there above.
+fn strip_el(p: Paint, clip: &Clip, layout: Layout) -> El {
+    let k = p.k;
+    let [x, y, w, h] = layout.strip;
+    let duration = clip.duration_ms.max(1) as f32;
+    let at = |ms: u64| (ms as f32 / duration * w).clamp(0.0, w).round();
+    let cell = w / clip.frames.len().max(1) as f32;
+    let mut strip = el()
+        .key("strip")
+        .absolute(x, y)
+        .size(w, h)
+        .radius(INNER_RADIUS)
+        .fill(k.c.layer_02)
+        .clip_rounded(INNER_RADIUS)
+        .instant_changes();
+    for (i, (_, frame)) in clip.frames.iter().enumerate() {
+        strip = strip.child(
+            el().absolute((i as f32 * cell).floor(), 0.0)
+                .size(cell.ceil() + 1.0, h)
+                .pixels_fit(frame.image.pixels(), rune::SurfaceFit::Fill),
+        );
+    }
+    let (a, b) = (at(clip.trim[0]), at(clip.trim[1]));
+    let shade = k.alpha(k.c.black, 0.55);
+    if a > 0.0 {
+        strip = strip.child(el().absolute(0.0, 0.0).size(a, h).fill(shade));
+    }
+    if b < w {
+        strip = strip.child(el().absolute(b, 0.0).size(w - b, h).fill(shade));
+    }
+    strip = strip.child(
+        el().key("span")
+            .absolute(a, 0.0)
+            .size((b - a).max(2.0 * HANDLE_W), h)
+            .radius(INNER_RADIUS)
+            .border(2.0, p.text()),
+    );
+    for (key, left) in [("start", a), ("end", b - HANDLE_W)] {
+        strip = strip.child(
+            el().key(key)
+                .absolute(left.clamp(0.0, (w - HANDLE_W).max(0.0)), 0.0)
+                .size(HANDLE_W, h)
+                .radius(INNER_RADIUS.min(HANDLE_W * 0.5))
+                .fill(p.text())
+                .child(
+                    el().absolute(HANDLE_W * 0.5 - 0.75, h * 0.5 - 7.0)
+                        .size(1.5, 14.0)
+                        .radius(0.75)
+                        .fill(k.c.bg_base),
+                ),
+        );
+    }
+    strip
+        .child(
+            el().absolute(0.0, 0.0)
+                .size(w, h)
+                .radius(INNER_RADIUS)
+                .border(p.hair, k.alpha(k.c.text_base, 0.14)),
+        )
+        .hit()
+        .cursor(Cursor::ResizeColumn)
+        .role("slider")
+        .label(tr("Trim"))
+        .on_drag(move |s: &mut Editor, d: &mut Drag, tx: &mut Tx| {
+            s.send = None;
+            if let Some(clip) = &mut s.clip {
+                let ms = ((d.x / w).clamp(0.0, 1.0) * clip.duration_ms as f32).round() as u64;
+                let handle = match (d.phase, clip.holding) {
+                    (Phase::Down, _) | (_, None) => clip.nearer(ms),
+                    (_, Some(handle)) => handle,
+                };
+                clip.holding = (d.phase != Phase::Up).then_some(handle);
+                clip.drag(handle, ms);
+            }
+            tx.instant();
+            tx.wake_after(Duration::ZERO);
+        })
 }
 
 /// A toolbar chip: the capsule's chip height, its hover and press.

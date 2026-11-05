@@ -1491,6 +1491,12 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", ["macOS przechwytuje ten skrót pierwszy. Wyłącz jego skróty zrzutów ekranu w Skróty klawiszowe › Zrzuty ekranu albo wybierz inny", "macOS 会先占用这个快捷键。请在“键盘快捷键 › 截屏”中关闭它的截屏快捷键，或换一个", "このショートカットは macOS が先に使います。「キーボードショートカット › スクリーンショット」で macOS のショートカットをオフにするか、別のものを選んでください", "macOS belegt dieses Kürzel zuerst. Schalte seine Bildschirmfoto-Kürzel unter Tastaturkurzbefehle › Bildschirmfotos aus oder wähle ein anderes", "macOS usa este atajo primero. Desactiva sus atajos de captura en Funciones rápidas de teclado › Capturas de pantalla o elige otro", "macOS перехоплює цю комбінацію першою. Вимкніть її комбінації для знімків у Сполучення клавіш › Знімки екрана або виберіть іншу"]),
     ("Open Keyboard Settings", ["Otwórz ustawienia klawiatury", "打开键盘设置", "キーボード設定を開く", "Tastatureinstellungen öffnen", "Abrir ajustes de teclado", "Відкрити налаштування клавіатури"]),
     ("Full screen · Click to capture", ["Cały ekran · Kliknij, aby uchwycić", "全屏 · 点按以截图", "全画面 · クリックで撮影", "Ganzer Bildschirm · Klicken zum Aufnehmen", "Pantalla completa · Haz clic para capturar", "Увесь екран · Клацніть, щоб зняти"]),
+    ("Record screen", ["Nagraj ekran", "录制屏幕", "画面を収録", "Bildschirm aufnehmen", "Grabar pantalla", "Записати екран"]),
+    ("Needs Annotate", ["Wymaga Adnotacji", "需要 Annotate", "Annotate が必要", "Benötigt Annotate", "Necesita Annotate", "Потрібен Annotate"]),
+    ("Full screen · Click to record", ["Cały ekran · Kliknij, aby nagrać", "全屏 · 点按以录制", "全画面 · クリックで収録", "Ganzer Bildschirm · Klicken zum Aufzeichnen", "Pantalla completa · Haz clic para grabar", "Увесь екран · Клацніть, щоб записати"]),
+    ("Screen recording", ["Nagranie ekranu", "屏幕录制", "画面収録", "Bildschirmaufnahme", "Grabación de pantalla", "Запис екрана"]),
+    ("Nothing was said", ["Nic nie powiedziano", "没有说话", "何も話されていません", "Nichts gesagt", "No se dijo nada", "Нічого не сказано"]),
+    ("Trim", ["Przytnij", "修剪", "トリム", "Kürzen", "Recortar", "Обрізати"]),
 ];
 
 #[cfg(test)]

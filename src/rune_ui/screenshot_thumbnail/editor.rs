@@ -7,11 +7,16 @@
 //!
 //! While it's open, a dictation talks over the shot (`screenshots::narration`):
 //! its words show under the shot and go with it to a session.
+//!
+//! A Screenshots recording opens here too, to trim ([`clip`]); its marks
+//! tools stay hidden.
 
+pub(crate) mod clip;
 mod export;
 pub(crate) mod marks;
 mod view;
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -19,6 +24,7 @@ use std::time::Duration;
 
 use rune::{Key, KeyEvent, OverlayHandle, Phase, Tx};
 
+use self::clip::Clip;
 use self::export::{Export, deliver, load_sessions};
 use self::marks::{Mark, Rect, Tool};
 use crate::desktop::i18n::{tr, tr_fill};
@@ -92,6 +98,8 @@ pub(crate) enum Listen {
 #[derive(Default)]
 pub(crate) struct Editor {
     shot: Option<Shot>,
+    /// A recording open to trim, in place of a shot.
+    clip: Option<Clip>,
     /// The display's size in points.
     screen: [f32; 2],
     /// The panel's top-left, once it's been moved.
@@ -128,6 +136,8 @@ struct Layout {
     panel: [f32; 4],
     /// The shot inside the panel.
     image: [f32; 4],
+    /// A recording's filmstrip, under its picture; empty for a shot.
+    strip: [f32; 4],
     /// The row under the shot: the microphone and the words.
     words: [f32; 4],
     /// Points per shot pixel.
@@ -178,28 +188,64 @@ impl Editor {
         };
     }
 
+    fn load_clip(&mut self, clip: Clip, screen: [f32; 2]) {
+        *self = Self {
+            clip: Some(clip),
+            screen,
+            on: true,
+            now: self.now,
+            overlay: self.overlay.take(),
+            tool: self.tool,
+            ..Self::default()
+        };
+    }
+
+    /// The picture shown: the shot, or the recording's frame.
+    fn picture(&self) -> Option<&Shot> {
+        match &self.clip {
+            Some(clip) => clip.picture(),
+            None => self.shot.as_ref(),
+        }
+    }
+
+    /// The words under the picture: what was said over the shot, or inside
+    /// the recording's span kept.
+    fn words(&self) -> Cow<'_, str> {
+        match &self.clip {
+            Some(clip) => Cow::Owned(clip.words_in_trim()),
+            None => Cow::Borrowed(&self.words),
+        }
+    }
+
     fn layout(&self) -> Layout {
         let [sw, sh] = self.screen;
         let (size, scale) = self
-            .shot
-            .as_ref()
+            .picture()
             .map_or(([1, 1], 1.0), |shot| (shot.size, shot.scale));
         let (w, h) = (size[0].max(1) as f32, size[1].max(1) as f32);
+        let words = self.words();
+        let strip_h = if self.clip.is_some() {
+            clip::STRIP_H + GAP
+        } else {
+            0.0
+        };
         let room_w = (sw - 2.0 * (MARGIN + PAD)).max(1.0);
-        let words_h = words_height(&self.words, room_w);
-        let room_h = (sh - 2.0 * (MARGIN + PAD) - CHIP_H - 2.0 * GAP - words_h).max(1.0);
+        let words_h = words_height(&words, room_w);
+        let room_h = (sh - 2.0 * (MARGIN + PAD) - CHIP_H - 2.0 * GAP - strip_h - words_h).max(1.0);
         let fit = (room_w / w).min(room_h / h).min(1.0 / scale.max(1.0));
         let (iw, ih) = ((w * fit).round(), (h * fit).round());
         let pw = (iw + 2.0 * PAD).max(MIN_W);
-        let words_h = words_height(&self.words, pw - 2.0 * PAD);
-        let ph = PAD + CHIP_H + GAP + ih + GAP + words_h + PAD;
+        let words_h = words_height(&words, pw - 2.0 * PAD);
+        let ph = PAD + CHIP_H + GAP + ih + GAP + strip_h + words_h + PAD;
         let [x, y] = self.pos.unwrap_or([(sw - pw) * 0.5, (sh - ph) * 0.5]);
         let [x, y] = clamp_panel([x, y], [pw, ph], self.screen);
         let iy = PAD + CHIP_H + GAP;
+        let sy = iy + ih + GAP;
         Layout {
             panel: [x, y, pw, ph],
             image: [((pw - iw) * 0.5).round(), iy, iw, ih],
-            words: [PAD, iy + ih + GAP, pw - 2.0 * PAD, words_h],
+            strip: [PAD, sy, pw - 2.0 * PAD, strip_h - GAP],
+            words: [PAD, sy + strip_h, pw - 2.0 * PAD, words_h],
             fit,
         }
     }
@@ -371,6 +417,10 @@ impl Editor {
             self.waiting = Some(dest.clone());
             return;
         }
+        if self.clip.is_some() {
+            self.deliver_clip(out, tx);
+            return;
+        }
         let Some(shot) = &self.shot else {
             return;
         };
@@ -411,6 +461,54 @@ impl Editor {
             });
         if let Err(error) = spawned {
             tracing::warn!(%error, "could not start a screenshot export");
+        }
+    }
+}
+
+impl Editor {
+    /// The recording's span kept, to `out`, on its own thread: saved as a
+    /// movie in the screenshots folder, or sent as a contact sheet with its
+    /// words and the movie's path. It never goes to the clipboard.
+    fn deliver_clip(&mut self, out: Out, tx: &mut Tx) {
+        let Some(clip) = &self.clip else {
+            return;
+        };
+        if matches!(out, Out::Copy) {
+            return;
+        }
+        let job = export::ClipExport {
+            movie: clip.movie.clone(),
+            trim: clip.trimmed().then_some(clip.trim),
+            length_ms: clip.trim[1] - clip.trim[0],
+            sheet: clip::sheet(&clip.sheet_frames()),
+            words: clip.words_in_trim(),
+        };
+        if let Out::Send(dest) = &out {
+            self.note(tr_fill("Sending to {}…", &dest.name), tx);
+        }
+        let overlay = self.overlay.clone();
+        let spawned = std::thread::Builder::new()
+            .name("hex-recording-export".into())
+            .spawn(move || {
+                let note = match job.deliver(&out) {
+                    Ok(()) => match &out {
+                        Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
+                        _ => tr("Saved").to_owned(),
+                    },
+                    Err(error) => {
+                        tracing::warn!(%error, "could not export the recording");
+                        match &out {
+                            Out::Send(_) => tr("Couldn't send").to_owned(),
+                            _ => tr("Couldn't save").to_owned(),
+                        }
+                    }
+                };
+                if let Some(overlay) = overlay {
+                    overlay.update(move |s, tx| s.note(note, tx));
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(%error, "could not start a recording export");
         }
     }
 }
@@ -458,7 +556,7 @@ fn on_key(s: &mut Editor, key: &KeyEvent, tx: &mut Tx) -> bool {
         s.undo();
         return true;
     }
-    if key.is_command('c') && s.typing.is_none() {
+    if key.is_command('c') && s.typing.is_none() && s.clip.is_none() {
         s.deliver(Out::Copy, tx);
         return true;
     }
@@ -521,6 +619,7 @@ fn poll(s: &mut Editor, now: f64, tx: &mut Tx) -> bool {
         if now - at >= LEAVE_S {
             s.leaving = None;
             s.shot = None;
+            s.clip = None;
             if let Some(overlay) = &s.overlay {
                 overlay.hide();
             }
@@ -620,6 +719,39 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
 /// any thread; reads the file on its own.
 pub(crate) fn open(path: PathBuf) {
     open_with(path, String::new());
+}
+
+/// Opens the Screenshots recording in `bundle` to trim, in place of
+/// anything open. Safe from any thread; reads its frames on its own.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn open_recording(bundle: PathBuf) {
+    let Some(overlay) = EDITOR.get().cloned() else {
+        return;
+    };
+    let spawned = std::thread::Builder::new()
+        .name("hex-recording-editor".into())
+        .spawn(move || {
+            let clip = match clip::load(&bundle) {
+                Ok(clip) => clip,
+                Err(error) => {
+                    tracing::warn!(%error, bundle = %bundle.display(), "could not open the recording");
+                    return;
+                }
+            };
+            let screen = export::screen_under_pointer();
+            let handle = overlay.clone();
+            overlay.update(move |s, tx| {
+                // Dictation stays dictation: nothing talks over a recording.
+                OPEN.store(false, Ordering::Release);
+                s.load_clip(clip, screen);
+                handle.show();
+                handle.request_keys();
+                tx.animated();
+            });
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "could not open the recording editor");
+    }
 }
 
 /// [`open`] with `words` already said over the shot.

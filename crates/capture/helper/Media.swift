@@ -689,6 +689,24 @@ enum Media {
     ]
   }
 
+  /// Copies the span of `movie` from `fromMs` to `toMs` into `out` as an MPEG-4, without
+  /// re-encoding, so it takes about as long as copying the bytes.
+  static func trim(movie: URL, out: URL, fromMs: Int, toMs: Int) async throws -> [String: Any] {
+    guard toMs > fromMs else { throw HelperError("The trim is empty") }
+    let asset = AVURLAsset(url: movie)
+    guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else {
+      throw HelperError("Could not trim the movie")
+    }
+    session.timeRange = CMTimeRange(
+      start: CMTime(value: CMTimeValue(fromMs), timescale: 1000),
+      end: CMTime(value: CMTimeValue(toMs), timescale: 1000)
+    )
+    try? FileManager.default.removeItem(at: out)
+    try await session.export(to: out, as: .mp4)
+    let written = try await AVURLAsset(url: out).load(.duration)
+    return ["path": out.path, "durationMs": Int((written.seconds * 1000).rounded())]
+  }
+
   /// Every audio track mixed to 16 kHz mono 16-bit PCM, padded so sample 0 is the movie's start.
   static func exportAudio(movie: URL, wav: URL) async throws -> [String: Any] {
     let asset = AVURLAsset(url: movie)
