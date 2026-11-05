@@ -256,7 +256,8 @@ substitute for source inspection or a second roadmap.
   macOS reads the front tab of a table of
   scriptable browsers (Safari and Chromium
   dictionaries) through AppleScript and any other app's focused AXWebArea
-  `AXURL`; `windows/context` reads any browser through UI Automation and
+  `AXURL`, and the front window's title only while a script
+  transformation is set up (`reads_window_title`); `windows/context` reads any browser through UI Automation and
   `linux/atspi` through AT-SPI.
 - `application_catalog`: cached installed-application discovery for the Modes
   picker, one module per OS: macOS bundles, Windows executables from Start menu
@@ -413,8 +414,9 @@ substitute for source inspection or a second roadmap.
 - `desktop/events`, `control/dashboard`: bounded asynchronous append-only NDJSON observations
   and bounded incremental reading; the debug `dashboard` TUI and the Activity
   pane are read-only projections. Context events name the foreground app,
-  never a page address, and no event holds dictated or transcribed text:
-  History is the only place Hex keeps what was said.
+  written only when it changes, never a page address or window title, and no
+  event holds dictated or transcribed text: History is the only place Hex
+  keeps what was said.
 - `desktop/activity`: the shared listener, device, session, and latest-failure
   projection over `EventReader`. Transcript rows read retained events directly.
 - `desktop/host`: the in-process listener, transcription, shortcut, and update

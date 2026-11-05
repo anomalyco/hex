@@ -1133,7 +1133,9 @@ browsers when on). Windows starts no UI Automation walk of the browser, and
 Linux asks AT-SPI only for the process of a window the display server names no
 other way. Check: `the_page_is_read_only_when_processing_uses_it` in
 [dictation/modes.rs](../../src/dictation/modes.rs); not run against a live
-browser. When something uses the page, macOS asks the front tab of Safari, Orion, Chrome,
+browser. On macOS the front window's title is read only by meeting detection
+and while a script transformation is set up (`reads_window_title`). When
+something uses the page, macOS asks the front tab of Safari, Orion, Chrome,
 Brave, Edge, Arc, Vivaldi, Opera, Helium, and Chromium over AppleScript (one
 Automation prompt per browser; a refusal keeps the application context) and
 reads any other app's focused AXWebArea `AXURL` (Firefox, Zen, web views).

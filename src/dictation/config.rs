@@ -7,6 +7,7 @@ use crate::dictation::text_replacements::ReplacementSet;
 
 static DICTATION_PROFILES: OnceLock<RwLock<Profiles>> = OnceLock::new();
 static READS_BROWSER: AtomicBool = AtomicBool::new(false);
+static READS_WINDOW_TITLE: AtomicBool = AtomicBool::new(false);
 
 /// Whether anything the user set up looks at the page: a mode chosen by
 /// website, an OpenCode rewrite (its prompt names the site), or a script
@@ -14,6 +15,19 @@ static READS_BROWSER: AtomicBool = AtomicBool::new(false);
 /// browser for its page, so macOS never shows an Automation prompt for it.
 pub fn reads_browser() -> bool {
     READS_BROWSER.load(Ordering::Acquire)
+}
+
+/// Whether a script transformation is set up, the only reader of the front
+/// window's title. Otherwise Hex never reads it.
+pub fn reads_window_title() -> bool {
+    READS_WINDOW_TITLE.load(Ordering::Acquire)
+}
+
+fn uses_scripts(settings: &DictationProcessingSettings) -> bool {
+    std::iter::once(&settings.default_mode)
+        .chain(&settings.modes)
+        .flat_map(|mode| &mode.transformations)
+        .any(|id| !crate::personal_commands::is_builtin_transformation(id))
 }
 
 fn uses_browser(settings: &DictationProcessingSettings) -> bool {
@@ -30,6 +44,7 @@ pub fn dictation_profiles() -> Profiles {
 pub fn update_dictation_profiles(settings: &DictationProcessingSettings) {
     let profiles = build_dictation_profiles(settings);
     READS_BROWSER.store(uses_browser(settings), Ordering::Release);
+    READS_WINDOW_TITLE.store(uses_scripts(settings), Ordering::Release);
     *dictation_profiles_lock()
         .write()
         .unwrap_or_else(|error| error.into_inner()) = profiles;
@@ -168,18 +183,32 @@ mod tests {
             browser_hosts: vec!["x.com".into()],
             ..DictationMode::default()
         })));
-        assert!(uses_browser(&with(DictationMode {
+        let script = with(DictationMode {
             applications: vec!["Slack".into()],
             transformations: vec!["my-script".into()],
             ..DictationMode::default()
-        })));
-        assert!(uses_browser(&with(DictationMode {
+        });
+        assert!(uses_browser(&script));
+        assert!(uses_scripts(&script));
+        let rewrite = with(DictationMode {
             applications: vec!["Slack".into()],
             post_processing: DictationPostProcessing {
                 enabled: true,
                 ..DictationPostProcessing::default()
             },
             ..DictationMode::default()
-        })));
+        });
+        assert!(uses_browser(&rewrite));
+        assert!(!uses_scripts(&rewrite));
+
+        let global = |transformation: &str| DictationProcessingSettings {
+            default_mode: DictationMode {
+                transformations: vec![transformation.into()],
+                ..DictationMode::default()
+            },
+            ..DictationProcessingSettings::default()
+        };
+        assert!(uses_scripts(&global("my-script")));
+        assert!(!uses_scripts(&global("lowercase")));
     }
 }
