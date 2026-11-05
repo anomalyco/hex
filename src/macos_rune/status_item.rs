@@ -5,10 +5,10 @@ use color_eyre::eyre::{Result, eyre};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
 use objc2::{AnyThread, DefinedClass, MainThreadOnly, msg_send, sel};
-use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem};
+use objc2_app_kit::{NSEventModifierFlags, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem};
 use objc2_foundation::{MainThreadMarker, NSData, NSObject, NSSize, NSString};
 
-use crate::app_settings::AppSettings;
+use crate::app_settings::{AppSettings, HotkeyBinding};
 use crate::desktop::tray_menu::model_menu_entries;
 use crate::transcription::models::{MODELS, TranscriptionModelId};
 use crate::transcription::preparation::PreparationStatus;
@@ -31,10 +31,8 @@ pub enum StatusItemAction {
     CopyLastMeetingTranscript,
     /// Copy chapter `n` of the recording meeting (Labs).
     CopyChapter(usize),
+    /// The recording row: the Meetings pane.
     OpenMeetings,
-    /// Flips `capture.show_overlays_in_recordings`.
-    #[cfg(hex_capture)]
-    ToggleOverlaysInRecordings,
     /// The update item: check, download, or restart into an update.
     Update,
     Quit,
@@ -127,15 +125,6 @@ objc2::define_class!(
             let _ = self.ivars().actions.try_send(StatusItemAction::OpenMeetings);
         }
 
-        #[unsafe(method(toggleOverlaysInRecordings:))]
-        fn toggle_overlays_in_recordings(&self, _sender: &AnyObject) {
-            #[cfg(hex_capture)]
-            let _ = self
-                .ivars()
-                .actions
-                .try_send(StatusItemAction::ToggleOverlaysInRecordings);
-        }
-
         #[unsafe(method(checkForUpdates:))]
         fn check_for_updates(&self, _sender: &AnyObject) {
             let _ = self
@@ -158,6 +147,152 @@ impl StatusItemTarget {
     }
 }
 
+/// One row of the status menu, top to bottom: what's happening now (the
+/// meeting group), then things to do, then the app.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Row {
+    MeetingStatus,
+    StopMeeting,
+    CopySection,
+    RecordMeeting,
+    MeetingSeparator,
+    PasteLast,
+    /// Labs › Copy recent dictations: hidden until the menu opens with it on.
+    CopyRecentDictation,
+    CopyLastMeetingTranscript,
+    SpeechModel,
+    Separator,
+    Settings,
+    Update,
+    Quit,
+}
+
+const ROWS: [Row; 13] = [
+    Row::MeetingStatus,
+    Row::StopMeeting,
+    Row::CopySection,
+    Row::RecordMeeting,
+    Row::MeetingSeparator,
+    Row::PasteLast,
+    Row::CopyRecentDictation,
+    Row::CopyLastMeetingTranscript,
+    Row::SpeechModel,
+    Row::Separator,
+    Row::Settings,
+    Row::Update,
+    Row::Quit,
+];
+
+impl Row {
+    /// The title it is built with; `None` for a separator.
+    fn title(self) -> Option<String> {
+        let title = match self {
+            Row::MeetingSeparator | Row::Separator => return None,
+            Row::MeetingStatus => "Recording meeting",
+            Row::StopMeeting => "Stop & Transcribe",
+            Row::CopySection => "Copy Section",
+            Row::RecordMeeting => "Record Meeting",
+            Row::PasteLast => "Paste Last Dictation",
+            Row::CopyRecentDictation => "Copy Recent Dictation",
+            Row::CopyLastMeetingTranscript => "Copy Last Meeting Transcript",
+            Row::SpeechModel => "Speech Model",
+            Row::Settings => "Settings…",
+            Row::Update => "Check for Updates…",
+            Row::Quit => return Some(format!("Quit {}", crate::app_paths::app_name())),
+        };
+        Some(title.into())
+    }
+
+    fn action(self) -> Option<Sel> {
+        Some(match self {
+            Row::MeetingStatus => sel!(openMeetings:),
+            Row::StopMeeting => sel!(stopMeeting:),
+            Row::RecordMeeting => sel!(startMeeting:),
+            Row::PasteLast => sel!(pasteLast:),
+            Row::CopyLastMeetingTranscript => sel!(copyLastMeetingTranscript:),
+            Row::Settings => sel!(openSettings:),
+            Row::Update => sel!(checkForUpdates:),
+            Row::Quit => sel!(quit:),
+            Row::MeetingSeparator
+            | Row::Separator
+            | Row::CopySection
+            | Row::CopyRecentDictation
+            | Row::SpeechModel => return None,
+        })
+    }
+
+    /// A fixed ⌘ key equivalent. Paste Last Dictation follows the saved
+    /// binding instead ([`update_paste_last`]).
+    fn command_key(self) -> Option<&'static str> {
+        match self {
+            Row::Settings => Some(","),
+            Row::Quit => Some("q"),
+            _ => None,
+        }
+    }
+
+    /// Rows shown only by a meeting or a Lab, from the first refresh on.
+    fn starts_hidden(self) -> bool {
+        matches!(
+            self,
+            Row::MeetingStatus
+                | Row::StopMeeting
+                | Row::CopySection
+                | Row::RecordMeeting
+                | Row::MeetingSeparator
+                | Row::CopyRecentDictation
+                | Row::CopyLastMeetingTranscript
+        )
+    }
+}
+
+/// A menu item's key equivalent: the key and its modifiers.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct KeyEquivalent {
+    key: String,
+    modifiers: NSEventModifierFlags,
+}
+
+/// What Paste Last Dictation shows for the saved binding: nothing when it is
+/// unbound, modifier-only, or a key a menu can't name (a mouse button).
+fn paste_last_key(binding: Option<&HotkeyBinding>) -> Option<KeyEquivalent> {
+    let binding = binding?;
+    let key = menu_key(&binding.key.as_ref()?.label)?;
+    let shortcut = binding.modifiers;
+    let mut modifiers = NSEventModifierFlags::empty();
+    for (held, flag) in [
+        (shortcut.control.is_some(), NSEventModifierFlags::Control),
+        (shortcut.option.is_some(), NSEventModifierFlags::Option),
+        (shortcut.shift.is_some(), NSEventModifierFlags::Shift),
+        (shortcut.command.is_some(), NSEventModifierFlags::Command),
+        (shortcut.function, NSEventModifierFlags::Function),
+    ] {
+        if held {
+            modifiers |= flag;
+        }
+    }
+    Some(KeyEquivalent { key, modifiers })
+}
+
+/// The key equivalent string for a keycap label: one character in lowercase
+/// (the modifier mask carries Shift), Space, or F1 to F20.
+fn menu_key(label: &str) -> Option<String> {
+    let mut characters = label.chars();
+    if let (Some(character), None) = (characters.next(), characters.next()) {
+        return Some(character.to_lowercase().collect());
+    }
+    if label == "Space" {
+        return Some(" ".into());
+    }
+    let number = label.strip_prefix('F')?.parse::<u32>().ok()?;
+    // NSF1FunctionKey and on.
+    (1..=20)
+        .contains(&number)
+        .then(|| char::from_u32(0xF704 + number - 1))
+        .flatten()
+        .map(String::from)
+}
+
 struct StatusItemController {
     item: Retained<NSStatusItem>,
     idle_symbol: Retained<NSImage>,
@@ -169,18 +304,14 @@ struct StatusItemController {
     meeting_sections: Retained<NSMenuItem>,
     meeting_sections_menu: Retained<NSMenu>,
     meeting_section_labels: RefCell<Vec<String>>,
-    meeting_open: Retained<NSMenuItem>,
     meeting_separator: Retained<NSMenuItem>,
     meeting_button: RefCell<(String, bool)>,
-    /// Labs › Copy recent dictations: hidden until the menu opens with it on.
+    paste_last: Retained<NSMenuItem>,
+    paste_last_key: RefCell<Option<KeyEquivalent>>,
     recent: Retained<NSMenuItem>,
     recent_menu: Retained<NSMenu>,
     update: Option<Retained<NSMenuItem>>,
     update_title: RefCell<String>,
-    /// A checkmark for `capture.show_overlays_in_recordings`, in builds
-    /// that can capture with the experiment on.
-    #[cfg(hex_capture)]
-    overlays_in_recordings: Retained<NSMenuItem>,
     _menu: Retained<NSMenu>,
     target: Retained<StatusItemTarget>,
     model_items: Vec<(TranscriptionModelId, Retained<NSMenuItem>)>,
@@ -200,78 +331,14 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
     let (actions, receiver) = sync_channel(8);
     let target = StatusItemTarget::new(actions, mtm);
     let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str("Hex"));
-    let meeting_status = add_item(
-        &menu,
-        &target,
-        "Recording meeting",
-        sel!(openMeetings:),
-        mtm,
-    );
-    let meeting_stop = add_item(&menu, &target, "Stop & Transcribe", sel!(stopMeeting:), mtm);
     let meeting_sections_menu =
         NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str("Copy Section"));
-    let meeting_sections = plain_item("Copy Section", mtm);
-    meeting_sections.setSubmenu(Some(&meeting_sections_menu));
-    menu.addItem(&meeting_sections);
-    let meeting_start = add_item(&menu, &target, "Record Meeting", sel!(startMeeting:), mtm);
-    let meeting_copy_last = add_item(
-        &menu,
-        &target,
-        "Copy Last Meeting Transcript",
-        sel!(copyLastMeetingTranscript:),
-        mtm,
-    );
-    let meeting_open = add_item(&menu, &target, "Meetings…", sel!(openMeetings:), mtm);
-    let meeting_separator = NSMenuItem::separatorItem(mtm);
-    menu.addItem(&meeting_separator);
-    for item in [
-        &meeting_status,
-        &meeting_stop,
-        &meeting_sections,
-        &meeting_start,
-        &meeting_copy_last,
-        &meeting_open,
-        &meeting_separator,
-    ] {
-        item.setHidden(true);
-    }
-
-    add_item(
-        &menu,
-        &target,
-        "Paste Last Dictation",
-        sel!(pasteLast:),
-        mtm,
-    );
     let recent_menu = NSMenu::initWithTitle(
         NSMenu::alloc(mtm),
         &NSString::from_str("Copy Recent Dictation"),
     );
-    let recent = plain_item("Copy Recent Dictation", mtm);
-    recent.setSubmenu(Some(&recent_menu));
-    recent.setHidden(true);
-    menu.addItem(&recent);
-    add_item(&menu, &target, "Settings…", sel!(openSettings:), mtm);
-    #[cfg(hex_capture)]
-    let overlays_in_recordings = {
-        let item = add_item(
-            &menu,
-            &target,
-            "Show Hex in Screen Recordings",
-            sel!(toggleOverlaysInRecordings:),
-            mtm,
-        );
-        item.setState(isize::from(crate::capture_host::own_windows_recorded()));
-        item
-    };
-    let models = NSMenu::initWithTitle(
-        NSMenu::alloc(mtm),
-        &NSString::from_str("Transcription Model"),
-    );
+    let models = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str("Speech Model"));
     models.setAutoenablesItems(false);
-    let heading = plain_item("Transcription Model", mtm);
-    heading.setSubmenu(Some(&models));
-    menu.addItem(&heading);
     let model_items = MODELS
         .iter()
         .enumerate()
@@ -312,28 +379,50 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
     );
     model_error.setHidden(true);
     add_item(&models, &target, "Manage Models…", sel!(openModels:), mtm);
-    menu.addItem(&NSMenuItem::separatorItem(mtm));
-    let update = if crate::updater::managed_by_policy() {
-        // An item without an action is shown disabled.
-        menu.addItem(&plain_item(crate::updater::MANAGED_LABEL, mtm));
-        None
-    } else {
-        Some(add_item(
-            &menu,
-            &target,
-            &update_title(&crate::desktop::host::DesktopUpdateStatus::Checking),
-            sel!(checkForUpdates:),
-            mtm,
-        ))
+
+    let update_managed = crate::updater::managed_by_policy();
+    let mut rows = Vec::with_capacity(ROWS.len());
+    for row in ROWS {
+        let item = match (row, row.title()) {
+            (_, None) => NSMenuItem::separatorItem(mtm),
+            // An item without an action is shown disabled.
+            (Row::Update, Some(_)) if update_managed => {
+                plain_item(crate::updater::MANAGED_LABEL, mtm)
+            }
+            (Row::Update, Some(_)) => action_item(
+                &target,
+                &update_title(&crate::desktop::host::DesktopUpdateStatus::Checking),
+                sel!(checkForUpdates:),
+                mtm,
+            ),
+            (row, Some(title)) => match row.action() {
+                Some(action) => action_item(&target, &title, action, mtm),
+                None => {
+                    let item = plain_item(&title, mtm);
+                    match row {
+                        Row::CopySection => item.setSubmenu(Some(&meeting_sections_menu)),
+                        Row::CopyRecentDictation => item.setSubmenu(Some(&recent_menu)),
+                        Row::SpeechModel => item.setSubmenu(Some(&models)),
+                        _ => {}
+                    }
+                    item
+                }
+            },
+        };
+        if let Some(key) = row.command_key() {
+            item.setKeyEquivalent(&NSString::from_str(key));
+            item.setKeyEquivalentModifierMask(NSEventModifierFlags::Command);
+        }
+        item.setHidden(row.starts_hidden());
+        menu.addItem(&item);
+        rows.push((row, item));
+    }
+    let row = |wanted: Row| {
+        rows.iter()
+            .find(|(row, _)| *row == wanted)
+            .map(|(_, item)| item.clone())
+            .expect("every row is built")
     };
-    menu.addItem(&NSMenuItem::separatorItem(mtm));
-    add_item(
-        &menu,
-        &target,
-        &format!("Quit {}", crate::app_paths::app_name()),
-        sel!(quit:),
-        mtm,
-    );
 
     let item = NSStatusBar::systemStatusBar().statusItemWithLength(-2.0);
     let button = item
@@ -356,22 +445,21 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             item,
             idle_symbol: symbol,
             recording_symbol,
-            meeting_status,
-            meeting_start,
-            meeting_stop,
-            meeting_copy_last,
-            meeting_sections,
+            meeting_status: row(Row::MeetingStatus),
+            meeting_start: row(Row::RecordMeeting),
+            meeting_stop: row(Row::StopMeeting),
+            meeting_copy_last: row(Row::CopyLastMeetingTranscript),
+            meeting_sections: row(Row::CopySection),
             meeting_sections_menu,
             meeting_section_labels: RefCell::new(Vec::new()),
-            meeting_open,
-            meeting_separator,
+            meeting_separator: row(Row::MeetingSeparator),
             meeting_button: RefCell::new((String::new(), false)),
-            recent,
+            paste_last: row(Row::PasteLast),
+            paste_last_key: RefCell::new(None),
+            recent: row(Row::CopyRecentDictation),
             recent_menu,
-            update,
+            update: (!update_managed).then(|| row(Row::Update)),
             update_title: RefCell::new("Check for Updates…".into()),
-            #[cfg(hex_capture)]
-            overlays_in_recordings,
             _menu: menu,
             target,
             model_items,
@@ -405,8 +493,7 @@ fn plain_item(title: &str, mtm: MainThreadMarker) -> Retained<NSMenuItem> {
     }
 }
 
-fn add_item(
-    menu: &NSMenu,
+fn action_item(
     target: &StatusItemTarget,
     title: &str,
     action: Sel,
@@ -421,6 +508,17 @@ fn add_item(
         )
     };
     unsafe { item.setTarget(Some(target)) };
+    item
+}
+
+fn add_item(
+    menu: &NSMenu,
+    target: &StatusItemTarget,
+    title: &str,
+    action: Sel,
+    mtm: MainThreadMarker,
+) -> Retained<NSMenuItem> {
+    let item = action_item(target, title, action, mtm);
     menu.addItem(&item);
     item
 }
@@ -615,15 +713,29 @@ fn update_title(status: &crate::desktop::host::DesktopUpdateStatus) -> String {
     }
 }
 
-/// Checks or unchecks Show Hex in Screen Recordings.
-#[cfg(hex_capture)]
-pub fn update_overlays_in_recordings(shown: bool) {
+/// Shows the saved Paste Last binding beside Paste Last Dictation, or
+/// nothing when it is unbound.
+pub fn update_paste_last(settings: &AppSettings) {
+    let key = paste_last_key(settings.paste_last_hotkey.as_ref());
     STATUS_ITEM.with(|controller| {
-        if let Some(controller) = controller.borrow().as_ref() {
-            controller
-                .overlays_in_recordings
-                .setState(isize::from(shown));
+        let controller = controller.borrow();
+        let Some(controller) = controller.as_ref() else {
+            return;
+        };
+        if *controller.paste_last_key.borrow() == key {
+            return;
         }
+        let (equivalent, modifiers) = key
+            .as_ref()
+            .map(|key| (key.key.as_str(), key.modifiers))
+            .unwrap_or(("", NSEventModifierFlags::empty()));
+        controller
+            .paste_last
+            .setKeyEquivalent(&NSString::from_str(equivalent));
+        controller
+            .paste_last
+            .setKeyEquivalentModifierMask(modifiers);
+        controller.paste_last_key.replace(key);
     });
 }
 
@@ -666,7 +778,6 @@ pub fn update_meeting(state: &crate::meeting::watcher::MeetingMenuState, enabled
         let visible = enabled || menu.status.is_some();
         controller.meeting_separator.setHidden(!visible);
         controller.meeting_copy_last.setHidden(!visible);
-        controller.meeting_open.setHidden(!visible);
         controller.meeting_start.setHidden(!menu.can_start);
         controller.meeting_stop.setHidden(!menu.can_stop);
         controller.meeting_status.setHidden(menu.status.is_none());
@@ -768,6 +879,67 @@ mod tests {
             transcribing.status.as_deref(),
             Some("Transcribing meeting…")
         );
+    }
+
+    #[test]
+    fn the_menu_reads_meeting_then_actions_then_the_app() {
+        let titles = ROWS
+            .iter()
+            .map(|row| row.title().unwrap_or_else(|| "—".into()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            titles,
+            [
+                "Recording meeting".to_string(),
+                "Stop & Transcribe".into(),
+                "Copy Section".into(),
+                "Record Meeting".into(),
+                "—".into(),
+                "Paste Last Dictation".into(),
+                "Copy Recent Dictation".into(),
+                "Copy Last Meeting Transcript".into(),
+                "Speech Model".into(),
+                "—".into(),
+                "Settings…".into(),
+                "Check for Updates…".into(),
+                format!("Quit {}", crate::app_paths::app_name()),
+            ]
+        );
+        assert_eq!(Row::Settings.command_key(), Some(","));
+        assert_eq!(Row::Quit.command_key(), Some("q"));
+        // Every row with neither a submenu nor a separator does something.
+        for row in ROWS {
+            let opens_submenu = matches!(
+                row,
+                Row::CopySection | Row::CopyRecentDictation | Row::SpeechModel
+            );
+            assert_eq!(
+                row.action().is_some(),
+                row.title().is_some() && !opens_submenu,
+                "{row:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn paste_last_shows_the_saved_binding_or_nothing() {
+        let default = paste_last_key(Some(&HotkeyBinding::paste_last_default())).unwrap();
+        assert_eq!(default.key, "v");
+        assert_eq!(
+            default.modifiers,
+            NSEventModifierFlags::Option | NSEventModifierFlags::Shift
+        );
+        assert_eq!(paste_last_key(None), None);
+        let modifier_only = HotkeyBinding {
+            key: None,
+            ..HotkeyBinding::paste_last_default()
+        };
+        assert_eq!(paste_last_key(Some(&modifier_only)), None);
+        assert_eq!(menu_key("F12").as_deref(), Some("\u{F70F}"));
+        assert_eq!(menu_key("Space").as_deref(), Some(" "));
+        assert_eq!(menu_key(","), Some(",".into()));
+        assert_eq!(menu_key("Mouse 4"), None);
+        assert_eq!(menu_key("F99"), None);
     }
 
     #[test]

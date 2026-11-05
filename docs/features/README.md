@@ -505,7 +505,7 @@ refusal. The story's demo cards and the game's messages stay in English in
 every interface language; its headings, buttons, and hints are translated.
 
 ```ts
-Menu bar > Transcription Model            // setup.quick-model-switch; macOS
+Menu bar > Speech Model                   // setup.quick-model-switch; macOS
 ├── Downloaded models -> Last selected language shown beside each model
 ├── Choose -> Verify installed artifact -> Prewarm -> Save selection
 │   ├── Success -> Checkmark moves; Settings reflects the saved selection
@@ -685,7 +685,9 @@ Completed output                         // output
 │   ├── Labs > Keep dictation on clipboard (macOS, off) -> the dictation stays on the clipboard (labs.md)
 │   └── Labs > Copy dictation only (macOS, off) -> clipboard only: no paste, typing, or restore (labs.md)
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
-│   └── Last completed dictation
+│   ├── Last completed dictation
+│   └── macOS menu item shows the saved binding (⌥⇧V by default); unbound,
+│       modifier-only, or a mouse button -> no shortcut shown
 └── History
     ├── Inspect / search / copy (row hover or the card) / delete
     ├── Retention ("Keep: 7 days" menu) -> Seven days by default, always hard-capped
@@ -1252,6 +1254,17 @@ Cancellation / interruption / failure    // recovery
   -> Next capture succeeds               // this is the proof, not a cleared error
 
 Menu bar and Settings                    // maintenance
+├── Menu (macOS), top to bottom: now, things to do, the app
+│   ├── Meetings on or a meeting under way: Recording · <title> · 12:34 (opens
+│   │   the Meetings pane), Stop & Transcribe, Copy Section ▸; idle: Record Meeting
+│   ├── Paste Last Dictation ⌥⇧V (saved binding), Copy Recent Dictation ▸ (Labs),
+│   │   Copy Last Meeting Transcript (Meetings on), Speech Model ▸
+│   ├── Settings… ⌘, · Check for Updates… · Quit Hex ⌘Q
+│   ├── No Meetings… (Settings… opens the same window) and no Show Hex in
+│   │   Screen Recordings (Annotate's pane has it)
+│   └── check: the_menu_reads_meeting_then_actions_then_the_app,
+│       paste_last_shows_the_saved_binding_or_nothing (status_item.rs; the
+│       row order and key equivalents only, no native menu is drawn)
 ├── Icon -> 18 pt monochrome Hex mark template (recording variant + elapsed time)
 │   └── Labs > Hide menu bar icon (off, #1064) -> hidden unless a meeting is under
 │       way; shortcuts keep working; Finder or Spotlight reopen -> Settings (labs.md)

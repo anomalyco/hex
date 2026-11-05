@@ -498,7 +498,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      ├── "Recording · <title> · 12:34" -> Meetings pane
      │   └── title follows the provisional title (see Titles And Summary)
      └── Stop & Transcribe
-     (Idle menu bar: "Record Meeting" + "Copy Last Meeting Transcript")
+     (Idle menu bar: "Record Meeting"; "Copy Last Meeting Transcript" sits
+      under Paste Last Dictation; there is no Meetings… item, Settings… opens
+      the same window)
   -> Floating recording indicator (when Show recording indicator is on) // meetings.indicator
      ├── Rune interactive overlay: a non-activating panel that never becomes key
      ├── Only the drawn pill takes the pointer (OverlayInput::Regions, the
