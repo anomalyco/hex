@@ -4,14 +4,15 @@
 //! closed without stopping anything.
 //!
 //! Threads: the main thread runs Rune's event loop; the host thread
-//! refreshes [`LinuxDesktopHost`] every 20 ms and publishes its status;
-//! the socket's workers answer `hex` commands from that published status
-//! and hand shortcut commands straight to the listener.
+//! refreshes [`LinuxDesktopHost`] (at once when a request changes it, else on
+//! a short idle tick) and publishes its status; the socket's workers answer
+//! `hex` commands from that published status and hand shortcut commands
+//! straight to the listener.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -32,7 +33,12 @@ use crate::linux::service::{
 
 mod control;
 
+/// The host's refresh while it starts, stops, or prepares something.
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
+/// How long the host waits with nothing in flight: requests and quits
+/// notify it, so only an outside settings edit or the updater waits for a
+/// tick.
+const IDLE_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 /// How often the host asks X11 for the active keyboard group.
 const INPUT_SOURCE_POLL: Duration = Duration::from_millis(250);
 /// Left by "Update" so the restarted process shows the window again; a
@@ -189,6 +195,10 @@ pub(crate) enum HostRequest {
 struct Shared {
     host: Mutex<LinuxDesktopHost>,
     waker: Mutex<Option<Waker>>,
+    /// Bumped whenever something outside the host's own thread changed it,
+    /// so its next refresh is not left waiting for the idle tick.
+    refreshed: Mutex<u64>,
+    refreshed_cv: Condvar,
     /// Whether the window shows, as its app reports it.
     window_visible: Mutex<Option<WindowVisible>>,
     /// Why the window's app stopped, once it panicked (#979): the window
@@ -209,6 +219,8 @@ impl HostHandle {
         Self(Arc::new(Shared {
             host: Mutex::new(host),
             waker: Mutex::new(None),
+            refreshed: Mutex::new(0),
+            refreshed_cv: Condvar::new(),
             window_visible: Mutex::new(None),
             window_failure: Mutex::new(None),
             shutdown,
@@ -218,6 +230,7 @@ impl HostHandle {
     /// The window's "Quit Hex": drains accepted work, then exits.
     pub(crate) fn quit(&self) {
         self.0.shutdown.store(true, Ordering::Release);
+        self.notify();
     }
 
     fn lock(&self) -> MutexGuard<'_, LinuxDesktopHost> {
@@ -256,6 +269,7 @@ impl HostHandle {
             }
         };
         self.wake();
+        self.notify();
         result
     }
 
@@ -265,6 +279,7 @@ impl HostHandle {
         settings.save()?;
         self.lock().adopt_settings(settings);
         self.wake();
+        self.notify();
         Ok(())
     }
 
@@ -281,6 +296,7 @@ impl HostHandle {
     /// `hex status` asks `visible` whether the window shows.
     pub(crate) fn set_window_visible(&self, visible: WindowVisible) {
         *self.0.window_visible.lock().unwrap() = Some(visible);
+        self.notify();
     }
 
     fn window_open(&self) -> bool {
@@ -306,6 +322,7 @@ impl HostHandle {
             .window_failure
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = Some(reason);
+        self.notify();
     }
 
     /// A closed window leaves no shortcut capture behind.
@@ -314,6 +331,8 @@ impl HostHandle {
         if host.capturing_hotkey() {
             host.cancel_shortcut_edit();
         }
+        drop(host);
+        self.notify();
     }
 
     fn wake(&self) {
@@ -321,6 +340,41 @@ impl HostHandle {
         if let Some(waker) = waker {
             waker();
         }
+    }
+
+    /// The host thread's refresh counter.
+    fn refreshed(&self) -> u64 {
+        *self
+            .0
+            .refreshed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Wakes the host thread: the state it publishes changed outside its own
+    /// refresh.
+    fn notify(&self) {
+        let mut refreshed = self
+            .0
+            .refreshed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *refreshed = refreshed.wrapping_add(1);
+        self.0.refreshed_cv.notify_all();
+    }
+
+    /// Waits for the host's next refresh, at most `timeout`, unless it was
+    /// notified since `seen`.
+    fn wait_for_refresh(&self, seen: u64, timeout: Duration) {
+        let refreshed = self
+            .0
+            .refreshed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _ = self
+            .0
+            .refreshed_cv
+            .wait_timeout_while(refreshed, timeout, |refreshed| *refreshed == seen);
     }
 
     fn status(&self, snapshot: HostSnapshot, session: linux_service::Session) -> Status {
@@ -444,6 +498,17 @@ pub(crate) fn run(
     Ok(())
 }
 
+/// Stores `value` for readers only when it differs from what they last saw.
+/// Returns whether it was written.
+fn publish_if_changed<T: PartialEq>(slot: &Mutex<Option<T>>, value: T) -> bool {
+    let mut slot = slot.lock().unwrap_or_else(|error| error.into_inner());
+    if slot.as_ref() == Some(&value) {
+        return false;
+    }
+    *slot = Some(value);
+    true
+}
+
 /// The host thread: refreshes the host, publishes what the socket answers
 /// with, wakes the window on changes, and drains accepted work on quit.
 fn run_host(
@@ -460,7 +525,8 @@ fn run_host(
     let mut tray_view = None;
     let mut tray_meetings = None;
     loop {
-        let (done, route, snapshot) = {
+        let seen = host.refreshed();
+        let (done, route, snapshot, interval) = {
             let mut guard = host.lock();
             if shutdown.load(Ordering::Acquire) && !stopping {
                 stopping = true;
@@ -471,14 +537,27 @@ fn run_host(
                 let _ = control.try_send(Control::Quit);
             }
             guard.refresh();
+            let interval = if stopping
+                || guard.shortcut_edit.is_some()
+                || guard.transcription_preparation.is_some()
+                || guard.listener.as_ref().is_some_and(|listener| {
+                    matches!(listener.startup, ListenerStartup::Awaiting { .. })
+                        || listener.worker.is_finished()
+                }) {
+                REFRESH_INTERVAL
+            } else {
+                IDLE_REFRESH_INTERVAL
+            };
             (
                 stopping && !guard.has_pending_work(),
                 guard.shortcut_route(),
                 guard.host_snapshot(),
+                interval,
             )
         };
         *published.shortcuts.lock().unwrap() = route;
-        *published.status.lock().unwrap() = Some(host.status(snapshot.clone(), session.clone()));
+        let status = host.status(snapshot.clone(), session.clone());
+        publish_if_changed(&published.status, status);
         let meetings = crate::meeting::runtime::tray_state();
         if shown.as_ref() != Some(&snapshot) || tray_meetings != meetings {
             tray_meetings = meetings;
@@ -495,7 +574,7 @@ fn run_host(
         if done {
             break;
         }
-        std::thread::sleep(REFRESH_INTERVAL);
+        host.wait_for_refresh(seen, interval);
     }
     *published.shortcuts.lock().unwrap() = None;
     drop(server);
@@ -1467,6 +1546,31 @@ mod tests {
                 .hud_limitation
                 .is_some_and(|why| why.contains("Invalid surface"))
         );
+    }
+
+    #[test]
+    fn a_notification_wakes_the_idle_host_before_its_tick() {
+        static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+        let host = HostHandle::new(host_for_edit(false), &SHUTDOWN);
+        let seen = host.refreshed();
+        let waiter = host.clone();
+        let started = Instant::now();
+        let waiting = std::thread::spawn(move || {
+            waiter.wait_for_refresh(seen, Duration::from_secs(5));
+            started.elapsed()
+        });
+        std::thread::sleep(Duration::from_millis(20));
+        host.notify();
+        assert!(waiting.join().unwrap() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn unchanged_status_is_not_published_again() {
+        let published = Mutex::new(None);
+        assert!(publish_if_changed(&published, 1));
+        assert!(!publish_if_changed(&published, 1));
+        assert!(publish_if_changed(&published, 2));
+        assert_eq!(*published.lock().unwrap(), Some(2));
     }
 
     #[test]
