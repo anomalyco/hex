@@ -8,6 +8,14 @@ fn runtime(scene: &str) -> Runtime<Ui> {
     if scene == "portal" {
         state.platform.caps = platform::Capabilities::LINUX;
     }
+    // Every Labs group open, so the lab's card is on screen.
+    for group in crate::labs::Group::ALL {
+        state
+            .settings
+            .labs
+            .groups
+            .insert(group.id().to_string(), true);
+    }
     let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
     let mut rt = crate::rune_ui::offscreen::runtime(
         state,
