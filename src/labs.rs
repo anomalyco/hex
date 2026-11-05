@@ -107,10 +107,11 @@ pub enum Feature {
     MeetingPlatformIcons,
     Screenshots,
     FollowLiveTranscript,
+    CollapsibleMeetingSections,
 }
 
 impl Feature {
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 49] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -159,6 +160,7 @@ impl Feature {
         Self::MeetingPlatformIcons,
         Self::Screenshots,
         Self::FollowLiveTranscript,
+        Self::CollapsibleMeetingSections,
     ];
 
     /// The features this OS and build have.
@@ -229,6 +231,7 @@ impl Feature {
             | Self::MeetingPlatformIcons
             | Self::Screenshots
             | Self::FollowLiveTranscript
+            | Self::CollapsibleMeetingSections
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -283,7 +286,8 @@ impl Feature {
             | Self::GnomeMeetingCapsules
             | Self::MeetingPlatformIcons
             | Self::Screenshots
-            | Self::FollowLiveTranscript => 20261104,
+            | Self::FollowLiveTranscript
+            | Self::CollapsibleMeetingSections => 20261104,
         }
     }
 
@@ -359,6 +363,7 @@ impl Feature {
             | Self::MeetingFinishedEvent
             | Self::MeetingPlatformIcons
             | Self::FollowLiveTranscript
+            | Self::CollapsibleMeetingSections
             | Self::FillerWords => true,
         }
     }
@@ -414,6 +419,7 @@ impl Feature {
             Self::MeetingPlatformIcons => "meeting-platform-icons",
             Self::Screenshots => "screenshots",
             Self::FollowLiveTranscript => "follow-live-transcript",
+            Self::CollapsibleMeetingSections => "collapsible-meeting-sections",
         }
     }
 
@@ -468,6 +474,7 @@ impl Feature {
             Self::MeetingPlatformIcons => "labs.meeting_platform_icons",
             Self::Screenshots => "labs.screenshots",
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
+            Self::CollapsibleMeetingSections => "labs.collapsible_meeting_sections",
         }
     }
 
@@ -600,6 +607,9 @@ impl Feature {
             Self::FollowLiveTranscript => {
                 "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
             }
+            Self::CollapsibleMeetingSections => {
+                "Fold the summary, chapters, and day groups in Meetings"
+            }
         }
     }
 
@@ -658,6 +668,7 @@ impl Feature {
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons,
             Self::Screenshots => settings.labs.screenshots,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
+            Self::CollapsibleMeetingSections => settings.labs.collapsible_meeting_sections,
         }
     }
 
@@ -714,6 +725,7 @@ impl Feature {
             &mut labs.meeting_platform_icons,
             &mut labs.screenshots,
             &mut labs.follow_live_transcript,
+            &mut labs.collapsible_meeting_sections,
         ]
     }
 
@@ -770,6 +782,9 @@ impl Feature {
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
+            Self::CollapsibleMeetingSections => {
+                settings.labs.collapsible_meeting_sections = on;
+            }
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
