@@ -1257,6 +1257,8 @@ Menu bar and Settings                    // maintenance
 
 ```ts
 Launch Hex                               // maintain.startup
+├── `hex app --hidden` + usable menu-bar item -> No startup window, even before setup
+│   └── check: login_item_launch_starts_without_the_window (the decision only); not run on a Mac
 ├── Setup incomplete / permissions or model missing -> Open setup or Settings
 ├── Show Dock icon on -> Open Settings
 │   └── Started by Launch at login -> No startup window (#1321)
