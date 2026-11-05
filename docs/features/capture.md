@@ -226,8 +226,7 @@ Settings › Annotate                      // capture.pane
 │       on the next read. Never part of onboarding (macOS also asks at the first
 │       capture). Check: rune_ui::scrawl tests
 ├── Show in screen recordings (capture.show_overlays_in_recordings, default
-│   off; also the menu bar's Show Hex in Screen Recordings checkmark) -> see
-│   capture.own-windows; applies at once, to open windows and a recording capture
+│   off) -> see capture.own-windows; applies at once, to open windows and a recording capture
 ├── Transcriber (capture.transcriber) -> Parakeet (default) | Apple
 ├── Captures folder (capture.folder, default Scrawl's) -> Reveal | choose another
 ├── Keep (capture.media_days / bundle_days) -> Scrawl's presets, or imported days

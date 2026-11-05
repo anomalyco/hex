@@ -324,17 +324,16 @@ impl CaptureOverlays {
 
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     /// Follows `capture.show_overlays_in_recordings` on windows already
-    /// made; returns the new value when it changed.
-    pub(crate) fn follow_recordings(&mut self) -> Option<bool> {
+    /// made.
+    pub(crate) fn follow_recordings(&mut self) {
         let shown = crate::capture_host::own_windows_recorded();
         if shown == self.shown {
-            return None;
+            return;
         }
         self.shown = shown;
         self.capsule.show_in_recordings(shown);
         self.picker.show_in_recordings(shown);
         self.ink.show_in_recordings(shown);
-        Some(shown)
     }
 }
 

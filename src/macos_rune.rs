@@ -1097,10 +1097,8 @@ impl Pump {
         }
         self.settle_meeting_waiters(None);
         #[cfg(hex_capture)]
-        if let Some(overlays) = &mut self.capture_overlays
-            && let Some(shown) = overlays.follow_recordings()
-        {
-            crate::macos_rune::status_item::update_overlays_in_recordings(shown);
+        if let Some(overlays) = &mut self.capture_overlays {
+            overlays.follow_recordings();
         }
         if self.status_actions.is_none() {
             return;
@@ -1112,6 +1110,7 @@ impl Pump {
                     &published.settings,
                     &published.preparation,
                 );
+                crate::macos_rune::status_item::update_paste_last(&published.settings);
             }
             self.model_menu_at = now + MODEL_MENU_REFRESH;
         }
@@ -1210,30 +1209,9 @@ impl Pump {
                 }
             }
             StatusItemAction::OpenMeetings => show(&self.window, Destination::Meetings(None)),
-            #[cfg(hex_capture)]
-            StatusItemAction::ToggleOverlaysInRecordings => self.toggle_overlays_in_recordings(),
             StatusItemAction::Quit => {
                 self.runtime_cancel();
                 self.window.quit();
-            }
-        }
-    }
-
-    /// Saves the flipped setting as the window would; the overlays and the
-    /// menu item follow it from [`Pump::tick`].
-    #[cfg(hex_capture)]
-    fn toggle_overlays_in_recordings(&self) {
-        let saved = AppSettings::load().and_then(|mut settings| {
-            settings.capture.show_overlays_in_recordings =
-                !settings.capture.show_overlays_in_recordings;
-            settings.save()
-        });
-        match saved {
-            Ok(()) => {
-                let _ = self.runtime.send(Request::ReloadSettings);
-            }
-            Err(error) => {
-                tracing::warn!(error = %format!("{error:#}"), "could not save the recordings setting");
             }
         }
     }
