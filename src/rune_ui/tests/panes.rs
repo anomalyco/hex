@@ -2111,21 +2111,6 @@ fn labs_groups_follow_each_os() {
     );
 }
 
-/// Whether the switch keyed `key` is on: its thumb sits past the track's
-/// middle.
-fn shows_on(rt: &Runtime<Ui>, key: &str) -> bool {
-    let inside = format!("/{key}/");
-    let part = |name: &str| {
-        rt.elements()
-            .into_iter()
-            .find(|e| !e.exiting && e.key.as_deref() == Some(name) && e.path.contains(&inside))
-            .unwrap_or_else(|| panic!("no {name} in {key}"))
-            .rect
-    };
-    let (track, thumb) = (part("control"), part("thumb"));
-    thumb[0] + thumb[2] / 2.0 > track[0] + track[2] / 2.0
-}
-
 #[test]
 fn command_f_searches_labs() {
     let mut rt = runtime("mac-labs", true, PANE_SIZE);
