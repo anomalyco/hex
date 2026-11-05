@@ -86,11 +86,11 @@ enum WtypeCommand {
 fn wtype_commands(text: &str) -> Vec<WtypeCommand> {
     crate::typing::strokes(text)
         .into_iter()
-        .filter_map(|stroke| match stroke {
-            Stroke::Text(units) => Some(WtypeCommand::Text(
+        .map(|stroke| match stroke {
+            Stroke::Text(units) => WtypeCommand::Text(
                 String::from_utf16(&units).expect("strokes keep whole characters"),
-            )),
-            Stroke::LineBreak => Some(WtypeCommand::LineBreak),
+            ),
+            Stroke::LineBreak => WtypeCommand::LineBreak,
         })
         .collect()
 }
