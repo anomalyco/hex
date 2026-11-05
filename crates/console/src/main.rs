@@ -96,9 +96,8 @@ mod tests {
 
     #[test]
     fn only_opening_the_app_returns_without_waiting() {
-        let opens = |arguments: &[&str]| {
-            opens_app(&arguments.iter().map(Into::into).collect::<Vec<_>>())
-        };
+        let opens =
+            |arguments: &[&str]| opens_app(&arguments.iter().map(Into::into).collect::<Vec<_>>());
         assert!(opens(&[]));
         assert!(opens(&["app"]));
         assert!(opens(&["app", "--hidden"]));
