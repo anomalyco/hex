@@ -403,8 +403,10 @@ whitespace, opening punctuation, straight quotes, or symbols such as `@ $ # /
 -`, and never before text that starts with whitespace or closing punctuation.
 Selected text, a cursor at the start, or an app that doesn't expose its
 cursor leaves the text unchanged, and both the clipboard paste and the
-Chromium 155/156 typing path use the adjusted text. Lowercasing the first
-letter is not done. Off, pasting is exactly as before. Checks:
+Chromium 155/156 typing path use the adjusted text. Hex's own window is
+never asked: its tree belongs to the main thread that updates it (#1402).
+Lowercasing the first letter is not done. Off, pasting is exactly as before.
+Checks:
 `smart_spacing_adds_a_space_only_where_one_belongs` in
 [paste.rs](../../src/paste.rs) (macOS only);
 `smart_spacing_is_its_own_bit_and_off_by_default` in
