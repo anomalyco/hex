@@ -13,7 +13,9 @@ const ui = ["interaction.p50", "interaction.p95", "frames.dropped", "cpu.work", 
 
 export default bench({
   targets: {
-    window: native("hex", { home, viewport: { width: 980, height: 760 } }),
+    // Each case names the pane its blocks show before and after the runs; a
+    // block on another screen (a first-run dialog) is refused, not timed.
+    window: native("hex", { home, viewport: { width: 980, height: 760 }, expect: { title: "Hex" } }),
   },
   // Fonts, the GPU and the first frames settle, then each case starts from
   // its pane.
@@ -28,6 +30,7 @@ export default bench({
   cases: {
     // General → History (200 rows of 10,000) → Output → General.
     "switch-panes": {
+      expect: { heading: "General" },
       primary: "ui.cpu",
       metrics: ui,
       async run({ page }) {
@@ -38,6 +41,7 @@ export default bench({
     },
     // Down History's list and back, at a trackpad's pace.
     "history-scroll": {
+      expect: { heading: "History" },
       primary: "ui.cpu",
       metrics: ["scroll.latency.p50", "scroll.latency.p95", "frames.dropped", "cpu.work"],
       async run({ page, phase }) {
@@ -47,6 +51,7 @@ export default bench({
     },
     // A search typed into History: each key searches all 10,000 entries.
     "history-search": {
+      expect: { heading: "History" },
       primary: "ui.cpu",
       metrics: ui,
       run: ({ page }) => page.type("history-search", "cache key", { delay: 120 }),
@@ -60,6 +65,7 @@ export default bench({
     // comparison, and close. Choosing a model would download or load one,
     // which is the network's and the model's cost, not the window's.
     "model-picker": {
+      expect: { heading: "General" },
       primary: "ui.cpu",
       metrics: ui,
       async run({ page }) {

@@ -72,8 +72,13 @@ with `perf/serve.ts`. strobe builds and serves both variants with this checkout'
 ```sh
 strobe bench site/perf/hex.bench.ts --base origin/dev --head .
 strobe bench site/perf/hex.bench.ts --head . --check            # each case once, pass or fail
-strobe report experiment <exp_…> --format pr                     # tables for the PR body
+strobe report experiment <exp_…> --format pr --update-pr <n>     # the results block in PR n
 ```
+
+In a PR, write your own text (what strobe showed, what changed) and let
+`--update-pr` place strobe's generated results block: it replaces only its own
+block after a rerun. Don't edit inside it. The bench's `expect` refuses a block
+whose page isn't the landing page (`WrongScreen`).
 
 The show draws at its own frame rate, not the display's: `canvas.frames` and
 `canvas.interval.p95` count the show's WebGPU frames, where presented frames count
