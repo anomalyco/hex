@@ -1400,6 +1400,7 @@ mod tests {
     #[test]
     fn meeting_delta_coalesces_turns_in_time_order() {
         let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
+            speaker: None,
             source,
             start_ms,
             end_ms,

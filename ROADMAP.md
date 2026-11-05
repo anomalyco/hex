@@ -255,6 +255,14 @@ forced final-transcription failure, and live provider detection. Evaluate
 synchronized playback, echo annotation, summarization, and person-level
 diarization only against real meeting recordings.
 
+Labs › Speakers in meetings tells a finished meeting's system audio apart into
+Speaker 1, 2, … with Sortformer 4spk v2.1 through `transcribe_cpp::DiarizeSession`.
+Next: port the Nemotron-3 diarization head (V3) to transcribe.cpp and swap it in
+behind the same session (more voices per chunk, steadier identities across
+chunks), validate on real calls, and then voiceprints: an opt-in, owner-only
+embedding per named speaker that only suggests a name for a new meeting's
+voice, never assigns one, and is deleted with its name.
+
 ## Recommend Better Models To Existing Users
 
 After the Rune port is fully done (the macOS app has passed its smoke test),

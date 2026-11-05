@@ -543,6 +543,20 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings = meetings::MeetingsPane::chapters_fixture();
         ui.pane = Pane::Meetings;
     }),
+    ("meetings-speakers", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.meeting_speakers = true;
+        ui.meetings = super::meeting_speakers::fixture();
+        ui.pane = Pane::Meetings;
+    }),
+    ("meetings-speaker-rename", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.meeting_speakers = true;
+        ui.meetings = super::meeting_speakers::fixture();
+        ui.meetings.renaming_speaker = Some(("preview-notes".into(), 1));
+        ui.meetings.speaker_name = TextEdit::new("Alex");
+        ui.pane = Pane::Meetings;
+    }),
     ("meetings-platform-icons", |ui| {
         *ui = mac_fixture();
         ui.settings.labs.meeting_platform_icons = true;
@@ -639,6 +653,10 @@ pub(super) const SCENES: &[Scene] = &[
     ("mac-labs-search", |ui| {
         labs_with_some_on(ui);
         ui.lab_store.search = rune::TextEdit::new("paste".to_string());
+    }),
+    ("mac-labs-meeting-speakers", |ui| {
+        labs_with_some_on(ui);
+        ui.lab_store.search = rune::TextEdit::new("speakers".to_string());
     }),
     ("mac-labs-drawer", |ui| {
         labs_with_some_on(ui);

@@ -89,6 +89,9 @@ pub(crate) enum ControllerEvent {
     },
     NotesStarted,
     NotesFinished(Box<meeting::MeetingManifest>),
+    /// A meeting's speakers were told apart, or why not (Labs › Speakers in
+    /// meetings).
+    SpeakersFinished(Box<meeting::MeetingManifest>),
 }
 
 struct ActiveRecording {
@@ -167,6 +170,9 @@ pub(crate) fn controller_loop(
         reminders.poll(enabled, recording.is_some(), &events);
         pending_finals.poll(enabled, recording.is_some(), &events);
         expiry.poll();
+        if enabled && crate::labs::meeting_speakers() {
+            meeting::speakers::prepare();
+        }
 
         if recording.is_none() && enabled {
             let choices = crate::app_settings::meeting_provider_choices();
@@ -286,9 +292,7 @@ impl PendingFinals {
                     match meeting::finish_pending(&id) {
                         Ok(Some(manifest)) => {
                             tracing::info!(meeting = id, "finished a pending meeting transcript");
-                            if meeting::notes_wanted() {
-                                start_notes(manifest.id, &events);
-                            }
+                            after_publication(manifest.id, &events);
                         }
                         Ok(None) => {}
                         Err(error) => {
@@ -671,8 +675,8 @@ fn poll_recording(
             .ok_or_else(|| eyre!("recording disappeared"))?;
         let event = match active.worker.join() {
             Ok(Ok(manifest)) => {
-                if manifest.status == meeting::MeetingStatus::Complete && meeting::notes_wanted() {
-                    start_notes(manifest.id.clone(), events);
+                if manifest.status == meeting::MeetingStatus::Complete {
+                    after_publication(manifest.id.clone(), events);
                 }
                 ControllerEvent::Finished(Box::new(manifest))
             }
@@ -985,6 +989,29 @@ fn detect_meeting(
         );
     }
     Ok(detection)
+}
+
+/// What follows a meeting's final publication: with Labs › Speakers in
+/// meetings on, its speakers are told apart first so the notes see them;
+/// then the notes, when they are wanted.
+fn after_publication(id: String, events: &SyncSender<ControllerEvent>) {
+    if crate::labs::meeting_speakers() {
+        let finished = events.clone();
+        let notes_id = id.clone();
+        // A run already going for this meeting starts the notes itself.
+        meeting::speakers::spawn(id, move |manifest| {
+            if let Some(manifest) = manifest {
+                let _ = finished.send(ControllerEvent::SpeakersFinished(Box::new(manifest)));
+            }
+            if meeting::notes_wanted() {
+                start_notes(notes_id, &finished);
+            }
+        });
+        return;
+    }
+    if meeting::notes_wanted() {
+        start_notes(id, events);
+    }
 }
 
 /// Writes notes on a background thread; the UI refreshes from the manifest

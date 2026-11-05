@@ -51,6 +51,8 @@ impl Status {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Turn {
     pub(super) mine: bool,
+    /// The told-apart voice of a system turn (Labs › Speakers in meetings).
+    pub(super) speaker: Option<u32>,
     pub(super) start_ms: u64,
     pub(super) text: String,
     /// A silence of 30 s or more before this turn.
@@ -98,6 +100,10 @@ pub(super) struct Meeting {
     pub(super) live_error: Option<String>,
     pub(super) transcript: Transcript,
     pub(super) chapters: Vec<Chapter>,
+    /// The other voices told apart (Labs › Speakers in meetings).
+    pub(super) speakers: Option<super::meeting_speakers::Speakers>,
+    pub(super) speakers_running: bool,
+    pub(super) speakers_error: Option<String>,
     /// How long it is kept once finished, as `MeetingRetention::label`;
     /// `None` when it is kept for good.
     pub(super) kept_for: Option<&'static str>,
@@ -171,7 +177,10 @@ pub(super) struct MeetingsPane {
     pub(super) renaming: Option<String>,
     pub(super) rename: TextEdit,
     pub(super) delete_armed: Option<String>,
-    action_error: Option<String>,
+    /// The meeting and speaker whose name is being edited.
+    pub(super) renaming_speaker: Option<(String, u32)>,
+    pub(super) speaker_name: TextEdit,
+    pub(super) action_error: Option<String>,
     /// What was last copied, for the button's "Copied".
     copied: Option<(String, String)>,
     pub(super) start_pending: bool,
@@ -204,13 +213,16 @@ fn clock_offset(milliseconds: u64) -> String {
 }
 
 /// Speaker turns as Markdown, as `meeting::transcript_markdown`.
-fn transcript_markdown(turns: &[Turn]) -> String {
+fn transcript_markdown(
+    speakers: Option<&super::meeting_speakers::Speakers>,
+    turns: &[Turn],
+) -> String {
     turns
         .iter()
         .map(|turn| {
             format!(
                 "**{}** · {}\n{}",
-                if turn.mine { "You" } else { "Them" },
+                super::meeting_speakers::markdown_label(speakers, turn),
                 clock_offset(turn.start_ms),
                 turn.text.trim()
             )
@@ -220,7 +232,7 @@ fn transcript_markdown(turns: &[Turn]) -> String {
 }
 
 impl MeetingsPane {
-    fn meeting(&self, id: &str) -> Option<&Meeting> {
+    pub(super) fn meeting(&self, id: &str) -> Option<&Meeting> {
         self.meetings.iter().find(|meeting| meeting.id == id)
     }
 
@@ -271,6 +283,7 @@ impl MeetingsPane {
     pub(super) fn select(&mut self, id: String) {
         if self.selected.as_deref() != Some(id.as_str()) {
             self.renaming = None;
+            self.renaming_speaker = None;
             self.delete_armed = None;
             self.action_error = None;
         }
@@ -281,6 +294,7 @@ impl MeetingsPane {
     pub(super) fn fixture() -> Self {
         let turn = |mine, seconds: u64, text: &str| Turn {
             mine,
+            speaker: None,
             start_ms: seconds * 1_000,
             text: text.into(),
             pause_before_ms: None,
@@ -340,6 +354,9 @@ impl MeetingsPane {
                 live_error: None,
                 transcript: Transcript::Loaded(Vec::new()),
                 chapters: Vec::new(),
+                speakers: None,
+                speakers_running: false,
+                speakers_error: None,
                 kept_for: Some("24 hours"),
             };
         let mut live = meeting(
@@ -457,7 +474,7 @@ impl MeetingsPane {
                         start_ms,
                         markdown: format!(
                             "## {title}\n\n{summary}\n\n{}",
-                            transcript_markdown(&inside)
+                            transcript_markdown(None, &inside)
                         )
                         .trim_end()
                         .into(),
@@ -471,7 +488,7 @@ impl MeetingsPane {
 
 /// Sends `request` where it is carried out (on Linux and Windows, the
 /// window's own meetings, not the OS host, which ignores meeting requests).
-fn ask(ui: &mut Ui, request: MeetingRequest) -> bool {
+pub(super) fn ask(ui: &mut Ui, request: MeetingRequest) -> bool {
     match ui.send_meeting(request) {
         Ok(()) => true,
         Err(error) => {
@@ -725,7 +742,7 @@ fn copy_action(p: Paint, pane: &MeetingsPane, meeting: &Meeting, what: &'static 
     let id = meeting.id.clone();
     let press = move |ui: &mut Ui, tx: &mut Tx| {
         if let Some(meeting) = ui.meetings.meeting(&id) {
-            let markdown = transcript_markdown(meeting.turns());
+            let markdown = transcript_markdown(meeting.speakers.as_ref(), meeting.turns());
             copy(ui, tx, id.clone(), what, markdown);
         }
     };
@@ -979,6 +996,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
             .as_deref()
             .filter(|_| active)
             .map(|error| ("live-error", tr("Live transcript unavailable."), error)),
+        super::meeting_speakers::error(meeting),
     ];
     let mut body = col().key("detail-body").gap(24.0).pb(8.0);
     for (key, title, error) in errors.into_iter().flatten() {
@@ -1018,6 +1036,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     if !meeting.chapters.is_empty() {
         body = body.child(chapters(p, meeting, &copied));
     }
+    body = body.children(super::meeting_speakers::section(ui, p, meeting));
     let transcript_label = match meeting.status {
         Status::Starting | Status::Recording if !pane.stop_pending => tr("Live transcript"),
         Status::Starting | Status::Recording | Status::Transcribing => tr("Draft transcript"),
@@ -1240,7 +1259,8 @@ fn transcript(p: Paint, meeting: &Meeting, stop_pending: bool) -> El {
     }
     let mut lines = col().key("turns").gap(14.0);
     for (index, turn) in turns.iter().enumerate() {
-        lines = lines.children(turn_line(p, index, turn));
+        let label = super::meeting_speakers::label(meeting.speakers.as_ref(), turn);
+        lines = lines.children(turn_line(p, index, turn, &label));
     }
     if meeting.status == Status::Recording && !stop_pending {
         lines = lines.child(
@@ -1255,7 +1275,7 @@ fn transcript(p: Paint, meeting: &Meeting, stop_pending: bool) -> El {
 
 /// One turn of a transcript: the pause before it, if any, then the speaker,
 /// the time, and the words.
-pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn) -> Vec<El> {
+pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, label: &str) -> Vec<El> {
     let mut els = Vec::new();
     if let Some(pause) = turn.pause_before_ms {
         els.push(
@@ -1274,7 +1294,7 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn) -> Vec<El> {
                     .key("speaker")
                     .gap(8.0)
                     .child(
-                        text(if turn.mine { tr("You") } else { tr("Them") })
+                        text(label.to_string())
                             .key("name")
                             .font(p.k.ty.small_medium)
                             .color(if turn.mine { p.text() } else { p.faint() }),

@@ -51,6 +51,7 @@ mod notes;
 pub mod query;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod runtime;
+pub(crate) mod speakers;
 mod transcript;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod watcher;
@@ -63,6 +64,7 @@ pub use delta::*;
 pub use notes::{MeetingNotes, display_title, notes_in_progress, notes_wanted, spawn_summary};
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub use notes::{summarize, summarize_file};
+pub use speakers::{MeetingSpeakers, rename_speaker, speaker_label, speakers_in_progress};
 pub use transcript::TranscriptReader;
 
 /// What the recorder knows about a meeting when it starts.
@@ -194,6 +196,13 @@ pub struct MeetingManifest {
     /// user edited stays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_sha256: Option<String>,
+    /// The other voices told apart after publication (Labs › Speakers in
+    /// meetings), and the names the user gave them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers: Option<MeetingSpeakers>,
+    /// Why telling the speakers apart failed or was skipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers_error: Option<String>,
 }
 
 impl MeetingManifest {
@@ -285,6 +294,10 @@ pub struct TranscriptEntry {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+    /// Which of the other voices said it, numbered from 1 in order of first
+    /// appearance (system audio only, Labs › Speakers in meetings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<u32>,
 }
 
 pub fn coalesce_transcript(
@@ -294,6 +307,7 @@ pub fn coalesce_transcript(
     for entry in entries {
         if let Some(turn) = turns.last_mut()
             && turn.source == entry.source
+            && turn.speaker == entry.speaker
             && entry.start_ms.saturating_sub(turn.end_ms) <= TRANSCRIPT_TURN_GAP_MS
         {
             if !turn.text.ends_with(char::is_whitespace) {
@@ -439,6 +453,8 @@ pub fn record(
         chapters_refined: false,
         retention_applies: true,
         export_sha256: None,
+        speakers: None,
+        speakers_error: None,
     };
     set_title_source(&mut manifest, title_source);
     write_manifest(&meeting_dir, &manifest)?;
@@ -857,26 +873,7 @@ fn transcribe(
     // Transcription takes a while; the headings use a rename made meanwhile.
     keep_rename(directory, manifest);
 
-    let ndjson_temporary = directory.join("transcript.ndjson.tmp");
-    let markdown_temporary = directory.join("transcript.md.tmp");
-    let mut ndjson = BufWriter::new(File::create(&ndjson_temporary)?);
-    let mut markdown = BufWriter::new(File::create(&markdown_temporary)?);
-    set_owner_only(&ndjson_temporary, false)?;
-    set_owner_only(&markdown_temporary, false)?;
-    writeln!(markdown, "# {}\n", display_title(manifest))?;
-    for entry in &transcript {
-        serde_json::to_writer(&mut ndjson, entry)?;
-        ndjson.write_all(b"\n")?;
-        writeln!(markdown, "{}", markdown_line(entry))?;
-    }
-    ndjson.flush()?;
-    markdown.flush()?;
-    ndjson.get_ref().sync_all()?;
-    markdown.get_ref().sync_all()?;
-    sync_directory(directory)?;
-    fs::rename(&ndjson_temporary, directory.join("transcript.ndjson"))?;
-    fs::rename(&markdown_temporary, directory.join("transcript.md"))?;
-    sync_directory(directory)?;
+    write_final_files(directory, manifest, &transcript)?;
 
     match transcript::export_markdown(
         &crate::app_settings::meeting_output_folder(),
@@ -895,6 +892,38 @@ fn transcribe(
     }
     let _ = fs::remove_file(directory.join(FINAL_PENDING_FILE));
     Ok(())
+}
+
+/// Atomically writes the final `transcript.ndjson` and its Markdown view.
+fn write_final_files(
+    directory: &Path,
+    manifest: &MeetingManifest,
+    transcript: &[TranscriptEntry],
+) -> Result<()> {
+    let ndjson_temporary = directory.join("transcript.ndjson.tmp");
+    let markdown_temporary = directory.join("transcript.md.tmp");
+    let mut ndjson = BufWriter::new(File::create(&ndjson_temporary)?);
+    let mut markdown = BufWriter::new(File::create(&markdown_temporary)?);
+    set_owner_only(&ndjson_temporary, false)?;
+    set_owner_only(&markdown_temporary, false)?;
+    writeln!(markdown, "# {}\n", display_title(manifest))?;
+    for entry in transcript {
+        serde_json::to_writer(&mut ndjson, entry)?;
+        ndjson.write_all(b"\n")?;
+        writeln!(
+            markdown,
+            "{}",
+            markdown_line(entry, manifest.speakers.as_ref())
+        )?;
+    }
+    ndjson.flush()?;
+    markdown.flush()?;
+    ndjson.get_ref().sync_all()?;
+    markdown.get_ref().sync_all()?;
+    sync_directory(directory)?;
+    fs::rename(&ndjson_temporary, directory.join("transcript.ndjson"))?;
+    fs::rename(&markdown_temporary, directory.join("transcript.md"))?;
+    Ok(sync_directory(directory)?)
 }
 
 /// Meetings Hex quit while recording, oldest first.
@@ -1083,12 +1112,20 @@ pub fn notes_markdown(notes: &MeetingNotes) -> String {
 
 /// Speaker turns as Markdown, for copying.
 pub fn transcript_markdown(entries: &[TranscriptEntry]) -> String {
+    transcript_markdown_with(entries, None)
+}
+
+/// Speaker turns as Markdown, naming told-apart speakers as `speakers` does.
+pub fn transcript_markdown_with(
+    entries: &[TranscriptEntry],
+    speakers: Option<&MeetingSpeakers>,
+) -> String {
     coalesce_transcript(entries.iter().cloned())
         .into_iter()
         .map(|turn| {
             format!(
                 "**{}** · {}\n{}",
-                turn.source.label(),
+                speaker_label(turn.source, turn.speaker, speakers),
                 format_duration(turn.start_ms),
                 turn.text.trim()
             )
@@ -1114,6 +1151,11 @@ fn trash_meeting(
     }
     if notes_in_progress(&manifest.id) {
         return Err(eyre!("Wait for the notes to finish before deleting"));
+    }
+    if speakers::speakers_in_progress(&manifest.id) {
+        return Err(eyre!(
+            "Wait for the speakers to be told apart before deleting"
+        ));
     }
     if let Some(path) = manifest.export_path.filter(|path| path.exists()) {
         move_to_trash(&path)?;
@@ -1203,6 +1245,9 @@ fn trash_expired(
     }
     if notes_in_progress(&manifest.id) {
         return Err(eyre!("its notes are being written"));
+    }
+    if speakers::speakers_in_progress(&manifest.id) {
+        return Err(eyre!("its speakers are being told apart"));
     }
     if let Some(path) = manifest.export_path.filter(|path| path.exists()) {
         if manifest.export_sha256.is_some() && file_sha256(&path) == manifest.export_sha256 {
@@ -1325,17 +1370,17 @@ pub fn show(id: &str) -> Result<String> {
     let manifest = read_manifest(&directory)?;
     let mut markdown = format!("# {}\n\n", manifest.title);
     for entry in transcript_entries_in(&directory)? {
-        markdown.push_str(&markdown_line(&entry));
+        markdown.push_str(&markdown_line(&entry, manifest.speakers.as_ref()));
         markdown.push('\n');
     }
     Ok(markdown)
 }
 
-fn markdown_line(entry: &TranscriptEntry) -> String {
+fn markdown_line(entry: &TranscriptEntry, speakers: Option<&MeetingSpeakers>) -> String {
     format!(
         "**{} {}**  {}",
         format_duration(entry.start_ms),
-        entry.source.label(),
+        speaker_label(entry.source, entry.speaker, speakers),
         entry.text
     )
 }

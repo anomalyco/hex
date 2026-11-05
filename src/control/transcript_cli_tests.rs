@@ -550,18 +550,21 @@ fn subtitles_render_speaker_turns_as_srt_and_vtt_cues() {
     use crate::meeting::{MeetingSource, TranscriptEntry};
     let entries = [
         TranscriptEntry {
+            speaker: None,
             source: MeetingSource::Microphone,
             start_ms: 5_500,
             end_ms: 8_000,
             text: "Hello <there> & welcome.".into(),
         },
         TranscriptEntry {
+            speaker: None,
             source: MeetingSource::System,
             start_ms: 3_725_042,
             end_ms: 3_725_000,
             text: "First line\n\n  \nsecond --> line".into(),
         },
         TranscriptEntry {
+            speaker: None,
             source: MeetingSource::System,
             start_ms: 3_800_000,
             end_ms: 3_801_000,
@@ -569,12 +572,12 @@ fn subtitles_render_speaker_turns_as_srt_and_vtt_cues() {
         },
     ];
     assert_eq!(
-        render_subtitles(&entries, SubtitleFormat::Srt),
+        render_subtitles(&entries, None, SubtitleFormat::Srt),
         "1\n00:00:05,500 --> 00:00:08,000\nYou: Hello <there> & welcome.\n\n\
          2\n01:02:05,042 --> 01:02:05,042\nThem: First line\nsecond -> line\n\n"
     );
     assert_eq!(
-        render_subtitles(&entries, SubtitleFormat::Vtt),
+        render_subtitles(&entries, None, SubtitleFormat::Vtt),
         "WEBVTT\n\n\
          00:00:05.500 --> 00:00:08.000\n<v You>Hello &lt;there&gt; &amp; welcome.\n\n\
          01:02:05.042 --> 01:02:05.042\n<v Them>First line\nsecond -&gt; line\n\n"
@@ -588,7 +591,11 @@ fn subtitles_follow_the_range_and_need_the_labs_toggle() {
         Library::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings"));
     let meeting = library.meeting("1790000500000-1002").unwrap();
     let range = OffsetRange::parse(Some("0:06"), Some("14")).unwrap();
-    let srt = render_subtitles(meeting.entries_in(range, NOW).unwrap(), SubtitleFormat::Srt);
+    let srt = render_subtitles(
+        meeting.entries_in(range, NOW).unwrap(),
+        None,
+        SubtitleFormat::Srt,
+    );
     assert!(srt.starts_with("1\n00:00:05,500 --> "), "{srt}");
     assert!(srt.contains("\n2\n00:00:13,000 --> "), "{srt}");
     assert!(srt.contains("You: Performance profiling"), "{srt}");

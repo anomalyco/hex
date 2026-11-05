@@ -271,6 +271,7 @@ impl TrackTranscript {
                     let start = (segment.start_ms.max(0) as u64).min(duration_ms);
                     let end = (segment.end_ms.max(0) as u64).min(duration_ms);
                     (!text.is_empty() && end > start).then(|| TranscriptEntry {
+                        speaker: None,
                         source: self.source,
                         start_ms: chunk_ms + start,
                         end_ms: chunk_ms + end,
@@ -282,6 +283,7 @@ impl TrackTranscript {
             let text = text.trim();
             (!text.is_empty())
                 .then(|| TranscriptEntry {
+                    speaker: None,
                     source: self.source,
                     start_ms: chunk_ms,
                     end_ms: chunk_ms + duration_ms,
@@ -398,6 +400,7 @@ impl TrackTranscript {
         for group in groups.into_iter().take(published) {
             let group = words.drain(..group.len()).collect::<Vec<_>>();
             self.entries.push(TranscriptEntry {
+                speaker: None,
                 source: self.source,
                 start_ms: group[0].start_ms as u64,
                 end_ms: group
@@ -2141,7 +2144,18 @@ pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptE
             markdown.push_str(&format!("- **Attendees:** {}\n", attendees.join(", ")));
         }
     }
-    markdown.push_str("\n## Transcript\n\n");
+    markdown.push('\n');
+    markdown.push_str(&render_transcript_section(manifest, entries));
+    markdown
+}
+
+/// The exported Markdown's `## Transcript` section, which runs to the end of
+/// the file.
+pub(super) fn render_transcript_section(
+    manifest: &MeetingManifest,
+    entries: &[TranscriptEntry],
+) -> String {
+    let mut markdown = String::from("## Transcript\n\n");
     let turns = coalesce_transcript(entries.iter().cloned());
     if turns.is_empty() {
         markdown.push_str("_No speech was transcribed._\n");
@@ -2149,7 +2163,7 @@ pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptE
     for turn in turns {
         markdown.push_str(&format!(
             "**{}** · {}\n{}\n\n",
-            turn.source.label(),
+            super::speaker_label(turn.source, turn.speaker, manifest.speakers.as_ref()),
             format_duration(turn.start_ms),
             turn.text.trim()
         ));
@@ -2319,6 +2333,7 @@ mod tests {
 
     fn entry(source: MeetingSource, start_ms: u64, end_ms: u64, text: &str) -> TranscriptEntry {
         TranscriptEntry {
+            speaker: None,
             source,
             start_ms,
             end_ms,

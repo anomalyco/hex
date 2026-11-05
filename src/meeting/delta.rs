@@ -192,7 +192,10 @@ pub fn transcript_markdown_for_manifest(manifest: &MeetingManifest) -> Result<St
     }
     let entries = TranscriptReader::default().read(&manifest.id)?;
     if !entries.is_empty() {
-        return Ok(transcript_markdown(&entries));
+        return Ok(super::transcript_markdown_with(
+            &entries,
+            manifest.speakers.as_ref(),
+        ));
     }
     Err(eyre!("no meeting transcript is available"))
 }
@@ -203,7 +206,10 @@ pub fn speaker_turns_markdown_for_manifest(manifest: &MeetingManifest) -> Result
     if let Ok(entries) = TranscriptReader::default().read(&manifest.id)
         && !entries.is_empty()
     {
-        return Ok(transcript_markdown(&entries));
+        return Ok(super::transcript_markdown_with(
+            &entries,
+            manifest.speakers.as_ref(),
+        ));
     }
     transcript_markdown_for_manifest(manifest)
 }

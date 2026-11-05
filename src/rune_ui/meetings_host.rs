@@ -45,6 +45,11 @@ impl LocalMeetings {
             MeetingRequest::Rename { id, title } => crate::meeting::rename(&id, &title)
                 .map(|_| ())
                 .map_err(failed),
+            MeetingRequest::RenameSpeaker { id, speaker, name } => {
+                crate::meeting::rename_speaker(&id, speaker, &name)
+                    .map(|_| ())
+                    .map_err(failed)
+            }
             MeetingRequest::Trash(id) => crate::meeting::trash(&id).map_err(failed),
             MeetingRequest::Reveal(id) => {
                 crate::meeting::reveal(&crate::meeting::root().map_err(failed)?.join(id));
@@ -167,6 +172,15 @@ fn pane_meeting(meeting: &crate::meeting::query::Meeting, now_ms: u64) -> Meetin
         notes_error: manifest.notes_error.clone(),
         live_error: manifest.live_transcription_error.clone(),
         transcript,
+        speakers: manifest
+            .speakers
+            .as_ref()
+            .map(|speakers| super::meeting_speakers::Speakers {
+                count: speakers.count,
+                names: speakers.names.clone(),
+            }),
+        speakers_running: crate::meeting::speakers_in_progress(&meeting.id),
+        speakers_error: manifest.speakers_error.clone(),
         // Sections come from the transcript lines, not the merged turns, as
         // the menu bar and `hex meetings show --chapter` read them.
         kept_for: (!meeting.status.is_active())
@@ -200,6 +214,7 @@ fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
             previous_end = Some(previous_end.map_or(turn.end_ms, |end| end.max(turn.end_ms)));
             Turn {
                 mine: turn.source == crate::meeting::MeetingSource::Microphone,
+                speaker: turn.speaker,
                 start_ms: turn.start_ms,
                 text: turn.text,
                 pause_before_ms,
@@ -267,6 +282,7 @@ mod tests {
         // One speaker's two lines join into one turn across the boundary
         // at 06:30; the second line belongs to the chapter after.
         let line = |start_ms: u64, end_ms: u64, text: &str| crate::meeting::TranscriptEntry {
+            speaker: None,
             source: crate::meeting::MeetingSource::Microphone,
             start_ms,
             end_ms,

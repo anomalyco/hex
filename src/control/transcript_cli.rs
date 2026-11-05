@@ -490,6 +490,12 @@ fn meeting_json(meeting: &Meeting, range: OffsetRange, now: u64) -> Result<serde
     if !meeting.manifest.chapters.is_empty() {
         json["chapters"] = chapters_json(meeting, now);
     }
+    // Only meetings whose speakers were told apart carry the field.
+    if let Some(speakers) = &meeting.manifest.speakers {
+        json["speakers"] = (1..=speakers.count)
+            .map(|number| serde_json::json!({"speaker": number, "name": speakers.name(number)}))
+            .collect();
+    }
     Ok(json)
 }
 
@@ -603,9 +609,17 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
                 let text = match chapter {
                     Some(number) => {
                         let view = meeting.chapter(*number, now)?;
-                        render_subtitles(view.entries.iter(), format)
+                        render_subtitles(
+                            view.entries.iter(),
+                            meeting.manifest.speakers.as_ref(),
+                            format,
+                        )
                     }
-                    None => render_subtitles(meeting.entries_in(range, now)?, format),
+                    None => render_subtitles(
+                        meeting.entries_in(range, now)?,
+                        meeting.manifest.speakers.as_ref(),
+                        format,
+                    ),
                 };
                 write!(out, "{text}")?;
                 return Ok(());
@@ -700,9 +714,10 @@ fn require_subtitle_export(on: bool) -> Result<()> {
 }
 
 /// One cue per transcript entry (a speaker turn), timed by the entry's
-/// offsets from the meeting's start and labelled You or Them.
+/// offsets from the meeting's start and labelled You, Them, or the speaker.
 fn render_subtitles<'a>(
     entries: impl IntoIterator<Item = &'a crate::meeting::TranscriptEntry>,
+    speakers: Option<&crate::meeting::MeetingSpeakers>,
     format: SubtitleFormat,
 ) -> String {
     let mut out = String::new();
@@ -718,7 +733,7 @@ fn render_subtitles<'a>(
         number += 1;
         let start = entry.start_ms;
         let end = entry.end_ms.max(start);
-        let speaker = entry.source.label();
+        let speaker = crate::meeting::speaker_label(entry.source, entry.speaker, speakers);
         match format {
             SubtitleFormat::Srt => {
                 out.push_str(&format!(

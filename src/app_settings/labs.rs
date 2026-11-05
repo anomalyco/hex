@@ -84,6 +84,9 @@ pub struct LabsSettings {
     pub screenshots: bool,
     /// A recording meeting's transcript scrolls to its newest line, until scrolled up (issue 1332).
     pub follow_live_transcript: bool,
+    /// A published meeting's other voices are told apart as Speaker 1,
+    /// Speaker 2, and so on (Labs › Speakers in meetings).
+    pub meeting_speakers: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -135,6 +138,7 @@ impl Default for LabsSettings {
             meeting_platform_icons: false,
             screenshots: false,
             follow_live_transcript: false,
+            meeting_speakers: false,
         }
     }
 }
