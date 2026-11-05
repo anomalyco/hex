@@ -25,13 +25,16 @@ pub struct Paster {
     prepared_clipboard: Option<PreparedClipboard>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PasteMode {
     Continue,
     Standalone,
     /// Labs › Copy dictation only: the text goes to the clipboard as an
     /// ordinary entry and nothing is pasted, typed, or restored.
     CopyOnly,
+    /// Labs › Type dictations instead of pasting: the text is typed as
+    /// keystrokes and the clipboard is never written or restored.
+    Type,
 }
 
 struct PreparedClipboard {
@@ -244,7 +247,9 @@ impl Paster {
             None if crate::labs::smart_spacing() => with_smart_spacing(text),
             None => text.to_string(),
         };
-        if crate::dictation::context::frontmost_bundle_path()
+        if matches!(mode, PasteMode::Type) {
+            self.type_dictation(&text, mode, commit)?;
+        } else if crate::dictation::context::frontmost_bundle_path()
             .is_some_and(|bundle| has_clipboard_race(&bundle))
         {
             commit_prepared_paste(
@@ -276,6 +281,27 @@ impl Paster {
             inserted: text,
         });
         Ok(())
+    }
+
+    /// Labs › Type dictations instead of pasting: types `text` and touches
+    /// no clipboard at all. A pending restore from an earlier paste is left
+    /// alone; nothing new is written, captured, or scheduled.
+    fn type_dictation(
+        &mut self,
+        text: &str,
+        mode: PasteMode,
+        commit: impl FnOnce() -> bool,
+    ) -> Result<()> {
+        commit_prepared_paste(
+            || Ok(()),
+            commit,
+            |()| {
+                if matches!(mode, PasteMode::Standalone) {
+                    self.continuation = None;
+                }
+                crate::keyboard::type_text(text)
+            },
+        )
     }
 
     /// Leaves `text` on the clipboard for the user to paste: no ⌘V, no typed

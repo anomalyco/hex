@@ -428,6 +428,16 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Changing input source selects its mapped model and language; manual choices still work"),
         ));
     }
+    // Everywhere Hex has a typing path: not Wayland desktops without wtype,
+    // where the paste portal can only send keysyms.
+    if Feature::TypeDictations.on_this_os() {
+        rows.push(row(
+            Feature::TypeDictations,
+            Some(&KEYBOARD),
+            tr("Type dictations instead of pasting"),
+            tr("Type each dictation as keystrokes, so the clipboard is never touched"),
+        ));
+    }
     if caps.os == super::platform::Os::Macos {
         rows.push(row(
             Feature::MouseShortcuts,
@@ -751,6 +761,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
         Feature::MeetingPlatformIcons => "lab-meeting-platform-icons",
         Feature::Screenshots => "lab-screenshots",
+        Feature::TypeDictations => "lab-type-dictations",
         Feature::FollowLiveTranscript => "lab-follow-live-transcript",
         Feature::AnnotateReplay => "lab-annotate-replay",
     }

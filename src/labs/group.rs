@@ -67,7 +67,8 @@ impl Feature {
             | Self::CopyOnly
             | Self::GnomeClipboardRestore
             | Self::TerminalPaste
-            | Self::OutputFixes => Group::Output,
+            | Self::OutputFixes
+            | Self::TypeDictations => Group::Output,
             Self::KeepRecordings | Self::HistoryStats | Self::RecentDictations => Group::History,
             Self::Meetings
             | Self::LiveChapters

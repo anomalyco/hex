@@ -113,10 +113,11 @@ pub enum Feature {
     Screenshots,
     FollowLiveTranscript,
     AnnotateReplay,
+    TypeDictations,
 }
 
 impl Feature {
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 50] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -166,6 +167,7 @@ impl Feature {
         Self::Screenshots,
         Self::FollowLiveTranscript,
         Self::AnnotateReplay,
+        Self::TypeDictations,
     ];
 
     /// The features this OS and build have.
@@ -239,6 +241,7 @@ impl Feature {
             | Self::Screenshots
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay
+            | Self::TypeDictations
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -295,6 +298,7 @@ impl Feature {
             | Self::Screenshots
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay => 20261104,
+            Self::TypeDictations => 20261105,
         }
     }
 
@@ -352,6 +356,9 @@ impl Feature {
             | Self::Screenshots => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
+            // Typing needs a real path to the focused app: macOS, Windows, X11,
+            // and Wayland's virtual keyboard through wtype.
+            Self::TypeDictations => crate::typing::available(),
             Self::AnnotateReplay => {
                 #[cfg(hex_capture)]
                 {
@@ -439,6 +446,7 @@ impl Feature {
             Self::Screenshots => "screenshots",
             Self::FollowLiveTranscript => "follow-live-transcript",
             Self::AnnotateReplay => "annotate-replay",
+            Self::TypeDictations => "type-dictations",
         }
     }
 
@@ -494,6 +502,7 @@ impl Feature {
             Self::Screenshots => "labs.screenshots",
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
             Self::AnnotateReplay => "labs.annotate_replay",
+            Self::TypeDictations => "labs.type_dictations",
         }
     }
 
@@ -629,6 +638,9 @@ impl Feature {
             Self::AnnotateReplay => {
                 "Save the last 15 seconds of your screen with hex capture replay or capture.replay_hotkey; macOS shows the screen-recording dot the whole time it's on (macOS 27+)"
             }
+            Self::TypeDictations => {
+                "Type each dictation as keystrokes instead of pasting, so the clipboard is never touched; Paste last dictation still pastes"
+            }
         }
     }
 
@@ -688,6 +700,7 @@ impl Feature {
             Self::Screenshots => settings.labs.screenshots,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
             Self::AnnotateReplay => settings.labs.annotate_replay,
+            Self::TypeDictations => settings.labs.type_dictations,
         }
     }
 
@@ -745,6 +758,7 @@ impl Feature {
             &mut labs.screenshots,
             &mut labs.follow_live_transcript,
             &mut labs.annotate_replay,
+            &mut labs.type_dictations,
         ]
     }
 
@@ -802,6 +816,7 @@ impl Feature {
             Self::Screenshots => settings.labs.screenshots = on,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
+            Self::TypeDictations => settings.labs.type_dictations = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -848,12 +863,15 @@ const MEETING_FINISHED_EVENT: u64 = 1 << 28;
 const GNOME_MEETING_CAPSULES: u64 = 1 << 29;
 const SCREENSHOTS: u64 = 1 << 30;
 const ANNOTATE_REPLAY: u64 = 1 << 31;
-/// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u64 = 32;
+const TYPE_DICTATIONS: u64 = 1 << 32;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
 static STATE: AtomicU64 = AtomicU64::new(0);
+
+/// Unload model when idle's minutes, read beside the switches so their word
+/// stays one bit per feature.
+static UNLOAD_MINUTES: AtomicU64 = AtomicU64::new(15);
 
 fn on(bit: u64) -> bool {
     state() & bit != 0
@@ -862,8 +880,9 @@ fn on(bit: u64) -> bool {
 fn state() -> u64 {
     match STATE.load(Ordering::Acquire) {
         0 => {
-            let saved = encode(&AppSettings::saved_labs());
-            let _ = STATE.compare_exchange(0, saved, Ordering::AcqRel, Ordering::Acquire);
+            let saved = AppSettings::saved_labs();
+            UNLOAD_MINUTES.store(encode_minutes(&saved), Ordering::Release);
+            let _ = STATE.compare_exchange(0, encode(&saved), Ordering::AcqRel, Ordering::Acquire);
             STATE.load(Ordering::Acquire)
         }
         state => state,
@@ -908,6 +927,13 @@ pub fn keep_on_clipboard() -> bool {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn copy_only() -> bool {
     on(COPY_ONLY)
+}
+
+/// A dictation is typed as keystrokes instead of pasted, so the clipboard is
+/// never touched (every OS whose typing path exists; read as each
+/// dictation's output commits).
+pub fn type_dictations() -> bool {
+    on(TYPE_DICTATIONS) && Feature::TypeDictations.on_this_os()
 }
 
 /// Spoken formatting phrases become line breaks and quotation marks (read
@@ -1072,14 +1098,22 @@ pub fn annotate_replay() -> bool {
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
-    let state = state();
-    (state & UNLOAD_IDLE != 0)
-        .then(|| std::time::Duration::from_secs((state >> MINUTES_SHIFT) * 60))
+    on(UNLOAD_IDLE).then(|| {
+        let minutes = UNLOAD_MINUTES.load(Ordering::Acquire);
+        std::time::Duration::from_secs(minutes * 60)
+    })
 }
 
 /// Records the switches the loaded or saved settings hold.
 pub(crate) fn apply(settings: &LabsSettings) {
+    UNLOAD_MINUTES.store(encode_minutes(settings), Ordering::Release);
     STATE.store(encode(settings), Ordering::Release);
+}
+
+/// Unload model when idle's minutes as its own number, stored beside the
+/// switches.
+fn encode_minutes(settings: &LabsSettings) -> u64 {
+    u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60))
 }
 
 fn encode(settings: &LabsSettings) -> u64 {
@@ -1092,7 +1126,6 @@ fn encode(settings: &LabsSettings) -> u64 {
 /// The switches `settings` hold for the features `reaches` admits; the
 /// rest read off while their saved setting stays as it is.
 fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u64 {
-    let minutes = u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60)) << MINUTES_SHIFT;
     [
         (Feature::LiveText, settings.live_text, LIVE_TEXT),
         (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
@@ -1205,10 +1238,15 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             GNOME_MEETING_CAPSULES,
         ),
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
+        (
+            Feature::TypeDictations,
+            settings.type_dictations,
+            TYPE_DICTATIONS,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
-    .fold(KNOWN | minutes, |state, (_, _, bit)| state | bit)
+    .fold(KNOWN, |state, (_, _, bit)| state | bit)
 }
 
 /// The names of the features on, for `hex status`.
@@ -1485,7 +1523,7 @@ mod tests {
         labs.unload_idle_minutes = 30;
         let state = encode(&labs);
         assert_ne!(state & UNLOAD_IDLE, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 30);
+        assert_eq!(encode_minutes(&labs), 30);
     }
 
     #[test]
@@ -1496,7 +1534,7 @@ mod tests {
         labs.unload_idle_minutes = 60;
         let state = encode(&labs);
         assert_ne!(state & SPOKEN_FORMATTING, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 60);
+        assert_eq!(encode_minutes(&labs), 60);
     }
 
     #[test]
@@ -1508,7 +1546,7 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & FILLER_WORDS, 0);
         assert_eq!(state & SPOKEN_FORMATTING, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1520,7 +1558,7 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & SUBTITLE_EXPORT, 0);
         assert_eq!(state & FILLER_WORDS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1532,7 +1570,7 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & SMART_SPACING, 0);
         assert_eq!(state & SUBTITLE_EXPORT, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1545,7 +1583,7 @@ mod tests {
         assert_ne!(state & SPOKEN_SYMBOLS, 0);
         assert_eq!(state & SPOKEN_FORMATTING, 0);
         assert_eq!(state & SMART_SPACING, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1557,7 +1595,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & SIDED_CHORDS, 0);
         assert_eq!(state & SPOKEN_SYMBOLS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1569,7 +1607,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & TAP_OR_HOLD, 0);
         assert_eq!(state & SIDED_CHORDS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1581,7 +1619,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & HISTORY_STATS, 0);
         assert_eq!(state & PARAKEET_ULTRA, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1593,7 +1631,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & RECENT_DICTATIONS, 0);
         assert_eq!(state & HISTORY_STATS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1606,7 +1644,7 @@ mod tests {
         assert_ne!(state & SKIP_PAUSES, 0);
         assert_eq!(state & TAP_OR_HOLD, 0);
         assert_eq!(state & PARAKEET_ULTRA, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1618,7 +1656,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & STOP_WHEN_CALL_ENDS, 0);
         assert_eq!(state & RECENT_DICTATIONS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1630,7 +1668,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & KEEP_RECORDINGS, 0);
         assert_eq!(state & STOP_WHEN_CALL_ENDS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1642,7 +1680,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & HIDE_MENU_BAR_ICON, 0);
         assert_eq!(state & KEEP_RECORDINGS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1654,7 +1692,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & SCREENSHOTS, 0);
         assert_eq!(state & MEETING_FINISHED_EVENT, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1666,7 +1704,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & NOTCH_INDICATOR, 0);
         assert_eq!(state & MEETING_NOTES_VOCABULARY, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1678,7 +1716,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & MOVABLE_MEETING_CAPSULES, 0);
         assert_eq!(state & HIDE_MENU_BAR_ICON, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1690,7 +1728,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & GNOME_CLIPBOARD_RESTORE, 0);
         assert_eq!(state & MEETING_SUMMARY_MODEL, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1702,7 +1740,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & MEETING_FINISHED_EVENT, 0);
         assert_eq!(state & NOTCH_INDICATOR, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]
@@ -1715,7 +1753,7 @@ mod tests {
         assert_ne!(state & ANNOTATE_REPLAY, 0);
         assert_eq!(state & GNOME_MEETING_CAPSULES, 0);
         assert_eq!(state & SCREENSHOTS, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
     #[test]
     fn gnome_meeting_capsules_is_its_own_bit_and_off_by_default() {
@@ -1726,7 +1764,19 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & GNOME_MEETING_CAPSULES, 0);
         assert_eq!(state & GNOME_CLIPBOARD_RESTORE, 0);
-        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
+    }
+
+    #[test]
+    fn type_dictations_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode(&labs) & TYPE_DICTATIONS, 0);
+        labs.type_dictations = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode(&labs);
+        assert_ne!(state & TYPE_DICTATIONS, 0);
+        assert_eq!(state & COPY_ONLY, 0);
+        assert_eq!(encode_minutes(&labs), 24 * 60);
     }
 
     #[test]

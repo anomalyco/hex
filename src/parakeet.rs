@@ -970,14 +970,15 @@ fn finish_output(
                     let commit = || control.begin_output();
                     match target {
                         TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
-                            // Labs › Copy dictation only, read as the output
-                            // commits: dictations go to the clipboard
-                            // unpasted; Paste last dictation still pastes.
-                            let mode = if crate::labs::copy_only() {
-                                PasteMode::CopyOnly
-                            } else {
-                                PasteMode::Continue
-                            };
+                            // Labs › Type dictations instead of pasting and
+                            // Copy dictation only, read as the output
+                            // commits: typing keeps the clipboard untouched;
+                            // copy-only leaves the text on it. Paste last
+                            // dictation still pastes.
+                            let mode = dictation_mode(
+                                crate::labs::type_dictations(),
+                                crate::labs::copy_only(),
+                            );
                             paste(&completed.text, mode, &commit)
                         }
                         TranscriptionTarget::Service
@@ -1051,6 +1052,17 @@ fn finish_output(
             };
             WorkerEvent::Pasted { kind, result }
         }
+    }
+}
+
+/// Labs › Copy dictation only and Type dictations instead of pasting choose
+/// how a finished dictation reaches the focused app. Typing wins, so its
+/// promise that the clipboard is never touched holds with both on.
+fn dictation_mode(type_dictations: bool, copy_only: bool) -> PasteMode {
+    match crate::typing::dictation_output(type_dictations) {
+        crate::typing::Output::Type => PasteMode::Type,
+        crate::typing::Output::Paste if copy_only => PasteMode::CopyOnly,
+        crate::typing::Output::Paste => PasteMode::Continue,
     }
 }
 
@@ -1319,6 +1331,14 @@ mod tests {
             },
             recording: None,
         }
+    }
+
+    #[test]
+    fn dictations_type_only_with_their_lab_and_typing_wins_over_copy_only() {
+        assert_eq!(dictation_mode(false, false), PasteMode::Continue);
+        assert_eq!(dictation_mode(false, true), PasteMode::CopyOnly);
+        assert_eq!(dictation_mode(true, false), PasteMode::Type);
+        assert_eq!(dictation_mode(true, true), PasteMode::Type);
     }
 
     #[test]

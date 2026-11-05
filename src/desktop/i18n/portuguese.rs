@@ -137,6 +137,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Leave the dictation on the clipboard after pasting instead of restoring what was there", "Deixa o ditado na área de transferência após colar, em vez de restaurar o que havia antes"),
     ("Copy dictation only", "Apenas copiar o ditado"),
     ("Put the dictation on the clipboard instead of pasting it", "Coloca o ditado na área de transferência em vez de colá-lo"),
+    ("Type dictations instead of pasting", "Digitar os ditados em vez de colar"),
+    ("Type each dictation as keystrokes, so the clipboard is never touched", "Digita cada ditado como teclas, sem nunca tocar na área de transferência"),
     ("Spoken formatting", "Formatação falada"),
     ("Say \"new line\", \"new paragraph\", \"open quote\", or \"close quote\" to insert line breaks and quotation marks", "Diga “new line”, “new paragraph”, “open quote” ou “close quote” para inserir quebras de linha e aspas"),
     ("Spoken symbols", "Símbolos falados"),

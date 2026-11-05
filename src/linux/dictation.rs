@@ -243,7 +243,12 @@ impl DictationOutput {
         }
         let printed = paster.is_none();
         if let Some(paster) = paster {
-            paster.paste(&processed.text)?;
+            // Labs › Type dictations instead of pasting, read as each
+            // dictation's output commits. Paste last dictation still pastes.
+            match crate::typing::dictation_output(crate::labs::type_dictations()) {
+                crate::typing::Output::Type => paster.type_text(&processed.text)?,
+                crate::typing::Output::Paste => paster.paste(&processed.text)?,
+            }
         }
         if let Some(history) = &self.history {
             let mut draft = crate::dictation::modes::history_draft(

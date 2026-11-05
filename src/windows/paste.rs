@@ -10,8 +10,8 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use windows_sys::Win32::System::DataExchange::{CountClipboardFormats, GetClipboardSequenceNumber};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-    KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyExW, SendInput, VK_CONTROL, VK_LWIN, VK_MENU,
-    VK_RWIN, VK_SHIFT, VK_V,
+    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC, MapVirtualKeyExW, SendInput, VK_CONTROL,
+    VK_LWIN, VK_MENU, VK_RETURN, VK_RWIN, VK_SHIFT, VK_V,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
@@ -189,6 +189,73 @@ impl WindowsPaster {
         });
         Ok(())
     }
+
+    /// Labs › Type dictations instead of pasting: types `text` as
+    /// `KEYEVENTF_UNICODE` key events, never reading or writing the
+    /// clipboard. A line break is Shift-Return, as on macOS.
+    pub fn type_text(&mut self, text: &str) -> Result<()> {
+        if text.trim().is_empty() {
+            return Err(eyre!("refusing to type an empty transcript"));
+        }
+        // Held Shift, Alt, or Win would turn a typed key into a shortcut.
+        wait_for_conflicting_modifiers();
+        let inputs = typing_inputs(&crate::typing::strokes(text));
+        let sent = send_inputs(&inputs);
+        if sent != inputs.len() as u32 {
+            // Release only what this typing pressed; never a key the user holds.
+            let cleanup = inputs
+                .iter()
+                .filter(|input| unsafe { input.Anonymous.ki.dwFlags } & KEYEVENTF_KEYUP != 0)
+                .copied()
+                .collect::<Vec<_>>();
+            send_inputs(&cleanup);
+            return Err(eyre!(
+                "Windows accepted only {sent} of {} synthetic typing events; an elevated target window may reject input",
+                inputs.len()
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// One `KEYEVENTF_UNICODE` press and release per UTF-16 unit, and a line
+/// break as Shift-Return so a chat box inserts a newline instead of sending.
+fn typing_inputs(strokes: &[crate::typing::Stroke]) -> Vec<INPUT> {
+    let mut inputs = Vec::new();
+    for stroke in strokes {
+        match stroke {
+            crate::typing::Stroke::Text(units) => {
+                for unit in units {
+                    for flags in [KEYEVENTF_UNICODE, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP] {
+                        inputs.push(INPUT {
+                            r#type: INPUT_KEYBOARD,
+                            Anonymous: INPUT_0 {
+                                ki: KEYBDINPUT {
+                                    wVk: 0,
+                                    wScan: *unit,
+                                    dwFlags: flags,
+                                    time: 0,
+                                    dwExtraInfo: crate::windows::input::HEX_INJECTED,
+                                },
+                            },
+                        });
+                    }
+                }
+            }
+            crate::typing::Stroke::LineBreak => {
+                for (key, down) in [
+                    (VK_SHIFT, true),
+                    (VK_RETURN, true),
+                    (VK_RETURN, false),
+                    (VK_SHIFT, false),
+                ] {
+                    let flags = if down { 0 } else { KEYEVENTF_KEYUP };
+                    inputs.push(keyboard_input(key, foreground_scan_code(key), flags));
+                }
+            }
+        }
+    }
+    inputs
 }
 
 fn clipboard_sequence() -> u32 {
@@ -397,6 +464,50 @@ mod tests {
                 (ki.wVk, ki.dwFlags & KEYEVENTF_KEYUP != 0)
             })
             .collect()
+    }
+
+    /// What one typing input sends, without its layout-dependent scan code.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Typed {
+        Unicode(u16, bool),
+        Key(u16, bool),
+    }
+
+    fn typed(inputs: &[INPUT]) -> Vec<Typed> {
+        inputs
+            .iter()
+            .map(|input| {
+                let ki = unsafe { input.Anonymous.ki };
+                let up = ki.dwFlags & KEYEVENTF_KEYUP != 0;
+                if ki.dwFlags & KEYEVENTF_UNICODE != 0 {
+                    assert_eq!(ki.wVk, 0, "a unicode event carries no virtual key");
+                    Typed::Unicode(ki.wScan, up)
+                } else {
+                    Typed::Key(ki.wVk, up)
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn typing_sends_unicode_keys_and_shift_return_for_line_breaks() {
+        assert_eq!(
+            typed(&typing_inputs(&crate::typing::strokes("a😀\r\nb"))),
+            [
+                Typed::Unicode(u16::from(b'a'), false),
+                Typed::Unicode(u16::from(b'a'), true),
+                Typed::Unicode(0xd83d, false),
+                Typed::Unicode(0xd83d, true),
+                Typed::Unicode(0xde00, false),
+                Typed::Unicode(0xde00, true),
+                Typed::Key(VK_SHIFT, false),
+                Typed::Key(VK_RETURN, false),
+                Typed::Key(VK_RETURN, true),
+                Typed::Key(VK_SHIFT, true),
+                Typed::Unicode(u16::from(b'b'), false),
+                Typed::Unicode(u16::from(b'b'), true),
+            ]
+        );
     }
 
     #[test]

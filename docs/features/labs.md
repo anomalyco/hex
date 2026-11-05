@@ -39,6 +39,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (macOS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
+├── Type dictations instead of pasting no labs.type_dictations (macOS, Windows, Linux X11 or Wayland with wtype)
+│                                        a dictation is typed as keystrokes and the clipboard is never touched; Paste last dictation still pastes (#1398)
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote", "quote … unquote" become line breaks and quotation marks; Spanish "nuevo párrafo", "nueva línea", "abre/cierra comillas", … too (#630, #1040)
 ├── Spoken symbols  no    labs.spoken_symbols          spoken "hashtag", "underscore", "comma", … become symbols joined to their words: "#release", "my_variable", "done, thanks"; Spanish "arroba", "guion bajo", "coma", … too (#678, #1040)
 ├── Remove filler words no labs.filler_words          um, umm, uh, uhh, erm, er, ah leave dictations, with no model (#631)
@@ -259,6 +261,43 @@ exactly as before. Checks:
 `contributed_options_are_labs_toggles_off_by_default` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation on a Mac with the toggle on.
+
+Type dictations instead of pasting (`type-dictations`, issue 1398): while on, a
+finished dictation (the dictation shortcut, Dictate without processing, or
+`hex dictation` without `--print`) is typed into the focused app as
+synthesized keystrokes, and the clipboard is never written or restored for it.
+`labs::type_dictations()` is read as each dictation's output commits. On macOS
+`parakeet::finish_output` picks `PasteMode::Type`, which uses the same
+`keyboard::type_text` path that Chromium 155/156 already gets, so continuation
+joins and Labs › Smart spacing still apply; typing wins over Copy dictation
+only when both are on, so its promise that nothing touches the clipboard
+holds. Every OS types a line break as one Shift-Return, as the macOS typer
+already did, so a chat box inserts a newline instead of sending. Windows sends
+`KEYEVENTF_UNICODE` events through SendInput. Linux uses XTest on X11
+(characters the active layout can't type are mapped onto free keycodes for the
+moment they are pressed, then the keymap is put back) and `wtype` on Wayland,
+which takes the text on stdin, never its argv; a line break there is
+`-M shift -k Return -m shift`. GNOME's RemoteDesktop portal can only send
+keysyms, so a Wayland desktop without `wtype` has no typing path: Labs does not
+list the row there. Paste last dictation, meeting paste, and `hex dictation
+--print` are unchanged and still paste or print. Output ordering and Escape
+before output are the same as pasting. Off, output is exactly as before.
+Checks: `type_dictations_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs); `a_dictation_is_typed_only_with_its_lab_on`,
+`typing_splits_text_into_twenty_unit_events_without_splitting_surrogate_pairs`,
+and `typing_sends_each_line_break_as_one_shift_return` in
+[typing.rs](../../src/typing.rs); `dictations_type_only_with_their_lab_and_typing_wins_over_copy_only`
+in [parakeet.rs](../../src/parakeet.rs) (macOS only);
+`typing_sends_unicode_keys_and_shift_return_for_line_breaks` in
+[windows/paste.rs](../../src/windows/paste.rs) (Windows compile check only);
+`typing_uses_the_layouts_keys_and_shift_for_capitals`,
+`typing_sends_each_line_break_as_one_shift_return`,
+`characters_the_layout_lacks_are_remapped_and_repeated_ones_reuse_their_key`,
+`a_remap_stops_at_the_free_keys_and_the_rest_gets_its_own`, and
+`wtype_gets_text_on_stdin_and_line_breaks_as_shift_return` in
+[linux/typing.rs](../../src/linux/typing.rs) (Linux). Not yet observed: a real
+dictation typed into an app on any OS; the Labs page goldens need regenerating
+on Linux with the new row.
 
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in

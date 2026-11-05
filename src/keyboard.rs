@@ -25,8 +25,6 @@ const FLAGS_CHANGED_EVENT: u32 = 12;
 /// (Microsoft's Windows App, #1048) track modifiers from their own events and
 /// can read a burst posted in one instant as the bare key, typing "v".
 const SHORTCUT_EVENT_GAP: std::time::Duration = std::time::Duration::from_millis(15);
-/// Quartz keeps at most 20 UTF-16 units of a keyboard event's Unicode string.
-const MAX_UNICODE_UNITS: usize = 20;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
 /// A hole in the virtual key codes, between keypad `*` (0x43) and keypad `+`
 /// (0x45): no keyboard sends it, and of the 264 layouts macOS ships only
@@ -294,16 +292,16 @@ pub fn post_command(character: char) -> Result<()> {
 /// breaks are Shift-Return so chat boxes insert a newline instead of sending.
 pub fn type_text(text: &str) -> Result<()> {
     let mut events = Vec::new();
-    for stroke in typing_strokes(text) {
+    for stroke in crate::typing::strokes(text) {
         match stroke {
-            Stroke::Text(units) => {
+            crate::typing::Stroke::Text(units) => {
                 for down in [true, false] {
                     let event = KeyboardEvent::new((0, down, 0))?;
                     event.set_unicode(&units);
                     events.push(event);
                 }
             }
-            Stroke::LineBreak => {
+            crate::typing::Stroke::LineBreak => {
                 for spec in
                     shortcut_event_specs(RETURN_KEY_CODE, &[(SHIFT_FLAG, SHIFT_KEY_CODE)], 1)
                 {
@@ -316,43 +314,6 @@ pub fn type_text(text: &str) -> Result<()> {
         event.post();
     }
     Ok(())
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Stroke {
-    Text(Vec<u16>),
-    LineBreak,
-}
-
-/// Splits text into key events of at most `MAX_UNICODE_UNITS` UTF-16 units,
-/// the most one event carries, without splitting a surrogate pair. `\r\n`,
-/// `\n`, and `\r` each become one line break.
-fn typing_strokes(text: &str) -> Vec<Stroke> {
-    let mut strokes = Vec::new();
-    let mut units = Vec::new();
-    let mut characters = text.chars().peekable();
-    while let Some(character) = characters.next() {
-        if matches!(character, '\r' | '\n') {
-            if character == '\r' {
-                characters.next_if_eq(&'\n');
-            }
-            if !units.is_empty() {
-                strokes.push(Stroke::Text(std::mem::take(&mut units)));
-            }
-            strokes.push(Stroke::LineBreak);
-            continue;
-        }
-        let mut encoded = [0; 2];
-        let encoded = character.encode_utf16(&mut encoded);
-        if units.len() + encoded.len() > MAX_UNICODE_UNITS {
-            strokes.push(Stroke::Text(std::mem::take(&mut units)));
-        }
-        units.extend_from_slice(encoded);
-    }
-    if !units.is_empty() {
-        strokes.push(Stroke::Text(units));
-    }
-    strokes
 }
 
 /// One press of a key that types nothing, under the modifier `flags` held
@@ -575,49 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn typing_splits_text_into_twenty_unit_events_without_splitting_surrogate_pairs() {
-        let text = |text: &str| Stroke::Text(text.encode_utf16().collect());
-        assert_eq!(typing_strokes(""), []);
-        assert_eq!(typing_strokes("hello"), [text("hello")]);
-        assert_eq!(
-            typing_strokes("abcdefghijklmnopqrstuvwxyz"),
-            [text("abcdefghijklmnopqrst"), text("uvwxyz")]
-        );
-        // 19 units, then a surrogate pair that would make 21, moves whole.
-        assert_eq!(
-            typing_strokes("abcdefghijklmnopqrs😀z"),
-            [text("abcdefghijklmnopqrs"), text("😀z")]
-        );
-        assert_eq!(
-            typing_strokes("😀😀😀😀😀😀😀😀😀😀😀"),
-            [text("😀😀😀😀😀😀😀😀😀😀"), text("😀")]
-        );
-        for stroke in typing_strokes(&"é漢😀a".repeat(40)) {
-            let Stroke::Text(units) = stroke else {
-                panic!("unexpected line break");
-            };
-            assert!(units.len() <= MAX_UNICODE_UNITS);
-            assert!(String::from_utf16(&units).is_ok());
-        }
-    }
-
-    #[test]
     fn typing_sends_each_line_break_as_one_shift_return() {
-        let text = |text: &str| Stroke::Text(text.encode_utf16().collect());
-        assert_eq!(
-            typing_strokes("one\ntwo\r\nthree\rfour\n\n"),
-            [
-                text("one"),
-                Stroke::LineBreak,
-                text("two"),
-                Stroke::LineBreak,
-                text("three"),
-                Stroke::LineBreak,
-                text("four"),
-                Stroke::LineBreak,
-                Stroke::LineBreak,
-            ]
-        );
         assert_eq!(
             shortcut_event_specs(RETURN_KEY_CODE, &[(SHIFT_FLAG, SHIFT_KEY_CODE)], 1)
                 .collect::<Vec<_>>(),
