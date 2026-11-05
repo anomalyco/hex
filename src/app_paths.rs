@@ -1,5 +1,5 @@
 use std::fs::{self, OpenOptions};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -46,16 +46,45 @@ pub fn logs_dir() -> Result<PathBuf> {
     Ok(support_dir()?.join("logs"))
 }
 
+/// Creates `directory` readable only by this user, and tightens it if an
+/// older Hex left it open. Tightening is best-effort: a folder Hex can't
+/// chmod (another owner, a mount that refuses it) is logged, never fatal.
+/// Windows folders already inherit the per-user `%APPDATA%` permissions.
+pub fn create_private_dir(directory: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(directory)?;
+    #[cfg(unix)]
+    tighten(directory, 0o700);
+    Ok(())
+}
+
+/// Opens `path` to append, readable only by this user, tightening a file an
+/// older Hex created open (best-effort, as `create_private_dir`).
+pub fn open_private_append(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    tighten(path, 0o600);
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn tighten(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(error) = fs::set_permissions(path, fs::Permissions::from_mode(mode)) {
+        tracing::warn!(path = %path.display(), %error, "could not make this private");
+    }
+}
+
 /// Creates the logs directory, appends process diagnostics to `process.log`
 /// alongside stderr, installs the global tracing subscriber, and routes Ctrl-C
 /// to `shutdown`. Returns the logs directory.
 pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
     let log_dir = logs_dir()?;
-    fs::create_dir_all(&log_dir)?;
-    let process_log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_dir.join("process.log"))?;
+    create_private_dir(&log_dir)?;
+    let process_log = open_private_append(&log_dir.join("process.log"))?;
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("hex=info"));
     tracing_subscriber::fmt()
@@ -164,6 +193,24 @@ fn user_config_dir_in(home: &std::path::Path, test_build: bool) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_logs_folder_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("hex-private-dir-{}", std::process::id()));
+        let logs = root.join("logs");
+        fs::create_dir_all(&logs).unwrap();
+        fs::set_permissions(&logs, fs::Permissions::from_mode(0o755)).unwrap();
+
+        create_private_dir(&logs).unwrap();
+        create_private_dir(&root.join("fresh")).unwrap();
+
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&logs), 0o700);
+        assert_eq!(mode(&root.join("fresh")), 0o700);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn each_build_has_its_own_config_folder() {

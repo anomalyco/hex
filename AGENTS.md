@@ -275,7 +275,8 @@ substitute for source inspection or a second roadmap.
   values only. Locked switches read off at load and keep their saved values on
   save; list-driven work checks the policy where it starts.
 - `app_paths`: the Application Support owner (`hex` on every OS) for runtime
-  logs and shared state.
+  logs and shared state. The logs folder and its files are owner-only on
+  Unix (0700/0600, tightened when an older Hex left them open).
 - `desktop/onboarding`, `desktop/permission_guide`: required permission health, the native
   floating System Settings guide, selected dictation-model installation, the
   release startup gate, and opt-in command-model setup.

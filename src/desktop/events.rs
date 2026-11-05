@@ -1,4 +1,4 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -195,7 +195,7 @@ impl EventLog {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let file = crate::app_paths::open_private_append(path)?;
         let (sender, receiver) = mpsc::sync_channel(EVENT_WRITER_CAPACITY);
         let error = Arc::new(Mutex::new(None));
         let worker_error = error.clone();
@@ -550,6 +550,7 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::OpenOptions;
 
     #[test]
     fn structural_event_equality_preserves_serialized_identity() {
@@ -725,6 +726,30 @@ mod tests {
         ));
         assert_eq!(reader.current_context(), None);
         fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_log_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = std::env::temp_dir().join(format!(
+            "hex-private-log-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+
+        let new = directory.join("new.ndjson");
+        drop(EventLog::create(&new).unwrap());
+        assert_eq!(mode(&new), 0o600);
+
+        let older = directory.join("live.ndjson");
+        fs::write(&older, "").unwrap();
+        fs::set_permissions(&older, fs::Permissions::from_mode(0o644)).unwrap();
+        drop(EventLog::create(&older).unwrap());
+        assert_eq!(mode(&older), 0o600);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
