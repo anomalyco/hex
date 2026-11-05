@@ -1133,6 +1133,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "macOS перехватывает это сочетание первой. Выключите её сочетания для снимков в разделе Сочетания клавиш › Снимки экрана или выберите другое"),
     ("Open Keyboard Settings", "Открыть настройки клавиатуры"),
     ("Full screen · Click to capture", "Весь экран · Нажмите, чтобы снять"),
+    ("Annotate 15 s replay", "Повтор последних 15 с в Заметках"),
+    ("Save the last 15 seconds of your screen. macOS shows the screen-recording dot the whole time it's on", "Сохраняет последние 15 секунд экрана. Пока включено, macOS постоянно показывает точку записи экрана"),
+    ("Replay last 15 s", "Сохранить последние 15 с"),
+    ("Press to save the last 15 s; hold to narrate over it", "Нажмите, чтобы сохранить последние 15 с; удерживайте, чтобы озвучить"),
 ];
 
 #[cfg(test)]

@@ -739,6 +739,12 @@ pub enum CaptureCommand {
         #[command(flatten)]
         output: Output,
     },
+    /// Export the last 15 s from the rolling screen buffer into a capture
+    /// bundle (`labs.annotate_replay`, macOS 27+).
+    Replay {
+        #[command(flatten)]
+        output: Output,
+    },
     /// The newest captures, newest first.
     List {
         /// How many to show (20 unless given).
@@ -828,6 +834,7 @@ pub fn capture(command: CaptureCommand) -> u8 {
         CaptureCommand::Cancel { output } => (C::ScrawlCapture { action: A::Cancel }, output),
         CaptureCommand::Toggle { output } => (C::ScrawlCapture { action: A::Toggle }, output),
         CaptureCommand::Status { output } => (C::ScrawlCapture { action: A::Status }, output),
+        CaptureCommand::Replay { output } => (C::ScrawlCapture { action: A::Replay }, output),
         CaptureCommand::List { limit, output } => (C::ScrawlCaptureList { limit }, output),
         CaptureCommand::Show { capture, output } => (C::ScrawlCaptureShow { capture }, output),
         CaptureCommand::Send {

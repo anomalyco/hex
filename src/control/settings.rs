@@ -450,6 +450,11 @@ const KEYS: &[Key] = &[
         "Labs: screenshots.hotkey (command+shift+4) drags out an area or, after space, picks a window; the PNG is copied and saved to screenshots.folder (macOS)",
     ),
     key(
+        "labs.annotate_replay",
+        Kind::Bool,
+        "Labs: keep a rolling 15-second screen buffer so hex capture replay or capture.replay_hotkey saves what just happened; macOS shows the screen-recording dot the whole time it's on (macOS 27+)",
+    ),
+    key(
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
@@ -647,6 +652,11 @@ const CAPTURE_KEYS: &[Key] = &[
         Kind::Shortcut(HotkeySlot::Capture),
         "The Annotate shortcut: press to start recording and again to finish",
     ),
+    optional(
+        "capture.replay_hotkey",
+        Kind::Shortcut(HotkeySlot::CaptureReplay),
+        "Labs: shortcut to export the last 15 s from Annotate's rolling replay buffer, or hold to narrate over it (macOS 27+, with labs.annotate_replay); none turns it off",
+    ),
     key(
         "capture.transcriber",
         Kind::Choice(&["parakeet", "apple"]),
@@ -740,7 +750,7 @@ fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<Contro
     }
     // A `labs.` key is only its feature's switch, so off its OS it does nothing.
     if let Some(feature) = crate::labs::Feature::for_settings_key(name)
-        && name.starts_with("labs.")
+        && (name.starts_with("labs.") || name == "capture.replay_hotkey")
         && !feature.on_this_os()
     {
         return Some(ControlError::new(
@@ -982,7 +992,8 @@ pub fn apply(
         | "second_dictation_hotkey"
         | "cancel_hotkey"
         | "screenshots.hotkey"
-        | "capture.hotkey" => {
+        | "capture.hotkey"
+        | "capture.replay_hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
             };
@@ -995,6 +1006,8 @@ pub fn apply(
                 HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
+                #[cfg(hex_capture)]
+                HotkeySlot::CaptureReplay => candidate.capture.replay_hotkey.as_ref(),
             };
             if let Some(binding) = binding {
                 if cfg!(target_os = "macos")

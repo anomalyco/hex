@@ -525,6 +525,16 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Screenshots"),
                 tr("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder"),
             ));
+            // macOS 27's SCClipBufferingOutput keeps a rolling 15 s display ring in replayd.
+            #[cfg(hex_capture)]
+            if Feature::AnnotateReplay.on_this_os() {
+                rows.push(row(
+                    Feature::AnnotateReplay,
+                    Some(Pane::Annotate.icon()),
+                    tr("Annotate 15 s replay"),
+                    tr("Save the last 15 seconds of your screen. macOS shows the screen-recording dot the whole time it's on"),
+                ));
+            }
         }
     }
     // Linux's X11 grabs and shortcuts portal take these keys alone.
@@ -757,6 +767,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::Screenshots => "lab-screenshots",
         Feature::FollowLiveTranscript => "lab-follow-live-transcript",
         Feature::CollapsibleMeetingSections => "lab-collapsible-meeting-sections",
+        Feature::AnnotateReplay => "lab-annotate-replay",
     }
 }
 

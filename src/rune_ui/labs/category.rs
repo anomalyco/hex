@@ -123,7 +123,8 @@ impl Category {
             Feature::HideMenuBarIcon
             | Feature::VoiceFilter
             | Feature::Playground
-            | Feature::Screenshots => Self::App,
+            | Feature::Screenshots
+            | Feature::AnnotateReplay => Self::App,
         }
     }
 }
@@ -196,6 +197,10 @@ impl Place {
             Feature::VoiceFilter => Self::Pane(Pane::VoiceFilter),
             Feature::Playground => Self::Playground,
             Feature::Screenshots => Self::Elsewhere(tr("Screenshot shortcut")),
+            #[cfg(hex_capture)]
+            Feature::AnnotateReplay => Self::Pane(Pane::Annotate),
+            #[cfg(not(hex_capture))]
+            Feature::AnnotateReplay => Self::Pane(Pane::General),
         }
     }
 
