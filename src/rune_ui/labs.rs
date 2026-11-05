@@ -421,6 +421,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Follow live transcript"),
             tr("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."),
         ));
+        rows.push(row(
+            Feature::CollapsibleMeetingSections,
+            None,
+            tr("Collapsible meeting sections"),
+            tr("Fold the summary, chapters, and day groups in Meetings"),
+        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -750,6 +756,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingPlatformIcons => "lab-meeting-platform-icons",
         Feature::Screenshots => "lab-screenshots",
         Feature::FollowLiveTranscript => "lab-follow-live-transcript",
+        Feature::CollapsibleMeetingSections => "lab-collapsible-meeting-sections",
     }
 }
 
