@@ -66,6 +66,24 @@ fn tap(rt: &mut Runtime<Ui>, key: &str) {
     settle(rt);
 }
 
+/// Opens Labs with every group unfolded, so each card is on screen.
+fn open_labs(rt: &mut Runtime<Ui>) {
+    tap(rt, "nav-labs");
+    unfold_labs(rt);
+}
+
+fn unfold_labs(rt: &mut Runtime<Ui>) {
+    for group in crate::labs::Group::ALL {
+        rt.state
+            .settings
+            .labs
+            .groups
+            .insert(group.id().to_string(), true);
+    }
+    rt.invalidate();
+    settle(rt);
+}
+
 /// Chooses option `index` from the quiet select keyed `{key}-control`.
 fn pick(rt: &mut Runtime<Ui>, key: &str, index: usize) {
     tap(rt, &format!("{key}-control-trigger"));
@@ -312,7 +330,7 @@ fn gnome_desktops_point_to_the_clipboard_lab_until_it_is_on() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("clipboard-restore-note").is_some());
-    tap(&mut rt, "nav-labs");
+    open_labs(&mut rt);
     tap(&mut rt, "lab-gnome-clipboard-restore");
     assert!(rt.state.settings.labs.gnome_clipboard_restore);
     tap(&mut rt, "nav-labs");
@@ -2543,6 +2561,7 @@ fn goldens() {
         check_golden("portal", dark, GOLDEN_SIZE);
         for scene in [
             "history",
+            "mac-labs",
             "mac-labs-link",
             "output",
             "modes",
@@ -2562,6 +2581,8 @@ fn goldens() {
     check_golden("picker-custom-models", false, PANE_SIZE);
     check_golden("picker-found", false, PANE_SIZE);
     check_golden("vocabulary-budget", false, PANE_SIZE);
+    check_golden("windows-labs", false, PANE_SIZE);
+    check_golden("linux-labs", false, PANE_SIZE);
 }
 
 mod onboarding_check;

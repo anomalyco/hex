@@ -416,23 +416,22 @@ dictation rules:
   their menu, and the paste lands there instead of the message box
   (#1023). Hex still logs the
   paste as sent. Ctrl+Space or a key without modifiers works.
-  Hyprland names each shortcut `anomaly.hex:<shortcut>-<trigger>`: Hex's app
-  id, the shortcut, and the key Settings records with `+` written as `-`.
-  With the default keys these are `anomaly.hex:dictation-ALT-space` and
-  `anomaly.hex:paste-last-CTRL-ALT-v` (Annotate: `anomaly.hex:capture-F9`).
-  The name changes when you record another key in Settings, so list the
-  current names with `hyprctl globalshortcuts` while Hex runs and bind those.
-  For example:
+  Hyprland names each shortcut `anomaly.hex:<shortcut>`: `anomaly.hex:dictation`,
+  `anomaly.hex:paste-last`, `anomaly.hex:capture` (Annotate), and
+  `anomaly.hex:raw-dictation` (Dictate without processing). The names stay the
+  same when you record another key in Settings (#1376), so a bind keeps
+  working; `hyprctl globalshortcuts` lists them while Hex runs. For example:
 
 ```lua
-hl.bind("End", hl.dsp.global("anomaly.hex:dictation-ALT-space"))
-hl.bind("F10", hl.dsp.global("anomaly.hex:paste-last-CTRL-ALT-v"))
+hl.bind("End", hl.dsp.global("anomaly.hex:dictation"))
+hl.bind("F10", hl.dsp.global("anomaly.hex:paste-last"))
 ```
 
   Traditional Hyprland configs write
-  `bind = , End, global, anomaly.hex:dictation-ALT-space`. Binds to
+  `bind = , End, global, anomaly.hex:dictation`. Earlier builds put the
+  recorded key in the name (`anomaly.hex:dictation-ALT-space`), and binds to
   `hex:dictation` or `hex:paste-last` (names from before Hex's app id was
-  `anomaly.hex`) do nothing; replace them. Remove any `cancel-dictation`
+  `anomaly.hex`) are older still; both do nothing now, so replace them. Remove any `cancel-dictation`
   bind: Hex no longer has it. Hyprland 0.56's Lua binds send no release when the modifier comes
   up before the key (Alt before Z); 0.57 fixes this. On 0.56, Toggle is
   unaffected: the next press still finishes. In Hold, recording continues

@@ -1,3 +1,7 @@
+// A GUI program on Windows, so launching Hex opens no console window (#850).
+// Commands run from a terminal attach to it (`windows::attach_parent_console`).
+#![cfg_attr(all(target_os = "windows", not(test)), windows_subsystem = "windows")]
+
 /// The version Hex reports: the release version, or `0.0.0-dev-local-<commit>`
 /// for a build outside the Release workflow (build.rs).
 const VERSION: &str = env!("HEX_BUILD_VERSION");
@@ -109,6 +113,9 @@ enum Command {
     Control(control::cli::ControlCli),
     /// Run the desktop app with local dictation.
     App {
+        /// Start in the menu bar without opening the window.
+        #[arg(long)]
+        hidden: bool,
         /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
@@ -377,6 +384,7 @@ fn main() -> Result<()> {
     let command = cli.command.unwrap_or({
         if bundled_watcher {
             Command::App {
+                hidden: false,
                 device: None,
                 rune_args: Vec::new(),
             }
@@ -387,7 +395,7 @@ fn main() -> Result<()> {
         }
     });
     match command {
-        Command::App { device, .. } => open_app(event_path, device),
+        Command::App { hidden, device, .. } => open_app(event_path, device, hidden),
         Command::Listen { device } => {
             let _instance = desktop::instance::acquire("listener")?;
             labs::log_launch();
@@ -576,13 +584,14 @@ fn main() -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn open_app(event_path: PathBuf, device: Option<String>) -> Result<()> {
+fn open_app(event_path: PathBuf, device: Option<String>, hidden: bool) -> Result<()> {
     let _instance = desktop::instance::acquire("listener")?;
     labs::log_launch();
     audio::hex_microphone::host_service();
     macos_rune::run(
         &SHUTDOWN,
         meeting::watcher::ListenerConfig { event_path, device },
+        hidden,
     )
 }
 
@@ -605,15 +614,18 @@ fn is_bundled_app_executable(name: Option<&std::ffi::OsStr>) -> bool {
     name.is_some_and(|name| name == "hex")
 }
 
-/// Whether this launch runs the app: `hex app` without Rune's own (headless)
-/// flags, or the bundled executable with no command. A hidden or login launch
-/// counts too, though it opens no window and Rune drops the prewarmed GPU:
-/// whether the window opens depends on settings, which may load only after
-/// the keyboard layout (`macos_rune::run`).
+/// Whether this launch runs the app: `hex app` without `--hidden` or Rune's
+/// own (headless) flags, or the bundled executable with no command. A
+/// menu-bar-only or login launch counts too, though it opens no window and
+/// Rune drops the prewarmed GPU: whether the window opens depends on
+/// settings, which may load only after the keyboard layout
+/// (`macos_rune::run`).
 #[cfg(target_os = "macos")]
 fn opens_app(command: Option<&Command>, bundled_watcher: bool) -> bool {
     match command {
-        Some(Command::App { rune_args, .. }) => rune_args.is_empty(),
+        Some(Command::App {
+            hidden, rune_args, ..
+        }) => !hidden && rune_args.is_empty(),
         None => bundled_watcher,
         Some(_) => false,
     }
@@ -833,6 +845,7 @@ mod tests {
         assert!(opens(&["hex", "app"]));
         assert!(opens(&["hex", "app", "--device", "MacBook Pro Microphone"]));
         assert!(!opens(&["hex", "app", "--", "--snap", "/tmp/a.png"]));
+        assert!(!opens(&["hex", "app", "--hidden"]));
         assert!(!opens(&["hex-service"]));
         assert!(!opens(&["hex-meetings-mcp"]));
         for command in [
@@ -863,7 +876,12 @@ fn main() -> Result<()> {
 #[cfg(target_os = "windows")]
 fn main() -> Result<()> {
     // DLL search hardening first: the CPU check's message box loads DLLs.
-    windows::restrict_dll_search();
+    let dll_search = windows::restrict_dll_search();
+    // Then, before anything prints, join the terminal that ran `hex`.
+    windows::attach_parent_console();
+    if let Err(error) = dll_search {
+        eprintln!("hex: SetDefaultDllDirectories failed: {error}");
+    }
     windows::vulkan::check();
     windows::gpu_fallback::choose();
     #[cfg(target_arch = "x86_64")]

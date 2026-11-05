@@ -794,7 +794,7 @@ fn keys() -> impl Iterator<Item = &'static Key> {
 
 /// Settings `hex settings` never shows: Hex's own bookkeeping.
 #[cfg(test)]
-const INTERNAL: &[&str] = &["migrations", "mouse_shortcut_notice"];
+const INTERNAL: &[&str] = &["migrations", "mouse_shortcut_notice", "labs.groups"];
 
 /// Settings another `hex` command edits instead (`hex vocabulary`).
 #[cfg(test)]

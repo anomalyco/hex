@@ -1,13 +1,15 @@
 # Builds hex-setup-<version>-windows-<x64|arm64>.exe, the per-user Windows
-# installer, around an already-built (and signed) release hex.exe. Installs
-# Inno Setup 6 when ISCC is missing. The installer embeds the executable byte
-# for byte.
+# installer, around an already-built (and signed) release hex.exe and its
+# console entry point hex.com. Installs Inno Setup 6 when ISCC is missing. The
+# installer embeds both byte for byte. -Console is left out only to wrap a
+# release published before hex.com.
 #
 #   scripts/build-windows-installer.ps1 -Executable dist\hex-2.4.0-windows-x64.exe `
-#     -Version 2.3.0 -Arch x86_64 -OutDir dist
+#     -Console dist\hex-2.4.0-windows-x64.com -Version 2.3.0 -Arch x86_64 -OutDir dist
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$Executable,
+    [string]$Console,
     [Parameter(Mandatory)] [string]$Version,
     [Parameter(Mandatory)] [ValidateSet('x86_64', 'aarch64')] [string]$Arch,
     [Parameter(Mandatory)] [string]$OutDir
@@ -16,6 +18,8 @@ $ErrorActionPreference = 'Stop'
 
 if ($Version -notmatch '^(\d+\.\d+\.\d+(-beta\.\d+)?|0\.0\.0-dev-\d+)$') { throw "Expected a release version, not $Version." }
 $Executable = (Resolve-Path $Executable).Path
+$consoleDefine = @()
+if ($Console) { $consoleDefine = @("/DConsole=$((Resolve-Path $Console).Path)") }
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 $label = if ($Arch -eq 'x86_64') { 'x64' } else { 'arm64' }
@@ -44,7 +48,7 @@ if (-not $iscc) {
     if (-not $iscc) { throw 'Inno Setup could not be installed.' }
 }
 
-& $iscc /Qp "/DAppVersion=$Version" "/DArch=$label" "/DExecutable=$Executable" "/DOutputDir=$OutDir" $script
+& $iscc /Qp "/DAppVersion=$Version" "/DArch=$label" "/DExecutable=$Executable" @consoleDefine "/DOutputDir=$OutDir" $script
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE." }
 $installer = Join-Path $OutDir "hex-setup-$Version-windows-$label.exe"
 if (-not (Test-Path $installer)) { throw "ISCC did not produce $installer." }

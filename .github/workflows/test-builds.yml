@@ -90,7 +90,15 @@ jobs:
           mkdir -p dist/staging
           /usr/bin/ditto "$bundle" "dist/staging/$(basename "$bundle")"
           ln -s /Applications dist/staging/Applications
-          hdiutil create -quiet -fs APFS -format ULFO -volname "Hex Test" -srcfolder dist/staging "dist/$DMG"
+          # hdiutil on the hosted runners intermittently fails (Resource busy)
+          # after the launch check, so it gets a few tries, with its error shown.
+          for attempt in 1 2 3 4 5; do
+            hdiutil create -fs APFS -format ULFO -volname "Hex Test" -srcfolder dist/staging "dist/$DMG" && break
+            [ "$attempt" -lt 5 ] || exit 1
+            echo "hdiutil create failed (attempt $attempt); retrying" >&2
+            rm -f "dist/$DMG"
+            sleep 10
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: hex-test-${{ needs.resolve.outputs.short }}-macos-arm64

@@ -1,9 +1,11 @@
 //! Windows installs: the per-user version layout our installers receipt
 //! (`%APPDATA%\hex\install.json`) updates itself by staging the
-//! new `hex.exe` into its own version directory and switching the
-//! `current-version` pointer. Before anything runs, the download must carry
-//! a valid Authenticode signature from Anomaly's Artifact Signing identity.
-//! Administrators turn updates off with the `DisableUpdates` policy value.
+//! new `hex.exe` and its console entry point `hex.com` (crates/console) into
+//! their own version directory and switching the `current-version` pointer.
+//! `bin\hex.com`, the copy PATH names, follows. Before anything runs, every
+//! download must carry a valid Authenticode signature from Anomaly's
+//! Artifact Signing identity. Administrators turn updates off with the
+//! `DisableUpdates` policy value.
 
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -20,6 +22,10 @@ use crate::desktop::background_process;
 pub const TARGET: &str = "windows-x64";
 #[cfg(target_arch = "aarch64")]
 pub const TARGET: &str = "windows-arm64";
+#[cfg(target_arch = "x86_64")]
+pub const CONSOLE_TARGET: &str = "windows-x64-cli";
+#[cfg(target_arch = "aarch64")]
+pub const CONSOLE_TARGET: &str = "windows-arm64-cli";
 #[cfg(target_arch = "x86_64")]
 pub const DOWNLOAD_TARGET: &str = "windows-x64-setup";
 #[cfg(target_arch = "aarch64")]
@@ -190,8 +196,13 @@ pub fn updates_disabled_by_policy() -> bool {
         })
 }
 
-pub fn stage(file: &Path, version: &str) -> Result<Staged> {
+/// Stages `file` (hex.exe) and `console` (hex.com), when the release has
+/// one, as `version`.
+pub fn stage(file: &Path, console: Option<&Path>, version: &str) -> Result<Staged> {
     verify_authenticode(file, AUTHENTICODE_SIGNER)?;
+    if let Some(console) = console {
+        verify_authenticode(console, AUTHENTICODE_SIGNER)?;
+    }
     let support = crate::app_paths::support_dir()?;
     let lock = OpenOptions::new()
         .create(true)
@@ -202,14 +213,30 @@ pub fn stage(file: &Path, version: &str) -> Result<Staged> {
     lock.try_lock_exclusive()
         .wrap_err("another Windows update is already in progress")?;
     let staging = support.join("updates").join("hex.exe.staging");
+    let console_staging = support.join("updates").join("hex.com.staging");
     let _ = fs::remove_file(&staging);
+    let _ = fs::remove_file(&console_staging);
     fs::copy(file, &staging)?;
-    let activation =
-        validate_executable(&staging, version).and_then(|()| activate(&support, version, &staging));
+    if let Some(console) = console {
+        fs::copy(console, &console_staging)?;
+    }
+    let console_staging = console.map(|_| console_staging);
+    let activation = validate_executable(&staging, version)
+        .and_then(|()| activate(&support, version, &staging, console_staging.as_deref()));
     if activation.is_err() {
         let _ = fs::remove_file(&staging);
+        if let Some(console_staging) = &console_staging {
+            let _ = fs::remove_file(console_staging);
+        }
     }
     let executable = activation?;
+    // A release without hex.com keeps the one in bin, which finds hex.exe
+    // through current-version.
+    if console.is_some()
+        && let Err(error) = publish_console(&support, &executable.with_file_name("hex.com"))
+    {
+        tracing::warn!(%error, "could not put the updated hex.com on PATH");
+    }
     if let Err(error) = crate::windows::login_item::repoint(&executable) {
         tracing::warn!(%error, "could not repoint Launch at login to the updated Hex");
     }
@@ -322,16 +349,161 @@ fn validate_executable(path: &Path, version: &str) -> Result<()> {
     Ok(())
 }
 
+/// `hex.com --version` runs the `hex.exe` beside it and reports its version.
+fn validate_console(path: &Path, version: &str) -> Result<()> {
+    let output = background_process::command(path)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .output()
+        .wrap_err("could not start the downloaded hex.com")?;
+    if !output.status.success()
+        || String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .last()
+            != Some(version)
+    {
+        bail!("the downloaded hex.com doesn't run this version's hex.exe");
+    }
+    Ok(())
+}
+
+/// Whether this install lacks `hex.com` beside the running `hex.exe` or in
+/// `bin`: Setup and updaters before it installed only `hex.exe`.
+pub fn console_missing() -> bool {
+    let (Ok(executable), Ok(support)) = (std::env::current_exe(), crate::app_paths::support_dir())
+    else {
+        return false;
+    };
+    !executable.with_file_name("hex.com").is_file()
+        || !support.join("bin").join("hex.com").is_file()
+}
+
+/// Adds a release's verified `hex.com` beside the running `hex.exe` and on
+/// PATH, for an install whose updater predates it. hex.com only starts the
+/// `hex.exe` beside it, so any release's copy serves this version.
+pub fn install_console(file: &Path) -> Result<()> {
+    verify_authenticode(file, AUTHENTICODE_SIGNER)?;
+    let support = crate::app_paths::support_dir()?;
+    let beside = std::env::current_exe()?.with_file_name("hex.com");
+    replace_file(file, &beside)?;
+    validate_console(&beside, crate::VERSION)?;
+    publish_console(&support, &beside)
+}
+
+/// Copies `console` to `bin\hex.com` and keeps `bin` on the user's PATH,
+/// where a terminal finds `hex` across updates.
+fn publish_console(support: &Path, console: &Path) -> Result<()> {
+    let bin = support.join("bin");
+    fs::create_dir_all(&bin)?;
+    replace_file(console, &bin.join("hex.com"))?;
+    add_to_path(&bin)
+}
+
+/// Copies `source` over `destination` through a `.partial` file. A
+/// destination that's running can't be replaced, but it can be renamed
+/// aside; the next replacement removes that copy.
+fn replace_file(source: &Path, destination: &Path) -> Result<()> {
+    let partial = destination.with_extension("com.partial");
+    let aside = destination.with_extension("com.old");
+    let _ = fs::remove_file(&partial);
+    let _ = fs::remove_file(&aside);
+    fs::copy(source, &partial)?;
+    sync_file(&partial)?;
+    if fs::rename(&partial, destination).is_err() {
+        fs::rename(destination, &aside)
+            .and_then(|()| fs::rename(&partial, destination))
+            .inspect_err(|_| {
+                let _ = fs::remove_file(&partial);
+            })
+            .wrap_err_with(|| format!("could not replace {}", destination.display()))?;
+    }
+    Ok(())
+}
+
+/// Appends `folder` to the user's PATH (`HKCU\Environment`) unless it's
+/// there, and tells running programs, so new terminals find it.
+fn add_to_path(folder: &Path) -> Result<()> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE,
+    };
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_EXPAND_SZ};
+    use winreg::{RegKey, RegValue};
+
+    let (environment, _) = RegKey::predef(HKEY_CURRENT_USER)
+        .create_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)
+        .wrap_err("could not open the user environment")?;
+    let existing = environment.get_raw_value("Path").ok();
+    let current = existing.as_ref().map_or_else(String::new, |value| {
+        let units: Vec<u16> = value
+            .bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
+            .take_while(|&unit| unit != 0)
+            .collect();
+        String::from_utf16_lossy(&units)
+    });
+    let wanted = folder.to_string_lossy();
+    if path_contains(&current, &wanted) {
+        return Ok(());
+    }
+    let updated = if current.trim_end_matches(';').is_empty() {
+        wanted.into_owned()
+    } else {
+        format!("{};{wanted}", current.trim_end_matches(';'))
+    };
+    let bytes = updated
+        .encode_utf16()
+        .chain([0])
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let vtype = existing.map_or(REG_EXPAND_SZ, |value| value.vtype);
+    environment
+        .set_raw_value("Path", &RegValue { bytes, vtype })
+        .wrap_err("could not add Hex to PATH")?;
+    let name: Vec<u16> = "Environment".encode_utf16().chain([0]).collect();
+    // SAFETY: `name` is NUL-terminated and outlives the call; a hung window
+    // is skipped after the timeout.
+    unsafe {
+        SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            0,
+            name.as_ptr() as isize,
+            SMTO_ABORTIFHUNG,
+            5_000,
+            std::ptr::null_mut(),
+        )
+    };
+    Ok(())
+}
+
+fn path_contains(path: &str, folder: &str) -> bool {
+    let folder = folder.trim_end_matches('\\');
+    path.split(';').any(|entry| {
+        entry
+            .trim()
+            .trim_end_matches('\\')
+            .eq_ignore_ascii_case(folder)
+    })
+}
+
 fn sync_file(path: &Path) -> Result<()> {
     OpenOptions::new().write(true).open(path)?.sync_all()?;
     Ok(())
 }
 
-/// Stage the executable into its version directory and switch the
-/// `current-version` pointer atomically; the running version's files are
-/// never touched, and every version but the new, running, and previous one
-/// is pruned.
-pub(super) fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
+/// Stage the executable, and hex.com beside it when there is one, into its
+/// version directory and switch the `current-version` pointer atomically;
+/// the running version's files are never touched, and every version but the
+/// new, running, and previous one is pruned.
+pub(super) fn activate(
+    support: &Path,
+    version: &str,
+    staging: &Path,
+    console: Option<&Path>,
+) -> Result<PathBuf> {
     let versions = support.join("versions");
     let version_dir = versions.join(version);
     fs::create_dir_all(&version_dir)?;
@@ -342,6 +514,15 @@ pub(super) fn activate(support: &Path, version: &str, staging: &Path) -> Result<
     // FlushFileBuffers requires write access on Windows, unlike fsync.
     sync_file(&staged)?;
     fs::rename(&staged, &executable)?;
+    if let Some(console) = console {
+        let installed = version_dir.join("hex.com");
+        let staged = version_dir.join("hex.com.partial");
+        let _ = fs::remove_file(&staged);
+        fs::rename(console, &staged)?;
+        sync_file(&staged)?;
+        fs::rename(&staged, &installed)?;
+        validate_console(&installed, version)?;
+    }
 
     let pointer = support.join("current-version");
     let previous = fs::read_to_string(&pointer)
@@ -503,7 +684,7 @@ mod tests {
         let staging = root.join("hex.exe.staging");
         fs::write(&staging, b"new").unwrap();
 
-        let executable = activate(&root, "1.1.0", &staging).unwrap();
+        let executable = activate(&root, "1.1.0", &staging, None).unwrap();
 
         assert_eq!(fs::read(&executable).unwrap(), b"new");
         assert_eq!(
@@ -518,6 +699,14 @@ mod tests {
         );
         assert!(!root.join("versions/0.9.0").exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn path_entries_match_without_case_or_a_trailing_backslash() {
+        let path = r"C:\Windows;C:\Users\Jo\AppData\Roaming\hex\bin\;D:\tools";
+        assert!(path_contains(path, r"c:\users\jo\appdata\roaming\HEX\bin"));
+        assert!(!path_contains(path, r"C:\Users\Jo\AppData\Roaming\hex"));
+        assert!(!path_contains("", r"C:\hex\bin"));
     }
 
     #[test]
