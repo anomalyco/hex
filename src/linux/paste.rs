@@ -318,9 +318,7 @@ impl LinuxPaster {
             return Err(eyre!("refusing to type an empty transcript"));
         }
         match &mut self.backend {
-            Backend::X11(_) => {
-                crate::linux::typing::type_x11(text, &self.stop, &self.keys)
-            }
+            Backend::X11(_) => crate::linux::typing::type_x11(text, &self.stop, &self.keys),
             Backend::Wayland(_) => {
                 self.keys.settle(&self.stop)?;
                 crate::linux::typing::type_wayland(text, &self.stop)

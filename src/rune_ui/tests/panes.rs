@@ -423,7 +423,10 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
     assert!(rt.find("lab-spoken-symbols").is_some(), "every OS");
     if crate::typing::available() {
-        assert!(rt.find("lab-type-dictations").is_some(), "every OS with a typing path");
+        assert!(
+            rt.find("lab-type-dictations").is_some(),
+            "every OS with a typing path"
+        );
     }
     assert!(!rt.state.settings.share_dictation_shortcut);
     tap(&mut rt, "lab-share-shortcut");

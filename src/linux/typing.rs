@@ -14,9 +14,7 @@ use x11rb::protocol::xproto::{ConnectionExt, KeyButMask, Keysym};
 use x11rb::protocol::xtest;
 use x11rb::rust_connection::RustConnection;
 
-use super::input::{
-    KEY_PRESS, KEY_RELEASE, Keymap, ShortcutKeys, XK_SHIFT_L, connect_x11,
-};
+use super::input::{KEY_PRESS, KEY_RELEASE, Keymap, ShortcutKeys, XK_SHIFT_L, connect_x11};
 use super::paste::{MODIFIER_WAIT_LIMIT, run_helper, wait_for_modifiers, wtype_pastes};
 use super::session::LinuxSession;
 use crate::typing::Stroke;
@@ -154,11 +152,7 @@ impl KeyLayout {
     /// The layout's own key for `keysym`: level 1 plainly, or level 2 with
     /// Shift (uppercase and the shifted symbols, when the layout has them).
     fn key(&self, keysym: Keysym) -> Option<Press> {
-        let rows = || {
-            self.symbols
-                .chunks(self.symbols_per_keycode)
-                .enumerate()
-        };
+        let rows = || self.symbols.chunks(self.symbols_per_keycode).enumerate();
         if let Some((index, _)) = rows().find(|(_, row)| row.first() == Some(&keysym)) {
             return Some(Press {
                 keycode: self.first_keycode + index as u8,
@@ -357,12 +351,7 @@ impl X11Typer {
 
     fn write_mapping(&self, keycode: u8, symbols: &[Keysym]) -> Result<()> {
         self.connection
-            .change_keyboard_mapping(
-                keycode,
-                1,
-                self.layout.symbols_per_keycode as u8,
-                symbols,
-            )?
+            .change_keyboard_mapping(keycode, 1, self.layout.symbols_per_keycode as u8, symbols)?
             .check()?;
         Ok(())
     }
@@ -462,7 +451,10 @@ mod tests {
         let [Step::Remap(first), Step::Remap(second)] = &steps[..] else {
             panic!("expected two remap runs: {steps:?}");
         };
-        assert_eq!(first.assignments, [(200, 0xe9), (201, 0x0100_0000 | 0x6f22)]);
+        assert_eq!(
+            first.assignments,
+            [(200, 0xe9), (201, 0x0100_0000 | 0x6f22)]
+        );
         assert_eq!(first.presses, [200, 201]);
         assert_eq!(second.assignments, [(200, 0x0100_0000 | 0x1f600)]);
         assert_eq!(second.presses, [200]);
