@@ -492,7 +492,15 @@ fn trigger_has_modifiers(granted: Option<&str>, requested: &LinuxHotkey) -> bool
 /// (GNOME, KDE), so a shortcut changed in Hex gets a new id, which the
 /// desktop binds to the new trigger (#575). An unchanged shortcut keeps its
 /// id, and with it any trigger the user assigned in the desktop.
-fn portal_shortcut_id(base: &str, trigger: &str) -> String {
+///
+/// With `desktop_assigns` (Hyprland), the desktop ignores the trigger and
+/// the user binds the id by name in its config, so the id is the bare
+/// `base`: recording another key in Hex must not leave that bind pointing
+/// at a name Hex no longer listens to (#1376).
+fn portal_shortcut_id(base: &str, trigger: &str, desktop_assigns: bool) -> String {
+    if desktop_assigns {
+        return base.to_string();
+    }
     format!("{base}-{}", trigger.replace('+', "-"))
 }
 
@@ -1104,6 +1112,7 @@ impl Backend {
                 .as_ref()
                 .map(|key| (Shortcut::RawDictation, key)),
         ];
+        let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let mut shortcuts = Vec::new();
         let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
         for (shortcut, key) in requested.into_iter().flatten() {
@@ -1114,7 +1123,7 @@ impl Backend {
                 continue;
             }
             let trigger = key.portal_trigger()?;
-            let id = portal_shortcut_id(base, &trigger);
+            let id = portal_shortcut_id(base, &trigger, desktop_assigns);
             ids[shortcut.index()] = Some(id.clone());
             shortcuts.push(crate::linux::portal::Shortcut {
                 id,
@@ -1163,7 +1172,6 @@ impl Backend {
                 ));
             }
         };
-        let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let project = |granted: &std::collections::HashMap<String, Option<String>>| {
             project_grants(granted, &requested, &ids, desktop_assigns)
         };
@@ -1714,7 +1722,8 @@ mod tests {
 
     #[test]
     fn a_changed_portal_trigger_gets_a_new_shortcut_id() {
-        let id = |trigger: &str| portal_shortcut_id(Shortcut::Dictation.portal_id().0, trigger);
+        let id =
+            |trigger: &str| portal_shortcut_id(Shortcut::Dictation.portal_id().0, trigger, false);
         assert_eq!(id("ALT+space"), "dictation-ALT-space");
         assert_eq!(id("ALT+space"), id("ALT+space"));
         assert_ne!(id("ALT+space"), id("CTRL+ALT+space"));
@@ -1732,6 +1741,20 @@ mod tests {
             Some("Press <ctrl>F9")
         );
         assert_eq!(granted_trigger(&granted, &ids, Shortcut::PasteLast), None);
+    }
+
+    /// #1376: Hyprland binds Hex's shortcuts by name in its config and
+    /// ignores the trigger, so a key recorded in Hex keeps the same name.
+    #[test]
+    fn a_desktop_that_assigns_keys_keeps_one_shortcut_id() {
+        let id = |shortcut: Shortcut, trigger: &str| {
+            portal_shortcut_id(shortcut.portal_id().0, trigger, true)
+        };
+        assert_eq!(id(Shortcut::Dictation, "ALT+space"), "dictation");
+        assert_eq!(id(Shortcut::Dictation, "CTRL+ALT+j"), "dictation");
+        assert_eq!(id(Shortcut::PasteLast, "CTRL+ALT+v"), "paste-last");
+        assert_eq!(id(Shortcut::Capture, "F9"), "capture");
+        assert_eq!(id(Shortcut::RawDictation, "CTRL+r"), "raw-dictation");
     }
 
     #[test]
