@@ -87,11 +87,10 @@ fn state(ui: &Ui, def: &'static ModelDefinition, language: &str) -> State {
     } else if installed {
         State::Downloaded
     } else if !def.id.is_custom()
-        && ui
-            .found
-            .models
-            .iter()
-            .any(|found| found.catalog == Some(def.id))
+        && ui.found.models.iter().any(|found| {
+            found.catalog == Some(def.id)
+                && !crate::transcription::found_models::is_forgotten(def, &found.path)
+        })
     {
         State::OnComputer
     } else {
