@@ -1,17 +1,15 @@
-//! Windows microphone streams opened directly through WASAPI. This is the
-//! first attempt on every endpoint: a plain shared-mode client in the
-//! unchanged mix format, before cpal or anything else probes the endpoint.
-//! Some drivers (Intel Smart Sound, #988) refuse every stream cpal builds
-//! with E_INVALIDARG, so further activation and initialization paths follow,
-//! each on a fresh client released as soon as it is refused. Every WASAPI
-//! call Hex makes on a capture endpoint is logged in order (`note_call`).
+//! A Windows microphone stream opened directly through WASAPI when cpal's
+//! stream will not open. Some drivers (Intel Smart Sound, #988) refuse every
+//! stream cpal builds with E_INVALIDARG, and in one process even the
+//! endpoint's unchanged mix format, so this tries several activation and
+//! initialization paths in turn and logs every argument of each attempt.
 //! Frames are averaged to mono here; the capture timeline resamples them.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender, SyncSender};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use color_eyre::eyre::{Result, eyre};
 use cpal::Device;
@@ -20,11 +18,10 @@ use windows::Win32::Foundation::{CloseHandle, E_FAIL, HANDLE};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-    ActivateAudioInterfaceAsync, DEVICE_STATE_ACTIVE, DEVINTERFACE_AUDIO_CAPTURE,
-    IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
-    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient,
-    IAudioClient3, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX, eCapture,
-    eConsole,
+    ActivateAudioInterfaceAsync, DEVINTERFACE_AUDIO_CAPTURE, IActivateAudioInterfaceAsyncOperation,
+    IActivateAudioInterfaceCompletionHandler, IActivateAudioInterfaceCompletionHandler_Impl,
+    IAudioCaptureClient, IAudioClient, IAudioClient3, IMMDevice, IMMDeviceEnumerator,
+    MMDeviceEnumerator, WAVEFORMATEX, eCapture, eConsole,
 };
 use windows::Win32::System::Com::{
     APTTYPE, APTTYPE_MAINSTA, APTTYPE_MTA, APTTYPE_NA, APTTYPE_STA, APTTYPEQUALIFIER, CLSCTX_ALL,
@@ -52,8 +49,6 @@ const PERIODICITY_HNS: i64 = 0;
 const CONVERTED_SAMPLE_RATE: u32 = 16_000;
 const SPEAKER_FRONT_CENTER: u32 = 0x4;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
-/// How often a default-following stream checks the system default.
-const DEFAULT_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const EVENT_WAIT_MS: u32 = 100;
 
 /// A running capture thread; dropping it stops capture.
@@ -154,15 +149,7 @@ impl Path {
 type Ready = std::result::Result<(u32, CaptureFeedSwitch), String>;
 
 /// Opens `device` through WASAPI directly and starts capture.
-/// `follows_default` marks the system-default input: when the default moves
-/// to another endpoint, the stream reports a route change and keeps
-/// capturing until Hex switches once capture is idle, as cpal's
-/// default-input stream does.
-pub(super) fn start(
-    device: &Device,
-    device_name: &str,
-    follows_default: bool,
-) -> Result<StartedStream> {
+pub(super) fn start(device: &Device, device_name: &str) -> Result<StartedStream> {
     let name = device_name.to_owned();
     let id = device
         .id()
@@ -184,12 +171,7 @@ pub(super) fn start(
                 chunks: sender,
                 errors: error_sender,
             };
-            let target = Target {
-                id: &id,
-                name: &name,
-                follows_default,
-            };
-            run(&target, &worker_stop, &ready_sender, &streams);
+            run(&id, &name, &worker_stop, &ready_sender, &streams);
         })
         .map_err(|error| eyre!("could not start the microphone thread: {error}"))?;
     let (sample_rate, hex_microphone) = match ready.recv_timeout(OPEN_TIMEOUT) {
@@ -240,15 +222,8 @@ impl Drop for OwnedEvent {
     }
 }
 
-/// The endpoint a capture thread opens.
-struct Target<'a> {
-    id: &'a str,
-    name: &'a str,
-    follows_default: bool,
-}
-
-fn run(target: &Target, stop: &AtomicBool, ready: &SyncSender<Ready>, streams: &Streams) {
-    let opened = match open(target.id, target.name) {
+fn run(id: &str, name: &str, stop: &AtomicBool, ready: &SyncSender<Ready>, streams: &Streams) {
+    let opened = match open(id, name) {
         Ok(opened) => opened,
         Err(error) => {
             let _ = ready.send(Err(error));
@@ -256,12 +231,13 @@ fn run(target: &Target, stop: &AtomicBool, ready: &SyncSender<Ready>, streams: &
         }
     };
     let (mut feed, switch) = capture_feed(opened.format.sample_rate);
-    if ready.send(Ok((opened.format.sample_rate, switch))).is_ok()
-        && let Err(error) = capture(&opened, target, stop, &mut feed, &streams.chunks)
-    {
+    if ready.send(Ok((opened.format.sample_rate, switch))).is_err() {
+        let _ = unsafe { opened.client.Stop() };
+        return;
+    }
+    if let Err(error) = capture(&opened, stop, &mut feed, &streams.chunks) {
         let _ = streams.errors.try_send(error);
     }
-    note_call("IAudioClient::Stop and Release", target.id);
     let _ = unsafe { opened.client.Stop() };
 }
 
@@ -270,12 +246,11 @@ fn run(target: &Target, stop: &AtomicBool, ready: &SyncSender<Ready>, streams: &
 fn open(id: &str, name: &str) -> std::result::Result<Opened, String> {
     let device = endpoint(id)
         .map_err(|error| format!("could not find the microphone: {}", hresult(&error)))?;
+    let is_default = default_capture_id().is_some_and(|default| default == id);
     let mut failures = Vec::new();
     let mut format_text = None;
     for path in PATHS {
-        if path == Path::DefaultInterfaceActivation
-            && default_capture_id().is_none_or(|default| default != id)
-        {
+        if path == Path::DefaultInterfaceActivation && !is_default {
             continue;
         }
         let mut attempt = Attempt::default();
@@ -321,8 +296,6 @@ fn open(id: &str, name: &str) -> std::result::Result<Opened, String> {
                 return Ok(opened);
             }
             Err(failure) => {
-                // `open_with` dropped the refused client before returning.
-                note_call("IAudioClient::Release (refused client)", id);
                 if let Some(format) = failure.mix {
                     format_text = Some(format.to_string());
                 }
@@ -376,7 +349,7 @@ impl Default for Attempt {
 }
 
 /// The calling thread's COM apartment, as `CoGetApartmentType` reports it.
-fn apartment() -> String {
+pub(super) fn apartment() -> String {
     let mut kind = APTTYPE::default();
     let mut qualifier = APTTYPEQUALIFIER::default();
     match unsafe { CoGetApartmentType(&mut kind, &mut qualifier) } {
@@ -420,20 +393,12 @@ fn open_with(
                     .map_err(|error| fail(None, "StringFromIID", error))?,
             };
             attempt.interface_path = interface_path.clone();
-            note_call(
-                &format!("ActivateAudioInterfaceAsync({interface_path}, IAudioClient)"),
-                id,
-            );
             activate_interface(&interface_path)
                 .map_err(|error| fail(None, "ActivateAudioInterfaceAsync", error))?
         }
-        _ => {
-            note_call("IMMDevice::Activate(IAudioClient, CLSCTX_ALL)", id);
-            unsafe { device.Activate(CLSCTX_ALL, None) }
-                .map_err(|error| fail(None, "Activate", error))?
-        }
+        _ => unsafe { device.Activate(CLSCTX_ALL, None) }
+            .map_err(|error| fail(None, "Activate", error))?,
     };
-    note_call("IAudioClient::GetMixFormat", id);
     let mix = MixFormatPtr(
         unsafe { client.GetMixFormat() }.map_err(|error| fail(None, "GetMixFormat", error))?,
     );
@@ -463,72 +428,25 @@ fn open_with(
         Some(bytes) => hex_bytes(bytes),
         None => attempt.mix_bytes.clone(),
     };
+    attempt.is_format_supported = is_format_supported(&client, format_ptr);
+    let (mut default_period, mut minimum_period) = (0i64, 0i64);
+    attempt.device_period = match unsafe {
+        client.GetDevicePeriod(Some(&mut default_period), Some(&mut minimum_period))
+    } {
+        Ok(()) => format!("default {default_period}, minimum {minimum_period}"),
+        Err(error) => hresult(&error),
+    };
     if !format.is_decodable() {
         return Err(Failure {
             mix: Some(mix_format),
             error: format!("Hex cannot decode this format ({format})"),
         });
     }
-    if let Err(failure) = initialize(&client, id, path, format_ptr, mix_format, attempt) {
-        // Probed only after a refusal, so nothing but Activate and
-        // GetMixFormat reaches the endpoint before the first Initialize.
-        attempt.is_format_supported = is_format_supported(&client, format_ptr);
-        note_call(
-            "IAudioClient::IsFormatSupported(shared), after the refusal",
-            id,
-        );
-        let (mut default_period, mut minimum_period) = (0i64, 0i64);
-        attempt.device_period = match unsafe {
-            client.GetDevicePeriod(Some(&mut default_period), Some(&mut minimum_period))
-        } {
-            Ok(()) => format!("default {default_period}, minimum {minimum_period}"),
-            Err(error) => hresult(&error),
-        };
-        note_call("IAudioClient::GetDevicePeriod, after the refusal", id);
-        return Err(failure);
-    }
-    let event = if path.polls() {
-        None
-    } else {
-        let event = OwnedEvent(
-            unsafe { CreateEventW(None, false, false, PCWSTR::null()) }
-                .map_err(|error| fail("CreateEvent", error))?,
-        );
-        unsafe { client.SetEventHandle(event.0) }.map_err(|error| fail("SetEventHandle", error))?;
-        Some(event)
-    };
-    let capture: IAudioCaptureClient =
-        unsafe { client.GetService() }.map_err(|error| fail("GetService", error))?;
-    note_call("IAudioClient::Start", id);
-    unsafe { client.Start() }.map_err(|error| fail("Start", error))?;
-    Ok(Opened {
-        client,
-        capture,
-        format,
-        path,
-        event,
-    })
-}
-
-/// Initializes `client` as `path` says.
-fn initialize(
-    client: &IAudioClient,
-    id: &str,
-    path: Path,
-    format_ptr: *const WAVEFORMATEX,
-    mix_format: MixFormat,
-    attempt: &mut Attempt,
-) -> std::result::Result<(), Failure> {
-    let fail = |step: &str, error: windows::core::Error| Failure {
-        mix: Some(mix_format),
-        error: format!("{step}: {}", hresult(&error)),
-    };
     if path == Path::SharedAudioStream {
         let client3: IAudioClient3 = client
             .cast()
             .map_err(|error| fail("QueryInterface(IAudioClient3)", error))?;
         let (mut default, mut fundamental, mut minimum, mut maximum) = (0u32, 0u32, 0u32, 0u32);
-        note_call("IAudioClient3::GetSharedModeEnginePeriod", id);
         unsafe {
             client3.GetSharedModeEnginePeriod(
                 format_ptr,
@@ -542,18 +460,9 @@ fn initialize(
         attempt.engine_period = format!(
             "default {default}, fundamental {fundamental}, minimum {minimum}, maximum {maximum}"
         );
-        note_call("IAudioClient3::InitializeSharedAudioStream", id);
         unsafe { client3.InitializeSharedAudioStream(path.flags(), default, format_ptr, None) }
-            .map_err(|error| fail("InitializeSharedAudioStream", error))
+            .map_err(|error| fail("InitializeSharedAudioStream", error))?;
     } else {
-        note_call(
-            &format!(
-                "IAudioClient::Initialize(shared, flags {:#x}, buffer {} hns, periodicity 0)",
-                path.flags(),
-                path.buffer_hns()
-            ),
-            id,
-        );
         unsafe {
             client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
@@ -564,58 +473,28 @@ fn initialize(
                 None,
             )
         }
-        .map_err(|error| fail("Initialize", error))
+        .map_err(|error| fail("Initialize", error))?;
     }
-}
-
-/// Logs one WASAPI call Hex makes on a capture endpoint, numbered in
-/// process order, so a log shows everything that touched the endpoint
-/// before a refusal (#988).
-pub(crate) fn note_call(call: &str, endpoint: &str) {
-    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed) + 1;
-    tracing::info!(sequence, call, endpoint, "wasapi call");
-}
-
-/// The cpal devices that are active capture endpoints. cpal's own
-/// `input_devices` probes every endpoint with dozens of format checks to
-/// tell inputs from outputs; Windows' enumerator answers that directly.
-pub(super) fn capture_devices(host: &cpal::Host) -> Result<Vec<Device>> {
-    use cpal::traits::HostTrait;
-    // cpal joins this thread to COM first; Hex never picks its apartment.
-    let devices = host
-        .devices()
-        .map_err(|error| eyre!("could not enumerate input devices: {error}"))?
-        .collect::<Vec<_>>();
-    note_call(
-        "IMMDeviceEnumerator::EnumAudioEndpoints(eCapture, active)",
-        "all",
-    );
-    let ids = capture_endpoint_ids()
-        .map_err(|error| eyre!("could not enumerate input devices: {}", hresult(&error)))?;
-    Ok(devices
-        .into_iter()
-        .filter(|device| {
-            device
-                .id()
-                .is_ok_and(|id| ids.iter().any(|known| known == id.id()))
-        })
-        .collect())
-}
-
-fn capture_endpoint_ids() -> windows::core::Result<Vec<String>> {
-    let enumerator: IMMDeviceEnumerator =
-        unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)? };
-    let endpoints = unsafe { enumerator.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE)? };
-    let mut ids = Vec::new();
-    for index in 0..unsafe { endpoints.GetCount()? } {
-        let id = unsafe { endpoints.Item(index)?.GetId()? };
-        if let Ok(text) = unsafe { id.to_string() } {
-            ids.push(text);
-        }
-        unsafe { CoTaskMemFree(Some(id.as_ptr().cast_const().cast())) };
-    }
-    Ok(ids)
+    let event = if path.polls() {
+        None
+    } else {
+        let event = OwnedEvent(
+            unsafe { CreateEventW(None, false, false, PCWSTR::null()) }
+                .map_err(|error| fail("CreateEvent", error))?,
+        );
+        unsafe { client.SetEventHandle(event.0) }.map_err(|error| fail("SetEventHandle", error))?;
+        Some(event)
+    };
+    let capture: IAudioCaptureClient =
+        unsafe { client.GetService() }.map_err(|error| fail("GetService", error))?;
+    unsafe { client.Start() }.map_err(|error| fail("Start", error))?;
+    Ok(Opened {
+        client,
+        capture,
+        format,
+        path,
+        event,
+    })
 }
 
 fn endpoint(id: &str) -> windows::core::Result<IMMDevice> {
@@ -744,27 +623,13 @@ fn is_format_supported(client: &IAudioClient, format: *const WAVEFORMATEX) -> St
 /// Delivers packets until `stop` or a WASAPI failure, which it returns.
 fn capture(
     opened: &Opened,
-    target: &Target,
     stop: &AtomicBool,
     feed: &mut CaptureFeed,
     chunks: &Sender<(Vec<f32>, CaptureInstant)>,
 ) -> std::result::Result<(), String> {
     let block = usize::from(opened.format.block_align);
     let rate = opened.format.sample_rate;
-    let mut default_checked = Instant::now();
-    let mut default_moved = false;
     while !stop.load(Ordering::Acquire) {
-        if target.follows_default
-            && !default_moved
-            && default_checked.elapsed() >= DEFAULT_CHECK_INTERVAL
-        {
-            default_checked = Instant::now();
-            if default_capture_id().is_some_and(|default| default != target.id) {
-                default_moved = true;
-                tracing::info!(from = %target.name, "the default microphone changed");
-                super::notify_input_route_changed();
-            }
-        }
         match &opened.event {
             Some(event) => {
                 unsafe { WaitForSingleObject(event.0, EVENT_WAIT_MS) };
