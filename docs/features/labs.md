@@ -93,7 +93,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the Meetings pane (#1271), whose note names the lab (#1274)
 │                                        // checks: floats_only_by_opt_in_*, looks_for_nothing_while_the_lab_is_off (linux/meeting_capsules.rs),
 │                                        // gnome_meeting_capsules_is_its_own_bit_*; Rune's xwayland pointer tests; not run on a GNOME session
-├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
+├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.record_hotkey (unbound) + screenshots.folder (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
 ├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
 │                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
@@ -1003,6 +1003,42 @@ Left to do: no blur or highlight tool, colour or stroke choice, moving or
 deleting a single mark, redo, or zoom; a shot larger than the GPU's
 largest texture exports without its marks; Send lists sessions only, not
 Annotate's rules; no Save as or drag out of the editor.
+
+Recording the screen
+([screenshots/recording.rs](../../src/screenshots/recording.rs)) needs
+Annotate on (`capture.enabled`): a recording is an Annotate capture
+(`CaptureCommand::Clip`) on capture-core's recorder, narrated from the
+dictation timeline. Its shortcut (`screenshots.record_hotkey`) is unbound
+until the drawer's Record screen row sets one (a key is required; the
+trash button clears it); without Annotate the row says "Needs Annotate".
+
+```ts
+record shortcut  -> the same picker, "Full screen · Click to record"; area, window (Space), or display
+│                   while an Annotate capture records -> nothing
+├── recording    -> Annotate's capsule shows it recording, as any capture; talk to narrate
+├── record shortcut again (or the capsule's stop) -> stops; the capsule folds unless it failed
+│                   ├── no clipboard, no router: nothing is sent or copied on its own
+│                   └── the corner card, from the first frame, its length in a pill
+│                       click -> the editor; drag -> the movie; a dictation never lands on it
+└── editor       -> the frame above a filmstrip of 12 frames; a drag on the strip moves the
+                    nearer end of the span kept (never under 0.5 s) and shows the frame there;
+                    the words said inside the span under it, read-only; no marks, no Copy
+                    ├── Save     -> "Hex Recording 2026-11-04 at 14.03.22.mp4" in screenshots.folder,
+                    │               copied whole or cut without re-encoding (`scrawl-helper trim`)
+                    └── Send to… -> a contact sheet of up to 4 frames in the span as the image,
+                                    the span's words and "Screen recording (m:ss): <movie>" as text
+```
+
+Checks: `the_record_shortcut_records_and_never_while_the_picker_shows` in
+[screenshots.rs](../../src/screenshots.rs),
+`a_stopped_screenshot_recording_folds_the_capsule` in
+[capture_capsule/feed.rs](../../src/rune_ui/capture_capsule/feed.rs), the
+trim, words, sheet, and no-marks tests and the `trim` editor golden in
+[screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
+and the `recording` thumbnail golden. Not yet observed: a real recording
+on a Mac, its card, trimming and saving a movie, and a session receiving
+a sent recording. Left to do: no playback in the editor, no audio-only or
+GIF export, and the recording shows no countdown.
 
 The shortcut is taken in Hex's session tap (`screenshots::key`, called
 from [suppression.rs](../../src/suppression.rs) before the listener's
