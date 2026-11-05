@@ -79,7 +79,9 @@ fn record_control(ui: &Ui, p: Paint) -> El {
             "clear-screenshot-record-shortcut",
             &rune_theme_opencode::icons::TRASH,
             tr("Clear shortcut"),
-            |ui: &mut Ui| ui.update(|settings| settings.screenshots.record_hotkey = None),
+            |ui: &mut Ui| {
+                ui.update(|settings| settings.screenshots.record_hotkey = None);
+            },
         ));
     }
     control
