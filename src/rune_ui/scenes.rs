@@ -623,6 +623,22 @@ pub(super) const SCENES: &[Scene] = &[
         ui.pane = Pane::HudLab;
     }),
     ("mac-labs", labs_with_some_on),
+    // t1402's directions for the Labs page, behind an internal switch.
+    ("mac-labs-list", |ui| {
+        labs_with_some_on(ui);
+        ui.lab_store.layout = labs::Layout::List;
+        ui.settings.labs.unload_idle = true;
+    }),
+    ("mac-labs-by-pane", |ui| {
+        labs_with_some_on(ui);
+        ui.lab_store.layout = labs::Layout::ByPane;
+        ui.settings.labs.unload_idle = true;
+    }),
+    ("mac-labs-on-first", |ui| {
+        labs_with_some_on(ui);
+        ui.lab_store.layout = labs::Layout::OnFirst;
+        ui.settings.labs.unload_idle = true;
+    }),
     // Where hex://labs/vocabulary-biasing lands: its group's chip.
     ("mac-labs-link", |ui| {
         *ui = mac_fixture();

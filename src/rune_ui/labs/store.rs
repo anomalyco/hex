@@ -396,7 +396,7 @@ fn lab_switch(p: Paint, entry: &Row) -> El {
 }
 
 /// What Labs is, Run setup again, and Send feedback.
-fn footer(p: Paint) -> El {
+pub(super) fn footer(p: Paint) -> El {
     let run = Button::new(tr("Run setup again"))
         .variant(ButtonVariant::Ghost)
         .on_press_tx(|ui: &mut Ui, tx: &mut Tx| {
