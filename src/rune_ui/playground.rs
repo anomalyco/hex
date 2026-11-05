@@ -339,6 +339,8 @@ fn playground() -> Playground<Ui> {
     let playground = super::hud_stories::add(playground);
     #[cfg(all(hex_capture, target_os = "macos"))]
     let playground = super::capture_capsule::playground::stories(playground);
+    #[cfg(all(hex_capture, target_os = "macos"))]
+    let playground = super::capture_capsule::quiet_states::add(playground);
     playground
 }
 
