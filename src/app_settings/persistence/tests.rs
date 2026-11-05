@@ -1,5 +1,7 @@
 use super::*;
-use crate::app_settings::{MeetingRetention, MeetingSettings, RecordingAudioBehavior};
+use crate::app_settings::{
+    MeetingRetention, MeetingSettings, MeetingSummaries, RecordingAudioBehavior,
+};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -263,7 +265,7 @@ fn unreadable_file_does_not_block_load_or_get_overwritten() {
 fn a_managed_lock_reads_off_and_never_rewrites_the_saved_switch() {
     use crate::policy::{Lock, Policy};
     let file = SettingsFile::new(
-        br#"{"meetings":{"enabled":true,"summarize_with_opencode":true},"labs":{"live_text":true}}"#,
+        br#"{"meetings":{"enabled":true,"summarize_with_apple_intelligence":false,"summarize_with_opencode":true},"labs":{"live_text":true}}"#,
     );
     let policy = Policy::default()
         .with(Lock::Meetings)
@@ -271,7 +273,7 @@ fn a_managed_lock_reads_off_and_never_rewrites_the_saved_switch() {
         .with(Lock::Labs);
     let (mut settings, _) = AppSettings::read_managed_from(&file.path, policy).unwrap();
     assert!(!settings.meetings.enabled);
-    assert!(!settings.meetings.summarize_with_opencode);
+    assert_eq!(settings.meetings.summaries, MeetingSummaries::Off);
     assert!(!settings.labs.live_text);
 
     // Saving another change, or the locked switch itself, keeps the file's.
@@ -280,7 +282,7 @@ fn a_managed_lock_reads_off_and_never_rewrites_the_saved_switch() {
     settings.write_managed_to(&file.path, policy).unwrap();
     let saved: serde_json::Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
     assert_eq!(saved["meetings"]["enabled"], json!(true));
-    assert_eq!(saved["meetings"]["summarize_with_opencode"], json!(true));
+    assert_eq!(saved["meetings"]["summaries"], json!("opencode"));
     assert_eq!(saved["labs"]["live_text"], json!(true));
     assert_eq!(saved["sound_effects"], json!(false));
 

@@ -382,13 +382,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Drag meeting capsules out of the way; they come back in the corner you left them"),
             ));
         }
-        // Every OS's meeting controller writes notes with OpenCode.
-        rows.push(row(
-            Feature::MeetingSummaryModel,
-            Some(&SPARKLES),
-            tr("Choose meeting summary model"),
-            tr("Pick the OpenCode provider and model that write meeting titles and summaries, in Meetings › Settings › Advanced"),
-        ));
         rows.push(row(
             Feature::MeetingNotesVocabulary,
             Some(&BOOK),
@@ -737,7 +730,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
-        Feature::MeetingSummaryModel => "lab-meeting-summary-model",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
         Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
         Feature::NotchIndicator => "lab-notch-indicator",

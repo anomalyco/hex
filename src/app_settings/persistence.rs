@@ -148,7 +148,9 @@ impl AppSettings {
         if !policy.any() {
             return Cow::Borrowed(self);
         }
-        let saved = saved.map_or_else(Self::default, |data| decode(data).0);
+        let mut saved = saved.map_or_else(Self::default, |data| decode(data).0);
+        // A file from before `meetings.summaries` keeps its choice under a lock.
+        saved.migrate_meeting_summaries();
         let mut written = self.clone();
         policy.keep_saved(&mut written, &saved);
         Cow::Owned(written)

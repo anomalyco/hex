@@ -66,7 +66,6 @@ pub struct LabsSettings {
     pub keep_recordings: bool,
     pub hide_menu_bar_icon: bool,
     pub movable_meeting_capsules: bool,
-    pub meeting_summary_model: bool,
     /// A paste restores the clipboard through a running XWayland on Wayland desktops without data-control, such as GNOME (Linux, issue 1111).
     pub gnome_clipboard_restore: bool,
     /// Meeting titles and summaries read the vocabulary (issue 1154).
@@ -130,7 +129,6 @@ impl Default for LabsSettings {
             keep_recordings: false,
             hide_menu_bar_icon: false,
             movable_meeting_capsules: false,
-            meeting_summary_model: false,
             gnome_clipboard_restore: false,
             meeting_notes_vocabulary: false,
             notch_indicator: false,
