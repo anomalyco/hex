@@ -253,8 +253,7 @@ pub(super) fn shortcut_rows(
         .key(format!("{key}-control"))
         .gap(4.0)
         .center_y()
-        .children(side_picker(ui, p, target))
-        .child(keys_button(ui, p, target));
+        .child(recorder(ui, p, target));
     // The optional shortcuts can be turned off.
     #[cfg(target_os = "macos")]
     let second = target == ShortcutTarget::SecondDictation;
@@ -330,36 +329,68 @@ pub(super) fn shortcut_rows(
     rows
 }
 
+/// The recorder, with the side picker before it while dictation's shortcut
+/// is modifier-only (macOS). While the shortcut records or shows Saved, the
+/// picker fades and the recorder, pinned to the right, grows over it, so
+/// neither moves.
+fn recorder(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
+    let Some(side) = picker_side(ui, target) else {
+        return keys_button(ui, p, target);
+    };
+    let mut picker = side_picker(p, side);
+    if shown_side(ui, target).is_none() {
+        picker = picker.opacity(0.0).inert().a11y_hidden();
+    }
+    // The recorder at rest, unseen, holds the picker in place.
+    let room = row()
+        .key("recorder-room")
+        .padding(2.0)
+        .mr(-3.0)
+        .child(shortcut_keys(ui, p, target, true))
+        .opacity(0.0)
+        .a11y_hidden();
+    row()
+        .key("dictation-recorder")
+        .gap(4.0)
+        .center_y()
+        .child(picker)
+        .child(room)
+        .child(keys_button(ui, p, target).pin(None, Some(0.0), Some(0.0), None))
+}
+
 /// The side a modifier-only dictation shortcut answers to (macOS): Left,
 /// Either, or Right, before its keys. A side that would collide with another
 /// shortcut is refused.
-fn side_picker(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<El> {
+fn side_picker(p: Paint, side: crate::app_settings::ModifierSide) -> El {
     use super::platform_settings::{SIDES, side_binding};
-    let side = shown_side(ui, target)?;
     let labels = [tr("Left"), tr("Either"), tr("Right")];
-    Some(
-        controls::segmented(
-            p,
-            "dictation-side",
-            &labels,
-            SIDES.iter().position(|s| *s == side).unwrap_or(1),
-            |ui: &mut Ui, index| {
-                let target = ShortcutTarget::Dictation;
-                if let Some(candidate) = side_binding(&ui.settings, target, SIDES[index]) {
-                    ui.update(|settings| s::set_binding(settings, target, candidate));
-                }
-            },
-        )
-        .label(tr("Shortcut side"))
-        .mr(8.0),
+    controls::segmented(
+        p,
+        "dictation-side",
+        &labels,
+        SIDES.iter().position(|s| *s == side).unwrap_or(1),
+        |ui: &mut Ui, index| {
+            let target = ShortcutTarget::Dictation;
+            if let Some(candidate) = side_binding(&ui.settings, target, SIDES[index]) {
+                ui.update(|settings| s::set_binding(settings, target, candidate));
+            }
+        },
     )
+    .label(tr("Shortcut side"))
+    .mr(8.0)
 }
 
-/// The side [`side_picker`] shows for `target`: only dictation's
-/// modifier-only shortcut has one, so its keys leave the side to it. While
-/// the shortcut records or shows Saved, the recorder takes the picker's
-/// place and its keys name the side, so the recorder's right edge and the
-/// picker, when it shows, hold still.
+/// The side [`side_picker`] picks for `target`: only dictation's
+/// modifier-only shortcut has one.
+fn picker_side(ui: &Ui, target: ShortcutTarget) -> Option<crate::app_settings::ModifierSide> {
+    (target == ShortcutTarget::Dictation)
+        .then(|| super::platform_settings::picked_side(ui, target))
+        .flatten()
+}
+
+/// [`picker_side`] while the picker shows, so the keys leave the side to
+/// it. While the shortcut records or shows Saved, the recorder covers the
+/// picker and its keys name the side.
 fn shown_side(ui: &Ui, target: ShortcutTarget) -> Option<crate::app_settings::ModifierSide> {
     let recording = match ui.capture {
         Capture::Idle => false,
@@ -367,9 +398,7 @@ fn shown_side(ui: &Ui, target: ShortcutTarget) -> Option<crate::app_settings::Mo
         | Capture::Saving { target: active, .. }
         | Capture::Saved { target: active, .. } => active == target,
     };
-    (target == ShortcutTarget::Dictation && !recording)
-        .then(|| super::platform_settings::picked_side(ui, target))
-        .flatten()
+    picker_side(ui, target).filter(|_| !recording)
 }
 
 /// Toggle's cancel shortcut. A shortcuts portal would hold its key from
@@ -1291,37 +1320,16 @@ pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
     );
     let content = match face {
         Face::Listening(_) => s::recorder_face(p, face, true).key("face"),
-        Face::Shortcut { saved } => {
-            let keys = match s::binding(&ui.settings, target) {
-                Some(binding) => {
-                    let caps = s::shortcut_caps(binding, shown_side(ui, target).is_some());
-                    key_tray(
-                        p,
-                        "keys",
-                        KeySize::Small,
-                        caps.iter()
-                            .enumerate()
-                            .map(|(index, cap)| keycap(p, index, cap, KeySize::Small, false)),
-                    )
-                }
-                None => row().key("off").h(24.0).px(8.0).center().child(
-                    text(tr("Off"))
-                        .key("label")
-                        .font(value_font(p))
-                        .color(p.faint()),
-                ),
-            };
-            row()
-                .key("face")
-                .gap(4.0)
-                .center_y()
-                .children(saved.then(|| {
-                    rune::icon(&rune_theme_opencode::icons::CHECK_SMALL, 16.0)
-                        .key("saved")
-                        .color(p.success())
-                }))
-                .child(keys)
-        }
+        Face::Shortcut { saved } => row()
+            .key("face")
+            .gap(4.0)
+            .center_y()
+            .children(saved.then(|| {
+                rune::icon(&rune_theme_opencode::icons::CHECK_SMALL, 16.0)
+                    .key("saved")
+                    .color(p.success())
+            }))
+            .child(shortcut_keys(ui, p, target, shown_side(ui, target).is_some())),
     };
     let mut button = row()
         .key(s::hotkey_key(target))
@@ -1342,4 +1350,26 @@ pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         button = button.hover(c.hover).press(c.pressed);
     }
     button
+}
+
+/// The keycaps of `target`'s shortcut, or Off, naming the side unless a
+/// side picker beside them does.
+fn shortcut_keys(ui: &Ui, p: Paint, target: ShortcutTarget, side_picker: bool) -> El {
+    match s::binding(&ui.settings, target) {
+        Some(binding) => key_tray(
+            p,
+            "keys",
+            KeySize::Small,
+            s::shortcut_caps(binding, side_picker)
+                .iter()
+                .enumerate()
+                .map(|(index, cap)| keycap(p, index, cap, KeySize::Small, false)),
+        ),
+        None => row().key("off").h(24.0).px(8.0).center().child(
+            text(tr("Off"))
+                .key("label")
+                .font(value_font(p))
+                .color(p.faint()),
+        ),
+    }
 }
