@@ -1,40 +1,30 @@
-//! Sounds: a sheet from General's Sounds row where each sound set can be
-//! heard in context. A stage at the top plays a short dictation (start, a
-//! moment of speaking, stop, a moment of transcribing, done) while Hex's own
-//! HUD, where this OS puts it, does what it does at each sound; its chips
-//! play one sound at a time. Below it each set has its name, what it sounds
-//! like and a play button; picking one is the setting, and plays it.
+//! Sounds: a sheet from General's Sounds row. The volume every sound plays
+//! at sits on top, and dragging it to the left turns the sounds off. Below
+//! it each set has its name, what it sounds like and a play button, and a
+//! check marks the chosen one; picking one is the setting, and plays it.
 //!
-//! The HUD runs on the window's poll clock while a sound plays and until it
-//! leaves. Any playback stops the one before it, and closing the sheet stops
-//! it.
-
-mod hud;
+//! Any playback stops the one before it, and closing the sheet stops it.
 
 use std::time::Duration;
 
 use rune::{Cursor, El, Icon, Tx, col, el, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
-use self::hud::Hud;
-pub(crate) use self::hud::Preview;
 use super::Ui;
 use super::controls::{
-    ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition,
+    ButtonKind, METRICS, Paint, button, card, icon_row, modal_scrim_transition, modal_transition,
+    section,
 };
-use super::lists::{list_row, source_list};
-use super::platform::Os;
-use crate::app_settings::IndicatorPosition;
-use crate::desktop::i18n::tr;
-use crate::feedback::{self, Audition, Cue, SoundSet};
-use crate::rune_hud::{BOTTOM_OFFSET, TOP_OFFSET};
+use super::icons::BELL;
+use super::lists::{select_at_once, slider_track, source_item, source_list};
+use crate::desktop::i18n::{tr, tr_fill};
+use crate::feedback::{self, Audition, SoundSet};
 
-const MODAL_WIDTH: f32 = 460.0;
+const MODAL_WIDTH: f32 = 520.0;
 const PADDING: f32 = 18.0;
-/// The slice of screen the stage shows.
-const SCREEN_HEIGHT: f32 = 84.0;
-const MENU_BAR: f32 = 24.0;
-const FRAME: Duration = Duration::from_micros(16_667);
+const SLIDER_WIDTH: f32 = 160.0;
+/// The column the chosen set's check sits in.
+const CHECK_WIDTH: f32 = 16.0;
 
 static PLAY: Icon = Icon {
     name: "hex-play",
@@ -45,48 +35,22 @@ static PLAY: Icon = Icon {
 #[derive(Default)]
 pub(super) struct SoundSets {
     pub(super) open: bool,
-    playing: Option<Playing>,
-    /// The poll clock when the playing sounds' frames started.
+    /// The set whose dictation plays.
+    playing: Option<SoundSet>,
+    /// The poll clock when it started.
     start: Option<f64>,
-    elapsed_ms: f64,
-    /// The poll clock when the next frame's wake is due.
-    next_frame: f64,
     /// A fixed moment for snapshots.
     held: bool,
-    /// The HUD while something plays and until it leaves.
-    hud: Option<Hud>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Playing {
-    set: SoundSet,
-    what: Audition,
+    /// The volume while the slider is dragged, saved when it lets go.
+    volume_drag: Option<f32>,
 }
 
 impl SoundSets {
     /// What plays now.
     #[cfg(all(test, target_os = "linux"))]
-    pub(super) fn playing(&self) -> Option<(SoundSet, Audition)> {
-        self.playing.map(|playing| (playing.set, playing.what))
+    pub(super) fn playing(&self) -> Option<SoundSet> {
+        self.playing
     }
-
-    /// The cue whose moment shows now, while something plays.
-    fn sounding(&self) -> Option<Cue> {
-        let playing = self.playing?;
-        sounding(playing.what, self.elapsed_ms)
-    }
-}
-
-/// The cue whose moment shows `ms` into `what`, until it ends.
-fn sounding(what: Audition, ms: f64) -> Option<Cue> {
-    if ms >= what.length().as_secs_f64() * 1000.0 {
-        return None;
-    }
-    what.cues()
-        .iter()
-        .rev()
-        .find(|(_, at)| at.as_secs_f64() * 1000.0 <= ms)
-        .map(|&(cue, _)| cue)
 }
 
 /// Opens the sheet over General, alone: it ends a shortcut recording and
@@ -99,7 +63,7 @@ pub(super) fn open(ui: &mut Ui) {
     ui.open = None;
     ui.sound_sets.open = true;
     ui.sound_sets.playing = None;
-    ui.sound_sets.hud = None;
+    ui.sound_sets.volume_drag = None;
 }
 
 /// Closes the sheet, stopping whatever it plays.
@@ -107,51 +71,35 @@ pub(super) fn close(ui: &mut Ui) {
     if ui.sound_sets.playing.take().is_some() && ui.live() {
         feedback::stop_audition();
     }
-    ui.sound_sets.hud = None;
     ui.sound_sets.open = false;
 }
 
-/// Opens the sheet, held `ms` into `set`'s `what` when given.
-pub(super) fn fixture(ui: &mut Ui, playing: Option<(SoundSet, Audition, f64)>) {
+/// Opens the sheet, held while `playing` plays when given.
+pub(super) fn fixture(ui: &mut Ui, playing: Option<SoundSet>) {
     open(ui);
-    if let Some((set, what, ms)) = playing {
-        let mut hud = Hud::new(ui.platform.hud.tuning, what);
-        hud.advance_to((ms / 1000.0) as f32);
-        ui.sound_sets.playing = Some(Playing { set, what });
-        ui.sound_sets.hud = Some(hud);
-        ui.sound_sets.elapsed_ms = ms;
-        ui.sound_sets.held = true;
-    }
-}
-
-fn play(ui: &mut Ui, set: SoundSet, what: Audition) {
-    let hud = Hud::new(ui.platform.hud.tuning, what);
-    let sheet = &mut ui.sound_sets;
-    sheet.playing = Some(Playing { set, what });
-    sheet.hud = Some(hud);
-    sheet.start = None;
-    sheet.elapsed_ms = 0.0;
-    sheet.next_frame = 0.0;
-    sheet.held = false;
-    if ui.live() {
-        feedback::audition(set, what);
-    }
+    ui.sound_sets.playing = playing;
+    ui.sound_sets.held = true;
 }
 
 /// Stops `set` when it plays, else plays its dictation.
 fn toggle(ui: &mut Ui, set: SoundSet) {
-    if ui
-        .sound_sets
-        .playing
-        .is_some_and(|playing| playing.set == set)
-    {
+    if ui.sound_sets.playing == Some(set) {
         ui.sound_sets.playing = None;
-        ui.sound_sets.hud = None;
         if ui.live() {
             feedback::stop_audition();
         }
     } else {
-        play(ui, set, Audition::Dictation);
+        play(ui, set);
+    }
+}
+
+fn play(ui: &mut Ui, set: SoundSet) {
+    let sheet = &mut ui.sound_sets;
+    sheet.playing = Some(set);
+    sheet.start = None;
+    sheet.held = false;
+    if ui.live() {
+        feedback::audition(set, Audition::Dictation);
     }
 }
 
@@ -160,43 +108,55 @@ fn choose(ui: &mut Ui, set: SoundSet) {
     if ui.settings.sound_theme != set && !ui.update(|settings| settings.sound_theme = set) {
         return;
     }
-    play(ui, set, Audition::Dictation);
+    play(ui, set);
 }
 
-/// Advances the HUD while something plays and until it leaves. True when
-/// it moved.
-pub(super) fn poll(ui: &mut Ui, clock: f64, visible: bool, tx: &mut Tx) -> bool {
+/// The volume the slider shows: zero while the sounds are off.
+fn shown_volume(ui: &Ui) -> f32 {
+    ui.sound_sets
+        .volume_drag
+        .unwrap_or(if ui.settings.sound_effects {
+            ui.settings.sound_effect_volume
+        } else {
+            0.0
+        })
+}
+
+/// Follows the slider, in steps of 5%, and saves where it lets go: zero
+/// turns the sounds off and keeps the last volume. A saved volume plays the
+/// start sound at it.
+fn set_volume(ui: &mut Ui, value: f32, done: bool) {
+    let volume = (value * 20.0).round() / 20.0;
+    ui.sound_sets.volume_drag = (!done).then_some(volume);
+    if !done {
+        return;
+    }
+    let saved = ui.update(|settings| {
+        settings.sound_effects = volume > 0.0;
+        if volume > 0.0 {
+            settings.sound_effect_volume = volume;
+        }
+    });
+    if saved && volume > 0.0 && ui.live() {
+        feedback::play(feedback::Tone::DictationStart);
+    }
+}
+
+/// Ends the play button's Stop once the dictation has played. True when it
+/// ended.
+pub(super) fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let sheet = &mut ui.sound_sets;
-    let Some(playing) = sheet.playing else {
-        return false;
-    };
-    if !sheet.open || sheet.held {
+    if !sheet.open || sheet.held || sheet.playing.is_none() {
         return false;
     }
     let start = *sheet.start.get_or_insert(clock);
-    sheet.elapsed_ms = (clock - start) * 1000.0;
-    if let Some(hud) = &mut sheet.hud {
-        hud.advance_to((sheet.elapsed_ms / 1000.0) as f32);
-    }
-    if sounding(playing.what, sheet.elapsed_ms).is_none()
-        && sheet.hud.as_ref().is_none_or(Hud::settled)
-    {
+    let left = Audition::Dictation.length().as_secs_f64() - (clock - start);
+    if left <= 0.0 {
         sheet.playing = None;
-        sheet.hud = None;
         return true;
     }
-    if visible && clock >= sheet.next_frame {
-        sheet.next_frame = clock + FRAME.as_secs_f64();
-        tx.wake_after(FRAME);
-    }
-    true
-}
-
-/// The set the stage plays: the one playing, else the saved one.
-fn staged(ui: &Ui) -> SoundSet {
-    ui.sound_sets
-        .playing
-        .map_or(ui.settings.sound_theme, |playing| playing.set)
+    tx.wake_after(Duration::from_secs_f64(left));
+    false
 }
 
 /// A stable key for `set`'s row.
@@ -209,45 +169,46 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         return None;
     }
     let c = &p.k.c;
-    let saved = ui.settings.sound_theme;
-    let playing = ui.sound_sets.playing;
-    let sets =
-        source_list(col().key("sets").gap(2.0)).children(SoundSet::ALL.into_iter().map(|set| {
-            let sounding = playing.is_some_and(|playing| playing.set == set);
-            list_row(
-                p,
-                &set_key(set),
-                tr(set.name()),
-                vec![play_button(p, set, sounding)],
-                tr(set.character()),
-                set == saved,
-                move |ui: &mut Ui| choose(ui, set),
-            )
-        }));
-    let mut footer = row().key("footer").gap(12.0).center_y();
-    footer = footer.child(
-        // Nothing plays with Sound volume off; the HUD still shows.
-        text(if ui.settings.sound_effects {
-            ""
-        } else {
-            tr("Sound volume is off")
-        })
-        .key("muted")
-        .font(DESCRIPTION)
-        .color(p.muted())
-        .grow(1.0)
-        .shrink(),
-    );
-    footer = footer.child(
-        button(
+    let volume = shown_volume(ui);
+    let percent = format!("{:.0}%", volume * 100.0);
+    let line = if volume > 0.0 {
+        tr_fill("{} · drag to the left to turn sounds off", &percent)
+    } else {
+        tr("Off · drag to the right to turn sounds on").to_string()
+    };
+    let volume_row = icon_row(
+        p,
+        "sound-volume",
+        &BELL,
+        tr("Volume"),
+        Some(&line),
+        slider_track(
             p,
-            "close-sound-sets",
-            tr("Close"),
-            ButtonKind::Secondary,
-            |ui: &mut Ui, _| close(ui),
-        )
-        .default_button(),
+            "sound-volume-slider",
+            tr("Sound volume"),
+            volume,
+            percent,
+            SLIDER_WIDTH,
+            set_volume,
+        ),
     );
+    let sets = SoundSet::ALL
+        .into_iter()
+        .map(|set| set_row(ui, p, set))
+        .collect::<Vec<_>>();
+    let footer = row()
+        .key("footer")
+        .child(el().key("spacer").grow(1.0))
+        .child(
+            button(
+                p,
+                "close-sound-sets",
+                tr("Done"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| close(ui),
+            )
+            .default_button(),
+        );
     let mut panel = col()
         .key("sound-sets")
         .role("dialog")
@@ -268,8 +229,8 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .font(p.k.ty.body_medium)
                 .color(p.text()),
         )
-        .child(stage(ui, p))
-        .child(sets.mx(-6.0))
+        .child(card(p, "volume", vec![volume_row]))
+        .child(source_list(section(p, "sets", tr("Sound set"), sets)))
         .child(footer);
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
@@ -295,6 +256,67 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     ])
 }
 
+/// One set: a check when it is the chosen one, its name and what it sounds
+/// like, and its play button. Pressing the row chooses it.
+fn set_row(ui: &Ui, p: Paint, set: SoundSet) -> El {
+    let c = &p.k.c;
+    let chosen = ui.settings.sound_theme == set;
+    let title = tr(set.name());
+    let meta = tr(set.character());
+    let mut item = row()
+        .key(set_key(set))
+        .role("listitem")
+        .label(title)
+        .description(meta)
+        .px(METRICS.row_px)
+        .py(10.0)
+        .gap(10.0)
+        .center_y()
+        .hover(c.hover)
+        .cursor(Cursor::Pointer)
+        .child(
+            el().key("check")
+                .w(CHECK_WIDTH)
+                .center()
+                .children(chosen.then(|| {
+                    rune::icon(&rune_theme_opencode::icons::CHECK, 16.0)
+                        .key("mark")
+                        .color(c.icon_accent)
+                }))
+                .a11y_hidden(),
+        )
+        .child(
+            col()
+                .key("copy")
+                .gap(2.0)
+                .grow(1.0)
+                .shrink()
+                .child(
+                    text(title)
+                        .key("title")
+                        .font(p.k.ty.ui_medium)
+                        .color(p.text())
+                        .truncate(),
+                )
+                .child(
+                    text(meta)
+                        .key("meta")
+                        .font(p.k.ty.small)
+                        .color(p.muted())
+                        .truncate(),
+                )
+                .a11y_hidden(),
+        )
+        .child(play_button(p, set, ui.sound_sets.playing == Some(set)));
+    if chosen {
+        item = item.fill(c.layer_01);
+    }
+    source_item(
+        select_at_once(item, chosen, move |ui: &mut Ui| choose(ui, set)),
+        chosen,
+    )
+}
+
 fn play_button(p: Paint, set: SoundSet, sounding: bool) -> El {
     let (icon, label) = if sounding {
         (&rune_theme_opencode::icons::STOP, tr("Stop"))
@@ -302,151 +324,11 @@ fn play_button(p: Paint, set: SoundSet, sounding: bool) -> El {
         (&PLAY, tr("Play"))
     };
     IconButton::new(icon)
-        .variant(IconButtonVariant::Ghost)
+        .variant(IconButtonVariant::Neutral)
         .control_size(ControlSize::Regular)
         .label(label)
         .on_press(move |ui: &mut Ui| toggle(ui, set))
         .build(p.k)
         .key("play")
-}
-
-/// The HUD over the staged set's sounds, one chip each.
-fn stage(ui: &Ui, p: Paint) -> El {
-    let c = &p.k.c;
-    let set = staged(ui);
-    let sounding = ui.sound_sets.sounding();
-    let chips = Cue::ALL
-        .into_iter()
-        .map(|cue| chip(p, set, cue, sounding == Some(cue)));
-    col()
-        .key("stage")
-        .padding(12.0)
-        .gap(12.0)
-        .radius(p.k.radius.lg)
-        .fill(c.layer_01)
-        .child(screen(ui, p))
-        .child(
-            row()
-                .key("cues")
-                .gap(6.0)
-                .center_y()
-                .child(
-                    text(tr(set.name()))
-                        .key("set")
-                        .font(p.k.ty.ui_medium)
-                        .color(p.text())
-                        .grow(1.0)
-                        .shrink()
-                        .truncate(),
-                )
-                .children(chips),
-        )
-}
-
-/// One sound of `set`, played alone. Inverted while its moment shows; faint
-/// and inert when the set has no such sound.
-fn chip(p: Paint, set: SoundSet, cue: Cue, lit: bool) -> El {
-    let c = &p.k.c;
-    let label = tr(cue.name());
-    let has = set.has(cue);
-    let ink = if lit {
-        c.text_inverse
-    } else if has {
-        p.text()
-    } else {
-        p.faint()
-    };
-    let mut chip = row()
-        .key(cue.name())
-        .role("button")
-        .label(label)
-        .h(24.0)
-        .px(9.0)
-        .center()
-        .radius(p.k.radius.sm)
-        .border(p.hair, if lit { c.bg_inverse } else { c.border_weak })
-        .child(
-            text(label)
-                .key("label")
-                .font(p.k.ty.small_medium)
-                .color(ink),
-        );
-    if lit {
-        chip = chip.fill(c.bg_inverse);
-    } else if has {
-        chip = chip.hover(c.hover).press(c.pressed);
-    }
-    if has {
-        chip = chip
-            .focusable(true)
-            .focus_ring(2.0, 2.0, c.border_focus)
-            .cursor(Cursor::Pointer)
-            .on_press(move |ui: &mut Ui| play(ui, set, Audition::Cue(cue)));
-    }
-    chip
-}
-
-/// A slice of the screen with Hex's HUD where this OS puts it: on a Mac its
-/// plate 6 pt under the menu bar or 24 pt above the Dock, on Linux and
-/// Windows its window 12 pt from the top or 24 pt from the bottom. Off shows
-/// nothing. The window's compositor draws the HUD itself.
-fn screen(ui: &Ui, p: Paint) -> El {
-    let c = &p.k.c;
-    let mac = ui.platform.caps.os == Os::Macos;
-    let radius = p.k.radius.md;
-    let mut screen = el()
-        .key(hud::SCREEN_KEY)
-        .role("none")
-        .w_full()
-        .h(SCREEN_HEIGHT)
-        .radius(radius)
-        .clip_rounded(radius)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak);
-    if mac {
-        screen = screen.child(
-            el().key("menu-bar")
-                .role("none")
-                .absolute(0.0, 0.0)
-                .w_full()
-                .h(MENU_BAR)
-                .fill(c.layer_02),
-        );
-    }
-    let position = ui.settings.indicator_position;
-    let Some(hud) = &ui.sound_sets.hud else {
-        return screen;
-    };
-    if position == IndicatorPosition::Hidden {
-        return screen;
-    }
-    let (hud, height, inset) = hud.view();
-    let y = match (position, mac) {
-        (IndicatorPosition::Bottom, true) => SCREEN_HEIGHT - 24.0 - height + inset,
-        (IndicatorPosition::Bottom, false) => SCREEN_HEIGHT - BOTTOM_OFFSET - height,
-        (_, true) => MENU_BAR + crate::rune_hud::hud_placement::TOP_OFFSET as f32 - inset,
-        (_, false) => TOP_OFFSET,
-    };
-    screen.child(hud.absolute(0.0, y))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn each_moment_shows_from_its_sound_to_the_next() {
-        let at = |ms| sounding(Audition::Dictation, ms);
-        assert_eq!(at(0.0), Some(Cue::Start));
-        assert_eq!(at(1_399.0), Some(Cue::Start));
-        assert_eq!(at(1_400.0), Some(Cue::Stop));
-        assert_eq!(at(2_100.0), Some(Cue::Done));
-        assert_eq!(at(2_899.0), Some(Cue::Done));
-        assert_eq!(at(2_900.0), None);
-        for cue in Cue::ALL {
-            let alone = Audition::Cue(cue);
-            assert_eq!(sounding(alone, 0.0), Some(cue));
-            assert_eq!(sounding(alone, alone.length().as_secs_f64() * 1000.0), None);
-        }
-    }
+        .radius(999.0)
 }

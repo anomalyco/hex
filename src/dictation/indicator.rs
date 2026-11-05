@@ -56,6 +56,8 @@ pub enum DictationIndicatorEvent {
     JobCompleted {
         job_id: u64,
     },
+    /// Only Linux's HUD hears a cancelled job.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     JobCancelled {
         job_id: u64,
     },

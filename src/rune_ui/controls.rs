@@ -25,7 +25,7 @@ pub(super) const DEVICE_SELECT_WIDTH: f32 = 320.0;
 /// the window's 860 px minimum width).
 const COPY_MIN_WIDTH: f32 = 100.0;
 /// An [`icon_row`]'s icon and the gap after it.
-const ICON_LEAD: f32 = 28.0;
+pub(super) const ICON_LEAD: f32 = 28.0;
 
 /// A settings page's measurements: raised cards of rows under muted
 /// labels. The title, section labels, and row text share the gutter; cards

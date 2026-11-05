@@ -41,7 +41,9 @@ pub(crate) use macos::DictationIndicatorUi;
 pub(crate) type HudEvent = DictationIndicatorEvent;
 
 /// The window's margin from the top or bottom edge on Linux and Windows.
+#[cfg(not(target_os = "macos"))]
 pub(crate) const TOP_OFFSET: f32 = 12.0;
+#[cfg(not(target_os = "macos"))]
 pub(crate) const BOTTOM_OFFSET: f32 = 24.0;
 /// The HUD window: room for Dot scope's widest plate and drop shadow, and
 /// on macOS for an island grown out of the widest notch.
@@ -905,34 +907,6 @@ impl Painter {
             pass.set_immediates(0, bytes(uniforms));
         }
         pass.draw(0..3, 0..1);
-    }
-
-    /// Draws Dot scope over what `view` holds, in `target`'s viewport and
-    /// clip only.
-    pub(crate) fn draw_over(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
-        target: Target,
-        uniforms: &DotUniforms,
-    ) {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("hex hud preview"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        self.draw_slot(&mut pass, target, uniforms);
     }
 
     /// Draw inside Rune's effect-slot pass, preserving its painter order and

@@ -340,6 +340,27 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 6])] = &[
+    ("Sound set", ["Zestaw dźwięków", "音效组", "サウンドセット", "Soundset", "Conjunto de sonidos", "Набір звуків"]),
+    ("{} · drag to the left to turn sounds off", ["{} · przeciągnij w lewo, aby wyłączyć dźwięki", "{} · 向左拖动可关闭声音", "{} · 左にドラッグするとサウンドがオフになります", "{} · nach links ziehen, um Töne auszuschalten", "{} · arrastra a la izquierda para desactivar los sonidos", "{} · перетягніть ліворуч, щоб вимкнути звуки"]),
+    ("Off · drag to the right to turn sounds on", ["Wył. · przeciągnij w prawo, aby włączyć dźwięki", "关 · 向右拖动可打开声音", "オフ · 右にドラッグするとサウンドがオンになります", "Aus · nach rechts ziehen, um Töne einzuschalten", "Desactivado · arrastra a la derecha para activar los sonidos", "Вимк. · перетягніть праворуч, щоб увімкнути звуки"]),
+    ("Microphone, sound and window", ["Mikrofon, dźwięk i okno", "麦克风、声音和窗口", "マイク、サウンド、ウインドウ", "Mikrofon, Ton und Fenster", "Micrófono, sonido y ventana", "Мікрофон, звук і вікно"]),
+    ("While you dictate", ["Podczas dyktowania", "听写时", "音声入力中", "Beim Diktieren", "Mientras dictas", "Під час диктування"]),
+    ("Microphone and model", ["Mikrofon i model", "麦克风和模型", "マイクとモデル", "Mikrofon und Modell", "Micrófono y modelo", "Мікрофон і модель"]),
+    ("Pasting", ["Wklejanie", "粘贴", "ペースト", "Einfügen", "Pegado", "Вставлення"]),
+    ("App", ["Aplikacja", "应用", "アプリ", "App", "App", "Застосунок"]),
+    ("Other audio", ["Inny dźwięk", "其他音频", "ほかのオーディオ", "Anderes Audio", "Otro audio", "Інший звук"]),
+    ("Music and calls go silent while you talk", ["Muzyka i rozmowy cichną, gdy mówisz", "说话时音乐和通话会静音", "話している間、音楽と通話は消音されます", "Musik und Anrufe verstummen, während du sprichst", "La música y las llamadas se silencian mientras hablas", "Музика й дзвінки замовкають, поки ви говорите"]),
+    ("Music pauses while you talk and plays on after", ["Muzyka pauzuje, gdy mówisz, i potem gra dalej", "说话时音乐暂停，之后继续播放", "話している間、音楽は一時停止し、その後再開します", "Musik pausiert, während du sprichst, und läuft danach weiter", "La música se pausa mientras hablas y sigue después", "Музика стає на паузу, поки ви говорите, а потім грає далі"]),
+    ("Music and calls drop to {}% while you talk", ["Muzyka i rozmowy ściszają się do {}%, gdy mówisz", "说话时音乐和通话降到 {}%", "話している間、音楽と通話は {}% に下がります", "Musik und Anrufe sinken auf {} %, während du sprichst", "La música y las llamadas bajan al {} % mientras hablas", "Музика й дзвінки стихають до {}%, поки ви говорите"]),
+    ("On: the mic opens as you dictate; the first moment can be clipped", ["Wł.: mikrofon otwiera się, gdy dyktujesz; pierwsza chwila może zostać ucięta", "开：麦克风在听写时打开；开头一瞬间可能被截掉", "オン：音声入力を始めるとマイクが開きます。最初の一瞬が切れることがあります", "An: Das Mikrofon öffnet sich beim Diktieren; der erste Moment kann abgeschnitten werden", "Activado: el micrófono se abre al dictar; el primer instante puede cortarse", "Увімк.: мікрофон відкривається, коли ви диктуєте; перша мить може обрізатися"]),
+    ("Off: dictation starts instantly; macOS shows the mic in use", ["Wył.: dyktowanie zaczyna się od razu; macOS pokazuje, że mikrofon jest używany", "关：听写立即开始；macOS 会显示麦克风正在使用", "オフ：音声入力はすぐに始まります。macOS はマイクを使用中と表示します", "Aus: Diktieren startet sofort; macOS zeigt das Mikrofon als aktiv", "Desactivado: el dictado empieza al instante; macOS muestra el micrófono en uso", "Вимк.: диктування починається миттєво; macOS показує, що мікрофон використовується"]),
+    ("Off: dictation starts instantly; your system shows the mic in use", ["Wył.: dyktowanie zaczyna się od razu; system pokazuje, że mikrofon jest używany", "关：听写立即开始；系统会显示麦克风正在使用", "オフ：音声入力はすぐに始まります。システムはマイクを使用中と表示します", "Aus: Diktieren startet sofort; dein System zeigt das Mikrofon als aktiv", "Desactivado: el dictado empieza al instante; el sistema muestra el micrófono en uso", "Вимк.: диктування починається миттєво; система показує, що мікрофон використовується"]),
+    ("Use the Mac's microphone with headsets", ["Używaj mikrofonu Maca ze słuchawkami", "使用耳机时用 Mac 的麦克风", "ヘッドセット使用時は Mac のマイクを使う", "Mit Headsets das Mikrofon des Mac verwenden", "Usar el micrófono del Mac con auriculares", "Використовувати мікрофон Mac із гарнітурами"]),
+    ("Use another microphone with headsets", ["Używaj innego mikrofonu ze słuchawkami", "使用耳机时用其他麦克风", "ヘッドセット使用時は別のマイクを使う", "Mit Headsets ein anderes Mikrofon verwenden", "Usar otro micrófono con auriculares", "Використовувати інший мікрофон із гарнітурами"]),
+    ("AirPods keep playing in full quality while you dictate", ["AirPods grają w pełnej jakości podczas dyktowania", "听写时 AirPods 保持完整音质播放", "音声入力中も AirPods はフル音質で再生を続けます", "AirPods spielen beim Diktieren in voller Qualität weiter", "Los AirPods siguen sonando con calidad completa mientras dictas", "AirPods грають у повній якості, поки ви диктуєте"]),
+    ("Headsets keep playing in full quality while you dictate", ["Słuchawki grają w pełnej jakości podczas dyktowania", "听写时耳机保持完整音质播放", "音声入力中もヘッドセットはフル音質で再生を続けます", "Headsets spielen beim Diktieren in voller Qualität weiter", "Los auriculares siguen sonando con calidad completa mientras dictas", "Гарнітури грають у повній якості, поки ви диктуєте"]),
+    ("Hex listens for these words", ["Hex nasłuchuje tych słów", "Hex 会留意这些词", "Hex はこれらの語を聞き取ります", "Hex achtet auf diese Wörter", "Hex presta atención a estas palabras", "Hex прислухається до цих слів"]),
+    ("Volume", ["Głośność", "音量", "音量", "Lautstärke", "Volumen", "Гучність"]),
     ("Hex picks a fast model", ["Hex wybiera szybki model", "由 Hex 选择快速模型", "Hex が高速なモデルを選ぶ", "Hex wählt ein schnelles Modell", "Hex elige un modelo rápido", "Hex вибирає швидку модель"]),
     ("Summary models show once Hex connects to OpenCode.", ["Modele podsumowań pojawią się, gdy Hex połączy się z OpenCode.", "Hex 连接到 OpenCode 后会显示摘要模型。", "Hex が OpenCode に接続すると要約モデルが表示されます。", "Modelle für Zusammenfassungen erscheinen, sobald Hex mit OpenCode verbunden ist.", "Los modelos de resumen aparecen cuando Hex se conecta a OpenCode.", "Моделі для підсумків з'являться, щойно Hex під'єднається до OpenCode."]),
     ("Start OpenCode to choose a summary model. Hex keeps the saved one.", ["Uruchom OpenCode, aby wybrać model podsumowań. Hex zachowuje zapisany.", "启动 OpenCode 以选择摘要模型。Hex 会保留已保存的模型。", "要約モデルを選ぶには OpenCode を起動してください。保存済みのモデルはそのまま残ります。", "Starte OpenCode, um ein Modell für Zusammenfassungen zu wählen. Hex behält das gespeicherte.", "Inicia OpenCode para elegir un modelo de resumen. Hex conserva el guardado.", "Запустіть OpenCode, щоб вибрати модель для підсумків. Hex зберігає збережену."]),
@@ -551,8 +572,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Default shortcut: {}", ["Domyślny skrót: {}", "默认快捷键：{}", "既定のショートカット: {}", "Standardkürzel: {}", "Atajo predeterminado: {}", "Типова комбінація: {}"]),
     ("Unload after", ["Zwolnij po", "卸载前等待", "解放までの時間", "Entladen nach", "Descargar tras", "Вивантажити через"]),
     ("Turn off the mic when not dictating", ["Wyłączaj mikrofon, gdy nie dyktujesz", "不听写时关闭麦克风", "音声入力していないときはマイクをオフにする", "Mikrofon ausschalten, wenn du nicht diktierst", "Apagar el micrófono cuando no dictas", "Вимикати мікрофон, коли не диктуєте"]),
-    ("The mic opens only while you dictate; the first moment can be clipped", ["Mikrofon otwiera się tylko podczas dyktowania; pierwsza chwila może zostać ucięta", "麦克风只在听写时打开；开头一瞬间可能被截掉", "マイクは音声入力中だけ開きます。最初の一瞬が切れることがあります", "Das Mikrofon öffnet sich nur beim Diktieren; der erste Moment kann abgeschnitten werden", "El micrófono solo se abre mientras dictas; el primer instante puede cortarse", "Мікрофон відкривається лише під час диктування; перша мить може обрізатися"]),
-    ("The mic stays ready so dictation starts instantly; your system shows it in use", ["Mikrofon jest stale gotowy, więc dyktowanie zaczyna się od razu; system pokazuje, że jest używany", "麦克风保持就绪，听写可立即开始；系统会显示它正在使用", "マイクを待機させておくので音声入力がすぐ始まります。システムには使用中と表示されます", "Das Mikrofon bleibt bereit, damit das Diktat sofort beginnt; dein System zeigt es als benutzt an", "El micrófono queda listo para que el dictado empiece al instante; tu sistema lo muestra en uso", "Мікрофон лишається готовим, тож диктування починається миттєво; система показує, що він використовується"]),
     ("Send feedback", ["Wyślij opinię", "发送反馈", "フィードバックを送信", "Feedback senden", "Enviar comentarios", "Надіслати відгук"]),
     ("Run setup again", ["Uruchom konfigurację ponownie", "重新运行设置", "セットアップをもう一度実行", "Einrichtung erneut ausführen", "Volver a ejecutar la configuración", "Запустити налаштування знову"]),
     ("Play the first run again. Settings, models, and permissions stay", ["Przejdź pierwsze uruchomienie jeszcze raz. Ustawienia, modele i uprawnienia zostają", "再次体验首次运行。设置、模型和权限保持不变", "初回起動をもう一度行います。設定、モデル、権限はそのままです", "Den ersten Start noch einmal durchlaufen. Einstellungen, Modelle und Berechtigungen bleiben", "Repite el primer inicio. La configuración, los modelos y los permisos se conservan", "Пройти перший запуск ще раз. Налаштування, моделі й дозволи залишаться"]),
@@ -810,12 +829,10 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Hold", ["Przytrzymaj", "按住", "押しながら", "Halte", "Mantén", "Утримувати"]),
     ("Activity", ["Aktywność", "活动", "アクティビティ", "Aktivität", "Actividad", "Активність"]),
     ("Voice commands", ["Polecenia głosowe", "语音命令", "音声コマンド", "Sprachbefehle", "Comandos de voz", "Голосові команди"]),
-    ("While dictating", ["Podczas dyktowania", "听写时", "音声入力中", "Während des Diktats", "Mientras dictas", "Під час диктування"]),
     ("Mute", ["Wycisz", "静音", "ミュート", "Stummschalten", "Silenciar", "Тиша"]),
     ("Pause media", ["Wstrzymaj media", "暂停媒体", "メディアを一時停止", "Medien pausieren", "Pausar medios", "Пауза медіа"]),
     ("Lower audio", ["Ścisz dźwięk", "降低音量", "音量を下げる", "Audio absenken", "Bajar audio", "Приглушити звук"]),
     ("Lower to", ["Ścisz do", "降低至", "音量の割合", "Absenken auf", "Bajar al", "Приглушити до"]),
-    ("Percent of the current output volume", ["Procent bieżącej głośności wyjściowej", "当前输出音量的百分比", "現在の出力音量に対する割合", "Prozent der aktuellen Ausgabelautstärke", "Porcentaje del volumen de salida actual", "Відсоток поточної гучності виходу"]),
     ("Volume while recording", ["Głośność podczas nagrywania", "录音时的音量", "録音中の音量", "Lautstärke während der Aufnahme", "Volumen durante la grabación", "Гучність під час запису"]),
     ("Also pause the browser", ["Wstrzymuj też przeglądarkę", "同时暂停浏览器", "ブラウザーも一時停止", "Auch den Browser pausieren", "Pausar también el navegador", "Також призупиняти браузер"]),
     ("YouTube and other tabs, resumed only if Hex paused them", ["YouTube i inne karty, wznawiane tylko wtedy, gdy wstrzymał je Hex", "YouTube 和其他标签页，仅在由 Hex 暂停时才会恢复", "YouTube などのタブ。Hex が一時停止した場合のみ再開します", "YouTube und andere Tabs, nur fortgesetzt, wenn Hex sie pausiert hat", "YouTube y otras pestañas; solo se reanudan si Hex las pausó", "YouTube та інші вкладки; відновлюються, лише якщо їх призупинив Hex"]),
@@ -940,9 +957,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("OpenCode transformation", ["Transformacja OpenCode", "OpenCode 转换", "OpenCode 変換", "OpenCode-Transformation", "Transformación de OpenCode", "Перетворення за допомогою OpenCode"]),
     ("OpenCode transformation will be available after Hex connects to OpenCode.", ["Transformacja OpenCode będzie dostępna, gdy Hex połączy się z OpenCode.", "Hex 连接到 OpenCode 后即可使用 OpenCode 转换。", "Hex が OpenCode に接続すると OpenCode 変換を使えます。", "Die OpenCode-Transformation ist verfügbar, sobald Hex mit OpenCode verbunden ist.", "La transformación de OpenCode estará disponible cuando Hex se conecte a OpenCode.", "Перетворення за допомогою OpenCode стане доступним після підключення Hex до OpenCode."]),
     ("Share dictation shortcut with other apps", ["Udostępniaj skrót dyktowania innym aplikacjom", "将听写快捷键共享给其他应用", "ディクテーションのショートカットを他のアプリと共有", "Diktierkürzel für andere Apps freigeben", "Compartir el atajo de dictado con otras aplicaciones", "Ділитися сполученням клавіш диктування з іншими програмами"]),
-    ("Use another microphone instead of Bluetooth", ["Używaj innego mikrofonu zamiast Bluetooth", "使用其他麦克风而不是蓝牙", "Bluetooth の代わりに別のマイクを使う", "Anderes Mikrofon statt Bluetooth verwenden", "Usar otro micrófono en lugar de Bluetooth", "Використовувати інший мікрофон замість Bluetooth"]),
-    ("Use the Mac's microphone instead of Bluetooth", ["Używaj mikrofonu Maca zamiast Bluetooth", "使用 Mac 的麦克风而不是蓝牙", "Bluetooth の代わりに Mac のマイクを使う", "Mikrofon des Mac statt Bluetooth verwenden", "Usar el micrófono del Mac en lugar de Bluetooth", "Використовувати мікрофон Mac замість Bluetooth"]),
-    ("Keeps AirPods and other headsets out of call-quality audio", ["Chroni AirPods i inne słuchawki przed jakością dźwięku rozmowy", "避免 AirPods 和其他耳机切换到通话音质", "AirPods などのヘッドセットが通話用の音質にならないようにします", "Hält AirPods und andere Headsets aus der Anrufqualität heraus", "Evita que los AirPods y otros auriculares pasen a calidad de llamada", "Не дає AirPods та іншим гарнітурам перейти на якість дзвінка"]),
     ("{bluetooth} is Bluetooth, so Hex listens to {input}", ["{bluetooth} to Bluetooth, więc Hex słucha przez {input}", "{bluetooth} 是蓝牙设备，因此 Hex 使用 {input}", "{bluetooth} は Bluetooth のため、Hex は {input} を使います", "{bluetooth} ist Bluetooth, daher nutzt Hex {input}", "{bluetooth} es Bluetooth, así que Hex usa {input}", "{bluetooth} — це Bluetooth, тож Hex слухає {input}"]),
     ("Lets apps such as Discord detect the same key", ["Umożliwia aplikacjom takim jak Discord wykrywanie tego samego klawisza", "允许 Discord 等应用检测同一个按键", "Discord などのアプリが同じキーを検出できるようにします", "Ermöglicht Apps wie Discord, dieselbe Taste zu erkennen", "Permite que aplicaciones como Discord detecten la misma tecla", "Дозволяє програмам на кшталт Discord бачити ту саму клавішу"]),
     ("Paste with Ctrl+Shift+V so terminals accept it", ["Wklejaj przez Ctrl+Shift+V, aby terminale to przyjmowały", "使用 Ctrl+Shift+V 粘贴，以便终端接受", "端末で受け付けられるよう Ctrl+Shift+V で貼り付け", "Mit Strg+Umschalt+V einfügen, damit Terminals es annehmen", "Pegar con Ctrl+Mayús+V para que los terminales lo acepten", "Вставляти за допомогою Ctrl+Shift+V, щоб термінали приймали текст"]),
@@ -990,7 +1004,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Start", ["Start", "开始", "開始", "Start", "Inicio", "Початок"]),
     ("Error", ["Błąd", "错误", "エラー", "Fehler", "Error", "Помилка"]),
     ("Play", ["Odtwórz", "播放", "再生", "Abspielen", "Reproducir", "Відтворити"]),
-    ("Sound volume is off", ["Głośność dźwięków jest wyłączona", "提示音音量已关闭", "サウンドの音量はオフです", "Die Tonlautstärke ist aus", "El volumen de los sonidos está desactivado", "Гучність звуків вимкнено"]),
     ("Spoken phrase (e.g. open code)", ["Wypowiadana fraza (np. open code)", "说出的短语（例如 open code）", "話すフレーズ（例: open code）", "Gesprochene Phrase (z. B. open code)", "Frase hablada (p. ej. open code)", "Продиктована фраза (наприклад, open code)"]),
     ("Start Hex when you log in", ["Uruchamiaj Hex po zalogowaniu", "登录时启动 Hex", "ログイン時に Hex を起動", "Hex beim Anmelden starten", "Iniciar Hex al iniciar sesión", "Запускати Hex під час входу в систему"]),
     ("System instructions for rewriting dictation in this mode", ["Instrukcje systemowe do przepisywania dyktowania w tym trybie", "此模式下改写听写内容的系统说明", "このモードで音声入力を書き直すためのシステム指示", "Systemanweisungen zum Umschreiben von Diktaten in diesem Modus", "Instrucciones del sistema para reescribir el dictado en este modo", "Системні інструкції для переписування диктування в цьому режимі"]),
@@ -1764,16 +1777,15 @@ mod tests {
         assert!(checked > 300, "only {checked} translated strings found");
     }
 
-    /// The sound picker translates each set's name and character and each
-    /// cue's name, which are not literals at the call.
+    /// The sound picker translates each set's name and character, which are
+    /// not literals at the call.
     #[test]
     fn every_sound_set_string_has_every_language() {
-        use crate::feedback::{Cue, SoundSet};
+        use crate::feedback::SoundSet;
         let table: std::collections::HashMap<_, _> = TRANSLATIONS.iter().copied().collect();
         let strings = SoundSet::ALL
             .into_iter()
-            .flat_map(|set| [set.name(), set.character()])
-            .chain(Cue::ALL.into_iter().map(Cue::name));
+            .flat_map(|set| [set.name(), set.character()]);
         for english in strings {
             let translations = table
                 .get(english)

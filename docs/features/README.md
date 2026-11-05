@@ -39,7 +39,7 @@ models toggle (off by default) adds a sort and a saved-language filter to the
 Local transcription picker (#645); its Benchmark details toggle (off by
 default) shows each model's raw WER or CER with its language, dataset, source,
 and conditions (#647).
-General › Advanced › Interface language offers Português (Brasil), and Hex
+General › App › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
 used for any French system language (#892), and Русский, used for any
 Russian system language (#1317). None of these has had a native speaker's
@@ -749,10 +749,13 @@ Sidebar                                  // settings.nav
     // Command-1…9 follow the panes' order (labs::order)
 
 General                                  // settings
-├── Basics card -> Shortcut, Speech model, Language, Microphone, Launch at login
-│   ├── Each row leads with an icon; choices are inline dropdowns, not segments
-│   ├── Language -> fixed text for a one-language model, else a dropdown
-│   └── A row that hides or shows (Advanced, a microphone error)
+├── Main card -> Shortcut, Shortcut mode, Speech model, Vocabulary, Microphone, Launch at login
+│   ├── Each row leads with an icon; choices are inline dropdowns or sheets
+│   ├── Shortcut -> a modifier-only binding shows Left / Either / Right before its keys,
+│   │   hidden while the recorder listens or saves
+│   ├── Cancel -> under Shortcut mode, Toggle only
+│   ├── Language -> under Speech model, only when the model has more than one language
+│   └── A row that hides or shows (the disclosure, a microphone error)
 │       -> Folds under a clip as the rows below slide over it; no fade in place
 ├── Microphone -> Value names the input in use, with live level bars // settings.microphone
 │   ├── "System default · Kit Pods", or a saved device
@@ -789,14 +792,15 @@ General                                  // settings
 │   │   └── Device returns -> Switch back once idle; the setting never changes
 │   ├── Menu lists real inputs only                                // never Hex Microphone
 │   └── Open menu covers the controls beneath it; click elsewhere dismisses
-├── Advanced ▸ -> one fold per pane, closed by default, even while a setting in it is in use
+├── Microphone, sound and window ▸ -> General's fold (the Advanced fold elsewhere), closed by default
 │   ├── Collapse -> drops a pending release confirmation
-│   ├── Dictation -> Shortcut side, keyboard-language mappings (while its Labs toggle is on),
-│   │   Use the Mac's microphone instead of Bluetooth (Linux, Windows: "Use another
-│   │   microphone instead of Bluetooth")
-│   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
+│   ├── While you dictate -> Other audio, Sounds, Dictation HUD
+│   ├── Microphone and model -> Turn off the mic when not dictating, Use the Mac's microphone
+│   │   with headsets (Linux, Windows: "Use another microphone with headsets"),
+│   │   keyboard-language mappings (while its Labs toggle is on), Speech engine (Linux, Windows)
+│   ├── Pasting -> Paste last shortcut, Terminal paste (Linux)
 │   │   (Dictate without processing sits in the Output pane; see dictation.md)
-│   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
+│   └── App -> Enable on launch, Show Dock icon,
 │       Interface language, Update channel (self-updating installs)
 │       // Interface language System: macOS's first preferred language (zh-Hans -> 简体中文,
 │       // zh-Hant, zh-TW, zh-HK, zh-MO -> 繁體中文), Linux LC_ALL/LC_MESSAGES/LANG
@@ -806,20 +810,20 @@ General                                  // settings
 │       // ja/ko/zh system locale -> that locale. Han text falls back to its fonts
 │       // (Hiragino Sans, Yu Gothic, Noto Sans CJK JP for ja) and shapes with its
 │       // locl forms (#1382)
-├── Use the Mac's / another microphone instead of Bluetooth (Advanced, on)
+├── Use the Mac's / another microphone with headsets (in the fold, on)
 │   └── Off -> System default follows a Bluetooth default too; re-resolves once idle
 ├── Labs > Share dictation shortcut with other apps (Windows, off)
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
 ├── Terminal paste (Advanced on Linux, Labs on Windows; off)
 │   └── On -> paste sends Ctrl+Shift+V instead of Ctrl+V; applies to the next paste
-├── Turn off the mic when not dictating (General, under Microphone; off)   // release_microphone_while_idle
+├── Turn off the mic when not dictating (in the fold, Microphone and model; off)   // release_microphone_while_idle
 │   ├── One switch, no confirmation; its line says what the state means (issue 61), on every OS
-│   ├── Off (default) -> "The mic stays ready so dictation starts instantly; your system shows it in use"
-│   │   Open while idle; pre-roll available
-│   └── On -> "The mic opens only while you dictate; the first moment can be clipped"
+│   ├── Off (default) -> "Off: dictation starts instantly; macOS shows the mic in use"
+│   │   (elsewhere "your system"). Open while idle; pre-roll available
+│   └── On -> "On: the mic opens as you dictate; the first moment can be clipped"
 │       Open on press; no pre-roll; startup delay
-├── While dictating -> Mute / Pause media / Lower audio / Do nothing
-│   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
+├── Other audio -> Mute / Pause media / Lower audio / Do nothing; its line says what happens
+│   ├── Lower audio -> Lower to slider, indented under it, 0–100% of the previous volume (default 20%)
 │   ├── Intentional capture only, not ordinary shortcut chords
 │   ├── Pause/resume only players already reported running by macOS
 │   ├── Linux restore -> Waits 300 ms; a new capture keeps it suppressed // double-tap lock
@@ -827,9 +831,9 @@ General                                  // settings
 │       ├── Turning it on without System Audio Recording -> ask now, never while dictating
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
-├── Sound volume -> immediate feedback; zero suppresses tones
+├── Sounds -> "Classic · 50%", or "Off" -> Sheet: volume slider, then the sets (dictation.md)
+│   ├── Volume -> immediate feedback; zero suppresses tones
 │   └── Default output changes or disappears (macOS) -> next tone reopens on the current default
-├── Sounds -> Sheet: hear each set on Hex's real HUD, pick one
 └── Linux / Windows -> listener card and desktop commands below the basics
 
 Pause media + Also pause the browser     // browser_media
@@ -979,8 +983,8 @@ A Bluetooth default (CoreAudio transport Bluetooth or Bluetooth LE) is passed
 over for the built-in microphone, else the first other real input, so AirPods
 keep their music out of call quality while you dictate; it is kept when nothing
 else is usable. Only System default is affected: a saved Bluetooth microphone
-and `--device` are honoured, and General › Advanced › "Use the Mac's microphone
-instead of Bluetooth" (`avoid_bluetooth_microphone`, default on) turns it off.
+and `--device` are honoured, and General › Microphone and model › "Use the Mac's
+microphone with headsets" (`avoid_bluetooth_microphone`, default on) turns it off.
 Hex Microphone carries whichever input Hex records from. Linux and Windows
 don't detect Bluetooth inputs yet and follow the default. Checks in
 [audio.rs](../../src/audio.rs):
@@ -1543,7 +1547,7 @@ or the managed rows in the window.
 ```ts
 Linux beta                               // not macOS feature parity
 ├── hex start -> One per-user Hex -> Alt-Space capture -> Stream (Vulkan GPU) -> Paste
-├── Speech engine (General › Advanced › Dictation; transcription_device) -> Auto | GPU | CPU (#856)
+├── Speech engine (General › Microphone and model; transcription_device) -> Auto | GPU | CPU (#856)
 │   ├── Auto -> best GPU unless gpu-failures.json lists it under its current driver
 │   │   (kernel + Vulkan driver libraries), then another GPU, then the CPU;
 │   │   the row says which GPU stopped responding
@@ -2043,12 +2047,12 @@ records an Arch/i3 client-independent ownership check, not transcription accurac
 or physical logout, Wayland, or signed cross-version update proof.
 
 ```ts
-Linux General > Sound volume              // dictate.feedback.linux; X11 + Wayland
+Linux General > Sounds > Volume           // dictate.feedback.linux; X11 + Wayland
 ├── Default / older settings -> 50%
-├── Off -> No recording tones
-└── 25% / 50% / 75% / 100% -> Save and apply live; preview the start sound
-Linux General > Sounds                    // dictate.sound-theme
-└── Signature / Classic -> Save and apply live; preview the start sound
+├── Drag to the left end -> Off: no recording tones
+└── 5% steps -> Save and apply live; preview the start sound
+Linux General > Sounds > Sound set        // dictate.sound-theme
+└── Each set -> Save and apply live; play its dictation
 
 Capture                                  // hex app and hex dictate
 ├── Shortcut starts capture -> Queue start sound immediately, before audio arrives

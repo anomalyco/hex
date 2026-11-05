@@ -149,6 +149,24 @@ pub(super) fn unused_note(ui: &Ui) -> Option<String> {
     })
 }
 
+/// General's Vocabulary line: why the terms don't reach transcription, or
+/// that Hex listens for them when the selected model takes them (Whisper's
+/// and Qwen3-ASR's prompt, or Parakeet's bias with Labs › Vocabulary biasing
+/// on).
+pub(super) fn general_note(ui: &Ui) -> Option<String> {
+    use crate::transcription::models::VocabularyUse;
+    let model = crate::transcription::models::definition(ui.settings.transcription.model);
+    let listens = match model.vocabulary_use() {
+        VocabularyUse::Prompt => true,
+        VocabularyUse::Bias => ui.settings.labs.vocabulary_biasing,
+        VocabularyUse::None => false,
+    };
+    unused_note(ui).or_else(|| {
+        (listens && !ui.settings.vocabulary.is_empty())
+            .then(|| tr("Hex listens for these words").to_string())
+    })
+}
+
 /// How many terms the selected model reads, when that is fewer than the
 /// list holds: Parakeet's bias cap, or Whisper's and Qwen3-ASR's prompt
 /// budget, as transcription applies them.

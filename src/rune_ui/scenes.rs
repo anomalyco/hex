@@ -342,21 +342,14 @@ pub(super) const SCENES: &[Scene] = &[
             TranscriptionModelId::ParakeetV3,
         ]);
     }),
-    // The sound sets sheet at rest, then Wood's dictation recording.
+    // The sound sets sheet at rest, then playing Wood's dictation.
     ("sound-sets", |ui| {
         *ui = mac_fixture();
         sound_sets::fixture(ui, None);
     }),
     ("sound-sets-playing", |ui| {
         *ui = mac_fixture();
-        sound_sets::fixture(
-            ui,
-            Some((
-                crate::feedback::SoundSet::Wood,
-                crate::feedback::Audition::Dictation,
-                900.0,
-            )),
-        );
+        sound_sets::fixture(ui, Some(crate::feedback::SoundSet::Wood));
     }),
     ("mac-microphone-missing", |ui| {
         *ui = mac_fixture();
