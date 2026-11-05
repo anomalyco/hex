@@ -5,6 +5,14 @@ use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
 
 const WAIT: Duration = Duration::from_secs(3);
 
+/// The pump ticks every frame only while the HUD animates; otherwise it
+/// idles and senders wake it (#1378).
+#[test]
+fn the_pump_idles_unless_the_hud_animates() {
+    assert!(pump_interval(true) < 0.02);
+    assert!(pump_interval(false) >= 0.2);
+}
+
 /// ⌘Tab back to Hex opens its closed window (#1298), but never for a
 /// menu-bar-only Hex, an overlay that took the keyboard, or an open window.
 #[test]
