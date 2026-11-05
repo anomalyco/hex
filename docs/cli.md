@@ -77,7 +77,7 @@ hex
 │   └── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
 ├── screenshot [--pick]           Labs (macOS): shoot the display under the pointer and print the PNG's path; --pick opens the ⌘⇧4 picker
 ├── labs [on|off <feature>]       list Labs features or turn one on/off; edits settings.json (features/labs.md)
-│   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens that lab's drawer in Hex's Labs page
+│   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens Hex's Labs page on that lab's group
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (macOS: installed Hex.app only; Windows Run key; Linux XDG autostart)
 └── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed

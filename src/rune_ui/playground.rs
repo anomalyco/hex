@@ -214,7 +214,7 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-labs-screenshots", "Window/General/Labs screenshots"),
     ("mac-labs-category", "Window/General/Labs category"),
     ("mac-labs-search", "Window/General/Labs search"),
-    ("mac-labs-drawer", "Window/General/Labs drawer"),
+    ("mac-labs-settings", "Window/General/Labs settings"),
     ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),
     ("mac-onboarding", "Window/Onboarding/Setting up Hex"),

@@ -191,9 +191,11 @@ impl Feature {
     /// Who the feature is for. Every feature picks one.
     pub const fn audience(self) -> Audience {
         match self {
+            // Developer tools: the story browser, and the virtual microphone
+            // (a stable build keeps only its Uninstall while the driver is
+            // installed).
+            Self::VoiceFilter | Self::Playground => Audience::Dev,
             Self::Meetings
-            | Self::VoiceFilter
-            | Self::Playground
             | Self::LiveText
             | Self::LiveChapters
             | Self::VocabularyBiasing
@@ -1432,6 +1434,22 @@ mod tests {
         assert!(Audience::Everyone.reaches(true));
         assert!(Audience::Dev.reaches(true));
         assert!(!Audience::Dev.reaches(false));
+    }
+
+    #[test]
+    fn the_developer_tools_are_dev_only() {
+        for feature in [Feature::Playground, Feature::VoiceFilter] {
+            assert_eq!(feature.audience(), Audience::Dev, "{}", feature.name());
+            assert!(resolve(feature.name(), |f| f.audience().reaches(false)).is_err());
+        }
+        let labs = LabsSettings {
+            playground: true,
+            ..LabsSettings::default()
+        };
+        assert_eq!(
+            encode_where(&labs, |f| f.audience().reaches(false)) & PLAYGROUND,
+            0
+        );
     }
 
     /// Stands in for a Dev feature in a stable build.

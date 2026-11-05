@@ -1,4 +1,4 @@
-//! Labs › Screenshots' drawer: its shortcut, where shots go, and a note
+//! Labs › Screenshots' card while on: its shortcut, where shots go, and a note
 //! while macOS's own screenshot shortcut takes the same keys first.
 
 use rune::{El, col, row, text};

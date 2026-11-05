@@ -99,7 +99,7 @@ impl Pane {
         match self {
             Pane::Modes | Pane::HudLab | Pane::Activity => false,
             Pane::Meetings => caps.meetings && meetings::available(ui),
-            // On from Labs, or kept by a driver apps already use.
+            // On from Labs (dev builds), or while its driver is installed.
             Pane::VoiceFilter => caps.fun && fun::running(ui),
             #[cfg(hex_capture)]
             Pane::Annotate => ui.platform.scrawl.is_some(),
