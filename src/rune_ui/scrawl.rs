@@ -7,8 +7,8 @@ use rune::{El, row};
 use scrawl_capture::retention::{Policy, Preset};
 
 use super::controls::{
-    ButtonKind, Choice, Paint, button, card, described_row, folding, icon_button, note, page,
-    section, segmented, select, setting_row, step_row, toggle_row,
+    ButtonKind, Choice, Paint, button, card, described_row, folding, note, page, section,
+    segmented, select, setting_row, step_row, toggle_row,
 };
 use super::general::keys_button;
 use super::lists::permission_control;
@@ -225,7 +225,7 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
             .center_y()
             .child(keys_button(ui, p, ShortcutTarget::CaptureReplay));
         if ui.settings.capture.replay_hotkey.is_some() {
-            control = control.child(icon_button(
+            control = control.child(super::controls::icon_button(
                 p,
                 "clear-capture-replay-shortcut",
                 &rune_theme_opencode::icons::TRASH,

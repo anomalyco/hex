@@ -15,33 +15,48 @@
 #[cfg(target_os = "macos")]
 mod sck;
 
+#[cfg(any(target_os = "macos", test))]
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::SyncSender;
+#[cfg(target_os = "macos")]
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+#[cfg(target_os = "macos")]
 use std::thread::{self, JoinHandle};
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context as _, bail};
+#[cfg(any(target_os = "macos", test))]
+use anyhow::Context as _;
+#[cfg(target_os = "macos")]
+use anyhow::bail;
+#[cfg(any(target_os = "macos", test))]
 use scrawl_capture::audio::{GapSpan, RecordedAudio};
+#[cfg(target_os = "macos")]
 use scrawl_capture::capture::{Movie, RouteContext, ScreenRecording};
+#[cfg(target_os = "macos")]
 use scrawl_capture::helper::{self, FrameTimes};
+#[cfg(target_os = "macos")]
 use scrawl_capture::model::{CaptureMode, TargetFrame, TargetInfo};
+#[cfg(any(target_os = "macos", test))]
 use serde::Serialize;
 
+use super::{AudioTimeline, FinishJob, SharedOutcomes};
+#[cfg(target_os = "macos")]
 use super::{
-    AudioTimeline, CaptureAudio, ChosenTranscriber, End, FinishJob, Sealed, SharedOutcomes, Stage,
-    TargetKind, Written, hex_engine_config, lock, new_bundle_dir, remove_bundle, routing,
+    CaptureAudio, ChosenTranscriber, End, Sealed, Stage, TargetKind, Written, hex_engine_config,
+    lock, new_bundle_dir, remove_bundle, routing,
 };
 use crate::audio::CaptureInstant;
 use crate::control::ControlReply;
 
 /// Maximum duration `SCClipBufferingOutput` supports (`SCClipBufferingOutput.h`).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub const DEFAULT_REPLAY_SECS: f64 = 15.0;
+#[cfg(target_os = "macos")]
+const DEFAULT_REPLAY_SECS: f64 = 15.0;
 
 /// Minimum hold on `capture.replay_hotkey` to keep spoken narration; shorter
 /// taps export a silent replay clip without a key-click WAV.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg(target_os = "macos")]
 const MIN_NARRATION_HOLD: Duration = Duration::from_millis(300);
 
 #[cfg(target_os = "macos")]
@@ -952,6 +967,7 @@ impl SealedReplay {
 /// Aligns optional post-press voice narration after the frozen replay video on
 /// the bundle clock, returning `None` when no narration samples were captured
 /// so silent replays never write a 44-byte empty `audio.wav`.
+#[cfg(any(target_os = "macos", test))]
 fn shift_audio_after_video(
     audio: RecordedAudio,
     video_duration_ms: u64,
@@ -981,6 +997,7 @@ fn shift_audio_after_video(
 // ---------------------------------------------------------------------------
 // `capture.json` v1 manifest writer (matches `crates/capture-core/src/manifest.rs`).
 
+#[cfg(any(target_os = "macos", test))]
 struct ManifestParams<'a> {
     anchor_ns: u64,
     started_at: Option<String>,
@@ -993,6 +1010,7 @@ struct ManifestParams<'a> {
     audio: Option<&'a RecordedAudio>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Serialize)]
 struct ReplayManifest {
     version: u32,
@@ -1006,6 +1024,7 @@ struct ReplayManifest {
     missing_permissions: Vec<&'static str>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Serialize)]
 struct ManifestSource {
     source: DisplaySourceTag,
@@ -1019,6 +1038,7 @@ struct ManifestSource {
     audio_tracks: Vec<&'static str>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Serialize)]
 struct DisplaySourceTag {
     #[serde(rename = "type")]
@@ -1026,6 +1046,7 @@ struct DisplaySourceTag {
     id: u32,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Serialize)]
 struct ManifestRect {
     x: f64,
@@ -1034,6 +1055,7 @@ struct ManifestRect {
     height: f64,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Serialize)]
 struct ManifestFile {
     name: &'static str,
@@ -1043,6 +1065,7 @@ struct ManifestFile {
     start_ns: Option<u64>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ManifestFileKind {
@@ -1050,12 +1073,14 @@ enum ManifestFileKind {
     Microphone { sample_rate: u32 },
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Serialize)]
 struct ManifestAudioGap {
     start_ns: u64,
     duration_ns: u64,
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn write_capture_manifest(bundle_dir: &Path, params: &ManifestParams<'_>) -> anyhow::Result<()> {
     let mut files = vec![ManifestFile {
         name: "recording.mp4",
