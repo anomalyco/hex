@@ -33,6 +33,7 @@ stage "code-shape"
 python3 scripts/code-shape.py --check || exit 13
 
 stage "nix pins"
+python3 scripts/test-check-nix-git-pins.py || exit 14
 python3 scripts/check-nix-git-pins.py || exit 14
 
 if [[ $# -eq 0 ]]; then

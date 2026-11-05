@@ -6,6 +6,12 @@
 without updating that revision and hash makes `nix build` fail late with a
 fixed-output hash mismatch. This check catches the revision half in a pull
 request, before Nix downloads anything.
+
+Cargo.lock writes Git sources as `git+URL[?query]#<commit>`, where the query
+may name a branch, tag, or short rev, and `<commit>` is always the full
+resolved commit. Only the fragment identifies the checked-out code, so the
+query is ignored here. Python 3.9 is the floor: `scripts/check` runs with
+Apple's interpreter on macOS.
 """
 
 from __future__ import annotations
@@ -14,11 +20,14 @@ import argparse
 from pathlib import Path
 import re
 import sys
-import tomllib
 
 REV = re.compile(r"[0-9a-f]{40}")
 HASH = re.compile(r"sha256-[A-Za-z0-9+/]{43}=")
-CARGO_GIT_SOURCE = re.compile(r"^git\+(?P<url>[^?#]+)\?rev=(?P<rev>[0-9a-f]{40})#(?P<sha>[0-9a-f]{40})$")
+FAKE_HASH = re.compile(r"sha256-A{43}=")
+PACKAGE_HEADER = "[[package]]"
+NAME = re.compile(r'^name = "([^"]+)"$', re.MULTILINE)
+VERSION = re.compile(r'^version = "([^"]+)"$', re.MULTILINE)
+SOURCE = re.compile(r'^source = "([^"]+)"$', re.MULTILINE)
 PIN_ENTRY = re.compile(r'"([^"]+)"\s*=\s*\{')
 PIN_VALUE = re.compile(r'(rev|hash)\s*=\s*"([^"]+)";')
 
@@ -70,34 +79,81 @@ def parse_pins(path: Path) -> dict[str, dict[str, str]]:
             fail(f"{path} needs one rev and one hash for {name}")
         if not REV.fullmatch(pin["rev"]):
             fail(f"{path} has no full 40-character rev for {name}")
+        if FAKE_HASH.fullmatch(pin["hash"]):
+            fail(f"{path} still has lib.fakeHash for {name}")
         if not HASH.fullmatch(pin["hash"]):
             fail(f"{path} has no sha256 output hash for {name}")
     return pins
 
 
-def parse_lock(path: Path) -> dict[str, dict]:
-    """One entry per Git repository: its rev and the packages it provides."""
-    lock = tomllib.loads(path.read_text())
-    repos: dict[str, dict] = {}
-    for package in lock.get("package", []):
-        source = package.get("source", "")
-        if not source.startswith("git+"):
-            continue
-        name = f"{package['name']}-{package['version']}"
-        match = CARGO_GIT_SOURCE.fullmatch(source)
-        if not match:
-            fail(
-                f"Cargo.lock pins {name} to a Git source without a full rev: {source}"
-            )
-        if match.group("rev") != match.group("sha"):
-            fail(f"Cargo.lock names different revs for {name}: {source}")
-        repo = repos.setdefault(
-            match.group("url"), {"rev": match.group("rev"), "packages": set()}
+def parse_git_source(source: str, package: str) -> tuple[str, str]:
+    """Return the normalized repository URL and resolved commit in a source."""
+    if "#" not in source:
+        fail(
+            f"Cargo.lock pins {package} to a Git source without a resolved "
+            f"commit: {source}"
         )
-        if repo["rev"] != match.group("rev"):
-            fail(f"Cargo.lock pins more than one rev of {match.group('url')}")
-        repo["packages"].add(name)
+    url_part, commit = source.rsplit("#", 1)
+    if not REV.fullmatch(commit):
+        fail(
+            f"Cargo.lock pins {package} to a Git source without a full "
+            f"40-character commit: {source}"
+        )
+    url = url_part[len("git+") :].split("?", 1)[0].rstrip("/")
+    if url.endswith(".git"):
+        url = url[:-4]
+    if not url:
+        fail(f"Cargo.lock pins {package} to an empty Git repository: {source}")
+    return url, commit
+
+
+def parse_lock(path: Path) -> dict[str, dict]:
+    """One entry per Git repository: its resolved commit and its packages."""
+    repos: dict[str, dict] = {}
+    for stanza in path.read_text().split(PACKAGE_HEADER)[1:]:
+        name = NAME.search(stanza)
+        version = VERSION.search(stanza)
+        if name is None or version is None:
+            fail(f"{path} has a package without a name or version")
+        package = f"{name.group(1)}-{version.group(1)}"
+        source = SOURCE.search(stanza)
+        if source is None or not source.group(1).startswith("git+"):
+            continue
+        url, commit = parse_git_source(source.group(1), package)
+        repo = repos.setdefault(url, {"rev": commit, "packages": set()})
+        if repo["rev"] != commit:
+            fail(f"Cargo.lock pins more than one commit of {url}")
+        repo["packages"].add(package)
     return repos
+
+
+def compare(pins: dict[str, dict[str, str]], repos: dict[str, dict]) -> list[str]:
+    problems = []
+    consumed = set()
+    for url, repo in sorted(repos.items()):
+        named = sorted(repo["packages"] & pins.keys())
+        if not named:
+            candidates = ", ".join(sorted(repo["packages"]))
+            problems.append(
+                f"{url}: Cargo.lock pins it, but the Nix table has no hash "
+                f"(pin one of: {candidates})"
+            )
+            continue
+        if len(named) > 1:
+            problems.append(
+                f"{url}: the Nix table names several of its packages: "
+                + ", ".join(named)
+            )
+        consumed.update(named)
+        for name in named:
+            if pins[name]["rev"] != repo["rev"]:
+                problems.append(
+                    f"{name} ({url}): Cargo.lock names {repo['rev']}, "
+                    f"the Nix table names {pins[name]['rev']}"
+                )
+    for name in sorted(pins.keys() - consumed):
+        problems.append(f"{name}: the Nix table pins it, but Cargo.lock does not")
+    return problems
 
 
 def main() -> None:
@@ -109,31 +165,7 @@ def main() -> None:
 
     pins = parse_pins(args.pins)
     repos = parse_lock(args.lock)
-
-    problems = []
-    consumed = set()
-    for url, repo in sorted(repos.items()):
-        named = sorted(repo["packages"] & pins.keys())
-        if not named:
-            problem = f"{url}: Cargo.lock pins it, but the Nix table has no hash"
-            if len(repo["packages"]) == 1:
-                problem += f" (add {next(iter(repo['packages']))})"
-            problems.append(problem)
-            continue
-        if len(named) > 1:
-            problems.append(
-                f"{url}: the Nix table names several of its packages: "
-                + ", ".join(named)
-            )
-        name = named[0]
-        consumed.add(name)
-        if pins[name]["rev"] != repo["rev"]:
-            problems.append(
-                f"{name} ({url}): Cargo.lock names {repo['rev']}, "
-                f"the Nix table names {pins[name]['rev']}"
-            )
-    for name in sorted(pins.keys() - consumed):
-        problems.append(f"{name}: the Nix table pins it, but Cargo.lock does not")
+    problems = compare(pins, repos)
 
     if problems:
         print("nix git pins do not match Cargo.lock:", file=sys.stderr)
@@ -144,7 +176,10 @@ def main() -> None:
             "and the output hash from a failed `nix build .#hex`"
         )
 
-    print(f"nix git pins match Cargo.lock ({len(pins)} Git dependencies)")
+    print(
+        f"nix git pins match Cargo.lock "
+        f"({len(repos)} Git repositories, {len(pins)} pins)"
+    )
 
 
 if __name__ == "__main__":
