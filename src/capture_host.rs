@@ -43,7 +43,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use scrawl_capture::audio::{GapSpan, RecordedAudio};
+use scrawl_capture::audio::RecordedAudio;
 use scrawl_capture::capture::{
     AudioIn, ConfigSource, Event, Host, InputSink, OwnWindows, SharedCaptureTelemetry,
     SharedResources, Stage, Start, Target,
@@ -1283,7 +1283,7 @@ impl Outcomes {
             .count()
     }
 
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn started(&mut self, bundle: PathBuf, since: CaptureInstant, target: TargetKind) {
         self.start(bundle, since, target, false);
     }
@@ -3707,6 +3707,7 @@ impl AudioTimeline for WavTimeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scrawl_capture::audio::GapSpan;
 
     /// A pen release on the `capture-input` thread ends its stroke while
     /// that thread holds the input target's lock; reading the ink must not
