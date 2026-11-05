@@ -706,6 +706,7 @@ impl Compositor<Hud> for HudCompositor {
             .as_ref()
             .is_none_or(|(device, gpu)| *device != f.device_key() || gpu.format != f.format)
         {
+            tracing::info!(gpu = %rune::describe_gpu(f.device), "HUD draws");
             let painter =
                 prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
             self.gpu = Some((f.device_key(), painter));
