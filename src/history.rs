@@ -160,16 +160,34 @@ impl HistoryEntry {
                 .sum::<usize>()
     }
 
-    fn matches(&self, needle: &str) -> bool {
-        let matches_field = |field: &str| field.to_lowercase().contains(needle);
-        matches_field(&self.raw_text)
+    /// Whether any searched field contains `needle` (already lowercased).
+    /// `scratch` is reused across a whole search so plain-ASCII fields,
+    /// almost all of them, are lowercased without a new allocation.
+    fn matches(&self, needle: &str, scratch: &mut String) -> bool {
+        let mut matches_field = |field: &str| field_contains(field, needle, scratch);
+        (self.raw_text != self.final_text && matches_field(&self.raw_text))
             || matches_field(&self.final_text)
-            || self.application.as_deref().is_some_and(matches_field)
-            || self.model.as_deref().is_some_and(matches_field)
+            || self.application.as_deref().is_some_and(&mut matches_field)
+            || self.model.as_deref().is_some_and(&mut matches_field)
             || self
                 .processing
                 .as_ref()
                 .is_some_and(|processing| matches_field(&processing.profile))
+    }
+}
+
+/// `field.to_lowercase().contains(needle)`, lowercasing an ASCII field
+/// into `scratch` instead of a new string.
+fn field_contains(field: &str, needle: &str, scratch: &mut String) -> bool {
+    if field.is_ascii() {
+        if field.len() < needle.len() {
+            return false;
+        }
+        scratch.clear();
+        scratch.extend(field.chars().map(|c| c.to_ascii_lowercase()));
+        scratch.contains(needle)
+    } else {
+        field.to_lowercase().contains(needle)
     }
 }
 
@@ -526,9 +544,10 @@ impl HistoryStore {
             .retention
             .max_age_ms()
             .map(|max_age| now_ms.saturating_sub(max_age));
+        let mut scratch = String::new();
         self.entries()
             .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
-            .filter(|entry| needle.is_empty() || entry.matches(&needle))
+            .filter(|entry| needle.is_empty() || entry.matches(&needle, &mut scratch))
             .take(MAX_SEARCH_RESULTS)
             .collect()
     }
@@ -851,6 +870,54 @@ mod tests {
             .unwrap_or_default();
         ids.sort_unstable();
         ids
+    }
+
+    #[test]
+    fn field_matching_agrees_with_full_lowercasing() {
+        let fields = [
+            "",
+            "Hello World",
+            "HELLO",
+            "Zed",
+            "Straße",
+            "İstanbul",
+            "ÉCOLE normale",
+            "mixed ASCII then Ω",
+        ];
+        let queries = [
+            "", "hello", "world", "o w", "ss", "straße", "i̇", "école", "ω", "zed!",
+        ];
+        let mut scratch = String::new();
+        for field in fields {
+            for query in queries {
+                let needle = query.to_lowercase();
+                assert_eq!(
+                    field_contains(field, &needle, &mut scratch),
+                    field.to_lowercase().contains(&needle),
+                    "{field:?} / {query:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn search_still_finds_raw_text_that_differs_from_the_final_text() {
+        let path = temp_path("search-raw");
+        let mut store = HistoryStore::open(path, HistoryRetention::Week, 0);
+        let mut same = draft("Same Words");
+        same.raw_text = same.final_text.clone();
+        let same = store.record(same, 1_000).unwrap().unwrap();
+        let rewritten = store.record(draft("Rewritten"), 2_000).unwrap().unwrap();
+        let ids = |query: &str| -> Vec<u64> {
+            store
+                .search(query, 3_000)
+                .iter()
+                .map(|entry| entry.id)
+                .collect()
+        };
+        assert_eq!(ids("same words"), [same]);
+        assert_eq!(ids("RAW rewritten"), [rewritten]);
+        assert_eq!(ids("no such phrase"), Vec::<u64>::new());
     }
 
     #[test]
