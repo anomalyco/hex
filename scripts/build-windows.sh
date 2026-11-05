@@ -5,7 +5,9 @@
 # (default; Vulkan SDK required) or aarch64 (clang-cl and Ninja, best on an
 # ARM64 host). CI then Authenticode-signs both and wraps them in the Setup.exe
 # installer; the Release workflow publishes all three
-# (docs/plans/release-service.md).
+# (docs/plans/release-service.md). Installers name the GUI executable
+# hex-voice.exe, which Discord's game detection does not match to HEX: Shards
+# of Fate (#445).
 set -eu
 
 script_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -72,12 +74,15 @@ cp "$target_dir/$triple/release/hex-console.exe" "$console"
 test "$(head -c 2 "$executable")" = MZ
 test "$(head -c 2 "$console")" = MZ
 # An executable for the other architecture cannot run here; the installer
-# test checks it on its own runner. hex.com runs the hex.exe beside it, as
-# installed.
+# test checks it on its own runner. hex.com runs the GUI executable beside it,
+# as installed, and still finds the hex.exe a release before the rename left.
 if [ "$(uname -m)" = "$arch" ]; then
   pair=$(mktemp -d)
-  cp "$executable" "$pair/hex.exe"
+  cp "$executable" "$pair/hex-voice.exe"
   cp "$console" "$pair/hex.com"
+  test "$("$pair/hex.com" --version | awk 'NF { value=$NF } END { print value }')" = "$version"
+  rm "$pair/hex-voice.exe"
+  cp "$executable" "$pair/hex.exe"
   test "$("$pair/hex.com" --version | awk 'NF { value=$NF } END { print value }')" = "$version"
   rm -rf "$pair"
 fi

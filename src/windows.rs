@@ -173,6 +173,12 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     if matches!(command, Command::App { .. }) && crate::updater::legacy::take_over() {
         return Ok(());
     }
+    // A managed install a release before the rename installed still launches
+    // as `hex.exe`, the name Discord's game detection matches to HEX: Shards
+    // of Fate (#445). Move it to `hex-voice.exe` and relaunch it.
+    if matches!(command, Command::App { .. }) && crate::updater::take_over_install_name() {
+        return Ok(());
+    }
 
     let event_path = log_dir.join("live.ndjson");
     match command {
@@ -243,7 +249,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     }
 }
 
-/// hex.exe is a GUI program, so Windows gives it no console of its own and
+/// The GUI executable is a GUI program, so Windows gives it no console of its own and
 /// an Explorer, Start menu, or login launch shows no terminal window. Run
 /// from a terminal, usually through `hex.com` (crates/console), which waits
 /// for it, it joins its parent's console, so Ctrl+C reaches it, and points

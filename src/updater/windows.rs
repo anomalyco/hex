@@ -1,9 +1,12 @@
 //! Windows installs: the per-user version layout our installers receipt
 //! (`%APPDATA%\hex\install.json`) updates itself by staging the
-//! new `hex.exe` and its console entry point `hex.com` (crates/console) into
-//! their own version directory and switching the `current-version` pointer.
-//! `bin\hex.com`, the copy PATH names, follows. Before anything runs, every
-//! download must carry a valid Authenticode signature from Anomaly's
+//! new `hex-voice.exe` and its console entry point `hex.com` (crates/console)
+//! into their own version directory and switching the `current-version`
+//! pointer. `bin\hex.com`, the copy PATH names, follows. The GUI executable is
+//! not `hex.exe` because Discord's game detection matches that name to *HEX:
+//! Shards of Fate* (#445, `updater/install_name.rs`); a release before the
+//! rename is moved to the new name on its first launch. Before anything runs,
+//! every download must carry a valid Authenticode signature from Anomaly's
 //! Artifact Signing identity. Administrators turn updates off with the
 //! `DisableUpdates` policy value.
 
@@ -40,7 +43,7 @@ const POLICY_KEY: &str = r"SOFTWARE\Policies\Anomaly\Hex";
 /// The Apps & Features entry that packaging/windows/hex.iss registers.
 const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{6ED48C92-5177-41F4-B8D6-37B7B02CFDF4}_is1";
 
-/// The activated `hex.exe`.
+/// The activated executable.
 #[derive(Clone, Debug)]
 pub struct Staged(PathBuf);
 
@@ -49,7 +52,7 @@ pub struct Staged(PathBuf);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Ineligible {
     /// Not running from `<support>\versions\<version>`: a downloaded or
-    /// copied `hex.exe`, or a build.
+    /// copied executable, or a build.
     NotInstalled,
     /// The data folder is outside the user's own profile.
     OutsideProfile,
@@ -89,6 +92,87 @@ pub fn method() -> Method {
 /// What the window shows when this Hex can't update itself.
 pub fn blocked() -> Option<&'static str> {
     eligibility().err().map(Ineligible::message)
+}
+
+/// Moves an install that a release before the rename installed as `hex.exe`
+/// to `hex-voice.exe` and relaunches it, so Discord's game detection stops
+/// matching *HEX: Shards of Fate* (#445). Those releases were staged by an
+/// updater that always wrote `hex.exe`, so this is how they reach the new
+/// name. Returns whether the relaunched copy took over; on a failure this copy
+/// keeps running under the old name, and the next launch tries again.
+pub fn take_over_name() -> bool {
+    let Some((running, renamed)) = renamed_install() else {
+        return false;
+    };
+    tracing::info!(
+        running = %running.display(),
+        renamed = %renamed.display(),
+        "moving Hex to its new executable name"
+    );
+    if let Err(error) = install_copy(&running, &renamed) {
+        tracing::warn!(error = %format!("{error:#}"), "could not rename Hex; running in place");
+        return false;
+    }
+    // The renamed copy exists before any launch surface names it, so a
+    // failure here leaves a working launch behind: the old name starts this
+    // move again.
+    if let Err(error) = repoint_start_menu_shortcut(&renamed) {
+        tracing::warn!(%error, "could not repoint the Start Menu shortcut to the renamed Hex");
+    }
+    if let Err(error) = crate::windows::login_item::repoint(&renamed) {
+        tracing::warn!(%error, "could not repoint Launch at login to the renamed Hex");
+    }
+    match relaunch(&renamed) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(
+                error = %format!("{error:#}"),
+                "could not start the renamed Hex; running in place"
+            );
+            false
+        }
+    }
+}
+
+/// This executable and the name it moves to, when it is still the managed
+/// install's current version running under the old name.
+fn renamed_install() -> Option<(PathBuf, PathBuf)> {
+    let running = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let support = crate::app_paths::support_dir().ok()?.canonicalize().ok()?;
+    let current = fs::read_to_string(support.join("current-version")).ok()?;
+    let renamed = super::install_name::renamed(&running, &support, &current)?;
+    Some((running, renamed))
+}
+
+/// Copies the running executable to its new name, through a `.partial` file,
+/// once. The renamed file is complete whenever it exists.
+fn install_copy(running: &Path, renamed: &Path) -> Result<()> {
+    if renamed.is_file() {
+        return Ok(());
+    }
+    let partial = renamed.with_extension("exe.partial");
+    let _ = fs::remove_file(&partial);
+    fs::copy(running, &partial).wrap_err("could not copy the Hex executable")?;
+    sync_file(&partial)?;
+    if let Err(error) = fs::rename(&partial, renamed) {
+        let _ = fs::remove_file(&partial);
+        return Err(error)
+            .wrap_err_with(|| format!("could not name the Hex executable {}", renamed.display()));
+    }
+    Ok(())
+}
+
+/// Starts the renamed executable with this launch's arguments; this process
+/// exits before claiming the single instance, as the legacy take-over does.
+fn relaunch(executable: &Path) -> Result<()> {
+    background_process::command(executable)
+        .args(std::env::args_os().skip(1))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .wrap_err("could not start the renamed Hex")?;
+    Ok(())
 }
 
 fn eligibility() -> std::result::Result<String, Ineligible> {
@@ -196,8 +280,8 @@ pub fn updates_disabled_by_policy() -> bool {
         })
 }
 
-/// Stages `file` (hex.exe) and `console` (hex.com), when the release has
-/// one, as `version`.
+/// Stages `file` (the release's executable) and `console` (hex.com), when the
+/// release has one, as `version`.
 pub fn stage(file: &Path, console: Option<&Path>, version: &str) -> Result<Staged> {
     verify_authenticode(file, AUTHENTICODE_SIGNER)?;
     if let Some(console) = console {
@@ -212,7 +296,7 @@ pub fn stage(file: &Path, console: Option<&Path>, version: &str) -> Result<Stage
         .open(support.join("updates").join("update.lock"))?;
     lock.try_lock_exclusive()
         .wrap_err("another Windows update is already in progress")?;
-    let staging = support.join("updates").join("hex.exe.staging");
+    let staging = support.join("updates").join("hex-voice.exe.staging");
     let console_staging = support.join("updates").join("hex.com.staging");
     let _ = fs::remove_file(&staging);
     let _ = fs::remove_file(&console_staging);
@@ -230,8 +314,8 @@ pub fn stage(file: &Path, console: Option<&Path>, version: &str) -> Result<Stage
         }
     }
     let executable = activation?;
-    // A release without hex.com keeps the one in bin, which finds hex.exe
-    // through current-version.
+    // A release without hex.com keeps the one in bin, which finds the
+    // current version's executable through current-version.
     if console.is_some()
         && let Err(error) = publish_console(&support, &executable.with_file_name("hex.com"))
     {
@@ -349,7 +433,8 @@ fn validate_executable(path: &Path, version: &str) -> Result<()> {
     Ok(())
 }
 
-/// `hex.com --version` runs the `hex.exe` beside it and reports its version.
+/// `hex.com --version` runs the GUI executable beside it and reports its
+/// version.
 fn validate_console(path: &Path, version: &str) -> Result<()> {
     let output = background_process::command(path)
         .arg("--version")
@@ -362,12 +447,12 @@ fn validate_console(path: &Path, version: &str) -> Result<()> {
             .last()
             != Some(version)
     {
-        bail!("the downloaded hex.com doesn't run this version's hex.exe");
+        bail!("the downloaded hex.com doesn't run this version's executable");
     }
     Ok(())
 }
 
-/// Whether this install lacks `hex.com` beside the running `hex.exe` or in
+/// Whether this install lacks `hex.com` beside the running executable or in
 /// `bin`: Setup and updaters before it installed only `hex.exe`.
 pub fn console_missing() -> bool {
     let (Ok(executable), Ok(support)) = (std::env::current_exe(), crate::app_paths::support_dir())
@@ -378,9 +463,9 @@ pub fn console_missing() -> bool {
         || !support.join("bin").join("hex.com").is_file()
 }
 
-/// Adds a release's verified `hex.com` beside the running `hex.exe` and on
+/// Adds a release's verified `hex.com` beside the running executable and on
 /// PATH, for an install whose updater predates it. hex.com only starts the
-/// `hex.exe` beside it, so any release's copy serves this version.
+/// executable beside it, so any release's copy serves this version.
 pub fn install_console(file: &Path) -> Result<()> {
     verify_authenticode(file, AUTHENTICODE_SIGNER)?;
     let support = crate::app_paths::support_dir()?;
@@ -507,8 +592,8 @@ pub(super) fn activate(
     let versions = support.join("versions");
     let version_dir = versions.join(version);
     fs::create_dir_all(&version_dir)?;
-    let executable = version_dir.join("hex.exe");
-    let staged = version_dir.join("hex.exe.partial");
+    let executable = version_dir.join(super::install_name::EXECUTABLE);
+    let staged = executable.with_extension("exe.partial");
     let _ = fs::remove_file(&staged);
     fs::rename(staging, &staged)?;
     // FlushFileBuffers requires write access on Windows, unlike fsync.
@@ -588,8 +673,9 @@ fn restart_script(pid: u32) -> String {
 mod tests {
     use super::*;
 
-    /// A profile with `<profile>\hex\versions\3.3.0\hex.exe`, the layout both
-    /// Setup.exe and install-windows.ps1 create (#1352).
+    /// A profile with `<profile>\hex\versions\3.3.0\hex.exe`, the layout
+    /// Setup.exe and install-windows.ps1 created before the executable rename
+    /// (#445, #1352).
     fn installed(name: &str) -> (PathBuf, PathBuf, PathBuf) {
         let profile = std::env::temp_dir().join(format!("hex-win-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&profile);
@@ -673,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    fn activation_switches_the_pointer_without_removing_the_old_version() {
+    fn activation_names_the_executable_for_discord_and_keeps_the_old_version() {
         let root = std::env::temp_dir().join(format!("hex-win-activate-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("versions/1.0.0")).unwrap();
@@ -681,23 +767,52 @@ mod tests {
         fs::create_dir_all(root.join("versions/0.9.0")).unwrap();
         fs::write(root.join("versions/0.9.0/hex.exe"), b"older").unwrap();
         fs::write(root.join("current-version"), "1.0.0\n").unwrap();
-        let staging = root.join("hex.exe.staging");
+        let staging = root.join("hex-voice.exe.staging");
         fs::write(&staging, b"new").unwrap();
 
         let executable = activate(&root, "1.1.0", &staging, None).unwrap();
 
+        // The new version never reintroduces `hex.exe`, which Discord's game
+        // detection matches to HEX: Shards of Fate (#445).
+        assert_eq!(
+            executable,
+            root.join("versions/1.1.0")
+                .join(super::super::install_name::EXECUTABLE)
+        );
         assert_eq!(fs::read(&executable).unwrap(), b"new");
+        assert!(!root.join("versions/1.1.0/hex.exe").exists());
         assert_eq!(
             fs::read_to_string(root.join("current-version"))
                 .unwrap()
                 .trim(),
             "1.1.0"
         );
+        // The old version, staged under the old name, stays and still works.
         assert_eq!(
             fs::read(root.join("versions/1.0.0/hex.exe")).unwrap(),
             b"old"
         );
         assert!(!root.join("versions/0.9.0").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_renamed_copy_is_complete_or_absent() {
+        let root = std::env::temp_dir().join(format!("hex-win-copy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let running = root.join("hex.exe");
+        fs::write(&running, b"running").unwrap();
+        let renamed = root.join(super::super::install_name::EXECUTABLE);
+
+        install_copy(&running, &renamed).unwrap();
+
+        assert_eq!(fs::read(&renamed).unwrap(), b"running");
+        assert!(!root.join("hex-voice.exe.partial").exists());
+        // A later launch keeps the copy it made the first time.
+        fs::write(&renamed, b"kept").unwrap();
+        install_copy(&running, &renamed).unwrap();
+        assert_eq!(fs::read(&renamed).unwrap(), b"kept");
         let _ = fs::remove_dir_all(root);
     }
 
