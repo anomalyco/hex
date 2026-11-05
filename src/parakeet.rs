@@ -1059,12 +1059,10 @@ fn finish_output(
 /// how a finished dictation reaches the focused app. Typing wins, so its
 /// promise that the clipboard is never touched holds with both on.
 fn dictation_mode(type_dictations: bool, copy_only: bool) -> PasteMode {
-    if type_dictations {
-        PasteMode::Type
-    } else if copy_only {
-        PasteMode::CopyOnly
-    } else {
-        PasteMode::Continue
+    match crate::typing::dictation_output(type_dictations) {
+        crate::typing::Output::Type => PasteMode::Type,
+        crate::typing::Output::Paste if copy_only => PasteMode::CopyOnly,
+        crate::typing::Output::Paste => PasteMode::Continue,
     }
 }
 

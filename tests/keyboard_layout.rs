@@ -5,6 +5,12 @@
 #[path = "../src/keyboard.rs"]
 mod keyboard;
 
+// The keyboard's body comes from the app; its typing strokes live beside it.
+#[cfg(target_os = "macos")]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/typing.rs"]
+mod typing;
+
 // The harness answers libtest's `--list` (which nextest uses to discover
 // tests): one `name: test` line per case, and nothing for `--ignored`.
 #[cfg(not(target_os = "macos"))]
