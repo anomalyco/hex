@@ -4,12 +4,16 @@
 //! edited shot goes to the clipboard, a new file beside the first, or an
 //! OpenCode session. Nothing changes the shot already saved. Escape or ✕
 //! closes it; until then it stays, and the panel moves by its edges.
+//!
+//! While it's open, a dictation talks over the shot (`screenshots::narration`):
+//! its words show under the shot and go with it to a session.
 
 mod export;
 pub(crate) mod marks;
 mod view;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -76,6 +80,15 @@ enum Out {
     Send(Dest),
 }
 
+/// A dictation talking over the shot, or none.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum Listen {
+    #[default]
+    Idle,
+    Recording,
+    Transcribing,
+}
+
 #[derive(Default)]
 pub(crate) struct Editor {
     shot: Option<Shot>,
@@ -95,6 +108,12 @@ pub(crate) struct Editor {
     /// Text being typed: its top-left and what's typed.
     typing: Option<([f32; 2], String)>,
     send: Option<SendList>,
+    /// What was said over the shot, every dictation's words joined.
+    words: String,
+    listen: Listen,
+    /// A send picked while a dictation was still going: it goes once the
+    /// words land, and never if Escape cancels them.
+    waiting: Option<Dest>,
     /// A short note and the animation seconds it appeared.
     note: Option<(String, f64)>,
     on: bool,
@@ -109,8 +128,30 @@ struct Layout {
     panel: [f32; 4],
     /// The shot inside the panel.
     image: [f32; 4],
+    /// The row under the shot: the microphone and the words.
+    words: [f32; 4],
     /// Points per shot pixel.
     fit: f32,
+}
+
+/// The most lines of words under the shot; more end in "…" there, and all
+/// of them are sent.
+const WORDS_LINES: usize = 3;
+/// Between the words row's text and its edges, top and bottom.
+const WORDS_PY: f32 = 6.0;
+
+/// How tall the words row is for `words` in a row `width` points wide: a
+/// chip's height, or taller for up to [`WORDS_LINES`] lines. Lines are
+/// estimated from an average glyph width so the panel sizes before layout;
+/// the text itself clamps to the same count.
+fn words_height(words: &str, width: f32) -> f32 {
+    let style = crate::rune_ui::capture_capsule::surface::medium();
+    let text_w = (width - 2.0 * (CHIP_H + GAP)).max(1.0);
+    let per_line = (text_w / (style.size * 0.55)).max(1.0);
+    let lines = (words.chars().count() as f32 / per_line)
+        .ceil()
+        .clamp(1.0, WORDS_LINES as f32);
+    CHIP_H.max(lines * style.line_height + 2.0 * WORDS_PY)
 }
 
 impl Editor {
@@ -145,24 +186,30 @@ impl Editor {
             .map_or(([1, 1], 1.0), |shot| (shot.size, shot.scale));
         let (w, h) = (size[0].max(1) as f32, size[1].max(1) as f32);
         let room_w = (sw - 2.0 * (MARGIN + PAD)).max(1.0);
-        let room_h = (sh - 2.0 * (MARGIN + PAD) - CHIP_H - GAP).max(1.0);
+        let words_h = words_height(&self.words, room_w);
+        let room_h = (sh - 2.0 * (MARGIN + PAD) - CHIP_H - 2.0 * GAP - words_h).max(1.0);
         let fit = (room_w / w).min(room_h / h).min(1.0 / scale.max(1.0));
         let (iw, ih) = ((w * fit).round(), (h * fit).round());
         let pw = (iw + 2.0 * PAD).max(MIN_W);
-        let ph = PAD + CHIP_H + GAP + ih + PAD;
+        let words_h = words_height(&self.words, pw - 2.0 * PAD);
+        let ph = PAD + CHIP_H + GAP + ih + GAP + words_h + PAD;
         let [x, y] = self.pos.unwrap_or([(sw - pw) * 0.5, (sh - ph) * 0.5]);
         let [x, y] = clamp_panel([x, y], [pw, ph], self.screen);
+        let iy = PAD + CHIP_H + GAP;
         Layout {
             panel: [x, y, pw, ph],
-            image: [((pw - iw) * 0.5).round(), PAD + CHIP_H + GAP, iw, ih],
+            image: [((pw - iw) * 0.5).round(), iy, iw, ih],
+            words: [PAD, iy + ih + GAP, pw - 2.0 * PAD, words_h],
             fit,
         }
     }
 
     fn close(&mut self, tx: &mut Tx) {
         if self.on {
+            OPEN.store(false, Ordering::Release);
             self.on = false;
             self.send = None;
+            self.waiting = None;
             self.leaving = Some(self.now);
             tx.animated();
             tx.wake_after(Duration::from_secs_f64(LEAVE_S));
@@ -269,10 +316,61 @@ impl Editor {
         load_sessions(self.overlay.clone());
     }
 
-    /// The edited shot, to `out`, on its own thread.
+    /// A dictation over the shot is now `listen`. Leaving it idle keeps the
+    /// words already heard.
+    fn listen(&mut self, listen: Listen, tx: &mut Tx) {
+        if !self.on {
+            return;
+        }
+        self.listen = listen;
+        if listen == Listen::Idle
+            && let Some(dest) = self.waiting.take()
+        {
+            self.deliver(Out::Send(dest), tx);
+        }
+    }
+
+    /// A dictation's words, or none when it had none; only while one is
+    /// being transcribed, so words Escape cancelled never land.
+    fn heard(&mut self, words: Option<String>, tx: &mut Tx) {
+        if self.listen != Listen::Transcribing {
+            return;
+        }
+        if let Some(words) = words.as_deref().map(str::trim).filter(|w| !w.is_empty()) {
+            if !self.words.is_empty() {
+                self.words.push(' ');
+            }
+            self.words.push_str(words);
+        }
+        self.listen(Listen::Idle, tx);
+    }
+
+    /// Escape while a dictation talks over the shot: its words never land,
+    /// and a send waiting for them never goes.
+    fn cancel_listening(&mut self) -> bool {
+        if self.listen == Listen::Idle {
+            return false;
+        }
+        self.listen = Listen::Idle;
+        self.waiting = None;
+        true
+    }
+
+    /// The edited shot, to `out`, on its own thread. A send waits for a
+    /// dictation still going.
     fn deliver(&mut self, out: Out, tx: &mut Tx) {
         self.finish_typing();
         self.send = None;
+        if let Out::Send(dest) = &out
+            && self.listen != Listen::Idle
+        {
+            self.note(
+                tr_fill("Sending to {} once your words are in…", &dest.name),
+                tx,
+            );
+            self.waiting = Some(dest.clone());
+            return;
+        }
         let Some(shot) = &self.shot else {
             return;
         };
@@ -287,11 +385,12 @@ impl Editor {
         if let Out::Send(dest) = &out {
             self.note(tr_fill("Sending to {}…", &dest.name), tx);
         }
+        let words = self.words.trim().to_owned();
         let overlay = self.overlay.clone();
         let spawned = std::thread::Builder::new()
             .name("hex-screenshot-export".into())
             .spawn(move || {
-                let note = match job.png().and_then(|png| deliver(&out, &png)) {
+                let note = match job.png().and_then(|png| deliver(&out, &png, &words)) {
                     Ok(()) => match &out {
                         Out::Copy => tr("Copied").to_owned(),
                         Out::Save => tr("Saved").to_owned(),
@@ -405,7 +504,12 @@ fn on_key(s: &mut Editor, key: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     if key.key == Key::Escape {
-        s.close(tx);
+        // Escape first cancels a dictation over the shot; the panel stays.
+        if s.cancel_listening() {
+            talk(Talk::Cancel);
+        } else {
+            s.close(tx);
+        }
         return true;
     }
     false
@@ -439,6 +543,53 @@ fn poll(s: &mut Editor, now: f64, tx: &mut Tx) -> bool {
 // ─── Opening, exporting, sending ─────────────────────────────────────────────
 
 static EDITOR: OnceLock<OverlayHandle<Editor>> = OnceLock::new();
+/// Whether a shot is open, for the listener's thread.
+static OPEN: AtomicBool = AtomicBool::new(false);
+
+/// What the microphone chip and Escape ask of the listener.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Talk {
+    /// Start a dictation, or finish the one going, as the shortcut does.
+    Toggle,
+    /// Cancel the dictation going; nothing is transcribed or sent.
+    Cancel,
+}
+
+fn talk(talk: Talk) {
+    #[cfg(target_os = "macos")]
+    crate::screenshots::narration::talk(talk);
+    #[cfg(not(target_os = "macos"))]
+    let _ = talk;
+}
+
+/// Whether a shot is open in the editor. Safe from any thread.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn is_open() -> bool {
+    OPEN.load(Ordering::Acquire)
+}
+
+/// A dictation over the open shot is now `listen`. Safe from any thread.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn listen(listen: Listen) {
+    if let Some(overlay) = EDITOR.get() {
+        overlay.update(move |s, tx| {
+            s.listen(listen, tx);
+            tx.animated();
+        });
+    }
+}
+
+/// A dictation over the open shot ended with `words`, or none. Safe from
+/// any thread.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn heard(words: Option<String>) {
+    if let Some(overlay) = EDITOR.get() {
+        overlay.update(move |s, tx| {
+            s.heard(words, tx);
+            tx.animated();
+        });
+    }
+}
 
 /// Adds the editor's overlay, hidden. Hidden, it holds no GPU surface.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -468,6 +619,12 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
 /// Opens the shot at `path` in the editor, in place of any open. Safe from
 /// any thread; reads the file on its own.
 pub(crate) fn open(path: PathBuf) {
+    open_with(path, String::new());
+}
+
+/// [`open`] with `words` already said over the shot.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn open_with(path: PathBuf, words: String) {
     let Some(overlay) = EDITOR.get().cloned() else {
         return;
     };
@@ -485,6 +642,10 @@ pub(crate) fn open(path: PathBuf) {
             let handle = overlay.clone();
             overlay.update(move |s, tx| {
                 s.load(shot, screen);
+                s.words = words;
+                s.listen = Listen::Idle;
+                s.waiting = None;
+                OPEN.store(true, Ordering::Release);
                 handle.show();
                 handle.request_keys();
                 tx.animated();

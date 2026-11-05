@@ -10,11 +10,14 @@ use rune::{
 use rune_kit::{Button, ButtonVariant, ControlSize};
 
 use super::marks::{self, Mark, Tool};
-use super::{Editor, Layout, Out, PAD, SendList, Sessions, Shot, clamp_panel, matching};
+use super::{
+    Editor, Layout, Listen, Out, PAD, SendList, Sessions, Shot, Talk, clamp_panel, matching, talk,
+};
 use crate::desktop::i18n::tr;
 use crate::rune_ui::capture_capsule::ink::{ink_red, layer};
 use crate::rune_ui::capture_capsule::surface::{self, CHIP_H, CHIP_PX, SHELL_RADIUS, medium};
-use crate::rune_ui::controls::Paint;
+use crate::rune_ui::controls::{Paint, status_dot};
+use crate::rune_ui::icons::MIC;
 
 /// The panel's corner, the capsule's and the thumbnail's.
 const RADIUS: f32 = SHELL_RADIUS;
@@ -130,7 +133,8 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
                 .border(p.hair, k.c.border_weak),
         )
         .child(toolbar(p, s, w - 2.0 * PAD).absolute(PAD, PAD))
-        .child(canvas_el(p, s, shot, layout));
+        .child(canvas_el(p, s, shot, layout))
+        .child(words_el(p, s, layout));
     if let Some(list) = &s.send {
         panel = panel.child(send_list(p, list).absolute(w - PAD - LIST_W, PAD + CHIP_H + 4.0));
     }
@@ -292,6 +296,87 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
             .help(tr("Close"))
             .on_press_tx(|s: &mut Editor, tx| s.close(tx)),
     )
+}
+
+/// Under the shot: the microphone, then what was said over the shot, or
+/// how to say it. While a dictation goes, the microphone carries the
+/// recording dot and the words end with where it's at.
+fn words_el(p: Paint, s: &Editor, layout: Layout) -> El {
+    let k = p.k;
+    let [x, y, w, h] = layout.words;
+    let recording = s.listen == Listen::Recording;
+    let mic_label = if recording {
+        tr("Finish talking")
+    } else {
+        tr("Talk over it")
+    };
+    let mut mic = chip(p)
+        .key("mic")
+        .w(CHIP_H)
+        .center()
+        .child(rune::icon(&MIC, GLYPH).color(if recording { p.text() } else { p.muted() }))
+        .label(mic_label)
+        .help(mic_label)
+        .on_press(|_: &mut Editor| talk(Talk::Toggle));
+    if recording {
+        mic = mic
+            .fill(k.c.pressed)
+            .child(status_dot(p.danger()).absolute(CHIP_H - 11.0, 5.0));
+    }
+    let status = match s.listen {
+        Listen::Idle => None,
+        Listen::Recording => Some(tr("Listening…")),
+        Listen::Transcribing => Some(surface::processing()),
+    };
+    let words = if !s.words.is_empty() {
+        text(&s.words).color(p.text())
+    } else if let Some(status) = status {
+        text(status).color(p.muted())
+    } else {
+        text(tr("Hold your dictation shortcut to talk over it")).color(p.faint())
+    };
+    let mut line = row()
+        .grow(1.0)
+        .h_full()
+        .py(super::WORDS_PY)
+        .center_y()
+        .gap(8.0)
+        .child(
+            words
+                .font(medium())
+                .max_lines(super::WORDS_LINES)
+                .grow(1.0)
+                .min_w(0.0),
+        );
+    if let Some(status) = status.filter(|_| !s.words.is_empty()) {
+        line = line.child(
+            text(status)
+                .font(surface::small())
+                .color(p.muted())
+                .single_line(),
+        );
+    }
+    let mut bar = row()
+        .key("words")
+        .absolute(x, y)
+        .size(w, h)
+        .gap(super::GAP)
+        .child(mic.self_start())
+        .child(line);
+    if !s.words.is_empty() && s.listen == Listen::Idle {
+        bar = bar.child(
+            chip(p)
+                .key("clear-words")
+                .w(CHIP_H)
+                .center()
+                .self_start()
+                .child(rune::icon(k.glyph.close, GLYPH).color(p.muted()))
+                .label(tr("Clear words"))
+                .help(tr("Clear words"))
+                .on_press(|s: &mut Editor| s.words.clear()),
+        );
+    }
+    bar
 }
 
 /// A toolbar chip: the capsule's chip height, its hover and press.

@@ -8,6 +8,7 @@
 //! by ScreenCaptureKit at the display's own pixels, with Hex's overlays and
 //! the pointer left out, on its own thread.
 
+pub(crate) mod narration;
 pub(crate) mod save;
 pub(crate) mod system_shortcut;
 
