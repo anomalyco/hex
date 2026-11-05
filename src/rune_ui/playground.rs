@@ -171,6 +171,11 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-empty", "Window/Meetings/Empty"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
+    ("meetings-summaries", "Window/Meetings/Summaries"),
+    (
+        "meetings-summaries-unavailable",
+        "Window/Meetings/Summaries without Apple Intelligence",
+    ),
     ("meetings-summary-model", "Window/Meetings/Summary model"),
     (
         "meetings-summary-model-not-running",

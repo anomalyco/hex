@@ -49,8 +49,7 @@ static SHORTCUT_TOGGLE: AtomicBool = AtomicBool::new(false);
 static MEETINGS_ENABLED: AtomicBool = AtomicBool::new(false);
 static PAUSE_BROWSER_MEDIA: AtomicBool = AtomicBool::new(false);
 static HEX_MICROPHONE_ENABLED: AtomicBool = AtomicBool::new(false);
-static MEETING_NOTES_ENABLED: AtomicBool = AtomicBool::new(true);
-static MEETING_NOTES_OPENCODE: AtomicBool = AtomicBool::new(false);
+static MEETING_SUMMARIES: AtomicU8 = AtomicU8::new(MeetingSummaries::platform_default() as u8);
 static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
 /// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
@@ -358,12 +357,14 @@ const MIGRATIONS: &[&str] = &[
     ANNOTATE_DEFAULT_MIGRATION,
     ANOMALY_IDENTITY_MIGRATION,
     MEETING_RETENTION_DEFAULT_MIGRATION,
+    MEETING_SUMMARIES_MIGRATION,
 ];
 #[cfg(not(hex_capture))]
 const MIGRATIONS: &[&str] = &[
     STREAMING_ENGLISH_MIGRATION,
     ANOMALY_IDENTITY_MIGRATION,
     MEETING_RETENTION_DEFAULT_MIGRATION,
+    MEETING_SUMMARIES_MIGRATION,
 ];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
@@ -376,6 +377,9 @@ const SCRAWL_ROUTING_IMPORT_MIGRATION: &str = "scrawl-routing-settings";
 /// Meeting retention first saved `forever` as its default; that default is
 /// now unchosen (24 hours for new meetings, older ones kept).
 const MEETING_RETENTION_DEFAULT_MIGRATION: &str = "meeting-retention-default";
+/// Summarize with Apple Intelligence and Summarize with OpenCode became one
+/// choice, `meetings.summaries`.
+const MEETING_SUMMARIES_MIGRATION: &str = "meeting-summaries-choice";
 
 fn deserialize_retired_value<'de, D>(
     deserializer: D,
@@ -774,11 +778,7 @@ impl AppSettings {
             self.experimental.hex_microphone_comfort_noise,
             self.experimental.hex_microphone_strength,
         );
-        MEETING_NOTES_ENABLED.store(
-            self.meetings.summarize_with_apple_intelligence,
-            Ordering::Release,
-        );
-        MEETING_NOTES_OPENCODE.store(self.meetings.summarize_with_opencode, Ordering::Release);
+        MEETING_SUMMARIES.store(self.meetings.summaries as u8, Ordering::Release);
         crate::meeting::generator::set_summary_model(self.meetings.opencode_model.as_deref());
         MEETING_INDICATOR_ENABLED.store(self.meetings.show_recording_indicator, Ordering::Release);
         MEETING_INDICATOR_CORNER.store(
@@ -889,11 +889,27 @@ impl AppSettings {
             self.migrations
                 .push(MEETING_RETENTION_DEFAULT_MIGRATION.into());
         }
+        self.migrate_meeting_summaries();
         #[cfg(hex_capture)]
         if !self.has_migration(ANNOTATE_DEFAULT_MIGRATION) {
             self.capture.enabled = true;
             self.migrations.push(ANNOTATE_DEFAULT_MIGRATION.into());
         }
+    }
+
+    /// The two retired summary switches become `meetings.summaries` once.
+    pub(super) fn migrate_meeting_summaries(&mut self) {
+        if !self.has_migration(MEETING_SUMMARIES_MIGRATION) {
+            self.meetings.summaries = MeetingSummaries::from_retired(
+                self.meetings
+                    .summarize_with_apple_intelligence
+                    .unwrap_or(true),
+                self.meetings.summarize_with_opencode.unwrap_or(false),
+            );
+            self.migrations.push(MEETING_SUMMARIES_MIGRATION.into());
+        }
+        self.meetings.summarize_with_apple_intelligence = None;
+        self.meetings.summarize_with_opencode = None;
     }
 
     fn has_migration(&self, id: &str) -> bool {
@@ -1437,6 +1453,64 @@ mod tests {
         assert!(!settings.capture.enabled, "only once");
     }
 
+    /// The two retired summary switches become one choice once; On this Mac
+    /// wins over the old OpenCode fallback.
+    #[test]
+    fn retired_summary_switches_become_one_choice_once() {
+        let migrated = |meetings: &str| {
+            let mut settings: AppSettings =
+                serde_json::from_str(&format!(r#"{{"meetings":{meetings}}}"#)).unwrap();
+            settings.apply_one_time_migrations_with(|_| true);
+            assert!(settings.has_migration(MEETING_SUMMARIES_MIGRATION));
+            let written = serde_json::to_value(&settings).unwrap();
+            assert!(written["meetings"].get("summarize_with_opencode").is_none());
+            assert!(
+                written["meetings"]
+                    .get("summarize_with_apple_intelligence")
+                    .is_none()
+            );
+            settings.meetings.summaries
+        };
+        let mac = |or: MeetingSummaries| {
+            if cfg!(target_os = "macos") {
+                MeetingSummaries::Mac
+            } else {
+                or
+            }
+        };
+        use MeetingSummaries::{Off, OpenCode};
+        assert_eq!(migrated("{}"), mac(Off));
+        assert_eq!(
+            migrated(
+                r#"{"summarize_with_apple_intelligence":true,"summarize_with_opencode":true}"#
+            ),
+            mac(OpenCode)
+        );
+        assert_eq!(
+            migrated(
+                r#"{"summarize_with_apple_intelligence":false,"summarize_with_opencode":true}"#
+            ),
+            OpenCode
+        );
+        assert_eq!(
+            migrated(r#"{"summarize_with_opencode":true}"#),
+            mac(OpenCode)
+        );
+        assert_eq!(
+            migrated(r#"{"summarize_with_apple_intelligence":false}"#),
+            Off
+        );
+
+        // Later choices stick.
+        let mut settings: AppSettings = serde_json::from_str(
+            r#"{"meetings":{"summaries":"off","summarize_with_opencode":true},"migrations":["meeting-summaries-choice"]}"#,
+        )
+        .unwrap();
+        settings.apply_one_time_migrations_with(|_| true);
+        assert_eq!(settings.meetings.summaries, Off);
+        assert!(AppSettings::default().has_migration(MEETING_SUMMARIES_MIGRATION));
+    }
+
     #[test]
     fn keyboard_model_switching_is_opt_in_and_source_mappings_round_trip() {
         let mut settings: AppSettings = serde_json::from_str("{}").unwrap();
@@ -1703,7 +1777,10 @@ mod tests {
         );
         assert!(!settings.meetings.enabled);
         assert_eq!(settings.meetings.output_folder, None);
-        assert!(settings.meetings.summarize_with_apple_intelligence);
+        assert_eq!(
+            settings.meetings.summaries,
+            MeetingSummaries::platform_default()
+        );
         assert!(settings.meetings.show_recording_indicator);
         assert_eq!(
             settings.meetings.recording_indicator_corner,
@@ -1800,7 +1877,10 @@ mod tests {
         let settings: AppSettings =
             serde_json::from_str(r#"{"meetings":{"enabled":true}}"#).unwrap();
         assert!(settings.meetings.enabled);
-        assert!(settings.meetings.summarize_with_apple_intelligence);
+        assert_eq!(
+            settings.meetings.summaries,
+            MeetingSummaries::platform_default()
+        );
         assert!(settings.meetings.show_recording_indicator);
         assert_eq!(
             settings.meetings.recording_indicator_corner,

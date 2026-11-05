@@ -141,17 +141,24 @@ pub(super) fn available(ui: &Ui) -> bool {
         && (ui.settings.meetings.enabled || ui.platform.developer)
 }
 
-/// Whether something can write a meeting's notes: Apple Intelligence on a
-/// Mac that has it, or OpenCode once turned on.
+/// Whether something can write a meeting's notes when asked: OpenCode once
+/// Summaries chooses it, otherwise Apple Intelligence on a Mac that has it.
 fn notes_available(ui: &Ui) -> bool {
-    (ui.platform.caps.os == super::platform::Os::Macos && ui.platform.notes.is_available())
-        || ui.settings.meetings.summarize_with_opencode
+    ui.settings.meetings.summaries == crate::app_settings::MeetingSummaries::OpenCode
+        || apple_intelligence_writes(ui)
 }
 
-/// What writes the notes now, as the generator picks it: Apple Intelligence
-/// on a Mac that has it, otherwise OpenCode.
+/// Whether Apple Intelligence writes notes asked for now: Summaries isn't
+/// OpenCode and this Mac has it.
+fn apple_intelligence_writes(ui: &Ui) -> bool {
+    ui.settings.meetings.summaries != crate::app_settings::MeetingSummaries::OpenCode
+        && ui.platform.caps.os == super::platform::Os::Macos
+        && ui.platform.notes.is_available()
+}
+
+/// What writes the notes now, as the generator picks it.
 fn notes_running_label(ui: &Ui) -> &'static str {
-    if ui.platform.caps.os == super::platform::Os::Macos && ui.platform.notes.is_available() {
+    if apple_intelligence_writes(ui) {
         tr("Writing a title and summary with Apple Intelligence…")
     } else {
         tr("Writing a title and summary with OpenCode…")

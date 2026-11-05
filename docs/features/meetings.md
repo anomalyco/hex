@@ -17,7 +17,7 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 ├── Off -> only the Labs switch -> Turn on -> meetings.enabled = true
 ├── On -> Meetings joins the sidebar; header switch Recordings | Settings;
 │   menu-bar items, call detection, Option-Control-V
-│   Settings view: Call recording, Calendar, Detected calls, Advanced ▸
+│   Settings view: Call recording, After a meeting, Calendar, Detected calls, Advanced ▸
 │   ├── System Audio Recording                  // meetings.permission; asked only now
 │   │   ├── Untrusted row shown / Allow -> retired Hex IDs cleared (`ScreenCapture` + `AudioCapture`)
 │   │   ├── Allow -> macOS prompt the first time (tour's permission_control)
@@ -26,17 +26,32 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   ├── Returned from System Settings still untrusted -> "Still grey? Fix it"
 │   │   │   (`AudioCapture` reset on running bundle + retired IDs, re-prompt / guide)
 │   │   └── Granted -> the Allow pill morphs into a green Allowed; moves to Advanced
-│   ├── Advanced -> Show recording indicator (on by default; corner-snapping capsule),
-│   │   Transcript folder (~/Documents/Hex Meetings; Reveal / choose; an error opens
-│   │   Advanced), Summarize with Apple Intelligence (on by default), Summarize
-│   │   with OpenCode (off by default; when Apple Intelligence is off or missing),
-│   │   then with Labs › Choose meeting summary model on, Summary model: a
-│   │   searchable picker of the running OpenCode's models (the catalog Modes
-│   │   uses, read only while this row shows) whose pick is the provider/model
-│   │   OpenCode notes use, no fallback; "Hex picks a fast model" clears it ->
-│   │   the ranked fast models. OpenCode missing or failing -> a notice with
-│   │   Check again / Retry, the saved model kept and shown by its ID
-│   │   (meetings.opencode_model; see labs.md, #1107, #1301)
+│   ├── After a meeting -> Summaries, Keep meetings, Transcript folder
+│   │   (~/Documents/Hex Meetings; Reveal / choose; its error shows here)
+│   │   └── Summaries pop-up (meetings.summaries; one-time migration
+│   │       "meeting-summaries-choice" from the two retired switches)
+│   │       ├── Off -> "No titles or summaries"
+│   │       ├── On this Mac (default) -> Apple Intelligence only; "Titles and
+│   │       │   short summaries, written on this Mac"; never sends anything to
+│   │       │   OpenCode, so the old OpenCode fallback is gone
+│   │       │   └── Apple Intelligence unavailable -> the option stays chosen
+│   │       │       but disabled ("Turn on Apple Intelligence in System
+│   │       │       Settings"); the row's line turns amber "Turn on Apple
+│   │       │       Intelligence in System Settings to write them on this Mac";
+│   │       │       a meeting records notes_error as before
+│   │       └── OpenCode -> "Sends the transcript to your OpenCode model";
+│   │           Model nests under it: a searchable picker of the running
+│   │           OpenCode's models (refreshed each time it opens; no Refresh),
+│   │           "Hex picks a fast model" first (clears meetings.opencode_model
+│   │           -> the ranked fast models); a pick is used alone, no fallback.
+│   │           OpenCode missing or failing -> a notice with Check again /
+│   │           Retry, the saved model kept and shown by its ID (#1107, #1301)
+│   │       // checks: summaries_are_one_choice_with_opencode_s_model_under_it,
+│   │       // on_this_mac_without_apple_intelligence_stays_chosen_with_the_fix
+│   │       // (tests/panes.rs); scenes meetings-summaries,
+│   │       // meetings-summaries-unavailable, meetings-summary-model
+│   ├── Advanced -> Show recording indicator (on by default; corner-snapping
+│   │   capsule) and the System Audio Recording row once allowed
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
@@ -116,13 +131,13 @@ Browser calls -> offered as "Call in <browser>": no site is read yet, so a
         process); others are not detected (#1105)
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
-Notes and live chapters -> Summarize with OpenCode (off by default); it sends
-    the transcript excerpt to the OpenCode model
+Notes and live chapters -> After a meeting › Summaries is a switch (off by
+    default; on = OpenCode): "Titles and short summaries. Sends the transcript
+    to your OpenCode model"; Model nests under it while on, as on macOS
+    (migrated from Summarize with OpenCode)
+    // check: summaries_are_a_switch_off_a_mac (tests/panes.rs)
     ├── Summarize -> "Writing a title and summary with OpenCode…" (never
     │   Apple Intelligence off a Mac that has it)
-    ├── Labs › Choose meeting summary model (off by default; #1160) -> Advanced
-    │   shows Summary model while Summarize with OpenCode is on; a saved
-    │   provider/model is used alone, as on macOS (labs.md)
     └── No writer (OpenCode not running) -> "Notes could not be written." with
         the reason, recorded as notes_error (#1151: it was dropped silently)
 Idle sleep -> systemd-inhibit idle:sleep (Linux),

@@ -430,11 +430,6 @@ const KEYS: &[Key] = &[
         "Labs: drag meeting capsules such as Meeting transcript ready out of the way; they show in the corner you left them, shared with the recording capsule (macOS)",
     ),
     key(
-        "labs.meeting_summary_model",
-        Kind::Bool,
-        "Labs: meeting notes written with OpenCode use meetings.opencode_model, with no fallback to another model",
-    ),
-    key(
         "labs.meeting_notes_vocabulary",
         Kind::Bool,
         "Labs: final meeting titles and summaries read the vocabulary, so names are spelled the way you wrote them",
@@ -500,19 +495,14 @@ const KEYS: &[Key] = &[
         "Folder for meeting Markdown; none uses ~/Documents/Hex Meetings",
     ),
     key(
-        "meetings.summarize_with_apple_intelligence",
-        Kind::Bool,
-        "Title and summarize meetings with Apple Intelligence",
-    ),
-    key(
-        "meetings.summarize_with_opencode",
-        Kind::Bool,
-        "Title and summarize meetings with the OpenCode model (sends the transcript to it)",
+        "meetings.summaries",
+        SUMMARIES,
+        "Who titles and summarizes meetings: off, mac (Apple Intelligence, nothing leaves this Mac), or opencode (sends the transcript to the OpenCode model)",
     ),
     optional(
         "meetings.opencode_model",
         Kind::Text,
-        "The OpenCode provider/model meeting notes use, with labs.meeting_summary_model; none tries Hex's ranked fast models",
+        "The OpenCode provider/model meeting notes use when meetings.summaries is opencode; none lets Hex pick a fast model",
     ),
     key(
         "meetings.show_recording_indicator",
@@ -689,6 +679,23 @@ const CAPTURE_KEYS: &[Key] = &[];
 #[cfg(hex_capture)]
 const RETENTION_DAYS: Kind = Kind::Integer { min: 1, max: 3650 };
 
+#[cfg(target_os = "macos")]
+const SUMMARIES: Kind = Kind::Choice(&["off", "mac", "opencode"]);
+#[cfg(not(target_os = "macos"))]
+const SUMMARIES: Kind = Kind::Choice(&["off", "opencode"]);
+
+/// Keys that were replaced, and what replaced them.
+const RETIRED: &[(&str, &str)] = &[
+    (
+        "meetings.summarize_with_apple_intelligence",
+        "meetings.summaries mac",
+    ),
+    (
+        "meetings.summarize_with_opencode",
+        "meetings.summaries opencode",
+    ),
+];
+
 /// Settings that act only where Hex has a capability (by its
 /// `rune_ui::capabilities` name), the same one that shows their row in the
 /// window. The first matching prefix decides.
@@ -699,7 +706,6 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.subtitle_export", "meetings"),
     ("labs.stop_when_call_ends", "meetings"),
     ("labs.movable_meeting_capsules", "meetings"),
-    ("labs.meeting_summary_model", "meetings"),
     ("labs.meeting_notes_vocabulary", "meetings"),
     ("labs.meeting_finished_event", "meetings"),
     ("labs.follow_live_transcript", "meetings"),
@@ -860,6 +866,12 @@ pub fn get(settings: &AppSettings, name: &str) -> Result<Vec<SettingValue>, Cont
 }
 
 fn unknown(name: &str) -> ControlError {
+    if let Some((_, replacement)) = RETIRED.iter().find(|(retired, _)| *retired == name) {
+        return ControlError::new(
+            "unknown-setting",
+            format!("`{name}` was replaced: use `hex settings set {replacement}`"),
+        );
+    }
     let near = keys()
         .map(|key| key.key)
         .find(|key| {
@@ -957,6 +969,13 @@ pub fn apply(
     let mut effects = Vec::new();
     let message = format!("Set {name}");
     match key.key {
+        "meetings.summaries"
+            if candidate.meetings.summaries == crate::app_settings::MeetingSummaries::OpenCode
+                && crate::policy::Policy::current()
+                    .locks(crate::policy::Lock::OpenCodeProcessing) =>
+        {
+            return Err(managed(name, crate::policy::Lock::OpenCodeProcessing));
+        }
         "sound_effect_volume" => {
             let volume = candidate.sound_effect_volume;
             candidate.sound_effects = volume > 0.0;
@@ -1424,11 +1443,7 @@ mod tests {
             .with(Lock::Meetings)
             .with(Lock::Annotate)
             .with(Lock::OpenCodeProcessing);
-        for name in [
-            "meetings.enabled",
-            "capture.enabled",
-            "meetings.summarize_with_opencode",
-        ] {
+        for name in ["meetings.enabled", "capture.enabled"] {
             let error = unavailable_under(name, policy).expect(name);
             assert_eq!(error.code, "managed");
             assert!(error.message.contains("managed by your organization"));
@@ -1754,6 +1769,23 @@ mod tests {
                 .value
                 .is_null()
         );
+        let change = apply(&settings, "meetings.summaries", "opencode", &rules()).unwrap();
+        assert_eq!(
+            change.settings.meetings.summaries,
+            crate::app_settings::MeetingSummaries::OpenCode
+        );
+        assert_eq!(
+            get(&change.settings, "meetings.summaries").unwrap()[0].value,
+            "opencode"
+        );
+        let retired = apply(
+            &settings,
+            "meetings.summarize_with_opencode",
+            "on",
+            &rules(),
+        )
+        .unwrap_err();
+        assert!(retired.message.contains("meetings.summaries opencode"));
         let mut saved = settings.clone();
         saved.microphone = Some("USB Mic".into());
         let change = apply(&saved, "microphone", "system-default", &rules()).unwrap();

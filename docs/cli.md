@@ -472,8 +472,7 @@ Writable keys: `release_microphone_while_idle`,
 `second_dictation_hotkey`, `labs.second_dictation_shortcut`, `labs.standalone_special_keys`, `show_dock_icon`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,
 `history_retention`, `meetings.enabled`,
-`meetings.output_folder`, `meetings.summarize_with_apple_intelligence`,
-`meetings.summarize_with_opencode`,
+`meetings.output_folder`, `meetings.summaries`, `meetings.opencode_model`,
 `meetings.show_recording_indicator`, `meetings.recording_indicator_corner`,
 `meetings.retention`, `meetings.providers`, `meetings.calendar.excluded_calendars`,
 `meetings.calendar.remind`, `meetings.calendar.lead_minutes`,
@@ -488,6 +487,14 @@ comma-separated, and `set` (or `apply`) adds the comma-separated names to it;
 `list` leaves the key out. Model listings keep `supports_recognition_hints`
 (true where the model reads the vocabulary as its prompt) beside the newer
 `vocabulary`: `prompt`, `bias`, or `none`.
+
+`meetings.summaries` chooses who titles and summarizes meetings: `off`, `mac`
+(Apple Intelligence; nothing leaves this Mac, and nothing falls back to
+OpenCode), or `opencode` (sends the transcript to `meetings.opencode_model`,
+or a fast model Hex picks when that is `none`). Off a Mac it is `off` or
+`opencode`. The retired `meetings.summarize_with_apple_intelligence` and
+`meetings.summarize_with_opencode` are refused with the `meetings.summaries`
+command to use instead.
 
 A test (`control::settings::tests::every_persisted_setting_has_a_cli_key`)
 fails when a new persisted setting has no key here.

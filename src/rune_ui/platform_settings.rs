@@ -8,8 +8,8 @@
 use rune::{El, Icon, row, text};
 
 use super::controls::{
-    ButtonKind, Choice, DESCRIPTION, Paint, button, card, icon_row, icon_toggle_row, note, section,
-    select, setting_row,
+    ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folding, icon_row,
+    icon_toggle_row, note, section, select, setting_row,
 };
 use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
 use super::paste_access::PasteAccess;
@@ -18,7 +18,7 @@ use super::settings::toggle_menu;
 use super::{Menu, Pane, ShortcutTarget, Ui, icons};
 use crate::app_settings::{
     AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, KNOWN_MEETING_PROVIDERS, MeetingPolicy,
-    MeetingProviderChoice, MeetingRetention, ModifierSide,
+    MeetingProviderChoice, MeetingRetention, MeetingSummaries, ModifierSide,
 };
 use crate::audio::hex_microphone::DriverActionState;
 use crate::calendar::{CalendarAccess, CallProvider};
@@ -236,17 +236,168 @@ pub(super) fn error_section(ui: &Ui, p: Paint) -> Option<El> {
 
 fn notes_description(availability: NotesAvailability) -> &'static str {
     match availability {
-        NotesAvailability::Available => {
-            tr("Meeting titles and short summaries, written on this Mac")
-        }
+        NotesAvailability::Available => tr("Titles and short summaries, written on this Mac"),
         NotesAvailability::DeviceNotEligible => tr("This Mac does not support Apple Intelligence"),
         NotesAvailability::NotEnabled => {
-            tr("Turn on Apple Intelligence in System Settings to use this")
+            tr("Turn on Apple Intelligence in System Settings to write them on this Mac")
         }
         NotesAvailability::ModelNotReady => tr("The Apple Intelligence model is still downloading"),
         NotesAvailability::UnsupportedSystem => tr("Requires macOS 26 or later"),
         NotesAvailability::Unknown => tr("Apple Intelligence is unavailable"),
     }
+}
+
+/// The second line of Summaries' On this Mac option: what it does, or why
+/// it can't be chosen and the fix.
+fn on_this_mac_detail(availability: NotesAvailability) -> &'static str {
+    match availability {
+        NotesAvailability::Available => tr("Apple Intelligence. Nothing leaves this Mac"),
+        NotesAvailability::NotEnabled => tr("Turn on Apple Intelligence in System Settings"),
+        other => notes_description(other),
+    }
+}
+
+/// Meetings › Settings › After a meeting › Summaries: who writes a meeting's
+/// title and summary, with the OpenCode model nested under it while OpenCode
+/// writes them. A Mac picks Off, On this Mac, or OpenCode; elsewhere a
+/// switch turns OpenCode on. Nothing falls back: an unavailable choice stays
+/// chosen and says how to fix it.
+fn summaries_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
+    let chosen = ui.settings.meetings.summaries;
+    let managed = opencode_managed();
+    let mut rows: Vec<CardRow> = Vec::new();
+    if ui.platform.caps.os == Os::Macos {
+        let notes = ui.platform.notes;
+        let (description, color) = match chosen {
+            MeetingSummaries::Off => (tr("No titles or summaries"), p.muted()),
+            MeetingSummaries::Mac if notes.is_available() => (notes_description(notes), p.muted()),
+            MeetingSummaries::Mac => (notes_description(notes), p.warning()),
+            MeetingSummaries::OpenCode => {
+                (tr("Sends the transcript to your OpenCode model"), p.muted())
+            }
+        };
+        let label = |choice: MeetingSummaries| match choice {
+            MeetingSummaries::Off => tr("Off"),
+            MeetingSummaries::Mac => tr("On this Mac"),
+            MeetingSummaries::OpenCode => "OpenCode",
+        };
+        let options = [
+            SummariesOption {
+                choice: MeetingSummaries::Off,
+                detail: None,
+                disabled: false,
+            },
+            SummariesOption {
+                choice: MeetingSummaries::Mac,
+                detail: Some(on_this_mac_detail(notes)),
+                disabled: !notes.is_available(),
+            },
+            SummariesOption {
+                choice: MeetingSummaries::OpenCode,
+                detail: Some(if managed {
+                    super::managed_note()
+                } else {
+                    tr("Sends the transcript to your OpenCode model")
+                }),
+                disabled: managed,
+            },
+        ];
+        let menu = Menu::Pick("meeting-summaries");
+        let labels: Vec<&str> = options.iter().map(|option| label(option.choice)).collect();
+        let trigger = rune_kit::Select::new("meeting-summaries-control", &labels)
+            .appearance(rune_kit::SelectAppearance::Inline)
+            .current(Some(label(chosen)))
+            .open(ui.open == Some(menu))
+            .on_toggle(move |ui: &mut Ui| toggle_menu(ui, menu))
+            .trigger(p.k)
+            .label(tr("Summaries"))
+            .a11y_value(label(chosen));
+        let mut picker = rune_kit::Menu::new("meeting-summaries-menu")
+            .trigger(trigger)
+            .placement(rune_kit::Placement::BottomEnd)
+            .gutter(4.0)
+            .min_width(380.0)
+            .open(ui.open == Some(menu))
+            .on_close(|ui: &mut Ui| ui.open = None);
+        for option in options {
+            let mut item = rune_kit::MenuItem::new(label(option.choice))
+                .checked(option.choice == chosen)
+                .disabled(option.disabled);
+            if let Some(detail) = option.detail {
+                item = item.description(detail);
+            }
+            let choice = option.choice;
+            picker = picker.item(item.on_select(move |ui: &mut Ui| {
+                ui.open = None;
+                ui.update(|settings| settings.meetings.summaries = choice);
+            }));
+            if choice == MeetingSummaries::Off {
+                picker = picker.separator();
+            }
+        }
+        rows.push(
+            super::controls::icon_described_row(
+                p,
+                "meeting-summaries",
+                &icons::SPARKLES,
+                tr("Summaries"),
+                Some((description.to_owned(), color)),
+                picker.build(p.k, layer).mr(-8.0),
+            )
+            .into(),
+        );
+    } else if managed {
+        rows.push(
+            super::controls::managed_row(
+                p,
+                "meeting-summaries",
+                Some(&icons::SPARKLES),
+                tr("Summaries"),
+            )
+            .into(),
+        );
+    } else {
+        rows.push(
+            icon_toggle_row(
+                p,
+                "meeting-summaries",
+                &icons::SPARKLES,
+                tr("Summaries"),
+                tr("Titles and short summaries. Sends the transcript to your OpenCode model"),
+                chosen == MeetingSummaries::OpenCode,
+                |ui: &mut Ui| {
+                    let summaries = match ui.settings.meetings.summaries {
+                        MeetingSummaries::OpenCode => MeetingSummaries::Off,
+                        _ => MeetingSummaries::OpenCode,
+                    };
+                    ui.update(|settings| settings.meetings.summaries = summaries);
+                },
+            )
+            .into(),
+        );
+    }
+    let model = if summary_model_shown(ui) {
+        super::models::rows(ui, p, super::models::Target::MeetingSummary, layer)
+            .into_iter()
+            .map(super::controls::nested)
+            .chain(super::models::unavailable(
+                ui,
+                p,
+                crate::desktop::opencode_catalog::OpenCodeFeature::MeetingSummary,
+            ))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    rows.push(folding("summary-model", model));
+    rows
+}
+
+/// One of Summaries' options on a Mac.
+struct SummariesOption {
+    choice: MeetingSummaries,
+    detail: Option<&'static str>,
+    disabled: bool,
 }
 
 fn folder_label(ui: &Ui) -> String {
@@ -342,8 +493,8 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             rows.push(system_audio);
         }
     }
+    let mut after = Vec::new();
     if meetings.enabled {
-        rows.push(retention_row(ui, p, layer));
         more.push(icon_toggle_row(
             p,
             "meeting-indicator",
@@ -356,97 +507,51 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 ui.update(|settings| settings.meetings.show_recording_indicator = show);
             },
         ));
-        more.push(icon_row(
-            p,
-            "meeting-folder",
-            &icons::FOLDER,
-            tr("Transcript folder"),
-            Some(tr("Finished meetings are saved here as Markdown")),
-            row()
-                .key("controls")
-                .gap(8.0)
-                .center_y()
-                .child(button(
-                    p,
-                    "reveal-meeting-folder",
-                    tr("Reveal"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| ui.ask(PlatformRequest::Meeting(MeetingRequest::RevealFolder)),
-                ))
-                .child(button(
-                    p,
-                    "choose-meeting-folder",
-                    &folder_label(ui),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| ui.ask(PlatformRequest::Meeting(MeetingRequest::ChooseFolder)),
-                )),
-        ));
-        if ui.platform.caps.os == Os::Macos {
-            more.push(icon_toggle_row(
+        after.extend(summaries_rows(ui, p, layer));
+        after.push(retention_row(ui, p, layer).into());
+        after.push(
+            icon_row(
                 p,
-                "meeting-notes",
-                &icons::SPARKLES,
-                tr("Summarize with Apple Intelligence"),
-                notes_description(ui.platform.notes),
-                meetings.summarize_with_apple_intelligence,
-                |ui: &mut Ui| {
-                    let enabled = !ui.settings.meetings.summarize_with_apple_intelligence;
-                    ui.update(|settings| {
-                        settings.meetings.summarize_with_apple_intelligence = enabled
-                    });
-                },
-            ));
-        }
-        more.push(if opencode_managed() {
-            super::controls::managed_row(
-                p,
-                "meeting-notes-opencode",
-                Some(&icons::SPARKLES),
-                tr("Summarize with OpenCode"),
+                "meeting-folder",
+                &icons::FOLDER,
+                tr("Transcript folder"),
+                Some(tr("Finished meetings are saved here as Markdown")),
+                row()
+                    .key("controls")
+                    .gap(8.0)
+                    .center_y()
+                    .child(button(
+                        p,
+                        "reveal-meeting-folder",
+                        tr("Reveal"),
+                        ButtonKind::Secondary,
+                        |ui: &mut Ui, _| {
+                            ui.ask(PlatformRequest::Meeting(MeetingRequest::RevealFolder))
+                        },
+                    ))
+                    .child(button(
+                        p,
+                        "choose-meeting-folder",
+                        &folder_label(ui),
+                        ButtonKind::Secondary,
+                        |ui: &mut Ui, _| {
+                            ui.ask(PlatformRequest::Meeting(MeetingRequest::ChooseFolder))
+                        },
+                    )),
             )
-        } else {
-            icon_toggle_row(
-            p,
-            "meeting-notes-opencode",
-            &icons::SPARKLES,
-            tr("Summarize with OpenCode"),
-            if ui.platform.caps.os == Os::Macos {
-                tr("When Apple Intelligence is off or unavailable. Sends the transcript to your OpenCode model")
-            } else {
-                tr("Meeting titles and short summaries. Sends the transcript to your OpenCode model")
-            },
-            meetings.summarize_with_opencode,
-            |ui: &mut Ui| {
-                let enabled = !ui.settings.meetings.summarize_with_opencode;
-                ui.update(|settings| settings.meetings.summarize_with_opencode = enabled);
-            },
-        )
-        });
-        // Labs › Choose meeting summary model, for OpenCode's notes only.
-        if summary_model_shown(ui) {
-            more.extend(super::models::rows(
-                ui,
-                p,
-                super::models::Target::MeetingSummary,
-                layer,
-            ));
-            more.extend(super::models::unavailable(
-                ui,
-                p,
-                crate::desktop::opencode_catalog::OpenCodeFeature::MeetingSummary,
-            ));
-        }
+            .into(),
+        );
         if let Some(error) = &ui.platform.meeting_folder_error {
-            // A failed folder change shows where it happened, opening the fold.
-            more.push(note("meeting-folder-error", error, p.danger()));
+            after.push(note("meeting-folder-error", error, p.danger()).into());
         }
     }
     let mut sections = vec![card(p, "meetings", rows)];
     if meetings.enabled {
+        sections.push(section(p, "after-meeting", tr("After a meeting"), after));
         sections.extend(calendar_section(ui, p, layer));
         sections.push(detected_calls_section(ui, p, layer));
         sections.push(advanced_toggle(ui, p, Pane::Meetings));
-        if meetings_advanced_shown(ui) {
+        if super::general::advanced_open(ui, Pane::Meetings) {
             sections.push(card(p, "advanced", more));
         }
     }
@@ -493,46 +598,25 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     )
 }
 
-/// Whether Meetings › Settings shows its Advanced card: the fold is open, or
-/// a failed folder change opened it to show where.
-fn meetings_advanced_shown(ui: &Ui) -> bool {
-    super::general::advanced_open(ui, Pane::Meetings) || ui.platform.meeting_folder_error.is_some()
-}
-
-/// Whether Labs › Choose meeting summary model's picker shows: Meetings ›
-/// Settings › Advanced shows with Summarize with OpenCode and the lab on.
-/// The window reads the OpenCode catalog only while it does.
+/// Whether the summary model picker shows: Meetings › Settings with
+/// Summaries set to OpenCode. The window reads the OpenCode catalog only
+/// while it does.
 pub(super) fn summary_model_shown(ui: &Ui) -> bool {
-    let summary_model = crate::labs::Feature::MeetingSummaryModel;
     ui.pane == Pane::Meetings
         && !ui.labs_open
         && super::meetings::available(ui)
         && ui.meetings.view == super::meetings::View::Settings
         && ui.settings.meetings.enabled
-        && meetings_advanced_shown(ui)
-        && ui.settings.meetings.summarize_with_opencode
+        && ui.settings.meetings.summaries == MeetingSummaries::OpenCode
         && !opencode_managed()
-        && summary_model.managed().is_none()
-        && summary_model.shipped()
-        && summary_model.on(&ui.settings)
 }
 
-/// What the summary model row says about the saved `provider/model`.
-pub(super) fn summary_model_about(saved: &str) -> String {
-    match crate::meeting::generator::parse_model(saved) {
-        Some((provider, model)) => tr_named(
-            "Summaries use {model}. If it isn't available, the meeting shows the error instead of trying another model",
-            &[("model", &format!("{provider}/{model}"))],
-        ),
-        None if saved.trim().is_empty() => tr(
-            "Empty: Hex tries its list of fast models in order and uses the first one OpenCode has",
-        )
-        .to_owned(),
-        None => tr(
-            "Write it as provider/model, such as openai/gpt-5.4-mini. Until then, Hex tries its list of fast models",
-        )
-        .to_owned(),
-    }
+/// What the summary model row says about a saved `provider/model` it can't
+/// use, such as one typed with `hex settings`; `None` when it can.
+pub(super) fn summary_model_problem(saved: &str) -> Option<&'static str> {
+    (!saved.trim().is_empty() && crate::meeting::generator::parse_model(saved).is_none()).then(|| {
+        tr("Write it as provider/model, such as openai/gpt-5.4-mini. Until then, Hex tries its list of fast models")
+    })
 }
 
 static ZOOM_ICON: Icon = Icon {

@@ -15,7 +15,7 @@
 
 use std::sync::OnceLock;
 
-use crate::app_settings::AppSettings;
+use crate::app_settings::{AppSettings, MeetingSummaries};
 
 /// One managed lock.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -141,7 +141,6 @@ impl Policy {
         }
         let lock = match name {
             "capture.enabled" => Lock::Annotate,
-            "meetings.summarize_with_opencode" => Lock::OpenCodeProcessing,
             _ => return None,
         };
         self.locks(lock).then_some(lock)
@@ -158,7 +157,8 @@ impl Policy {
             ],
             #[cfg(not(hex_capture))]
             Lock::Annotate => Vec::new(),
-            Lock::OpenCodeProcessing => vec![&mut settings.meetings.summarize_with_opencode],
+            // `meetings.summaries` is a choice, not a switch; see `enforce`.
+            Lock::OpenCodeProcessing => Vec::new(),
             Lock::Transforms | Lock::LoopbackTransforms => Vec::new(),
             Lock::Labs => crate::labs::Feature::switches(settings),
         }
@@ -170,6 +170,11 @@ impl Policy {
             for switch in Self::switches(settings, lock) {
                 *switch = false;
             }
+        }
+        if self.locks(Lock::OpenCodeProcessing)
+            && settings.meetings.summaries == MeetingSummaries::OpenCode
+        {
+            settings.meetings.summaries = MeetingSummaries::Off;
         }
     }
 
@@ -184,6 +189,12 @@ impl Policy {
             {
                 *switch = *value;
             }
+        }
+        if self.locks(Lock::OpenCodeProcessing)
+            && settings.meetings.summaries == MeetingSummaries::Off
+            && saved.meetings.summaries == MeetingSummaries::OpenCode
+        {
+            settings.meetings.summaries = MeetingSummaries::OpenCode;
         }
     }
 }
@@ -247,7 +258,7 @@ mod tests {
     fn locked_switches_read_off_and_save_as_they_were() {
         let mut saved = AppSettings::default();
         saved.meetings.enabled = true;
-        saved.meetings.summarize_with_opencode = true;
+        saved.meetings.summaries = MeetingSummaries::OpenCode;
         saved.labs.live_text = true;
         saved.pause_browser_media = true;
         let policy = Policy::default()
@@ -257,7 +268,7 @@ mod tests {
         let mut loaded = saved.clone();
         policy.enforce(&mut loaded);
         assert!(!loaded.meetings.enabled);
-        assert!(!loaded.meetings.summarize_with_opencode);
+        assert_eq!(loaded.meetings.summaries, MeetingSummaries::Off);
         assert!(!loaded.labs.live_text);
         assert!(!loaded.pause_browser_media);
         for feature in crate::labs::Feature::ALL {
@@ -269,10 +280,24 @@ mod tests {
         let mut written = loaded.clone();
         policy.keep_saved(&mut written, &saved);
         assert!(written.meetings.enabled);
-        assert!(written.meetings.summarize_with_opencode);
+        assert_eq!(written.meetings.summaries, MeetingSummaries::OpenCode);
         assert!(written.labs.live_text);
         assert!(written.pause_browser_media);
         assert_eq!(written.sound_effects, loaded.sound_effects);
+    }
+
+    #[test]
+    fn the_opencode_lock_leaves_other_summary_choices_alone() {
+        let policy = Policy::default().with(Lock::OpenCodeProcessing);
+        let mut saved = AppSettings::default();
+        saved.meetings.summaries = MeetingSummaries::OpenCode;
+        let mut loaded = saved.clone();
+        policy.enforce(&mut loaded);
+        // Choosing On this Mac while locked is the user's own change.
+        loaded.meetings.summaries = MeetingSummaries::Mac;
+        let mut written = loaded.clone();
+        policy.keep_saved(&mut written, &saved);
+        assert_eq!(written.meetings.summaries, MeetingSummaries::Mac);
     }
 
     #[test]
@@ -299,11 +324,10 @@ mod tests {
         assert_eq!(labs.setting_lock("meetings.enabled"), Some(Lock::Labs));
         assert_eq!(labs.setting_lock("pause_browser_media"), Some(Lock::Labs));
         assert_eq!(labs.setting_lock("sound_effects"), None);
+        // A choice that is only partly locked: `hex settings` refuses
+        // `opencode` itself.
         let opencode = Policy::default().with(Lock::OpenCodeProcessing);
-        assert_eq!(
-            opencode.setting_lock("meetings.summarize_with_opencode"),
-            Some(Lock::OpenCodeProcessing)
-        );
+        assert_eq!(opencode.setting_lock("meetings.summaries"), None);
         let annotate = Policy::default().with(Lock::Annotate);
         assert_eq!(
             annotate.setting_lock("capture.enabled"),

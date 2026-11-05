@@ -419,32 +419,94 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.state.settings.share_dictation_shortcut);
 }
 
-/// Choose meeting summary model is a Labs toggle wherever Meetings is,
-/// Windows and Linux included (#1160), off by default.
+/// Summaries is one choice in Meetings › Settings › After a meeting: Off,
+/// On this Mac, or OpenCode on a Mac, with OpenCode's model nested under it
+/// only while OpenCode writes them.
 #[test]
-fn the_meeting_summary_model_lab_is_on_every_os_with_meetings() {
-    for scene in ["portal", "windows-settings", "mac-settings"] {
-        let mut rt = runtime(scene, true, (980.0, 2000.0));
-        open_labs(&mut rt);
-        assert!(
-            rt.find("lab-meeting-summary-model").is_some(),
-            "{scene} lists Choose meeting summary model"
+fn summaries_are_one_choice_with_opencode_s_model_under_it() {
+    use crate::app_settings::MeetingSummaries;
+    let size = (980.0, 2400.0);
+    let mut rt = runtime("meetings-settings", true, size);
+    assert!(rt.find("after-meeting").is_some());
+    assert!(rt.find("meeting-summaries").is_some());
+    assert!(
+        rt.find("meeting-summary-model").is_none(),
+        "On this Mac has no model"
+    );
+    tap(&mut rt, "meeting-summaries-control-trigger");
+    tap(&mut rt, "meeting-summaries-menu-item3");
+    assert_eq!(
+        rt.state.settings.meetings.summaries,
+        MeetingSummaries::OpenCode
+    );
+    settle(&mut rt);
+    assert!(rt.find("meeting-summary-model").is_some());
+    assert!(
+        rt.find("refresh-models").is_none(),
+        "opening the picker reads the list"
+    );
+    tap(&mut rt, "meeting-summaries-control-trigger");
+    tap(&mut rt, "meeting-summaries-menu-item0");
+    assert_eq!(rt.state.settings.meetings.summaries, MeetingSummaries::Off);
+    settle(&mut rt);
+    assert!(rt.find("meeting-summary-model").is_none());
+}
+
+/// Without Apple Intelligence, On this Mac stays chosen and disabled, and
+/// the row says how to turn it on; nothing switches to OpenCode.
+#[test]
+fn on_this_mac_without_apple_intelligence_stays_chosen_with_the_fix() {
+    use crate::app_settings::MeetingSummaries;
+    let mut rt = runtime("meetings-summaries-unavailable", true, (980.0, 2400.0));
+    assert!(texts(&rt).iter().any(|text| {
+        text == "Turn on Apple Intelligence in System Settings to write them on this Mac"
+    }));
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Turn on Apple Intelligence in System Settings")
+    );
+    tap(&mut rt, "meeting-summaries-menu-item2");
+    assert_eq!(rt.state.settings.meetings.summaries, MeetingSummaries::Mac);
+    assert!(rt.find("meeting-summary-model").is_none());
+}
+
+/// Off a Mac, Summaries is a switch that turns OpenCode on.
+#[test]
+fn summaries_are_a_switch_off_a_mac() {
+    use crate::app_settings::MeetingSummaries;
+    for scene in ["portal", "windows-settings"] {
+        let mut rt = runtime(scene, true, (980.0, 2400.0));
+        rt.state.settings.meetings.enabled = true;
+        rt.state.pane = Pane::Meetings;
+        rt.state.meetings.view = super::super::meetings::View::Settings;
+        refresh(&mut rt);
+        assert_eq!(
+            rt.state.settings.meetings.summaries,
+            MeetingSummaries::Off,
+            "{scene}"
         );
-        assert!(!rt.state.settings.labs.meeting_summary_model);
-        tap(&mut rt, "lab-meeting-summary-model");
-        assert!(rt.state.settings.labs.meeting_summary_model, "{scene}");
+        tap(&mut rt, "meeting-summaries");
+        assert_eq!(
+            rt.state.settings.meetings.summaries,
+            MeetingSummaries::OpenCode,
+            "{scene}"
+        );
     }
 }
 
-/// Labs › Choose meeting summary model picks from OpenCode's models in
-/// Meetings › Settings › Advanced, with the automatic choice first; without
-/// OpenCode it offers a retry and keeps the saved model (#1301).
+/// The meeting summary model picks from OpenCode's models, with the
+/// automatic choice first; without OpenCode it offers a retry and keeps the
+/// saved model (#1301).
 #[test]
 fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
     let size = (980.0, 2400.0);
     let mut rt = runtime("meetings-summary-model", true, size);
     assert!(rt.find("meeting-summary-model").is_some());
     assert!(rt.find("opencode-unavailable").is_none());
+    assert!(super::super::platform_settings::summary_model_shown(
+        &rt.state
+    ));
     rt.state.models.open_picker();
     rt.invalidate();
     settle(&mut rt);
@@ -465,10 +527,6 @@ fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
             .any(|text| text == "Hex picks a fast model")
     );
 
-    rt.state.settings.labs.meeting_summary_model = false;
-    refresh(&mut rt);
-    assert!(rt.find("meeting-summary-model").is_none(), "off, no picker");
-
     let rt = runtime("meetings-summary-model-not-running", true, size);
     assert!(rt.find("opencode-unavailable").is_some());
     assert!(rt.find("retry-opencode").is_some());
@@ -477,18 +535,6 @@ fn the_meeting_summary_model_is_picked_from_opencode_s_models() {
         Some("anthropic/claude-sonnet-4-5")
     );
     assert!(texts(&rt).iter().any(|text| text == "claude-sonnet-4-5"));
-
-    // A failed folder change opens Advanced with the fold closed; the picker
-    // shows there too, and the catalog is read for it.
-    let mut rt = runtime("meetings-summary-model", true, size);
-    rt.state.advanced.clear();
-    rt.state.platform.meeting_folder_error = Some("Couldn't use that folder".into());
-    refresh(&mut rt);
-    assert!(rt.find("meeting-folder-error").is_some());
-    assert!(rt.find("meeting-summary-model").is_some());
-    assert!(super::super::platform_settings::summary_model_shown(
-        &rt.state
-    ));
 }
 
 /// The cancel shortcut's row shows only in Toggle; its default, Escape,

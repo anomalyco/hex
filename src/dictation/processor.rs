@@ -487,7 +487,7 @@ pub(crate) fn generate_text(
 }
 
 /// One generation from exactly `model`, never another provider's: a failure
-/// is OpenCode's answer for that model (Labs › Choose meeting summary model).
+/// is OpenCode's answer for that model (the meeting summary model).
 pub(crate) fn generate_text_with(
     prompt: &str,
     model: &Model,
@@ -1464,7 +1464,7 @@ mod tests {
         assert!(!retryable_generation_error("processor returned empty text"));
     }
 
-    /// Labs › Choose meeting summary model: a chosen model is the only one
+    /// The meeting summary model: a chosen model is the only one
     /// asked, and its failure is reported rather than another provider tried.
     #[test]
     fn a_chosen_model_is_asked_alone_and_never_falls_back() {

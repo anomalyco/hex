@@ -103,7 +103,6 @@ pub enum Feature {
     KeepRecordings,
     HideMenuBarIcon,
     MovableMeetingCapsules,
-    MeetingSummaryModel,
     GnomeClipboardRestore,
     MeetingNotesVocabulary,
     NotchIndicator,
@@ -115,7 +114,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 47] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -155,7 +154,6 @@ impl Feature {
         Self::KeepRecordings,
         Self::HideMenuBarIcon,
         Self::MovableMeetingCapsules,
-        Self::MeetingSummaryModel,
         Self::GnomeClipboardRestore,
         Self::MeetingNotesVocabulary,
         Self::NotchIndicator,
@@ -228,7 +226,6 @@ impl Feature {
             | Self::KeepRecordings
             | Self::HideMenuBarIcon
             | Self::MovableMeetingCapsules
-            | Self::MeetingSummaryModel
             | Self::GnomeClipboardRestore
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
@@ -282,7 +279,6 @@ impl Feature {
             | Self::KeepRecordings
             | Self::HideMenuBarIcon => 20261102,
             Self::MovableMeetingCapsules
-            | Self::MeetingSummaryModel
             | Self::GnomeClipboardRestore
             | Self::MeetingNotesVocabulary
             | Self::NotchIndicator => 20261103,
@@ -374,7 +370,6 @@ impl Feature {
             | Self::ModelInPlace
             | Self::PickerDownloaded
             | Self::KeepRecordings
-            | Self::MeetingSummaryModel
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::FollowLiveTranscript
@@ -424,7 +419,6 @@ impl Feature {
             Self::KeepRecordings => "keep-recordings",
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
             Self::MovableMeetingCapsules => "movable-meeting-capsules",
-            Self::MeetingSummaryModel => "meeting-summary-model",
             Self::GnomeClipboardRestore => "gnome-clipboard-restore",
             Self::MeetingNotesVocabulary => "meeting-notes-vocabulary",
             Self::NotchIndicator => "notch-indicator",
@@ -478,7 +472,6 @@ impl Feature {
             Self::KeepRecordings => "labs.keep_recordings",
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
             Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
-            Self::MeetingSummaryModel => "labs.meeting_summary_model",
             Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
             Self::MeetingNotesVocabulary => "labs.meeting_notes_vocabulary",
             Self::NotchIndicator => "labs.notch_indicator",
@@ -592,9 +585,6 @@ impl Feature {
             Self::MovableMeetingCapsules => {
                 "Drag meeting capsules such as Meeting transcript ready out of the way; they come back in the corner you left them"
             }
-            Self::MeetingSummaryModel => {
-                "Choose the OpenCode provider and model that write meeting notes (meetings.opencode_model, provider/model)"
-            }
             Self::GnomeClipboardRestore => {
                 "Put the previous clipboard back after a paste on GNOME Wayland, through the XWayland clipboard while XWayland is running"
             }
@@ -668,7 +658,6 @@ impl Feature {
             Self::KeepRecordings => settings.labs.keep_recordings,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
-            Self::MeetingSummaryModel => settings.labs.meeting_summary_model,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
             Self::NotchIndicator => settings.labs.notch_indicator,
@@ -724,7 +713,6 @@ impl Feature {
             &mut labs.keep_recordings,
             &mut labs.hide_menu_bar_icon,
             &mut labs.movable_meeting_capsules,
-            &mut labs.meeting_summary_model,
             &mut labs.gnome_clipboard_restore,
             &mut labs.meeting_notes_vocabulary,
             &mut labs.notch_indicator,
@@ -780,7 +768,6 @@ impl Feature {
             Self::KeepRecordings => settings.labs.keep_recordings = on,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
-            Self::MeetingSummaryModel => settings.labs.meeting_summary_model = on,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
             Self::NotchIndicator => settings.labs.notch_indicator = on,
@@ -827,7 +814,7 @@ const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
-const MEETING_SUMMARY_MODEL: u64 = 1 << 24;
+// 1 << 24 was Labs › Choose meeting summary model, now Meetings › Summaries.
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
 const NOTCH_INDICATOR: u64 = 1 << 27;
@@ -998,13 +985,6 @@ pub fn movable_meeting_capsules() -> bool {
     on(MOVABLE_MEETING_CAPSULES) && Feature::MovableMeetingCapsules.on_this_os()
 }
 
-/// Meeting notes written with OpenCode use the saved
-/// `meetings.opencode_model`, with no fallback to another model (every OS
-/// with meetings; read at each generation).
-pub fn meeting_summary_model() -> bool {
-    on(MEETING_SUMMARY_MODEL) && Feature::MeetingSummaryModel.on_this_os()
-}
-
 /// Final meeting notes (title and summary) put the vocabulary ahead of the
 /// transcript (every OS with meetings; read at each generation, so
 /// Regenerate summary uses the current list).
@@ -1155,11 +1135,6 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MovableMeetingCapsules,
             settings.movable_meeting_capsules,
             MOVABLE_MEETING_CAPSULES,
-        ),
-        (
-            Feature::MeetingSummaryModel,
-            settings.meeting_summary_model,
-            MEETING_SUMMARY_MODEL,
         ),
         (
             Feature::GnomeClipboardRestore,
@@ -1687,7 +1662,7 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & GNOME_CLIPBOARD_RESTORE, 0);
-        assert_eq!(state & MEETING_SUMMARY_MODEL, 0);
+        assert_eq!(state & MEETING_NOTES_VOCABULARY, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
