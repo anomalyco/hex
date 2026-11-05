@@ -60,6 +60,10 @@ pub(super) fn type_wayland(text: &str, stop: &AtomicBool) -> Result<()> {
             return Err(eyre!("typing cancelled"));
         }
         let mut wtype = std::process::Command::new("wtype");
+        // wtype reads stdin as multibyte text; Hex may run with no locale set
+        // (a service started before the session), where UTF-8 would stop at
+        // the first non-ASCII character.
+        wtype.env("LC_ALL", "C.UTF-8");
         let input = match command {
             WtypeCommand::Text(text) => {
                 wtype.arg("-");
