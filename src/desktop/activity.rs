@@ -89,6 +89,7 @@ pub(crate) fn event_summary(event: &VoiceEvent) -> String {
             ..
         } => {
             let command = command.as_deref().unwrap_or("an unmatched command");
+            let heard = if heard.is_empty() { "speech" } else { heard };
             match outcome {
                 CommandOutcome::Ignored => format!("Ignored \"{heard}\""),
                 CommandOutcome::Woke => format!("\"{heard}\" woke Hex"),
