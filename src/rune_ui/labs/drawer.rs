@@ -141,6 +141,35 @@ fn body(ui: &Ui, p: Paint, entry: &Row) -> El {
             tr("Shows up in"),
             place(ui, p, entry.lab),
         ));
+    #[cfg(all(target_os = "macos", hex_capture))]
+    if entry.lab == Lab::Feature(Feature::Screenshots) {
+        let system = entry.on && crate::screenshots::system_takes_shortcut();
+        body = body.child(super::screenshots::body(ui, p, system));
+    }
+    #[cfg(all(target_os = "macos", hex_capture))]
+    if entry.lab == Lab::Feature(Feature::AnnotateReplay) {
+        let mut control = row()
+            .key("drawer-replay-shortcut-control")
+            .gap(4.0)
+            .center_y()
+            .child(super::super::general::keys_button(
+                ui,
+                p,
+                super::super::ShortcutTarget::CaptureReplay,
+            ));
+        if ui.settings.capture.replay_hotkey.is_some() {
+            control = control.child(super::super::controls::icon_button(
+                p,
+                "drawer-clear-capture-replay-shortcut",
+                &rune_theme_opencode::icons::TRASH,
+                tr("Clear shortcut"),
+                |ui: &mut Ui| {
+                    ui.update(|settings| settings.capture.replay_hotkey = None);
+                },
+            ));
+        }
+        body = body.child(fact(p, "replay-shortcut", tr("Shortcut"), control));
+    }
     if entry.lab == Lab::Feature(Feature::UnloadIdle) && entry.on {
         body = body.child(fact(
             p,

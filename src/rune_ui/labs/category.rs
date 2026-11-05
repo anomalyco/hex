@@ -82,7 +82,10 @@ impl Category {
             | Feature::MovableMeetingCapsules
             | Feature::MeetingSummaryModel
             | Feature::MeetingNotesVocabulary
-            | Feature::MeetingFinishedEvent => Self::Meetings,
+            | Feature::MeetingFinishedEvent
+            | Feature::MeetingPlatformIcons
+            | Feature::FollowLiveTranscript
+            | Feature::GnomeMeetingCapsules => Self::Meetings,
             Feature::LiveText
             | Feature::NotchIndicator
             | Feature::SmartSpacing
@@ -119,6 +122,7 @@ impl Category {
             Feature::HideMenuBarIcon
             | Feature::VoiceFilter
             | Feature::Playground
+            | Feature::Screenshots
             | Feature::AnnotateReplay => Self::App,
         }
     }
@@ -147,10 +151,12 @@ impl Place {
             | Feature::LiveChapters
             | Feature::MeetingSummaryModel
             | Feature::MeetingNotesVocabulary
-            | Feature::MeetingFinishedEvent => Self::Pane(Pane::Meetings),
-            Feature::StopWhenCallEnds | Feature::MovableMeetingCapsules => {
-                Self::Elsewhere(tr("Meeting capsules"))
-            }
+            | Feature::MeetingFinishedEvent
+            | Feature::MeetingPlatformIcons
+            | Feature::FollowLiveTranscript => Self::Pane(Pane::Meetings),
+            Feature::StopWhenCallEnds
+            | Feature::MovableMeetingCapsules
+            | Feature::GnomeMeetingCapsules => Self::Elsewhere(tr("Meeting capsules")),
             // A command, so never translated.
             Feature::SubtitleExport => Self::Elsewhere("hex meetings show"),
             Feature::LiveText | Feature::NotchIndicator => {
@@ -188,6 +194,7 @@ impl Place {
             Feature::UnloadIdle => Self::Elsewhere(tr("In the background")),
             Feature::VoiceFilter => Self::Pane(Pane::VoiceFilter),
             Feature::Playground => Self::Playground,
+            Feature::Screenshots => Self::Elsewhere(tr("Screenshot shortcut")),
             #[cfg(hex_capture)]
             Feature::AnnotateReplay => Self::Pane(Pane::Annotate),
             #[cfg(not(hex_capture))]

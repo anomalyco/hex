@@ -521,4 +521,9 @@ printf 'Installed Hex %s to %s\n' "$version" "$binary"
 printf 'Install a model: %s model install\n' "$binary"
 printf 'Launch Hex: %s\n' "$binary"
 printf 'Start in the background: %s start (quit with %s quit)\n' "$binary" "$binary"
-printf 'Uninstall: sh install-linux.sh uninstall\n'
+# A piped install leaves no script on disk, so point at the published one.
+if [ "${HEX_INSTALL_SOURCE:-}" = 1 ]; then
+  printf 'Uninstall: scripts/install-linux.sh uninstall (from the Hex checkout)\n'
+else
+  printf 'Uninstall: curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh -s -- uninstall\n'
+fi

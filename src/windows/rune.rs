@@ -171,7 +171,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         .ok();
     crate::windows::gpu_fallback::watch();
     let mut app = crate::rune_ui::app(Default::default())
-        .args(Vec::new())
+        .args(crate::rune_ui::window_args())
         .on_window(|window| {
             let _ = window.with_raw_handle(|handle| {
                 if let rune::raw_window_handle::RawWindowHandle::Win32(handle) = handle.as_raw() {

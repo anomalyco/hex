@@ -34,9 +34,9 @@ use block2::RcBlock;
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, NSObjectProtocol, Sel};
+use objc2::runtime::{AnyObject, NSObjectProtocol};
 use objc2::{MainThreadOnly, msg_send, sel};
-use objc2_app_kit::{NSApplication, NSEventModifierFlags, NSMenu, NSMenuItem};
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use objc2_foundation::{MainThreadMarker, NSAppleEventManager, NSObject, NSString, NSTimer};
 
 use crate::app_settings::AppSettings;
@@ -56,8 +56,15 @@ use crate::transcription::models::{
 };
 use crate::transcription::preparation::TranscriptionPreparation;
 
+mod activation;
 mod control;
+mod launch;
+mod main_menu;
 pub(crate) mod status_item;
+
+use activation::{observe_activation, reopen_on_activation};
+use launch::{LaunchWindow, launched_as_login_item, observe_launch, take_login_launch_activation};
+use main_menu::install_main_menu;
 
 #[cfg(test)]
 mod tests;
@@ -123,6 +130,8 @@ pub(crate) enum ShortcutTarget {
     SecondDictation,
     /// Toggle mode's cancel shortcut.
     Cancel,
+    /// Labs › Screenshots.
+    Screenshot,
 }
 
 /// What the runtime last published for the window and the menu bar.
@@ -307,6 +316,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     };
     shutdown.store(false, Ordering::Relaxed);
     watch_process();
+    // Observing first means a source change during startup still rebuilds
+    // the snapshot at the pump's first turn.
+    crate::keyboard_input_sources::start(mtm);
     crate::keyboard::initialize_layout()?;
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());
@@ -468,13 +480,19 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     let _ = WINDOW.set(window.clone());
     // The status item is created inside the loop; Hex can't run without a
     // way back to its window, so a failed item opens the window there.
-    let open_at_launch = settings_error.is_some()
-        || crate::meeting::watcher::should_open_app_on_launch(
+    // With the Dock icon shown, Hex starts windowless and opens the window
+    // once AppKit says the launch wasn't a login item.
+    let launch_window = if settings_error.is_some() {
+        LaunchWindow::Open
+    } else {
+        LaunchWindow::decide(
             settings.show_dock_icon,
             setup_ready,
             onboarding_completed,
             true,
-        );
+        )
+    };
+    let open_at_launch = launch_window == LaunchWindow::Open;
     if let Some(error) = settings_error {
         window.update(move |ui, _| crate::rune_ui::show_error(ui, error));
     }
@@ -507,6 +525,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     #[cfg(hex_capture)]
     let capture_overlays =
         Some(crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
+    // Labs › Screenshots: its own picker and the thumbnail.
+    #[cfg(hex_capture)]
+    crate::screenshots::install(&mut app);
     // `hex dictation` and `hex paste-last` go straight to the listener; the
     // rest reach the main thread's pump.
     let (pump_calls, pump_call_receiver) = mpsc::sync_channel(8);
@@ -572,6 +593,9 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
     // is in place before the loop runs; the rest of `target` waits below.
     let target = MenuTarget::new(mtm);
     observe_termination(&target);
+    if launch_window == LaunchWindow::OpenUnlessLoginItem {
+        observe_launch(&target);
+    }
     // The status item, HUD, and main menu wait for the window's first frame
     // so it reaches the screen without them; a launch without a window sets
     // them up in the loop's first turn. None of these updates change what the
@@ -933,6 +957,7 @@ fn start_main_thread() {
     );
     let indicator = DictationIndicatorUi::new(pump.hud.clone());
     install_main_menu(&target, mtm);
+    observe_activation(&target);
     // Inside the loop, once AppKit has started, so its own Apple event setup
     // can't replace this handler.
     // SAFETY: the target outlives the handler (kept in PUMP for the app's
@@ -953,6 +978,9 @@ fn start_main_thread() {
                     let switching = state.pump.runtime.published().is_some_and(|published| {
                         published.settings.keyboard_model_switching.enabled
                     });
+                    if crate::keyboard_input_sources::take_layout_change(mtm) {
+                        refresh_keyboard_layout(mtm);
+                    }
                     crate::keyboard_input_sources::observe(mtm, switching);
                     if let Some(source) = crate::keyboard_input_sources::take_change(mtm) {
                         let _ = state.pump.runtime.send(Request::InputSourceChanged(source));
@@ -980,6 +1008,21 @@ fn start_main_thread() {
             _menu_target: target,
         });
     });
+}
+
+/// Rebuilds the keyboard layout snapshot after the selected input source
+/// changed, here on the main thread, so a later ⌘V posts the key that types
+/// V now (t1304). Shortcuts on letter keys follow it; the listener rebinds a
+/// shortcut only once its machine is idle, so a recording goes on.
+fn refresh_keyboard_layout(mtm: MainThreadMarker) {
+    match crate::keyboard::refresh_layout(mtm) {
+        Ok(true) => {
+            tracing::info!("keyboard layout changed");
+            crate::app_settings::refresh_layout_hotkeys();
+        }
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "could not read the new keyboard layout"),
+    }
 }
 
 /// Whether the window is on screen.
@@ -1367,6 +1410,32 @@ objc2::define_class!(
             with_window(|window| show(window, Destination::Settings));
         }
 
+        /// Observed only when the Dock icon is shown and setup is done: a
+        /// manual launch opens the window, a login-item launch stays quiet.
+        #[unsafe(method(applicationDidFinishLaunching:))]
+        fn application_did_finish_launching(&self, _notification: Option<&AnyObject>) {
+            let login_item = launched_as_login_item();
+            if LaunchWindow::OpenUnlessLoginItem.opens(login_item) {
+                with_window(bring_forward);
+            } else {
+                tracing::info!("launched as a login item; starting without the window");
+            }
+        }
+
+        /// ⌘Tab (or any activation) with the window closed opens it where
+        /// it was, as clicking the Dock icon does.
+        #[unsafe(method(applicationDidBecomeActive:))]
+        fn application_did_become_active(&self, _notification: Option<&AnyObject>) {
+            let app = NSApplication::sharedApplication(self.mtm());
+            if !take_login_launch_activation() && reopen_on_activation(
+                app.activationPolicy() == NSApplicationActivationPolicy::Regular,
+                app.keyWindow().is_some(),
+                window_visible(),
+            ) {
+                with_window(bring_forward);
+            }
+        }
+
         /// `-[NSApplication terminate:]` calls `exit` right after this.
         #[unsafe(method(applicationWillTerminate:))]
         fn application_will_terminate(&self, _notification: Option<&AnyObject>) {
@@ -1392,80 +1461,4 @@ fn with_window(f: impl FnOnce(&rune::AppHandle<Ui>)) {
     if let Some(window) = WINDOW.get() {
         f(window);
     }
-}
-
-/// The menu bar while the window is active: Hex, File, View (with the
-/// Labs), Window.
-/// Rune draws no Edit menu items, so ⌘C/⌘V reach its text fields as keys.
-fn install_main_menu(target: &MenuTarget, mtm: MainThreadMarker) {
-    let main = NSMenu::new(mtm);
-    let name = crate::app_paths::app_name();
-    let (hide, quit) = (format!("Hide {name}"), format!("Quit {name}"));
-    let mut application = vec![];
-    if !crate::updater::managed_by_policy() {
-        application.push(Some(("Check for Updates…", sel!(checkForUpdates:), "")));
-        application.push(None);
-    }
-    application.extend([
-        Some(("Settings…", sel!(showSettings:), ",")),
-        None,
-        Some((hide.as_str(), sel!(hideHex:), "h")),
-        None,
-        Some((quit.as_str(), sel!(quitHex:), "q")),
-    ]);
-    let mut menus = vec![
-        (name, application),
-        (
-            "File",
-            vec![Some(("Close Window", sel!(closeWindow:), "w"))],
-        ),
-    ];
-    // Rune's own View › Playground item, which this menu bar replaces. A
-    // capital letter adds Shift: ⇧⌘D. It opens the playground only while
-    // Labs › Playground is on.
-    menus.push((
-        "View",
-        vec![Some(("Playground", sel!(togglePlayground:), "D"))],
-    ));
-    menus.push((
-        "Window",
-        vec![Some(("Minimize", sel!(minimizeWindow:), "m"))],
-    ));
-    for (title, items) in menus {
-        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(title));
-        for item in items {
-            match item {
-                Some((title, action, key)) => {
-                    menu.addItem(&menu_item(target, title, action, key, mtm));
-                }
-                None => menu.addItem(&NSMenuItem::separatorItem(mtm)),
-            }
-        }
-        let heading = NSMenuItem::new(mtm);
-        heading.setSubmenu(Some(&menu));
-        main.addItem(&heading);
-    }
-    NSApplication::sharedApplication(mtm).setMainMenu(Some(&main));
-}
-
-fn menu_item(
-    target: &MenuTarget,
-    title: &str,
-    action: Sel,
-    key: &str,
-    mtm: MainThreadMarker,
-) -> Retained<NSMenuItem> {
-    // SAFETY: a plain menu item whose action the target implements.
-    let item = unsafe {
-        NSMenuItem::initWithTitle_action_keyEquivalent(
-            NSMenuItem::alloc(mtm),
-            &NSString::from_str(title),
-            Some(action),
-            &NSString::from_str(key),
-        )
-    };
-    item.setKeyEquivalentModifierMask(NSEventModifierFlags::Command);
-    // SAFETY: the target lives as long as the app (kept in PUMP).
-    unsafe { item.setTarget(Some(target)) };
-    item
 }

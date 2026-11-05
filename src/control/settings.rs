@@ -221,6 +221,17 @@ const KEYS: &[Key] = &[
          turns it off",
     ),
     key(
+        "screenshots.hotkey",
+        Kind::Shortcut(HotkeySlot::Screenshot),
+        "Labs: the screenshot shortcut, command+shift+4 by default: drag an area, or \
+         press space to pick a window (macOS, with labs.screenshots)",
+    ),
+    optional(
+        "screenshots.folder",
+        Kind::Path,
+        "Labs: folder screenshots are saved to; none uses the Desktop (macOS)",
+    ),
+    key(
         "show_dock_icon",
         Kind::Bool,
         "Keep Hex in the Dock when Settings is closed (macOS)",
@@ -434,14 +445,34 @@ const KEYS: &[Key] = &[
         "Labs: the local API's GET /meetings/events tells one subscriber each finished meeting's id once its final transcript is written; no transcript, audio, path, or title",
     ),
     key(
+        "labs.screenshots",
+        Kind::Bool,
+        "Labs: screenshots.hotkey (command+shift+4) drags out an area or, after space, picks a window; the PNG is copied and saved to screenshots.folder (macOS)",
+    ),
+    key(
         "labs.annotate_replay",
         Kind::Bool,
-        "Labs: keep a rolling 15-second screen buffer so hex capture replay or capture.replay_hotkey saves what just happened (macOS 27+)",
+        "Labs: keep a rolling 15-second screen buffer so hex capture replay or capture.replay_hotkey saves what just happened; macOS shows the screen-recording dot the whole time it's on (macOS 27+)",
     ),
     key(
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
+    ),
+    key(
+        "labs.gnome_meeting_capsules",
+        Kind::Bool,
+        "Labs: on Wayland desktops without layer-shell, such as GNOME, the meeting capsules float over the call through XWayland while it is already running (Linux)",
+    ),
+    key(
+        "labs.meeting_platform_icons",
+        Kind::Bool,
+        "Labs: each recording in the Meetings list shows a small icon for its call app or website, or a neutral one when Hex doesn't know it",
+    ),
+    key(
+        "labs.follow_live_transcript",
+        Kind::Bool,
+        "Labs: while a meeting records, its transcript in Meetings scrolls to the newest line; scroll up to read earlier text, back to the bottom to follow again",
     ),
     key(
         "labs.output_fixes",
@@ -582,7 +613,7 @@ const KEYS: &[Key] = &[
     optional(
         "ui_language",
         Kind::Choice(&[
-            "en", "pl", "zh", "zh-Hant", "ja", "de", "es", "uk", "pt", "fr",
+            "en", "pl", "zh", "zh-Hant", "ja", "de", "es", "uk", "pt", "fr", "ru",
         ]),
         "Interface language; none follows the system",
     ),
@@ -658,10 +689,10 @@ const CAPTURE_KEYS: &[Key] = &[
         "Let screen recordings, captures included, show Hex's capsules, ink, and HUD (for demos)",
     ),
 ];
-#[cfg(hex_capture)]
-const RETENTION_DAYS: Kind = Kind::Integer { min: 1, max: 3650 };
 #[cfg(not(hex_capture))]
 const CAPTURE_KEYS: &[Key] = &[];
+#[cfg(hex_capture)]
+const RETENTION_DAYS: Kind = Kind::Integer { min: 1, max: 3650 };
 
 /// Settings that act only where Hex has a capability (by its
 /// `rune_ui::capabilities` name), the same one that shows their row in the
@@ -676,6 +707,8 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.meeting_summary_model", "meetings"),
     ("labs.meeting_notes_vocabulary", "meetings"),
     ("labs.meeting_finished_event", "meetings"),
+    ("labs.meeting_platform_icons", "meetings"),
+    ("labs.follow_live_transcript", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),
@@ -717,6 +750,12 @@ fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<Contro
         return Some(ControlError::new(
             "unsupported",
             format!("`{name}` belongs to a Labs feature this OS doesn't have"),
+        ));
+    }
+    if name.starts_with("screenshots.") && !cfg!(target_os = "macos") {
+        return Some(ControlError::new(
+            "unsupported",
+            format!("`{name}` belongs to Labs › Screenshots, which only macOS has"),
         ));
     }
     let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
@@ -946,6 +985,7 @@ pub fn apply(
         | "raw_dictation_hotkey"
         | "second_dictation_hotkey"
         | "cancel_hotkey"
+        | "screenshots.hotkey"
         | "capture.hotkey"
         | "capture.replay_hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
@@ -957,6 +997,7 @@ pub fn apply(
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
+                HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
                 #[cfg(hex_capture)]
@@ -1017,6 +1058,17 @@ pub fn apply(
             return Err(ControlError::new(
                 "shortcut-in-use",
                 "The capture shortcut is already in use; set capture.hotkey to another \
+                 shortcut first",
+            ));
+        }
+        "labs.screenshots"
+            if candidate.labs.screenshots
+                && candidate
+                    .hotkey_in_use(HotkeySlot::Screenshot, &candidate.screenshots.hotkey) =>
+        {
+            return Err(ControlError::new(
+                "shortcut-in-use",
+                "The screenshot shortcut is already in use; set screenshots.hotkey to another \
                  shortcut first",
             ));
         }

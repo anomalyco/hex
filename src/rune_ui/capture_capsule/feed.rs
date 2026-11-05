@@ -240,7 +240,14 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
         dests
             .iter()
             .map(|dest| {
-                Dest::new(dest.name.clone(), dest.why.clone()).session(dest.session.clone())
+                let folder = dest
+                    .directory
+                    .as_deref()
+                    .and_then(|directory| directory.file_name())
+                    .map(|name| name.to_string_lossy().into_owned());
+                Dest::new(dest.name.clone(), dest.why.clone())
+                    .session(dest.session.clone())
+                    .folder(folder)
             })
             .collect()
     };
@@ -291,9 +298,11 @@ pub(crate) struct CaptureOverlays {
 }
 
 impl CaptureOverlays {
-    /// Adds the three overlays, prewarmed and hidden, and starts following
-    /// captures. Away from macOS they make their GPU surfaces only to show,
-    /// so a Hex that never annotates holds none.
+    /// Adds the three overlays, hidden, and starts following captures. They
+    /// make their GPU surfaces only to show, and on macOS and Windows their
+    /// windows too, so a Hex that never annotates holds none: idle
+    /// screen-sized panels emptied macOS 27's Mission Control Space
+    /// thumbnails (#1315).
     pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
         let picker = PickerOverlay::install(app, act);
         let aim = picker.clone();
@@ -473,6 +482,7 @@ pub(crate) fn act(action: Action) {
             always: always.is_some(),
         })],
         Action::Undo { .. } => vec![command(CaptureCommand::Undo)],
+        Action::Hold(on) => vec![command(CaptureCommand::Hold(on))],
         Action::Pen => {
             crate::capture_host::toggle_pen();
             return;
@@ -793,6 +803,7 @@ mod tests {
             session: format!("ses_{name}"),
             name: name.into(),
             why: why.into(),
+            directory: None,
         }
     }
 

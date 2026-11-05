@@ -543,11 +543,18 @@ unsafe extern "C" fn event_callback(
         };
     }
     #[cfg(hex_capture)]
-    let list_swallows = match list_tap(event_type, event) {
-        ListSwallow::No => false,
-        ListSwallow::Only => return ptr::null_mut(),
-        ListSwallow::AfterListener => true,
+    let screenshot_swallows = match screenshot_tap(event_type, event) {
+        crate::screenshots::Take::No => false,
+        crate::screenshots::Take::Only => return ptr::null_mut(),
+        crate::screenshots::Take::AfterListener => true,
     };
+    #[cfg(hex_capture)]
+    let list_swallows = screenshot_swallows
+        || match list_tap(event_type, event) {
+            ListSwallow::No => false,
+            ListSwallow::Only => return ptr::null_mut(),
+            ListSwallow::AfterListener => true,
+        };
     #[cfg(not(hex_capture))]
     let list_swallows = false;
     #[cfg(hex_capture)]
@@ -704,6 +711,29 @@ fn list_takes_keys(capture_on: bool, open: bool, recording_shortcut: bool) -> bo
     capture_on && open && !recording_shortcut
 }
 
+/// Hands Labs › Screenshots its keys (`screenshots::key`): its shortcut,
+/// and Escape and Space while its picker shows.
+#[cfg(hex_capture)]
+fn screenshot_tap(event_type: u32, event: EventRef) -> crate::screenshots::Take {
+    if !matches!(event_type, EVENT_KEY_DOWN | EVENT_KEY_UP) {
+        return crate::screenshots::Take::No;
+    }
+    // SAFETY: CoreGraphics supplied a valid keyboard event.
+    let (code, repeat, flags) = unsafe {
+        (
+            CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) as u16,
+            CGEventGetIntegerValueField(event, KEYBOARD_EVENT_AUTOREPEAT) != 0,
+            CGEventGetFlags(event),
+        )
+    };
+    crate::screenshots::key(crate::screenshots::Key {
+        code,
+        down: event_type == EVENT_KEY_DOWN,
+        repeat,
+        flags,
+    })
+}
+
 /// Hands the open list its keys (`capture_host::list_key`) on the tap's
 /// thread; their releases stay with it even after it closes.
 #[cfg(hex_capture)]
@@ -771,9 +801,10 @@ fn list_tap(event_type: u32, event: EventRef) -> ListSwallow {
     unsafe { CGEventKeyboardGetUnicodeString(event, typed.len(), &mut length, typed.as_mut_ptr()) };
     let typed = String::from_utf16_lossy(&typed[..length.min(typed.len())]);
     match list_key(code, flags, &typed) {
-        // The suggestions take only the toast's Return and Tab; the rest
-        // goes on (the capture shortcut reaches them through the listener).
-        ListTap::Key(key @ (CapsuleKey::Return { .. } | CapsuleKey::Tab { .. })) if suggesting => {
+        // The suggestions take only what their keys say (the toast's Return
+        // and Tab, and text once the pointer moved onto them); the rest goes
+        // on (the capture shortcut reaches them through the listener).
+        ListTap::Key(key) if suggesting => {
             *taken |= bit;
             drop(taken);
             if capsule_key(key) {

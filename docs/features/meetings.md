@@ -30,13 +30,17 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   Transcript folder (~/Documents/Hex Meetings; Reveal / choose; an error opens
 │   │   Advanced), Summarize with Apple Intelligence (on by default), Summarize
 │   │   with OpenCode (off by default; when Apple Intelligence is off or missing),
-│   │   then with Labs › Choose meeting summary model on, Summary model: the
-│   │   provider/model OpenCode notes use, no fallback; empty -> the ranked fast
-│   │   models (meetings.opencode_model; see labs.md, #1107)
+│   │   then with Labs › Choose meeting summary model on, Summary model: a
+│   │   searchable picker of the running OpenCode's models (the catalog Modes
+│   │   uses, read only while this row shows) whose pick is the provider/model
+│   │   OpenCode notes use, no fallback; "Hex picks a fast model" clears it ->
+│   │   the ranked fast models. OpenCode missing or failing -> a notice with
+│   │   Check again / Retry, the saved model kept and shown by its ID
+│   │   (meetings.opencode_model; see labs.md, #1107, #1301)
 │   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
-│       │   Gather (always listed)
+│       │   Gather, Discord (always listed)
 │       └── then each website or app chosen for from an offer's "…"
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
            the pane leaves the sidebar
@@ -51,6 +55,17 @@ Apps -> GET /meetings/events on the local API      // Labs › Meeting finished 
         one SSE event per meeting once its final transcript is written:
         {"type":"meeting.finished","id":"<id>"}, nothing else; one subscriber;
         off -> 404 labs-off (docs/streams.md, labs.md)
+Recordings list icons                               // Labs › Meeting platform icons, off by default (#1290)
+        on -> each row's title gets a small faint icon: Zoom, Google Meet, Teams,
+        Slack, or Webex when the meeting's app names it, else a neutral call
+        icon (FaceTime, Discord, WhatsApp, manual recordings); off -> rows as before
+        (platform_icon in rune_ui/meetings.rs; labs.md)
+Live transcript scrolling                           // Labs › Follow live transcript, off by default (#1332)
+        on -> while the selected meeting is Starting or Recording (no Stop
+        pending), the detail card's scroll sticks to the bottom: new turns
+        stay in view; scrolling up stops following, scrolling back to the
+        bottom follows again. Finished meetings and off -> scroll by hand as before
+        (follows_live_transcript in rune_ui/meetings.rs; not observed on a real call)
 ```
 
 Requires the selected local dictation model, Microphone, and System Audio
@@ -112,12 +127,21 @@ Idle sleep -> systemd-inhibit idle:sleep (Linux),
     SetThreadExecutionState (Windows) while recording
 Tray -> Record meeting, Stop & transcribe, Copy last meeting transcript
     while Meetings is on
-Quit while recording -> audio kept; the transcript finishes at the next launch
+Quit while recording or transcribing -> audio kept; the transcript finishes at
+    the next launch
 Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     overlay there, only the HUD on XWayland, #1271)
     -> 2 s after the offer Rune reports the overlay unavailable -> logged
        "meeting recording offer could not show", and the window opens on
-       Meetings saying so with Rune's reason; its Start recording records
+       Meetings saying so with Rune's reason; its Start recording records;
+       while Labs › Floating meeting capsules on GNOME is off, the note
+       names it
+    ├── Labs › Floating meeting capsules on GNOME on (off by default, #1274),
+    │   layer-shell missing, this user's Xwayland already running (checked at
+    │   each show; never started) -> offer and recording capsules float on
+    │   XWayland: override-redirect, clicks on their buttons, never keyboard
+    │   focus; if Rune still can't open them, the pane path above
+    │   // checks: linux/meeting_capsules.rs gating tests; not run on GNOME
     └── not observed on a real GNOME session; no automated check
 Files -> Reveal opens the folder (xdg-open, Explorer); Delete moves to the
     freedesktop Trash or the Recycle Bin
@@ -145,12 +169,14 @@ hardware.
 ### Detect And Offer
 
 ```ts
-Zoom / Teams / Slack huddle / FaceTime / WhatsApp / browser call uses the microphone
+Zoom / Teams / Slack huddle / FaceTime / WhatsApp / Discord / browser call uses the microphone
   (WhatsApp: net.whatsapp.WhatsApp, the older desktop.WhatsApp, WhatsApp.exe or
   WhatsApp.Root.exe on Windows, web.whatsapp.com in a browser; 20 s, as voice
   notes also hold the microphone; Gather: com.gather.GatherV2 and its helpers,
   com.gather.Gather, Gather.exe, app.v2.gather.town and app.gather.town; 20 s,
-  as sitting in a space can hold it)
+  as sitting in a space can hold it; Discord: com.hnc.Discord and its helpers,
+  its Canary and PTB builds, Discord.exe, the Linux discord binary and Flatpak,
+  #1283)
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
   -> On the microphone for 2 s by the monotonic clock // meetings.detect
      │   Google Meet and Banshee (banshee.app) in a browser count as known
@@ -466,6 +492,10 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      (Idle menu bar: "Record Meeting" + "Copy Last Meeting Transcript")
   -> Floating recording indicator (when Show recording indicator is on) // meetings.indicator
      ├── Rune interactive overlay: a non-activating panel that never becomes key
+     ├── Only the drawn pill takes the pointer (OverlayInput::Regions, the
+     │   pill `.hit()`); the window is as wide as the open pill, and clicks
+     │   in its transparent rest reach the app beneath (#1305; not observed
+     │   on a real Mac)
      ├── In the saved recording_indicator_corner
      ├── Compact: pulsing red dot · title · mm:ss, plus "+N" when turns wait
      ├── Hover -> widens toward the screen with the actions below; pointer
@@ -503,8 +533,10 @@ Labs › Movable meeting capsules (macOS, off by default; #1093) // meetings.pan
   -> Off: top right below the menu bar, no drag, exactly as before
   Checks: a_released_panel_snaps_by_its_own_size,
   each_corner_places_the_panel_at_its_edges, only_a_movable_panel_drags
-  (rune_ui/meeting_capsules.rs); not observed on a real Mac. Not built:
-  clicks passing through the panel outside its buttons
+  (rune_ui/meeting_capsules.rs); not observed on a real Mac. Every panel
+  capsule takes the pointer only on its body, never the window's margin
+  around it (#1305); a click on the body outside its buttons still stops
+  there
 
 Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-stop
   Only a recording Hex started on its own (Always record); manual, offered,
@@ -664,6 +696,8 @@ Stop & Transcribe
 Hex quits while recording                           // meetings.quit
   -> Capture stops; WAVs and manifest finalized; no chunk starts, no model loads
   -> Interrupted with its rolling draft + final.pending beside the manifest
+Hex quits during Stop & Transcribe's final pass (#1284)
+  -> Same: Interrupted + final.pending, never Failed with "Hex is quitting"
   -> Next launch, Meetings on, no recording, once the dictation engine is up
      (or 30 s without one) -> full-WAV final pass -> Complete + Markdown + notes
      ├── Quit again or model not installed -> stays pending

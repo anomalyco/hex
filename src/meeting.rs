@@ -17,7 +17,8 @@ use crate::durable::{sync_directory, sync_file};
 
 const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
-/// Beside the manifest of a meeting Hex quit while recording: its audio is
+/// Beside the manifest of a meeting Hex quit while recording or during its
+/// final transcription: its audio is
 /// saved and its final transcript runs at the next launch.
 const FINAL_PENDING_FILE: &str = "final.pending";
 
@@ -559,6 +560,21 @@ pub fn record(
             rolling,
         ) {
             Ok(()) => manifest.status = MeetingStatus::Complete,
+            Err(error) if crate::desktop::process_exit::quitting() => {
+                // Quitting cut the final pass short: like quitting while
+                // recording, the transcript finishes at the next launch.
+                keep_rename(&meeting_dir, &mut manifest);
+                fs::write(meeting_dir.join(FINAL_PENDING_FILE), b"")?;
+                manifest.status = MeetingStatus::Interrupted;
+                manifest.error = None;
+                write_manifest(&meeting_dir, &manifest)?;
+                tracing::info!(
+                    meeting = manifest.id,
+                    %error,
+                    "Hex quit during final transcription; the transcript finishes at the next launch"
+                );
+                return Ok(manifest);
+            }
             Err(error) => {
                 keep_rename(&meeting_dir, &mut manifest);
                 manifest.status = MeetingStatus::Failed;

@@ -53,6 +53,8 @@ mod practice;
 mod scenes;
 #[cfg(hex_capture)]
 mod scrawl;
+#[cfg(hex_capture)]
+pub(crate) mod screenshot_thumbnail;
 mod settings;
 mod shortcut_mode;
 mod sidebar;
@@ -103,7 +105,9 @@ pub(crate) fn run_app(
 ) {
     use crate::linux::service::{Activation, Control};
     rune::set_app_id(crate::linux::portal::APP_ID);
-    let mut app = self::app(Some(host.clone())).args(Vec::new()).windowless();
+    let mut app = self::app(Some(host.clone()))
+        .args(window_args())
+        .windowless();
     // Tiling window managers float a window that maps at a fixed size.
     // Desktops that float every window need no such map, and KWin on X11
     // keeps a fixed-size window from fitting a small screen, its title bar
@@ -176,6 +180,15 @@ pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
     #[cfg(target_os = "macos")]
     let app = app.on_open_url(on_open_url);
     app
+}
+
+/// Rune's flags for the window on Linux and Windows: scroll bars show
+/// whenever there's more to scroll, as those platforms do, so a pointer
+/// without a wheel can reach them (#1209). macOS follows its own "Show scroll
+/// bars" setting.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) fn window_args() -> Vec<String> {
+    vec!["--scroll-bars".into(), "always".into()]
 }
 
 /// Beside a setting an organization locked (`crate::policy`).
@@ -460,10 +473,12 @@ pub(crate) fn shortcut_rule(
         HotkeySlot::CaptureReplay => ShortcutTarget::Capture,
         #[cfg(target_os = "macos")]
         HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
-        // Labs › Second dictation shortcut is macOS's; elsewhere a saved one
-        // meets the dictation shortcut's rules.
+        #[cfg(target_os = "macos")]
+        HotkeySlot::Screenshot => ShortcutTarget::Screenshot,
+        // Labs › Second dictation shortcut and Screenshots are macOS's;
+        // elsewhere a saved one meets the dictation shortcut's rules.
         #[cfg(not(target_os = "macos"))]
-        HotkeySlot::SecondDictation => ShortcutTarget::Dictation,
+        HotkeySlot::SecondDictation | HotkeySlot::Screenshot => ShortcutTarget::Dictation,
     };
     host::validate_hotkey(target, binding)
 }
@@ -1241,10 +1256,11 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let now = Instant::now();
     let mut changed = ui.save_drafts(now);
     changed |= paste_access::poll(ui);
-    // The OpenCode catalog is read only while the pane that uses it shows.
+    // The OpenCode catalog is read only while a pane that uses it shows:
+    // Modes, or Labs › Choose meeting summary model's picker.
     changed |= ui.models.poll(
         ui.live()
-            && ui.pane == Pane::Modes
+            && (ui.pane == Pane::Modes || platform_settings::summary_model_shown(ui))
             && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
     );
     changed |= ui.history.poll(ui.pane == Pane::History);
@@ -1461,20 +1477,8 @@ fn scroll_body(k: &rune_kit::Kit, key: &str, content: El) -> El {
 
 /// A [`scroll_body`] with its own top and bottom fades, and a scroll bar to
 /// drag while it overflows (#1209).
-fn faded_body(k: &rune_kit::Kit, key: &str, content: El, (top, bottom): (f32, f32)) -> El {
-    // Both shrink below their content in a fixed-height parent (#906).
-    let viewport = col().grow(1.0).shrink().min_h(0.0);
-    let viewport = viewport
-        .clip_fade(0.0, top, 0.0, bottom)
-        .scroll(ScrollSpec {
-            stick_bottom: false,
-        })
-        .child(col().key("inset").pt(top).pb(bottom).child(content));
-    let area = format!("{key}-area");
-    rune_kit::scroll_bar(k, &area, key, viewport)
-        .grow(1.0)
-        .shrink()
-        .min_h(0.0)
+fn faded_body(k: &rune_kit::Kit, key: &str, content: El, fades: (f32, f32)) -> El {
+    list_detail::faded_body_sticky(k, key, content, fades, false)
 }
 
 #[cfg(all(test, target_os = "linux"))]

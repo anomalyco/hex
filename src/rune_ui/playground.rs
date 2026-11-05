@@ -169,8 +169,14 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-delete", "Window/Meetings/Delete"),
     ("meetings-failed", "Window/Meetings/Failed"),
     ("meetings-empty", "Window/Meetings/Empty"),
+    ("meetings-platform-icons", "Window/Meetings/Platform icons"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
+    ("meetings-summary-model", "Window/Meetings/Summary model"),
+    (
+        "meetings-summary-model-not-running",
+        "Window/Meetings/Summary model without OpenCode",
+    ),
     ("meetings-allow", "Window/Meetings/Allow system audio"),
     ("meetings-calendar", "Window/Meetings/Calendar"),
     (
@@ -205,6 +211,7 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-labs", "Window/General/Labs"),
     ("mac-labs-link", "Window/General/Labs link"),
     ("mac-labs-on", "Window/General/Labs turned on"),
+    ("mac-labs-screenshots", "Window/General/Labs screenshots"),
     ("mac-labs-category", "Window/General/Labs category"),
     ("mac-labs-search", "Window/General/Labs search"),
     ("mac-labs-drawer", "Window/General/Labs drawer"),

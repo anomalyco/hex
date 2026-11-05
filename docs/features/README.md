@@ -39,8 +39,9 @@ default) shows each model's raw WER or CER with its language, dataset, source,
 and conditions (#647).
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
-used for any French system language (#892). Neither has had a native
-speaker's review yet. It offers 简体中文 (`zh`) and 繁體中文 (`zh-Hant`, #944);
+used for any French system language (#892), and Русский, used for any
+Russian system language (#1317). None of these has had a native speaker's
+review yet. It offers 简体中文 (`zh`) and 繁體中文 (`zh-Hant`, #944);
 Traditional Chinese is drafted from the Simplified strings by a character and
 Taiwan-usage phrase converter (`desktop/i18n/traditional_chinese.rs`), not yet
 reviewed by a native speaker.
@@ -49,6 +50,8 @@ The [vocabulary](vocabulary.md) biases transcription toward names you list.
 models another app already downloaded.
 [Annotate](capture.md) (macOS, Linux,
 and Windows) records the screen while you draw and talk and sends it to an agent.
+[Screenshots](labs.md) (Labs, macOS) takes CleanShot-style ⌘⇧4 area and
+window screenshots.
 The other capabilities stay here until they need their own verification recipe.
 
 ## Get Ready
@@ -572,11 +575,13 @@ labeled Not installed and can be cleared; a mapping to a model or language Hex n
 longer offers is dropped when settings load. Removing a source hides its row
 without erasing its saved mapping.
 
-Hex reads input sources only while the setting is on: the macOS main-thread TIS
-distributed-notification observer, the Windows runtime's poll of the foreground
-window's layout, and the Linux host's XKB connection (polled every 250 ms) exist
-only then and work without a Settings window; the window lists enabled sources
-only then. Windows lists the language bar's layouts, named by language and
+Hex reads input sources only while the setting is on: the Windows runtime's poll
+of the foreground window's layout and the Linux host's XKB connection (polled
+every 250 ms) exist only then, and the macOS main-thread TIS
+distributed-notification observer, which always runs to rebuild the keyboard
+layout snapshot ([recovery](recovery.md#keyboard-layout-resolution)), reports
+the selected source only then; all work without a Settings window, and the
+window lists enabled sources only then. Windows lists the language bar's layouts, named by language and
 keyboard. On Linux the row appears only in X11 sessions: Wayland compositors keep
 the active layout to themselves, with no general protocol (IBus and Fcitx report
 input-method engines, not the compositor's layout), so Wayland is unavailable. Source changes cancel
@@ -999,9 +1004,12 @@ The bar is Rune's `rune_kit::scroll_bar`, used by `scroll_body`, `faded_body`
 and every kit `Menu`, `Select` and `Combobox`. Checks:
 `a_long_transcript_scrolls_by_dragging_its_scroll_bar`, and in Rune the
 `scroll_bar` tests and `page_keys_move_a_scrolling_listbox_highlight_by_what_it_shows`.
-Gaps: dragging content with a touchscreen or pen does not scroll on desktop
-(Rune pans by touch only on the web), and the bar is not verified on a real
-Windows PC.
+A touchscreen (Wayland, X11, Windows; a pen where the system reports it as a
+touch) acts as the primary button (#1337): a tap clicks, dragging a slider or
+the bar drags it, and any other drag pans the scroll area under the finger and
+flings on; a second finger is ignored. Checks:
+`a_finger_pans_the_transcript_and_taps_the_sidebar`, and Rune's touch tests.
+Gaps: the bar and touch are not verified on a real Windows PC or touchscreen.
 
 ## Process Text With Modes
 
@@ -1094,12 +1102,17 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/browser context changes.
 
-Website context per OS: macOS reads no page at all until something uses it: a
-mode chosen by website, an OpenCode rewrite (its prompt names the site), or a
+Website context per OS: no OS reads a page until something uses it: a mode
+chosen by website, an OpenCode rewrite (its prompt names the site), or a
 script transformation (it receives the address)
-(`dictation::config::reads_browser`), so dictation's page reads never prompt
-without one (Meetings and media pause still ask browsers when on). Otherwise
-it asks the front tab of Safari, Orion, Chrome,
+(`dictation::config::reads_browser` on macOS, `ModeRuntime::reads_page` on
+Windows and Linux; a dictation without processing never reads it). On macOS,
+dictation's page reads then never prompt (Meetings and media pause still ask
+browsers when on). Windows starts no UI Automation walk of the browser, and
+Linux asks AT-SPI only for the process of a window the display server names no
+other way. Check: `the_page_is_read_only_when_processing_uses_it` in
+[dictation/modes.rs](../../src/dictation/modes.rs); not run against a live
+browser. When something uses the page, macOS asks the front tab of Safari, Orion, Chrome,
 Brave, Edge, Arc, Vivaldi, Opera, Helium, and Chromium over AppleScript (one
 Automation prompt per browser; a refusal keeps the application context) and
 reads any other app's focused AXWebArea `AXURL` (Firefox, Zen, web views).
@@ -1241,6 +1254,10 @@ Menu bar and Settings                    // maintenance
 Launch Hex                               // maintain.startup
 ├── Setup incomplete / permissions or model missing -> Open setup or Settings
 ├── Show Dock icon on -> Open Settings
+│   └── Started by Launch at login -> No startup window (#1321)
+│       ├── macOS marks the open-application Apple event as a login-item launch
+│       ├── The activation that comes with that launch doesn't reopen the window (#1298)
+│       └── check: login_item_launch_starts_without_the_window (the decision only); not run on a Mac
 └── Show Dock icon off + usable menu-bar item -> No startup window
     ├── Dictation starts independently of the Settings window
     └── Menu-bar Settings / Finder or Spotlight reopen -> Open or focus the window
@@ -1251,6 +1268,12 @@ Menu-bar installation fails -> Show Dock icon and open the window // recovery ac
 Show Dock icon off                       // maintain.dock-policy
 ├── Settings window open -> Dock icon stays // hiding it would deactivate Hex
 └── Settings window closes -> Menu-bar only
+
+⌘Tab to Hex while it's in the Dock and its window is closed   // maintain.app-switcher (#1298)
+└── Opens the window in front, on the pane it last showed, as the Dock icon does
+    ├── No reopen Apple event comes with ⌘Tab; Hex watches its own activation
+    └── Menu-bar only, an overlay that took the keyboard, or the window already open -> nothing
+    // check: switching_to_hex_opens_its_closed_window (the decision only); not run on a Mac
 ```
 
 ```ts
@@ -1598,6 +1621,9 @@ Linux beta                               // not macOS feature parity
 │       │   // seen in headless mutter 51 + Xwayland on apollo: HUD at the top
 │       │   // centre, animating, focus unchanged, the pointer over it hits the
 │       │   // window below; not yet on a real GNOME Shell session
+│       │   ├── Meeting capsules take clicks, so they open there only with Labs ›
+│       │   │   Floating meeting capsules on GNOME on and Xwayland already running
+│       │   │   (meetings.md, labs.md; #1274)
 │       │   ├── Drawn on the compositor's GPU only, opaque when its driver offers
 │       │   │   no translucent alpha (NVIDIA), never moved to an iGPU or lavapipe
 │       │   │   that can't make its swapchain (#979, #982)

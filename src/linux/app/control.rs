@@ -61,9 +61,15 @@ impl crate::control::host::Host for LinuxControl {
             .unwrap()
             .clone()
             .ok_or_else(|| ControlError::new("not-ready", "Hex is starting; try again"))?;
+        let mut listener = status.desktop.listener;
+        // A listener that couldn't start says why, as the window does
+        // ("Alt+Space is already in use by another X11 client").
+        if !listener.running && listener.warning.is_none() {
+            listener.warning = status.desktop.operation_error.clone();
+        }
         Ok(crate::control::host::HostState {
             capture: crate::control::host::capture_from_state(status.desktop.activity.state),
-            listener: status.desktop.listener,
+            listener,
             transcription: status.desktop.transcription,
             update: status.desktop.update_status,
             settings: status.settings,

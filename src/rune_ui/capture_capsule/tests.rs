@@ -362,8 +362,9 @@ fn every_state_draws_its_pieces() {
         ("processing", &["processing"]),
         ("saved", &["done", "paste", "inspect", "close"]),
         ("failed", &["done", "close"]),
-        ("rule-sent", &["done", "why", "undo", "close"]),
-        ("rule-final", &["done", "why", "paste", "inspect", "close"]),
+        // A rule's send counts down on the Undo chip, with no words.
+        ("rule-sent", &["done", "undo", "close"]),
+        ("rule-final", &["done", "paste", "inspect", "close"]),
         ("guess", &["done", "ask", "list", "row-SEER", "remembers"]),
         ("guess-five", &["done", "ask", "list", "row-SEER"]),
         ("no-answer", &["done", "why", "ask", "list"]),
@@ -389,7 +390,7 @@ fn every_state_draws_its_pieces() {
         ("list-guess", &["paste", "inspect"]),
         // Trimmed to Search and ✕: the capture is already copied.
         ("guess", &["field", "paste", "inspect", "footer"]),
-        ("rule-sent", &["paste", "ask", "inspect"]),
+        ("rule-sent", &["why", "paste", "ask", "inspect"]),
         ("rule-final", &["ask"]),
         ("sent", &["paste", "inspect"]),
     ];
@@ -471,11 +472,11 @@ fn the_widest_states_fit_the_panel() {
     }
 }
 
-/// The capsule says its shortcuts in quiet text ("⏎", "esc"), a hint's
-/// keys in one small rect at most. The one keycap tray is Search's: the
-/// capture shortcut that opens it, drawn as Settings draws it.
+/// Keycaps, as Settings draws a shortcut, are for Search's chip and the
+/// hints under the list; a chip on the top line says its shortcut in quiet
+/// text ("Next ⇥").
 #[test]
-fn the_capsule_draws_keycaps_only_on_search() {
+fn the_capsule_draws_keycaps_only_on_search_and_hints() {
     for (name, pres) in stills() {
         let rt = runtime(pres, false);
         for e in rt.elements() {
@@ -484,7 +485,10 @@ fn the_capsule_draws_keycaps_only_on_search() {
                 .as_deref()
                 .is_some_and(|k| k == "keys" || k.starts_with("keycap"));
             assert!(
-                !keycap || e.path.contains("ask-keys"),
+                !keycap
+                    || ["ask-keys", "footer", "card-hints"]
+                        .iter()
+                        .any(|at| e.path.contains(at)),
                 "{name}: {} is a keycap",
                 e.path
             );
@@ -660,13 +664,17 @@ fn top_line_from_env() {
     }
 }
 
-/// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark.
+/// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark;
+/// `HEX_CAPSULE_LANGUAGE=de` (any interface language code) in that language.
 #[test]
 fn capture_capsule_snapshots() {
     let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS") else {
         return;
     };
     top_line_from_env();
+    if let Ok(language) = std::env::var("HEX_CAPSULE_LANGUAGE") {
+        crate::desktop::i18n::apply(Some(&language));
+    }
     let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
         eprintln!("skipping capture capsule snapshots: no GPU adapter");
         return;
@@ -738,6 +746,19 @@ fn scripts() -> Vec<Script> {
                 (3.2, stage(Stage::Stopping)),
             ],
             end: 4.4,
+        },
+        // The capsule's whole life, nothing routed: it comes in recording,
+        // narrows to processing, widens to "Copied", and leaves.
+        Script {
+            name: "lifecycle",
+            beats: vec![
+                (0.2, stage(Stage::Recording)),
+                (1.6, stage(Stage::Stopping)),
+                (1.8, stage(Stage::Transcribing)),
+                (3.0, stage(Stage::Done)),
+                (4.4, In(Input::Dismiss)),
+            ],
+            end: 5.4,
         },
         Script {
             name: "chips-close",
@@ -1177,18 +1198,20 @@ fn clicks_on_the_capsule_do_what_they_say() {
         click_on(&mut rt, "ask", 0);
         assert!(keys(&rt).iter().any(|k| k == "field"), "{:?}", keys(&rt));
 
-        // A rule's send: Undo takes it back and offers the list again, where
-        // a click redirects it.
+        // A rule's send: pointing at Undo holds it, Undo takes it back and
+        // offers the list again, where a click redirects it.
         let (mut rt, actions) = live(routed(rule()));
         click_on(&mut rt, "undo", 0);
-        assert_eq!(
-            *actions.lock().unwrap(),
-            vec![Action::Undo { to: "SEER".into() }]
-        );
+        let undo = [
+            Action::Hold(true),
+            Action::Undo { to: "SEER".into() },
+            Action::Hold(false),
+        ];
+        assert_eq!(*actions.lock().unwrap(), undo);
         click_on(&mut rt, "row-HOME", 0);
         assert_eq!(
             *actions.lock().unwrap(),
-            vec![Action::Undo { to: "SEER".into() }, send("HOME")]
+            [undo.as_slice(), &[send("HOME")]].concat()
         );
 
         // ✕ closes.

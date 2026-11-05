@@ -478,6 +478,14 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings.view = meetings::View::Settings;
         ui.pane = Pane::Meetings;
     }),
+    // Labs › Choose meeting summary model: the picker in Advanced, then
+    // with OpenCode not running, the saved model kept.
+    ("meetings-summary-model", |ui| {
+        summary_model_scene(ui, models::Models::fixture())
+    }),
+    ("meetings-summary-model-not-running", |ui| {
+        summary_model_scene(ui, models::Models::fixture_not_running())
+    }),
     // System Audio not yet allowed: tap Allow to wait, again to grant.
     ("meetings-allow", |ui| {
         *ui = mac_fixture();
@@ -533,6 +541,12 @@ pub(super) const SCENES: &[Scene] = &[
     ("meetings-chapters", |ui| {
         *ui = mac_fixture();
         ui.meetings = meetings::MeetingsPane::chapters_fixture();
+        ui.pane = Pane::Meetings;
+    }),
+    ("meetings-platform-icons", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.meeting_platform_icons = true;
+        ui.meetings = meetings::MeetingsPane::platforms_fixture();
         ui.pane = Pane::Meetings;
     }),
     ("meetings-empty", |ui| {
@@ -629,6 +643,12 @@ pub(super) const SCENES: &[Scene] = &[
     ("mac-labs-drawer", |ui| {
         labs_with_some_on(ui);
         ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::LiveText));
+    }),
+    // Labs › Screenshots' drawer (macOS only: elsewhere the lab has no row).
+    ("mac-labs-screenshots", |ui| {
+        labs_with_some_on(ui);
+        ui.settings.labs.screenshots = true;
+        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::Screenshots));
     }),
     ("mac-production", |ui| {
         *ui = mac_fixture();
@@ -782,6 +802,20 @@ pub(super) fn mac_fixture() -> Ui {
     });
     ui.meetings = meetings::MeetingsPane::fixture();
     ui
+}
+
+/// Meetings › Settings with Advanced open, Summarize with OpenCode and Labs ›
+/// Choose meeting summary model on, a model saved, and `models` as the
+/// OpenCode catalog.
+fn summary_model_scene(ui: &mut Ui, models: models::Models) {
+    *ui = mac_fixture();
+    ui.settings.labs.meeting_summary_model = true;
+    ui.settings.meetings.summarize_with_opencode = true;
+    ui.settings.meetings.opencode_model = Some("anthropic/claude-sonnet-4-5".into());
+    ui.models = models;
+    ui.advanced = vec![Pane::Meetings];
+    ui.meetings.view = meetings::View::Settings;
+    ui.pane = Pane::Meetings;
 }
 
 fn shortcut_row(ui: &mut Ui, capture: Capture) {

@@ -176,9 +176,6 @@ pub(super) struct MeetingsPane {
     copied: Option<(String, String)>,
     pub(super) start_pending: bool,
     pub(super) stop_pending: bool,
-    /// Labs › Choose meeting summary model's field while it holds typing
-    /// not yet saved; `None` shows the saved model.
-    pub(super) summary_model: Option<TextEdit>,
     /// Where Linux and Windows perform meeting requests.
     #[cfg(not(target_os = "macos"))]
     pub(super) local: super::meetings_host::LocalMeetings,
@@ -394,6 +391,27 @@ impl MeetingsPane {
             selected: Some("preview-notes".into()),
             ..Self::default()
         }
+    }
+
+    /// The fixture with recordings from more call services, for Labs ›
+    /// Meeting platform icons: a Zoom call, a Google Meet tab, a Teams
+    /// website call, a Slack huddle, FaceTime, and one started by hand.
+    pub(super) fn platforms_fixture() -> Self {
+        let mut pane = Self::fixture();
+        let mut more = Vec::new();
+        for (id, title, app) in [
+            ("preview-meet", "Weekly sync", "Google Meet"),
+            ("preview-teams", "Vendor check-in", "teams.microsoft.com"),
+            ("preview-huddle", "Release huddle", "Slack Huddle"),
+        ] {
+            let mut meeting = pane.meetings[2].clone();
+            meeting.id = id.into();
+            meeting.title = title.into();
+            meeting.app = Some(app.into());
+            more.push(meeting);
+        }
+        pane.meetings.splice(2..2, more);
+        pane
     }
 
     /// The fixture with live chapters (Labs) on the
@@ -671,6 +689,27 @@ fn row_meta(pane: &MeetingsPane, meeting: &Meeting, p: Paint) -> (String, Option
     (parts.join(" · "), ink)
 }
 
+/// Labs › Meeting platform icons: the icon before a row's title, the call
+/// service's when its app names one and a neutral one otherwise (another
+/// app, or a meeting started by hand). `None` while the lab is off.
+fn platform_icon(ui: &Ui, meeting: &Meeting) -> Option<&'static rune::Icon> {
+    if !ui.settings.labs.meeting_platform_icons
+        || !crate::labs::Feature::MeetingPlatformIcons.shipped()
+    {
+        return None;
+    }
+    Some(
+        match meeting
+            .app
+            .as_deref()
+            .and_then(crate::calendar::CallProvider::from_meeting_app)
+        {
+            Some(provider) => super::platform_settings::provider_icon(provider),
+            None => &super::icons::CALL,
+        },
+    )
+}
+
 /// Copy transcript as an icon: a completed row's hover action, or the
 /// card's.
 fn copy_action(p: Paint, pane: &MeetingsPane, meeting: &Meeting, what: &'static str) -> El {
@@ -751,7 +790,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             let completed = meeting.status == Status::Complete && !meeting.turns().is_empty();
             let id = meeting.id.clone();
             list = list.child(
-                ld::item(
+                ld::item_with_icon(
                     p,
                     Item {
                         key: format!("meeting-{}", meeting.id),
@@ -765,6 +804,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                             .collect(),
                         selected: pane.selected.as_deref() == Some(meeting.id.as_str()),
                     },
+                    platform_icon(ui, meeting),
                     move |ui: &mut Ui| ui.meetings.select(id.clone()),
                 )
                 .position_in_set(index + 1, count),
@@ -997,7 +1037,22 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         .shrink()
         .child(ld::card_header(title, meta, actions))
         .children(confirm)
-        .child(ld::card_scroll(p, "meeting-transcript", body))
+        .child(ld::card_scroll_sticky(
+            p,
+            "meeting-transcript",
+            body,
+            follows_live_transcript(ui, meeting),
+        ))
+}
+
+/// Labs › Follow live transcript: a recording meeting's transcript keeps
+/// its newest line in view while scrolled to the bottom. Off, and for any
+/// meeting not recording, the card scrolls only by hand, as before.
+fn follows_live_transcript(ui: &Ui, meeting: &Meeting) -> bool {
+    ui.settings.labs.follow_live_transcript
+        && crate::labs::Feature::FollowLiveTranscript.shipped()
+        && matches!(meeting.status, Status::Starting | Status::Recording)
+        && !ui.meetings.stop_pending
 }
 
 /// The meeting's chapters, each with its start, name, line, and Copy
@@ -1264,6 +1319,51 @@ mod tests {
         stop(&mut ui);
         assert!(!ui.meetings.stop_pending);
         assert!(ui.meetings.action_error.is_some());
+    }
+
+    /// Labs › Meeting platform icons: no icon while off; on, a known call
+    /// service's icon, and the neutral one for any other or no app (#1290).
+    #[test]
+    fn platform_icons_show_only_with_their_lab_and_fall_back_to_a_neutral_one() {
+        let mut settings = crate::app_settings::AppSettings::default();
+        let ui = Ui::with(settings.clone(), Service::Fixture(Vec::new()));
+        let pane = MeetingsPane::platforms_fixture();
+        assert!(
+            pane.meetings
+                .iter()
+                .all(|meeting| platform_icon(&ui, meeting).is_none())
+        );
+        settings.labs.meeting_platform_icons = true;
+        let ui = Ui::with(settings, Service::Fixture(Vec::new()));
+        let name = |id: &str| {
+            let meeting = pane.meeting(id).unwrap();
+            platform_icon(&ui, meeting).map(|icon| icon.name)
+        };
+        assert_eq!(name("preview-live"), Some("hex-provider-zoom"));
+        assert_eq!(name("preview-meet"), Some("hex-provider-meet"));
+        assert_eq!(name("preview-teams"), Some("hex-provider-teams"));
+        assert_eq!(name("preview-huddle"), Some("hex-provider-slack"));
+        assert_eq!(name("preview-design"), Some("hex-row-call"));
+        assert_eq!(name("preview-failed"), Some("hex-row-call"));
+    }
+
+    /// Labs › Follow live transcript: only a recording meeting's transcript
+    /// follows its newest line, and only with the lab on (#1332).
+    #[test]
+    fn only_a_recording_transcript_follows_and_only_with_its_lab() {
+        let mut settings = crate::app_settings::AppSettings::default();
+        let pane = MeetingsPane::fixture();
+        let live = pane.meeting("preview-live").unwrap();
+        let finished = pane.meeting("preview-notes").unwrap();
+        let ui = Ui::with(settings.clone(), Service::Fixture(Vec::new()));
+        assert!(!follows_live_transcript(&ui, live));
+        assert!(!follows_live_transcript(&ui, finished));
+        settings.labs.follow_live_transcript = true;
+        let mut ui = Ui::with(settings, Service::Fixture(Vec::new()));
+        assert!(follows_live_transcript(&ui, live));
+        assert!(!follows_live_transcript(&ui, finished));
+        ui.meetings.stop_pending = true;
+        assert!(!follows_live_transcript(&ui, live));
     }
 
     /// Off a Mac the notes are written by OpenCode, so the progress line

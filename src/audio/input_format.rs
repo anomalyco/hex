@@ -44,9 +44,42 @@ pub(super) fn start_stream_with_fallback(
     device_name: &str,
     default_name: Option<String>,
 ) -> Result<StartedStream> {
+    // Windows opens the endpoint plainly, in its unchanged mix format, before
+    // cpal probes it: Intel Smart Sound refused every stream cpal built and
+    // then every client in any process (#988).
+    #[cfg(target_os = "windows")]
+    match super::wasapi_capture::start(device, device_name, default_name.is_some()) {
+        Ok(started) => return Ok(started),
+        Err(wasapi_error) => tracing::warn!(
+            error = format!("{wasapi_error:#}"),
+            device = %device_name,
+            "the microphone refused every direct wasapi path; trying cpal's streams"
+        ),
+    }
+    note_cpal_call(
+        device,
+        "cpal default_input_config: IMMDevice::Activate, GetMixFormat, IAudioClient2::GetBufferSizeLimits, GetDevicePeriod",
+    );
     let supported = device
         .default_input_config()
         .wrap_err("could not read the input device configuration")?;
+    // ALSA's default period, PipeWire's included, can be large: about a
+    // second of audio per chunk put speech from before the press into the
+    // pre-roll (#1309). Ask for about 20 ms first.
+    #[cfg(target_os = "linux")]
+    if let Some(&period) =
+        fixed_buffer_sizes(supported.sample_rate(), supported.buffer_size()).first()
+    {
+        match start_stream(device, &supported, period, default_name.clone()) {
+            Ok(started) => return Ok(started),
+            Err(error) => tracing::warn!(
+                error = format!("{error:#}"),
+                device = %device_name,
+                buffer = ?period,
+                "the microphone refused a short period; using its default"
+            ),
+        }
+    }
     let error = match start_stream(
         device,
         &supported,
@@ -61,18 +94,6 @@ pub(super) fn start_stream_with_fallback(
         device = %device_name,
         "the microphone refused its default format; trying the others it lists"
     );
-    // Intel Smart Sound refused every stream cpal built, at any format and
-    // buffer, so Hex tries its own WASAPI paths next (#988).
-    #[cfg(target_os = "windows")]
-    match super::wasapi_capture::start(device, device_name) {
-        Ok(started) => return Ok(started),
-        Err(wasapi_error) => tracing::warn!(
-            error = format!("{wasapi_error:#}"),
-            device = %device_name,
-            cpal_thread_apartment = %super::wasapi_capture::apartment(),
-            "the microphone refused every direct wasapi path; trying the formats it lists"
-        ),
-    }
     // Some drivers refuse every format with the backend's default buffer
     // (Intel Smart Sound answered E_INVALIDARG for each, #988) yet accept
     // the same format with an explicit buffer duration, so each format is
@@ -129,6 +150,18 @@ fn fixed_buffer_sizes(rate: u32, reported: &SupportedBufferSize) -> Vec<BufferSi
     sizes
 }
 
+/// Logs a cpal call that reaches the endpoint, in the same numbered order as
+/// Hex's own WASAPI calls (#988).
+fn note_cpal_call(device: &Device, call: &str) {
+    #[cfg(target_os = "windows")]
+    super::wasapi_capture::note_call(
+        call,
+        &device.id().map(|id| id.id().to_owned()).unwrap_or_default(),
+    );
+    #[cfg(not(target_os = "windows"))]
+    let _ = (device, call);
+}
+
 fn is_supported_sample_format(format: SampleFormat) -> bool {
     matches!(
         format,
@@ -152,6 +185,10 @@ fn alternative_input_configs(
     device: &Device,
     default: &SupportedStreamConfig,
 ) -> Vec<SupportedStreamConfig> {
+    note_cpal_call(
+        device,
+        "cpal supported_input_configs: IsFormatSupported(shared) for each common rate and sample format",
+    );
     let ranges = match device.supported_input_configs() {
         Ok(ranges) => ranges,
         Err(error) => {
@@ -194,6 +231,13 @@ fn start_stream(
     buffer_size: BufferSize,
     default_name: Option<String>,
 ) -> Result<StartedStream> {
+    note_cpal_call(
+        device,
+        &format!(
+            "cpal build_input_stream ({}, buffer {buffer_size:?}): IMMDevice::Activate, IAudioClient::Initialize(shared, event callback)",
+            describe_config(supported)
+        ),
+    );
     let sample_format = supported.sample_format();
     let mut config: StreamConfig = (*supported).into();
     config.buffer_size = buffer_size;

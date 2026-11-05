@@ -42,6 +42,8 @@ const SLIDER_W: f32 = SIDEBAR_W - 2.0 * PAD - 2.0 * CARD_PAD;
 enum Step {
     Input(Input),
     Click(Id),
+    /// The pointer comes onto the capsule or leaves it.
+    Hover(bool),
     /// Starts the whole flow again, when looping.
     Again,
 }
@@ -72,7 +74,12 @@ pub(crate) struct Playground {
 
 /// Opens the playground and runs it until its window closes.
 pub(crate) fn run(rune_args: Vec<String>) {
-    let _ = crate::feedback::preload();
+    // A headless still or clip is silent.
+    if rune::tooling::Args::parse_from(rune_args.clone()).headless() {
+        crate::feedback::set_enabled(false);
+    } else {
+        let _ = crate::feedback::preload();
+    }
     crate::feedback::set_volume(0.5);
     let spec = rune::AppSpec {
         title: "Hex capsule playground",
@@ -146,6 +153,21 @@ const SCENES: &[Scene] = &[
             ],
         )
     }),
+    // Typed over the suggestions, with the pointer on them.
+    ("typed", |s| {
+        scene(
+            s,
+            &[
+                record(),
+                Step::Input(stop()),
+                done(),
+                routed(guess()),
+                Step::Input(Input::Type("h".into())),
+                Step::Input(Input::Type("e".into())),
+                Step::Input(Input::Type("x".into())),
+            ],
+        )
+    }),
     ("picked", |s| {
         scene(
             s,
@@ -167,7 +189,114 @@ const SCENES: &[Scene] = &[
     }),
     // Allow walks it to granted, as System Settings would.
     ("permission", |s| scene(s, &[needs_screen()])),
+    // Timed stories for review clips (`-- --video … --scene clip-…`).
+    ("clip-rule", |s| {
+        clip(
+            s,
+            &[(2.5, routed(rule())), (5.5, Step::Input(Input::Settled))],
+        )
+    }),
+    ("clip-pick", |s| {
+        clip(
+            s,
+            &[
+                (2.5, routed(guess())),
+                (3.6, Step::Input(Input::SendRow(0))),
+            ],
+        )
+    }),
+    // The pointer holds a rule's countdown 1.5 s in, for 2 s: the send
+    // waits, then goes once it leaves, with the 3.5 s it had left.
+    ("clip-hover-pause", |s| {
+        clip(
+            s,
+            &[
+                (2.5, routed(rule())),
+                (4.0, Step::Hover(true)),
+                (6.0, Step::Hover(false)),
+                (7.5, Step::Input(Input::Settled)),
+            ],
+        )
+    }),
+    ("clip-saved", |s| clip(s, &[(5.0, routed(guess()))])),
+    ("clip-words", |s| {
+        clip(
+            s,
+            &[
+                (
+                    2.5,
+                    Step::Input(Input::Failed(
+                        Failure::Send("SEER".into()),
+                        Some(
+                            "OpenCode said: Unable to read attachment \
+                             file:///Users/alex/captures/2026-11-04/sheet.png"
+                                .into(),
+                        ),
+                    )),
+                ),
+                (5.0, Step::Input(Input::Dismiss)),
+                (5.4, record()),
+                (6.0, Step::Input(stop())),
+                (6.6, done()),
+                (7.0, routed(Route::NoAnswer { recent: recent() })),
+                (9.5, Step::Input(Input::Dismiss)),
+                (9.9, record()),
+                (10.5, Step::Input(stop())),
+                (11.1, done()),
+                (11.5, routed(guess())),
+                (12.0, Step::Input(Input::Shift(true))),
+                (12.4, Step::Input(Input::SendRow(0))),
+                (12.5, Step::Input(Input::Shift(false))),
+                (14.0, Step::Click(Id::Undo)),
+                (14.1, Step::Input(Input::Undone(Undone::TooLate))),
+            ],
+        )
+    }),
+    ("clip-search", |s| {
+        clip(
+            s,
+            &[
+                (2.5, routed(guess())),
+                (3.4, Step::Input(Input::OpenList)),
+                (4.2, Step::Input(Input::Type("x".into()))),
+                (4.5, Step::Input(Input::Type("y".into()))),
+                (4.8, Step::Input(Input::Type("z".into()))),
+                (6.0, Step::Input(Input::Send { always: false })),
+            ],
+        )
+    }),
+    ("clip-undo-lone", |s| {
+        clip(
+            s,
+            &[
+                (2.5, routed(lone_rule())),
+                (5.5, Step::Input(Input::Settled)),
+                (6.2, Step::Click(Id::Undo)),
+                (9.0, Step::Input(Input::SendRow(0))),
+            ],
+        )
+    }),
 ];
+
+/// A capture recorded and written, then `steps` at their times.
+fn clip(s: &mut CapsuleState, steps: &[(f64, Step)]) {
+    if let Some(pg) = s.playground.as_mut() {
+        pg.queue = [(0.3, record()), (1.3, Step::Input(stop())), (2.1, done())]
+            .into_iter()
+            .chain(steps.iter().cloned())
+            .collect();
+    }
+}
+
+/// A saved rule with no other session to offer.
+fn lone_rule() -> Route {
+    Route::Rule {
+        to: Dest::new("SEER", "rule: docs.example.com"),
+        suggested: Vec::new(),
+        recent: Vec::new(),
+        site: Some("docs.example.com".into()),
+    }
+}
 
 /// A capture refused for Screen Recording: the permission helper.
 fn needs_screen() -> Step {
@@ -236,11 +365,16 @@ fn routed(route: Route) -> Step {
     Step::Input(Input::Routed(route))
 }
 
+/// `name` working in `folder`.
+fn dest(name: &str, why: &str, folder: &str) -> Dest {
+    Dest::new(name, why).folder(Some(folder.into()))
+}
+
 fn recent() -> Vec<Dest> {
     vec![
-        Dest::new("RUNE", "2 min ago"),
-        Dest::new("SCRAWL", "an hour ago"),
-        Dest::new("HOME", "yesterday"),
+        dest("RUNE", "2 min ago", "rune"),
+        dest("SCRAWL", "an hour ago", "hex"),
+        dest("HOME", "yesterday", "home"),
     ]
 }
 
@@ -258,9 +392,9 @@ fn rule() -> Route {
 fn guess() -> Route {
     Route::Guess {
         suggested: vec![
-            Dest::new("HEX", "you were just in it"),
-            Dest::new("SEER", "same page"),
-            Dest::new("HOME", "mentioned"),
+            dest("HEX", "you were just in it", "hex"),
+            dest("SEER", "same page", "seer"),
+            dest("HOME", "mentioned", "home"),
         ],
         recent: recent(),
         site: Some("problems.kitlangton.com".into()),
@@ -314,6 +448,7 @@ impl Playground {
             | Action::Send { .. }
             | Action::Paste
             | Action::Pen
+            | Action::Hold(_)
             | Action::Inspect => {}
         }
     }
@@ -375,6 +510,10 @@ fn poll(s: &mut CapsuleState, wall: f64, tx: &mut Tx) -> bool {
                 s.now = now;
                 s.click(id, tx);
             }
+            Step::Hover(on) => {
+                s.now = now;
+                s.hover(super::Part::Pill, on, tx);
+            }
             Step::Again => {
                 if let Some(pg) = s.playground.as_mut() {
                     pg.play();
@@ -412,6 +551,10 @@ fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
         keys,
         crate::capture_host::CapsuleKeys::Suggest { cycle: true, .. }
     );
+    let search = matches!(
+        keys,
+        crate::capture_host::CapsuleKeys::Suggest { search: true, .. }
+    );
     let escape = matches!(
         keys,
         crate::capture_host::CapsuleKeys::List | crate::capture_host::CapsuleKeys::Picker
@@ -438,6 +581,14 @@ fn on_key(s: &mut CapsuleState, key: &KeyEvent, tx: &mut Tx) -> bool {
         Key::Tab if cycle => Input::Cycle(if key.mods.shift { -1 } else { 1 }),
         Key::Backspace if list => Input::Backspace,
         Key::Text(t) if list => Input::Type(t.clone()),
+        Key::Text(t)
+            if search
+                && !key.mods.cmd
+                && !key.mods.ctrl
+                && crate::capture_host::opens_search(t) =>
+        {
+            Input::Type(t.clone())
+        }
         _ => return false,
     };
     s.inbox.push(input);
@@ -931,6 +1082,7 @@ fn tuning(p: Paint, pg: &Playground, w: f32, standalone: bool) -> El {
         ("Stop", Cue::Stop),
         ("Sent", Cue::Sent),
         ("Undo", Cue::TakenBack),
+        ("Discard", Cue::Discarded),
         ("Failed", Cue::Failed),
     ];
     // Standalone, the playground switches Hex's sounds and sets their

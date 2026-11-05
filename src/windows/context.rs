@@ -42,12 +42,14 @@ pub struct PendingContext {
 
 /// Begin reading the foreground context at the moment the dictation is
 /// submitted; `finish` collects the browser host after inference, hiding
-/// the UIA walk behind it.
-pub fn begin_capture() -> PendingContext {
+/// the UIA walk behind it. The page is read only when `read_page` says
+/// processing uses it (`ModeRuntime::reads_page`): a UIA client turns on a
+/// Chromium browser's accessibility tree, and `finish` waits for the walk.
+pub fn begin_capture(read_page: bool) -> PendingContext {
     let application = crate::windows::input::foreground_process_stem();
     let url = application
         .as_deref()
-        .filter(|stem| BROWSER_STEMS.contains(stem))
+        .filter(|stem| read_page && BROWSER_STEMS.contains(stem))
         .and_then(|_| spawn_url_read());
     PendingContext { application, url }
 }
@@ -193,7 +195,7 @@ mod tests {
     use crate::dictation::modes::canonical_host;
 
     fn capture() -> ContextSnapshot {
-        begin_capture().finish()
+        begin_capture(true).finish()
     }
 
     #[test]
