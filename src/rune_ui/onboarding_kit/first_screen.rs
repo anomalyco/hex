@@ -13,8 +13,8 @@ const WINDOW: [f32; 2] = [980.0, 760.0];
 const NOTE_FROM_BOTTOM: f32 = 40.0;
 
 /// How much of the model is down, beside its percentage: `"190 of 610 MB"`.
-pub(super) fn amount(p: Paint, d: Download) -> Option<El> {
-    (!d.done() && d.total > 0).then(|| {
+pub(super) fn amount(p: Paint, s: &Onboard, d: Download) -> Option<El> {
+    (!d.done() && d.total > 0 && !failed(s)).then(|| {
         let mb = |bytes: u64| (bytes as f64 / 1_000_000.0).round() as u64;
         text(format!("{} of {} MB", mb(d.downloaded), mb(d.total)))
             .key("amount")
@@ -25,7 +25,7 @@ pub(super) fn amount(p: Paint, d: Download) -> Option<El> {
 
 /// One quiet line at the foot of the window: why there's a download.
 pub(super) fn note(p: Paint, s: &Onboard) -> Option<El> {
-    matches!(s.step, Step::Pick | Step::Started).then(|| {
+    (matches!(s.step, Step::Pick | Step::Started) && !failed(s)).then(|| {
         let quiet = p.muted();
         row()
             .key("first-note")
@@ -42,4 +42,9 @@ pub(super) fn note(p: Paint, s: &Onboard) -> Option<El> {
                     .color(quiet),
             )
     })
+}
+
+/// A failed download keeps its page to the error and what to do about it.
+fn failed(s: &Onboard) -> bool {
+    s.live.as_ref().is_some_and(|live| live.failed)
 }

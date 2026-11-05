@@ -461,7 +461,7 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
         .width_leads()
         .child(hex_meter(p, "meter", 18.0, d.fraction(), s.closed))
         .child(status_inner)
-        .children(super::first_screen::amount(p, d));
+        .children(super::first_screen::amount(p, s, d));
     // "Almost ready" receives the download back from the top bar as a
     // quiet bar, by that flight rather than a staggered entrance, with
     // "Watch another one" beside it.
