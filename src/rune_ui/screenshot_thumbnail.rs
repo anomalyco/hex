@@ -454,7 +454,8 @@ mod tests {
         (w, h, target.read(&gpu.device))
     }
 
-    /// The card at rest and under the pointer against
+    /// The card at rest, under the pointer, and held while someone talks
+    /// over it, against
     /// `tests/golden/screenshot-thumbnail-*.png`; `HEX_UPDATE_GOLDENS=1`
     /// rewrites them and `HEX_GOLDEN_RENDERS` also writes them there.
     /// Without a GPU adapter it skips. Checked on Linux only, like every
@@ -468,11 +469,18 @@ mod tests {
         };
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
         let mut misses = Vec::new();
-        for (name, hovered) in [("rest", false), ("hover", true)] {
+        for (name, hovered, listen) in [
+            ("rest", false, Listen::Idle),
+            ("hover", true, Listen::Idle),
+            ("listening", false, Listen::Recording),
+        ] {
             for dark in [false, true] {
                 let theme = if dark { "dark" } else { "light" };
                 let name = format!("screenshot-thumbnail-{name}-{theme}");
-                let card = Card::still(desktop([1440, 900]), hovered);
+                let card = Card {
+                    listen,
+                    ..Card::still(desktop([1440, 900]), hovered)
+                };
                 let (w, h, pixels) = render(&gpu, card, dark);
                 if let Some(renders) = std::env::var_os("HEX_GOLDEN_RENDERS") {
                     let renders = std::path::PathBuf::from(renders);
@@ -585,5 +593,26 @@ mod tests {
         poll(&mut card, 0.0, &mut tx);
         poll(&mut card, 60.0, &mut tx);
         assert!(card.on);
+    }
+
+    #[test]
+    fn talking_over_it_holds_it_until_the_words_are_in() {
+        let mut card = Card {
+            listen: Listen::Recording,
+            ..Card::still(shot([800, 600]), false)
+        };
+        let mut tx = Tx::default();
+        poll(&mut card, 0.0, &mut tx);
+        poll(&mut card, 30.0, &mut tx);
+        assert!(card.on, "held while recording");
+        card.listen = Listen::Transcribing;
+        poll(&mut card, 60.0, &mut tx);
+        assert!(card.on, "and while transcribing");
+        card.listen = Listen::Idle;
+        card.since = Some(60.0);
+        poll(&mut card, 64.9, &mut tx);
+        assert!(card.on, "then its usual few seconds again");
+        poll(&mut card, 65.0, &mut tx);
+        assert!(!card.on);
     }
 }

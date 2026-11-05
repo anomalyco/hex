@@ -1045,8 +1045,8 @@ and `a_large_shot_shrinks_for_its_thumbnail` in
 file in one second, and the PNG's density in
 [screenshots/save.rs](../../src/screenshots/save.rs); the system shortcut
 read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
-`thumbnail_goldens` (rest and hover, light and dark) and the thumbnail's
-timer in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
+`thumbnail_goldens` (rest, hover, and listening, light and dark) and the
+thumbnail's timer, held while someone talks over it, in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
 `editor_goldens` (marks, the Send to… list, and words while a dictation
 records, light and dark), the layout and the words row's height, words
 landing only while transcribed, Escape dropping them and a waiting send, a
