@@ -16,6 +16,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex picks a fast model", "Hex выбирает быструю модель"),
+    ("Collapsible meeting sections", "Сворачиваемые разделы встреч"),
+    ("Fold the summary, chapters, and day groups in Meetings", "Сворачивайте сводку, главы и группы по дням во Встречах"),
     ("Follow live transcript", "Следить за расшифровкой в реальном времени"),
     ("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again.", "Пока встреча записывается, расшифровка прокручивается к самой новой строке. Прокрутите вверх, чтобы прочитать предыдущий текст; прокрутите обратно вниз, чтобы снова следить."),
     ("Summary models show once Hex connects to OpenCode.", "Модели для сводок появятся, когда Hex подключится к OpenCode."),
@@ -247,6 +249,17 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("While it records, hold the shortcut and move the pointer; no click needed", "Во время записи удерживайте сочетание клавиш и двигайте указатель; щёлкать не нужно"),
     ("While it records, hold the shortcut and move the pointer; no click needed. Shift draws too", "Во время записи удерживайте сочетание клавиш и двигайте указатель; щёлкать не нужно. Shift тоже рисует"),
     ("Pen", "Перо"),
+    ("Arrow", "Стрелка"),
+    ("Box", "Рамка"),
+    ("Text", "Текст"),
+    ("Crop", "Обрезать"),
+    ("Screenshot", "Снимок экрана"),
+    ("Sending to {}…", "Отправка в {}…"),
+    ("Couldn't copy", "Не удалось скопировать"),
+    ("Couldn't send", "Не удалось отправить"),
+    ("Looking for sessions…", "Поиск сессий…"),
+    ("No sessions", "Нет сессий"),
+    ("Search sessions", "Искать сессии"),
     ("Or click the pen on the bar, then drag to draw; click it again or press Esc to stop", "Или щёлкните перо на панели и рисуйте перетаскиванием; щёлкните его снова или нажмите Esc, чтобы закончить"),
     ("Tap the shortcut again: the annotation is copied, ready to paste", "Нажмите сочетание клавиш ещё раз: аннотация скопирована и готова к вставке"),
     ("Draw", "Рисовать"),
@@ -792,6 +805,9 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex Dictation: transcribing", "Диктовка Hex: распознавание"),
     ("Hex Dictation: update available", "Диктовка Hex: доступно обновление"),
     ("Download update", "Загрузить обновление"),
+    ("This copy of Hex can't update itself because the Hex installer didn't install it. Install Hex from anoma.ly/hex to get updates in the app.", "Эта копия Hex не может обновляться сама, потому что её установил не установщик Hex. Установите Hex с anoma.ly/hex, чтобы получать обновления в приложении."),
+    ("This copy of Hex can't update itself because it's installed outside your user folder. Reinstall Hex from anoma.ly/hex to get updates in the app.", "Эта копия Hex не может обновляться сама, потому что установлена вне вашей папки пользователя. Переустановите Hex с anoma.ly/hex, чтобы получать обновления в приложении."),
+    ("This copy of Hex can't update itself because its install record is from another installer. Reinstall Hex from anoma.ly/hex to get updates in the app.", "Эта копия Hex не может обновляться сама, потому что её запись об установке сделал другой установщик. Переустановите Hex с anoma.ly/hex, чтобы получать обновления в приложении."),
     ("What's new", "Что нового"),
     ("Downloading update", "Загрузка обновления"),
     ("Managed by your organization", "Управляется вашей организацией"),
@@ -1131,6 +1147,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "macOS перехватывает это сочетание первой. Выключите её сочетания для снимков в разделе Сочетания клавиш › Снимки экрана или выберите другое"),
     ("Open Keyboard Settings", "Открыть настройки клавиатуры"),
     ("Full screen · Click to capture", "Весь экран · Нажмите, чтобы снять"),
+    ("Annotate 15 s replay", "Повтор последних 15 с в Заметках"),
+    ("Save the last 15 seconds of your screen. macOS shows the screen-recording dot the whole time it's on", "Сохраняет последние 15 секунд экрана. Пока включено, macOS постоянно показывает точку записи экрана"),
+    ("Replay last 15 s", "Сохранить последние 15 с"),
+    ("Press to save the last 15 s; hold to narrate over it", "Нажмите, чтобы сохранить последние 15 с; удерживайте, чтобы озвучить"),
 ];
 
 #[cfg(test)]

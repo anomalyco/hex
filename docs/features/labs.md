@@ -11,7 +11,7 @@ debug, local `HEX_LOCAL_BUILD`, test `HEX_TEST_BUILD`, and dev-channel
 drops it, its gate reads false even when `settings.json` says on, and the
 saved setting is kept untouched. In dev builds a Dev row carries a quiet
 "Dev" tag, and `hex labs` prints each feature's audience. Every feature
-below is `Everyone` today. There is no master switch. **Labs** is always the last item in the
+below is `Everyone` today unless marked `(Dev)`. There is no master switch. **Labs** is always the last item in the
 sidebar and lists every Labs feature as one flat row (name, one-line
 description, toggle), each **off by default**, plus Send feedback and Run
 setup again.
@@ -79,6 +79,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the bottom; scroll up to read, back to the bottom to follow again (#1332)
 │                                        // check: only_a_recording_transcript_follows_and_only_with_its_lab (rune_ui/meetings.rs,
 │                                        // Linux and Windows); not observed on a real call; Labs page goldens need regenerating
+├── Collapsible meeting sections no labs.collapsible_meeting_sections (every OS with Meetings)
+│                                        the Meetings list's day headings (Today, Yesterday, dates) and the detail's Summary and
+│                                        Chapters labels become buttons with a chevron that fold what follows; a folded day keeps
+│                                        its heading, search shows every match whatever the folds, folds last until Hex quits (#1348)
+│                                        // checks: nothing_folds_with_the_lab_off, days_and_sections_fold_with_the_lab_on_and_search_ignores_folds
+│                                        // (rune_ui/meetings/folds.rs, Linux and Windows); no scene with folds yet; Labs page goldens need regenerating
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
@@ -89,7 +95,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // gnome_meeting_capsules_is_its_own_bit_*; Rune's xwayland pointer tests; not run on a GNOME session
 ├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
-└── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
+├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
+│                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
+│                                        macOS keeps its screen-recording dot lit the whole time it is on
+└── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General);
+                                         Java games (javaw/java, e.g. Minecraft) still get Ctrl+V (#1362)
+                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
 
 Settings › Labs                          // labs.page, a store (labs/store.rs, labs/drawer.rs)
 ├── Header -> "Labs", Search N labs (⌘F focuses it), Discover | Turned on · N
@@ -139,7 +150,9 @@ features on (`Labs` line on macOS, `labs` array in the macOS and Linux JSON,
 
 Every toggle applies at once, from the window or `hex labs on|off` (issue
 568, from @maharshi365): Live text is asked as each dictation starts and its
-plate is always installed (prewarmed only when Live text is on at launch);
+plate is always installed (prewarmed on macOS whatever the setting, so a
+plate turned on after launch never flashes the last dictation's words,
+#1075; elsewhere only when Live text is on at launch);
 the window always attaches the playground with Rune's own ⇧⌘D off, and its
 sidebar item, ⇧⌘D, the macOS View menu, and story links open it only while
 the toggle is on. Live chapters are read when a recording starts. Nothing
@@ -924,8 +937,10 @@ shortcut uses) opens a second copy of Annotate's capture picker
 [capture_capsule/picker.rs](../../src/rune_ui/capture_capsule/picker.rs)):
 
 ```ts
-⌘⇧4            -> the screen dims under a crosshair; a drag draws the area with its W × H
-├── Space      -> window mode: the window under the pointer highlights; Space again -> area
+⌘⇧4            -> the screen dims under a crosshair cursor, even while another app is frontmost;
+│                 a drag draws the area with its W × H beside the pointer, outside the area
+├── Space      -> window mode: a camera replaces the pointer and the window under it highlights;
+│                 Space again -> area
 ├── Click      -> the whole display ("Full screen · Click to capture")
 ├── Escape     -> closes it, nothing shot; Escape reaches no other app or Hex shortcut
 └── Release    -> shot at the display's own pixels (ScreenCaptureKit), Hex's overlays,
@@ -933,10 +948,45 @@ shortcut uses) opens a second copy of Annotate's capture picker
                   ├── PNG (pHYs at the display's scale) -> "Hex Screenshot 2026-11-04 at 14.03.22.png"
                   │   in screenshots.folder (the Desktop when unset); a second shot that second gets " (2)"
                   ├── clipboard -> the PNG and the file's URL, one pasteboard item
-                  └── thumbnail bottom right for 5 s (held while the pointer is on it):
-                      click -> opens it in Preview, drag -> the file, ✕ -> closes
+                  └── thumbnail bottom right for 5 s (held while the pointer is on it), 16 pt in,
+                      its corner concentric with the display's (30 pt, a design constant):
+                      slides in from past the right edge on the HUD's spring and out the same way
+                      (Reduce Motion: a fade); ✕ shows inside its top-left corner on hover;
+                      click -> opens it in the editor, drag -> the file, ✕ -> closes
                       a failure -> the error tone; there is no success sound (Hex has no shutter cue)
 ```
+
+A click on the thumbnail opens the editor
+([screenshot_thumbnail/editor.rs](../../src/rune_ui/screenshot_thumbnail/editor.rs)), a panel
+centred on the display under the pointer, the capsule's corners and
+shadow, growing in on the HUD's spring (Reduce Motion: a fade). The shot
+shows at no more than its own points. It stays until Escape or ✕:
+
+```ts
+editor
+├── Pen, Arrow, Box, Text, Crop -> a drag on the shot draws in Annotate's red;
+│                                   Text: a click, then type, Enter or Escape ends it;
+│                                   Crop: a drag shades what's left out, a click clears it
+├── ⌘Z            -> the text being typed, else the last mark, else the crop
+├── Copy (⌘C)     -> the edited PNG on the clipboard
+├── Save (⌘S)     -> a new file in screenshots.folder; the first shot is never changed
+├── Send to…      -> a list of open OpenCode sessions (typing searches title, folder, id,
+│                    as Annotate's; ↑↓ Enter); the PNG goes to the session as an image
+├── a drag on the panel's edge or the toolbar's gap -> moves it, kept on the display
+└── Escape        -> ends the text, else closes the list, else closes the editor
+```
+
+The edited shot is drawn on the GPU at the shot's own pixels, the marks
+as the editor draws them (an offscreen Rune view), then cropped; without
+marks it's a plain crop. A note in the toolbar says Copied, Saved, or Sent
+to…, or what failed. Sending writes the PNG to the temp folder and posts it
+through the router's `send_image_to_session`, which Scrawl's copy of the
+router doesn't have yet.
+
+Left to do: no blur or highlight tool, colour or stroke choice, moving or
+deleting a single mark, redo, or zoom; a shot larger than the GPU's
+largest texture exports without its marks; Send lists sessions only, not
+Annotate's rules; no Save as or drag out of the editor.
 
 The shortcut is taken in Hex's session tap (`screenshots::key`, called
 from [suppression.rs](../../src/suppression.rs) before the listener's
@@ -945,6 +995,17 @@ it. With the lab off the tap returns at once and nothing is made: no
 picker window, no thumbnail, no work. Screen Recording is Annotate's: a
 press without it shows Annotate's permission helper instead of the
 picker.
+
+The picker is a non-key overlay, so Hex is usually not the frontmost app
+while it shows, and macOS ignores a background app's cursor. Hex builds
+Rune with `macos-background-cursor`, which sets WindowServer's private
+`SetsCursorInBackground` property so the picker's crosshair (and Window
+mode's hidden arrow under the drawn camera) shows over any app. It is a
+private API, acceptable because Hex isn't sold through the App Store; if a
+macOS release drops the property, Rune skips it and the cursor shows only
+while Hex is frontmost. Checks: `the_badge_stays_on_the_display` in
+[capture_capsule/picker.rs](../../src/rune_ui/capture_capsule/picker.rs).
+Not yet observed: the cursor over another frontmost app on a real Mac.
 
 macOS matches its own screenshot shortcuts (Keyboard Shortcuts ›
 Screenshots, ⌘⇧4 among them) in the window server before any app's event
@@ -970,13 +1031,35 @@ file in one second, and the PNG's density in
 read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
 `thumbnail_goldens` (rest and hover, light and dark) and the thumbnail's
 timer in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
+`editor_goldens` (marks and the Send to… list, light and dark), the
+layout, each tool's drag, text, undo, the list's search, and both exports
+(`an_export_draws_the_marks_over_the_shot` renders on a GPU, skipping
+without one) in [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
+and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/screenshot_thumbnail/editor/marks.rs);
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
 the drawer renders as `--scene mac-labs-screenshots`. Not yet observed: a
 real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
-clipboard paste, the thumbnail's drag and Preview, and whether a session
+clipboard paste, the thumbnail's drag, the editor on a real display
+(its keys, Copy, Save, and a session receiving a sent shot), and whether a session
 tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
 symbolic hotkeys are dispatched, not tested). The row renders only in
 macOS builds, so the settings goldens don't change.
+
+Annotate 15 s replay (`annotate-replay`, macOS 27+ only, category App): keeps
+a rolling 15-second display buffer through `SCClipBufferingOutput` (resolved
+at run time through Objective-C, so macOS 26 and earlier neither link nor
+list it) while both `labs.annotate_replay` and `capture.enabled` are on and
+Screen Recording is granted. Because an active `SCStream` feeds `replayd`,
+macOS shows its purple screen-recording indicator the whole time the lab is
+on, which the Labs store card states plainly. `hex capture replay` (or a tap
+on `capture.replay_hotkey`, unbound by default and recordable in the lab's
+drawer or Settings › Annotate) exports the last 15 seconds into a normal
+`.scrawl` bundle; holding `capture.replay_hotkey` (≥ 300 ms) freezes the clip
+at the press and records microphone narration shifted onto the bundle clock
+after it. Details, checks, and live macOS 27.0 measurements:
+[capture.md](capture.md) (`capture.replay`) and
+`annotate_replay_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs).
+The row renders only on macOS 27+, so Linux goldens don't change.
 
 Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
 like Meetings; its row shows wherever Meetings does, in macOS builds): for

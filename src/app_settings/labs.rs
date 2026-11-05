@@ -84,6 +84,10 @@ pub struct LabsSettings {
     pub screenshots: bool,
     /// A recording meeting's transcript scrolls to its newest line, until scrolled up (issue 1332).
     pub follow_live_transcript: bool,
+    /// Meetings' summary, chapters, and day groups fold and unfold (issue 1348).
+    pub collapsible_meeting_sections: bool,
+    /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
+    pub annotate_replay: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -131,10 +135,12 @@ impl Default for LabsSettings {
             meeting_notes_vocabulary: false,
             notch_indicator: false,
             meeting_finished_event: false,
+            annotate_replay: false,
             gnome_meeting_capsules: false,
             meeting_platform_icons: false,
             screenshots: false,
             follow_live_transcript: false,
+            collapsible_meeting_sections: false,
         }
     }
 }

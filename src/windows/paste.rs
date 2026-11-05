@@ -30,6 +30,15 @@ fn is_remote_desktop(stem: Option<&str>) -> bool {
     stem.is_some_and(|stem| REMOTE_DESKTOP_STEMS.contains(&stem))
 }
 
+/// Java games such as Minecraft (#1362; GLFW and LWJGL windows run inside
+/// `javaw`/`java`) take only Ctrl+V as paste and ignore Ctrl+Shift+V, so
+/// Terminal paste sends them plain Ctrl+V.
+const PLAIN_PASTE_STEMS: &[&str] = &["javaw", "java"];
+
+fn paste_with_shift_into(stem: Option<&str>, terminal_paste: bool) -> bool {
+    terminal_paste && !stem.is_some_and(|stem| PLAIN_PASTE_STEMS.contains(&stem))
+}
+
 enum ClipboardSnapshot {
     Empty,
     Files(Vec<PathBuf>),
@@ -155,12 +164,16 @@ impl WindowsPaster {
         let generation = restore.register(snapshot, original_sequence, transcript_sequence);
         drop(restore);
 
-        let remote_desktop =
-            is_remote_desktop(crate::windows::input::foreground_process_stem().as_deref());
+        let stem = crate::windows::input::foreground_process_stem();
+        let remote_desktop = is_remote_desktop(stem.as_deref());
         if remote_desktop {
             thread::sleep(REMOTE_DESKTOP_PASTE_DELAY);
         }
-        if let Err(error) = send_paste_shortcut(self.paste_with_shift.load(Ordering::Relaxed)) {
+        let shift = paste_with_shift_into(
+            stem.as_deref(),
+            self.paste_with_shift.load(Ordering::Relaxed),
+        );
+        if let Err(error) = send_paste_shortcut(shift) {
             restore_clipboard_generation(&self.clipboard_restore, generation);
             return Err(error);
         }
@@ -346,6 +359,15 @@ mod tests {
         assert!(is_remote_desktop(Some("msrdc")));
         assert!(!is_remote_desktop(Some("notepad")));
         assert!(!is_remote_desktop(None));
+    }
+
+    #[test]
+    fn terminal_paste_sends_plain_control_v_to_java_games() {
+        assert!(paste_with_shift_into(Some("windowsterminal"), true));
+        assert!(paste_with_shift_into(None, true));
+        assert!(!paste_with_shift_into(Some("javaw"), true));
+        assert!(!paste_with_shift_into(Some("java"), true));
+        assert!(!paste_with_shift_into(Some("notepad"), false));
     }
 
     /// US-layout scan codes for the chord's keys.

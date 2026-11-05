@@ -149,6 +149,7 @@ impl Backend {
                 transcription: desktop.transcription,
                 update_status: desktop.update_status,
                 update_notes: desktop.update_notes,
+                update_blocked: None,
                 editing,
             },
             settings,

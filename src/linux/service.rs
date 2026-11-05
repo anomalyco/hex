@@ -431,6 +431,9 @@ fn connect() -> std::result::Result<UnixStream, RequestError> {
 /// `hex capture`'s recording commands, handed to the running listener.
 pub(crate) fn capture(action: crate::control::ScrawlCaptureAction) -> crate::control::ControlReply {
     use crate::control::{ControlReply, ScrawlCaptureAction};
+    if action == ScrawlCaptureAction::Replay {
+        return ControlReply::error("unsupported", "Annotate replay requires macOS 27 or later");
+    }
     if action == ScrawlCaptureAction::Status {
         return match exchange(Request::CaptureStatus, SEND_WAIT) {
             Ok(reply) => reply

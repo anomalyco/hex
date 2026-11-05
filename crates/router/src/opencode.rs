@@ -1038,6 +1038,31 @@ pub fn send_text_to_session(session: &str, text: &str) -> Result<Posted> {
     post_prompt(session, serde_json::json!({ "text": text }))
 }
 
+/// Sends `text` with the PNG at `png` attached into an OpenCode session, as
+/// [`send_text_to_session`] does: inline as a `data:` URL, so a server on another
+/// machine gets the picture, or by its `file://` URL when it's too big to inline.
+pub fn send_image_to_session(session: &str, text: &str, png: &Path) -> Result<Posted> {
+    ensure!(
+        session.starts_with("ses")
+            && session
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
+        "Invalid OpenCode session ID"
+    );
+    let bytes = fs::read(png)?;
+    let encoded = base64(&bytes);
+    let uri = if encoded.len() > MAX_INLINE_BYTES {
+        file_uri(png)
+    } else {
+        format!("data:image/png;base64,{encoded}")
+    };
+    let name = png
+        .file_name()
+        .map_or_else(|| "screenshot.png".into(), |n| n.to_string_lossy());
+    let files = serde_json::json!([{ "uri": uri, "name": name, "description": "A screenshot" }]);
+    post_prompt(session, serde_json::json!({ "text": text, "files": files }))
+}
+
 /// A stand-in for OpenCode's session API, for tests here and in hosts.
 #[doc(hidden)]
 pub mod fake_api {

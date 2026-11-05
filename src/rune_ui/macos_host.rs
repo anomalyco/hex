@@ -142,6 +142,7 @@ impl Backend {
                 transcription: published.transcription.clone(),
                 update_status: published.update_status.clone(),
                 update_notes: published.update_notes.clone(),
+                update_blocked: None,
                 editing: false,
             },
             settings: published.settings.clone(),
@@ -477,7 +478,11 @@ pub(super) fn validate_hotkey(
         return Err(tr("Add a key"));
     }
     #[cfg(hex_capture)]
-    if target == ShortcutTarget::Capture && binding.key.is_none() {
+    if matches!(
+        target,
+        ShortcutTarget::Capture | ShortcutTarget::CaptureReplay
+    ) && binding.key.is_none()
+    {
         return Err(tr("Add a key"));
     }
     Ok(())

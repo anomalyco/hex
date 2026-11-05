@@ -39,7 +39,7 @@ const FRAME: Duration = Duration::from_micros(16_667);
 
 /// Scrawl's ink and laser colours: content drawn on the screen, like a
 /// pen's, not interface chrome, so they stay the same in either appearance.
-fn ink_red() -> Color {
+pub(crate) fn ink_red() -> Color {
     rune::color::hex("#ff3b30").unwrap_or(Color::WHITE)
 }
 
@@ -549,7 +549,7 @@ fn draw_surface(drawing: bool, scale: f32) -> El {
 
 /// One canvas holding `segments` (from, to, width), cropped to their bounds
 /// plus `pad` so a blur or opacity layer covers only what it draws.
-fn layer(
+pub(crate) fn layer(
     segments: impl Iterator<Item = ([f32; 2], [f32; 2], f32)>,
     color: Color,
     pad: f32,

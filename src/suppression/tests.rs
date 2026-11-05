@@ -444,10 +444,7 @@ fn mouse_hotkeys() -> RuntimeHotkeys {
         .runtime(),
         paste_last: None,
         paste_meeting: None,
-        capture: None,
-        raw_dictation: None,
-        second_dictation: None,
-        cancel: None,
+        ..RuntimeHotkeys::default()
     }
 }
 

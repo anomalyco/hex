@@ -103,6 +103,7 @@ pub(crate) struct Published {
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
     pub(crate) update_notes: Option<crate::desktop::host::UpdateNotes>,
+    pub(crate) update_blocked: Option<&'static str>,
     pub(crate) settings: AppSettings,
     /// The running listener's state, for the tray.
     pub(crate) state: Option<crate::desktop::events::VoiceState>,

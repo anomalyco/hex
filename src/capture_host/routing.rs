@@ -195,6 +195,32 @@ fn opencode_managed() -> bool {
     crate::policy::Policy::current().locks(crate::policy::Lock::OpenCodeProcessing)
 }
 
+/// Open OpenCode sessions, newest first, as Send to… lists them, read
+/// within `budget`. Blocks; call it off the UI thread.
+#[cfg(target_os = "macos")]
+pub fn recent_sessions(budget: Duration) -> anyhow::Result<Vec<RouteDest>> {
+    anyhow::ensure!(!opencode_managed(), "OpenCode is turned off here");
+    let read = router().run(|| {
+        let mut get = routing::within(scrawl_capture::opencode::api_get_within, budget);
+        look::read_candidates(&mut get, &[], &[], 1)
+    });
+    if read.candidates.is_empty()
+        && let Some(error) = read.error
+    {
+        return Err(error);
+    }
+    Ok(recent(&read.candidates, &[], now_ms()))
+}
+
+/// Sends the PNG at `png` with `text` into `session`, as the router sends
+/// captures. Blocks; call it off the UI thread.
+#[cfg(target_os = "macos")]
+pub fn send_image(session: &str, text: &str, png: &Path) -> anyhow::Result<()> {
+    anyhow::ensure!(!opencode_managed(), "OpenCode is turned off here");
+    router().run(|| scrawl_capture::opencode::send_image_to_session(session, text, png))?;
+    Ok(())
+}
+
 /// The tab, terminal, and sessions behind a capture that just stopped,
 /// read while it is written.
 pub(super) struct Look {

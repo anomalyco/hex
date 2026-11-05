@@ -48,6 +48,11 @@ fn installed_bundle() -> Option<PathBuf> {
     .then(|| bundle.to_path_buf())
 }
 
+/// Only Windows explains beside Download update why it can't update itself.
+pub fn blocked() -> Option<&'static str> {
+    None
+}
+
 pub fn method() -> Method {
     let Some(bundle) = installed_bundle() else {
         // A bare binary from a checkout.

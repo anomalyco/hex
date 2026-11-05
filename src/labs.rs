@@ -107,10 +107,12 @@ pub enum Feature {
     MeetingPlatformIcons,
     Screenshots,
     FollowLiveTranscript,
+    CollapsibleMeetingSections,
+    AnnotateReplay,
 }
 
 impl Feature {
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 50] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -159,6 +161,8 @@ impl Feature {
         Self::MeetingPlatformIcons,
         Self::Screenshots,
         Self::FollowLiveTranscript,
+        Self::CollapsibleMeetingSections,
+        Self::AnnotateReplay,
     ];
 
     /// The features this OS and build have.
@@ -229,6 +233,8 @@ impl Feature {
             | Self::MeetingPlatformIcons
             | Self::Screenshots
             | Self::FollowLiveTranscript
+            | Self::CollapsibleMeetingSections
+            | Self::AnnotateReplay
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -283,7 +289,9 @@ impl Feature {
             | Self::GnomeMeetingCapsules
             | Self::MeetingPlatformIcons
             | Self::Screenshots
-            | Self::FollowLiveTranscript => 20261104,
+            | Self::FollowLiveTranscript
+            | Self::CollapsibleMeetingSections
+            | Self::AnnotateReplay => 20261104,
         }
     }
 
@@ -303,6 +311,9 @@ impl Feature {
     pub fn for_settings_key(key: &str) -> Option<Self> {
         if key == "labs.unload_idle_minutes" {
             return Some(Self::UnloadIdle);
+        }
+        if key == "capture.replay_hotkey" {
+            return Some(Self::AnnotateReplay);
         }
         Self::ALL
             .into_iter()
@@ -338,6 +349,16 @@ impl Feature {
             | Self::Screenshots => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
+            Self::AnnotateReplay => {
+                #[cfg(hex_capture)]
+                {
+                    crate::capture_host::replay_available()
+                }
+                #[cfg(not(hex_capture))]
+                {
+                    false
+                }
+            }
             Self::Playground
             | Self::LiveText
             | Self::VocabularyBiasing
@@ -359,6 +380,7 @@ impl Feature {
             | Self::MeetingFinishedEvent
             | Self::MeetingPlatformIcons
             | Self::FollowLiveTranscript
+            | Self::CollapsibleMeetingSections
             | Self::FillerWords => true,
         }
     }
@@ -414,6 +436,8 @@ impl Feature {
             Self::MeetingPlatformIcons => "meeting-platform-icons",
             Self::Screenshots => "screenshots",
             Self::FollowLiveTranscript => "follow-live-transcript",
+            Self::CollapsibleMeetingSections => "collapsible-meeting-sections",
+            Self::AnnotateReplay => "annotate-replay",
         }
     }
 
@@ -468,6 +492,8 @@ impl Feature {
             Self::MeetingPlatformIcons => "labs.meeting_platform_icons",
             Self::Screenshots => "labs.screenshots",
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
+            Self::CollapsibleMeetingSections => "labs.collapsible_meeting_sections",
+            Self::AnnotateReplay => "labs.annotate_replay",
         }
     }
 
@@ -600,6 +626,12 @@ impl Feature {
             Self::FollowLiveTranscript => {
                 "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
             }
+            Self::CollapsibleMeetingSections => {
+                "Fold the summary, chapters, and day groups in Meetings"
+            }
+            Self::AnnotateReplay => {
+                "Save the last 15 seconds of your screen with hex capture replay or capture.replay_hotkey; macOS shows the screen-recording dot the whole time it's on (macOS 27+)"
+            }
         }
     }
 
@@ -658,6 +690,8 @@ impl Feature {
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons,
             Self::Screenshots => settings.labs.screenshots,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
+            Self::CollapsibleMeetingSections => settings.labs.collapsible_meeting_sections,
+            Self::AnnotateReplay => settings.labs.annotate_replay,
         }
     }
 
@@ -714,6 +748,8 @@ impl Feature {
             &mut labs.meeting_platform_icons,
             &mut labs.screenshots,
             &mut labs.follow_live_transcript,
+            &mut labs.collapsible_meeting_sections,
+            &mut labs.annotate_replay,
         ]
     }
 
@@ -770,6 +806,10 @@ impl Feature {
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
+            Self::CollapsibleMeetingSections => {
+                settings.labs.collapsible_meeting_sections = on;
+            }
+            Self::AnnotateReplay => settings.labs.annotate_replay = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -815,6 +855,7 @@ const NOTCH_INDICATOR: u64 = 1 << 27;
 const MEETING_FINISHED_EVENT: u64 = 1 << 28;
 const GNOME_MEETING_CAPSULES: u64 = 1 << 29;
 const SCREENSHOTS: u64 = 1 << 30;
+const ANNOTATE_REPLAY: u64 = 1 << 31;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
 
@@ -1028,6 +1069,14 @@ pub fn screenshots() -> bool {
     on(SCREENSHOTS) && Feature::Screenshots.on_this_os()
 }
 
+/// Annotate's rolling 15 s display replay buffer (`SCClipBufferingOutput`,
+/// macOS 27+; read where the replay worker starts and on each `hex capture
+/// replay`).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn annotate_replay() -> bool {
+    on(ANNOTATE_REPLAY) && Feature::AnnotateReplay.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -1152,6 +1201,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MeetingFinishedEvent,
             settings.meeting_finished_event,
             MEETING_FINISHED_EVENT,
+        ),
+        (
+            Feature::AnnotateReplay,
+            settings.annotate_replay,
+            ANNOTATE_REPLAY,
         ),
         (
             Feature::GnomeMeetingCapsules,
@@ -1643,6 +1697,18 @@ mod tests {
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 
+    #[test]
+    fn annotate_replay_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & ANNOTATE_REPLAY, 0);
+        labs.annotate_replay = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & ANNOTATE_REPLAY, 0);
+        assert_eq!(state & GNOME_MEETING_CAPSULES, 0);
+        assert_eq!(state & SCREENSHOTS, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
     #[test]
     fn gnome_meeting_capsules_is_its_own_bit_and_off_by_default() {
         let mut labs = LabsSettings::default();

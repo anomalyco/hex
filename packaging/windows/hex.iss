@@ -128,6 +128,25 @@ begin
     RaiseException('Could not write ' + Path);
 end;
 
+{ The same as UTF-8 without a byte order mark: SaveStringToFile writes the
+  ANSI code page, which turns a non-ASCII profile path in install.json into
+  bytes Hex can't read, so the install stopped updating itself (#1352). }
+procedure WriteUtf8Atomically(Path, Contents: String);
+var
+  Partial: String;
+  Lines: TArrayOfString;
+begin
+  Partial := Path + '.partial';
+  DeleteFile(Partial);
+  SetArrayLength(Lines, 1);
+  Lines[0] := Contents;
+  if not SaveStringsToUTF8FileWithoutBOM(Partial, Lines, False) then
+    RaiseException('Could not write ' + Partial);
+  DeleteFile(Path);
+  if not RenameFile(Partial, Path) then
+    RaiseException('Could not write ' + Path);
+end;
+
 { Point current-version at this version only once its files are in place,
   then mark the install as direct so the app updates itself
   (docs/plans/release-service.md). }
@@ -140,8 +159,8 @@ begin
     WriteAtomically(ExpandConstant('{app}\current-version'), '{#AppVersion}' + #10);
     Root := ExpandConstant('{app}');
     StringChangeEx(Root, '\', '\\', True);
-    WriteAtomically(ExpandConstant('{app}\install.json'),
-      '{"app":"hex","artifact":"desktop","channel":"stable","method":"direct","root":"' + Root + '"}' + #10);
+    WriteUtf8Atomically(ExpandConstant('{app}\install.json'),
+      '{"app":"hex","artifact":"desktop","channel":"stable","method":"direct","root":"' + Root + '"}');
   end;
 end;
 

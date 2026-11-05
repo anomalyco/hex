@@ -85,6 +85,7 @@ impl Category {
             | Feature::MeetingFinishedEvent
             | Feature::MeetingPlatformIcons
             | Feature::FollowLiveTranscript
+            | Feature::CollapsibleMeetingSections
             | Feature::GnomeMeetingCapsules => Self::Meetings,
             Feature::LiveText
             | Feature::NotchIndicator
@@ -122,7 +123,8 @@ impl Category {
             Feature::HideMenuBarIcon
             | Feature::VoiceFilter
             | Feature::Playground
-            | Feature::Screenshots => Self::App,
+            | Feature::Screenshots
+            | Feature::AnnotateReplay => Self::App,
         }
     }
 }
@@ -152,7 +154,8 @@ impl Place {
             | Feature::MeetingNotesVocabulary
             | Feature::MeetingFinishedEvent
             | Feature::MeetingPlatformIcons
-            | Feature::FollowLiveTranscript => Self::Pane(Pane::Meetings),
+            | Feature::FollowLiveTranscript
+            | Feature::CollapsibleMeetingSections => Self::Pane(Pane::Meetings),
             Feature::StopWhenCallEnds
             | Feature::MovableMeetingCapsules
             | Feature::GnomeMeetingCapsules => Self::Elsewhere(tr("Meeting capsules")),
@@ -194,6 +197,10 @@ impl Place {
             Feature::VoiceFilter => Self::Pane(Pane::VoiceFilter),
             Feature::Playground => Self::Playground,
             Feature::Screenshots => Self::Elsewhere(tr("Screenshot shortcut")),
+            #[cfg(hex_capture)]
+            Feature::AnnotateReplay => Self::Pane(Pane::Annotate),
+            #[cfg(not(hex_capture))]
+            Feature::AnnotateReplay => Self::Pane(Pane::General),
         }
     }
 

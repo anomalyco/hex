@@ -867,12 +867,17 @@ pub fn listen(
                     crate::app_settings::runtime_hotkeys(),
                     activity,
                 );
-                if action == crate::capture_host::ShortcutAction::Cancel {
-                    // Escape before the shortcut's keys came up: nothing else
-                    // hears it.
+                let swallow = matches!(
+                    action,
+                    crate::capture_host::ShortcutAction::Cancel
+                        | crate::capture_host::ShortcutAction::ReplayCancel
+                );
+                host.shortcut_at(action, capture_at, &input);
+                if swallow {
+                    // Escape before the shortcut's keys came up (or while
+                    // narrating a replay): nothing else hears it.
                     continue;
                 }
-                host.shortcut(action, &input);
             }
             // Escape closes the capsule's picker or open list (never an
             // Undo: that is a click). It never ends a dictation or a
