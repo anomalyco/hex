@@ -192,6 +192,9 @@ impl crate::control::host::Host for LinuxControl {
             crate::control::ControlCommand::ScrawlCapture {
                 action: crate::control::ScrawlCaptureAction::Status,
             } => linux_service::capture_status(),
+            crate::control::ControlCommand::ScrawlCapture {
+                action: crate::control::ScrawlCaptureAction::Replay,
+            } => crate::control::host::unsupported("Annotate replay requires macOS 27 or later"),
             crate::control::ControlCommand::ScrawlCapture { action } => {
                 match crate::capture_host::send_to_listener(
                     crate::capture_host::CaptureControl::Scrawl(action),

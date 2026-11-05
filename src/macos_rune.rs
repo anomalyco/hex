@@ -122,6 +122,9 @@ pub(crate) enum ShortcutTarget {
     PasteLast,
     #[cfg(hex_capture)]
     Capture,
+    /// Labs › Annotate 15 s replay shortcut.
+    #[cfg(hex_capture)]
+    CaptureReplay,
     RawDictation,
     /// Labs › Second dictation shortcut.
     SecondDictation,

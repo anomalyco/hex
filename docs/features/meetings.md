@@ -82,6 +82,15 @@ Speakers                                            // Labs › Speakers in meet
             notes use the labels
         Delete and expiry wait while a run goes
         (meeting/speakers.rs, rune_ui/meeting_speakers.rs)
+Folding sections                                    // Labs › Collapsible meeting sections, off by default (#1348)
+        on -> each day heading in the list (Today, Yesterday, a date) and the
+        detail's Summary and Chapters labels are buttons with a chevron
+        (expanded/collapsed for screen readers); pressing one hides the day's
+        rows, the summary text, or the chapter rows, and the heading or label
+        stays. Typing in Search shows every match whatever the folds; a
+        selected meeting in a folded day stays in the detail. Folds last until
+        Hex quits, never saved; everything starts open. Off -> as before
+        (rune_ui/meetings/folds.rs; no scene or golden with folds yet)
 ```
 
 Requires the selected local dictation model, Microphone, and System Audio

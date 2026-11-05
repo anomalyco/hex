@@ -87,6 +87,10 @@ pub struct LabsSettings {
     /// A published meeting's other voices are told apart as Speaker 1,
     /// Speaker 2, and so on (Labs › Speakers in meetings).
     pub meeting_speakers: bool,
+    /// Meetings' summary, chapters, and day groups fold and unfold (issue 1348).
+    pub collapsible_meeting_sections: bool,
+    /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
+    pub annotate_replay: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -134,11 +138,13 @@ impl Default for LabsSettings {
             meeting_notes_vocabulary: false,
             notch_indicator: false,
             meeting_finished_event: false,
+            annotate_replay: false,
             gnome_meeting_capsules: false,
             meeting_platform_icons: false,
             screenshots: false,
             follow_live_transcript: false,
             meeting_speakers: false,
+            collapsible_meeting_sections: false,
         }
     }
 }

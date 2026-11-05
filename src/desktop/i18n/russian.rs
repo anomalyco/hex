@@ -23,6 +23,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Speakers could not be told apart.", "Не удалось различить говорящих."),
     ("Telling the speakers apart…", "Различаем говорящих…"),
     ("Rename speaker", "Переименовать говорящего"),
+    ("Collapsible meeting sections", "Сворачиваемые разделы встреч"),
+    ("Fold the summary, chapters, and day groups in Meetings", "Сворачивайте сводку, главы и группы по дням во Встречах"),
     ("Follow live transcript", "Следить за расшифровкой в реальном времени"),
     ("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again.", "Пока встреча записывается, расшифровка прокручивается к самой новой строке. Прокрутите вверх, чтобы прочитать предыдущий текст; прокрутите обратно вниз, чтобы снова следить."),
     ("Summary models show once Hex connects to OpenCode.", "Модели для сводок появятся, когда Hex подключится к OpenCode."),
@@ -1138,6 +1140,10 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "macOS перехватывает это сочетание первой. Выключите её сочетания для снимков в разделе Сочетания клавиш › Снимки экрана или выберите другое"),
     ("Open Keyboard Settings", "Открыть настройки клавиатуры"),
     ("Full screen · Click to capture", "Весь экран · Нажмите, чтобы снять"),
+    ("Annotate 15 s replay", "Повтор последних 15 с в Заметках"),
+    ("Save the last 15 seconds of your screen. macOS shows the screen-recording dot the whole time it's on", "Сохраняет последние 15 секунд экрана. Пока включено, macOS постоянно показывает точку записи экрана"),
+    ("Replay last 15 s", "Сохранить последние 15 с"),
+    ("Press to save the last 15 s; hold to narrate over it", "Нажмите, чтобы сохранить последние 15 с; удерживайте, чтобы озвучить"),
 ];
 
 #[cfg(test)]

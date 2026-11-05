@@ -11,7 +11,7 @@ debug, local `HEX_LOCAL_BUILD`, test `HEX_TEST_BUILD`, and dev-channel
 drops it, its gate reads false even when `settings.json` says on, and the
 saved setting is kept untouched. In dev builds a Dev row carries a quiet
 "Dev" tag, and `hex labs` prints each feature's audience. Every feature
-below is `Everyone` today. There is no master switch. **Labs** is always the last item in the
+below is `Everyone` today unless marked `(Dev)`. There is no master switch. **Labs** is always the last item in the
 sidebar and lists every Labs feature as one flat row (name, one-line
 description, toggle), each **off by default**, plus Send feedback and Run
 setup again.
@@ -85,6 +85,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        pinned); Them lines read Speaker 1, Speaker 2, …, renamed per meeting in the pane
 │                                        // checks: meeting::speakers tests (stitching, assignment, rename rewrites);
 │                                        // the ignored real-model test on a synthetic call; not observed on a real call
+├── Collapsible meeting sections no labs.collapsible_meeting_sections (every OS with Meetings)
+│                                        the Meetings list's day headings (Today, Yesterday, dates) and the detail's Summary and
+│                                        Chapters labels become buttons with a chevron that fold what follows; a folded day keeps
+│                                        its heading, search shows every match whatever the folds, folds last until Hex quits (#1348)
+│                                        // checks: nothing_folds_with_the_lab_off, days_and_sections_fold_with_the_lab_on_and_search_ignores_folds
+│                                        // (rune_ui/meetings/folds.rs, Linux and Windows); no scene with folds yet; Labs page goldens need regenerating
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
@@ -95,6 +101,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // gnome_meeting_capsules_is_its_own_bit_*; Rune's xwayland pointer tests; not run on a GNOME session
 ├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
+├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
+│                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
+│                                        macOS keeps its screen-recording dot lit the whole time it is on
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)
 
 Settings › Labs                          // labs.page, a store (labs/store.rs, labs/drawer.rs)
@@ -983,6 +992,22 @@ clipboard paste, the thumbnail's drag and Preview, and whether a session
 tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
 symbolic hotkeys are dispatched, not tested). The row renders only in
 macOS builds, so the settings goldens don't change.
+
+Annotate 15 s replay (`annotate-replay`, macOS 27+ only, category App): keeps
+a rolling 15-second display buffer through `SCClipBufferingOutput` (resolved
+at run time through Objective-C, so macOS 26 and earlier neither link nor
+list it) while both `labs.annotate_replay` and `capture.enabled` are on and
+Screen Recording is granted. Because an active `SCStream` feeds `replayd`,
+macOS shows its purple screen-recording indicator the whole time the lab is
+on, which the Labs store card states plainly. `hex capture replay` (or a tap
+on `capture.replay_hotkey`, unbound by default and recordable in the lab's
+drawer or Settings › Annotate) exports the last 15 seconds into a normal
+`.scrawl` bundle; holding `capture.replay_hotkey` (≥ 300 ms) freezes the clip
+at the press and records microphone narration shifted onto the bundle clock
+after it. Details, checks, and live macOS 27.0 measurements:
+[capture.md](capture.md) (`capture.replay`) and
+`annotate_replay_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs).
+The row renders only on macOS 27+, so Linux goldens don't change.
 
 Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
 like Meetings; its row shows wherever Meetings does, in macOS builds): for

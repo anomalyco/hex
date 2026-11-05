@@ -122,10 +122,14 @@ impl Policy {
         self.0 != 0
     }
 
-    /// The lock on a Labs feature: Labs, or Meetings for Meetings.
+    /// The lock on a Labs feature: Labs, Meetings for Meetings, or Annotate
+    /// for Annotate replay.
     pub fn labs_lock(self, feature: crate::labs::Feature) -> Option<Lock> {
         if feature == crate::labs::Feature::Meetings && self.locks(Lock::Meetings) {
             return Some(Lock::Meetings);
+        }
+        if feature == crate::labs::Feature::AnnotateReplay && self.locks(Lock::Annotate) {
+            return Some(Lock::Annotate);
         }
         self.locks(Lock::Labs).then_some(Lock::Labs)
     }
@@ -148,7 +152,10 @@ impl Policy {
         match lock {
             Lock::Meetings => vec![&mut settings.meetings.enabled],
             #[cfg(hex_capture)]
-            Lock::Annotate => vec![&mut settings.capture.enabled],
+            Lock::Annotate => vec![
+                &mut settings.capture.enabled,
+                &mut settings.labs.annotate_replay,
+            ],
             #[cfg(not(hex_capture))]
             Lock::Annotate => Vec::new(),
             Lock::OpenCodeProcessing => vec![&mut settings.meetings.summarize_with_opencode],

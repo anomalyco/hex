@@ -83,6 +83,82 @@ pub(super) fn group(p: Paint, key: &str, label: &str, first: bool) -> El {
         .pb(6.0)
 }
 
+/// A folded section's chevron, pointing at its label.
+static FOLDED: Icon = Icon {
+    name: "hex-fold-closed",
+    view: 16.0,
+    body: r#"<path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#,
+};
+/// An open section's chevron, pointing down at its content.
+static UNFOLDED: Icon = Icon {
+    name: "hex-fold-open",
+    view: 16.0,
+    body: r#"<path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#,
+};
+
+/// A label that folds what follows it (Labs › Collapsible meeting
+/// sections): a button with a chevron after its text, read as `label` with
+/// its expanded state. The label stays while its content is folded.
+pub(super) fn fold_label(
+    p: Paint,
+    key: &str,
+    label: &str,
+    ink: rune::Color,
+    expanded: bool,
+    toggle: impl Fn(&mut Ui) + 'static,
+) -> El {
+    let c = &p.k.c;
+    row()
+        .key(key)
+        .role("button")
+        .label(label)
+        .expanded(expanded)
+        .focusable(true)
+        .focus_ring(2.0, 0.0, c.border_focus)
+        .gap(2.0)
+        .center_y()
+        .radius(p.k.radius.sm)
+        .hover(c.hover)
+        .press(c.pressed)
+        .on_press(toggle)
+        .child(
+            text(label)
+                .key("label")
+                .font(p.k.ty.small_medium)
+                .color(ink)
+                .a11y_hidden(),
+        )
+        .child(
+            icon(if expanded { &UNFOLDED } else { &FOLDED }, 14.0)
+                .key("chevron")
+                .color(c.icon_faint)
+                .a11y_hidden(),
+        )
+}
+
+/// A [`group`] heading that folds its rows away ([`fold_label`]), on the
+/// same text edge and spacing as [`group`].
+pub(super) fn foldable_group(
+    p: Paint,
+    key: &str,
+    label: &str,
+    first: bool,
+    expanded: bool,
+    toggle: impl Fn(&mut Ui) + 'static,
+) -> El {
+    row()
+        .key(format!("{key}-slot"))
+        .role("none")
+        .px(METRICS.row_px - 4.0)
+        .pt(if first { 0.0 } else { 15.0 })
+        .pb(3.0)
+        .child(
+            fold_label(p, key, label, p.faint(), expanded, toggle)
+                .px(4.0)
+                .py(3.0),
+        )
+}
+
 /// One list row's words: the title over its meta line, and the time (or
 /// another short value) on the right, aligned down the list. `hover` takes
 /// the time's place while the pointer is over the row.
