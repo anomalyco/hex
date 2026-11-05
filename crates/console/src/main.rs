@@ -3,7 +3,9 @@
 //! wait for a GUI program or capture its output. A terminal resolves `hex` to
 //! `hex.com` first (PATHEXT lists .COM before .EXE), and this runs `hex.exe`
 //! with the same arguments, standard handles, and console, waits for it, and
-//! exits with its code.
+//! exits with its code. Opening the app (`hex`, `hex app [--hidden]`) doesn't
+//! wait: the app stays resident, so the terminal returns once it starts, as
+//! it would for a GUI program.
 //!
 //! It finds `hex.exe` beside itself (`versions\<version>\hex.com`), or, as
 //! the copy in `%APPDATA%\hex\bin` that PATH names, the version
@@ -11,13 +13,19 @@
 
 #[cfg(windows)]
 fn main() {
-    use windows_sys::Win32::Foundation::TRUE;
-    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+    use windows_sys::Win32::Foundation::{FALSE, TRUE};
+    use windows_sys::Win32::System::Console::{
+        CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
+    };
 
     // Ctrl+C reaches every process on the console: hex.exe handles it, and
-    // this stays to report its exit code.
-    unsafe extern "system" fn wait_for_hex(_: u32) -> i32 {
-        TRUE
+    // this stays to report its exit code. Closing the console still ends it.
+    unsafe extern "system" fn wait_for_hex(event: u32) -> i32 {
+        if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
+            TRUE
+        } else {
+            FALSE
+        }
     }
     // SAFETY: registers a handler that lives for the whole process.
     unsafe { SetConsoleCtrlHandler(Some(wait_for_hex), TRUE) };
@@ -29,15 +37,30 @@ fn main() {
             std::process::exit(1);
         }
     };
-    match std::process::Command::new(&hex)
-        .args(std::env::args_os().skip(1))
-        .status()
-    {
-        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    let mut command = std::process::Command::new(&hex);
+    command.args(&arguments);
+    let result = if opens_app(&arguments) {
+        command.spawn().map(|_| 0)
+    } else {
+        command.status().map(|status| status.code().unwrap_or(1))
+    };
+    match result {
+        Ok(code) => std::process::exit(code),
         Err(error) => {
             eprintln!("hex: couldn't start {}: {error}", hex.display());
             std::process::exit(1);
         }
+    }
+}
+
+/// `hex`, `hex app`, or `hex app --hidden`: the resident app, not a command
+/// that finishes. A headless render (`hex app -- --snap …`) or `--help` does.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn opens_app(arguments: &[std::ffi::OsString]) -> bool {
+    match arguments.split_first() {
+        None => true,
+        Some((first, rest)) => first == "app" && rest.iter().all(|argument| argument == "--hidden"),
     }
 }
 
@@ -69,7 +92,22 @@ fn locate(console: &std::path::Path) -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::locate;
+    use super::{locate, opens_app};
+
+    #[test]
+    fn only_opening_the_app_returns_without_waiting() {
+        let opens = |arguments: &[&str]| {
+            opens_app(&arguments.iter().map(Into::into).collect::<Vec<_>>())
+        };
+        assert!(opens(&[]));
+        assert!(opens(&["app"]));
+        assert!(opens(&["app", "--hidden"]));
+        assert!(!opens(&["app", "--", "--snap", "out.png"]));
+        assert!(!opens(&["app", "--help"]));
+        assert!(!opens(&["status", "--json"]));
+        assert!(!opens(&["listen"]));
+        assert!(!opens(&["--version"]));
+    }
 
     #[test]
     fn finds_hex_beside_it_or_through_current_version() {

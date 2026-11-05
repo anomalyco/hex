@@ -116,6 +116,19 @@ function Resolve-Download($entry, [string]$name) {
     $url
 }
 
+# Moves <source> over <path>. A running program can't be replaced but can be
+# renamed, so one in the way moves aside to <path>.old, removed next time.
+function Replace-File([string]$source, [string]$path) {
+    $aside = "$path.old"
+    if (Test-Path $aside) { Remove-Item $aside -Force -ErrorAction SilentlyContinue }
+    try {
+        Move-Item $source $path -Force
+    } catch {
+        Move-Item $path $aside -Force
+        Move-Item $source $path -Force
+    }
+}
+
 # Downloads to <path>.partial, checks size and SHA-256 against the manifest,
 # then moves it into place.
 function Save-Download($entry, [string]$url, [string]$path) {
@@ -132,7 +145,7 @@ function Save-Download($entry, [string]$url, [string]$path) {
         Remove-Item $partial -Force
         throw 'The download failed checksum verification.'
     }
-    Move-Item $partial $path -Force
+    Replace-File $partial $path
 }
 
 $fileUrl = Resolve-Download $file $target
@@ -182,7 +195,9 @@ $link.Save()
 
 if ($consoleUrl) {
     New-Item -ItemType Directory -Force $bin | Out-Null
-    Copy-Item $console (Join-Path $bin 'hex.com') -Force
+    $copy = Join-Path $bin 'hex.com.partial'
+    Copy-Item $console $copy -Force
+    Replace-File $copy (Join-Path $bin 'hex.com')
     Set-BinOnPath $true
 }
 

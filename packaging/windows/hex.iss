@@ -107,13 +107,16 @@ end;
 procedure StopManagedHex();
 var
   ResultCode: Integer;
-  Versions: String;
+  Versions, Bin: String;
 begin
   Versions := ExpandConstant('{app}\versions\');
   StringChangeEx(Versions, '''', '''''', True);
+  Bin := ExpandConstant('{app}\bin\');
+  StringChangeEx(Bin, '''', '''''', True);
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -WindowStyle Hidden -Command "Get-Process hex -ErrorAction SilentlyContinue | ' +
-    'Where-Object { $_.Path -and $_.Path.StartsWith(''' + Versions + ''', [StringComparison]::OrdinalIgnoreCase) } | ' +
+    'Where-Object { $_.Path -and ($_.Path.StartsWith(''' + Versions + ''', [StringComparison]::OrdinalIgnoreCase) -or ' +
+    '$_.Path.StartsWith(''' + Bin + ''', [StringComparison]::OrdinalIgnoreCase)) } | ' +
     'Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
@@ -158,9 +161,16 @@ begin
     RaiseException('Could not write ' + Path);
 end;
 
+{ Path's entries compared case-insensitively, ignoring a trailing backslash. }
+function NormalPath(Path: String): String;
+begin
+  Result := ';' + AnsiLowercase(Path) + ';';
+  StringChangeEx(Result, '\;', ';', True);
+end;
+
 function PathHas(Path, Folder: String): Boolean;
 begin
-  Result := Pos(';' + Lowercase(Folder) + ';', ';' + Lowercase(Path) + ';') > 0;
+  Result := Pos(';' + AnsiLowercase(Folder) + ';', NormalPath(Path)) > 0;
 end;
 
 { Puts bin, where hex.com lives, on the user's PATH, so a terminal runs `hex`
@@ -181,18 +191,30 @@ end;
 
 procedure RemoveBinFromPath();
 var
-  Path, Bin: String;
+  Path, Bin, Entry, Kept: String;
   At: Integer;
 begin
   Bin := ExpandConstant('{app}\bin');
   if not RegQueryStringValue(HKCU, 'Environment', 'Path', Path) then
     exit;
-  Path := ';' + Path + ';';
-  At := Pos(';' + Lowercase(Bin) + ';', Lowercase(Path));
-  if At = 0 then
+  if not PathHas(Path, Bin) then
     exit;
-  Delete(Path, At, Length(Bin) + 1);
-  RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Copy(Path, 2, Length(Path) - 2));
+  { Rebuilt without the entry; the comparison form loses the original case. }
+  Path := Path + ';';
+  Kept := '';
+  while Path <> '' do
+  begin
+    At := Pos(';', Path);
+    Entry := Copy(Path, 1, At - 1);
+    Delete(Path, 1, At);
+    if (Entry <> '') and not PathHas(Entry, Bin) then
+    begin
+      if Kept <> '' then
+        Kept := Kept + ';';
+      Kept := Kept + Entry;
+    end;
+  end;
+  RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Kept);
 end;
 
 { Point current-version at this version only once its files are in place,

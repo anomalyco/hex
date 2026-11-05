@@ -72,7 +72,8 @@ Uninstall a script install with `install-windows.ps1 -Uninstall`.
 The managed layout is `%APPDATA%\hex\versions\<version>\` holding `hex.exe`,
 the app, a GUI program so launching Hex opens no console window, and
 `hex.com`, its console entry point, which runs `hex.exe` with the same
-arguments, waits for it, and returns its exit code. Shortcuts, Launch at login,
+arguments, waits for it, and returns its exit code (`hex` and `hex app` only
+start the app and return). Shortcuts, Launch at login,
 and the Start menu open `hex.exe`. `%APPDATA%\hex\bin\hex.com`, a copy that
 runs the version `current-version` names, is on the user's PATH, and a
 terminal resolves `hex` to it before any `hex.exe` because PATHEXT lists
