@@ -132,7 +132,11 @@ fn layers(look: RingLook, reduced: bool) -> Vec<Layer> {
                     from: t * FADE_REACH,
                     along: true,
                     ink: Ink::Line(FADE_FLOOR + (1.0 - FADE_FLOOR) * eased),
-                    cap: if k == 0 { LineCap::Round } else { LineCap::Butt },
+                    cap: if k == 0 {
+                        LineCap::Round
+                    } else {
+                        LineCap::Butt
+                    },
                     ..LINE
                 }
             })
@@ -241,8 +245,9 @@ fn border(p: Paint, [w, h]: [f32; 2], ground: Color, ring: &Ring) -> El {
         } else {
             tint(ground, ink, amount)
         };
-        let mut line = layer(Shape::new().stroke_with(path.clone(), false, spec.width, spec.cap, color))
-            .live_trim(span);
+        let mut line =
+            layer(Shape::new().stroke_with(path.clone(), false, spec.width, spec.cap, color))
+                .live_trim(span);
         if spec.blur > 0.0 {
             line = line.blur(spec.blur).opacity(amount * glow);
         }
@@ -257,7 +262,8 @@ fn border(p: Paint, [w, h]: [f32; 2], ground: Color, ring: &Ring) -> El {
 /// `ink` `amount` of the way over `ground`, as an alpha would show it on
 /// screen (in sRGB, not linear light), opaque.
 fn tint(ground: Color, ink: Color, amount: f32) -> Color {
-    let m = |a: f32, b: f32| srgb_decode(srgb_encode(a) + (srgb_encode(b) - srgb_encode(a)) * amount);
+    let m =
+        |a: f32, b: f32| srgb_decode(srgb_encode(a) + (srgb_encode(b) - srgb_encode(a)) * amount);
     Color {
         r: m(ground.r, ink.r),
         g: m(ground.g, ink.g),
@@ -270,7 +276,10 @@ fn tint(ground: Color, ink: Color, amount: f32) -> Color {
 /// the chip's corners, from the top centre clockwise and back.
 fn outline(w: f32, h: f32, inset: f32) -> Vec<[f32; 2]> {
     let (x0, y0, x1, y1) = (inset, inset, w - inset, h - inset);
-    let r = (CHIP_RADIUS - inset).min((y1 - y0) * 0.5).min((x1 - x0) * 0.5).max(0.01);
+    let r = (CHIP_RADIUS - inset)
+        .min((y1 - y0) * 0.5)
+        .min((x1 - x0) * 0.5)
+        .max(0.01);
     let mut points = vec![[w * 0.5, y0]];
     let corners = [
         (x1 - r, y0 + r, -FRAC_PI_2),
@@ -317,7 +326,10 @@ mod tests {
                 let d = (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]);
                 if d >= left {
                     let k = left / d;
-                    return [w[0][0] + (w[1][0] - w[0][0]) * k, w[0][1] + (w[1][1] - w[0][1]) * k];
+                    return [
+                        w[0][0] + (w[1][0] - w[0][0]) * k,
+                        w[0][1] + (w[1][1] - w[0][1]) * k,
+                    ];
                 }
                 left -= d;
             }
@@ -327,7 +339,8 @@ mod tests {
         let bottom = at(0.5);
         assert!((bottom[0] - 30.0).abs() < 0.05 && (bottom[1] - 28.0).abs() < 0.05);
         // The corners follow the chip's radius, within a hair.
-        let ideal = 2.0 * (w - 2.0 * CHIP_RADIUS) + 2.0 * (h - 2.0 * CHIP_RADIUS) + 2.0 * PI * CHIP_RADIUS;
+        let ideal =
+            2.0 * (w - 2.0 * CHIP_RADIUS) + 2.0 * (h - 2.0 * CHIP_RADIUS) + 2.0 * PI * CHIP_RADIUS;
         assert!((total - ideal).abs() < 0.05, "{total} vs {ideal}");
     }
 
@@ -343,7 +356,10 @@ mod tests {
         };
         let mut ring = None;
         sync(&mut ring, &counting(Some(5.0)), 0.0, false);
-        assert!(ring.as_ref().is_some_and(|r| r.layers.iter().any(|(l, _)| *l == LINE)));
+        assert!(
+            ring.as_ref()
+                .is_some_and(|r| r.layers.iter().any(|(l, _)| *l == LINE))
+        );
         // The same window a second on keeps the ring it had.
         sync(&mut ring, &counting(Some(5.0)), 1.0, false);
         assert_eq!(ring.as_ref().map(|r| r.end), Some(5.0));
@@ -357,7 +373,10 @@ mod tests {
     fn every_look_keeps_one_line_to_the_top_and_reduce_motion_keeps_only_it() {
         for look in RingLook::ALL {
             let all = layers(look, false);
-            assert!(all.iter().any(|l| l.from == 0.0 && l.to.is_none()), "{look:?}");
+            assert!(
+                all.iter().any(|l| l.from == 0.0 && l.to.is_none()),
+                "{look:?}"
+            );
             assert_eq!(layers(look, true), vec![LINE]);
         }
     }

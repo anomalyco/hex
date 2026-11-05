@@ -222,9 +222,15 @@ const SCENES: &[Scene] = &[
     ("clip-ring-comet", |s| ring_clip(s, RingLook::Comet, false)),
     ("clip-ring-glow", |s| ring_clip(s, RingLook::Glow, false)),
     ("clip-ring-fade", |s| ring_clip(s, RingLook::Fade, false)),
-    ("clip-ring-comet-hold", |s| ring_clip(s, RingLook::Comet, true)),
-    ("clip-ring-glow-hold", |s| ring_clip(s, RingLook::Glow, true)),
-    ("clip-ring-fade-hold", |s| ring_clip(s, RingLook::Fade, true)),
+    ("clip-ring-comet-hold", |s| {
+        ring_clip(s, RingLook::Comet, true)
+    }),
+    ("clip-ring-glow-hold", |s| {
+        ring_clip(s, RingLook::Glow, true)
+    }),
+    ("clip-ring-fade-hold", |s| {
+        ring_clip(s, RingLook::Fade, true)
+    }),
     ("clip-saved", |s| clip(s, &[(5.0, routed(guess()))])),
     ("clip-words", |s| {
         clip(
