@@ -74,9 +74,15 @@ export default bench({
       primary: "ui.cpu",
       metrics: ui,
       async run({ page }) {
+        // The panel scales in and springs to each view's height, so its
+        // header buttons move until it rests; a click before then misses
+        // them (Back did on macOS).
         await page.click("transcription-control", { until: "transcription-picker" })
+        await page.idle()
         await page.click("more-models", { until: "all-view" })
+        await page.idle()
         await page.click("picker-back", { until: "compare-view" })
+        await page.idle()
         await page.click("close-picker", { until: "transcription-control" })
       },
     },

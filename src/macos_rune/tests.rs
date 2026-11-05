@@ -25,7 +25,8 @@ fn switching_to_hex_opens_its_closed_window() {
 
 /// Setup or a missing menu-bar item always opens the window; otherwise a
 /// shown Dock icon opens it unless macOS started Hex at login (#1321), and a
-/// hidden one never does.
+/// hidden one never does. `hex app --hidden` opens it only without the
+/// menu-bar item.
 #[test]
 fn login_item_launch_starts_without_the_window() {
     for setup_ready in [false, true] {
@@ -34,6 +35,7 @@ fn login_item_launch_starts_without_the_window() {
                 for show_dock_icon in [false, true] {
                     let ready = setup_ready && onboarding_completed && status_item_available;
                     let launch = LaunchWindow::decide(
+                        false,
                         show_dock_icon,
                         setup_ready,
                         onboarding_completed,
@@ -44,6 +46,18 @@ fn login_item_launch_starts_without_the_window() {
                         launch.opens(false),
                         !ready || show_dock_icon,
                         "{launch:?} opened by hand"
+                    );
+                    let hidden = LaunchWindow::decide(
+                        true,
+                        show_dock_icon,
+                        setup_ready,
+                        onboarding_completed,
+                        status_item_available,
+                    );
+                    assert_eq!(
+                        hidden.opens(false),
+                        !status_item_available,
+                        "{hidden:?} hidden"
                     );
                 }
             }
