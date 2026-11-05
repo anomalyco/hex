@@ -7,7 +7,7 @@ use rune_kit::{ButtonVariant, IconButton, IconButtonVariant};
 
 use super::super::Ui;
 use super::super::controls::{DESCRIPTION, Paint, modal_scrim_transition};
-use super::category::Place;
+use super::group::{self, Place};
 use super::store::{feedback_button, lab_switch, tile};
 use super::{Lab, Row, close_drawer, shown, unload_after};
 use crate::desktop::i18n::tr;
@@ -64,10 +64,10 @@ pub(in crate::rune_ui) fn drawer(ui: &Ui, p: Paint) -> Option<[El; 2]> {
 }
 
 fn header(p: Paint, entry: &Row, new: bool) -> El {
-    let category = if new {
-        format!("{} · {}", entry.category.name(), tr("New"))
+    let group = if new {
+        format!("{} · {}", group::name(entry.group), tr("New"))
     } else {
-        entry.category.name().to_string()
+        group::name(entry.group).to_string()
     };
     let close = IconButton::new(p.k.glyph.close)
         .variant(IconButtonVariant::Ghost)
@@ -96,12 +96,7 @@ fn header(p: Paint, entry: &Row, new: bool) -> El {
                         .color(p.text())
                         .wrap(),
                 )
-                .child(
-                    text(category)
-                        .key("category")
-                        .font(DESCRIPTION)
-                        .color(p.muted()),
-                ),
+                .child(text(group).key("group").font(DESCRIPTION).color(p.muted())),
         )
         .child(close)
 }

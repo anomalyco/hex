@@ -1,6 +1,7 @@
 //! Labs: features we're unsure about, especially ones people asked for,
 //! each behind its own switch, off by default. There is no master switch:
-//! Settings › Labs lists every feature as a row with a toggle. A feature
+//! Settings › Labs lists every feature as a card with a toggle, under its
+//! group's collapsible header (`Feature::group`). A feature
 //! with its own pane (Meetings, Voice Filter, Playground) joins the sidebar
 //! as a normal item while on and is hidden while off; a behaviour-only
 //! feature (Live text, Live chapters, Vocabulary biasing, keyboard-language
@@ -26,6 +27,10 @@ use color_eyre::Result;
 use color_eyre::eyre::eyre;
 
 use crate::app_settings::{AppSettings, LabsSettings};
+
+mod group;
+
+pub use self::group::Group;
 
 /// Where people send feedback on Labs features.
 pub const FEEDBACK_URL: &str = "https://github.com/anomalyco/hex/issues/new";

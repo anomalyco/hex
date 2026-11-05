@@ -634,7 +634,7 @@ pub(super) const SCENES: &[Scene] = &[
     }),
     ("mac-labs-category", |ui| {
         labs_with_some_on(ui);
-        ui.lab_store.category = labs::Category::from_id("shortcuts");
+        ui.lab_store.group = Some(crate::labs::Group::Shortcuts);
     }),
     ("mac-labs-search", |ui| {
         labs_with_some_on(ui);
@@ -649,6 +649,21 @@ pub(super) const SCENES: &[Scene] = &[
         labs_with_some_on(ui);
         ui.settings.labs.screenshots = true;
         ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::Screenshots));
+    }),
+    // Labs on Windows and Linux: only their OS's labs, groups holding a
+    // lab that's on open.
+    ("windows-labs", |ui| {
+        *ui = fixture(DesktopShortcuts::Registered);
+        ui.platform = platform::PlatformState::preview(platform::Capabilities::WINDOWS);
+        ui.host = platform::PlatformHost::Fixture(Vec::new());
+        ui.settings.paste_with_shift = true;
+        ui.labs_open = true;
+    }),
+    ("linux-labs", |ui| {
+        *ui = portal_fixture();
+        ui.platform.caps = platform::Capabilities::LINUX;
+        ui.settings.labs.skip_pauses = true;
+        ui.labs_open = true;
     }),
     ("mac-production", |ui| {
         *ui = mac_fixture();
