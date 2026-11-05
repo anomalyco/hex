@@ -1,4 +1,4 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -193,9 +193,9 @@ const MAX_EVENT_RECORD_BYTES: usize = 1024 * 1024;
 impl EventLog {
     pub fn create(path: &Path) -> io::Result<Self> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            crate::app_paths::create_private_dir(parent)?;
         }
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let file = crate::app_paths::open_private_append(path)?;
         let (sender, receiver) = mpsc::sync_channel(EVENT_WRITER_CAPACITY);
         let error = Arc::new(Mutex::new(None));
         let worker_error = error.clone();
@@ -550,6 +550,7 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::OpenOptions;
 
     #[test]
     fn structural_event_equality_preserves_serialized_identity() {
@@ -725,6 +726,29 @@ mod tests {
         ));
         assert_eq!(reader.current_context(), None);
         fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_log_and_its_folder_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = std::env::temp_dir().join(format!(
+            "hex-private-log-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = directory.join("live.ndjson");
+        fs::write(&path, "").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        drop(EventLog::create(&path).unwrap());
+
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&directory), 0o700);
+        assert_eq!(mode(&path), 0o600);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

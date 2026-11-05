@@ -1,5 +1,5 @@
 use std::fs::{self, OpenOptions};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -46,16 +46,45 @@ pub fn logs_dir() -> Result<PathBuf> {
     Ok(support_dir()?.join("logs"))
 }
 
+/// Creates `directory` (and any missing parents) readable only by this user,
+/// and tightens it if an older Hex made it world-readable. Windows folders
+/// already inherit the per-user `%APPDATA%` permissions.
+pub fn create_private_dir(directory: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(directory)?;
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(directory)
+    }
+}
+
+/// Opens `path` to append, readable only by this user, tightening a file an
+/// older Hex created world-readable.
+pub fn open_private_append(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    Ok(file)
+}
+
 /// Creates the logs directory, appends process diagnostics to `process.log`
 /// alongside stderr, installs the global tracing subscriber, and routes Ctrl-C
 /// to `shutdown`. Returns the logs directory.
 pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
     let log_dir = logs_dir()?;
-    fs::create_dir_all(&log_dir)?;
-    let process_log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_dir.join("process.log"))?;
+    create_private_dir(&log_dir)?;
+    let process_log = open_private_append(&log_dir.join("process.log"))?;
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("hex=info"));
     tracing_subscriber::fmt()

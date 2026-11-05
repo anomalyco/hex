@@ -712,7 +712,11 @@ logs are separate and currently unbounded on disk, but they never hold what was
 said: `live.ndjson` records each dictation's phase and timing with its text
 left out (`events::VoiceEvent::without_words`,
 `the_log_never_keeps_what_was_said`), so History is the only place dictated
-words are kept.
+words are kept. They are readable
+only by their owner on macOS and Linux: Hex creates and tightens the logs folder
+to 0700 and `live.ndjson` and `process.log` to 0600 (`app_paths::create_private_dir`,
+`open_private_append`; `the_log_and_its_folder_are_private`), so other
+accounts can't read them through a world-readable home folder.
 
 
 The shared `EventReader` streams a file-length snapshot in 16 KiB chunks rather
