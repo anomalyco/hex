@@ -107,11 +107,12 @@ pub enum Feature {
     MeetingPlatformIcons,
     Screenshots,
     FollowLiveTranscript,
+    CollapsibleMeetingSections,
     AnnotateReplay,
 }
 
 impl Feature {
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 50] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -160,6 +161,7 @@ impl Feature {
         Self::MeetingPlatformIcons,
         Self::Screenshots,
         Self::FollowLiveTranscript,
+        Self::CollapsibleMeetingSections,
         Self::AnnotateReplay,
     ];
 
@@ -231,6 +233,7 @@ impl Feature {
             | Self::MeetingPlatformIcons
             | Self::Screenshots
             | Self::FollowLiveTranscript
+            | Self::CollapsibleMeetingSections
             | Self::AnnotateReplay
             | Self::NotchIndicator => Audience::Everyone,
         }
@@ -287,6 +290,7 @@ impl Feature {
             | Self::MeetingPlatformIcons
             | Self::Screenshots
             | Self::FollowLiveTranscript
+            | Self::CollapsibleMeetingSections
             | Self::AnnotateReplay => 20261104,
         }
     }
@@ -376,6 +380,7 @@ impl Feature {
             | Self::MeetingFinishedEvent
             | Self::MeetingPlatformIcons
             | Self::FollowLiveTranscript
+            | Self::CollapsibleMeetingSections
             | Self::FillerWords => true,
         }
     }
@@ -431,6 +436,7 @@ impl Feature {
             Self::MeetingPlatformIcons => "meeting-platform-icons",
             Self::Screenshots => "screenshots",
             Self::FollowLiveTranscript => "follow-live-transcript",
+            Self::CollapsibleMeetingSections => "collapsible-meeting-sections",
             Self::AnnotateReplay => "annotate-replay",
         }
     }
@@ -486,6 +492,7 @@ impl Feature {
             Self::MeetingPlatformIcons => "labs.meeting_platform_icons",
             Self::Screenshots => "labs.screenshots",
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
+            Self::CollapsibleMeetingSections => "labs.collapsible_meeting_sections",
             Self::AnnotateReplay => "labs.annotate_replay",
         }
     }
@@ -619,6 +626,9 @@ impl Feature {
             Self::FollowLiveTranscript => {
                 "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
             }
+            Self::CollapsibleMeetingSections => {
+                "Fold the summary, chapters, and day groups in Meetings"
+            }
             Self::AnnotateReplay => {
                 "Save the last 15 seconds of your screen with hex capture replay or capture.replay_hotkey; macOS shows the screen-recording dot the whole time it's on (macOS 27+)"
             }
@@ -680,6 +690,7 @@ impl Feature {
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons,
             Self::Screenshots => settings.labs.screenshots,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
+            Self::CollapsibleMeetingSections => settings.labs.collapsible_meeting_sections,
             Self::AnnotateReplay => settings.labs.annotate_replay,
         }
     }
@@ -737,6 +748,7 @@ impl Feature {
             &mut labs.meeting_platform_icons,
             &mut labs.screenshots,
             &mut labs.follow_live_transcript,
+            &mut labs.collapsible_meeting_sections,
             &mut labs.annotate_replay,
         ]
     }
@@ -794,6 +806,9 @@ impl Feature {
             Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
+            Self::CollapsibleMeetingSections => {
+                settings.labs.collapsible_meeting_sections = on;
+            }
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
