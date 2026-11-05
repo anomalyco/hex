@@ -22,11 +22,13 @@ use objc2_core_audio::{
     AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
     AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectID,
     AudioObjectPropertyAddress, CATapDescription, CATapMuteBehavior,
-    kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceNameKey,
+    kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceMainSubDeviceKey,
+    kAudioAggregateDeviceNameKey, kAudioAggregateDeviceSubDeviceListKey,
     kAudioAggregateDeviceTapAutoStartKey, kAudioAggregateDeviceTapListKey,
     kAudioAggregateDeviceUIDKey, kAudioHardwarePropertyTranslatePIDToProcessObject,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
-    kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey, kAudioTapPropertyFormat,
+    kAudioSubDeviceUIDKey, kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey,
+    kAudioTapPropertyFormat,
 };
 use objc2_core_audio_types::{
     AudioBuffer, AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp,
@@ -210,6 +212,7 @@ impl ProcessTapSource {
             &tap_uid,
             "Hex Meeting System Audio",
             &format!("anomaly.hex.meeting-tap.{}", std::process::id()),
+            None,
         )?;
 
         let channels = format.mChannelsPerFrame.max(1) as usize;
@@ -320,7 +323,8 @@ fn check(status: i32, context: &str) -> Result<()> {
     }
 }
 
-fn own_process_object() -> Option<AudioObjectID> {
+/// Hex's own Core Audio process object, which its global taps leave out.
+pub(crate) fn own_process_object() -> Option<AudioObjectID> {
     let pid = std::process::id() as i32;
     let mut object: AudioObjectID = 0;
     let mut size = size_of::<AudioObjectID>() as u32;
@@ -343,7 +347,7 @@ fn own_process_object() -> Option<AudioObjectID> {
     (status == 0 && object != 0).then_some(object)
 }
 
-fn tap_format(tap: AudioObjectID) -> Result<AudioStreamBasicDescription> {
+pub(crate) fn tap_format(tap: AudioObjectID) -> Result<AudioStreamBasicDescription> {
     let mut format = AudioStreamBasicDescription {
         mSampleRate: 0.0,
         mFormatID: 0,
@@ -387,11 +391,14 @@ fn object<T: objc2::Message>(value: Retained<T>) -> Retained<AnyObject> {
 }
 
 /// A private aggregate device that reads one process tap. `uid` must differ
-/// for each concurrent tap of this process.
+/// for each concurrent tap of this process. With `output`, the UID of an
+/// output device, the aggregate also plays: its IOProc gets the tap as
+/// input and that device's buffers as output.
 pub(crate) fn create_tap_aggregate(
     tap_uid: &NSString,
     name: &str,
     uid: &str,
+    output: Option<&str>,
 ) -> Result<AudioObjectID> {
     fn key(name: &CStr) -> Retained<NSString> {
         NSString::from_str(name.to_str().unwrap_or_default())
@@ -407,23 +414,34 @@ pub(crate) fn create_tap_aggregate(
         ],
     );
     let taps = NSArray::from_retained_slice(&[sub_tap]);
+    let mut keys = vec![
+        key(kAudioAggregateDeviceNameKey),
+        key(kAudioAggregateDeviceUIDKey),
+        key(kAudioAggregateDeviceIsPrivateKey),
+        key(kAudioAggregateDeviceTapAutoStartKey),
+        key(kAudioAggregateDeviceTapListKey),
+    ];
+    let mut values = vec![
+        object(NSString::from_str(name)),
+        object(NSString::from_str(uid)),
+        object(NSNumber::new_bool(true)),
+        object(NSNumber::new_bool(true)),
+        object(taps),
+    ];
+    if let Some(output) = output {
+        let sub_device: Retained<NSDictionary<NSString, AnyObject>> =
+            NSDictionary::from_retained_objects(
+                &[&*key(kAudioSubDeviceUIDKey)],
+                &[object(NSString::from_str(output))],
+            );
+        keys.push(key(kAudioAggregateDeviceSubDeviceListKey));
+        values.push(object(NSArray::from_retained_slice(&[sub_device])));
+        keys.push(key(kAudioAggregateDeviceMainSubDeviceKey));
+        values.push(object(NSString::from_str(output)));
+    }
+    let keys: Vec<&NSString> = keys.iter().map(|key| &**key).collect();
     let description: Retained<NSDictionary<NSString, AnyObject>> =
-        NSDictionary::from_retained_objects(
-            &[
-                &*key(kAudioAggregateDeviceNameKey),
-                &*key(kAudioAggregateDeviceUIDKey),
-                &*key(kAudioAggregateDeviceIsPrivateKey),
-                &*key(kAudioAggregateDeviceTapAutoStartKey),
-                &*key(kAudioAggregateDeviceTapListKey),
-            ],
-            &[
-                object(NSString::from_str(name)),
-                object(NSString::from_str(uid)),
-                object(NSNumber::new_bool(true)),
-                object(NSNumber::new_bool(true)),
-                object(taps),
-            ],
-        );
+        NSDictionary::from_retained_objects(&keys, &values);
     let mut aggregate: AudioObjectID = 0;
     // SAFETY: NSDictionary is toll-free bridged to CFDictionary.
     let dictionary: &CFDictionary =

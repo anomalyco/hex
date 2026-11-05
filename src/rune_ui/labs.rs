@@ -17,7 +17,9 @@ pub(super) use self::category::Category;
 pub(super) use self::drawer::drawer;
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
-use super::icons::{BOOK, CAMERA, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
+use super::icons::{
+    BOOK, CAMERA, GLOBE, KEYBOARD, MOUSE, SPARKLES, SPEAKER, TERMINAL, TIMER, WAVE,
+};
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
 use crate::desktop::i18n::{tr, tr_fill};
@@ -456,6 +458,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("While dictating with Pause media: YouTube and other tabs, resumed only if Hex paused them"),
         ));
         rows.push(row(
+            Feature::Muffle,
+            Some(&SPEAKER),
+            tr("Muffle other audio"),
+            tr("While dictating offers Muffle: other apps keep playing, low and through a wall, like a club heard from its bathroom"),
+        ));
+        rows.push(row(
             Feature::KeepOnClipboard,
             None,
             tr("Keep dictation on clipboard"),
@@ -728,6 +736,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::KeyboardModelSwitching => "lab-keyboard-model-switching",
         Feature::MouseShortcuts => "lab-mouse-shortcuts",
         Feature::PauseBrowser => "lab-pause-browser",
+        Feature::Muffle => "lab-muffle",
         Feature::ShareShortcut => "lab-share-shortcut",
         Feature::UnloadIdle => "lab-unload-idle",
         Feature::RestoreShortcutDefault => "lab-restore-shortcut-default",
@@ -791,8 +800,9 @@ fn flip(ui: &mut Ui, lab: Lab) {
     ui.update(|settings| feature.set(settings, on));
     match feature {
         Feature::KeyboardModelSwitching => ui.open = None,
-        // Hex hears the browser through System Audio Recording.
-        Feature::PauseBrowser if on && !ui.platform.system_audio => {
+        // Hex hears the browser, and replays muffled audio, through System
+        // Audio Recording.
+        Feature::PauseBrowser | Feature::Muffle if on && !ui.platform.system_audio => {
             ui.ask(super::platform::PlatformRequest::SystemAudio);
         }
         _ => {}

@@ -402,36 +402,38 @@ fn microphone_release_row(ui: &Ui, p: Paint) -> CardRow {
     .into()
 }
 
-/// Labs › Also pause the browser's permission, under Pause media on macOS:
-/// Hex hears the browser through System Audio Recording, asked for here,
-/// never while you dictate.
-fn pause_browser_rows(ui: &Ui, p: Paint) -> Vec<El> {
-    let on = ui.settings.pause_browser_media;
-    let mut rows = Vec::new();
-    if on {
-        let control = if ui.platform.system_audio {
-            PermissionControl::Allowed
-        } else if ui.platform.asked(PermissionKind::SystemAudio) {
-            PermissionControl::Waiting
-        } else {
-            PermissionControl::Allow
-        };
-        rows.push(icon_row(
+/// The System Audio Recording row under "While dictating": Labs › Also
+/// pause the browser hears the browser through it, and Muffle replays
+/// other apps' audio through it. Asked for here, never while you dictate.
+fn system_audio_row(ui: &Ui, p: Paint, key: &str, why: &str) -> El {
+    let control = if ui.platform.system_audio {
+        PermissionControl::Allowed
+    } else if ui.platform.asked(PermissionKind::SystemAudio) {
+        PermissionControl::Waiting
+    } else {
+        PermissionControl::Allow
+    };
+    icon_row(
+        p,
+        key,
+        &SPEAKER,
+        tr("Screen & System Audio Recording"),
+        Some(why),
+        permission_control(
             p,
-            "pause-browser-audio",
-            &SPEAKER,
-            tr("Screen & System Audio Recording"),
-            Some(tr("Lets Hex hear whether a tab is playing")),
-            permission_control(
-                p,
-                "pause-browser-allow",
-                control,
-                ButtonKind::Secondary,
-                |ui: &mut Ui| ui.ask(PlatformRequest::SystemAudio),
-            ),
-        ));
-    }
-    rows
+            &format!("{key}-allow"),
+            control,
+            ButtonKind::Secondary,
+            |ui: &mut Ui| ui.ask(PlatformRequest::SystemAudio),
+        ),
+    )
+}
+
+/// Whether "While dictating" offers Muffle: macOS with its Labs feature
+/// on, or already chosen, so the picker can show what is saved.
+fn muffle_offered(ui: &Ui) -> bool {
+    (ui.platform.caps.os == super::platform::Os::Macos && ui.settings.labs.muffle)
+        || ui.settings.recording_audio_behavior == RecordingAudioBehavior::Muffle
 }
 
 /// The model's languages as a quiet select, or the fallback note when
@@ -918,7 +920,7 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             None,
         ));
     }
-    let behaviors = RecordingAudioBehavior::ALL;
+    let behaviors = RecordingAudioBehavior::choices(muffle_offered(ui));
     rows.push(pick_row(
         ui,
         p,
@@ -934,13 +936,24 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             .position(|behavior| *behavior == settings.recording_audio_behavior)
             .unwrap_or(0),
         |ui, index| {
-            let behavior = RecordingAudioBehavior::ALL[index];
+            let behavior = RecordingAudioBehavior::choices(muffle_offered(ui))[index];
             if ui.settings.recording_audio_behavior != behavior {
                 ui.update(|settings| settings.recording_audio_behavior = behavior);
             }
         },
         layer,
     ));
+    if settings.recording_audio_behavior == RecordingAudioBehavior::Muffle {
+        rows.push(
+            system_audio_row(
+                ui,
+                p,
+                "muffle-audio",
+                tr("Lets Hex replay other apps' audio through the wall; until allowed, it lowers the audio"),
+            )
+            .into(),
+        );
+    }
     if settings.recording_audio_behavior == RecordingAudioBehavior::Duck {
         let volume = ui
             .duck_volume_drag
@@ -973,8 +986,17 @@ fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     }
     if ui.platform.caps.os == super::platform::Os::Macos
         && settings.recording_audio_behavior == RecordingAudioBehavior::PauseMedia
+        && settings.pause_browser_media
     {
-        rows.extend(pause_browser_rows(ui, p).into_iter().map(CardRow::from));
+        rows.push(
+            system_audio_row(
+                ui,
+                p,
+                "pause-browser-audio",
+                tr("Lets Hex hear whether a tab is playing"),
+            )
+            .into(),
+        );
     }
     rows.push(pick_row(
         ui,

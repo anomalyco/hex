@@ -19,6 +19,7 @@ use crate::app_settings::{self, RecordingAudioBehavior};
 use crate::audio::browser_media::{self, NativeBrowserAudio, PausedBrowser};
 
 mod ducking;
+mod muffle;
 
 const VIRTUAL_MAIN_VOLUME: u32 = u32::from_be_bytes(*b"vmvc");
 
@@ -87,13 +88,20 @@ pub(crate) enum Effect {
     Sleep,
     Mute,
     Duck,
+    Muffle,
     Pause,
 }
 
 impl Effect {
     /// Restoration order: output is audible again before a session's
     /// callback, and resuming media (AppleScript) never delays it.
-    const ALL: [Self; 4] = [Self::Sleep, Self::Mute, Self::Duck, Self::Pause];
+    const ALL: [Self; 5] = [
+        Self::Sleep,
+        Self::Mute,
+        Self::Duck,
+        Self::Muffle,
+        Self::Pause,
+    ];
 
     const fn index(self) -> usize {
         self as usize
@@ -114,9 +122,31 @@ impl Hold {
             Effect::Sleep => self.dictation,
             Effect::Mute => self.audio == RecordingAudioBehavior::Mute,
             Effect::Duck => self.audio == RecordingAudioBehavior::Duck,
+            Effect::Muffle => self.audio == RecordingAudioBehavior::Muffle,
             Effect::Pause => self.audio == RecordingAudioBehavior::PauseMedia,
         }
     }
+}
+
+/// What a session asking for `behavior` gets. Muffle needs its Labs
+/// feature and the System Audio Recording consent its tap needs (a tap
+/// without it opens the macOS dialog, never while you dictate); otherwise
+/// the audio is lowered instead.
+fn effective(behavior: RecordingAudioBehavior) -> RecordingAudioBehavior {
+    if behavior != RecordingAudioBehavior::Muffle {
+        return behavior;
+    }
+    if !crate::labs::muffle() {
+        return RecordingAudioBehavior::Duck;
+    }
+    if !matches!(
+        crate::meeting::system_audio_authorization(),
+        crate::meeting::SystemAudioAuthorization::Granted
+    ) {
+        tracing::info!("System Audio Recording is off; lowering audio instead of muffling");
+        return RecordingAudioBehavior::Duck;
+    }
+    behavior
 }
 
 /// What the native environment holds for one effect until it is dropped.
@@ -139,6 +169,7 @@ fn hold_native(effect: Effect) -> Held {
         },
         Effect::Mute => audio(RecordingAudioBehavior::Mute),
         Effect::Duck => audio(RecordingAudioBehavior::Duck),
+        Effect::Muffle => audio(RecordingAudioBehavior::Muffle),
         Effect::Pause => audio(RecordingAudioBehavior::PauseMedia),
     }
 }
@@ -255,7 +286,7 @@ impl RecordingEnvironmentController {
     pub fn begin(&self) -> RecordingEnvironmentSession {
         self.begin_as(Hold {
             dictation: true,
-            audio: app_settings::recording_audio_behavior(),
+            audio: effective(app_settings::recording_audio_behavior()),
         })
     }
 
@@ -266,7 +297,7 @@ impl RecordingEnvironmentController {
     pub fn begin_capture(&self, audio: RecordingAudioBehavior) -> RecordingEnvironmentSession {
         self.begin_as(Hold {
             dictation: false,
-            audio,
+            audio: effective(audio),
         })
     }
 
@@ -348,6 +379,7 @@ pub fn capture_active() -> bool {
 
 enum AudioBehaviorGuard {
     Ducked(crate::audio::output_ducking::Guard),
+    Muffled(muffle::Guard),
     Muted {
         device: u32,
         previous: f32,
@@ -407,6 +439,13 @@ impl AudioBehaviorGuard {
             }
             RecordingAudioBehavior::Duck => ducking::start(app_settings::recording_duck_volume())
                 .map_or(Self::None, Self::Ducked),
+            // A tap that fails to start (an output without a UID, macOS before
+            // 14.2) leaves the audio lowered.
+            RecordingAudioBehavior::Muffle => match muffle::start() {
+                Some(guard) => Self::Muffled(guard),
+                None => ducking::start(app_settings::recording_duck_volume())
+                    .map_or(Self::None, Self::Ducked),
+            },
             RecordingAudioBehavior::DoNothing => Self::None,
         }
     }
@@ -423,6 +462,7 @@ impl Drop for AudioBehaviorGuard {
                 }
             }
             Self::Ducked(guard) => guard.restore(),
+            Self::Muffled(guard) => guard.restore(),
             Self::Paused { players, browser } => {
                 // The browser first: its play goes to whatever macOS treats as
                 // playing, which a player resumed just before could become.

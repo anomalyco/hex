@@ -163,8 +163,8 @@ const KEYS: &[Key] = &[
     ),
     key(
         "recording_audio_behavior",
-        Kind::Choice(&["mute", "pause_media", "do_nothing", "duck"]),
-        "What other audio does while you dictate",
+        Kind::Choice(&["mute", "pause_media", "do_nothing", "duck", "muffle"]),
+        "What other audio does while you dictate; muffle needs labs.muffle (macOS) and lowers elsewhere",
     ),
     key(
         "recording_duck_volume",
@@ -443,6 +443,11 @@ const KEYS: &[Key] = &[
         "labs.meeting_finished_event",
         Kind::Bool,
         "Labs: the local API's GET /meetings/events tells one subscriber each finished meeting's id once its final transcript is written; no transcript, audio, path, or title",
+    ),
+    key(
+        "labs.muffle",
+        Kind::Bool,
+        "Labs: While dictating offers Muffle, other apps' audio low-passed and lowered through a system audio tap, as if through a wall (macOS, with System Audio Recording)",
     ),
     key(
         "labs.screenshots",

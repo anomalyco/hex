@@ -109,10 +109,11 @@ pub enum Feature {
     FollowLiveTranscript,
     CollapsibleMeetingSections,
     AnnotateReplay,
+    Muffle,
 }
 
 impl Feature {
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 51] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -163,6 +164,7 @@ impl Feature {
         Self::FollowLiveTranscript,
         Self::CollapsibleMeetingSections,
         Self::AnnotateReplay,
+        Self::Muffle,
     ];
 
     /// The features this OS and build have.
@@ -235,6 +237,7 @@ impl Feature {
             | Self::FollowLiveTranscript
             | Self::CollapsibleMeetingSections
             | Self::AnnotateReplay
+            | Self::Muffle
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -292,6 +295,7 @@ impl Feature {
             | Self::FollowLiveTranscript
             | Self::CollapsibleMeetingSections
             | Self::AnnotateReplay => 20261104,
+            Self::Muffle => 20261105,
         }
     }
 
@@ -346,7 +350,8 @@ impl Feature {
             | Self::RecentDictations
             | Self::HideMenuBarIcon
             | Self::NotchIndicator
-            | Self::Screenshots => cfg!(target_os = "macos"),
+            | Self::Screenshots
+            | Self::Muffle => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::AnnotateReplay => {
@@ -438,6 +443,7 @@ impl Feature {
             Self::FollowLiveTranscript => "follow-live-transcript",
             Self::CollapsibleMeetingSections => "collapsible-meeting-sections",
             Self::AnnotateReplay => "annotate-replay",
+            Self::Muffle => "muffle",
         }
     }
 
@@ -494,6 +500,7 @@ impl Feature {
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
             Self::CollapsibleMeetingSections => "labs.collapsible_meeting_sections",
             Self::AnnotateReplay => "labs.annotate_replay",
+            Self::Muffle => "labs.muffle",
         }
     }
 
@@ -632,6 +639,9 @@ impl Feature {
             Self::AnnotateReplay => {
                 "Save the last 15 seconds of your screen with hex capture replay or capture.replay_hotkey; macOS shows the screen-recording dot the whole time it's on (macOS 27+)"
             }
+            Self::Muffle => {
+                "While dictating offers Muffle: other apps keep playing, but low and through a wall, like a club from its bathroom (needs System Audio Recording)"
+            }
         }
     }
 
@@ -692,6 +702,7 @@ impl Feature {
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
             Self::CollapsibleMeetingSections => settings.labs.collapsible_meeting_sections,
             Self::AnnotateReplay => settings.labs.annotate_replay,
+            Self::Muffle => settings.labs.muffle,
         }
     }
 
@@ -750,6 +761,7 @@ impl Feature {
             &mut labs.follow_live_transcript,
             &mut labs.collapsible_meeting_sections,
             &mut labs.annotate_replay,
+            &mut labs.muffle,
         ]
     }
 
@@ -810,6 +822,7 @@ impl Feature {
                 settings.labs.collapsible_meeting_sections = on;
             }
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
+            Self::Muffle => settings.labs.muffle = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -856,8 +869,9 @@ const MEETING_FINISHED_EVENT: u64 = 1 << 28;
 const GNOME_MEETING_CAPSULES: u64 = 1 << 29;
 const SCREENSHOTS: u64 = 1 << 30;
 const ANNOTATE_REPLAY: u64 = 1 << 31;
+const MUFFLE: u64 = 1 << 32;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
-const MINUTES_SHIFT: u64 = 32;
+const MINUTES_SHIFT: u64 = 40;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1077,6 +1091,13 @@ pub fn annotate_replay() -> bool {
     on(ANNOTATE_REPLAY) && Feature::AnnotateReplay.on_this_os()
 }
 
+/// "While dictating" may muffle other audio (macOS; read as each recording
+/// environment session starts, so nothing taps while it is off).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn muffle() -> bool {
+    on(MUFFLE) && Feature::Muffle.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -1213,6 +1234,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             GNOME_MEETING_CAPSULES,
         ),
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
+        (Feature::Muffle, settings.muffle, MUFFLE),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))

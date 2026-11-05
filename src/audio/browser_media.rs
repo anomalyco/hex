@@ -273,6 +273,7 @@ impl BrowserTap {
             &tap_uid,
             "Hex Browser Level",
             &format!("anomaly.hex.browser-tap.{}", std::process::id()),
+            None,
         )?;
         let peak = source.peak.clone();
         let callbacks = source.callbacks.clone();

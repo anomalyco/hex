@@ -41,7 +41,7 @@ on and is hidden while off; a behaviour-only feature is just its toggle. Today:
 Meetings (beta), Voice Filter (locked on while its macOS driver is
 installed), Playground, Live text, Live chapters, Vocabulary biasing, Switch
 model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
-pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
+pause the browser (#301, macOS), Muffle other audio (macOS), Share dictation shortcut (#176, Windows),
 Unload model when idle (#442), and Terminal paste (Windows). Externally contributed features land there too.
 Annotate is a normal feature in every build, stable included, on macOS,
 Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
@@ -102,9 +102,16 @@ substitute for source inspection or a second roadmap.
   each OS's audio owner and read by the window's level bars (General and the
   practice dictation); a stale peak reads as no audio.
 - `audio/recording_environment`: serialized RAII ownership of idle-sleep prevention,
-  output muting and lowering, and supported media-player pause/resume
-  behavior on macOS, each held from the first dictation or capture session
-  that wants it to the last.
+  output muting, lowering, and muffling, and supported media-player
+  pause/resume behavior on macOS, each held from the first dictation or
+  capture session that wants it to the last.
+- `audio/muffle`: the "Muffle" signal path (Labs › Muffle other audio): a
+  400 Hz low-pass with a resonant thump as it shuts, 40 % level, a small
+  Freeverb-shaped room, and a soft clip, swept open again over 200 ms. Pure
+  and the same on every OS; `recording_environment/muffle` is the macOS
+  adapter: a muted-when-tapped global process tap (Hex left out) replayed
+  onto the default output by a private aggregate device, only with System
+  Audio Recording granted, else the audio is lowered.
 - `audio/output_ducking`: the shared Lower audio ramp (relative, channel-preserving,
   respecting manual changes, rolled back on failure) over each OS's volume
   adapter: CoreAudio output channels, the Linux default sink's channels

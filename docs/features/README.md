@@ -803,8 +803,12 @@ General                                  // settings
 │   │   Open while idle; pre-roll available
 │   └── On -> "The mic opens only while you dictate; the first moment can be clipped"
 │       Open on press; no pre-roll; startup delay
-├── While dictating -> Mute / Pause media / Lower audio / Do nothing
+├── While dictating -> Mute / Pause media / Lower audio / Do nothing / Muffle (macOS, Labs > Muffle other audio)
 │   ├── Lower audio -> Lower to slider, 0–100% of the previous volume (default 20%)
+│   ├── Muffle -> other apps muted at the output by a process tap and replayed through a 400 Hz low-pass
+│   │   at 40 % with a small room (a resonant thump as it shuts, a 200 ms sweep back up); Hex's own tones left out
+│   │   ├── Screen & System Audio Recording row: Allow / waiting / Allowed, never asked while dictating
+│   │   └── Permission off, Labs off, or the tap fails (macOS before 14.2, an output without a UID) -> Lower audio
 │   ├── Intentional capture only, not ordinary shortcut chords
 │   ├── Pause/resume only players already reported running by macOS
 │   ├── Linux restore -> Waits 300 ms; a new capture keeps it suppressed // double-tap lock

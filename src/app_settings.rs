@@ -192,12 +192,32 @@ pub enum RecordingAudioBehavior {
     PauseMedia,
     #[default]
     DoNothing,
+    /// Other audio keeps playing, low-passed and lowered as if through a
+    /// wall (macOS, Labs › Muffle other audio; elsewhere it lowers).
+    Muffle,
 }
 
 pub use crate::dictation::text_replacements::TextReplacement;
 
 impl RecordingAudioBehavior {
     pub const ALL: [Self; 4] = [Self::Mute, Self::PauseMedia, Self::Duck, Self::DoNothing];
+    const WITH_MUFFLE: [Self; 5] = [
+        Self::Mute,
+        Self::PauseMedia,
+        Self::Duck,
+        Self::DoNothing,
+        Self::Muffle,
+    ];
+
+    /// What the "While dictating" picker offers: Muffle only where its
+    /// Labs feature is on, after the others so their places stay.
+    pub const fn choices(muffle: bool) -> &'static [Self] {
+        if muffle {
+            &Self::WITH_MUFFLE
+        } else {
+            &Self::ALL
+        }
+    }
 
     pub const fn label(self) -> &'static str {
         match self {
@@ -205,6 +225,7 @@ impl RecordingAudioBehavior {
             Self::Duck => "Lower audio",
             Self::PauseMedia => "Pause media",
             Self::DoNothing => "Do nothing",
+            Self::Muffle => "Muffle",
         }
     }
 
@@ -214,6 +235,7 @@ impl RecordingAudioBehavior {
             Self::Duck => 3,
             Self::PauseMedia => 1,
             Self::DoNothing => 2,
+            Self::Muffle => 4,
         }
     }
 
@@ -222,6 +244,7 @@ impl RecordingAudioBehavior {
             3 => Self::Duck,
             1 => Self::PauseMedia,
             2 => Self::DoNothing,
+            4 => Self::Muffle,
             _ => Self::Mute,
         }
     }

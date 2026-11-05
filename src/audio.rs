@@ -12,6 +12,8 @@ pub(crate) mod instant;
 mod lid;
 #[cfg(any(target_os = "windows", test))]
 mod mix_format;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+pub(crate) mod muffle;
 pub(crate) mod output_ducking;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;

@@ -28,6 +28,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the input source picks its mapped model (#216); General shows the mappings while on
 ├── Mouse shortcuts no    labs.mouse_shortcuts         (macOS)   mouse buttons record as shortcuts (#209)
 ├── Also pause the browser no pause_browser_media      (macOS)   pause a playing tab too, with Pause media (#301); General shows its permission row
+├── Muffle other audio no labs.muffle                  (macOS)   While dictating offers Muffle: a process tap mutes other apps at the output and replays them
+│                                        through a 400 Hz low-pass at 40 % with a small room, as a club sounds from its bathroom;
+│                                        General shows its permission row; without System Audio Recording, or where the tap
+│                                        fails, the audio is lowered instead
+│                                        // check: audio::muffle tests (the signal path, every OS); the tap itself is not under test
 ├── Share dictation shortcut no share_dictation_shortcut (Windows) apps such as Discord see the shortcut too (#176)
 ├── Unload model when idle no labs.unload_idle + labs.unload_idle_minutes (5/15/30/60, default 15)
 │                                        the engine frees the speech model after that long unused (#442)

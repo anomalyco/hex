@@ -158,11 +158,14 @@ fn suppress(behavior: RecordingAudioBehavior) -> Suppressed {
                 Suppressed::Nothing
             }
         },
-        RecordingAudioBehavior::Duck => output_ducking::Guard::start(
-            crate::app_settings::recording_duck_volume(),
-            SinkVolume::find,
-        )
-        .map_or(Suppressed::Nothing, Suppressed::Ducked),
+        // Muffle is macOS's; here it lowers.
+        RecordingAudioBehavior::Duck | RecordingAudioBehavior::Muffle => {
+            output_ducking::Guard::start(
+                crate::app_settings::recording_duck_volume(),
+                SinkVolume::find,
+            )
+            .map_or(Suppressed::Nothing, Suppressed::Ducked)
+        }
         RecordingAudioBehavior::PauseMedia => Suppressed::Paused(pause_players()),
         RecordingAudioBehavior::DoNothing => Suppressed::Nothing,
     }

@@ -95,6 +95,7 @@ impl Category {
             | Feature::FillerWords
             | Feature::VocabularyBiasing
             | Feature::PauseBrowser
+            | Feature::Muffle
             | Feature::KeepRecordings
             | Feature::OutputFixes
             | Feature::HistoryStats
@@ -175,6 +176,7 @@ impl Place {
             | Feature::GnomeClipboardRestore
             | Feature::TerminalPaste => Self::Elsewhere(tr("Every dictation")),
             Feature::PauseBrowser
+            | Feature::Muffle
             | Feature::MouseShortcuts
             | Feature::SidedChords
             | Feature::StandaloneSpecialKeys

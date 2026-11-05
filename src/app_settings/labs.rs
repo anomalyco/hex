@@ -88,6 +88,8 @@ pub struct LabsSettings {
     pub collapsible_meeting_sections: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
+    /// "While dictating" offers Muffle: other apps' audio low-passed and lowered through a Core Audio process tap (macOS).
+    pub muffle: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -141,6 +143,7 @@ impl Default for LabsSettings {
             screenshots: false,
             follow_live_transcript: false,
             collapsible_meeting_sections: false,
+            muffle: false,
         }
     }
 }

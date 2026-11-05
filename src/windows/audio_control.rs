@@ -84,7 +84,10 @@ impl AudioSuppressor {
                             held = Some(Held {
                                 audio: match mode {
                                     WhileDictating::Mute => mute_other_sessions(),
-                                    WhileDictating::Duck => duck_other_sessions(),
+                                    // Muffle is macOS's; here it lowers.
+                                    WhileDictating::Duck | WhileDictating::Muffle => {
+                                        duck_other_sessions()
+                                    }
                                     WhileDictating::PauseMedia => pause_playing_media(),
                                     WhileDictating::DoNothing => None,
                                 },
