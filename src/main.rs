@@ -1,3 +1,7 @@
+// A GUI program on Windows, so launching Hex opens no console window (#850).
+// Commands run from a terminal attach to it (`windows::attach_parent_console`).
+#![cfg_attr(all(target_os = "windows", not(test)), windows_subsystem = "windows")]
+
 /// The version Hex reports: the release version, or `0.0.0-dev-local-<commit>`
 /// for a build outside the Release workflow (build.rs).
 const VERSION: &str = env!("HEX_BUILD_VERSION");
@@ -863,7 +867,12 @@ fn main() -> Result<()> {
 #[cfg(target_os = "windows")]
 fn main() -> Result<()> {
     // DLL search hardening first: the CPU check's message box loads DLLs.
-    windows::restrict_dll_search();
+    let dll_search = windows::restrict_dll_search();
+    // Then, before anything prints, join the terminal that ran `hex`.
+    windows::attach_parent_console();
+    if let Err(error) = dll_search {
+        eprintln!("hex: SetDefaultDllDirectories failed: {error}");
+    }
     windows::vulkan::check();
     windows::gpu_fallback::choose();
     #[cfg(target_arch = "x86_64")]

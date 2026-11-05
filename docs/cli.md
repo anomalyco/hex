@@ -18,6 +18,13 @@ CLI; `hex status --json` lists the OS's `capabilities`. Today that is
 playground stories (`window story`) outside macOS and the local `model`
 tools on macOS.
 
+On Windows `hex.exe` is a GUI program, so opening Hex shows no console
+window. Run from a terminal, a command joins that terminal and prints there,
+but PowerShell and an interactive `cmd` neither wait for it nor capture its
+output. When a script or agent needs the reply or the exit code, pipe it
+(`hex status --json | Out-String` in PowerShell, which waits and sets
+`$LASTEXITCODE`), or run it from a batch file, which waits.
+
 The read-only `hex history` and `hex meetings list|show|chapters|search` commands, and
 `hex mcp`, read files rather than the running Hex; see `docs/transcript-cli.md`.
 

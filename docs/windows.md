@@ -175,8 +175,10 @@ discarded. `--device` accepts a case-insensitive fragment from `devices`.
 Runtime data is stored under `%APPDATA%\hex`. Observations are in
 `logs\live.ndjson`, and native/runtime diagnostics are in `logs\process.log`,
 including every panic with its thread and backtrace. A worker that stops
-unexpectedly leaves its cause there. The app detaches from its console at
-launch, so it has no stdout or stderr.
+unexpectedly leaves its cause there. `hex.exe` is a GUI program, so a launch
+from Explorer, the Start menu, or login opens no console window. Run from a
+terminal, it prints startup errors there, then the app leaves the terminal and
+has no stdout or stderr.
 Successful pasted dictations are retained, subject to the selected retention
 window and hard size limits, in `history.json`. Captured audio is never retained
 by default.
