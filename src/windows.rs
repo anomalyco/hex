@@ -19,8 +19,8 @@ use clap::{Args, Parser, Subcommand};
 use color_eyre::Result;
 use color_eyre::eyre::{WrapErr, bail};
 use windows_sys::Win32::System::Console::{
-    FreeConsole, GetConsoleMode, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
-    STD_OUTPUT_HANDLE, SetStdHandle,
+    ATTACH_PARENT_PROCESS, AttachConsole, FreeConsole, GetConsoleMode, GetStdHandle,
+    STD_ERROR_HANDLE, STD_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
 };
 
 use crate::audio::{AudioInput, AudioInputEvent};
@@ -133,7 +133,7 @@ impl SelectionArgs {
 /// must not load into Hex. Hex's own imports loaded before this, except the
 /// delay-loaded vulkan-1.dll (`vulkan`); Windows, the GPU drivers, and COM
 /// load theirs by full path.
-pub(crate) fn restrict_dll_search() {
+pub(crate) fn restrict_dll_search() -> std::io::Result<()> {
     use windows_sys::Win32::System::LibraryLoader::{
         LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
     };
@@ -142,11 +142,9 @@ pub(crate) fn restrict_dll_search() {
         SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_APPLICATION_DIR)
     } == 0
     {
-        eprintln!(
-            "hex: SetDefaultDllDirectories failed: {}",
-            std::io::Error::last_os_error()
-        );
+        return Err(std::io::Error::last_os_error());
     }
+    Ok(())
 }
 
 pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
@@ -245,10 +243,63 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     }
 }
 
+/// hex.exe is a GUI program, so Windows gives it no console of its own and
+/// an Explorer, Start menu, or login launch shows no terminal window. Run
+/// from a terminal, it joins that terminal's console and points any standard
+/// handle it wasn't given there, so commands, `--help`, and startup errors
+/// print as before. Handles the caller redirected (a pipe, a file, NUL) stay.
+/// The shell doesn't wait for a GUI program unless it reads its output.
+pub(crate) fn attach_parent_console() {
+    use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_UNKNOWN, GetFileType,
+        OPEN_EXISTING,
+    };
+    let missing = |id: STD_HANDLE| {
+        // SAFETY: reads this process's standard handle and its type.
+        let handle = unsafe { GetStdHandle(id) };
+        handle.is_null()
+            || handle == INVALID_HANDLE_VALUE
+            || unsafe { GetFileType(handle) } == FILE_TYPE_UNKNOWN
+    };
+    let missing: Vec<_> = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
+        .into_iter()
+        .filter(|&id| missing(id))
+        .collect();
+    // SAFETY: no pointers; fails when the parent has no console.
+    if missing.is_empty() || unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
+        return;
+    }
+    for id in missing {
+        let device = if id == STD_INPUT_HANDLE {
+            "CONIN$"
+        } else {
+            "CONOUT$"
+        };
+        let name: Vec<u16> = device.encode_utf16().chain([0]).collect();
+        // SAFETY: `name` is a NUL-terminated UTF-16 string that outlives the call.
+        let handle = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle != INVALID_HANDLE_VALUE {
+            // SAFETY: hands the console handle to this process's standard slot.
+            unsafe { SetStdHandle(id, handle) };
+        }
+    }
+}
+
 fn detach_from_console() {
-    // The binary also exposes terminal-oriented subcommands, so it cannot use a
-    // crate-wide Windows GUI subsystem. Detach only for the native app: an
-    // Explorer-launched console disappears, while a parent terminal remains.
+    // The native app leaves the terminal it joined (`attach_parent_console`)
+    // once startup errors have had their chance to print there: it outlives
+    // that terminal, whose shell has already moved on.
     // FreeConsole leaves the standard handles holding closed console handle
     // values that Windows soon reuses for unrelated objects, so a later print
     // panics (a read-only file) or writes into whatever file took the value.
@@ -256,14 +307,23 @@ fn detach_from_console() {
     unsafe {
         let console_handles: Vec<_> = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
             .into_iter()
-            .filter(|&id| {
+            .map(|id| (id, GetStdHandle(id)))
+            .filter(|&(_, handle)| {
                 let mut mode = 0;
-                GetConsoleMode(GetStdHandle(id), &mut mode) != 0
+                GetConsoleMode(handle, &mut mode) != 0
             })
             .collect();
         FreeConsole();
-        for id in console_handles {
+        for &(id, _) in &console_handles {
             SetStdHandle(id, std::ptr::null_mut());
+        }
+        // Open, they'd keep the terminal's console alive as long as Hex runs.
+        let mut closed = Vec::new();
+        for (_, handle) in console_handles {
+            if !closed.contains(&handle) {
+                windows_sys::Win32::Foundation::CloseHandle(handle);
+                closed.push(handle);
+            }
         }
     }
 }

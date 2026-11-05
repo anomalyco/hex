@@ -62,7 +62,9 @@ Check ($uninstaller -like "$support\uninstall\*") 'the uninstaller lives outside
 Check (Test-Path $uninstaller) 'the uninstaller exists'
 
 # Starts without a Vulkan loader too (#1240), which some runners lack.
-$reported = (& $installed --version) -split '\s+' | Select-Object -Last 1
+# hex.exe is a GUI program: PowerShell waits for it and reads its output only
+# when it isn't last in the pipeline.
+$reported = (& $installed --version | Out-String).Trim() -split '\s+' | Select-Object -Last 1
 Check ($reported -eq $Version) "installed hex.exe reports $Version"
 
 Check ((Run-Setup 'reinstall') -eq 0) 'reinstalling the same version exits 0'
