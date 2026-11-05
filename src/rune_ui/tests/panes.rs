@@ -433,7 +433,7 @@ fn summaries_are_one_choice_with_opencode_s_model_under_it() {
         rt.find("meeting-summary-model").is_none(),
         "On this Mac has no model"
     );
-    tap(&mut rt, "meeting-summaries-control");
+    tap(&mut rt, "meeting-summaries-control-trigger");
     tap(&mut rt, "meeting-summaries-menu-item3");
     assert_eq!(
         rt.state.settings.meetings.summaries,
@@ -445,7 +445,7 @@ fn summaries_are_one_choice_with_opencode_s_model_under_it() {
         rt.find("refresh-models").is_none(),
         "opening the picker reads the list"
     );
-    tap(&mut rt, "meeting-summaries-control");
+    tap(&mut rt, "meeting-summaries-control-trigger");
     tap(&mut rt, "meeting-summaries-menu-item0");
     assert_eq!(rt.state.settings.meetings.summaries, MeetingSummaries::Off);
     settle(&mut rt);
