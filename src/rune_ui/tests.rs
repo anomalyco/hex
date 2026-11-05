@@ -1169,11 +1169,54 @@ fn history_selects_deletes_and_clears_in_two_steps() {
     assert_eq!(rt.state.history.selected, Some(3));
     tap(&mut rt, "history-delete");
     assert!(rt.state.history.entries.iter().all(|entry| entry.id != 3));
-    tap(&mut rt, "history-clear");
+    // Clear all history… sits at the bottom of the retention menu and only
+    // asks; Cancel keeps everything, and only the confirmation clears.
+    tap(&mut rt, "history-retention-field-trigger");
+    let clear = menu_item(&rt, "history-retention", "Clear all history…");
+    tap(&mut rt, &clear);
     assert!(rt.state.history.clear_armed);
     assert_eq!(rt.state.history.entries.len(), 2);
-    tap(&mut rt, "history-clear");
+    assert!(rt.find("history-retention-field-trigger").is_none());
+    tap(&mut rt, "history-cancel-clear");
+    assert!(!rt.state.history.clear_armed);
+    assert_eq!(rt.state.history.entries.len(), 2);
+    tap(&mut rt, "history-retention-field-trigger");
+    tap(&mut rt, &clear);
+    tap(&mut rt, "history-confirm-clear");
     assert!(rt.state.history.entries.is_empty());
+}
+
+#[test]
+fn history_menu_sets_retention_and_keep_recordings() {
+    let mut rt = runtime("history-menu", true, PANE_SIZE);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Kept 7 days"));
+    let day = menu_item(&rt, "history-retention", "24 hours");
+    tap(&mut rt, &day);
+    assert_eq!(
+        rt.state.settings.history_retention,
+        crate::history::HistoryRetention::Day
+    );
+    assert!(texts(&rt).iter().any(|text| text == "Kept 24 hours"));
+    tap(&mut rt, "history-retention-field-trigger");
+    let audio = menu_item(&rt, "history-retention", "Keep audio too");
+    tap(&mut rt, &audio);
+    assert!(rt.state.settings.labs.keep_recordings);
+    tap(&mut rt, "history-retention-field-trigger");
+    let off = menu_item(&rt, "history-retention", "Off");
+    tap(&mut rt, &off);
+    assert!(texts(&rt).iter().any(|text| text == "History off"));
+}
+
+/// The key of `menu`'s item labelled `label`.
+fn menu_item(rt: &Runtime<Ui>, menu: &str, label: &str) -> String {
+    let prefix = format!("{menu}-item");
+    rt.elements()
+        .into_iter()
+        .filter_map(|e| e.key.filter(|key| key.starts_with(&prefix)).zip(e.label))
+        .find(|(_, shown)| shown == label)
+        .map(|(key, _)| key)
+        .unwrap_or_else(|| panic!("{menu} has no {label:?}"))
 }
 
 /// What is still changing one short frame after an input: hover and press
@@ -2583,6 +2626,7 @@ fn goldens() {
     check_golden("vocabulary-budget", false, PANE_SIZE);
     check_golden("windows-labs", false, PANE_SIZE);
     check_golden("linux-labs", false, PANE_SIZE);
+    check_golden("history-menu", true, PANE_SIZE);
 }
 
 mod onboarding_check;

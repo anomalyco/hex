@@ -690,9 +690,11 @@ Completed output                         // output
 │       modifier-only, or a mouse button -> no shortcut shown
 └── History
     ├── Inspect / search / copy (row hover or the card) / delete
-    ├── Retention ("Keep: 7 days" menu) -> Seven days by default, always hard-capped
-    ├── Off -> Stop new entries; preserve existing entries
+    ├── Retention ("Kept 7 days ▾" menu) -> Seven days by default, always hard-capped
+    ├── Off ("History off") -> Stop new entries; preserve existing entries
+    ├── Same menu > Clear all history… -> asks in the header; only the red confirm clears
     └── Labs > Keep recordings (off) -> new entries keep their 16 kHz audio   // labs.keep-recordings
+        -> also "Keep audio too" in the retention menu while the lab is offered
         -> the card's "Transcribe again" menu runs it through any installed model
         -> the new text with Copy and Replace; Clear all and retention delete the audio (labs.md, #1032)
         -> Replace keeps the old text as one of 5 earlier versions: Copy, Use this version (#1177)

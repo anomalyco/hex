@@ -184,6 +184,8 @@ const PATHS: &[(&str, &str)] = &[
         "Window/Meetings/Calendar denied",
     ),
     ("history", "Window/History/History"),
+    ("history-menu", "Window/History/Retention menu"),
+    ("history-clear", "Window/History/Clear all asks first"),
     ("history-empty", "Window/History/Empty"),
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
