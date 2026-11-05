@@ -5,8 +5,9 @@ import { bench, native } from "@hona/strobe"
 
 export default bench({
   targets: {
-    // The Settings window open on General. Needs an unlocked session.
-    window: native("hex"),
+    // The Settings window open on General. Needs an unlocked session. A block
+    // on another screen (a first-run dialog, another pane) is refused.
+    window: native("hex", { expect: { title: "Hex", heading: "General" } }),
     // A login launch: the tray only, no window. Runs on a locked session too.
     tray: native("hex", { args: ["--hidden"], window: false }),
   },

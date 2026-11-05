@@ -16,6 +16,7 @@ use rune::{Spring, TextStyle};
 use super::flow::{Done, Lead, Mode, Pen, Pres};
 use super::notch;
 use super::tuning::{self, CapsuleFlow, TopLine};
+use crate::desktop::i18n::tr;
 use crate::rune_hud::spring::REDUCED_FADE;
 
 /// The overlay's panel: wide enough for the open list, and tall enough for
@@ -119,11 +120,14 @@ pub(crate) fn medium() -> TextStyle {
 pub(crate) fn small() -> TextStyle {
     rune_theme_opencode::kit(false).ty.small_medium
 }
+/// "Processing…" in the interface's language.
+pub(crate) fn processing() -> &'static str {
+    tr("Processing…")
+}
 /// Tabular digits, so a new second never changes the timer's width.
 pub(crate) fn clock_style() -> TextStyle {
     medium().features("'tnum' 1")
 }
-pub(crate) const PROCESSING: &str = "Processing…";
 /// The hairline between the recording's tools and its stop and cancel.
 pub(crate) const DIVIDER_W: f32 = 1.0;
 
@@ -150,7 +154,7 @@ pub(crate) fn done_style() -> TextStyle {
 /// [`TopLine::Icons`] says nothing for a plain copy: the check is enough.
 pub(crate) fn bare(done: &Done) -> bool {
     tuning::get().top_line == TopLine::Icons
-        && (done.text.is_empty() || done.text == super::flow::COPIED)
+        && (done.text.is_empty() || done.text == super::flow::copied())
         && done.why.is_none()
 }
 
@@ -183,10 +187,16 @@ pub(crate) fn ellipsize(text: &str, style: TextStyle, max: f32) -> String {
 }
 
 /// The Undo chip's label; the seconds left show in the ring.
-pub(crate) const UNDO_LABEL: &str = "Undo";
+pub(crate) fn undo_label() -> &'static str {
+    tr("Undo")
+}
 /// The recording's ✕ asks before it discards.
-pub(crate) const KEEP_LABEL: &str = "Keep recording";
-pub(crate) const DISCARD_LABEL: &str = "Discard";
+pub(crate) fn keep_label() -> &'static str {
+    tr("Keep recording")
+}
+pub(crate) fn discard_label() -> &'static str {
+    tr("Discard")
+}
 
 /// Something the capsule shows, or a click on a row of its list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -456,7 +466,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Next,
             String::new(),
-            keyed_width(&["⇥"], "Next", medium()),
+            keyed_width(&["⇥"], tr("Next"), medium()),
             false,
         ));
     }
@@ -474,7 +484,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         raw.push((
             Id::Undo,
             String::new(),
-            keyed_width(&[], UNDO_LABEL, medium()),
+            keyed_width(&[], undo_label(), medium()),
             false,
         ));
     } else {
@@ -595,7 +605,7 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
                 raw.push((
                     Id::Record,
                     String::new(),
-                    chip_width(measure("Record", medium())),
+                    chip_width(measure(tr("Record"), medium())),
                     false,
                 ));
             }
@@ -615,13 +625,13 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
                 raw.push((
                     Id::Keep,
                     String::new(),
-                    chip_width(measure(KEEP_LABEL, medium())),
+                    chip_width(measure(keep_label(), medium())),
                     false,
                 ));
                 raw.push((
                     Id::Discard,
                     String::new(),
-                    chip_width(measure(DISCARD_LABEL, medium())),
+                    chip_width(measure(discard_label(), medium())),
                     false,
                 ));
             } else if *chips {
@@ -640,7 +650,7 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
             }
         }
         Pres::Processing => {
-            let w = PROCESSING_TEXT_X + measure(PROCESSING, medium()) + PROCESSING_TRAIL;
+            let w = PROCESSING_TEXT_X + measure(processing(), medium()) + PROCESSING_TRAIL;
             raw.push((Id::Processing, String::new(), w, false));
         }
         Pres::Done(done) => done_items(done, &mut raw),
@@ -1073,7 +1083,7 @@ mod tests {
     fn open() -> Pres {
         Pres::Done(Done {
             open: Some((
-                String::new(),
+                rune::TextEdit::default(),
                 List {
                     rows: vec![
                         Dest::new("SEER", "same page"),
@@ -1269,10 +1279,10 @@ mod tests {
     fn the_undo_chip_is_as_wide_as_its_label_is_drawn() {
         let (_, items) = layout(&ruled(true), "0:00");
         let undo = items.iter().find(|i| i.id == Id::Undo).unwrap();
-        assert_eq!(undo.rect[2], keyed_width(&[], UNDO_LABEL, medium()));
+        assert_eq!(undo.rect[2], keyed_width(&[], undo_label(), medium()));
         assert_ne!(
-            keyed_width(&[], UNDO_LABEL, medium()),
-            keyed_width(&[], UNDO_LABEL, small())
+            keyed_width(&[], undo_label(), medium()),
+            keyed_width(&[], undo_label(), small())
         );
     }
 

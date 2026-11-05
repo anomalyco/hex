@@ -4033,7 +4033,7 @@ mod tests {
         assert_eq!(capture_size(&display, CANDIDATE_EDGE), (480, 310));
         let region = target(CaptureMode::Region, 480.0, 320.0);
         assert_eq!(capture_size(&region, CANDIDATE_EDGE), (480, 320));
-        if cfg!(target_os = "windows") {
+        if cfg!(any(target_os = "windows", target_os = "linux")) {
             // Frames are in pixels: never upscaled past the screen's own.
             assert_eq!(capture_size(&display, 2560.0), (1728, 1116));
             assert_eq!(capture_size(&region, 1280.0), (480, 320));

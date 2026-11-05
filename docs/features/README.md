@@ -1004,9 +1004,12 @@ The bar is Rune's `rune_kit::scroll_bar`, used by `scroll_body`, `faded_body`
 and every kit `Menu`, `Select` and `Combobox`. Checks:
 `a_long_transcript_scrolls_by_dragging_its_scroll_bar`, and in Rune the
 `scroll_bar` tests and `page_keys_move_a_scrolling_listbox_highlight_by_what_it_shows`.
-Gaps: dragging content with a touchscreen or pen does not scroll on desktop
-(Rune pans by touch only on the web), and the bar is not verified on a real
-Windows PC.
+A touchscreen (Wayland, X11, Windows; a pen where the system reports it as a
+touch) acts as the primary button (#1337): a tap clicks, dragging a slider or
+the bar drags it, and any other drag pans the scroll area under the finger and
+flings on; a second finger is ignored. Checks:
+`a_finger_pans_the_transcript_and_taps_the_sidebar`, and Rune's touch tests.
+Gaps: the bar and touch are not verified on a real Windows PC or touchscreen.
 
 ## Process Text With Modes
 
