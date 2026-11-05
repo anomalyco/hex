@@ -128,7 +128,8 @@ fn check_layout(
 fn repair_receipt(root: &Path) -> std::result::Result<(), Ineligible> {
     let path = root.join("install.json");
     let existing = fs::read(&path).ok().and_then(|bytes| {
-        serde_json::from_str::<serde_json::Value>(&String::from_utf8_lossy(&bytes)).ok()
+        let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+        serde_json::from_str::<serde_json::Value>(&String::from_utf8_lossy(bytes)).ok()
     });
     let field = |name: &str| {
         existing

@@ -842,7 +842,7 @@ fn receipt_channel(root: &Path) -> Option<String> {
         root: PathBuf,
     }
     let bytes = std::fs::read(root.join("install.json")).ok()?;
-    // Setup.exe writes UTF-8 with a byte order mark.
+    // Tolerate a byte order mark: some UTF-8 writers add one.
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
     let receipt: Receipt = serde_json::from_slice(bytes).ok()?;
     let canonical = |path: &Path| path.canonicalize().ok();
