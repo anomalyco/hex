@@ -354,7 +354,8 @@ const EXIT_FADE: Duration = Duration::from_millis(120);
 /// about 150 MB and the GPU driver's threads waking some 65 times a second.
 /// Windows gives it back, window included, once the HUD's exit fade ends: a hidden
 /// topmost window that presented with DXGI let NVIDIA's Instant Replay take
-/// Hex for the running game (#1308).
+/// Hex for the running game (#1308). The device itself waits five minutes for
+/// the next show either way, so dictations reuse one device (#1268).
 #[cfg(not(target_os = "windows"))]
 const GPU_IDLE: Duration = Duration::from_secs(5 * 60);
 #[cfg(target_os = "windows")]
