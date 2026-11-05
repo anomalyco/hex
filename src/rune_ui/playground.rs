@@ -188,6 +188,8 @@ const PATHS: &[(&str, &str)] = &[
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
     #[cfg(hex_capture)]
+    ("mac-scrawl-open", "Window/Annotate/Folds open"),
+    #[cfg(hex_capture)]
     ("mac-scrawl-off", "Window/Annotate/Off"),
     #[cfg(hex_capture)]
     ("mac-scrawl-running", "Window/Annotate/Scrawl.app running"),
