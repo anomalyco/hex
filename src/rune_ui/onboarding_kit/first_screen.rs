@@ -1,7 +1,6 @@
 //! More on `"Setting up Hex"` than a title and a percentage: the details a
 //! download page owes you, how much is down and that your voice stays on
-//! this Mac. A prototype story variant until it's picked; the first run
-//! shows today's page.
+//! this Mac.
 
 use rune::{El, TextStyle, Transition, icon, row, text};
 use rune_kit::glyphs;
@@ -14,8 +13,8 @@ const WINDOW: [f32; 2] = [980.0, 760.0];
 const NOTE_FROM_BOTTOM: f32 = 40.0;
 
 /// How much of the model is down, beside its percentage: `"190 of 610 MB"`.
-pub(super) fn amount(p: Paint, s: &Onboard, d: Download) -> Option<El> {
-    (s.download_details && !d.done() && d.total > 0).then(|| {
+pub(super) fn amount(p: Paint, d: Download) -> Option<El> {
+    (!d.done() && d.total > 0).then(|| {
         let mb = |bytes: u64| (bytes as f64 / 1_000_000.0).round() as u64;
         text(format!("{} of {} MB", mb(d.downloaded), mb(d.total)))
             .key("amount")
@@ -26,7 +25,7 @@ pub(super) fn amount(p: Paint, s: &Onboard, d: Download) -> Option<El> {
 
 /// One quiet line at the foot of the window: why there's a download.
 pub(super) fn note(p: Paint, s: &Onboard) -> Option<El> {
-    (s.download_details && matches!(s.step, Step::Pick | Step::Started)).then(|| {
+    matches!(s.step, Step::Pick | Step::Started).then(|| {
         let quiet = p.muted();
         row()
             .key("first-note")

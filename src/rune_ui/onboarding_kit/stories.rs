@@ -113,9 +113,6 @@ pub(crate) struct Onboard {
     pub(crate) now: f64,
     pub(crate) reduced: Cell<bool>,
     pub(crate) motion: super::landing::Motion,
-    /// `"Setting up Hex"` shows how much is down and that your voice stays
-    /// on this Mac, while it's compared with today's page.
-    pub(crate) download_details: bool,
     download_from: Option<f64>,
     pub(crate) download: Option<Download>,
     /// Whether the download showed in the top bar at the last poll, when it
@@ -265,7 +262,6 @@ impl Onboard {
             now: 0.0,
             reduced: Cell::new(false),
             motion: super::landing::Motion::default(),
-            download_details: false,
             download_from: None,
             download: None,
             pill_up: false,
@@ -848,7 +844,6 @@ fn first_run() -> Story<Onboard> {
         s.autoplay = true;
         s.download_secs = SKETCH_DOWNLOAD_SECS;
     })
-    .variant("First screen · Details", first_screen)
     .variant("Your turn, keeps tapping", |s| {
         s.rehearsal = Some(Rehearsal::new(true));
         s.taps = TAPS_BEFORE_TOGGLE;
@@ -868,14 +863,6 @@ fn first_run() -> Story<Onboard> {
         s.motion.keyboard = 0.8;
     })
     .side(side::side)
-}
-
-/// The whole run, slowly downloading, with the details on its first screen.
-fn first_screen(s: &mut Onboard) {
-    s.rehearsal = Some(Rehearsal::new(true));
-    s.autoplay = true;
-    s.download_secs = SKETCH_DOWNLOAD_SECS;
-    s.download_details = true;
 }
 
 fn finish_download(s: &mut Onboard, _: &mut Play<'_, Onboard>) {
