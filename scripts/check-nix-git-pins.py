@@ -25,6 +25,7 @@ REV = re.compile(r"[0-9a-f]{40}")
 HASH = re.compile(r"sha256-[A-Za-z0-9+/]{43}=")
 FAKE_HASH = re.compile(r"sha256-A{43}=")
 PACKAGE_HEADER = "[[package]]"
+TABLE_HEADER = re.compile(r"(?m)^\[")
 NAME = re.compile(r'^name = "([^"]+)"$', re.MULTILINE)
 VERSION = re.compile(r'^version = "([^"]+)"$', re.MULTILINE)
 SOURCE = re.compile(r'^source = "([^"]+)"$', re.MULTILINE)
@@ -111,6 +112,7 @@ def parse_lock(path: Path) -> dict[str, dict]:
     """One entry per Git repository: its resolved commit and its packages."""
     repos: dict[str, dict] = {}
     for stanza in path.read_text().split(PACKAGE_HEADER)[1:]:
+        stanza = TABLE_HEADER.split(stanza, maxsplit=1)[0]
         name = NAME.search(stanza)
         version = VERSION.search(stanza)
         if name is None or version is None:
