@@ -313,10 +313,6 @@ pub fn preload() -> Result<()> {
                                 Retractable::with_flag(sound.delay(at), stopped.clone());
                             output.play(sound, (set, cue));
                         }
-                        #[cfg(target_os = "macos")]
-                        if what == Audition::Cue(Cue::Error) && !set.has_own_error() {
-                            audition.system = spawn_system_sound("Basso");
-                        }
                         None
                     }
                     Some(Request::StopAudition) => {
@@ -446,7 +442,7 @@ impl SoundSet {
     }
 
     /// Whether the set plays a sound for `cue`. Classic and Thock have no done
-    /// sound; Classic's error is macOS Basso, or Signature's elsewhere.
+    /// sound.
     #[cfg(test)]
     pub fn has(self, cue: Cue) -> bool {
         cue != Cue::Done || BUNDLED_SETS[self as usize].done.is_some()
@@ -471,12 +467,6 @@ pub enum Cue {
     Start,
     Stop,
     Done,
-    Error,
-}
-
-#[cfg(test)]
-impl Cue {
-    pub const ALL: [Self; 4] = [Self::Start, Self::Stop, Self::Done, Self::Error];
 }
 
 /// What the sound picker plays of a set.
@@ -485,7 +475,6 @@ pub enum Audition {
     /// A short dictation: start, a moment of speaking, stop, a moment of
     /// transcribing, then done.
     Dictation,
-    Cue(Cue),
 }
 
 /// When a dictation audition plays each sound, from its start.
@@ -501,10 +490,6 @@ impl Audition {
     pub fn cues(self) -> &'static [(Cue, Duration)] {
         match self {
             Self::Dictation => &DICTATION_CUES,
-            Self::Cue(Cue::Start) => &[(Cue::Start, Duration::ZERO)],
-            Self::Cue(Cue::Stop) => &[(Cue::Stop, Duration::ZERO)],
-            Self::Cue(Cue::Done) => &[(Cue::Done, Duration::ZERO)],
-            Self::Cue(Cue::Error) => &[(Cue::Error, Duration::ZERO)],
         }
     }
 
@@ -512,7 +497,6 @@ impl Audition {
     pub fn length(self) -> Duration {
         match self {
             Self::Dictation => Duration::from_millis(2_900),
-            Self::Cue(_) => Duration::from_millis(900),
         }
     }
 }
@@ -556,9 +540,6 @@ pub fn stop_audition() {
 #[derive(Default)]
 struct Auditioning {
     stopped: Option<Arc<AtomicBool>>,
-    /// Basso, for Classic's error.
-    #[cfg(target_os = "macos")]
-    system: Option<std::process::Child>,
 }
 
 impl Auditioning {
@@ -572,11 +553,6 @@ impl Auditioning {
     fn stop(&mut self) {
         if let Some(stopped) = self.stopped.take() {
             stopped.store(true, Ordering::Release);
-        }
-        #[cfg(target_os = "macos")]
-        if let Some(mut child) = self.system.take() {
-            let _ = child.kill();
-            let _ = child.wait();
         }
     }
 }
@@ -791,8 +767,7 @@ impl Sounds {
         &self.sets[set as usize]
     }
 
-    /// The sounds `what` plays of `set`, each with when it starts. Classic's
-    /// error is macOS Basso, which the worker plays itself.
+    /// The sounds `what` plays of `set`, each with when it starts.
     fn audition(&self, set: SoundSet, what: Audition) -> Vec<(SamplesBuffer, Duration, Cue)> {
         let sounds = self.set(set);
         what.cues()
@@ -802,7 +777,6 @@ impl Sounds {
                     Cue::Start => Some(&sounds.start),
                     Cue::Stop => Some(&sounds.stop),
                     Cue::Done => sounds.done.as_ref(),
-                    Cue::Error => sounds.error.as_ref(),
                 };
                 sound.map(|sound| (sound.clone(), at, cue))
             })
@@ -1787,7 +1761,7 @@ mod tests {
     }
 
     /// A dictation audition plays start, stop and done at their moments,
-    /// each finished before the next, and every cue plays alone at once.
+    /// each finished before the next.
     #[test]
     fn auditions_play_each_sound_at_its_moment() {
         let sounds = Sounds::load().unwrap();
@@ -1804,20 +1778,8 @@ mod tests {
                 assert!(ends < pair[1].1, "{set:?} {:?} overlaps", pair[0].2);
             }
             assert!(Audition::Dictation.length() > DICTATION_CUES[2].1);
-
-            for cue in Cue::ALL {
-                let alone = sounds.audition(set, Audition::Cue(cue));
-                let own = set.has(cue) && (cue != Cue::Error || set.has_own_error());
-                assert_eq!(alone.len(), usize::from(own), "{set:?} {cue:?}");
-                assert!(
-                    alone
-                        .iter()
-                        .all(|&(_, at, played)| at.is_zero() && played == cue)
-                );
-            }
         }
         assert!(!SoundSet::Classic.has(Cue::Done));
-        assert!(SoundSet::Classic.has(Cue::Error));
     }
 
     /// Stopping fades every sound of the audition, even one still waiting
