@@ -370,10 +370,8 @@ fn validate_console(path: &Path, version: &str) -> Result<()> {
 /// Whether this install lacks `hex.com` beside the running `hex.exe` or in
 /// `bin`: Setup and updaters before it installed only `hex.exe`.
 pub fn console_missing() -> bool {
-    let (Ok(executable), Ok(support)) = (
-        std::env::current_exe(),
-        crate::app_paths::support_dir(),
-    ) else {
+    let (Ok(executable), Ok(support)) = (std::env::current_exe(), crate::app_paths::support_dir())
+    else {
         return false;
     };
     !executable.with_file_name("hex.com").is_file()
@@ -481,8 +479,12 @@ fn add_to_path(folder: &Path) -> Result<()> {
 
 fn path_contains(path: &str, folder: &str) -> bool {
     let folder = folder.trim_end_matches('\\');
-    path.split(';')
-        .any(|entry| entry.trim().trim_end_matches('\\').eq_ignore_ascii_case(folder))
+    path.split(';').any(|entry| {
+        entry
+            .trim()
+            .trim_end_matches('\\')
+            .eq_ignore_ascii_case(folder)
+    })
 }
 
 fn sync_file(path: &Path) -> Result<()> {

@@ -80,13 +80,20 @@ mod tests {
         std::fs::create_dir_all(root.join("bin")).unwrap();
         std::fs::write(version.join("hex.exe"), b"").unwrap();
 
-        assert_eq!(locate(&version.join("hex.com")), Some(version.join("hex.exe")));
+        assert_eq!(
+            locate(&version.join("hex.com")),
+            Some(version.join("hex.exe"))
+        );
         let bin = root.join("bin").join("hex.com");
         assert_eq!(locate(&bin), None, "no current-version yet");
         std::fs::write(root.join("current-version"), "3.4.0\n").unwrap();
         assert_eq!(locate(&bin), Some(version.join("hex.exe")));
         std::fs::write(root.join("current-version"), "..\\..\\elsewhere").unwrap();
-        assert_eq!(locate(&bin), None, "a pointer that leaves versions is ignored");
+        assert_eq!(
+            locate(&bin),
+            None,
+            "a pointer that leaves versions is ignored"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }
