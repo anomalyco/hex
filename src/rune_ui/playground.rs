@@ -169,7 +169,6 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-delete", "Window/Meetings/Delete"),
     ("meetings-failed", "Window/Meetings/Failed"),
     ("meetings-empty", "Window/Meetings/Empty"),
-    ("meetings-platform-icons", "Window/Meetings/Platform icons"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
     ("meetings-summary-model", "Window/Meetings/Summary model"),

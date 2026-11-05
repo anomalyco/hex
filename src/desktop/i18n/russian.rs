@@ -64,8 +64,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Transcription was cancelled.", "Распознавание отменено."),
     ("Section key alone", "Клавиша § отдельно"),
     ("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound", "Использовать клавишу § (слева от 1 на клавиатурах ISO) как сочетание без модификатора. Пока она назначена, Hex забирает § у всех приложений"),
-    ("Meeting platform icons", "Значки платформ встреч"),
-    ("Show a small icon for the app or website each meeting was recorded from, beside its name", "Показывает рядом с названием каждой встречи небольшой значок приложения или сайта, откуда она записана"),
     ("Floating meeting capsules on GNOME", "Плавающие капсулы встреч в GNOME"),
     ("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running", "Показывает предложение записи и индикатор записи поверх звонка через XWayland. Работает, только когда XWayland уже запущен"),
     ("Restore clipboard on GNOME", "Восстановление буфера обмена в GNOME"),

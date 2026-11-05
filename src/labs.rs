@@ -109,7 +109,6 @@ pub enum Feature {
     NotchIndicator,
     MeetingFinishedEvent,
     GnomeMeetingCapsules,
-    MeetingPlatformIcons,
     Screenshots,
     FollowLiveTranscript,
     AnnotateReplay,
@@ -162,7 +161,6 @@ impl Feature {
         Self::NotchIndicator,
         Self::MeetingFinishedEvent,
         Self::GnomeMeetingCapsules,
-        Self::MeetingPlatformIcons,
         Self::Screenshots,
         Self::FollowLiveTranscript,
         Self::AnnotateReplay,
@@ -235,7 +233,6 @@ impl Feature {
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::GnomeMeetingCapsules
-            | Self::MeetingPlatformIcons
             | Self::Screenshots
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay
@@ -291,7 +288,6 @@ impl Feature {
             | Self::NotchIndicator => 20261103,
             Self::MeetingFinishedEvent
             | Self::GnomeMeetingCapsules
-            | Self::MeetingPlatformIcons
             | Self::Screenshots
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay => 20261104,
@@ -381,7 +377,6 @@ impl Feature {
             | Self::MeetingSummaryModel
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
-            | Self::MeetingPlatformIcons
             | Self::FollowLiveTranscript
             | Self::FillerWords => true,
         }
@@ -435,7 +430,6 @@ impl Feature {
             Self::NotchIndicator => "notch-indicator",
             Self::MeetingFinishedEvent => "meeting-finished-event",
             Self::GnomeMeetingCapsules => "gnome-meeting-capsules",
-            Self::MeetingPlatformIcons => "meeting-platform-icons",
             Self::Screenshots => "screenshots",
             Self::FollowLiveTranscript => "follow-live-transcript",
             Self::AnnotateReplay => "annotate-replay",
@@ -490,7 +484,6 @@ impl Feature {
             Self::NotchIndicator => "labs.notch_indicator",
             Self::MeetingFinishedEvent => "labs.meeting_finished_event",
             Self::GnomeMeetingCapsules => "labs.gnome_meeting_capsules",
-            Self::MeetingPlatformIcons => "labs.meeting_platform_icons",
             Self::Screenshots => "labs.screenshots",
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
             Self::AnnotateReplay => "labs.annotate_replay",
@@ -617,9 +610,6 @@ impl Feature {
             Self::GnomeMeetingCapsules => {
                 "Show the meeting capsules (recording offer, recording indicator) floating over your call on GNOME Wayland, through XWayland while XWayland is running"
             }
-            Self::MeetingPlatformIcons => {
-                "Show a small icon for the app or website each meeting was recorded from, beside its name in Meetings"
-            }
             Self::Screenshots => {
                 "Take a screenshot of an area or a window with a shortcut (Command-Shift-4 by default): copied, saved, and shown in the corner"
             }
@@ -684,7 +674,6 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
-            Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons,
             Self::Screenshots => settings.labs.screenshots,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
             Self::AnnotateReplay => settings.labs.annotate_replay,
@@ -741,7 +730,6 @@ impl Feature {
             &mut labs.notch_indicator,
             &mut labs.meeting_finished_event,
             &mut labs.gnome_meeting_capsules,
-            &mut labs.meeting_platform_icons,
             &mut labs.screenshots,
             &mut labs.follow_live_transcript,
             &mut labs.annotate_replay,
@@ -798,7 +786,6 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
-            Self::MeetingPlatformIcons => settings.labs.meeting_platform_icons = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
@@ -1315,10 +1302,16 @@ pub fn run(command: Option<&LabsCommand>) -> Result<()> {
 
 /// The feature `name` names, if this OS has it and `reaches` admits it.
 /// Features that left Labs: `hex labs` still knows their names.
-const GRADUATED: [(&str, &str); 1] = [(
-    "custom-models",
-    "custom-models graduated: adding a model file and models found on this computer are always on now",
-)];
+const GRADUATED: [(&str, &str); 2] = [
+    (
+        "custom-models",
+        "custom-models graduated: adding a model file and models found on this computer are always on now",
+    ),
+    (
+        "meeting-platform-icons",
+        "meeting-platform-icons graduated: the Meetings list always shows each recording's call app icon now",
+    ),
+];
 
 fn resolve(name: &str, reaches: impl Fn(Feature) -> bool + Copy) -> Result<Feature> {
     if let Some((_, note)) = GRADUATED.iter().find(|(graduated, _)| *graduated == name) {
@@ -1380,6 +1373,11 @@ mod tests {
         let error = resolve("custom-models", |_| true).unwrap_err().to_string();
         assert!(error.contains("graduated"), "{error}");
         assert_eq!(Feature::from_name("custom-models"), None);
+        let error = resolve("meeting-platform-icons", |_| true)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("graduated"), "{error}");
+        assert_eq!(Feature::from_name("meeting-platform-icons"), None);
     }
 
     #[test]

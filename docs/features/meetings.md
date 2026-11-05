@@ -55,11 +55,13 @@ Apps -> GET /meetings/events on the local API      // Labs › Meeting finished 
         one SSE event per meeting once its final transcript is written:
         {"type":"meeting.finished","id":"<id>"}, nothing else; one subscriber;
         off -> 404 labs-off (docs/streams.md, labs.md)
-Recordings list icons                               // Labs › Meeting platform icons, off by default (#1290)
-        on -> each row's title gets a small faint icon: Zoom, Google Meet, Teams,
+Recordings list icons                               // always on (#1290; graduated from Labs)
+        each row's title gets a small faint icon: Zoom, Google Meet, Teams,
         Slack, or Webex when the meeting's app names it, else a neutral call
-        icon (FaceTime, Discord, WhatsApp, manual recordings); off -> rows as before
-        (platform_icon in rune_ui/meetings.rs; labs.md)
+        icon (FaceTime, Discord, WhatsApp, manual recordings)
+        (platform_icon in rune_ui/meetings.rs; CallProvider::from_meeting_app in
+        calendar.rs; check: platform_icons_fall_back_to_a_neutral_one; goldens
+        meetings light/dark show Zoom, FaceTime, and the neutral icon)
 Live transcript scrolling                           // Labs › Follow live transcript, off by default (#1332)
         on -> while the selected meeting is Starting or Recording (no Stop
         pending), the detail card's scroll sticks to the bottom: new turns

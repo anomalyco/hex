@@ -393,9 +393,10 @@ impl MeetingsPane {
         }
     }
 
-    /// The fixture with recordings from more call services, for Labs ›
-    /// Meeting platform icons: a Zoom call, a Google Meet tab, a Teams
-    /// website call, a Slack huddle, FaceTime, and one started by hand.
+    /// The fixture with recordings from more call services: a Zoom call, a
+    /// Google Meet tab, a Teams website call, a Slack huddle, FaceTime, and
+    /// one started by hand.
+    #[cfg(all(test, not(target_os = "macos")))]
     pub(super) fn platforms_fixture() -> Self {
         let mut pane = Self::fixture();
         let mut more = Vec::new();
@@ -689,25 +690,18 @@ fn row_meta(pane: &MeetingsPane, meeting: &Meeting, p: Paint) -> (String, Option
     (parts.join(" · "), ink)
 }
 
-/// Labs › Meeting platform icons: the icon before a row's title, the call
-/// service's when its app names one and a neutral one otherwise (another
-/// app, or a meeting started by hand). `None` while the lab is off.
-fn platform_icon(ui: &Ui, meeting: &Meeting) -> Option<&'static rune::Icon> {
-    if !ui.settings.labs.meeting_platform_icons
-        || !crate::labs::Feature::MeetingPlatformIcons.shipped()
+/// The icon before a row's title: the call service's when its app names
+/// one and a neutral one otherwise (another app, or a meeting started by
+/// hand).
+fn platform_icon(meeting: &Meeting) -> &'static rune::Icon {
+    match meeting
+        .app
+        .as_deref()
+        .and_then(crate::calendar::CallProvider::from_meeting_app)
     {
-        return None;
+        Some(provider) => super::platform_settings::provider_icon(provider),
+        None => &super::icons::CALL,
     }
-    Some(
-        match meeting
-            .app
-            .as_deref()
-            .and_then(crate::calendar::CallProvider::from_meeting_app)
-        {
-            Some(provider) => super::platform_settings::provider_icon(provider),
-            None => &super::icons::CALL,
-        },
-    )
 }
 
 /// Copy transcript as an icon: a completed row's hover action, or the
@@ -804,7 +798,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                             .collect(),
                         selected: pane.selected.as_deref() == Some(meeting.id.as_str()),
                     },
-                    platform_icon(ui, meeting),
+                    Some(platform_icon(meeting)),
                     move |ui: &mut Ui| ui.meetings.select(id.clone()),
                 )
                 .position_in_set(index + 1, count),
@@ -1321,30 +1315,18 @@ mod tests {
         assert!(ui.meetings.action_error.is_some());
     }
 
-    /// Labs › Meeting platform icons: no icon while off; on, a known call
-    /// service's icon, and the neutral one for any other or no app (#1290).
+    /// A known call service's icon, and the neutral one for any other or
+    /// no app (#1290).
     #[test]
-    fn platform_icons_show_only_with_their_lab_and_fall_back_to_a_neutral_one() {
-        let mut settings = crate::app_settings::AppSettings::default();
-        let ui = Ui::with(settings.clone(), Service::Fixture(Vec::new()));
+    fn platform_icons_fall_back_to_a_neutral_one() {
         let pane = MeetingsPane::platforms_fixture();
-        assert!(
-            pane.meetings
-                .iter()
-                .all(|meeting| platform_icon(&ui, meeting).is_none())
-        );
-        settings.labs.meeting_platform_icons = true;
-        let ui = Ui::with(settings, Service::Fixture(Vec::new()));
-        let name = |id: &str| {
-            let meeting = pane.meeting(id).unwrap();
-            platform_icon(&ui, meeting).map(|icon| icon.name)
-        };
-        assert_eq!(name("preview-live"), Some("hex-provider-zoom"));
-        assert_eq!(name("preview-meet"), Some("hex-provider-meet"));
-        assert_eq!(name("preview-teams"), Some("hex-provider-teams"));
-        assert_eq!(name("preview-huddle"), Some("hex-provider-slack"));
-        assert_eq!(name("preview-design"), Some("hex-row-call"));
-        assert_eq!(name("preview-failed"), Some("hex-row-call"));
+        let name = |id: &str| platform_icon(pane.meeting(id).unwrap()).name;
+        assert_eq!(name("preview-live"), "hex-provider-zoom");
+        assert_eq!(name("preview-meet"), "hex-provider-meet");
+        assert_eq!(name("preview-teams"), "hex-provider-teams");
+        assert_eq!(name("preview-huddle"), "hex-provider-slack");
+        assert_eq!(name("preview-design"), "hex-row-call");
+        assert_eq!(name("preview-failed"), "hex-row-call");
     }
 
     /// Labs › Follow live transcript: only a recording meeting's transcript
