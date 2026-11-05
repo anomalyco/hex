@@ -430,6 +430,7 @@ fn after_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Vec<
 /// The transcriber, showing Hex in screen recordings for demos, and the
 /// replay Lab: settings most people never change. macOS only.
 fn more_rows(ui: &Ui, p: Paint) -> Vec<El> {
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut rows = vec![transcriber_row(ui, p), recordings_row(ui, p)];
     #[cfg(target_os = "macos")]
     if crate::labs::Feature::AnnotateReplay.on_this_os()
