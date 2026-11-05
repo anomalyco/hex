@@ -393,11 +393,11 @@ impl X11Typer {
     }
 }
 
-/// A keyboard with `a`, `b`, `space`, Return on keycode 36, and Shift 50:
-/// two free keycodes (`200`, `201`).
+/// A keyboard with `a`–`z` (uppercase on the second level), space on 34,
+/// Return on 35, Shift on 36, and two free keycodes for remapping.
 #[cfg(test)]
 fn test_layout() -> KeyLayout {
-    let mut symbols = vec![0; 26 * 4];
+    let mut symbols = vec![0; 29 * 4];
     for (index, character) in ('a'..='z').enumerate() {
         symbols[index * 4] = u32::from(character);
         symbols[index * 4 + 1] = u32::from(character.to_ascii_uppercase());
@@ -405,7 +405,9 @@ fn test_layout() -> KeyLayout {
     symbols[26 * 4] = 0x20;
     symbols[27 * 4] = XK_RETURN;
     symbols[28 * 4] = XK_SHIFT_L;
-    KeyLayout::new(8, 4, symbols)
+    let mut layout = KeyLayout::new(8, 4, symbols);
+    layout.free = vec![200, 201];
+    layout
 }
 
 #[cfg(test)]
