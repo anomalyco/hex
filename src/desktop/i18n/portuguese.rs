@@ -16,8 +16,6 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex picks a fast model", "O Hex escolhe um modelo rápido"),
-    ("Collapsible meeting sections", "Seções de reunião recolhíveis"),
-    ("Fold the summary, chapters, and day groups in Meetings", "Recolha o resumo, os capítulos e os grupos por dia em Reuniões"),
     ("Follow live transcript", "Acompanhar a transcrição ao vivo"),
     ("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again.", "Enquanto uma reunião é gravada, a transcrição rola até a linha mais recente. Role para cima para ler o texto anterior; volte ao final para acompanhar de novo."),
     ("Summary models show once Hex connects to OpenCode.", "Os modelos de resumo aparecem quando o Hex se conecta ao OpenCode."),

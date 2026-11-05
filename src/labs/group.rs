@@ -79,7 +79,6 @@ impl Feature {
             | Self::MeetingFinishedEvent
             | Self::MeetingPlatformIcons
             | Self::FollowLiveTranscript
-            | Self::CollapsibleMeetingSections
             | Self::GnomeMeetingCapsules => Group::Meetings,
             Self::Screenshots | Self::AnnotateReplay => Group::Annotate,
             Self::MouseShortcuts

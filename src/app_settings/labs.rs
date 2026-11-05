@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and `labs.enabled` is ignored.
+/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`) are ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
@@ -84,8 +84,6 @@ pub struct LabsSettings {
     pub screenshots: bool,
     /// A recording meeting's transcript scrolls to its newest line, until scrolled up (issue 1332).
     pub follow_live_transcript: bool,
-    /// Meetings' summary, chapters, and day groups fold and unfold (issue 1348).
-    pub collapsible_meeting_sections: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
@@ -144,7 +142,6 @@ impl Default for LabsSettings {
             meeting_platform_icons: false,
             screenshots: false,
             follow_live_transcript: false,
-            collapsible_meeting_sections: false,
             groups: std::collections::BTreeMap::new(),
         }
     }

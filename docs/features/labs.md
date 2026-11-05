@@ -84,12 +84,6 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the bottom; scroll up to read, back to the bottom to follow again (#1332)
 │                                        // check: only_a_recording_transcript_follows_and_only_with_its_lab (rune_ui/meetings.rs,
 │                                        // Linux and Windows); not observed on a real call; Labs page goldens need regenerating
-├── Collapsible meeting sections no labs.collapsible_meeting_sections (every OS with Meetings)
-│                                        the Meetings list's day headings (Today, Yesterday, dates) and the detail's Summary and
-│                                        Chapters labels become buttons with a chevron that fold what follows; a folded day keeps
-│                                        its heading, search shows every match whatever the folds, folds last until Hex quits (#1348)
-│                                        // checks: nothing_folds_with_the_lab_off, days_and_sections_fold_with_the_lab_on_and_search_ignores_folds
-│                                        // (rune_ui/meetings/folds.rs, Linux and Windows); no scene with folds yet; Labs page goldens need regenerating
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and

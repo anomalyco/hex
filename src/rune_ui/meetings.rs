@@ -23,8 +23,6 @@ use super::platform::MeetingRequest;
 use super::{Menu, Ui};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
-mod folds;
-
 static MORE_ICON: rune::Icon = rune::Icon {
     name: "hex-more",
     view: 16.0,
@@ -178,8 +176,6 @@ pub(super) struct MeetingsPane {
     copied: Option<(String, String)>,
     pub(super) start_pending: bool,
     pub(super) stop_pending: bool,
-    /// Labs › Collapsible meeting sections: what is folded, until Hex quits.
-    folds: folds::Folds,
     /// Where Linux and Windows perform meeting requests.
     #[cfg(not(target_os = "macos"))]
     pub(super) local: super::meetings_host::LocalMeetings,
@@ -779,29 +775,17 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
         let mut list = col().key("meetings-list").label(tr("Meetings"));
         let mut day: Option<&str> = None;
         let visible = pane.visible();
-        // Rows under a folded day (Labs) stay out of the list; their
-        // heading stays.
-        let count = visible
-            .iter()
-            .filter(|meeting| !folds::day_folded(ui, &meeting.day))
-            .count();
-        let mut position = 0;
+        let count = visible.len();
         for (index, meeting) in visible.into_iter().enumerate() {
             if day != Some(meeting.day.as_str()) {
-                list = list.child(folds::day_heading(
-                    ui,
+                list = list.child(ld::group(
                     p,
                     &format!("day{index}"),
                     day_label(&meeting.day),
-                    &meeting.day,
                     day.is_none(),
                 ));
                 day = Some(&meeting.day);
             }
-            if folds::day_folded(ui, &meeting.day) {
-                continue;
-            }
-            position += 1;
             let (meta, meta_ink) = row_meta(pane, meeting, p);
             let completed = meeting.status == Status::Complete && !meeting.turns().is_empty();
             let id = meeting.id.clone();
@@ -823,7 +807,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
                     platform_icon(ui, meeting),
                     move |ui: &mut Ui| ui.meetings.select(id.clone()),
                 )
-                .position_in_set(position, count),
+                .position_in_set(index + 1, count),
             );
         }
         let detail = match pane.selected.as_deref().and_then(|id| pane.meeting(id)) {
@@ -1006,8 +990,8 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
             col()
                 .key("notes")
                 .gap(6.0)
-                .child(folds::summary_label(ui, p))
-                .children(folds::summary_shown(ui).then(|| {
+                .child(section_label(p, "summary-label", tr("Summary")))
+                .child(
                     text(if summary.is_empty() {
                         tr("Nothing to summarize.")
                     } else {
@@ -1020,8 +1004,8 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
                     } else {
                         p.text()
                     })
-                    .wrap()
-                })),
+                    .wrap(),
+                ),
         );
     } else if meeting.notes_running {
         body = body.child(
@@ -1032,7 +1016,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         );
     }
     if !meeting.chapters.is_empty() {
-        body = body.child(chapters(ui, p, meeting, &copied));
+        body = body.child(chapters(p, meeting, &copied));
     }
     let transcript_label = match meeting.status {
         Status::Starting | Status::Recording if !pane.stop_pending => tr("Live transcript"),
@@ -1073,15 +1057,12 @@ fn follows_live_transcript(ui: &Ui, meeting: &Meeting) -> bool {
 
 /// The meeting's chapters, each with its start, name, line, and Copy
 /// section.
-fn chapters(ui: &Ui, p: Paint, meeting: &Meeting, copied: &dyn Fn(&str) -> bool) -> El {
+fn chapters(p: Paint, meeting: &Meeting, copied: &dyn Fn(&str) -> bool) -> El {
     let mut list = col()
         .key("chapters")
         .gap(10.0)
         .pb(16.0)
-        .child(folds::chapters_label(ui, p));
-    if !folds::chapters_shown(ui) {
-        return list;
-    }
+        .child(section_label(p, "chapters-label", tr("Chapters")));
     for (index, chapter) in meeting.chapters.iter().enumerate() {
         let what = format!("chapter{index}");
         let id = meeting.id.clone();
