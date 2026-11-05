@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -193,7 +193,7 @@ const MAX_EVENT_RECORD_BYTES: usize = 1024 * 1024;
 impl EventLog {
     pub fn create(path: &Path) -> io::Result<Self> {
         if let Some(parent) = path.parent() {
-            crate::app_paths::create_private_dir(parent)?;
+            fs::create_dir_all(parent)?;
         }
         let file = crate::app_paths::open_private_append(path)?;
         let (sender, receiver) = mpsc::sync_channel(EVENT_WRITER_CAPACITY);
@@ -550,7 +550,7 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{self, OpenOptions};
+    use std::fs::OpenOptions;
 
     #[test]
     fn structural_event_equality_preserves_serialized_identity() {
@@ -730,7 +730,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn the_log_and_its_folder_are_private() {
+    fn the_log_is_private() {
         use std::os::unix::fs::PermissionsExt;
         let directory = std::env::temp_dir().join(format!(
             "hex-private-log-{}-{}",
@@ -738,16 +738,17 @@ mod tests {
             now_ms()
         ));
         fs::create_dir(&directory).unwrap();
-        fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
-        let path = directory.join("live.ndjson");
-        fs::write(&path, "").unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-
-        drop(EventLog::create(&path).unwrap());
-
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&directory), 0o700);
-        assert_eq!(mode(&path), 0o600);
+
+        let new = directory.join("new.ndjson");
+        drop(EventLog::create(&new).unwrap());
+        assert_eq!(mode(&new), 0o600);
+
+        let older = directory.join("live.ndjson");
+        fs::write(&older, "").unwrap();
+        fs::set_permissions(&older, fs::Permissions::from_mode(0o644)).unwrap();
+        drop(EventLog::create(&older).unwrap());
+        assert_eq!(mode(&older), 0o600);
         fs::remove_dir_all(directory).unwrap();
     }
 

@@ -46,27 +46,19 @@ pub fn logs_dir() -> Result<PathBuf> {
     Ok(support_dir()?.join("logs"))
 }
 
-/// Creates `directory` (and any missing parents) readable only by this user,
-/// and tightens it if an older Hex made it world-readable. Windows folders
-/// already inherit the per-user `%APPDATA%` permissions.
+/// Creates `directory` readable only by this user, and tightens it if an
+/// older Hex left it open. Tightening is best-effort: a folder Hex can't
+/// chmod (another owner, a mount that refuses it) is logged, never fatal.
+/// Windows folders already inherit the per-user `%APPDATA%` permissions.
 pub fn create_private_dir(directory: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(directory)?;
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(directory)?;
-        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
-    }
-    #[cfg(not(unix))]
-    {
-        fs::create_dir_all(directory)
-    }
+    tighten(directory, 0o700);
+    Ok(())
 }
 
 /// Opens `path` to append, readable only by this user, tightening a file an
-/// older Hex created world-readable.
+/// older Hex created open (best-effort, as `create_private_dir`).
 pub fn open_private_append(path: &Path) -> std::io::Result<fs::File> {
     let mut options = OpenOptions::new();
     options.create(true).append(true);
@@ -74,8 +66,16 @@ pub fn open_private_append(path: &Path) -> std::io::Result<fs::File> {
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let file = options.open(path)?;
     #[cfg(unix)]
-    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    tighten(path, 0o600);
     Ok(file)
+}
+
+#[cfg(unix)]
+fn tighten(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(error) = fs::set_permissions(path, fs::Permissions::from_mode(mode)) {
+        tracing::warn!(path = %path.display(), %error, "could not make this private");
+    }
 }
 
 /// Creates the logs directory, appends process diagnostics to `process.log`
@@ -193,6 +193,24 @@ fn user_config_dir_in(home: &std::path::Path, test_build: bool) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_logs_folder_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("hex-private-dir-{}", std::process::id()));
+        let logs = root.join("logs");
+        fs::create_dir_all(&logs).unwrap();
+        fs::set_permissions(&logs, fs::Permissions::from_mode(0o755)).unwrap();
+
+        create_private_dir(&logs).unwrap();
+        create_private_dir(&root.join("fresh")).unwrap();
+
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&logs), 0o700);
+        assert_eq!(mode(&root.join("fresh")), 0o700);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn each_build_has_its_own_config_folder() {

@@ -715,7 +715,8 @@ left out (`events::VoiceEvent::without_words`,
 words are kept. They are readable
 only by their owner on macOS and Linux: Hex creates and tightens the logs folder
 to 0700 and `live.ndjson` and `process.log` to 0600 (`app_paths::create_private_dir`,
-`open_private_append`; `the_log_and_its_folder_are_private`), so other
+`open_private_append`; `the_logs_folder_is_private`, `the_log_is_private`;
+tightening is best-effort, never fatal), so other
 accounts can't read them through a world-readable home folder.
 
 
