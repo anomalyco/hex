@@ -150,7 +150,9 @@ features on (`Labs` line on macOS, `labs` array in the macOS and Linux JSON,
 
 Every toggle applies at once, from the window or `hex labs on|off` (issue
 568, from @maharshi365): Live text is asked as each dictation starts and its
-plate is always installed (prewarmed only when Live text is on at launch);
+plate is always installed (prewarmed on macOS whatever the setting, so a
+plate turned on after launch never flashes the last dictation's words,
+#1075; elsewhere only when Live text is on at launch);
 the window always attaches the playground with Rune's own ⇧⌘D off, and its
 sidebar item, ⇧⌘D, the macOS View menu, and story links open it only while
 the toggle is on. Live chapters are read when a recording starts. Nothing
