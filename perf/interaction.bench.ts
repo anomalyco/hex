@@ -61,7 +61,7 @@ export default bench({
       metrics: ui,
       run: ({ page }) => page.type("history-search", "cache key", { delay: 120 }),
       async reset({ page }) {
-        await page.press("Control+a")
+        await page.press("ControlOrMeta+a")
         await page.press("Backspace")
         await page.idle()
       },
