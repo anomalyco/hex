@@ -316,7 +316,7 @@ fn summaries_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
             .trigger(trigger)
             .placement(rune_kit::Placement::BottomEnd)
             .gutter(4.0)
-            .min_width(280.0)
+            .min_width(380.0)
             .open(ui.open == Some(menu))
             .on_close(|ui: &mut Ui| ui.open = None);
         for option in options {
