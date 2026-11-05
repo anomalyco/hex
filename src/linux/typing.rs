@@ -17,9 +17,7 @@ use x11rb::rust_connection::RustConnection;
 use super::input::{
     KEY_PRESS, KEY_RELEASE, Keymap, ShortcutKeys, XK_SHIFT_L, connect_x11,
 };
-use super::paste::{
-    HELPER_TIMEOUT, MODIFIER_WAIT_LIMIT, run_helper, wait_for_modifiers, wtype_pastes,
-};
+use super::paste::{MODIFIER_WAIT_LIMIT, run_helper, wait_for_modifiers, wtype_pastes};
 use super::session::LinuxSession;
 use crate::typing::Stroke;
 

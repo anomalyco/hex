@@ -761,6 +761,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
         Feature::MeetingPlatformIcons => "lab-meeting-platform-icons",
         Feature::Screenshots => "lab-screenshots",
+        Feature::TypeDictations => "lab-type-dictations",
         Feature::FollowLiveTranscript => "lab-follow-live-transcript",
         Feature::AnnotateReplay => "lab-annotate-replay",
     }
