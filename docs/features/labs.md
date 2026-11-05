@@ -935,8 +935,10 @@ shortcut uses) opens a second copy of Annotate's capture picker
 [capture_capsule/picker.rs](../../src/rune_ui/capture_capsule/picker.rs)):
 
 ```ts
-⌘⇧4            -> the screen dims under a crosshair; a drag draws the area with its W × H
-├── Space      -> window mode: the window under the pointer highlights; Space again -> area
+⌘⇧4            -> the screen dims under a crosshair cursor, even while another app is frontmost;
+│                 a drag draws the area with its W × H beside the pointer, outside the area
+├── Space      -> window mode: a camera replaces the pointer and the window under it highlights;
+│                 Space again -> area
 ├── Click      -> the whole display ("Full screen · Click to capture")
 ├── Escape     -> closes it, nothing shot; Escape reaches no other app or Hex shortcut
 └── Release    -> shot at the display's own pixels (ScreenCaptureKit), Hex's overlays,
@@ -944,10 +946,45 @@ shortcut uses) opens a second copy of Annotate's capture picker
                   ├── PNG (pHYs at the display's scale) -> "Hex Screenshot 2026-11-04 at 14.03.22.png"
                   │   in screenshots.folder (the Desktop when unset); a second shot that second gets " (2)"
                   ├── clipboard -> the PNG and the file's URL, one pasteboard item
-                  └── thumbnail bottom right for 5 s (held while the pointer is on it):
-                      click -> opens it in Preview, drag -> the file, ✕ -> closes
+                  └── thumbnail bottom right for 5 s (held while the pointer is on it), 16 pt in,
+                      its corner concentric with the display's (30 pt, a design constant):
+                      slides in from past the right edge on the HUD's spring and out the same way
+                      (Reduce Motion: a fade); ✕ shows inside its top-left corner on hover;
+                      click -> opens it in the editor, drag -> the file, ✕ -> closes
                       a failure -> the error tone; there is no success sound (Hex has no shutter cue)
 ```
+
+A click on the thumbnail opens the editor
+([screenshot_thumbnail/editor.rs](../../src/rune_ui/screenshot_thumbnail/editor.rs)), a panel
+centred on the display under the pointer, the capsule's corners and
+shadow, growing in on the HUD's spring (Reduce Motion: a fade). The shot
+shows at no more than its own points. It stays until Escape or ✕:
+
+```ts
+editor
+├── Pen, Arrow, Box, Text, Crop -> a drag on the shot draws in Annotate's red;
+│                                   Text: a click, then type, Enter or Escape ends it;
+│                                   Crop: a drag shades what's left out, a click clears it
+├── ⌘Z            -> the text being typed, else the last mark, else the crop
+├── Copy (⌘C)     -> the edited PNG on the clipboard
+├── Save (⌘S)     -> a new file in screenshots.folder; the first shot is never changed
+├── Send to…      -> a list of open OpenCode sessions (typing searches title, folder, id,
+│                    as Annotate's; ↑↓ Enter); the PNG goes to the session as an image
+├── a drag on the panel's edge or the toolbar's gap -> moves it, kept on the display
+└── Escape        -> ends the text, else closes the list, else closes the editor
+```
+
+The edited shot is drawn on the GPU at the shot's own pixels, the marks
+as the editor draws them (an offscreen Rune view), then cropped; without
+marks it's a plain crop. A note in the toolbar says Copied, Saved, or Sent
+to…, or what failed. Sending writes the PNG to the temp folder and posts it
+through the router's `send_image_to_session`, which Scrawl's copy of the
+router doesn't have yet.
+
+Left to do: no blur or highlight tool, colour or stroke choice, moving or
+deleting a single mark, redo, or zoom; a shot larger than the GPU's
+largest texture exports without its marks; Send lists sessions only, not
+Annotate's rules; no Save as or drag out of the editor.
 
 The shortcut is taken in Hex's session tap (`screenshots::key`, called
 from [suppression.rs](../../src/suppression.rs) before the listener's
@@ -956,6 +993,17 @@ it. With the lab off the tap returns at once and nothing is made: no
 picker window, no thumbnail, no work. Screen Recording is Annotate's: a
 press without it shows Annotate's permission helper instead of the
 picker.
+
+The picker is a non-key overlay, so Hex is usually not the frontmost app
+while it shows, and macOS ignores a background app's cursor. Hex builds
+Rune with `macos-background-cursor`, which sets WindowServer's private
+`SetsCursorInBackground` property so the picker's crosshair (and Window
+mode's hidden arrow under the drawn camera) shows over any app. It is a
+private API, acceptable because Hex isn't sold through the App Store; if a
+macOS release drops the property, Rune skips it and the cursor shows only
+while Hex is frontmost. Checks: `the_badge_stays_on_the_display` in
+[capture_capsule/picker.rs](../../src/rune_ui/capture_capsule/picker.rs).
+Not yet observed: the cursor over another frontmost app on a real Mac.
 
 macOS matches its own screenshot shortcuts (Keyboard Shortcuts ›
 Screenshots, ⌘⇧4 among them) in the window server before any app's event
@@ -981,10 +1029,16 @@ file in one second, and the PNG's density in
 read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
 `thumbnail_goldens` (rest and hover, light and dark) and the thumbnail's
 timer in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
+`editor_goldens` (marks and the Send to… list, light and dark), the
+layout, each tool's drag, text, undo, the list's search, and both exports
+(`an_export_draws_the_marks_over_the_shot` renders on a GPU, skipping
+without one) in [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
+and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/screenshot_thumbnail/editor/marks.rs);
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
 the drawer renders as `--scene mac-labs-screenshots`. Not yet observed: a
 real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
-clipboard paste, the thumbnail's drag and Preview, and whether a session
+clipboard paste, the thumbnail's drag, the editor on a real display
+(its keys, Copy, Save, and a session receiving a sent shot), and whether a session
 tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
 symbolic hotkeys are dispatched, not tested). The row renders only in
 macOS builds, so the settings goldens don't change.

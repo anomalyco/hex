@@ -94,6 +94,8 @@ pub use replay::available as replay_available;
 pub use routing::CaptureRoute;
 pub use routing::{RouteAnswer, RouteDelivery, RouteDest};
 #[cfg(target_os = "macos")]
+pub use routing::{recent_sessions, send_image};
+#[cfg(target_os = "macos")]
 pub use screen_access::{ScreenAccess, invalidate_screen_access, screen_access, screen_access_now};
 #[cfg(target_os = "macos")]
 pub use sink::CaptureSink;

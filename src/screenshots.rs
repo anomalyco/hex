@@ -8,7 +8,7 @@
 //! by ScreenCaptureKit at the display's own pixels, with Hex's overlays and
 //! the pointer left out, on its own thread.
 
-mod save;
+pub(crate) mod save;
 pub(crate) mod system_shortcut;
 
 use std::sync::OnceLock;
@@ -33,7 +33,7 @@ static WINDOW_MODE: AtomicBool = AtomicBool::new(false);
 /// The picker's window, left out of the shot; 0 before it's made.
 static PICKER_WINDOW: AtomicU32 = AtomicU32::new(0);
 
-/// Adds the screenshot picker and thumbnail, hidden. They're made at
+/// Adds the screenshot picker, thumbnail, and editor, hidden. They're made at
 /// launch only while the Lab is on then.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
     let picker = PickerOverlay::install_as(
@@ -48,6 +48,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
         },
     );
     let thumbnail = Thumbnail::install(app);
+    crate::rune_ui::screenshot_thumbnail::editor::install(app);
     let _ = OVERLAYS.set(Overlays { picker, thumbnail });
 }
 

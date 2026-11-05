@@ -1,29 +1,53 @@
 //! The screenshot just taken, as a card in the bottom-right corner of the
-//! display under the pointer, as macOS and CleanShot show theirs: a click
-//! opens it in Preview, a drag carries the file out, and ✕ closes it. It
-//! goes by itself a few seconds on, unless the pointer is on it.
+//! display under the pointer, as macOS and CleanShot show theirs: it slides
+//! in from the display's edge and leaves the same way. A click opens it in
+//! the editor, a drag carries the file out, and ✕ closes it. It goes by itself
+//! a few seconds on, unless the pointer is on it.
+
+pub(crate) mod editor;
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-use rune::{Align, Anim, Cursor, Cx, El, OverlayHandle, OverlaySpec, ScreenEdge, Spring, Tx, el};
+use rune::{
+    Align, Anim, Cursor, Cx, El, OverlayHandle, OverlaySpec, ScreenEdge, Spring, SpringPair,
+    Transition, Tx, el,
+};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
 use super::controls::Paint;
 use crate::desktop::i18n::tr;
 
-/// The overlay: room for the largest card and its ✕.
+/// The overlay: room for the largest card and its shadow.
 const SIZE: (f32, f32) = (CARD_MAX.0 + 2.0 * PAD, CARD_MAX.1 + 2.0 * PAD);
 const CARD_MAX: (f32, f32) = (240.0, 168.0);
-/// Around the card, for its shadow and the ✕ that overhangs its corner.
+/// Around the card, for its shadow.
 const PAD: f32 = 16.0;
-const MARGIN: f32 = 8.0;
-const RADIUS: f32 = 10.0;
+/// The corner the card's own corner follows. macOS gives no display's
+/// corner radius (and a MacBook's bottom corners are square glass), so this
+/// is a design constant: the card's corner is concentric with it.
+const SCREEN_RADIUS: f32 = 30.0;
+/// From the display's edges to the card's.
+const INSET: f32 = 16.0;
+/// The overlay sits on the display's edges; [`PAD`] holds the card in.
+const MARGIN: f32 = INSET - PAD;
+/// Concentric with [`SCREEN_RADIUS`], and so the capture capsule's shell.
+const RADIUS: f32 = SCREEN_RADIUS - INSET;
+/// ✕ sits inside the card's corner, its corner concentric with the card's.
+const CLOSE_INSET: f32 = 6.0;
+const CLOSE_RADIUS: f32 = RADIUS - CLOSE_INSET;
 /// How long it stays once the pointer isn't on it.
 const LINGER: Duration = Duration::from_secs(5);
 const FADE: Spring = Spring::new(0.22, 0.0);
-/// The fade's length, before the overlay hides.
-const FADE_S: f64 = 0.3;
+/// In on the HUD family's spring, a little bounce; out shorter, none.
+const ENTER: Spring = super::capture_capsule::tuning::spring(crate::rune_hud::spring::MORPH);
+const LEAVE: Spring = Spring::new(0.24, 0.0);
+const REDUCED: Spring =
+    super::capture_capsule::tuning::spring(crate::rune_hud::spring::REDUCED_FADE);
+/// How far it leans back as it travels, about its bottom-right corner.
+const TRAVEL_SCALE: f32 = 0.94;
+/// How long leaving takes, before the overlay hides.
+const LEAVE_S: f64 = 0.4;
 
 static CLOSE: &rune::Icon = &rune_theme_opencode::icons::CLOSE;
 
@@ -65,20 +89,13 @@ impl Card {
             self.on = false;
             self.leaving = Some(self.now);
             tx.animated();
-            tx.wake_after(Duration::from_secs_f64(FADE_S));
+            tx.wake_after(Duration::from_secs_f64(LEAVE_S));
         }
     }
 
     fn open(&mut self, tx: &mut Tx) {
-        #[cfg(target_os = "macos")]
         if let Some(shot) = &self.shot {
-            let opened = std::process::Command::new("/usr/bin/open")
-                .args(["-a", "Preview"])
-                .arg(&shot.path)
-                .spawn();
-            if let Err(error) = opened {
-                tracing::warn!(%error, "could not open the screenshot in Preview");
-            }
+            editor::open(shot.path.clone());
         }
         self.close(tx);
     }
@@ -97,7 +114,7 @@ impl Card {
 fn poll(s: &mut Card, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
     if let Some(at) = s.leaving {
-        if now - at >= FADE_S {
+        if now - at >= LEAVE_S {
             s.leaving = None;
             s.shot = None;
             if let Some(overlay) = &s.overlay {
@@ -105,7 +122,7 @@ fn poll(s: &mut Card, now: f64, tx: &mut Tx) -> bool {
             }
             return true;
         }
-        tx.wake_after(Duration::from_secs_f64(at + FADE_S - now));
+        tx.wake_after(Duration::from_secs_f64(at + LEAVE_S - now));
         return false;
     }
     if !s.on || s.hovered {
@@ -190,7 +207,7 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .key("screenshot-thumbnail")
         .size(SIZE.0, SIZE.1)
         .hover_motion_within(Anim::INSTANT, Anim::INSTANT);
-    let Some(shot) = &s.shot else {
+    let Some(shot) = s.shot.as_ref().filter(|_| s.on) else {
         return root;
     };
     let (w, h) = s.card_size();
@@ -226,9 +243,22 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .on_press_tx(|s: &mut Card, tx| s.close(tx))
         .build(k)
         .key("close")
-        .absolute(PAD - 10.0, PAD - 10.0)
+        .radius(CLOSE_RADIUS)
+        .absolute(PAD + CLOSE_INSET, PAD + CLOSE_INSET)
         .opacity(if s.hovered { 1.0 } else { 0.0 })
         .opacity_motion(FADE);
+    // In from past the display's right edge, leaning back about the corner
+    // it rests in, and out the same way; Reduce Motion only fades.
+    let travel = if cx.is_reduced_motion() {
+        Transition::opacity().springs(SpringPair::new(REDUCED, REDUCED))
+    } else {
+        Transition::offset(w + PAD + INSET, 0.0)
+            .combined(Transition::scale_anchor(
+                TRAVEL_SCALE,
+                rune::Vec2::new(1.0, 1.0),
+            ))
+            .springs(SpringPair::new(ENTER, LEAVE))
+    };
     let group = el()
         .key("shot")
         .absolute(x - PAD, y - PAD)
@@ -242,8 +272,7 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
             }
             tx.animated();
         })
-        .opacity(if s.on { 1.0 } else { 0.0 })
-        .opacity_motion(FADE)
+        .transition(travel)
         .child(card)
         .child(close);
     root.child(group)
@@ -383,6 +412,57 @@ mod tests {
         assert!(misses.is_empty(), "{}", misses.join("\n"));
     }
 
+    /// `HEX_SCREENSHOT_FRAMES=<folder>` writes the card coming in, held,
+    /// and leaving at 60 fps, dark, to `<folder>/thumbnail/`. Without the
+    /// variable or a GPU adapter it does nothing.
+    #[test]
+    fn thumbnail_frames() {
+        let Some(folder) = std::env::var_os("HEX_SCREENSHOT_FRAMES") else {
+            return;
+        };
+        let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+            return;
+        };
+        let out = std::path::PathBuf::from(folder).join("thumbnail");
+        std::fs::create_dir_all(&out).unwrap();
+        let mut card = Card::still(desktop([1440, 900]), false);
+        card.on = false;
+        let mut rt = crate::rune_ui::offscreen::runtime(
+            card,
+            view,
+            SIZE,
+            rune::Env {
+                system_dark: true,
+                scale: 2.0,
+            },
+            rune::text::TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES),
+        );
+        rt.frame(0.0);
+        let (w, h) = ((SIZE.0 * 2.0) as u32, (SIZE.1 * 2.0) as u32);
+        let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
+        let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
+        for index in 0..=150 {
+            match index {
+                12 => rt.update(|s: &mut Card, tx| {
+                    s.on = true;
+                    tx.animated();
+                }),
+                110 => rt.update(|s: &mut Card, tx| s.close(tx)),
+                _ => {}
+            }
+            rt.frame(1.0 / 60.0);
+            let pixels = crate::rune_ui::offscreen::paint(&gpu, &mut renderer, &target, &mut rt);
+            rune::render::write_png(&out.join(format!("{index:04}.png")), w, h, &pixels).unwrap();
+        }
+    }
+
+    #[test]
+    fn its_corners_nest_in_the_displays_and_match_the_capsule() {
+        assert_eq!(RADIUS, SCREEN_RADIUS - INSET);
+        assert_eq!(RADIUS, super::super::capture_capsule::surface::SHELL_RADIUS);
+        assert_eq!(CLOSE_RADIUS + CLOSE_INSET, RADIUS);
+    }
+
     #[test]
     fn the_card_keeps_the_shots_shape() {
         let wide = Card::still(shot([1600, 400]), false);
@@ -400,7 +480,7 @@ mod tests {
         assert!(card.on);
         poll(&mut card, 5.0, &mut tx);
         assert!(!card.on);
-        poll(&mut card, 5.01 + FADE_S, &mut tx);
+        poll(&mut card, 5.01 + LEAVE_S, &mut tx);
         assert!(card.shot.is_none());
 
         let mut card = Card::still(shot([800, 600]), true);
