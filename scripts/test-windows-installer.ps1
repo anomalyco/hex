@@ -85,11 +85,11 @@ if ($Console) {
     # A new terminal: the user's PATH, where `hex` resolves to bin\hex.com.
     $env:Path = "$(User-Path);$([Environment]::GetEnvironmentVariable('Path', 'Machine'))"
     $command = Get-Command hex -CommandType Application | Select-Object -First 1
-    Check ($command.Source -eq (Join-Path $bin 'hex.com')) "``hex`` resolves to bin\hex.com, not $($command.Source)"
+    Check ($command.Source -eq (Join-Path $bin 'hex.com')) "``hex`` resolves to bin\hex.com ($($command.Source))"
     $started = Get-Date
     $status = hex status --json
     $code = $LASTEXITCODE
-    Check ($code -eq 3) "``hex status --json`` waits and exits 3 (Hex isn't running), not $code"
+    Check ($code -eq 3) "``hex status --json`` waits and exits 3, Hex isn't running ($code)"
     Check (($status | Out-String) -match 'not-running') "``hex status --json`` printed its reply: $status"
     Check ($null -ne (($status | Out-String) | ConvertFrom-Json)) '``hex status --json`` printed JSON'
     Write-Output "  (hex status --json took $([int]((Get-Date) - $started).TotalMilliseconds) ms)"
@@ -144,3 +144,5 @@ if ($Console) {
 }
 Remove-Item $support -Recurse -Force
 Write-Output "Installer $([IO.Path]::GetFileName($Installer)) passed."
+# `hex status` left $LASTEXITCODE at 3, which would become this script's code.
+exit 0
