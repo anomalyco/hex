@@ -40,6 +40,24 @@ pub(super) fn control(ui: &Ui, p: Paint) -> Option<El> {
     })
 }
 
+/// Under Download update on Windows, why this Hex can't update itself and
+/// what to do (#1352).
+pub(super) fn blocked(ui: &Ui, p: Paint) -> Option<El> {
+    let view = ui.view.as_ref()?;
+    let why = view
+        .update_blocked
+        .filter(|_| view.update_status == DesktopUpdateStatus::Available)?;
+    Some(
+        text(tr(why))
+            .key("sidebar-update-blocked")
+            .font(p.k.ty.small)
+            .color(p.faint())
+            .wrap()
+            .mt(6.0)
+            .px(6.0),
+    )
+}
+
 /// What the staged dev build changed, while Restart to update shows.
 pub(super) fn notes(ui: &Ui, p: Paint) -> Option<El> {
     ui.view

@@ -45,6 +45,11 @@ Check ((Get-Content $pointer -Raw).Trim() -eq $Version) "current-version names $
 $installReceipt = Get-Content $receipt -Raw | ConvertFrom-Json
 Check ($installReceipt.app -eq 'hex' -and $installReceipt.artifact -eq 'desktop' -and $installReceipt.channel -eq 'stable' -and $installReceipt.method -eq 'direct') 'install.json marks a direct install of hex desktop stable'
 Check ($installReceipt.root -eq $support) 'install.json names the install root'
+# Hex reads the receipt as UTF-8; Setup once wrote the ANSI code page (#1352).
+$receiptBytes = [IO.File]::ReadAllBytes($receipt)
+Check (-not ($receiptBytes.Length -ge 3 -and $receiptBytes[0] -eq 0xEF -and $receiptBytes[1] -eq 0xBB -and $receiptBytes[2] -eq 0xBF)) 'install.json has no byte order mark'
+$strict = New-Object System.Text.UTF8Encoding($false, $true)
+Check ($null -ne $strict.GetString($receiptBytes)) 'install.json is valid UTF-8'
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
 Check ($link.TargetPath -eq $installed) 'Start Menu shortcut targets the managed executable'
 Check ($link.Arguments -eq 'app') 'Start Menu shortcut launches the app'

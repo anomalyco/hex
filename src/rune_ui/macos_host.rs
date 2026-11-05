@@ -142,6 +142,7 @@ impl Backend {
                 transcription: published.transcription.clone(),
                 update_status: published.update_status.clone(),
                 update_notes: published.update_notes.clone(),
+                update_blocked: None,
                 editing: false,
             },
             settings: published.settings.clone(),

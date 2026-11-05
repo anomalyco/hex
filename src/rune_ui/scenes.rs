@@ -890,6 +890,7 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         },
         update_status: DesktopUpdateStatus::Current,
         update_notes: None,
+        update_blocked: None,
         editing: false,
     });
     ui
