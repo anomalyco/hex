@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`) are ignored.
+/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`) are ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
@@ -77,8 +77,6 @@ pub struct LabsSettings {
     pub meeting_finished_event: bool,
     /// The meeting capsules float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux, issue 1274).
     pub gnome_meeting_capsules: bool,
-    /// Each recording in the Meetings list shows its call app's icon, or a neutral one (issue 1290).
-    pub meeting_platform_icons: bool,
     /// The screenshot shortcut takes an area or a window (macOS); its
     /// shortcut and folder are `screenshots.*`.
     pub screenshots: bool,
@@ -139,7 +137,6 @@ impl Default for LabsSettings {
             meeting_finished_event: false,
             annotate_replay: false,
             gnome_meeting_capsules: false,
-            meeting_platform_icons: false,
             screenshots: false,
             follow_live_transcript: false,
             groups: std::collections::BTreeMap::new(),

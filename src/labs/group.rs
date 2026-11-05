@@ -77,7 +77,6 @@ impl Feature {
             | Self::MeetingSummaryModel
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
-            | Self::MeetingPlatformIcons
             | Self::FollowLiveTranscript
             | Self::GnomeMeetingCapsules => Group::Meetings,
             Self::Screenshots | Self::AnnotateReplay => Group::Annotate,

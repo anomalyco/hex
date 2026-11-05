@@ -465,11 +465,6 @@ const KEYS: &[Key] = &[
         "Labs: on Wayland desktops without layer-shell, such as GNOME, the meeting capsules float over the call through XWayland while it is already running (Linux)",
     ),
     key(
-        "labs.meeting_platform_icons",
-        Kind::Bool,
-        "Labs: each recording in the Meetings list shows a small icon for its call app or website, or a neutral one when Hex doesn't know it",
-    ),
-    key(
         "labs.follow_live_transcript",
         Kind::Bool,
         "Labs: while a meeting records, its transcript in Meetings scrolls to the newest line; scroll up to read earlier text, back to the bottom to follow again",
@@ -707,7 +702,6 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.meeting_summary_model", "meetings"),
     ("labs.meeting_notes_vocabulary", "meetings"),
     ("labs.meeting_finished_event", "meetings"),
-    ("labs.meeting_platform_icons", "meetings"),
     ("labs.follow_live_transcript", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),

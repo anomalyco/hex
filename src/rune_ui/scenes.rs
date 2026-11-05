@@ -555,12 +555,6 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings = meetings::MeetingsPane::chapters_fixture();
         ui.pane = Pane::Meetings;
     }),
-    ("meetings-platform-icons", |ui| {
-        *ui = mac_fixture();
-        ui.settings.labs.meeting_platform_icons = true;
-        ui.meetings = meetings::MeetingsPane::platforms_fixture();
-        ui.pane = Pane::Meetings;
-    }),
     ("meetings-empty", |ui| {
         *ui = mac_fixture();
         ui.meetings = meetings::MeetingsPane::default();

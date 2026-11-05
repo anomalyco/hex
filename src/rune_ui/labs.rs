@@ -402,12 +402,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Tell apps on this computer when a meeting's transcript is ready. They get only the meeting's ID, through Hex's local API"),
         ));
         rows.push(row(
-            Feature::MeetingPlatformIcons,
-            None,
-            tr("Meeting platform icons"),
-            tr("Show a small icon for the app or website each meeting was recorded from, beside its name"),
-        ));
-        rows.push(row(
             Feature::FollowLiveTranscript,
             None,
             tr("Follow live transcript"),
@@ -749,7 +743,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::NotchIndicator => "lab-notch-indicator",
         Feature::MeetingFinishedEvent => "lab-meeting-finished-event",
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
-        Feature::MeetingPlatformIcons => "lab-meeting-platform-icons",
         Feature::Screenshots => "lab-screenshots",
         Feature::FollowLiveTranscript => "lab-follow-live-transcript",
         Feature::AnnotateReplay => "lab-annotate-replay",
