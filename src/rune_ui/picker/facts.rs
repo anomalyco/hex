@@ -6,7 +6,8 @@
 //!   that writes while you talk.
 //! - Wrong words: "1 in 62", from the error rate, only when the model was
 //!   measured in the saved language.
-//! - Languages, the download, and whether it reads your vocabulary.
+//! - Languages, and whether it reads your vocabulary. The download's size
+//!   is on the button that starts it.
 
 use rune::{El, TextStyle, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant, Progress};
@@ -196,28 +197,11 @@ pub(super) fn reads_vocabulary(ui: &Ui, def: &ModelDefinition) -> bool {
     }
 }
 
-/// Bytes a choice still has to download.
-pub(super) fn to_download(entry: &Entry) -> u64 {
-    match entry.state {
-        State::NotDownloaded | State::Preparing { .. } => entry.def.download_bytes().unwrap_or(0),
-        _ => 0,
-    }
-}
-
 /// The download's size, or who keeps the model when Hex downloads none.
 pub(super) fn size_text(def: &ModelDefinition) -> String {
     match def.runtime {
         ModelRuntime::AppleSpeech => tr("Managed by macOS").into(),
         ModelRuntime::Gguf(_) => def.size_label(),
-    }
-}
-
-/// The download row's value: the size, or that nothing is left to fetch.
-pub(super) fn download_label(entry: &Entry) -> String {
-    match entry.state {
-        State::InUse | State::Downloaded => tr("Downloaded").into(),
-        State::OnComputer => tr("On this computer").into(),
-        _ => size_text(entry.def),
     }
 }
 
@@ -263,22 +247,29 @@ pub(super) fn list_role(entry: &Entry) -> Option<(&'static str, bool)> {
     })
 }
 
-/// What a model is best at among `others`, for its eyebrow.
-pub(super) fn role(ui: &Ui, entry: &Entry, others: &[&Entry]) -> Option<&'static str> {
+/// What a model is best at among `others`, for its eyebrow, with the key
+/// of the compare row that measures the same thing, if one does.
+pub(super) fn role(
+    ui: &Ui,
+    entry: &Entry,
+    others: &[&Entry],
+) -> Option<(&'static str, Option<&'static str>)> {
     match entry.recommendation {
-        Some(Recommendation::Recommended) => Some(tr("Recommended")),
-        Some(Recommendation::MostAccurate) => Some(tr("Fewest wrong words")),
-        Some(Recommendation::Fastest) => Some(tr("Fastest")),
-        Some(Recommendation::Vocabulary) => Some(tr("Reads your vocabulary")),
+        Some(Recommendation::Recommended) => Some((tr("Recommended"), None)),
+        Some(Recommendation::MostAccurate) => Some((tr("Fewest wrong words"), Some("wrong"))),
+        Some(Recommendation::Fastest) => Some((tr("Fastest"), Some("wait"))),
+        Some(Recommendation::Vocabulary) => Some((tr("Reads your vocabulary"), Some("vocabulary"))),
         None if others.len() > 1
             && others.iter().all(|other| {
                 language_count(other.def) < language_count(entry.def)
                     || other.def.id == entry.def.id
             }) =>
         {
-            Some(tr("Most languages"))
+            Some((tr("Most languages"), Some("languages")))
         }
-        None if reads_vocabulary(ui, entry.def) => Some(tr("Reads your vocabulary")),
+        None if reads_vocabulary(ui, entry.def) => {
+            Some((tr("Reads your vocabulary"), Some("vocabulary")))
+        }
         None => None,
     }
 }
@@ -378,6 +369,41 @@ pub(super) fn compact_progress(p: Paint, entry: &Entry) -> El {
                 ),
         )
         .child(cancel_button(p))
+}
+
+/// Progress on one line, for the compare view's action row: the percentage
+/// and a bar (or the stage alone), then the ×.
+pub(super) fn progress_line(p: Paint, entry: &Entry) -> El {
+    let State::Preparing { label, fraction } = &entry.state else {
+        return row();
+    };
+    let mut line = row().key("preparing").w_full().gap(8.0).center_y();
+    line = match fraction {
+        Some(fraction) => line
+            .child(
+                text(format!("{:.0}%", fraction * 100.0))
+                    .key("percent")
+                    .font(tnum(p.k.ty.small_medium))
+                    .color(p.text())
+                    // Holds the bar still as the digits grow.
+                    .min_w(28.0),
+            )
+            .child(
+                Progress::new(Some(*fraction))
+                    .build(p.k)
+                    .grow(1.0)
+                    .label(label.clone()),
+            ),
+        None => line.child(
+            text(label.clone())
+                .key("stage")
+                .font(tnum(p.k.ty.small_medium))
+                .color(p.text())
+                .grow(1.0)
+                .truncate(),
+        ),
+    };
+    line.child(cancel_button(p))
 }
 
 /// Use or Download for a model that can be chosen, at the button size of
