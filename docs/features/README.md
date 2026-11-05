@@ -708,7 +708,11 @@ Send is not an atomic target-app transaction. Chromium 155 and 156 get the text
 typed instead of pasted for a [Chrome paste bug](dictation.md#ongoing-jobs-and-output).
 
 **Easy to misread:** History Off does not stop diagnostic logging. Diagnostic
-logs are separate and currently unbounded on disk.
+logs are separate and currently unbounded on disk, but they never hold what was
+said: `live.ndjson` records each dictation's phase and timing with its text
+left out (`events::VoiceEvent::without_words`,
+`the_log_never_keeps_what_was_said`), so History is the only place dictated
+words are kept.
 
 
 The shared `EventReader` streams a file-length snapshot in 16 KiB chunks rather

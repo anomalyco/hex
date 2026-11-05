@@ -412,7 +412,8 @@ substitute for source inspection or a second roadmap.
 - `desktop/events`, `control/dashboard`: bounded asynchronous append-only NDJSON observations
   and bounded incremental reading; the debug `dashboard` TUI and the Activity
   pane are read-only projections. Context events name the foreground app,
-  never a page address.
+  never a page address, and no event holds dictated or transcribed text:
+  History is the only place Hex keeps what was said.
 - `desktop/activity`: the shared listener, device, session, and latest-failure
   projection over `EventReader`. Transcript rows read retained events directly.
 - `desktop/host`: the in-process listener, transcription, shortcut, and update

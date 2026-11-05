@@ -218,7 +218,7 @@ impl EventLog {
             .sender
             .as_ref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "event writer stopped"))?;
-        match sender.try_send(WriterMessage::Event(event.clone())) {
+        match sender.try_send(WriterMessage::Event(event.without_words())) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(WriterMessage::Event(event))) if event.is_replaceable() => {
                 Ok(())
@@ -341,6 +341,20 @@ impl EventLog {
 }
 
 impl VoiceEvent {
+    /// The event as it is written: what was said stays out of the log. The
+    /// log is a plain file kept for diagnosis, never trimmed by History's
+    /// retention or Clear all, and `hex logs` prints it, so dictated words
+    /// live only in History.
+    fn without_words(&self) -> Self {
+        let mut event = self.clone();
+        match &mut event {
+            Self::Transcript { text, .. } | Self::Dictation { text, .. } => text.clear(),
+            Self::Command { heard, .. } => heard.clear(),
+            _ => {}
+        }
+        event
+    }
+
     fn is_replaceable(&self) -> bool {
         matches!(
             self,
@@ -714,6 +728,30 @@ mod tests {
     }
 
     #[test]
+    fn the_log_never_keeps_what_was_said() {
+        let path = std::env::temp_dir().join(format!(
+            "hex-no-words-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let log = EventLog::create(&path).unwrap();
+        log.emit(&VoiceEvent::Transcript {
+            timestamp_ms: 1,
+            phase: TranscriptPhase::Completed,
+            latency_ms: 5,
+            text: "my bank pin is 4321".into(),
+        })
+        .unwrap();
+        log.dictation(DictationPhase::Pasted, "my bank pin is 4321")
+            .unwrap();
+        log.flush().unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        assert_eq!(written.lines().count(), 2);
+        assert!(!written.contains("4321"), "{written}");
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn a_bounded_flush_writes_every_queued_event() {
         let path = std::env::temp_dir().join(format!(
             "hex-bounded-flush-{}-{}.ndjson",
@@ -744,10 +782,11 @@ mod tests {
         })
         .unwrap();
         for timestamp_ms in 1..=2048 {
-            log.dictation(
-                DictationPhase::Pasted,
-                format!("{timestamp_ms}: {}", "é".repeat(100)),
-            )
+            log.emit(&VoiceEvent::ApiAuthFailed {
+                timestamp_ms,
+                method: "POST".into(),
+                path: "é".repeat(100),
+            })
             .unwrap();
         }
         log.flush().unwrap();
@@ -756,9 +795,13 @@ mod tests {
         assert_eq!(reader.offset, fs::metadata(&path).unwrap().len());
         assert_eq!(reader.events().len(), EVENT_RETENTION);
         assert_eq!(reader.current_context(), Some(&Some("Fixture".into())));
-        assert!(
-            matches!(reader.events().back(), Some(VoiceEvent::Dictation { text, .. }) if text.starts_with("2048:"))
-        );
+        assert!(matches!(
+            reader.events().back(),
+            Some(VoiceEvent::ApiAuthFailed {
+                timestamp_ms: 2048,
+                ..
+            })
+        ));
         // Scratch space follows one record, never the size of the file.
         assert!(reader.pending.capacity() <= EVENT_READ_BUFFER_BYTES);
         drop(log);
