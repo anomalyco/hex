@@ -57,8 +57,8 @@ driver Hex still starts and decodes on the CPU, and Settings › Speech engine
 says so. **ARM64** decodes on the CPU. Both are
 self-contained: no Visual C++ Redistributable is required. Hex then keeps
 itself current through the signed update feed. Uninstalling removes every
-installed version, the shortcut, and Launch at login, and keeps settings, logs,
-history, and models in `%APPDATA%\hex`.
+installed version, the shortcut, and Launch at login, and keeps settings and
+history in `%APPDATA%\hex` and logs and models in `%LOCALAPPDATA%\hex`.
 
 The installer and the script below create the same managed layout, so either
 can replace the other. For a scripted install:
@@ -183,7 +183,12 @@ cargo run -- listen --model parakeet_v3 --language pl
 Press Enter once to start, then again to stop. Captures shorter than 300 ms are
 discarded. `--device` accepts a case-insensitive fragment from `devices`.
 
-Runtime data is stored under `%APPDATA%\hex`. Observations are in
+Runtime data is stored under `%APPDATA%\hex`, except logs and speech models,
+which belong to this computer and live in `%LOCALAPPDATA%\hex`: on managed
+networks Windows copies the Roaming folder to a server at every sign-in, which
+hundreds of megabytes of models would slow down. An older Hex's `logs` and
+`models` move there once (`app_paths::machine_local`); while a running Hex
+holds them, the Roaming copy stays in use. Observations are in
 `logs\live.ndjson`, and native/runtime diagnostics are in `logs\process.log`,
 including every panic with its thread and backtrace. A worker that stops
 unexpectedly leaves its cause there. `hex.exe` is a GUI program, so a launch

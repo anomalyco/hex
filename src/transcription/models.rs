@@ -819,7 +819,7 @@ pub fn models_dir() -> Result<PathBuf> {
     if let Some(directory) = TEST_MODELS_DIR.with(|directory| directory.borrow().clone()) {
         return Ok(directory);
     }
-    Ok(crate::app_paths::support_dir()?.join("models"))
+    crate::app_paths::models_dir()
 }
 
 #[cfg(test)]

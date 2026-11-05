@@ -1731,8 +1731,9 @@ Tab to cycle, and `q`/Escape to quit.
   tracks, the rolling in-call transcript, and atomically published final
   transcripts.
 
-Windows uses `%APPDATA%\hex` and Linux `~/.local/share/hex` (or under
-`XDG_DATA_HOME`). Hex keeps no compatibility with earlier `voice-control`
+Windows uses `%APPDATA%\hex`, with logs and models in `%LOCALAPPDATA%\hex`
+(machine-local, so roaming profiles don't copy them), and Linux
+`~/.local/share/hex` (or under `XDG_DATA_HOME`). Hex keeps no compatibility with earlier `voice-control`
 folders or per-OS settings files.
 
 ## Future Direction
