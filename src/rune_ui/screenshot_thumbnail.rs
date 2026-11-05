@@ -1,8 +1,10 @@
 //! The screenshot just taken, as a card in the bottom-right corner of the
 //! display under the pointer, as macOS and CleanShot show theirs: it slides
 //! in from the display's edge and leaves the same way. A click opens it in
-//! Preview, a drag carries the file out, and ✕ closes it. It goes by itself
+//! the editor, a drag carries the file out, and ✕ closes it. It goes by itself
 //! a few seconds on, unless the pointer is on it.
+
+pub(crate) mod editor;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -92,15 +94,8 @@ impl Card {
     }
 
     fn open(&mut self, tx: &mut Tx) {
-        #[cfg(target_os = "macos")]
         if let Some(shot) = &self.shot {
-            let opened = std::process::Command::new("/usr/bin/open")
-                .args(["-a", "Preview"])
-                .arg(&shot.path)
-                .spawn();
-            if let Err(error) = opened {
-                tracing::warn!(%error, "could not open the screenshot in Preview");
-            }
+            editor::open(shot.path.clone());
         }
         self.close(tx);
     }
@@ -415,6 +410,50 @@ mod tests {
             }
         }
         assert!(misses.is_empty(), "{}", misses.join("\n"));
+    }
+
+    /// `HEX_SCREENSHOT_FRAMES=<folder>` writes the card coming in, held,
+    /// and leaving at 60 fps, dark, to `<folder>/thumbnail/`. Without the
+    /// variable or a GPU adapter it does nothing.
+    #[test]
+    fn thumbnail_frames() {
+        let Some(folder) = std::env::var_os("HEX_SCREENSHOT_FRAMES") else {
+            return;
+        };
+        let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+            return;
+        };
+        let out = std::path::PathBuf::from(folder).join("thumbnail");
+        std::fs::create_dir_all(&out).unwrap();
+        let mut card = Card::still(desktop([1440, 900]), false);
+        card.on = false;
+        let mut rt = crate::rune_ui::offscreen::runtime(
+            card,
+            view,
+            SIZE,
+            rune::Env {
+                system_dark: true,
+                scale: 2.0,
+            },
+            rune::text::TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES),
+        );
+        rt.frame(0.0);
+        let (w, h) = ((SIZE.0 * 2.0) as u32, (SIZE.1 * 2.0) as u32);
+        let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
+        let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
+        for index in 0..=150 {
+            match index {
+                12 => rt.update(|s: &mut Card, tx| {
+                    s.on = true;
+                    tx.animated();
+                }),
+                110 => rt.update(|s: &mut Card, tx| s.close(tx)),
+                _ => {}
+            }
+            rt.frame(1.0 / 60.0);
+            let pixels = crate::rune_ui::offscreen::paint(&gpu, &mut renderer, &target, &mut rt);
+            rune::render::write_png(&out.join(format!("{index:04}.png")), w, h, &pixels).unwrap();
+        }
     }
 
     #[test]
