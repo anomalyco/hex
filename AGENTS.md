@@ -32,9 +32,10 @@ runtime settings persist in Application Support.
 Every build shows General, Output, History, and Labs. Labs holds features
 we're unsure about, especially ones people asked for that we built: **new or
 user-requested features land in Labs, off by default, not on by default.**
-Labs has no master switch; Settings › Labs is one flat list of rows (name,
-description, toggle), each off by default, plus Send feedback and Run setup
-again. Each feature has an audience: `Everyone` or `Dev` (dev, local, test, and
+Labs has no master switch; Settings › Labs lists every lab this OS has as a
+card (name, description, toggle), each off by default, under one collapsible
+header per group (Dictation, Output, History, Meetings, Annotate, Shortcuts,
+Models; `labs::Feature::group`), plus Send feedback and Run setup again. Each feature has an audience: `Everyone` or `Dev` (dev, local, test, and
 dev-channel builds only; a stable build never lists, accepts, or runs it).
 A feature with its own pane joins the sidebar as a normal item while
 on and is hidden while off; a behaviour-only feature is just its toggle. Today:
@@ -520,7 +521,7 @@ substitute for source inspection or a second roadmap.
   its own thread. Answers on a channel; cancel and a dialog that never opened
   read as nothing chosen.
 - `labs`: the Labs feature registry (`labs::Feature`: name, settings key,
-  description, audience), the runtime gates (`labs::live_text`, `live_chapters`,
+  description, audience, group), the runtime gates (`labs::live_text`, `live_chapters`,
   `playground`, `vocabulary_biasing`, `mouse_shortcuts`), and
   `hex labs [on|off <feature>]`. `dev_build`: whether this is a dev, local, test,
   or dev-channel build.
@@ -1445,7 +1446,7 @@ cd sdk/typescript && bun run check && bun run test && bun run build
 New, unproven, user-requested, and externally contributed features
 (including ones the issue pipeline builds) land in Labs, off by default
 ([docs/features/labs.md](docs/features/labs.md)): add a `labs::Feature` with
-its settings key and description, a row on the Labs page, and a
+its settings key, description, and group (`Feature::group`), a card on the Labs page, and a
 `hex settings` key; gate where the feature's work starts (worker, thread,
 capture), not just its UI. Never add a master switch or ship such a feature
 on by default. Remove it from Labs when it graduates or is dropped.

@@ -30,7 +30,9 @@ have detailed maps.
 automation (strobe's benches) read from the window, the HUD, and the capsules.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
-[Labs](labs.md) is one switch, on by default, for every unfinished feature.
+[Labs](labs.md) gives every unfinished feature its own switch, off by
+default, listed under collapsible groups (Dictation, Output, History,
+Meetings, Annotate, Shortcuts, Models) with only this OS's labs.
 Its Restore shortcut default toggle (off by default) puts a Restore default
 button beside Paste last dictation's shortcut (#613); its Sort and filter
 models toggle (off by default) adds a sort and a saved-language filter to the
