@@ -19,6 +19,7 @@ on:
       - "assets/**"
       - "nix/**"
       - "scripts/check-nix-git-pins.py"
+      - "scripts/test-check-nix-git-pins.py"
       - ".github/workflows/compile.yml"
   workflow_dispatch:
 

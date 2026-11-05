@@ -192,6 +192,33 @@ class ParseLockTest(unittest.TestCase):
         self.assertEqual(repos["https://github.com/example/full"]["rev"], SHA_A)
         self.assertEqual(len(repos), 6)
 
+    def test_sourceless_package_is_ignored(self):
+        lock = """version = 4
+
+[[package]]
+name = "hex"
+version = "3.3.0"
+dependencies = []
+"""
+        self.assertEqual(self.parse(lock), {})
+
+    def test_trailing_patch_table_is_not_attributed(self):
+        lock = f"""version = 4
+
+[[package]]
+name = "hex"
+version = "3.3.0"
+dependencies = [
+ "rune",
+]
+
+[[patch.unused]]
+name = "rune"
+version = "0.0.1"
+source = "git+https://github.com/example/rune?branch=main#{SHA_A}"
+"""
+        self.assertEqual(self.parse(lock), {})
+
 
 class CompareTest(unittest.TestCase):
     def test_one_pin_covers_a_multi_crate_repo(self):
@@ -232,8 +259,13 @@ class CompareTest(unittest.TestCase):
                 }
             },
         )
-        self.assertTrue(any("names several" in problem for problem in problems))
-        self.assertFalse(any("does not pin" in problem for problem in problems))
+        self.assertEqual(
+            problems,
+            [
+                "https://github.com/example/rune: the Nix table names several "
+                "of its packages: rune-0.0.1, rune-kit-0.0.1"
+            ],
+        )
 
     def test_stale_revision(self):
         pins = {"rune-0.0.1": {"rev": SHA_B, "hash": VALID_HASH}}
