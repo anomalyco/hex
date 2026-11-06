@@ -36,17 +36,19 @@ export default bench({
     // General → History (200 rows of 10,000) → Output → General. Hex keeps
     // drawing for about a second after a pane switch, and strobe takes no
     // sample from a click sent while the window still draws, so each click
-    // waits for the window to go idle first, between the clicks' phases.
+    // waits for the window to go idle first. The waits are untimed: the run
+    // counts the clicks and their frames, not the rest after them. strobe
+    // can't take a wait out of gpu.process.3d, so this case leaves it out.
     "switch-panes": {
       expect: { heading: "General" },
       primary: "ui.cpu",
-      metrics: ui,
-      async run({ page, phase }) {
-        await phase("history", () => open(page, "nav-history", "history-list"))
-        await page.idle()
-        await phase("output", () => open(page, "nav-output", "output-content"))
-        await page.idle()
-        await phase("general", () => open(page, "nav-general", "basics"))
+      metrics: ui.filter((metric) => metric !== "gpu.process.3d"),
+      async run({ page, untimed }) {
+        await open(page, "nav-history", "history-list")
+        await untimed(() => page.idle())
+        await open(page, "nav-output", "output-content")
+        await untimed(() => page.idle())
+        await open(page, "nav-general", "basics")
       },
     },
     // Down History's list and back, at a trackpad's pace.
