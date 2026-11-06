@@ -967,15 +967,16 @@ fn detect_meeting(
         tracing::info!(?applications, "microphone application activity changed");
         *observed_microphone_apps = observed;
     }
+    let more_call_apps = crate::labs::more_call_apps();
     let application = microphone_apps
         .into_iter()
-        .filter(|application| application.is_supported_meeting_app())
+        .filter(|application| application.is_supported_meeting_app(more_call_apps))
         .min_by_key(|application| application.detection_priority());
     let context = browser.context(application.as_ref(), |bundle_id| {
         detector.is_application_snoozed(bundle_id)
     });
-    let candidate =
-        application.and_then(|application| candidate_from_microphone(&application, &context));
+    let candidate = application
+        .and_then(|application| candidate_from_microphone(&application, &context, more_call_apps));
     let detection = detector.detect(candidate, choices);
     if let Some(Detection::Offer(candidate)) = &detection {
         tracing::info!(
@@ -1006,7 +1007,7 @@ pub fn probe() -> Result<()> {
         println!(
             "{}\t{}\t{}\t{}",
             application.pid,
-            if application.is_supported_meeting_app() {
+            if application.is_supported_meeting_app(crate::labs::more_call_apps()) {
                 "meeting"
             } else {
                 "other"
@@ -1196,7 +1197,7 @@ mod tests {
                 assert_eq!(context, ContextSnapshot::default());
                 first = false;
             }
-            let candidate = candidate_from_microphone(&brave(), &context);
+            let candidate = candidate_from_microphone(&brave(), &context, false);
             if let Some(detection) = detector.detect(candidate, &[]) {
                 break detection;
             }

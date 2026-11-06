@@ -56,6 +56,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
 │       │   Gather, Discord (always listed)
+│       ├── Labs › More call apps on -> also Signal, Telegram, WeChat, LINE, Webex, Element,
+│       │   Phone, Google Voice, Messenger, and GroupMe (always listed)
 │       └── then each website or app chosen for from an offer's "…"
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
            the pane leaves the sidebar
@@ -196,6 +198,16 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / Discord / browser call uses 
   as sitting in a space can hold it; Discord: com.hnc.Discord and its helpers,
   its Canary and PTB builds, Discord.exe, the Linux discord binary and Flatpak,
   #1283)
+Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser call on
+  voice.google.com, messenger.com, teams.live.com, facetime.apple.com,
+  web.groupme.com, or webex.com                 // Labs › More call apps, off by default
+  (Signal: org.whispersystems.signal-desktop; Telegram: ru.keepcoder.Telegram,
+  com.tdesktop.Telegram, org.telegram.desktop; WeChat: com.tencent.xinWeChat;
+  LINE: jp.naver.line.mac; Webex: com.webex.meetingmanager,
+  com.cisco.webexmeetingsapp, Cisco-Systems.Spark (CiscoCollabHost.exe on
+  Windows); Element: im.riot.app; Phone: com.apple.mobilephone;
+  Signal, Telegram, WeChat, LINE, Element, Messenger, and GroupMe wait 20 s,
+  as voice notes and clips also hold the microphone; Webex and Phone wait 2 s)
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
   -> On the microphone for 2 s by the monotonic clock // meetings.detect
      │   Google Meet and Banshee (banshee.app) in a browser count as known
@@ -262,6 +274,47 @@ calls were never detected; Vivaldi was missing until #1105, so its calls
 `a_google_meet_call_in_arc_records_after_about_two_seconds`,
 `vivaldi_on_the_microphone_is_a_browser_call`. Not observed on a real
 Vivaldi call.
+
+Labs › More call apps (`labs.more_call_apps`, off by default; every OS with
+Meetings) widens which calls detection recognizes. While on, Signal, Telegram,
+WeChat, LINE, Webex, Element, and the Phone app are call apps: the Electron
+apps' helpers fold to their parents, and Windows and Linux executables
+(`signal`, `signal-desktop`, `telegram`, `telegram-desktop`, `wechat`,
+`weixin`, `line`, `webex`, `ciscocollabhost`, `element`, `element-desktop`)
+map to the same keys in [microphone_activity.rs](../../src/microphone_activity.rs).
+The Webex app is `com.webex.meetingmanager`, `com.cisco.webexmeetingsapp`, or
+Cisco's current `Cisco-Systems.Spark` bundle, and `CiscoCollabHost.exe` is its
+Windows host. Signal, Telegram, WeChat, LINE, Element, Messenger, and GroupMe
+keep WhatsApp's about-20 s threshold because voice notes and clips hold the
+microphone too; Webex and Phone take the normal 2 s. On macOS, where Hex reads
+the browser's page, pages on `voice.google.com` (Google Voice), `messenger.com`,
+`teams.live.com` (the Teams source), `facetime.apple.com` (FaceTime), and
+`web.groupme.com` are named, and any `webex.com` subdomain is Webex, with one
+`webex.com` provider choice covering them all. Settings › Meetings › Detected
+calls lists the seven apps, Google Voice, Messenger, and GroupMe only while
+the lab is on (`app_settings::known_meeting_providers`). A Teams page gets its
+own `teams.live.com` choice from an offer's "…", shown as "Teams (web)", and a
+FaceTime page its own `facetime.apple.com` choice ("FaceTime (web)"); neither
+follows the Teams or FaceTime app's choice. A Webex page's `webex.com` choice
+is made the same way and covers every subdomain, so those three have no
+always-listed row. Their Ask / Always record / Never offer choices work as the
+existing services' do. Off,
+offers are unchanged: a Signal or Telegram process is not a meeting app, and
+those pages are unknown pages (a plain "Browser call" after 20 s). The
+microphone app list in `hex meeting probe` and the logs still resolves and
+merges these apps' helpers under the parent app, because canonicalization is
+not gated; offers and Settings are. Phone calls are not verified on a real
+call: Continuity call audio may be held by `com.apple.avconferenced` instead
+of `com.apple.mobilephone`.
+Checks: `more_call_apps_are_unknown_until_their_lab_is_on`,
+`more_call_apps_names_its_apps_and_websites_with_their_lab_on`,
+`a_telegram_voice_note_is_not_offered_but_a_sustained_call_is`, and
+`a_messenger_voice_clip_is_not_offered_but_a_sustained_call_is` in
+[meeting/detection.rs](../../src/meeting/detection.rs);
+`more_call_app_bundle_variants_and_executables_canonicalize` in
+[microphone_activity.rs](../../src/microphone_activity.rs). Not observed: any
+of these apps or websites on a real call, the Phone app's Continuity audio in
+particular.
 
 Chromium and Electron apps (Brave, Chrome, Edge, Arc, Slack, Teams) capture microphone
 audio in sandboxed `audio.mojom.AudioService` utility processes (`*.helper`) that

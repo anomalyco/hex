@@ -400,6 +400,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Follow live transcript"),
             tr("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."),
         ));
+        rows.push(row(
+            Feature::MoreCallApps,
+            Some(&GLOBE),
+            tr("More call apps"),
+            tr("Offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on more websites."),
+        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -737,6 +743,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::GnomeMeetingCapsules => "lab-gnome-meeting-capsules",
         Feature::Screenshots => "lab-screenshots",
         Feature::FollowLiveTranscript => "lab-follow-live-transcript",
+        Feature::MoreCallApps => "lab-more-call-apps",
         Feature::AnnotateReplay => "lab-annotate-replay",
     }
 }

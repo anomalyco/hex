@@ -173,10 +173,13 @@ impl ContextSnapshot {
             // the app in front.
             if let Some(pid) = pid {
                 let pages = crate::accessibility::browser_pages(pid);
+                let more_call_apps = crate::labs::more_call_apps();
                 let (url, title) = crate::dictation::browser_page::choose(
                     &pages,
                     |url| {
-                        web_url(url).is_some_and(|url| crate::meeting::detection::names_call(&url))
+                        web_url(url).is_some_and(|url| {
+                            crate::meeting::detection::names_call(&url, more_call_apps)
+                        })
                     },
                     crate::meeting::detection::title_names_call,
                 );
@@ -184,10 +187,9 @@ impl ContextSnapshot {
                 let title_names_call = title
                     .as_deref()
                     .is_some_and(crate::meeting::detection::title_names_call);
-                let url = url
-                    .as_deref()
-                    .and_then(web_url)
-                    .filter(|url| crate::meeting::detection::names_call(url) || !title_names_call);
+                let url = url.as_deref().and_then(web_url).filter(|url| {
+                    crate::meeting::detection::names_call(url, more_call_apps) || !title_names_call
+                });
                 return Ok(Self {
                     application: Some(browser.name.into()),
                     browser_url: url,
