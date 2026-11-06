@@ -24,14 +24,19 @@ pub(crate) fn pointer_screen(mtm: MainThreadMarker) -> Option<(hud_placement::Sc
     let pointer = NSEvent::mouseLocation();
     let screens = NSScreen::screens(mtm);
     let primary = screens.iter().next()?;
+    // The half-open rule Rune resolves `UnderPointer` with (closed at a
+    // screen's top, open at its bottom), so the capsule's panel and the
+    // notch it hangs from pick the same display where two share an edge.
+    // The fallback stays the main screen: Rune's "previous display" would
+    // need state the HUD's placement doesn't keep.
     let screen = screens
         .iter()
         .find(|screen| {
             let frame = screen.frame();
             pointer.x >= frame.origin.x
                 && pointer.x < frame.origin.x + frame.size.width
-                && pointer.y >= frame.origin.y
-                && pointer.y < frame.origin.y + frame.size.height
+                && pointer.y > frame.origin.y
+                && pointer.y <= frame.origin.y + frame.size.height
         })
         .or_else(|| NSScreen::mainScreen(mtm))?;
     let rect = |r: NSRect| hud_placement::Rect {

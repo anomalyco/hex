@@ -579,21 +579,32 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
         overlay.set_display(rune::DisplayTarget::UnderPointer);
     }
     // Hanging from the notch, the panel is fitted to the one on the
-    // pointer's display: measured on macOS, the pretend one elsewhere.
-    if s.placed != s.surface.anchor || replaced {
+    // pointer's display: measured on macOS, the pretend one elsewhere. It's
+    // measured every poll, because Rune re-resolves `UnderPointer` when the
+    // overlay shows and, with the picker following the pointer, on every
+    // display change: a MacBook's inset must not stay on an external display
+    // the pointer moved to, nor the second capture's picker use the first
+    // one's. Nothing is re-placed unless that measurement changed.
+    let moved = s.placed != s.surface.anchor || replaced;
+    if moved {
         s.placed = s.surface.anchor;
-        if s.placed == surface::Anchor::Notch {
-            s.notch = measured_notch();
-            let geometry = s
-                .notch
-                .map_or_else(notch::Geometry::default, |m| m.geometry);
+    }
+    let mut remeasured = false;
+    if s.surface.anchor == surface::Anchor::Notch {
+        let notch = measured_notch();
+        if notch != s.notch {
+            s.notch = notch;
+            let geometry = notch.map_or_else(notch::Geometry::default, |m| m.geometry);
             changed |= s.surface.set_notch(geometry);
-        } else {
-            s.notch = None;
+            remeasured = true;
         }
-        if let Some(overlay) = &s.overlay {
-            place(overlay, s.placed, s.notch.map(|m| m.panel_x));
-        }
+    } else {
+        s.notch = None;
+    }
+    if (moved || remeasured)
+        && let Some(overlay) = &s.overlay
+    {
+        place(overlay, s.placed, s.notch.map(|m| m.panel_x));
     }
 
     let earliest = |wake: Option<f64>, at: Option<f64>| match (wake, at) {

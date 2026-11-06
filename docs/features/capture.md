@@ -560,10 +560,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     ├── cursor -> recording stays under the menu bar; the "Send to" card
     │   (number, name, reason) opens at the pointer and its Sent stays there
     └── notch -> a black shape grows out of the notch (the measured one on
-        macOS's pointer screen, left and right edges snapped to the backing
-        pixels and the panel moved under its middle; 185 pt on a flat
-        display, a pretend one the menu bar's height) into the pill and
-        the same card, its content under the notch, and shrinks back into it
+        macOS's pointer screen, re-read every poll so the picker following
+        the pointer to another display refits it; left and right edges
+        snapped to the backing pixels and the panel moved under its middle;
+        185 pt on a flat display, a pretend one the menu bar's height, so its
+        panel lands within a point of the display's middle rather than
+        exactly on it) into the pill and the same card, its content under the
+        notch, and shrinks back into it
         (capture_capsule/notch.rs). The playground's "Prototypes/Capture capsule/notch"
         story plays it on a 14-inch MacBook Pro and a 27-inch display, side
         by side or each whole, at their real sizes
@@ -1013,7 +1016,10 @@ Checks:
   `the_notch_hangs_from_the_top_edge`,
   `the_default_notch_rests_where_it_always_has`,
   `the_notch_shell_fits_a_measured_notch`,
+  `notch_content_centres_on_the_notch`,
+  `a_wide_recording_row_stays_inside_the_notch_shell`,
   `a_measured_notch_refreshes_the_entry_and_the_rest`,
+  `a_measured_notch_never_tucks_under_reduce_motion`,
   `the_menu_bar_flow_folds_up_toward_the_menu_bar`, goldens
   `tests/golden/capture-capsule-*.png`, and
   `the_capsule_moves_inside_its_panel_and_comes_to_rest`, which traces every
@@ -1022,7 +1028,16 @@ Checks:
   motion-lint. `cues_mark_start_stop_sent_and_taking_back`,
   `nothing_heard_says_so`, and `a_capture_with_no_words_says_nothing_was_heard`
   cover the tones and the empty transcript. Observed (Oct 27, worker, r19 motion): all 28
-  capsule runs, Calm and Reduce Motion, pass lint.
+  capsule runs, Calm and Reduce Motion, pass lint. In
+  [notch.rs](../../src/rune_ui/capture_capsule/notch.rs):
+  `the_default_geometry_is_the_pretend_notch`,
+  `a_measured_notch_moves_the_panel_with_its_edges`,
+  `a_two_x_notch_lands_on_whole_pixels`, and
+  `edges_between_pixels_snap_outward_or_inward`. Flat displays go through
+  the same measured path with the pretend notch, so their panel is
+  pixel-snapped within a point of the display's middle, not exactly on it.
+  The re-measure itself (every poll, not only on an anchor change) has no
+  test: it needs two real displays.
 - Playground: `hex capsule-playground` (feature builds; hidden), or
   `scripts/build-capsule-playground.sh` for an ad-hoc signed
   `Hex Playground.app`, runs the real capsule in a window of its own against a

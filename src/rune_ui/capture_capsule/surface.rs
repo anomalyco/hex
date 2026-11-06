@@ -578,12 +578,15 @@ pub(crate) fn layout_at(
         shell[3] = hints_y + CARD_HINTS_H + ISLAND_INSET - shell[1];
     }
     // The notch's walls run up past the screen's top edge, so only its
-    // bottom corners round, and it's never narrower than the notch: the
-    // notch with 12 pt either side, centred on it.
+    // bottom corners round, and it's never narrower than the notch: widen
+    // it to the notch with 12 pt either side, about its own middle. `dx`
+    // centred the symmetric states on the notch already, so a minimum-width
+    // rest still covers it; a row that hangs left of its middle (the lead
+    // dot, the clock) keeps its walls where its items are.
     if anchor == Anchor::Notch {
-        let width = notch.min_width().max(shell[2]);
-        shell[0] = notch.centre() - width * 0.5;
-        shell[2] = width;
+        let wider = (notch.min_width() - shell[2]).max(0.0);
+        shell[0] -= wider * 0.5;
+        shell[2] += wider;
         shell[1] -= notch::REACH;
         shell[3] += notch::REACH;
     }
@@ -864,12 +867,21 @@ impl Surface {
         if let Some((_, due, due_items)) = self.entry.as_mut() {
             *due = rest;
             *due_items = items;
-            // The entry starts from the notch, so its origin pose follows.
-            self.shell = pose(rest, self.anchor, notch);
+            // The entry starts from the notch, so its origin pose follows;
+            // under Reduce Motion it waits at rest, as every entry does.
+            self.shell = if self.reduced {
+                rest
+            } else {
+                pose(rest, self.anchor, notch)
+            };
         } else if self.shell_on {
             self.apply(rest, items);
         } else {
-            self.shell = pose(rest, self.anchor, notch);
+            // Hidden or leaving: under Reduce Motion it stays where it is;
+            // otherwise its next entry starts from the notch.
+            if !self.reduced {
+                self.shell = pose(rest, self.anchor, notch);
+            }
             self.items.clear();
             self.highlight = None;
         }
@@ -1297,6 +1309,57 @@ mod tests {
             assert!(rest.set_notch(geometry));
             assert_eq!(rest.shell[0], geometry.left - 12.0);
             assert_eq!(rest.shell[0] + rest.shell[2], geometry.right + 12.0);
+        });
+    }
+
+    /// A recording's chips row hangs left of its middle for the lead dot
+    /// and the clock; the notch widens it only when it's too narrow, about
+    /// the row's own middle, so every item stays inside the walls.
+    #[test]
+    fn a_wide_recording_row_stays_inside_the_notch_shell() {
+        // A 210 pt notch, 12 pt right of its 1512 pt display's middle.
+        let notch::Measured { geometry, .. } = notch::fitted(663.0, 873.0, 1.0);
+        let (row, _) = line(&recording(true), "0:00");
+        assert!(
+            row[2] > geometry.min_width(),
+            "the chips row is wider than the notch's minimum"
+        );
+        let (shell, items) = layout_at(&recording(true), "0:00", Anchor::Notch, geometry);
+        assert_eq!(shell[2], row[2], "the shell keeps the row's width");
+        assert_eq!(shell[0], row[0] + (geometry.centre() - CX));
+        for item in &items {
+            assert!(
+                item.rect[0] >= shell[0] && item.rect[0] + item.rect[2] <= shell[0] + shell[2],
+                "{:?} inside the shell",
+                item.id
+            );
+        }
+    }
+
+    /// Under Reduce Motion a measured notch never puts the shell in the
+    /// tucked pose: an entry waits at rest, and a hidden capsule stays
+    /// where it left instead of jumping back into the notch.
+    #[test]
+    fn a_measured_notch_never_tucks_under_reduce_motion() {
+        tuning::with_flow(CapsuleFlow::Notch, || {
+            let notch::Measured { geometry, .. } = notch::fitted(663.0, 873.0, 1.0);
+            let (rest, _) = layout_at(&recording(false), "0:00", Anchor::Notch, geometry);
+            let mut entering = Surface::new();
+            entering.reduced = true;
+            entering.set(recording(false), 0.0);
+            assert!(entering.set_notch(geometry));
+            assert_eq!(entering.shell, rest, "the entry waits at rest");
+            assert_ne!(entering.shell, geometry.tucked());
+            assert!(entering.tick(0.001));
+            assert_eq!(entering.shell, rest);
+
+            let mut leaving = Surface::new().settled(recording(false));
+            leaving.reduced = true;
+            leaving.set(Pres::Hidden, 1.0);
+            let left = leaving.shell;
+            assert!(leaving.set_notch(geometry));
+            assert_eq!(leaving.shell, left, "hidden, it stays where it left");
+            assert_ne!(leaving.shell, geometry.tucked());
         });
     }
 
