@@ -65,6 +65,20 @@ pub(crate) fn find() -> Result<Service, Missing> {
     find_in(&state_dir().ok_or(Missing::NotRunning)?)
 }
 
+/// [`find`] within the caller's own budget: every `/api/info` confirmation
+/// shares `deadline` (still capped by [`INFO_DEADLINE`]) and stops when
+/// `cancelled` is set, so a rewrite never waits past its deadline here.
+pub(crate) fn find_cancellable(
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<Service, Missing> {
+    find_in_cancellable(
+        &state_dir().ok_or(Missing::NotRunning)?,
+        deadline,
+        cancelled,
+    )
+}
+
 /// Whether a service answers now; a short loopback check for availability.
 pub(crate) fn running() -> bool {
     find().is_ok()
@@ -83,6 +97,27 @@ fn state_dir() -> Option<PathBuf> {
 /// `service.json` (the stable, beta and dev channels) first, then other
 /// channels' `service-<channel>.json`; the first that answers wins.
 fn find_in(state: &Path) -> Result<Service, Missing> {
+    discover(state, None, &AtomicBool::new(false))
+}
+
+/// [`find_in`] bounded by the caller's remaining time: `Some` stops the whole
+/// search once it is spent, so a stalled service can't outlive the rewrite.
+fn find_in_cancellable(
+    state: &Path,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<Service, Missing> {
+    discover(state, Some(deadline), cancelled)
+}
+
+/// `budget` is the caller's whole remaining time, or `None` for one
+/// [`INFO_DEADLINE`] per registration (the Settings and availability paths).
+fn discover(
+    state: &Path,
+    budget: Option<Duration>,
+    cancelled: &AtomicBool,
+) -> Result<Service, Missing> {
+    let started = Instant::now();
     let mut others: Vec<PathBuf> = fs::read_dir(state)
         .map_err(|_| Missing::NotRunning)?
         .flatten()
@@ -101,7 +136,20 @@ fn find_in(state: &Path) -> Result<Service, Missing> {
         .take(MAX_REGISTRATIONS)
         .filter_map(|path| read_registration(&path))
     {
-        match confirm(&registration) {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(Missing::NotRunning);
+        }
+        let deadline = match budget {
+            Some(budget) => {
+                let remaining = budget.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(Missing::NotRunning);
+                }
+                remaining.min(INFO_DEADLINE)
+            }
+            None => INFO_DEADLINE,
+        };
+        match confirm(&registration, deadline, cancelled) {
             Ok(service) => return Ok(service),
             Err(Missing::Outdated) => missing = Missing::Outdated,
             Err(Missing::NotRunning) => {}
@@ -158,7 +206,11 @@ fn open_private(path: &Path) -> Option<fs::File> {
 
 /// The service a registration names, when it is on loopback and the process
 /// answering `/api/info` is the registered one.
-fn confirm(registration: &Registration) -> Result<Service, Missing> {
+fn confirm(
+    registration: &Registration,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<Service, Missing> {
     let service = Service {
         address: loopback_address(&registration.url).ok_or(Missing::NotRunning)?,
         password: registration
@@ -172,14 +224,7 @@ fn confirm(registration: &Registration) -> Result<Service, Missing> {
         version: String,
     }
     let response = service
-        .request(
-            "GET",
-            "/api/info",
-            None,
-            None,
-            INFO_DEADLINE,
-            &AtomicBool::new(false),
-        )
+        .request("GET", "/api/info", None, None, deadline, cancelled)
         .map_err(|_| Missing::NotRunning)?;
     if response.status == 404 {
         tracing::warn!(
@@ -688,6 +733,51 @@ pub(crate) mod tests {
         drop(closed);
         register(&state, "service.json", &url, 42);
         assert_eq!(find_in(&state), Err(Missing::NotRunning));
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]
+    fn a_service_search_is_bounded_by_the_callers_deadline() {
+        let state = state_root("search-deadline");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        register(&state, "service.json", &url, 42);
+        let started = Instant::now();
+        assert_eq!(
+            find_in_cancellable(&state, Duration::from_millis(100), &AtomicBool::new(false)),
+            Err(Missing::NotRunning)
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+        fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]
+    fn a_service_search_stops_when_the_caller_cancels() {
+        let state = state_root("search-cancel");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        register(&state, "service.json", &url, 42);
+        let cancelled = AtomicBool::new(false);
+        let started = Instant::now();
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(Duration::from_millis(100));
+                cancelled.store(true, Ordering::Release);
+            });
+            assert_eq!(
+                find_in_cancellable(&state, Duration::from_secs(30), &cancelled),
+                Err(Missing::NotRunning)
+            );
+        });
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
         fs::remove_dir_all(state).unwrap();
     }
 
