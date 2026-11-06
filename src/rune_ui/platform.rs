@@ -8,6 +8,8 @@
 //! preview data and record the requests, so macOS and Windows surfaces render
 //! and are tested on Linux; a native host fills the same data on its own OS.
 
+use std::path::PathBuf;
+
 use super::meetings::Meeting;
 use crate::audio::hex_microphone::{
     DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, HexMicrophoneStatus, TunedFilterConfig,
@@ -554,7 +556,12 @@ impl PlatformState {
 pub(super) enum MeetingRequest {
     Start,
     Stop,
-    Rename { id: String, title: String },
+    /// Import a local audio file as a meeting (macOS; Labs › Import audio).
+    Import(PathBuf),
+    Rename {
+        id: String,
+        title: String,
+    },
     Trash(String),
     Summarize(String),
     Reveal(crate::meeting::RevealTarget),

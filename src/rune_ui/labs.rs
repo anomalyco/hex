@@ -413,6 +413,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("More call apps"),
             tr("Offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on more websites."),
         ));
+        if Feature::MeetingImport.on_this_os() {
+            rows.push(row(
+                Feature::MeetingImport,
+                None,
+                tr("Import audio"),
+                tr("Add an audio file to Meetings and transcribe it on this Mac"),
+            ));
+        }
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -753,6 +761,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::FollowLiveTranscript => "lab-follow-live-transcript",
         Feature::MoreCallApps => "lab-more-call-apps",
         Feature::AnnotateReplay => "lab-annotate-replay",
+        Feature::MeetingImport => "lab-meeting-import",
     }
 }
 

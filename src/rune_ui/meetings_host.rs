@@ -39,6 +39,7 @@ impl LocalMeetings {
                 crate::meeting::runtime::request(Controller::Start { title: None })
             }
             MeetingRequest::Stop => crate::meeting::runtime::request(Controller::Stop),
+            MeetingRequest::Import(_) => Err("Importing audio is only available on macOS.".into()),
             MeetingRequest::Summarize(id) => {
                 crate::meeting::runtime::request(Controller::Summarize(id))
             }
@@ -171,6 +172,7 @@ fn pane_meeting(
         notes_error: manifest.notes_error.clone(),
         live_error: manifest.live_transcription_error.clone(),
         transcript,
+        imported: manifest.imported,
         // Sections come from the transcript lines, not the merged turns, as
         // the menu bar and `hex meetings show --chapter` read them.
         kept_for: (!meeting.status.is_active())

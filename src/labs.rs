@@ -113,6 +113,7 @@ pub enum Feature {
     FollowLiveTranscript,
     MoreCallApps,
     AnnotateReplay,
+    MeetingImport,
 }
 
 impl Feature {
@@ -166,6 +167,7 @@ impl Feature {
         Self::FollowLiveTranscript,
         Self::MoreCallApps,
         Self::AnnotateReplay,
+        Self::MeetingImport,
     ];
 
     /// The features this OS and build have.
@@ -239,6 +241,7 @@ impl Feature {
             | Self::FollowLiveTranscript
             | Self::MoreCallApps
             | Self::AnnotateReplay
+            | Self::MeetingImport
             | Self::NotchIndicator => Audience::Everyone,
         }
     }
@@ -293,7 +296,7 @@ impl Feature {
             | Self::Screenshots
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay => 20261104,
-            Self::MoreCallApps | Self::SettingsSearch => 20261106,
+            Self::MoreCallApps | Self::SettingsSearch | Self::MeetingImport => 20261106,
         }
     }
 
@@ -329,7 +332,8 @@ impl Feature {
             | Self::LiveChapters
             | Self::SubtitleExport
             | Self::StopWhenCallEnds
-            | Self::MovableMeetingCapsules => cfg!(target_os = "macos"),
+            | Self::MovableMeetingCapsules
+            | Self::MeetingImport => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
             Self::SectionKeyAlone | Self::GnomeClipboardRestore | Self::GnomeMeetingCapsules => {
@@ -438,6 +442,7 @@ impl Feature {
             Self::FollowLiveTranscript => "follow-live-transcript",
             Self::MoreCallApps => "more-call-apps",
             Self::AnnotateReplay => "annotate-replay",
+            Self::MeetingImport => "meeting-import",
         }
     }
 
@@ -493,6 +498,7 @@ impl Feature {
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
             Self::MoreCallApps => "labs.more_call_apps",
             Self::AnnotateReplay => "labs.annotate_replay",
+            Self::MeetingImport => "labs.meeting_import",
         }
     }
 
@@ -626,6 +632,9 @@ impl Feature {
             Self::AnnotateReplay => {
                 "Save the last 15 seconds of your screen with hex capture replay or capture.replay_hotkey; macOS shows the screen-recording dot the whole time it's on (macOS 27+)"
             }
+            Self::MeetingImport => {
+                "Import an audio file into Meetings and transcribe it on this Mac"
+            }
         }
     }
 
@@ -685,6 +694,7 @@ impl Feature {
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
             Self::MoreCallApps => settings.labs.more_call_apps,
             Self::AnnotateReplay => settings.labs.annotate_replay,
+            Self::MeetingImport => settings.labs.meeting_import,
         }
     }
 
@@ -742,6 +752,7 @@ impl Feature {
             &mut labs.follow_live_transcript,
             &mut labs.more_call_apps,
             &mut labs.annotate_replay,
+            &mut labs.meeting_import,
         ]
     }
 
@@ -799,6 +810,7 @@ impl Feature {
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
             Self::MoreCallApps => settings.labs.more_call_apps = on,
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
+            Self::MeetingImport => settings.labs.meeting_import = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -849,6 +861,10 @@ const SCREENSHOTS: u64 = 1 << 30;
 const ANNOTATE_REPLAY: u64 = 1 << 31;
 /// Unload-idle minutes (at most 1,440, 11 bits) sit above the switches.
 const MINUTES_SHIFT: u64 = 32;
+const MINUTES_BITS: u32 = 11;
+const MINUTES_MASK: u64 = (1 << MINUTES_BITS) - 1;
+/// Bits 1..31 are full, so this switch sits above the minutes.
+const MEETING_IMPORT: u64 = 1 << (MINUTES_SHIFT + MINUTES_BITS as u64);
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1067,12 +1083,19 @@ pub fn annotate_replay() -> bool {
     on(ANNOTATE_REPLAY) && Feature::AnnotateReplay.on_this_os()
 }
 
+/// Audio files may be imported as meetings (macOS; read where the Meetings
+/// pane offers Import audio and where an import starts).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn meeting_import() -> bool {
+    on(MEETING_IMPORT) && Feature::MeetingImport.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
     let state = state();
     (state & UNLOAD_IDLE != 0)
-        .then(|| std::time::Duration::from_secs((state >> MINUTES_SHIFT) * 60))
+        .then(|| std::time::Duration::from_secs(((state >> MINUTES_SHIFT) & MINUTES_MASK) * 60))
 }
 
 /// Records the switches the loaded or saved settings hold.
@@ -1196,6 +1219,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::AnnotateReplay,
             settings.annotate_replay,
             ANNOTATE_REPLAY,
+        ),
+        (
+            Feature::MeetingImport,
+            settings.meeting_import,
+            MEETING_IMPORT,
         ),
         (
             Feature::GnomeMeetingCapsules,
@@ -1748,6 +1776,18 @@ mod tests {
         assert_ne!(state & MORE_CALL_APPS, 0);
         assert_eq!(state & STOP_WHEN_CALL_ENDS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn meeting_import_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & MEETING_IMPORT, 0);
+        labs.meeting_import = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & MEETING_IMPORT, 0);
+        assert_eq!(state & ANNOTATE_REPLAY, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
     }
 
     #[test]

@@ -77,6 +77,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the bottom; scroll up to read, back to the bottom to follow again (#1332)
 │                                        // check: only_a_recording_transcript_follows_and_only_with_its_lab (rune_ui/meetings.rs,
 │                                        // Linux and Windows); not observed on a real call; Labs page goldens need regenerating
+├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
+│                                        file is decoded locally, transcribed with the selected model, saved as a normal
+│                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
@@ -1367,6 +1370,27 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 - Meetings (beta): see [Meetings](meetings.md). Its toggle is
   `meetings.enabled`; on, Meetings is a top-level sidebar item (debug builds
   keep it available regardless).
+- Import audio (macOS): Meetings offers **Import audio…** beside Start
+  recording. A local WAV, M4A, MP3, AIFF, or CAF file is decoded to 16 kHz
+  mono float WAV by the AVFoundation bridge, then transcribed with the
+  selected speech model as a normal meeting: its turns are labelled Speaker,
+  it gets the user Markdown export, and notes and summaries run afterward when
+  the meetings setting asks for them. Its toggle is `labs.meeting_import`
+  (off by default). Off, the button, dialog, decoder, and watcher command do
+  nothing. Checks: `meeting_import_is_its_own_bit_and_off_by_default`
+  ([labs.rs](../../src/labs.rs));
+  `only_the_listed_audio_files_are_imported` and
+  `the_title_is_the_file_name_without_its_extension`
+  ([meeting/import.rs](../../src/meeting/import.rs), macOS);
+  `imported_meetings_keep_their_flag_and_older_manifests_read_as_recorded`
+  ([tests.rs](../../src/meeting/tests.rs));
+  `an_empty_track_transcribes_to_nothing` and
+  `imported_meetings_label_their_one_track_speaker`
+  ([transcript.rs](../../src/meeting/transcript.rs)); the Linux-only pane test
+  `an_imported_meeting_labels_its_one_track_speaker`
+  ([rune_ui/meetings.rs](../../src/rune_ui/meetings.rs)). Not verified on a
+  real Mac: AVFoundation decoding, the native picker, and quitting mid-import
+  have no automated end-to-end check.
 - Vocabulary biasing: Parakeet transcription biased toward the
   [vocabulary](vocabulary.md) (`transcribe_cpp::RunExtension::ParakeetVocabulary`),
   the request behind issue 452 / PR 457. Off (the default),

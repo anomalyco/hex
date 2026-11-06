@@ -548,6 +548,11 @@ pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
     ui.meetings.runtime_error = Some(error);
 }
 
+/// An audio file could not be imported; the Meetings pane says why.
+pub(crate) fn meeting_import_failed(ui: &mut Ui, error: String) {
+    ui.meetings.import_error = Some(error);
+}
+
 /// `hex app -- --snap out.png --scene …`: a headless render of a fixture
 /// scene, or `live` for the running Hex's `hex status`.
 #[cfg(target_os = "linux")]
@@ -1289,6 +1294,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
     changed |= model_import::poll(ui);
+    changed |= meetings::poll_import(ui);
     changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);

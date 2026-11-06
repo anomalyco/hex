@@ -21,6 +21,7 @@ use super::list_detail::{self as ld, Item};
 use super::lists::{Tone, dismissible_error_panel, error_panel, section_label, tone_tag};
 use super::platform::MeetingRequest;
 use super::{Menu, Ui};
+use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
 static MORE_ICON: rune::Icon = rune::Icon {
@@ -99,6 +100,9 @@ pub(super) struct Meeting {
     pub(super) live_error: Option<String>,
     pub(super) transcript: Transcript,
     pub(super) chapters: Vec<Chapter>,
+    /// Imported from an audio file (Labs › Import audio): its one track is
+    /// labelled Speaker.
+    pub(super) imported: bool,
     /// How long it is kept once finished, as `MeetingRetention::label`;
     /// `None` when it is kept for good.
     pub(super) kept_for: Option<&'static str>,
@@ -174,6 +178,10 @@ pub(super) struct MeetingsPane {
     error: Option<String>,
     /// The last recording that could not start or finish.
     pub(super) runtime_error: Option<String>,
+    /// The last audio file that could not be imported (Labs › Import audio).
+    pub(super) import_error: Option<String>,
+    /// The audio file dialog while it is open.
+    import_chooser: Option<Pending>,
     pub(super) search: TextEdit,
     pub(super) selected: Option<String>,
     pub(super) renaming: Option<String>,
@@ -211,14 +219,21 @@ fn clock_offset(milliseconds: u64) -> String {
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
-/// Speaker turns as Markdown, as `meeting::transcript_markdown`.
-fn transcript_markdown(turns: &[Turn]) -> String {
+/// Speaker turns as Markdown, as `meeting::transcript_markdown`; an imported
+/// meeting's one track is Speaker.
+fn transcript_markdown(turns: &[Turn], imported: bool) -> String {
     turns
         .iter()
         .map(|turn| {
             format!(
                 "**{}** · {}\n{}",
-                if turn.mine { "You" } else { "Them" },
+                if imported {
+                    "Speaker"
+                } else if turn.mine {
+                    "You"
+                } else {
+                    "Them"
+                },
                 clock_offset(turn.start_ms),
                 turn.text.trim()
             )
@@ -350,6 +365,7 @@ impl MeetingsPane {
                 live_error: None,
                 transcript: Transcript::Loaded(Vec::new()),
                 chapters: Vec::new(),
+                imported: false,
                 kept_for: Some("24 hours"),
             };
         let mut live = meeting(
@@ -451,6 +467,7 @@ impl MeetingsPane {
         if let Some(notes) = pane.meetings.iter_mut().find(|m| m.id == "preview-notes") {
             notes.title = "Arcade launch plan: One login, Gravity well, Build screen".into();
             let turns = notes.turns().to_vec();
+            let imported = notes.imported;
             notes.chapters = chapters
                 .iter()
                 .enumerate()
@@ -470,7 +487,7 @@ impl MeetingsPane {
                         start_ms,
                         markdown: format!(
                             "## {title}\n\n{summary}\n\n{}",
-                            transcript_markdown(&inside)
+                            transcript_markdown(&inside, imported)
                         )
                         .trim_end()
                         .into(),
@@ -643,7 +660,7 @@ fn recording_action(ui: &Ui, p: Paint) -> El {
             .color(p.muted())
     };
     let active = pane.active();
-    match active.map(|meeting| meeting.status) {
+    let action = match active.map(|meeting| meeting.status) {
         _ if pane.stop_pending => busy(tr("Finalizing…")),
         Some(Status::Transcribing) => busy(tr("Finalizing…")),
         Some(Status::Starting) => busy(tr("Starting…")),
@@ -680,7 +697,69 @@ fn recording_action(ui: &Ui, p: Paint) -> El {
             ButtonKind::Primary,
             |ui: &mut Ui, _| start(ui),
         ),
+    };
+    // Importing is a second way in, never a competing main action.
+    if crate::labs::Feature::MeetingImport.on(&ui.settings)
+        && crate::labs::Feature::MeetingImport.on_this_os()
+        && active.is_none()
+        && !pane.start_pending
+    {
+        return row()
+            .key("meeting-actions")
+            .gap(8.0)
+            .center_y()
+            .child(button(
+                p,
+                "import-meeting",
+                tr("Import audio…"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| choose_import(ui),
+            ))
+            .child(action);
     }
+    action
+}
+
+/// The Labs › Import audio file dialog: one supported audio file.
+fn choose_import(ui: &mut Ui) {
+    if ui.meetings.import_chooser.is_some() {
+        return;
+    }
+    ui.meetings.action_error = None;
+    let waker = ui.modes.waker.clone();
+    let wake = move || {
+        if let Some(waker) = &waker {
+            waker();
+        }
+    };
+    ui.meetings.import_chooser = Some(crate::desktop::file_dialog::open(
+        Dialog {
+            title: tr("Import audio").into(),
+            target: Target::File(vec![Filter {
+                label: tr("Audio files").into(),
+                extensions: &["wav", "m4a", "mp3", "aiff", "aif", "caf"],
+            }]),
+            directory: dirs::audio_dir(),
+        },
+        wake,
+    ));
+}
+
+/// The audio file dialog's answer: a chosen file is imported where meetings
+/// are carried out. True when the answer changed what the pane shows.
+pub(super) fn poll_import(ui: &mut Ui) -> bool {
+    let Some(choice) = ui.meetings.import_chooser.as_ref().and_then(Pending::poll) else {
+        return false;
+    };
+    ui.meetings.import_chooser = None;
+    match choice {
+        Ok(Some(path)) => {
+            ask(ui, MeetingRequest::Import(path));
+        }
+        Ok(None) => {}
+        Err(error) => ui.meetings.action_error = Some(error),
+    }
+    true
 }
 
 /// A row's state line: what went wrong or is happening, else the app and
@@ -731,7 +810,7 @@ fn copy_action(p: Paint, pane: &MeetingsPane, meeting: &Meeting, what: &'static 
     let id = meeting.id.clone();
     let press = move |ui: &mut Ui, tx: &mut Tx| {
         if let Some(meeting) = ui.meetings.meeting(&id) {
-            let markdown = transcript_markdown(meeting.turns());
+            let markdown = transcript_markdown(meeting.turns(), meeting.imported);
             copy(ui, tx, id.clone(), what, markdown);
         }
     };
@@ -767,6 +846,15 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             tr("Meeting could not be recorded."),
             error,
             |ui: &mut Ui| ui.meetings.runtime_error = None,
+        ));
+    }
+    if let Some(error) = &pane.import_error {
+        notices.push(dismissible_error_panel(
+            p,
+            "meeting-import-error",
+            tr("Audio could not be imported."),
+            error,
+            |ui: &mut Ui| ui.meetings.import_error = None,
         ));
     }
     let body = if pane.meetings.is_empty() {
@@ -1248,7 +1336,7 @@ fn transcript(p: Paint, meeting: &Meeting, stop_pending: bool) -> El {
     }
     let mut lines = col().key("turns").gap(14.0);
     for (index, turn) in turns.iter().enumerate() {
-        lines = lines.children(turn_line(p, index, turn));
+        lines = lines.children(turn_line(p, index, turn, meeting.imported));
     }
     if meeting.status == Status::Recording && !stop_pending {
         lines = lines.child(
@@ -1262,8 +1350,8 @@ fn transcript(p: Paint, meeting: &Meeting, stop_pending: bool) -> El {
 }
 
 /// One turn of a transcript: the pause before it, if any, then the speaker,
-/// the time, and the words.
-pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn) -> Vec<El> {
+/// the time, and the words. An imported meeting has one track: Speaker.
+pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> Vec<El> {
     let mut els = Vec::new();
     if let Some(pause) = turn.pause_before_ms {
         els.push(
@@ -1282,10 +1370,20 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn) -> Vec<El> {
                     .key("speaker")
                     .gap(8.0)
                     .child(
-                        text(if turn.mine { tr("You") } else { tr("Them") })
-                            .key("name")
-                            .font(p.k.ty.small_medium)
-                            .color(if turn.mine { p.text() } else { p.faint() }),
+                        text(if imported {
+                            tr("Speaker")
+                        } else if turn.mine {
+                            tr("You")
+                        } else {
+                            tr("Them")
+                        })
+                        .key("name")
+                        .font(p.k.ty.small_medium)
+                        .color(if turn.mine && !imported {
+                            p.text()
+                        } else {
+                            p.faint()
+                        }),
                     )
                     .child(
                         text(clock_offset(turn.start_ms))
@@ -1310,6 +1408,21 @@ mod tests {
     use super::*;
     use crate::rune_ui::Service;
     use crate::rune_ui::platform::PlatformHost;
+
+    /// An imported meeting has one track: every turn is Speaker, not Them.
+    #[test]
+    fn an_imported_meeting_labels_its_one_track_speaker() {
+        let turn = |mine| Turn {
+            mine,
+            start_ms: 1_000,
+            text: "Hi.".into(),
+            pause_before_ms: None,
+        };
+        assert!(transcript_markdown(&[turn(false)], true).contains("**Speaker** · 00:01"));
+        assert!(transcript_markdown(&[turn(true)], true).contains("**Speaker**"));
+        assert!(transcript_markdown(&[turn(true)], false).contains("**You**"));
+        assert!(transcript_markdown(&[turn(false)], false).contains("**Them**"));
+    }
 
     /// Linux and Windows carry meeting requests out in the window's own
     /// process; the OS host ignored them, so Stop, Rename, and Trash from

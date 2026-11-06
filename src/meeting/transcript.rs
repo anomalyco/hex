@@ -2149,7 +2149,7 @@ pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptE
     for turn in turns {
         markdown.push_str(&format!(
             "**{}** · {}\n{}\n\n",
-            turn.source.label(),
+            manifest.speaker_label(turn.source),
             format_duration(turn.start_ms),
             turn.text.trim()
         ));
@@ -3986,6 +3986,55 @@ mod tests {
         .unwrap();
         manifest.app = Some("Zoom".into());
         manifest
+    }
+
+    #[test]
+    fn an_empty_track_transcribes_to_nothing() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-meeting-empty-track-{}-{}",
+            std::process::id(),
+            crate::desktop::events::now_ms()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("microphone.wav");
+        hound::WavWriter::create(
+            &path,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: RATE as u32,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            },
+        )
+        .unwrap()
+        .finalize()
+        .unwrap();
+        let track = transcribe_file(
+            |_: &Chunk| -> Result<Transcript> {
+                panic!("an empty track has nothing to transcribe")
+            },
+            &path,
+            TrackTranscript::new(MeetingSource::Microphone, 0),
+            &mut EchoEnvelope::default(),
+        )
+        .unwrap();
+        assert!(track.entries.is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn imported_meetings_label_their_one_track_speaker() {
+        let mut manifest = manifest();
+        manifest.imported = true;
+        let markdown = render_markdown(
+            &manifest,
+            &[entry(MeetingSource::System, 1_000, 2_000, "Hi.")],
+        );
+        assert!(
+            markdown.contains("**Speaker** · 00:01\nHi.\n"),
+            "{markdown}"
+        );
+        assert!(!markdown.contains("**Them**"), "{markdown}");
     }
 
     #[test]

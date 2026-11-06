@@ -28,6 +28,8 @@ pub(crate) enum ControllerCommand {
     /// offered again once its app releases and retakes the microphone.
     OfferTimedOut,
     Stop,
+    /// Import a local audio file as a meeting (macOS; Labs › Import audio).
+    Import(PathBuf),
     Open(String),
     Summarize(String),
     /// Record a calendar meeting from its reminder, first opening its call
@@ -87,6 +89,10 @@ pub(crate) enum ControllerEvent {
         title: String,
         error: String,
     },
+    /// An audio file could not be imported as a meeting (macOS).
+    ImportFailed {
+        error: String,
+    },
     NotesStarted,
     NotesFinished(Box<meeting::MeetingManifest>),
 }
@@ -133,6 +139,7 @@ pub(crate) fn controller_loop(
 ) -> Result<()> {
     let mut detector = MeetingDetector::default();
     let mut recording: Option<ActiveRecording> = None;
+    let mut importing: Option<ImportWorker> = None;
     let mut reminders = Reminders::default();
     let mut observed_microphone_apps = Vec::new();
     let mut browser = BrowserWatch::new(ContextSnapshot::capture_for_meeting);
@@ -142,6 +149,7 @@ pub(crate) fn controller_loop(
 
     while !shutdown.load(Ordering::Relaxed) {
         let enabled = crate::app_settings::meetings_enabled();
+        poll_import(&mut importing, &events);
         let requested_commands = meeting_requests
             .try_iter()
             .take(8)
@@ -151,10 +159,12 @@ pub(crate) fn controller_loop(
                 }
                 MeetingRequest::Stop => ControllerCommand::Stop,
                 MeetingRequest::Summarize(id) => ControllerCommand::Summarize(id),
+                MeetingRequest::Import(path) => ControllerCommand::Import(path),
             });
         for command in commands.try_iter().take(8).chain(requested_commands) {
             handle_command(
                 &mut recording,
+                &mut importing,
                 &mut detector,
                 &mut reminders,
                 command,
@@ -207,6 +217,12 @@ pub(crate) fn controller_loop(
             .worker
             .join()
             .map_err(|_| eyre!("meeting recorder panicked"))??;
+    }
+    if let Some(importing) = importing {
+        importing
+            .worker
+            .join()
+            .map_err(|_| eyre!("meeting import panicked"))??;
     }
     pending_finals.join();
     Ok(())
@@ -312,6 +328,7 @@ impl PendingFinals {
 
 fn handle_command(
     recording: &mut Option<ActiveRecording>,
+    importing: &mut Option<ImportWorker>,
     detector: &mut MeetingDetector,
     reminders: &mut Reminders,
     command: ControllerCommand,
@@ -322,6 +339,10 @@ fn handle_command(
         ControllerCommand::Record(_) | ControllerCommand::RecordMeeting { .. } if !enabled => {
             tracing::warn!("ignored a meeting recording request while meetings are off");
         }
+        ControllerCommand::Import(_) if !enabled => {
+            tracing::warn!("ignored an audio import while meetings are off");
+        }
+        ControllerCommand::Import(path) => start_import(recording, importing, path, events),
         ControllerCommand::Record(candidate) if recording.is_none() => {
             let start = reminders.start_for(&candidate);
             start_recording(recording, reminders, start, false, events);
@@ -585,6 +606,88 @@ fn records_automatically(
                     && choice.policy == crate::app_settings::MeetingPolicy::AlwaysRecord
             })
         })
+}
+
+/// An audio file being transcribed as a meeting on its own worker thread
+/// (macOS; Labs › Import audio).
+struct ImportWorker {
+    worker: JoinHandle<Result<meeting::MeetingManifest>>,
+}
+
+/// Starts importing `path`, refusing while a recording or another import
+/// runs. Failures reach the Meetings pane as an import error.
+fn start_import(
+    recording: &mut Option<ActiveRecording>,
+    importing: &mut Option<ImportWorker>,
+    path: PathBuf,
+    events: &SyncSender<ControllerEvent>,
+) {
+    if recording.is_some() {
+        let _ = events.send(ControllerEvent::ImportFailed {
+            error: "Stop the recording before importing audio".into(),
+        });
+        return;
+    }
+    if importing.is_some() {
+        let _ = events.send(ControllerEvent::ImportFailed {
+            error: "An audio import is already running".into(),
+        });
+        return;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        let _ = events.send(ControllerEvent::ImportFailed {
+            error: "Importing audio is only available on macOS".into(),
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let started = thread::Builder::new()
+            .name("meeting-import".into())
+            .spawn(move || meeting::import::import(&path));
+        match started {
+            Ok(worker) => *importing = Some(ImportWorker { worker }),
+            Err(error) => {
+                let _ = events.send(ControllerEvent::ImportFailed {
+                    error: error.to_string(),
+                });
+            }
+        }
+    }
+}
+
+/// Finishes an import worker, starting notes as a finished recording would.
+fn poll_import(importing: &mut Option<ImportWorker>, events: &SyncSender<ControllerEvent>) {
+    if !importing
+        .as_ref()
+        .is_some_and(|worker| worker.worker.is_finished())
+    {
+        return;
+    }
+    let Some(worker) = importing.take() else {
+        return;
+    };
+    match worker.worker.join() {
+        Ok(Ok(manifest)) => {
+            tracing::info!(meeting = manifest.id, "imported audio was transcribed");
+            if manifest.status == meeting::MeetingStatus::Complete && meeting::notes_wanted() {
+                start_notes(manifest.id, events);
+            }
+        }
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "could not import audio as a meeting");
+            let _ = events.send(ControllerEvent::ImportFailed {
+                error: format!("{error:#}"),
+            });
+        }
+        Err(_) => {
+            tracing::error!("an audio import panicked");
+            let _ = events.send(ControllerEvent::ImportFailed {
+                error: "the audio import stopped".into(),
+            });
+        }
+    }
 }
 
 fn start_recording(
@@ -1054,6 +1157,7 @@ mod tests {
         }
         handle_command(
             &mut recording,
+            &mut None,
             &mut MeetingDetector::default(),
             &mut Reminders::default(),
             ControllerCommand::KeepRecording,
@@ -1063,6 +1167,53 @@ mod tests {
         let active = recording.as_mut().unwrap();
         assert!(!active.auto_stop.disarm(), "nothing is left to stop");
         assert!(!active.stop.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn an_import_is_refused_while_a_recording_runs_or_another_import_does() {
+        let (events, received) = mpsc::sync_channel(4);
+        let (_update_sender, updates) = mpsc::sync_channel(1);
+        let mut recording = Some(ActiveRecording {
+            title: "Zoom call".into(),
+            application: None,
+            app_label: "Zoom".into(),
+            automatic: false,
+            presence: CallPresence::default(),
+            auto_stop: AutoStop::default(),
+            stop: Arc::new(AtomicBool::new(false)),
+            updates,
+            reported_started: true,
+            worker: thread::spawn(|| Err(eyre!("not recording"))),
+        });
+        start_import(
+            &mut recording,
+            &mut None,
+            PathBuf::from("/tmp/call.m4a"),
+            &events,
+        );
+        match received.try_recv() {
+            Ok(ControllerEvent::ImportFailed { error }) => {
+                assert!(error.contains("Stop the recording"), "{error}");
+            }
+            _ => panic!("a recording did not refuse the import"),
+        }
+
+        let mut recording = None;
+        let mut importing = Some(ImportWorker {
+            worker: thread::spawn(|| Err(eyre!("not imported"))),
+        });
+        start_import(
+            &mut recording,
+            &mut importing,
+            PathBuf::from("/tmp/call.m4a"),
+            &events,
+        );
+        match received.try_recv() {
+            Ok(ControllerEvent::ImportFailed { error }) => {
+                assert!(error.contains("already running"), "{error}");
+            }
+            _ => panic!("a running import did not refuse another"),
+        }
     }
 
     fn banshee_tab() -> ContextSnapshot {

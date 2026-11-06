@@ -79,6 +79,12 @@ Recordings list icons                               // always on (#1290; graduat
         (platform_icon in rune_ui/meetings.rs; CallProvider::from_meeting_app in
         calendar.rs; check: platform_icons_fall_back_to_a_neutral_one; goldens
         meetings light/dark show Zoom, FaceTime, and the neutral icon)
+Import audio                                        // Labs › Import audio, off by default (macOS)
+        Meetings header -> Import audio… beside Start recording; only while
+        the lab is on and nothing records or imports
+        ├── Native picker filters WAV, M4A, MP3, AIFF, AIF, and CAF
+        ├── Off -> no button, dialog, decoder, or watcher command
+        └── see Import Audio (Labs) below
 Live transcript scrolling                           // Labs › Follow live transcript, off by default (#1332)
         on -> while the selected meeting is Starting or Recording (no Stop
         pending), the detail card's scroll sticks to the bottom: new turns
@@ -626,6 +632,39 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
      └── 30 s pass -> Stop & Transcribe, as the menu bar's; logged
          "meeting recording stopped automatically after its call ended"
   -> Off -> exactly as above: microphone only, nothing stops
+
+### Import Audio (Labs)
+
+```ts
+Meetings > Import audio… (macOS; Labs › Import audio, off by default) // meetings.import
+├── Only while the lab is on and no recording or import runs
+├── Pick a WAV, M4A, MP3, AIFF, AIF, or CAF file
+├── AVFoundation streams it to 16 kHz mono 32-bit float WAV in bounded blocks
+│   (src/meeting_import.swift; no whole file in memory)
+├── New owner-only Application Support/meetings/<created_ms>-<pid> folder,
+│   active.lock held
+│   ├── system.wav = the decoded audio; microphone.wav = an empty 16 kHz track
+│   ├── manifest: Transcribing, title = file name, samples/sample_rate/
+│   │   duration/created_at/ended_at, retention_applies, imported: true
+│   └── final.pending, then the same final pass a recording uses:
+│       transcript.ndjson + transcript.md, the user Markdown export, the
+│       finished event, and Complete
+├── Turns say "Speaker" in the pane and the export, never You/Them
+├── Notes/summary follow exactly as after a recording (the meetings Summaries
+│   setting; Apple Intelligence or OpenCode)
+├── A second request while recording or importing is refused; the failure
+│   shows in Meetings as Audio could not be imported
+└── Quitting mid-import
+    ├── Before the manifest is written -> nothing is kept
+    └── After final.pending -> next launch finishes it (the pending-finals
+        thread), exactly like a recording Hex quit during
+```
+
+Proof limits: the decoder has no automated end-to-end run (it needs a Mac and
+AVFoundation), the native picker is not exercised headlessly, and quitting at
+each mid-import moment is reasoned from `final.pending` rather than observed.
+The manifest flag, the empty microphone track, the Speaker label, and the lab
+default are unit-checked on every OS that can run them.
 
 Capture sources (meeting/capture.rs)                // meetings.capture
 ├── Microphone -> dictation's input (saved device, else System default) via cpal, resampled to 16 kHz
