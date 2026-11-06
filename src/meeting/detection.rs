@@ -262,7 +262,8 @@ impl MeetingCandidate {
         match self.source {
             // WhatsApp also takes the microphone for voice notes (#835), and
             // Gather can hold it while you sit in a space (#855). So can the
-            // messaging apps Labs › More call apps adds.
+            // messaging apps Labs › More call apps adds, and Messenger and
+            // GroupMe send voice clips too.
             MeetingSource::BrowserCall
             | MeetingSource::WhatsApp
             | MeetingSource::Gather
@@ -270,7 +271,9 @@ impl MeetingCandidate {
             | MeetingSource::Telegram
             | MeetingSource::WeChat
             | MeetingSource::Line
-            | MeetingSource::Element => BROWSER_STABLE_FOR,
+            | MeetingSource::Element
+            | MeetingSource::Messenger
+            | MeetingSource::GroupMe => BROWSER_STABLE_FOR,
             _ => STABLE_FOR,
         }
     }
@@ -1506,6 +1509,36 @@ mod tests {
         let mut watch = Watch::new();
         assert!(watch.run(Some(&call), &[], 19_500).is_empty());
         assert_eq!(watch.run(Some(&call), &[], 1_000).len(), 1);
+    }
+
+    #[test]
+    fn a_messenger_voice_clip_is_not_offered_but_a_sustained_call_is() {
+        let page = context(
+            "Brave Browser",
+            Some("https://www.messenger.com/t/ana"),
+            "Messenger",
+        );
+        let call = super::candidate_from_microphone(&brave(), &page, true).unwrap();
+        assert_eq!(call.source, MeetingSource::Messenger);
+        // A voice clip holds the microphone too, so it takes about 20 s.
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&call), &[], 19_500).is_empty());
+        assert_eq!(watch.run(Some(&call), &[], 1_000).len(), 1);
+
+        // GroupMe sends voice clips as well.
+        let groupme = super::candidate_from_microphone(
+            &brave(),
+            &context(
+                "Brave Browser",
+                Some("https://web.groupme.com/chats/1"),
+                "GroupMe",
+            ),
+            true,
+        )
+        .unwrap();
+        assert_eq!(groupme.source, MeetingSource::GroupMe);
+        assert_eq!(groupme.required_stability(), BROWSER_STABLE_FOR);
+        assert_eq!(call.required_stability(), BROWSER_STABLE_FOR);
     }
 
     #[test]

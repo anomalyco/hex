@@ -245,7 +245,7 @@ fn is_process_of(bundle_id: &str, canonical_bundle_id: &str) -> bool {
 
 /// Linux and Windows executables (lowercase, without `.exe`) by the bundle
 /// identifier of the same app on macOS.
-const EXECUTABLES: [(&str, &str); 42] = [
+const EXECUTABLES: [(&str, &str); 43] = [
     // Discord and its Canary and PTB builds, on Windows and Linux (the
     // Flatpak runs the same binary).
     ("discord", "com.hnc.Discord"),
@@ -268,6 +268,8 @@ const EXECUTABLES: [(&str, &str); 42] = [
     ("element", "im.riot.app"),
     ("element-desktop", "im.riot.app"),
     ("webex", "com.webex.meetingmanager"),
+    // The Webex app's multiprocess host on Windows (Cisco's executable list).
+    ("ciscocollabhost", "com.webex.meetingmanager"),
     ("wechat", "com.tencent.xinWeChat"),
     ("weixin", "com.tencent.xinWeChat"),
     ("line", "jp.naver.line.mac"),
@@ -343,6 +345,8 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
         ("jp.naver.line.mac", "jp.naver.line.mac"),
         ("com.webex.meetingmanager", "com.webex.meetingmanager"),
         ("com.cisco.webexmeetingsapp", "com.webex.meetingmanager"),
+        // The current Webex app uses Spark's bundle id, helpers included.
+        ("cisco-systems.spark", "com.webex.meetingmanager"),
         ("im.riot.app", "im.riot.app"),
         ("com.apple.mobilephone", "com.apple.mobilephone"),
         ("com.google.chrome", "com.google.Chrome"),
@@ -1095,6 +1099,8 @@ mod tests {
             ("jp.naver.line.mac", "jp.naver.line.mac"),
             ("com.webex.meetingmanager", "com.webex.meetingmanager"),
             ("com.cisco.webexmeetingsapp", "com.webex.meetingmanager"),
+            ("Cisco-Systems.Spark", "com.webex.meetingmanager"),
+            ("Cisco-Systems.Spark.helper", "com.webex.meetingmanager"),
             ("im.riot.app", "im.riot.app"),
             ("com.apple.mobilephone", "com.apple.mobilephone"),
             ("Signal.exe", "org.whispersystems.signal-desktop"),
@@ -1104,6 +1110,8 @@ mod tests {
             ("Element.exe", "im.riot.app"),
             ("element-desktop", "im.riot.app"),
             ("webex", "com.webex.meetingmanager"),
+            ("CiscoCollabHost.exe", "com.webex.meetingmanager"),
+            ("ciscocollabhost", "com.webex.meetingmanager"),
             ("WeChat.exe", "com.tencent.xinWeChat"),
             ("Weixin.exe", "com.tencent.xinWeChat"),
             ("LINE.exe", "jp.naver.line.mac"),

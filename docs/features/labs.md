@@ -746,28 +746,33 @@ microphone held by Signal (`org.whispersystems.signal-desktop`), Telegram
 (`ru.keepcoder.Telegram`, also `com.tdesktop.Telegram` and
 `org.telegram.desktop`), WeChat (`com.tencent.xinWeChat`), LINE
 (`jp.naver.line.mac`), Webex (`com.webex.meetingmanager`, also
-`com.cisco.webexmeetingsapp`), Element (`im.riot.app`), or the Phone app
-(`com.apple.mobilephone`) is that app's call ("Signal call", "Webex
-meeting", "Phone call", …). Each Electron app's helpers fold to its parent
-through [microphone_activity.rs](../../src/microphone_activity.rs), and on
-Windows and Linux the same apps' executables (`signal`, `signal-desktop`,
-`telegram`, `telegram-desktop`, `wechat`, `weixin`, `line`, `webex`,
-`element`, `element-desktop`) map to the same keys. Signal, Telegram, WeChat,
-LINE, and Element also hold the microphone for voice notes, so they keep it
-about 20 s before they count as calls, as WhatsApp does; Webex and Phone
+`com.cisco.webexmeetingsapp`, and the current app's `Cisco-Systems.Spark`),
+Element (`im.riot.app`), or the Phone app (`com.apple.mobilephone`) is that
+app's call ("Signal call", "Webex meeting", "Phone call", …). Each Electron
+app's helpers fold to its parent through
+[microphone_activity.rs](../../src/microphone_activity.rs), and on Windows
+and Linux the same apps' executables (`signal`, `signal-desktop`, `telegram`,
+`telegram-desktop`, `wechat`, `weixin`, `line`, `webex`, `ciscocollabhost`,
+`element`, `element-desktop`) map to the same keys; `ciscocollabhost` is the
+Webex app's Windows host. Signal, Telegram, WeChat, LINE, Element, Messenger,
+and GroupMe also hold the microphone for voice notes or clips, so they keep
+it about 20 s before they count as calls, as WhatsApp does; Webex and Phone
 count after 2 s. A browser on Google Voice (`voice.google.com`), Messenger
 (`messenger.com`), Teams (`teams.live.com`), FaceTime
 (`facetime.apple.com`), GroupMe (`web.groupme.com`), or any `webex.com`
-subdomain is named after the service (a Webex page's provider is
-`webex.com`, so one choice covers every subdomain); these names need the
-browser's page, which Hex reads on macOS ([meetings.md](meetings.md#detect-and-offer)).
-Those choices and the new apps are listed in Detected calls, and Ask /
-Always record / Never offer work as for the existing services. Off, nothing changes: those processes are
-not meeting apps, the pages stay unknown pages ("Browser call") after 20 s,
-and Detected calls lists exactly the services it did before. Checks:
+subdomain is named after the service; these names need the browser's page,
+which Hex reads on macOS ([meetings.md](meetings.md#detect-and-offer)).
+Detected calls lists the seven apps, Google Voice, Messenger, and GroupMe
+while the lab is on. Teams and FaceTime pages use those apps' own choices,
+and a Webex page's `webex.com` choice is set from an offer's "…", so none of
+the three has a separate row; Ask / Always record / Never offer work as for
+the existing services. Off, offers are unchanged: those processes are not meeting apps,
+the pages stay unknown pages ("Browser call") after 20 s, and Detected calls
+lists exactly the services it did before. Checks:
 `more_call_apps_are_unknown_until_their_lab_is_on`,
-`more_call_apps_names_its_apps_and_websites_with_their_lab_on`, and
-`a_telegram_voice_note_is_not_offered_but_a_sustained_call_is` in
+`more_call_apps_names_its_apps_and_websites_with_their_lab_on`,
+`a_telegram_voice_note_is_not_offered_but_a_sustained_call_is`, and
+`a_messenger_voice_clip_is_not_offered_but_a_sustained_call_is` in
 [meeting/detection.rs](../../src/meeting/detection.rs);
 `more_call_app_bundle_variants_and_executables_canonicalize` in
 [microphone_activity.rs](../../src/microphone_activity.rs);
