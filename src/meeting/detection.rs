@@ -215,8 +215,12 @@ impl MeetingCandidate {
     }
 
     /// The user's choice for this call: the website's when it has one, else
-    /// the app's (a browser's choice covers its other sites), else Ask.
-    pub fn policy(&self, choices: &[MeetingProviderChoice]) -> MeetingPolicy {
+    /// the app's (a browser's choice covers its other sites), else `default`.
+    pub fn policy(
+        &self,
+        choices: &[MeetingProviderChoice],
+        default: MeetingPolicy,
+    ) -> MeetingPolicy {
         let chosen = |key: Option<&str>| {
             let key = key?;
             choices
@@ -226,7 +230,7 @@ impl MeetingCandidate {
         };
         chosen(self.site.as_deref())
             .or_else(|| chosen(self.application.as_deref()))
-            .unwrap_or_default()
+            .unwrap_or(default)
     }
 
     fn required_stability(&self) -> Duration {
@@ -508,10 +512,12 @@ impl MeetingDetector {
         &mut self,
         candidate: Option<MeetingCandidate>,
         choices: &[MeetingProviderChoice],
+        default: MeetingPolicy,
     ) -> Option<Detection> {
         self.detect_at(
             candidate,
             choices,
+            default,
             Instant::now(),
             crate::calendar::wall_clock_ms(),
         )
@@ -521,20 +527,20 @@ impl MeetingDetector {
         &mut self,
         candidate: Option<MeetingCandidate>,
         choices: &[MeetingProviderChoice],
+        default: MeetingPolicy,
         now: Instant,
         now_ms: i64,
     ) -> Option<Detection> {
-        if candidate
-            .as_ref()
-            .is_some_and(|candidate| candidate.policy(choices) == MeetingPolicy::NeverOffer)
-        {
+        if candidate.as_ref().is_some_and(|candidate| {
+            candidate.policy(choices, default) == MeetingPolicy::NeverOffer
+        }) {
             // Still on the microphone: an earlier offer stays snoozed.
             self.pending = None;
             self.last_present = Some(now);
             return None;
         }
         let candidate = self.observe_at(candidate, now, now_ms)?;
-        Some(match candidate.policy(choices) {
+        Some(match candidate.policy(choices, default) {
             MeetingPolicy::AlwaysRecord => Detection::Record(candidate),
             _ => Detection::Offer(candidate),
         })
@@ -1000,10 +1006,13 @@ mod tests {
             let end = self.elapsed_ms + ms;
             while self.elapsed_ms < end {
                 let now = self.base + Duration::from_millis(self.elapsed_ms);
-                if let Some(detection) =
-                    self.detector
-                        .detect_at(candidate.cloned(), choices, now, self.wall_ms)
-                {
+                if let Some(detection) = self.detector.detect_at(
+                    candidate.cloned(),
+                    choices,
+                    MeetingPolicy::Ask,
+                    now,
+                    self.wall_ms,
+                ) {
                     found.push((self.elapsed_ms, detection));
                 }
                 self.elapsed_ms += step_ms;
@@ -1583,7 +1592,10 @@ mod tests {
         let provider = site.provider().unwrap();
         assert_eq!(provider.key, "problems.kitlangton.com");
         assert_eq!(
-            site.policy(&[provider.choose(MeetingPolicy::NeverOffer)]),
+            site.policy(
+                &[provider.choose(MeetingPolicy::NeverOffer)],
+                MeetingPolicy::Ask
+            ),
             MeetingPolicy::NeverOffer
         );
         assert!(site.can_always_record());
@@ -1596,26 +1608,40 @@ mod tests {
         );
         assert!(!unknown.can_always_record());
         let never_site = [choice("problems.kitlangton.com", MeetingPolicy::NeverOffer)];
-        assert_eq!(unknown.policy(&never_site), MeetingPolicy::Ask);
+        assert_eq!(
+            unknown.policy(&never_site, MeetingPolicy::Ask),
+            MeetingPolicy::Ask
+        );
+        // Without a choice of its own, a call follows the default.
+        assert_eq!(
+            unknown.policy(&never_site, MeetingPolicy::AlwaysRecord),
+            MeetingPolicy::AlwaysRecord
+        );
         // A browser's choice covers its sites unless the site has its own.
         let never_brave = choice("com.brave.Browser", MeetingPolicy::NeverOffer);
         assert_eq!(
-            site.policy(std::slice::from_ref(&never_brave)),
+            site.policy(std::slice::from_ref(&never_brave), MeetingPolicy::Ask),
             MeetingPolicy::NeverOffer
         );
         assert_eq!(
-            site.policy(&[
-                never_brave.clone(),
-                choice("problems.kitlangton.com", MeetingPolicy::AlwaysRecord)
-            ]),
+            site.policy(
+                &[
+                    never_brave.clone(),
+                    choice("problems.kitlangton.com", MeetingPolicy::AlwaysRecord)
+                ],
+                MeetingPolicy::Ask
+            ),
             MeetingPolicy::AlwaysRecord
         );
         // A site set back to Ask asks, whatever its browser's choice.
         assert_eq!(
-            site.policy(&[
-                never_brave,
-                choice("problems.kitlangton.com", MeetingPolicy::Ask)
-            ]),
+            site.policy(
+                &[
+                    never_brave,
+                    choice("problems.kitlangton.com", MeetingPolicy::Ask)
+                ],
+                MeetingPolicy::NeverOffer
+            ),
             MeetingPolicy::Ask
         );
 

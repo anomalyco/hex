@@ -57,6 +57,7 @@ static MEETING_RETENTION: AtomicU8 = AtomicU8::new(RETENTION_UNSET);
 const RETENTION_UNSET: u8 = u8::MAX;
 static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 static MEETING_PROVIDERS: OnceLock<RwLock<Vec<MeetingProviderChoice>>> = OnceLock::new();
+static MEETING_DEFAULT_POLICY: AtomicU8 = AtomicU8::new(MeetingPolicy::Ask as u8);
 static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
 static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -358,6 +359,7 @@ const MIGRATIONS: &[&str] = &[
     ANOMALY_IDENTITY_MIGRATION,
     MEETING_RETENTION_DEFAULT_MIGRATION,
     MEETING_SUMMARIES_MIGRATION,
+    MEETING_DEFAULT_POLICY_MIGRATION,
 ];
 #[cfg(not(hex_capture))]
 const MIGRATIONS: &[&str] = &[
@@ -365,6 +367,7 @@ const MIGRATIONS: &[&str] = &[
     ANOMALY_IDENTITY_MIGRATION,
     MEETING_RETENTION_DEFAULT_MIGRATION,
     MEETING_SUMMARIES_MIGRATION,
+    MEETING_DEFAULT_POLICY_MIGRATION,
 ];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
@@ -380,6 +383,9 @@ const MEETING_RETENTION_DEFAULT_MIGRATION: &str = "meeting-retention-default";
 /// Summarize with Apple Intelligence and Summarize with OpenCode became one
 /// choice, `meetings.summaries`.
 const MEETING_SUMMARIES_MIGRATION: &str = "meeting-summaries-choice";
+/// Detected calls gained one default choice; before it, every website or
+/// app without its own choice asked.
+const MEETING_DEFAULT_POLICY_MIGRATION: &str = "meeting-default-policy";
 
 fn deserialize_retired_value<'de, D>(
     deserializer: D,
@@ -798,6 +804,7 @@ impl AppSettings {
             .get_or_init(Default::default)
             .write()
             .unwrap_or_else(|error| error.into_inner()) = self.meetings.providers.clone();
+        MEETING_DEFAULT_POLICY.store(self.meetings.default_policy as u8, Ordering::Release);
         *CALENDAR_SETTINGS
             .get_or_init(Default::default)
             .write()
@@ -890,6 +897,11 @@ impl AppSettings {
                 .push(MEETING_RETENTION_DEFAULT_MIGRATION.into());
         }
         self.migrate_meeting_summaries();
+        if !self.has_migration(MEETING_DEFAULT_POLICY_MIGRATION) {
+            self.meetings.adopt_default_policy();
+            self.migrations
+                .push(MEETING_DEFAULT_POLICY_MIGRATION.into());
+        }
         #[cfg(hex_capture)]
         if !self.has_migration(ANNOTATE_DEFAULT_MIGRATION) {
             self.capture.enabled = true;
@@ -1509,6 +1521,88 @@ mod tests {
         settings.apply_one_time_migrations_with(|_| true);
         assert_eq!(settings.meetings.summaries, Off);
         assert!(AppSettings::default().has_migration(MEETING_SUMMARIES_MIGRATION));
+    }
+
+    /// Detected calls gain a default once: the most common answer, with
+    /// every listed service that answered otherwise kept as it was.
+    #[test]
+    fn detected_calls_adopt_the_most_common_answer_once() {
+        let migrated = |providers: &str| {
+            let mut settings: AppSettings =
+                serde_json::from_str(&format!(r#"{{"meetings":{{"providers":{providers}}}}}"#))
+                    .unwrap();
+            settings.apply_one_time_migrations_with(|_| true);
+            assert!(settings.has_migration(MEETING_DEFAULT_POLICY_MIGRATION));
+            settings.meetings
+        };
+        let before = |providers: &[MeetingProviderChoice], key: &str| {
+            providers
+                .iter()
+                .find(|choice| choice.key == key)
+                .map_or(MeetingPolicy::Ask, |choice| choice.policy)
+        };
+
+        let untouched = migrated("[]");
+        assert_eq!(untouched.default_policy, MeetingPolicy::Ask);
+        assert!(untouched.providers.is_empty());
+
+        let always: Vec<String> = KNOWN_MEETING_PROVIDERS
+            .iter()
+            .take(5)
+            .map(|(key, label)| {
+                format!(r#"{{"key":"{key}","label":"{label}","policy":"always_record"}}"#)
+            })
+            .collect();
+        let saved = format!("[{}]", always.join(","));
+        let original: Vec<MeetingProviderChoice> = serde_json::from_str(&saved).unwrap();
+        let meetings = migrated(&saved);
+        assert_eq!(meetings.default_policy, MeetingPolicy::AlwaysRecord);
+        for (key, _) in KNOWN_MEETING_PROVIDERS {
+            assert_eq!(meetings.policy_for(key), before(&original, key), "{key}");
+        }
+
+        // One different answer keeps Ask.
+        let never = r#"[{"key":"us.zoom.xos","label":"Zoom","policy":"never_offer"}]"#;
+        assert_eq!(migrated(never).default_policy, MeetingPolicy::Ask);
+
+        // Later choices stick.
+        let mut settings = AppSettings::default();
+        settings.meetings.default_policy = MeetingPolicy::NeverOffer;
+        settings.apply_one_time_migrations_with(|_| true);
+        assert_eq!(settings.meetings.default_policy, MeetingPolicy::NeverOffer);
+    }
+
+    /// Answers that followed the old default follow the new one; others stay.
+    #[test]
+    fn changing_the_default_moves_the_answers_that_followed_it() {
+        let mut meetings = MeetingSettings {
+            providers: vec![
+                MeetingProviderChoice {
+                    key: "us.zoom.xos".into(),
+                    label: "Zoom".into(),
+                    policy: MeetingPolicy::Ask,
+                },
+                MeetingProviderChoice {
+                    key: "meet.google.com".into(),
+                    label: "Google Meet".into(),
+                    policy: MeetingPolicy::NeverOffer,
+                },
+            ],
+            ..Default::default()
+        };
+        meetings.set_default_policy(MeetingPolicy::AlwaysRecord);
+        assert_eq!(
+            meetings.policy_for("us.zoom.xos"),
+            MeetingPolicy::AlwaysRecord
+        );
+        assert_eq!(
+            meetings.policy_for("meet.google.com"),
+            MeetingPolicy::NeverOffer
+        );
+        assert_eq!(
+            meetings.policy_for("example.com"),
+            MeetingPolicy::AlwaysRecord
+        );
     }
 
     #[test]

@@ -17,7 +17,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 ├── Off -> only the Labs switch -> Turn on -> meetings.enabled = true
 ├── On -> Meetings joins the sidebar; header switch Recordings | Settings;
 │   menu-bar items, call detection, Option-Control-V
-│   Settings view: Call recording, After a meeting, Calendar, Detected calls, Advanced ▸
+│   Settings view: Meetings (beta), When a call starts, After a meeting,
+│   Recording indicator and permissions ▸
 │   ├── System Audio Recording                  // meetings.permission; asked only now
 │   │   ├── Untrusted row shown / Allow -> retired Hex IDs cleared (`ScreenCapture` + `AudioCapture`)
 │   │   ├── Allow -> macOS prompt the first time (tour's permission_control)
@@ -25,9 +26,26 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   ├── Asked -> pulse; TCC preflight re-read on each poll, no reopen needed
 │   │   ├── Returned from System Settings still untrusted -> "Still grey? Fix it"
 │   │   │   (`AudioCapture` reset on running bundle + retired IDs, re-prompt / guide)
-│   │   └── Granted -> the Allow pill morphs into a green Allowed; moves to Advanced
-│   ├── After a meeting -> Summaries, Keep meetings, Transcript folder
-│   │   (~/Documents/Hex Meetings; Reveal / choose; its error shows here)
+│   │   └── Granted -> the Allow pill morphs into a green Allowed; moves under
+│   │       Recording indicator and permissions
+│   ├── When a call starts                      // meetings.policy
+│   │   ├── Detected calls -> one answer for every call: Ask (default) /
+│   │   │   Always record / Never offer (meetings.default_policy); its line
+│   │   │   names the services that follow it ("Zoom, Google Meet, Microsoft
+│   │   │   Teams, FaceTime and 3 more")
+│   │   │   ├── Changing it moves every service that followed it along
+│   │   │   └── a site or app with its own answer is a row under it, keeping it
+│   │   │       ├── its own pop-up; picking the default's answer folds it back
+│   │   │       └── "Set a different answer for one app…" -> a menu of the
+│   │   │           services that follow the default; choosing one gives it the
+│   │   │           next answer (Always record, or Ask) and its own row
+│   │   └── Remind me before meetings -> Connect calendar; once connected, the
+│   │       reminder switch, lead time, calendars and next meetings
+│   │       // meetings.calendar
+│   ├── After a meeting -> Summaries, Keep meetings ("Then audio, transcripts
+│   │   and notes move to the Trash"), Transcript folder ("A Markdown copy of
+│   │   each meeting"; ~/Documents/Hex Meetings; Reveal / choose; its error
+│   │   shows here)
 │   │   └── Summaries pop-up (meetings.summaries; one-time migration
 │   │       "meeting-summaries-choice" from the two retired switches)
 │   │       ├── Off -> "No titles or summaries"
@@ -50,13 +68,12 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │       // on_this_mac_without_apple_intelligence_stays_chosen_with_the_fix
 │   │       // (tests/panes.rs); scenes meetings-summaries,
 │   │       // meetings-summaries-unavailable, meetings-summary-model
-│   ├── Advanced -> Show recording indicator (on by default; corner-snapping
-│   │   capsule) and the System Audio Recording row once allowed
-│   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
-│   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
-│       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
-│       │   Gather, Discord (always listed)
-│       └── then each website or app chosen for from an offer's "…"
+│   └── Recording indicator and permissions ▸ -> Show recording indicator (on
+│       by default; corner-snapping capsule) and the System Audio Recording
+│       row once allowed
+│   // checks: meetings_settings_save_and_ask_for_system_audio (tests/panes.rs);
+│   // detected_calls_adopt_the_most_common_answer_once,
+│   // changing_the_default_moves_the_answers_that_followed_it (app_settings.rs)
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
            the pane leaves the sidebar
 
@@ -246,7 +263,13 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / Discord / browser call uses 
          its run; a longer release starts it over
 
 Choices persist as `meetings.providers` (`key`, `label`, `policy`:
-`ask` / `always_record` / `never_offer`) in `settings.json`. Missing means Ask.
+`ask` / `always_record` / `never_offer`) in `settings.json`. A website or app
+without one follows `meetings.default_policy` (Ask unless chosen). The
+one-time `meeting-default-policy` migration sets that default to the answer
+most of the listed services and chosen sites had (Ask on a tie or when
+nothing was chosen) and writes an entry for every listed service that
+answered otherwise, so their calls go on as before. A website or app never
+listed and never chosen asked before; it now gets the default.
 The older `meetings.never_offer` list reads as Never offer entries and is
 rewritten as `providers` on the next load.
 ```
@@ -384,7 +407,8 @@ Mac with a GPU.
 ### Calendar Reminders
 
 ```ts
-Meetings > Settings > Calendar                       // meetings.calendar (macOS)
+Meetings > Settings > When a call starts > Remind me before meetings
+                                                     // meetings.calendar (macOS)
 ├── Connect calendar -> macOS full-access prompt, on this click only
 │   ├── Granted -> meetings.calendar.connected = true; reminders on, 1 min lead
 │   │   └── trusts the prompt's answer: macOS keeps reporting "not determined"
@@ -422,7 +446,7 @@ Settings persist as `meetings.calendar` (`connected`, `excluded_calendars`,
 files from older builds stay off. Every calendar is included unless excluded.
 Hex never asks for calendar access at launch: only Connect calendar calls
 `requestFullAccessToEvents` (`NSCalendarsFullAccessUsageDescription`). With
-Meetings off there is no Calendar card, no EventKit read, and no reminder.
+Meetings off there are no calendar rows, no EventKit read, and no reminder.
 
 The controller thread reads EventKit (one bounded query, 48 hours ahead, at most
 200 events) when the store's change notification bumps its counter or once a

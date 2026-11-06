@@ -59,6 +59,9 @@ pub struct MeetingSettings {
     /// and so read as Never offer.
     #[serde(alias = "never_offer")]
     pub providers: Vec<MeetingProviderChoice>,
+    /// What to do for a call from a website or app with no entry in
+    /// `providers`.
+    pub default_policy: MeetingPolicy,
     /// Reminders before calendar meetings (macOS). Off until the user
     /// connects a calendar.
     pub calendar: CalendarSettings,
@@ -254,18 +257,33 @@ pub const KNOWN_MEETING_PROVIDERS: [(&str, &str); 8] = [
 /// What Hex does when it detects a call from a provider.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum MeetingPolicy {
     /// Offer to record.
     #[default]
-    Ask,
+    Ask = 0,
     /// Start recording without an offer.
-    AlwaysRecord,
+    AlwaysRecord = 1,
     /// Neither offer nor record.
-    NeverOffer,
+    NeverOffer = 2,
+}
+
+impl MeetingPolicy {
+    /// In the order Settings lists them.
+    pub const ALL: [Self; 3] = [Self::Ask, Self::AlwaysRecord, Self::NeverOffer];
+
+    pub(super) const fn decode(value: u8) -> Self {
+        match value {
+            1 => Self::AlwaysRecord,
+            2 => Self::NeverOffer,
+            _ => Self::Ask,
+        }
+    }
 }
 
 /// A website host or an app's canonical bundle ID, the name shown in
-/// Settings, and the user's choice for its calls. Unlisted providers Ask.
+/// Settings, and the user's choice for its calls. Unlisted providers follow
+/// [`MeetingSettings::default_policy`].
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MeetingProviderChoice {
     pub key: String,
@@ -290,6 +308,7 @@ impl Default for MeetingSettings {
             show_recording_indicator: true,
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
             providers: Vec::new(),
+            default_policy: MeetingPolicy::Ask,
             calendar: CalendarSettings::default(),
             retention: None,
             opencode_model: None,
@@ -303,6 +322,77 @@ impl MeetingSettings {
     pub fn available(&self) -> bool {
         crate::labs::Feature::Meetings.managed().is_none()
             && (crate::DEVELOPER_FEATURES_ENABLED || self.enabled)
+    }
+
+    /// Picks the default once, from before there was one: the answer most
+    /// of the listed services and chosen websites and apps have (Ask on a
+    /// tie), with every listed service that answered otherwise written down
+    /// so its calls go on as before.
+    pub(super) fn adopt_default_policy(&mut self) {
+        let asked_before = |key: &str| {
+            self.providers
+                .iter()
+                .find(|choice| choice.key == key)
+                .map_or(MeetingPolicy::Ask, |choice| choice.policy)
+        };
+        let answers: Vec<MeetingPolicy> = KNOWN_MEETING_PROVIDERS
+            .iter()
+            .map(|(key, _)| asked_before(key))
+            .chain(
+                self.providers
+                    .iter()
+                    .filter(|choice| {
+                        !KNOWN_MEETING_PROVIDERS
+                            .iter()
+                            .any(|(key, _)| *key == choice.key)
+                    })
+                    .map(|choice| choice.policy),
+            )
+            .collect();
+        let count =
+            |policy: MeetingPolicy| answers.iter().filter(|answer| **answer == policy).count();
+        let default = MeetingPolicy::ALL
+            .into_iter()
+            .fold(MeetingPolicy::Ask, |best, policy| {
+                if count(policy) > count(best) {
+                    policy
+                } else {
+                    best
+                }
+            });
+        for (key, label) in KNOWN_MEETING_PROVIDERS {
+            if !self.providers.iter().any(|choice| choice.key == key)
+                && default != MeetingPolicy::Ask
+            {
+                self.providers.push(MeetingProviderChoice {
+                    key: key.into(),
+                    label: label.into(),
+                    policy: MeetingPolicy::Ask,
+                });
+            }
+        }
+        self.default_policy = default;
+    }
+
+    /// Changes the default. Websites and apps whose answer was the old
+    /// default, which Settings showed as following it, go on following it.
+    pub fn set_default_policy(&mut self, policy: MeetingPolicy) {
+        let old = self.default_policy;
+        // Kept rather than removed: a website's entry outranks its browser's.
+        for choice in &mut self.providers {
+            if choice.policy == old {
+                choice.policy = policy;
+            }
+        }
+        self.default_policy = policy;
+    }
+
+    /// The choice for calls from `key`: its own, else the default.
+    pub fn policy_for(&self, key: &str) -> MeetingPolicy {
+        self.providers
+            .iter()
+            .find(|choice| choice.key == key)
+            .map_or(self.default_policy, |choice| choice.policy)
     }
 
     pub fn resolved_output_folder(&self) -> PathBuf {
@@ -350,6 +440,13 @@ pub fn meeting_provider_choices() -> Vec<MeetingProviderChoice> {
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
+}
+
+/// The choice for detected calls from websites and apps with none of their
+/// own, as last applied.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn meeting_default_policy() -> MeetingPolicy {
+    MeetingPolicy::decode(MEETING_DEFAULT_POLICY.load(Ordering::Acquire))
 }
 
 /// The connected calendar's reminder settings, as last applied.

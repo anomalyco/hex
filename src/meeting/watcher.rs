@@ -175,6 +175,7 @@ pub(crate) fn controller_loop(
                 &mut observed_microphone_apps,
                 &mut browser,
                 &choices,
+                crate::app_settings::meeting_default_policy(),
             ) {
                 Err(()) => {
                     thread::sleep(Duration::from_secs(2));
@@ -516,6 +517,7 @@ impl Reminders {
                 let automatic = records_automatically(
                     &meeting,
                     &crate::app_settings::meeting_provider_choices(),
+                    crate::app_settings::meeting_default_policy(),
                 );
                 tracing::info!(
                     provider = meeting.link.as_ref().map(|link| link.provider.label()),
@@ -574,16 +576,18 @@ impl Reminders {
 fn records_automatically(
     meeting: &CalendarMeeting,
     choices: &[crate::app_settings::MeetingProviderChoice],
+    default: crate::app_settings::MeetingPolicy,
 ) -> bool {
     meeting
         .link
         .as_ref()
         .and_then(|link| link.provider.choice_key())
         .is_some_and(|key| {
-            choices.iter().any(|choice| {
-                choice.key == key
-                    && choice.policy == crate::app_settings::MeetingPolicy::AlwaysRecord
-            })
+            choices
+                .iter()
+                .find(|choice| choice.key == key)
+                .map_or(default, |choice| choice.policy)
+                == crate::app_settings::MeetingPolicy::AlwaysRecord
         })
 }
 
@@ -942,6 +946,7 @@ fn detect_meeting(
     observed_microphone_apps: &mut Vec<(i32, String)>,
     browser: &mut BrowserWatch,
     choices: &[crate::app_settings::MeetingProviderChoice],
+    default: crate::app_settings::MeetingPolicy,
 ) -> Result<Option<Detection>, ()> {
     let microphone_apps = match active_microphone_applications() {
         Ok(applications) => applications,
@@ -976,7 +981,7 @@ fn detect_meeting(
     });
     let candidate =
         application.and_then(|application| candidate_from_microphone(&application, &context));
-    let detection = detector.detect(candidate, choices);
+    let detection = detector.detect(candidate, choices, default);
     if let Some(Detection::Offer(candidate)) = &detection {
         tracing::info!(
             source = candidate.source.label(),
@@ -1197,7 +1202,9 @@ mod tests {
                 first = false;
             }
             let candidate = candidate_from_microphone(&brave(), &context);
-            if let Some(detection) = detector.detect(candidate, &[]) {
+            if let Some(detection) =
+                detector.detect(candidate, &[], crate::app_settings::MeetingPolicy::Ask)
+            {
                 break detection;
             }
             thread::sleep(Duration::from_millis(50));

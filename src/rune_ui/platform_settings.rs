@@ -8,8 +8,8 @@
 use rune::{El, Icon, row, text};
 
 use super::controls::{
-    ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folding, icon_row,
-    icon_toggle_row, note, section, select, setting_row,
+    ButtonKind, CardRow, Choice, DESCRIPTION, METRICS, Paint, button, card, folding, icon_row,
+    icon_toggle_row, nested, note, section, select, setting_row,
 };
 use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
 use super::paste_access::PasteAccess;
@@ -443,11 +443,11 @@ pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
 }
 
 /// Meetings › Settings: the opt-in (and the system-audio permission while
-/// it's missing); once on, how long meetings are kept, Calendar and each detected call provider's Ask /
-/// Always record / Never offer choice; behind Advanced the indicator,
-/// folder, Apple Intelligence notes, and the granted permission.
+/// it's missing); once on, what happens when a call starts (detected calls
+/// and calendar reminders), then after a meeting (summaries, how long
+/// meetings are kept, the transcript folder), and behind one disclosure the
+/// recording indicator and the granted permission.
 pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
-    use super::general::advanced_toggle;
     let meetings = &ui.settings.meetings;
     let mut rows = vec![meetings_toggle(ui, p)];
     let mut more = Vec::new();
@@ -493,9 +493,13 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
             rows.push(system_audio);
         }
     }
-    let mut after = Vec::new();
-    if meetings.enabled {
-        more.push(icon_toggle_row(
+    let mut sections = vec![card(p, "meetings", rows)];
+    if !meetings.enabled {
+        return sections;
+    }
+    more.insert(
+        0,
+        icon_toggle_row(
             p,
             "meeting-indicator",
             &icons::PILL,
@@ -506,54 +510,54 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 let show = !ui.settings.meetings.show_recording_indicator;
                 ui.update(|settings| settings.meetings.show_recording_indicator = show);
             },
-        ));
-        after.extend(summaries_rows(ui, p, layer));
-        after.push(retention_row(ui, p, layer).into());
-        after.push(
-            icon_row(
-                p,
-                "meeting-folder",
-                &icons::FOLDER,
-                tr("Transcript folder"),
-                Some(tr("Finished meetings are saved here as Markdown")),
-                row()
-                    .key("controls")
-                    .gap(8.0)
-                    .center_y()
-                    .child(button(
-                        p,
-                        "reveal-meeting-folder",
-                        tr("Reveal"),
-                        ButtonKind::Secondary,
-                        |ui: &mut Ui, _| {
-                            ui.ask(PlatformRequest::Meeting(MeetingRequest::RevealFolder))
-                        },
-                    ))
-                    .child(button(
-                        p,
-                        "choose-meeting-folder",
-                        &folder_label(ui),
-                        ButtonKind::Secondary,
-                        |ui: &mut Ui, _| {
-                            ui.ask(PlatformRequest::Meeting(MeetingRequest::ChooseFolder))
-                        },
-                    )),
-            )
-            .into(),
-        );
-        if let Some(error) = &ui.platform.meeting_folder_error {
-            after.push(note("meeting-folder-error", error, p.danger()).into());
-        }
+        ),
+    );
+    let mut call = detected_calls_rows(ui, p, layer);
+    call.extend(calendar_rows(ui, p, layer).into_iter().map(CardRow::from));
+    sections.push(section(p, "call-starts", tr("When a call starts"), call));
+
+    let mut after = summaries_rows(ui, p, layer);
+    after.push(retention_row(ui, p, layer).into());
+    after.push(
+        icon_row(
+            p,
+            "meeting-folder",
+            &icons::FOLDER,
+            tr("Transcript folder"),
+            Some(tr("A Markdown copy of each meeting")),
+            row()
+                .key("controls")
+                .gap(8.0)
+                .center_y()
+                .child(button(
+                    p,
+                    "reveal-meeting-folder",
+                    tr("Reveal"),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| ui.ask(PlatformRequest::Meeting(MeetingRequest::RevealFolder)),
+                ))
+                .child(button(
+                    p,
+                    "choose-meeting-folder",
+                    &folder_label(ui),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| ui.ask(PlatformRequest::Meeting(MeetingRequest::ChooseFolder)),
+                )),
+        )
+        .into(),
+    );
+    if let Some(error) = &ui.platform.meeting_folder_error {
+        after.push(note("meeting-folder-error", error, p.danger()).into());
     }
-    let mut sections = vec![card(p, "meetings", rows)];
-    if meetings.enabled {
-        sections.push(section(p, "after-meeting", tr("After a meeting"), after));
-        sections.extend(calendar_section(ui, p, layer));
-        sections.push(detected_calls_section(ui, p, layer));
-        sections.push(advanced_toggle(ui, p, Pane::Meetings));
-        if super::general::advanced_open(ui, Pane::Meetings) {
-            sections.push(card(p, "advanced", more));
-        }
+    sections.push(section(p, "after-meeting", tr("After a meeting"), after));
+    sections.push(super::general::disclosure(
+        ui,
+        p,
+        Pane::Meetings,
+        tr("Recording indicator and permissions"),
+    ));
+    if super::general::advanced_open(ui, Pane::Meetings) {
+        sections.push(card(p, "advanced", more));
     }
     sections
 }
@@ -587,12 +591,10 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         tr("Keep meetings"),
         match chosen {
             None => Some(tr(
-                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash. Meetings from before this setting stay until you choose",
+                "Then audio, transcripts and notes move to the Trash. Meetings from before this setting stay until you choose",
             )),
             Some(MeetingRetention::Forever) => None,
-            Some(_) => Some(tr(
-                "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash",
-            )),
+            Some(_) => Some(tr("Then audio, transcripts and notes move to the Trash")),
         },
         control,
     )
@@ -659,9 +661,9 @@ pub(super) fn provider_icon(provider: CallProvider) -> &'static Icon {
 /// Calendar reminders: Connect calendar (the only thing that asks macOS for
 /// access), then the reminder switch, lead time, included calendars, and
 /// the next few meetings.
-fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
+fn calendar_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
     if !ui.platform.caps.calendar {
-        return None;
+        return Vec::new();
     }
     let view = &ui.platform.calendar;
     let calendar = &ui.settings.meetings.calendar;
@@ -790,7 +792,7 @@ fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     if let Some(error) = &view.error {
         rows.push(note("calendar-error", error, p.danger()));
     }
-    Some(section(p, "calendar", tr("Calendar"), rows))
+    rows
 }
 
 /// Which calendars remind: all by default, each one switched in the menu.
@@ -856,14 +858,18 @@ fn calendars_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     )
 }
 
-/// The known services, then every other website or app the user chose for,
-/// each with Ask / Always record / Never offer.
-fn detected_calls_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
-    let choices = &ui.settings.meetings.providers;
+/// One answer for every detected call, naming the services that follow it;
+/// under it each website or app with an answer of its own, then the row that
+/// gives one service its own answer.
+fn detected_calls_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
+    let meetings = &ui.settings.meetings;
+    let default = meetings.default_policy;
+    let labels = [tr("Ask"), tr("Always record"), tr("Never offer")];
     let known = KNOWN_MEETING_PROVIDERS
         .iter()
         .map(|(key, label)| (key.to_string(), label.to_string(), tr(label).to_owned()));
-    let others = choices
+    let others = meetings
+        .providers
         .iter()
         .filter(|choice| {
             !KNOWN_MEETING_PROVIDERS
@@ -877,48 +883,167 @@ fn detected_calls_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 choice.label.clone(),
             )
         });
-    let labels = [tr("Ask"), tr("Always record"), tr("Never offer")];
-    let rows = known
+    let (own, following): (Vec<_>, Vec<_>) = known
         .chain(others)
-        .enumerate()
-        .map(|(index, (key, label, shown))| {
-            let policy = choices
+        .partition(|(key, _, _)| meetings.policy_for(key) != default);
+
+    let names: Vec<&str> = following
+        .iter()
+        .map(|(_, _, shown)| shown.as_str())
+        .collect();
+    let summary = match names.len() {
+        0 => None,
+        1..=SUMMARY_NAMES => Some(names.join(", ")),
+        count => Some(tr_named(
+            "{names} and {count} more",
+            &[
+                ("names", &names[..SUMMARY_NAMES].join(", ")),
+                ("count", &(count - SUMMARY_NAMES).to_string()),
+            ],
+        )),
+    };
+    let control = super::general::pick_select(
+        ui,
+        p,
+        "detected-calls",
+        tr("Detected calls"),
+        labels.to_vec(),
+        MeetingPolicy::ALL
+            .iter()
+            .position(|policy| *policy == default)
+            .unwrap_or(0),
+        |ui, index| {
+            ui.update(|settings| {
+                settings
+                    .meetings
+                    .set_default_policy(MeetingPolicy::ALL[index]);
+            });
+        },
+        layer,
+    );
+    let mut rows: Vec<CardRow> = vec![
+        icon_row(
+            p,
+            "detected-calls",
+            &icons::PHONE,
+            tr("Detected calls"),
+            summary.as_deref(),
+            control,
+        )
+        .into(),
+    ];
+    for (index, (key, label, shown)) in own.into_iter().enumerate() {
+        let policy = meetings.policy_for(&key);
+        let control = super::general::quiet_select(
+            ui,
+            p,
+            Menu::Call(index),
+            format!("call{index}-policy-control"),
+            &shown,
+            labels.to_vec(),
+            MeetingPolicy::ALL
                 .iter()
-                .find(|choice| choice.key == key)
-                .map_or(MeetingPolicy::Ask, |choice| choice.policy);
-            let selected = POLICIES.iter().position(|known| *known == policy);
-            let control = super::general::quiet_select(
-                ui,
+                .position(|known| *known == policy)
+                .unwrap_or(0),
+            move |ui, index| {
+                let choice = MeetingProviderChoice {
+                    key: key.clone(),
+                    label: label.clone(),
+                    policy: MeetingPolicy::ALL[index],
+                };
+                ui.update(|settings| {
+                    crate::app_settings::set_meeting_provider(&mut settings.meetings, choice);
+                });
+            },
+            layer,
+        );
+        rows.push(
+            nested(setting_row(
                 p,
-                Menu::Call(index),
-                format!("call{index}-policy-control"),
+                &format!("call{index}"),
                 &shown,
-                labels.to_vec(),
-                selected.unwrap_or(0),
-                move |ui, index| {
-                    let choice = MeetingProviderChoice {
-                        key: key.clone(),
-                        label: label.clone(),
-                        policy: POLICIES[index],
-                    };
-                    ui.update(|settings| {
-                        crate::app_settings::set_meeting_provider(&mut settings.meetings, choice);
-                    });
-                },
-                layer,
-            );
-            setting_row(p, &format!("call{index}"), &shown, None, control)
-        })
-        .collect::<Vec<_>>();
-    section(p, "detected-calls", tr("Detected calls"), rows)
+                None,
+                control,
+            ))
+            .into(),
+        );
+    }
+    if !following.is_empty() {
+        rows.push(nested(own_answer_row(ui, p, following, default, layer)).into());
+    }
+    rows
 }
 
-/// In the order of the Detected calls segments.
-const POLICIES: [MeetingPolicy; 3] = [
-    MeetingPolicy::Ask,
-    MeetingPolicy::AlwaysRecord,
-    MeetingPolicy::NeverOffer,
-];
+/// How many services the Detected calls row names before "and N more".
+const SUMMARY_NAMES: usize = 4;
+
+/// "Set a different answer for one app…": a menu of the services that
+/// follow the default. Choosing one gives it the next answer, which its own
+/// row then shows and changes.
+fn own_answer_row(
+    ui: &Ui,
+    p: Paint,
+    following: Vec<(String, String, String)>,
+    default: MeetingPolicy,
+    layer: &mut Vec<El>,
+) -> El {
+    let c = &p.k.c;
+    let menu = Menu::Pick("detected-calls-add");
+    let open = ui.open == Some(menu);
+    let title = tr("Set a different answer for one app…");
+    let trigger = row()
+        .key("detected-calls-add-button")
+        .role("button")
+        .label(title)
+        .min_h(32.0)
+        .px(6.0)
+        .ml(-6.0)
+        .center_y()
+        .self_start()
+        .radius(p.k.radius.md)
+        .hover(c.hover)
+        .press(c.pressed)
+        .focusable(true)
+        .focus_ring(2.0, 0.0, c.border_focus)
+        .on_press(move |ui: &mut Ui| toggle_menu(ui, menu))
+        .child(
+            text(title)
+                .key("title")
+                .font(p.k.ty.ui)
+                .color(c.text_muted)
+                .a11y_hidden(),
+        );
+    let answer = MeetingPolicy::ALL
+        .into_iter()
+        .find(|policy| *policy != default)
+        .unwrap_or_default();
+    let mut picker = rune_kit::Menu::new("detected-calls-add-menu")
+        .trigger(trigger)
+        .placement(rune_kit::Placement::BottomStart)
+        .gutter(4.0)
+        .open(open)
+        .on_close(|ui: &mut Ui| ui.open = None);
+    for (key, label, shown) in following {
+        picker = picker.item(
+            rune_kit::MenuItem::new(shown).on_select(move |ui: &mut Ui| {
+                ui.open = None;
+                let choice = MeetingProviderChoice {
+                    key: key.clone(),
+                    label: label.clone(),
+                    policy: answer,
+                };
+                ui.update(|settings| {
+                    crate::app_settings::set_meeting_provider(&mut settings.meetings, choice);
+                });
+            }),
+        );
+    }
+    row()
+        .key("detected-calls-add")
+        .px(METRICS.row_px)
+        .py(4.0)
+        .child(picker.build(p.k, layer))
+}
 
 /// The virtual microphone driver's row: install, update, or uninstall it.
 pub(super) fn driver_row(ui: &Ui, p: Paint) -> El {

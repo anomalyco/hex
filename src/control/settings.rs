@@ -524,6 +524,11 @@ const KEYS: &[Key] = &[
         Kind::Json,
         "Per-app call choices, as a JSON array of {key, label, policy: ask|always_record|never_offer}",
     ),
+    key(
+        "meetings.default_policy",
+        Kind::Choice(&["ask", "always_record", "never_offer"]),
+        "What to do for a detected call from a website or app with no entry in meetings.providers",
+    ),
     read_only(
         "meetings.calendar.connected",
         Kind::Bool,
