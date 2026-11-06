@@ -44,6 +44,7 @@ pub(crate) use os::{
 };
 mod delta;
 mod echo;
+mod finish;
 pub(crate) mod finished_events;
 pub(crate) mod generator;
 #[cfg(target_os = "macos")]
@@ -955,36 +956,7 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
         meeting = id,
         "finishing a meeting transcript left pending by an earlier quit"
     );
-    finish_transcription(&directory, manifest, &selection).map(Some)
-}
-
-/// Transcribes and publishes a meeting whose audio is complete, with the
-/// folder's lock held: its final transcript, the user's Markdown copy, and a
-/// finished event. A failure while quitting leaves `final.pending` for the
-/// next launch; any other failure keeps the meeting Interrupted with its
-/// error.
-fn finish_transcription(
-    directory: &Path,
-    mut manifest: MeetingManifest,
-    selection: &crate::transcription::models::TranscriptionSelection,
-) -> Result<MeetingManifest> {
-    match transcribe(directory, &mut manifest, selection, None) {
-        Ok(()) => {
-            manifest.status = MeetingStatus::Complete;
-            manifest.error = None;
-            write_manifest(directory, &manifest)?;
-            finished_events::publish(&manifest.id);
-            Ok(manifest)
-        }
-        Err(error) if crate::desktop::process_exit::quitting() => Err(error),
-        Err(error) => {
-            manifest.status = MeetingStatus::Interrupted;
-            manifest.error = Some(error.to_string());
-            write_manifest(directory, &manifest)?;
-            let _ = fs::remove_file(directory.join(FINAL_PENDING_FILE));
-            Err(error)
-        }
-    }
+    finish::finish_transcription(&directory, manifest, &selection).map(Some)
 }
 
 pub fn list() -> Result<Vec<MeetingManifest>> {

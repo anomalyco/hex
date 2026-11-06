@@ -1376,11 +1376,20 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   selected speech model as a normal meeting: its turns are labelled Speaker,
   it gets the user Markdown export, and notes and summaries run afterward when
   the meetings setting asks for them. Its toggle is `labs.meeting_import`
-  (off by default). Off, the button, dialog, decoder, and watcher command do
-  nothing. Checks: `meeting_import_is_its_own_bit_and_off_by_default`
+  (off by default). The button, and the watcher before it spawns a worker,
+  both read `labs::meeting_import()`, which includes an organization's Labs
+  lock; with the lab off the button hides and an import request is refused
+  with Audio could not be imported, so no decoder or worker runs. While an
+  import runs the button stays visible, and another choice is refused until it
+  finishes. CLI/MCP query output, chapter prompts, notes input, the internal
+  transcript.md, and Copy Last Transcript still say You/Them for imported
+  meetings; only the pane and the user Markdown export say Speaker. Checks:
+  `meeting_import_is_its_own_bit_and_off_by_default`
   ([labs.rs](../../src/labs.rs));
-  `only_the_listed_audio_files_are_imported` and
-  `the_title_is_the_file_name_without_its_extension`
+  `only_the_listed_audio_files_are_imported`,
+  `the_title_is_the_file_name_without_its_extension`,
+  `decodes_a_stereo_float_wav_to_mono_16_khz`, and
+  `decodes_a_stereo_16_bit_wav_to_mono_16_khz`
   ([meeting/import.rs](../../src/meeting/import.rs), macOS);
   `imported_meetings_keep_their_flag_and_older_manifests_read_as_recorded`
   ([tests.rs](../../src/meeting/tests.rs));
@@ -1388,9 +1397,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `imported_meetings_label_their_one_track_speaker`
   ([transcript.rs](../../src/meeting/transcript.rs)); the Linux-only pane test
   `an_imported_meeting_labels_its_one_track_speaker`
-  ([rune_ui/meetings.rs](../../src/rune_ui/meetings.rs)). Not verified on a
-  real Mac: AVFoundation decoding, the native picker, and quitting mid-import
-  have no automated end-to-end check.
+  ([rune_ui/meetings.rs](../../src/rune_ui/meetings.rs)). The decoder tests run
+  in Check macOS. Not verified on a real Mac: the native picker and quitting
+  at each mid-import moment have no automated end-to-end check.
 - Vocabulary biasing: Parakeet transcription biased toward the
   [vocabulary](vocabulary.md) (`transcribe_cpp::RunExtension::ParakeetVocabulary`),
   the request behind issue 452 / PR 457. Off (the default),

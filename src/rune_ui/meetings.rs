@@ -699,11 +699,7 @@ fn recording_action(ui: &Ui, p: Paint) -> El {
         ),
     };
     // Importing is a second way in, never a competing main action.
-    if crate::labs::Feature::MeetingImport.on(&ui.settings)
-        && crate::labs::Feature::MeetingImport.on_this_os()
-        && active.is_none()
-        && !pane.start_pending
-    {
+    if crate::labs::meeting_import() && active.is_none() && !pane.start_pending {
         return row()
             .key("meeting-actions")
             .gap(8.0)
@@ -760,6 +756,11 @@ pub(super) fn poll_import(ui: &mut Ui) -> bool {
         Err(error) => ui.meetings.action_error = Some(error),
     }
     true
+}
+
+/// An audio file could not be imported; the Meetings pane says why.
+pub(crate) fn meeting_import_failed(ui: &mut Ui, error: String) {
+    ui.meetings.import_error = Some(error);
 }
 
 /// A row's state line: what went wrong or is happening, else the app and

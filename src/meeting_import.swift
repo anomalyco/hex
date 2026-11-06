@@ -4,7 +4,6 @@ import Foundation
 
 private let importSampleRate: Double = 16_000
 private let importInputFrames: AVAudioFrameCount = 32_768
-private let importOutputFrames: AVAudioFrameCount = 16_384
 
 private struct ImportError: LocalizedError {
     let message: String
@@ -62,9 +61,6 @@ public func hexMeetingImportFreeString(_ string: UnsafeMutablePointer<CChar>?) {
 /// bounded blocks, so a long recording never loads whole into memory.
 private func convertAudio(_ inputURL: URL, to outputURL: URL) throws {
     let input = try AVAudioFile(forReading: inputURL)
-    guard input.length > 0 else {
-        throw ImportError("The audio file has no sound.")
-    }
     guard let outputFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
         sampleRate: importSampleRate,
@@ -76,8 +72,12 @@ private func convertAudio(_ inputURL: URL, to outputURL: URL) throws {
     guard let converter = AVAudioConverter(from: input.processingFormat, to: outputFormat) else {
         throw ImportError("Hex could not read this audio file's format.")
     }
+    // Stereo and multichannel files mix down; the converter otherwise keeps
+    // one channel and drops the rest.
+    converter.downmix = true
     let settings: [String: Any] = [
         AVFormatIDKey: kAudioFormatLinearPCM,
+        AVAudioFileTypeKey: kAudioFileWAVEType,
         AVSampleRateKey: importSampleRate,
         AVNumberOfChannelsKey: 1,
         AVLinearPCMBitDepthKey: 32,
@@ -91,76 +91,102 @@ private func convertAudio(_ inputURL: URL, to outputURL: URL) throws {
         commonFormat: .pcmFormatFloat32,
         interleaved: false
     )
+    // The header is written when the file closes; do it before Rust reads it.
+    defer { output.close() }
+
     let inputFormat = input.processingFormat
+    // One output buffer holds a whole input block, so the converter never has
+    // to keep a returned input buffer for a later call.
+    let ratio = importSampleRate / max(inputFormat.sampleRate, 1)
+    let outputFrames = AVAudioFrameCount(
+        min(1_048_576, max(1, Int((Double(importInputFrames) * max(1, ratio)).rounded(.up)) + 64))
+    )
+    guard
+        let inputBuffer = AVAudioPCMBuffer(
+            pcmFormat: inputFormat,
+            frameCapacity: importInputFrames
+        ),
+        let outputBuffer = AVAudioPCMBuffer(
+            pcmFormat: outputFormat,
+            frameCapacity: outputFrames
+        )
+    else {
+        throw ImportError("Hex ran out of memory converting this audio file.")
+    }
+
+    var inputExhausted = false
     var finished = false
     var failure: Error?
-    while !finished {
-        guard let outputBuffer = AVAudioPCMBuffer(
-            pcmFormat: outputFormat,
-            frameCapacity: importOutputFrames
-        ) else {
-            throw ImportError("Hex ran out of memory converting this audio file.")
-        }
-        var conversionError: NSError?
-        let status = converter.convert(to: outputBuffer, error: &conversionError) {
-            requestedPackets, inputStatus in
-            if finished {
-                inputStatus.pointee = .noDataNow
-                return nil
+    var wroteFrames: AVAudioFramePosition = 0
+
+    try autoreleasepool {
+        while !finished {
+            outputBuffer.frameLength = 0
+            var conversionError: NSError?
+            let status = converter.convert(to: outputBuffer, error: &conversionError) {
+                _, inputStatus in
+                // Once the file has no more audio, keep answering end of
+                // stream; a no-data answer would make the converter wait.
+                if inputExhausted {
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                inputBuffer.frameLength = 0
+                do {
+                    try input.read(into: inputBuffer)
+                } catch {
+                    let code = (error as NSError).code
+                    // A short or malformed file ends at EOF, not as a read
+                    // failure; AVAudioFile may answer either way.
+                    if code == 0 || code == Int(kAudioFileEndOfFileError) {
+                        inputExhausted = true
+                        inputStatus.pointee = .endOfStream
+                    } else {
+                        failure = error
+                        inputStatus.pointee = .endOfStream
+                    }
+                    return nil
+                }
+                if inputBuffer.frameLength == 0 {
+                    inputExhausted = true
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                inputStatus.pointee = .haveData
+                return inputBuffer
             }
-            let remaining = input.length - input.framePosition
-            if remaining <= 0 {
-                finished = true
-                inputStatus.pointee = .endOfStream
-                return nil
+            if let failure {
+                throw failure
             }
-            let wanted = min(Int64(importInputFrames), max(1, Int64(requestedPackets)))
-            let frames = AVAudioFrameCount(min(wanted, remaining))
-            guard let inputBuffer = AVAudioPCMBuffer(
-                pcmFormat: inputFormat,
-                frameCapacity: frames
-            ) else {
-                failure = ImportError("Hex ran out of memory reading this audio file.")
-                finished = true
-                inputStatus.pointee = .endOfStream
-                return nil
+            if let conversionError {
+                throw conversionError
             }
-            do {
-                try input.read(into: inputBuffer, frameCount: frames)
-            } catch {
-                failure = error
-                finished = true
-                inputStatus.pointee = .endOfStream
-                return nil
-            }
-            if inputBuffer.frameLength == 0 {
-                finished = true
-                inputStatus.pointee = .endOfStream
-                return nil
-            }
-            inputStatus.pointee = .haveData
-            return inputBuffer
-        }
-        if let failure {
-            throw failure
-        }
-        if let conversionError {
-            throw conversionError
-        }
-        switch status {
-        case .haveData:
-            try output.write(from: outputBuffer)
-        case .inputRanDry:
-            continue
-        case .endOfStream:
+            // Every status may carry audio: write it before deciding whether
+            // the run is over.
             if outputBuffer.frameLength > 0 {
                 try output.write(from: outputBuffer)
+                wroteFrames += AVAudioFramePosition(outputBuffer.frameLength)
             }
-            finished = true
-        case .error:
-            throw ImportError("Hex could not convert this audio file.")
-        @unknown default:
-            throw ImportError("Hex could not convert this audio file.")
+            switch status {
+            case .haveData:
+                break
+            case .inputRanDry:
+                // With the input block always answering data or end of
+                // stream, this only means the converter has no output and
+                // nothing left to read.
+                if inputExhausted && outputBuffer.frameLength == 0 {
+                    finished = true
+                }
+            case .endOfStream:
+                finished = true
+            case .error:
+                throw ImportError("Hex could not convert this audio file.")
+            @unknown default:
+                throw ImportError("Hex could not convert this audio file.")
+            }
         }
+    }
+    if wroteFrames == 0 {
+        throw ImportError("The audio file has no sound.")
     }
 }

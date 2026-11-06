@@ -81,7 +81,9 @@ Recordings list icons                               // always on (#1290; graduat
         meetings light/dark show Zoom, FaceTime, and the neutral icon)
 Import audio                                        // Labs › Import audio, off by default (macOS)
         Meetings header -> Import audio… beside Start recording; only while
-        the lab is on and nothing records or imports
+        the lab is on and nothing records
+        ├── While an import runs the button stays visible; choosing another
+        │   file is refused until it finishes
         ├── Native picker filters WAV, M4A, MP3, AIFF, AIF, and CAF
         ├── Off -> no button, dialog, decoder, or watcher command
         └── see Import Audio (Labs) below
@@ -637,10 +639,14 @@ Labs › Stop when the call ends (macOS, off by default; #835) // meetings.auto-
 
 ```ts
 Meetings > Import audio… (macOS; Labs › Import audio, off by default) // meetings.import
-├── Only while the lab is on and no recording or import runs
+├── Only while the lab is on and no recording runs
+│   ├── While an import runs the button stays visible; another choice is
+│   │   refused (Audio could not be imported) until it finishes
+│   └── Labs off -> the button hides; the watcher also refuses an import
+│       before spawning a worker
 ├── Pick a WAV, M4A, MP3, AIFF, AIF, or CAF file
-├── AVFoundation streams it to 16 kHz mono 32-bit float WAV in bounded blocks
-│   (src/meeting_import.swift; no whole file in memory)
+├── AVFoundation downmixes and streams it to 16 kHz mono 32-bit float WAV in
+│   bounded blocks (src/meeting_import.swift; no whole file in memory)
 ├── New owner-only Application Support/meetings/<created_ms>-<pid> folder,
 │   active.lock held
 │   ├── system.wav = the decoded audio; microphone.wav = an empty 16 kHz track
@@ -649,20 +655,26 @@ Meetings > Import audio… (macOS; Labs › Import audio, off by default) // mee
 │   └── final.pending, then the same final pass a recording uses:
 │       transcript.ndjson + transcript.md, the user Markdown export, the
 │       finished event, and Complete
-├── Turns say "Speaker" in the pane and the export, never You/Them
+├── Turns say "Speaker" in the pane and the user Markdown export, never You/Them
+│   └── CLI/MCP query output, chapter prompts, notes input, the internal
+│       transcript.md, and Copy Last Transcript still say You/Them
 ├── Notes/summary follow exactly as after a recording (the meetings Summaries
 │   setting; Apple Intelligence or OpenCode)
-├── A second request while recording or importing is refused; the failure
-│   shows in Meetings as Audio could not be imported
+├── A request while recording or importing is refused; the failure shows in
+│   Meetings as Audio could not be imported
 └── Quitting mid-import
-    ├── Before the manifest is written -> nothing is kept
-    └── After final.pending -> next launch finishes it (the pending-finals
-        thread), exactly like a recording Hex quit during
+    ├── Before final.pending -> the folder is removed; nothing is kept
+    ├── After final.pending -> next launch finishes it (the pending-finals
+    │   thread), exactly like a recording Hex quit during
+    └── During the final pass -> Interrupted with final.pending kept, so the
+        next launch finishes it
 ```
 
-Proof limits: the decoder has no automated end-to-end run (it needs a Mac and
-AVFoundation), the native picker is not exercised headlessly, and quitting at
-each mid-import moment is reasoned from `final.pending` rather than observed.
+Proof limits: the decoder now has macOS-only unit tests through
+`hex_meeting_import_decode` (stereo 44.1 kHz float and 16-bit PCM in, mono
+16 kHz float out), but no automated end-to-end run on a real Mac: the native
+picker is not exercised headlessly, and quitting at each mid-import moment is
+reasoned from the shared cleanup scope and `final.pending` rather than observed.
 The manifest flag, the empty microphone track, the Speaker label, and the lab
 default are unit-checked on every OS that can run them.
 

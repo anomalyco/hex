@@ -36,6 +36,7 @@ mod live_notes;
 pub(crate) mod live_text;
 pub(crate) mod meeting_capsules;
 mod meetings;
+pub(crate) use self::meetings::meeting_import_failed;
 mod meetings_host;
 mod model_details;
 mod model_import;
@@ -546,11 +547,6 @@ pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
     ui.meetings.start_pending = false;
     ui.meetings.stop_pending = false;
     ui.meetings.runtime_error = Some(error);
-}
-
-/// An audio file could not be imported; the Meetings pane says why.
-pub(crate) fn meeting_import_failed(ui: &mut Ui, error: String) {
-    ui.meetings.import_error = Some(error);
 }
 
 /// `hex app -- --snap out.png --scene …`: a headless render of a fixture

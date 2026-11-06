@@ -219,10 +219,20 @@ pub(crate) fn controller_loop(
             .map_err(|_| eyre!("meeting recorder panicked"))??;
     }
     if let Some(importing) = importing {
-        importing
-            .worker
-            .join()
-            .map_err(|_| eyre!("meeting import panicked"))??;
+        // A failed import during shutdown is reported, not propagated: it
+        // must not skip joining the pending finals below.
+        match importing.worker.join() {
+            Ok(Ok(manifest)) => {
+                tracing::info!(
+                    meeting = manifest.id,
+                    "audio import finished while shutting down"
+                );
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "audio import did not finish before shutdown");
+            }
+            Err(_) => tracing::error!("meeting import panicked"),
+        }
     }
     pending_finals.join();
     Ok(())
@@ -300,11 +310,20 @@ impl PendingFinals {
                         return;
                     }
                     match meeting::finish_pending(&id) {
-                        Ok(Some(manifest)) => {
+                        Ok(Some(manifest))
+                            if manifest.status == meeting::MeetingStatus::Complete =>
+                        {
                             tracing::info!(meeting = id, "finished a pending meeting transcript");
                             if meeting::notes_wanted() {
                                 start_notes(manifest.id, &events);
                             }
+                        }
+                        Ok(Some(manifest)) => {
+                            tracing::info!(
+                                meeting = id,
+                                status = ?manifest.status,
+                                "left a pending meeting for the next launch"
+                            );
                         }
                         Ok(None) => {}
                         Err(error) => {
@@ -341,6 +360,12 @@ fn handle_command(
         }
         ControllerCommand::Import(_) if !enabled => {
             tracing::warn!("ignored an audio import while meetings are off");
+        }
+        ControllerCommand::Import(_) if !crate::labs::meeting_import() => {
+            tracing::warn!("ignored an audio import while Labs › Import audio is off");
+            let _ = events.send(ControllerEvent::ImportFailed {
+                error: "Labs › Import audio is off".into(),
+            });
         }
         ControllerCommand::Import(path) => start_import(recording, importing, path, events),
         ControllerCommand::Record(candidate) if recording.is_none() => {
@@ -669,11 +694,18 @@ fn poll_import(importing: &mut Option<ImportWorker>, events: &SyncSender<Control
         return;
     };
     match worker.worker.join() {
-        Ok(Ok(manifest)) => {
+        Ok(Ok(manifest)) if manifest.status == meeting::MeetingStatus::Complete => {
             tracing::info!(meeting = manifest.id, "imported audio was transcribed");
-            if manifest.status == meeting::MeetingStatus::Complete && meeting::notes_wanted() {
+            if meeting::notes_wanted() {
                 start_notes(manifest.id, events);
             }
+        }
+        Ok(Ok(manifest)) => {
+            tracing::info!(
+                meeting = manifest.id,
+                status = ?manifest.status,
+                "left an imported meeting for the next launch"
+            );
         }
         Ok(Err(error)) => {
             tracing::warn!(%error, "could not import audio as a meeting");
