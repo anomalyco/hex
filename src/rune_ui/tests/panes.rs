@@ -1190,18 +1190,43 @@ fn meetings_settings_save_and_ask_for_system_audio() {
             .find(|choice| choice.key == key)
             .map(|choice| choice.policy)
     };
-    // Known services first (Zoom is second), then the sites and apps chosen for.
-    pick(&mut rt, "call1-policy", 1);
-    assert_eq!(
-        policy(&rt, "us.zoom.xos"),
-        Some(MeetingPolicy::AlwaysRecord)
+    // Detected calls names the services that follow its answer; under it
+    // come the ones with their own (Slack, then the chosen site).
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| { text == "Zoom, Google Meet, Microsoft Teams, FaceTime and 3 more" })
     );
-    pick(&mut rt, "call8-policy", 0);
+    pick(&mut rt, "call0-policy", 0);
     assert_eq!(
-        policy(&rt, "problems.kitlangton.com"),
+        policy(&rt, "com.tinyspeck.slackmacgap"),
         Some(MeetingPolicy::Ask)
     );
-    assert!(rt.find("call8").is_some());
+    settle(&mut rt);
+    assert!(rt.find("call1").is_none(), "Slack follows Ask now");
+    pick(&mut rt, "detected-calls", 1);
+    let meetings = &rt.state.settings.meetings;
+    assert_eq!(meetings.default_policy, MeetingPolicy::AlwaysRecord);
+    assert_eq!(
+        meetings.policy_for("us.zoom.xos"),
+        MeetingPolicy::AlwaysRecord
+    );
+    assert_eq!(
+        meetings.policy_for("problems.kitlangton.com"),
+        MeetingPolicy::NeverOffer
+    );
+    // One service gets an answer of its own, which its row then changes.
+    tap(&mut rt, "detected-calls-add-button");
+    tap(&mut rt, "detected-calls-add-menu-item0");
+    assert_eq!(
+        rt.state
+            .settings
+            .meetings
+            .policy_for("com.tinyspeck.slackmacgap"),
+        MeetingPolicy::Ask
+    );
+    settle(&mut rt);
+    assert!(rt.find("call1").is_some());
     tap(&mut rt, "meetings-enabled");
     assert!(!rt.state.settings.meetings.enabled);
     assert!(rt.find("meeting-folder").is_none());
@@ -1220,12 +1245,15 @@ fn the_calendar_asks_for_access_only_when_connect_is_pressed() {
         [PlatformRequest::Calendar(CalendarRequest::Connect)]
     );
 
-    // Meetings off: no calendar card, so nothing can ask for access.
+    // Meetings off: no calendar rows, so nothing can ask for access.
     tap(&mut rt, "meetings-enabled");
-    assert!(rt.find("calendar").is_none());
+    assert!(rt.find("calendar-connect").is_none());
     for scene in ["portal", "windows-settings"] {
         let rt = runtime(scene, true, GOLDEN_SIZE);
-        assert!(rt.find("calendar").is_none(), "{scene} has no calendar");
+        assert!(
+            rt.find("calendar-connect").is_none(),
+            "{scene} has no calendar"
+        );
     }
 }
 

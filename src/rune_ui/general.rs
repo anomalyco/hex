@@ -1216,12 +1216,17 @@ pub(super) fn advanced_open(ui: &Ui, pane: Pane) -> bool {
 /// The disclosure for a pane's settings most people never change, which
 /// follow it.
 pub(super) fn advanced_toggle(ui: &Ui, p: Paint, pane: Pane) -> El {
+    disclosure(ui, p, pane, tr("Advanced"))
+}
+
+/// [`advanced_toggle`] named for what it holds.
+pub(super) fn disclosure(ui: &Ui, p: Paint, pane: Pane, title: &str) -> El {
     let c = &p.k.c;
     let open = advanced_open(ui, pane);
     row()
         .key("advanced-toggle")
         .role("button")
-        .label(tr("Advanced"))
+        .label(title)
         .h(18.0)
         .px(6.0)
         .ml(METRICS.row_px - 6.0)
@@ -1241,7 +1246,7 @@ pub(super) fn advanced_toggle(ui: &Ui, p: Paint, pane: Pane) -> El {
             }
         })
         .child(
-            text(tr("Advanced"))
+            text(title)
                 .key("title")
                 .font(p.k.ty.ui.lh(16.0))
                 .color(c.text_muted),
