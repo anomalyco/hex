@@ -161,8 +161,9 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     │   // checks: linux/meeting_capsules.rs gating tests; not run on GNOME
     └── not observed on a real GNOME session; no automated check
 Files -> Reveal Markdown selects the exported .md (Explorer) or opens the folder
-    holding it (xdg-open); Reveal files opens the recording folder; Delete moves
-    to the freedesktop Trash or the Recycle Bin
+    holding it (xdg-open); Reveal files shows the recording folder (selected in
+    Explorer, opened by xdg-open); Delete moves to the freedesktop Trash or the
+    Recycle Bin
 ```
 
 The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and
