@@ -5,7 +5,7 @@
 //! its audio is the system track, the microphone track is empty, and the
 //! existing final pass transcribes, exports, and publishes it.
 
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{CStr, CString, c_char, c_int};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -24,10 +24,12 @@ const EXTENSIONS: &[&str] = &["wav", "m4a", "mp3", "aiff", "aif", "caf"];
 
 unsafe extern "C" {
     /// Converts `input` to a 16 kHz mono float WAV at `output`, answering 0
-    /// on success and a message in `error` otherwise.
+    /// on success and a message in `error` otherwise. `cancelled` is asked
+    /// between decode blocks; a nonzero answer stops the conversion.
     fn hex_meeting_import_decode(
         input: *const c_char,
         output: *const c_char,
+        cancelled: extern "C" fn() -> c_int,
         error: *mut *mut c_char,
     ) -> i32;
     fn hex_meeting_import_free_string(string: *mut c_char);
@@ -179,12 +181,24 @@ fn decode(input: &Path, output: &Path) -> Result<()> {
     let mut error = ptr::null_mut();
     // SAFETY: both paths are NUL-terminated strings that outlive the call;
     // the bridge writes only the output file and, on failure, an owned
-    // message into `error`.
-    let status = unsafe { hex_meeting_import_decode(input.as_ptr(), output.as_ptr(), &mut error) };
+    // message into `error`. The cancellation callback reads Hex's quit flag
+    // and captures nothing.
+    let status = unsafe {
+        hex_meeting_import_decode(input.as_ptr(), output.as_ptr(), hex_is_quitting, &mut error)
+    };
     if status == 0 {
         return Ok(());
     }
     Err(take_error(error))
+}
+
+/// The bridge's cancellation check: Hex's own quit flag.
+extern "C" fn hex_is_quitting() -> c_int {
+    if crate::desktop::process_exit::quitting() {
+        1
+    } else {
+        0
+    }
 }
 
 fn take_error(error: *mut c_char) -> color_eyre::Report {
@@ -239,8 +253,10 @@ mod tests {
         .unwrap();
         for frame in 0..44_100 {
             let time = frame as f32 / 44_100.0;
-            let left = (time * 440.0 * std::f32::consts::TAU).sin() * 0.4;
-            let right = (time * 660.0 * std::f32::consts::TAU).sin() * 0.3;
+            // Silence on the left makes a lost downmix fail the test: the
+            // right channel is the only tone.
+            let left = 0.0_f32;
+            let right = (time * 660.0 * std::f32::consts::TAU).sin() * 0.4;
             match format {
                 hound::SampleFormat::Float => {
                     writer.write_sample(left).unwrap();

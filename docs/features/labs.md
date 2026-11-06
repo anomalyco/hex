@@ -1383,7 +1383,10 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   import runs the button stays visible, and another choice is refused until it
   finishes. CLI/MCP query output, chapter prompts, notes input, the internal
   transcript.md, and Copy Last Transcript still say You/Them for imported
-  meetings; only the pane and the user Markdown export say Speaker. Checks:
+  meetings; only the pane and the user Markdown export say Speaker. Quitting
+  cancels the decode and removes its folder; a crash or a quit past the drain
+  leaves only a staging file, which the next launch's sweep removes once its
+  lock is free. Checks:
   `meeting_import_is_its_own_bit_and_off_by_default`
   ([labs.rs](../../src/labs.rs));
   `only_the_listed_audio_files_are_imported`,
@@ -1391,6 +1394,8 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `decodes_a_stereo_float_wav_to_mono_16_khz`, and
   `decodes_a_stereo_16_bit_wav_to_mono_16_khz`
   ([meeting/import.rs](../../src/meeting/import.rs), macOS);
+  `only_abandoned_import_folders_are_removed`
+  ([meeting/sweep.rs](../../src/meeting/sweep.rs));
   `imported_meetings_keep_their_flag_and_older_manifests_read_as_recorded`
   ([tests.rs](../../src/meeting/tests.rs));
   `an_empty_track_transcribes_to_nothing` and

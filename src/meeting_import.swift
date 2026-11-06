@@ -31,16 +31,24 @@ private func importPath(_ pointer: UnsafePointer<CChar>?) -> String? {
 public func hexMeetingImportDecode(
     _ inputPath: UnsafePointer<CChar>?,
     _ outputPath: UnsafePointer<CChar>?,
+    _ isCancelled: (@convention(c) () -> Int32)?,
     _ errorOutput: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
 ) -> Int32 {
-    guard let inputPath = importPath(inputPath), let outputPath = importPath(outputPath) else {
-        writeImportError("The audio import received no file path.", to: errorOutput)
+    guard let inputPath = importPath(inputPath),
+          let outputPath = importPath(outputPath),
+          let isCancelled
+    else {
+        writeImportError(
+            "The audio import received no file path or cancellation check.",
+            to: errorOutput
+        )
         return 1
     }
     do {
         try convertAudio(
             URL(fileURLWithPath: inputPath),
-            to: URL(fileURLWithPath: outputPath)
+            to: URL(fileURLWithPath: outputPath),
+            isCancelled: isCancelled
         )
         return 0
     } catch {
@@ -59,7 +67,13 @@ public func hexMeetingImportFreeString(_ string: UnsafeMutablePointer<CChar>?) {
 
 /// Streams `inputURL` to a 16 kHz mono 32-bit float WAV at `outputURL` in
 /// bounded blocks, so a long recording never loads whole into memory.
-private func convertAudio(_ inputURL: URL, to outputURL: URL) throws {
+/// `isCancelled` is checked between blocks, and in each input read, so a quit
+/// stops decode early enough for the caller to remove its folder.
+private func convertAudio(
+    _ inputURL: URL,
+    to outputURL: URL,
+    isCancelled: @convention(c) () -> Int32
+) throws {
     let input = try AVAudioFile(forReading: inputURL)
     guard let outputFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
@@ -119,8 +133,11 @@ private func convertAudio(_ inputURL: URL, to outputURL: URL) throws {
     var failure: Error?
     var wroteFrames: AVAudioFramePosition = 0
 
-    try autoreleasepool {
-        while !finished {
+    while !finished {
+        if isCancelled() != 0 {
+            throw ImportError("Hex is quitting; the audio was not imported.")
+        }
+        try autoreleasepool {
             outputBuffer.frameLength = 0
             var conversionError: NSError?
             let status = converter.convert(to: outputBuffer, error: &conversionError) {
@@ -131,18 +148,30 @@ private func convertAudio(_ inputURL: URL, to outputURL: URL) throws {
                     inputStatus.pointee = .endOfStream
                     return nil
                 }
+                if isCancelled() != 0 {
+                    failure = ImportError("Hex is quitting; the audio was not imported.")
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
                 inputBuffer.frameLength = 0
                 do {
                     try input.read(into: inputBuffer)
                 } catch {
                     let code = (error as NSError).code
                     // A short or malformed file ends at EOF, not as a read
-                    // failure; AVAudioFile may answer either way.
-                    if code == 0 || code == Int(kAudioFileEndOfFileError) {
+                    // failure. AVAudioFile can answer the tail with a generic
+                    // nilError instead of a zero-frame read; at the file's
+                    // recorded end that is EOF, not corruption. Its error
+                    // code is not consulted (it is 0).
+                    if code == Int(kAudioFileEndOfFileError)
+                        || input.framePosition >= input.length
+                    {
                         inputExhausted = true
                         inputStatus.pointee = .endOfStream
                     } else {
-                        failure = error
+                        failure = ImportError(
+                            "Hex could not read the audio at frame \(input.framePosition) of \(input.length): \(error.localizedDescription)"
+                        )
                         inputStatus.pointee = .endOfStream
                     }
                     return nil
@@ -151,6 +180,11 @@ private func convertAudio(_ inputURL: URL, to outputURL: URL) throws {
                     inputExhausted = true
                     inputStatus.pointee = .endOfStream
                     return nil
+                }
+                // A short fixed-capacity read is the file's last block. Stop
+                // asking for more so AVAudioFile's tail error never arises.
+                if inputBuffer.frameLength < inputBuffer.frameCapacity {
+                    inputExhausted = true
                 }
                 inputStatus.pointee = .haveData
                 return inputBuffer

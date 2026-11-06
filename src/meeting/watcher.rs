@@ -274,6 +274,8 @@ const ENGINE_GRACE: Duration = Duration::from_secs(30);
 /// model rather than loading a second copy.
 struct PendingFinals {
     since: Instant,
+    /// The launch sweep for abandoned import folders ran.
+    swept: bool,
     checked: bool,
     worker: Option<JoinHandle<()>>,
 }
@@ -282,12 +284,19 @@ impl PendingFinals {
     fn new() -> Self {
         Self {
             since: Instant::now(),
+            swept: false,
             checked: false,
             worker: None,
         }
     }
 
     fn poll(&mut self, enabled: bool, recording: bool, events: &SyncSender<ControllerEvent>) {
+        // Before the pending pass, and whatever the Meetings opt-in, remove
+        // folders a crashed or quitting import left without a manifest.
+        if !self.swept {
+            self.swept = true;
+            meeting::sweep::remove_orphaned_imports();
+        }
         if self.checked
             || !enabled
             || recording
