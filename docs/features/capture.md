@@ -562,16 +562,18 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     └── notch -> a black shape grows out of the notch (the measured one on
         macOS's pointer screen, read when the panel may go to that display:
         a new capture, an anchor change, the capsule coming back from
-        hidden, or the picker following the pointer to another display. A
-        capsule that is showing and not following stays put when the
-        pointer moves, whatever the notch there reads; left and right edges
-        snapped to the backing pixels, the panel moved under its middle and
-        pinned to the display it was measured on, so the panel and the notch
-        can't disagree. Pinned, Rune never follows the pointer for it, so
-        the picker's crossing is Hex's re-place: a changed measurement moves
-        display and inset together, and only the fallback that couldn't read
-        the screen keeps `UnderPointer`, where Rune can show one frame at
-        the previous inset before Hex re-places it; 185 pt
+        hidden, or while the picker is open. A capsule that is showing and
+        not following stays put when the pointer moves, whatever the notch
+        there reads; left and right edges snapped to the backing pixels, the
+        panel moved under its middle and pinned to the display it was
+        measured on, so the panel and the notch can't disagree. Pinned, Rune
+        doesn't follow the pointer for it; while the picker is open, Hex
+        re-reads the pointer's screen at the picker's display-check cadence
+        (`picker::DISPLAY_EVERY`, 100 ms) and re-places display and inset
+        together, so the capsule crosses with the picker within that
+        cadence. Only the fallback that couldn't read the screen keeps
+        `UnderPointer`, where Rune can show one frame at the previous inset
+        before Hex re-places it; 185 pt
         on a flat display, a pretend one the menu bar's height, so its panel
         lands within a point of the display's middle rather than exactly on
         it) into the pill and the same card, its content under the notch,
@@ -1054,8 +1056,12 @@ Checks:
   `following_places_only_for_a_changed_notch`: a showing capsule that isn't
   following never moves because the pointer's notch changed, a capsule coming
   back from hidden is placed before it shows rather than on the display it
-  last hid on, and following moves it only for a changed notch. The native
-  read and the re-place themselves have no test: they need two real displays.
+  last hid on, and following moves it only for a changed notch. Whether a
+  poll looks at the pointer's screen on its own (an open picker over a
+  pinned capsule with an overlay) is `follows_display`, tested by
+  `only_an_open_picker_over_a_pinned_capsule_looks_again`. The native
+  read, the re-place, and the 100 ms wake itself have no test: they need two
+  real displays.
 - Playground: `hex capsule-playground` (feature builds; hidden), or
   `scripts/build-capsule-playground.sh` for an ad-hoc signed
   `Hex Playground.app`, runs the real capsule in a window of its own against a

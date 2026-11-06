@@ -590,13 +590,15 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     let shown = !hidden || leaving > 0.0;
     // Shown, the capsule stays put. It moves to the pointer's display when
     // a new capture brings it, when its anchor changes, when it comes back
-    // from hidden, and while the picker follows the pointer; a notch read
-    // that changed on its own never moves it. Pinned to the measured
-    // screen, Rune's own follow never runs for it, so the picker's crossing
-    // is this block's: a changed read re-places display and inset together
-    // from one measurement. Only the fallback that couldn't read the screen
-    // keeps `UnderPointer`, where Rune can follow first and leave an inset
-    // from the other display for a frame. Without an overlay (the
+    // from hidden, and while the picker is open; a notch read that changed
+    // on its own never moves it. Pinned to the measured screen, Rune's own
+    // follow never runs for it, so the picker's crossing is this block's:
+    // while the picker is open, the poll is woken every `DISPLAY_EVERY` to
+    // re-read the pointer's screen, and a changed read re-places display and
+    // inset together from one measurement, so the capsule crosses with the
+    // picker within that cadence. Only the fallback that couldn't read the
+    // screen keeps `UnderPointer`, where Rune can follow first and leave an
+    // inset from the other display for a frame. Without an overlay (the
     // playground and stills) there is nothing to measure or place, so the
     // pretend notch stays.
     let replaced = std::mem::take(&mut s.replace);
@@ -634,6 +636,17 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     };
     let mut wake = s.surface.next_due().map(|due| due - now);
     wake = earliest(wake, s.flow.next_due(now).map(|due| due - now));
+    // Pinned to the measured screen, Rune doesn't follow the pointer for
+    // the capsule and nothing else wakes an idle poll, so look again at the
+    // picker's cadence while it is open: the read that crosses displays
+    // comes within one check of the picker's own.
+    if follows_display(
+        following,
+        s.surface.anchor == surface::Anchor::Notch,
+        s.overlay.is_some(),
+    ) {
+        wake = earliest(wake, Some(picker::DISPLAY_EVERY.as_secs_f64()));
+    }
     if let Some(since) = s.recording_since {
         let secs = (now - since).max(0.0);
         let whole = secs as u64;
@@ -766,7 +779,7 @@ enum Move {
 
 /// Decides a poll's [`Move`]. The panel goes to the pointer's display on a
 /// new capture (`replaced`), an anchor change (`moved`), a capsule coming
-/// back from hidden (`appearing`), or while the picker follows the pointer
+/// back from hidden (`appearing`), or while the picker is open
 /// (`following`). A showing capsule that isn't following keeps its place
 /// however the pointer's screen's notch reads now: no new capture, no new
 /// anchor, and no show means nobody asked it to move.
@@ -778,6 +791,15 @@ fn move_of(replaced: bool, moved: bool, following: bool, appearing: bool) -> Mov
     } else {
         Move::Stay
     }
+}
+
+/// Whether a poll must look at the pointer's screen again on its own: the
+/// picker is open (`following`) over a capsule pinned to a measured notch
+/// (`pinned`), with an overlay to place (`resolved`). Pinned, Rune's own
+/// follow never runs, so this wake is what lets the capsule cross displays
+/// with the picker.
+fn follows_display(following: bool, pinned: bool, resolved: bool) -> bool {
+    following && pinned && resolved
 }
 
 impl Move {
@@ -1115,7 +1137,7 @@ impl Compositor<CapsuleState> for TraceFrames {
 
 #[cfg(test)]
 mod moves {
-    use super::{Move, move_of};
+    use super::{Move, follows_display, move_of};
 
     /// Showing and not following the pointer, the capsule keeps its place:
     /// whatever the pointer's screen's notch reads now, nothing asked it to
@@ -1167,5 +1189,18 @@ mod moves {
         assert_eq!(move_of(false, false, true, false), Move::Follow);
         assert!(Move::Follow.places(true));
         assert!(!Move::Follow.places(false));
+    }
+
+    /// Only an open picker over a capsule pinned to a measured notch that
+    /// has an overlay to place asks a poll to look at the pointer's screen
+    /// again: a settled capsule keeps its place, the cursor card follows the
+    /// pointer itself, and without an overlay (the playground and stills)
+    /// there is nothing to place.
+    #[test]
+    fn only_an_open_picker_over_a_pinned_capsule_looks_again() {
+        assert!(follows_display(true, true, true));
+        assert!(!follows_display(false, true, true));
+        assert!(!follows_display(true, false, true));
+        assert!(!follows_display(true, true, false));
     }
 }
