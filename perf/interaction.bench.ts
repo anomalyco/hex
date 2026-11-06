@@ -33,15 +33,20 @@ export default bench({
     }
   },
   cases: {
-    // General → History (200 rows of 10,000) → Output → General.
+    // General → History (200 rows of 10,000) → Output → General. Hex keeps
+    // drawing for about a second after a pane switch, and strobe takes no
+    // sample from a click sent while the window still draws, so each click
+    // waits for the window to go idle first, between the clicks' phases.
     "switch-panes": {
       expect: { heading: "General" },
       primary: "ui.cpu",
       metrics: ui,
-      async run({ page }) {
-        await open(page, "nav-history", "history-list")
-        await open(page, "nav-output", "output-content")
-        await open(page, "nav-general", "basics")
+      async run({ page, phase }) {
+        await phase("history", () => open(page, "nav-history", "history-list"))
+        await page.idle()
+        await phase("output", () => open(page, "nav-output", "output-content"))
+        await page.idle()
+        await phase("general", () => open(page, "nav-general", "basics"))
       },
     },
     // Down History's list and back, at a trackpad's pace.
