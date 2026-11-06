@@ -559,9 +559,25 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     │   then the capsule folds into the menu-bar item
     ├── cursor -> recording stays under the menu bar; the "Send to" card
     │   (number, name, reason) opens at the pointer and its Sent stays there
-    └── notch -> a black shape grows out of the notch (185 pt wide; on a
-        flat display a pretend one the menu bar's height) into the pill and
-        the same card, its content under the notch, and shrinks back into it
+    └── notch -> a black shape grows out of the notch (the measured one on
+        macOS's pointer screen, read when the panel may go to that display:
+        a new capture, an anchor change, the capsule coming back from
+        hidden, or while the picker is open. A capsule that is showing and
+        not following stays put when the pointer moves, whatever the notch
+        there reads; left and right edges snapped to the backing pixels, the
+        panel moved under its middle and pinned to the display it was
+        measured on, so the panel and the notch can't disagree. Pinned, Rune
+        doesn't follow the pointer for it; while the picker is open, Hex
+        re-reads the pointer's screen at the picker's display-check cadence
+        (`picker::DISPLAY_EVERY`, 100 ms) and re-places display and inset
+        together, so the capsule crosses with the picker within that
+        cadence. Only the fallback that couldn't read the screen keeps
+        `UnderPointer`, where Rune can show one frame at the previous inset
+        before Hex re-places it; 185 pt
+        on a flat display, a pretend one the menu bar's height, so its panel
+        lands within a point of the display's middle rather than exactly on
+        it) into the pill and the same card, its content under the notch,
+        and shrinks back into it
         (capture_capsule/notch.rs). The playground's "Prototypes/Capture capsule/notch"
         story plays it on a 14-inch MacBook Pro and a 27-inch display, side
         by side or each whole, at their real sizes
@@ -573,8 +589,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     simulation), bars, or a line; only the capture adds a red dot or a small
     screen, the cue alternating each loop
     Gap: only the shapes are prototyped; the menu-bar item's capture list
-    is not, the app doesn't read the screen's notch (the overlay still puts
-    the pill's content under it), and no flow but list has run live
+    is not, the app reads the notch's edges but not its height (the walls
+    run up past the screen's top), and no flow but list has run live
 
 The on-screen picker                     // capture.picker (capture_capsule/picker.rs)
 ├── A full-screen Rune overlay on the pointer's display, under the capsule,
@@ -1009,6 +1025,12 @@ Checks:
   `the_menu_bar_hint_is_brief_and_its_chips_send`,
   `the_cursor_card_lists_its_guesses_at_the_pointer`,
   `the_notch_hangs_from_the_top_edge`,
+  `the_default_notch_rests_where_it_always_has`,
+  `the_notch_shell_fits_a_measured_notch`,
+  `notch_content_centres_on_the_notch`,
+  `a_wide_recording_row_stays_inside_the_notch_shell`,
+  `a_measured_notch_refreshes_the_entry_and_the_rest`,
+  `a_measured_notch_never_tucks_under_reduce_motion`,
   `the_menu_bar_flow_folds_up_toward_the_menu_bar`, goldens
   `tests/golden/capture-capsule-*.png`, and
   `the_capsule_moves_inside_its_panel_and_comes_to_rest`, which traces every
@@ -1017,7 +1039,29 @@ Checks:
   motion-lint. `cues_mark_start_stop_sent_and_taking_back`,
   `nothing_heard_says_so`, and `a_capture_with_no_words_says_nothing_was_heard`
   cover the tones and the empty transcript. Observed (Oct 27, worker, r19 motion): all 28
-  capsule runs, Calm and Reduce Motion, pass lint.
+  capsule runs, Calm and Reduce Motion, pass lint. In
+  [notch.rs](../../src/rune_ui/capture_capsule/notch.rs):
+  `the_default_geometry_is_the_pretend_notch`,
+  `a_measured_notch_moves_the_panel_with_its_edges`,
+  `a_two_x_notch_lands_on_whole_pixels`, and
+  `edges_between_pixels_snap_outward_or_inward`. Flat displays go through
+  the same measured path with the pretend notch, so their panel is
+  pixel-snapped within a point of the display's middle, not exactly on it.
+  Which poll re-measures and re-places is decided by `move_of` in
+  [mod.rs](../../src/rune_ui/capture_capsule/mod.rs), tested by
+  `a_showing_capsule_that_is_not_following_stays_put`,
+  `a_new_capture_places_the_capsule_on_the_pointers_display`,
+  `an_anchor_change_places_the_capsule_again`,
+  `a_capsule_coming_back_from_hidden_places_on_the_pointers_display`, and
+  `following_places_only_for_a_changed_notch`: a showing capsule that isn't
+  following never moves because the pointer's notch changed, a capsule coming
+  back from hidden is placed before it shows rather than on the display it
+  last hid on, and following moves it only for a changed notch. Whether a
+  poll looks at the pointer's screen on its own (an open picker over a
+  pinned capsule with an overlay) is `follows_display`, tested by
+  `only_an_open_picker_over_a_pinned_capsule_looks_again`. The native
+  read, the re-place, and the 100 ms wake itself have no test: they need two
+  real displays.
 - Playground: `hex capsule-playground` (feature builds; hidden), or
   `scripts/build-capsule-playground.sh` for an ad-hoc signed
   `Hex Playground.app`, runs the real capsule in a window of its own against a

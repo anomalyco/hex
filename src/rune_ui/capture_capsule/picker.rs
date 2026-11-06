@@ -59,8 +59,10 @@ pub(crate) const FULL_SCREEN: &str = "Full screen · Click to record";
 const HIDE_AFTER_S: f64 = 0.35;
 /// A pick that started no capture this long after shows the picker again.
 const RETRY_AFTER_S: f64 = 2.0;
-/// How often the open picker looks for the pointer on another display.
-const DISPLAY_EVERY: Duration = Duration::from_millis(100);
+/// How often the open picker looks for the pointer on another display. The
+/// capsule, pinned to a measured screen, re-reads it on the same cadence so
+/// the two cross displays together.
+pub(super) const DISPLAY_EVERY: Duration = Duration::from_millis(100);
 
 // ─── Geometry ────────────────────────────────────────────────────────────────
 
