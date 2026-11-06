@@ -14,7 +14,7 @@ use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEve
 use crate::dictation::{
     ClipSource, DictationCapture, DictationClip, Finish, POST_RELEASE_TAIL, ReleaseTail,
 };
-use crate::feedback::{self, Tone};
+use crate::feedback;
 use crate::suppression::PendingInputEvents;
 use crate::transcription::engine::TranscriptionEngine;
 
@@ -635,7 +635,7 @@ impl Owner {
                     // A release that will transcribe sounds at once, not after
                     // its tail, and a muted output is restored first.
                     self.capture
-                        .end_recording_environment_then(|| feedback::play(Tone::DictationStop));
+                        .end_recording_environment_then(feedback::deferred_stop());
                 }
                 let (tail, deferred) = if announced {
                     self.drain_tail(at, feedback::stop_tone_length())

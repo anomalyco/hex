@@ -1282,6 +1282,7 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
         the microphone is open and the hold counts
   Dictation pasted >= 2 s after the stop tone -> Done tone      // dictate.done-tone
      -> Pasted sooner (the usual case) -> Stop tone only; `DONE_MIN_AFTER_STOP`
+     -> Stop tone still waiting on Lower audio -> Stop only, never done first
      -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
   Failure -> Error tone; wake/sleep keep macOS Pop/Tink      // dictate.error-tone
      -> Classic has none: macOS Basso, Signature's error on Windows and Linux
@@ -1360,7 +1361,8 @@ restored from git; it has no done tone, errors play macOS Basso as they
 did, and onboarding success plays its stop sound (the other sets have their own).
 The done sound of every set plays only when the paste lands at least
 `DONE_MIN_AFTER_STOP` (2 s) after the stop sound, as after a slow rewrite; the
-Sounds sheet's demo still plays it. Checked by `done_plays_only_after_a_slow_paste`.
+Sounds sheet's demo still plays it. Checked by
+`done_plays_only_after_a_slow_paste` and `done_never_plays_before_a_delayed_stop_tone`.
 
 Each set is a folder in `resources/audio/sounds/` made by
 [`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)
