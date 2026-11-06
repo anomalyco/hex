@@ -608,7 +608,7 @@ pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
     ]
 }
 
-pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
+pub(super) fn listener_card(ui: &Ui, p: Paint) -> (String, El) {
     let running = ui.running();
     let status = match &ui.view {
         Some(view) => tr(&view.listener.status).to_string(),
@@ -639,6 +639,7 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
         (true, ShortcutMode::Hold) => tr_fill("Ready anywhere · Hold {} to dictate", &shortcut),
         (false, _) => tr_fill("Enable Hex to dictate into any app with {}", &shortcut),
     };
+    let search = format!("{status} {hint} {} {}", tr("Enable"), tr("Disable"));
     let failure = ui
         .view
         .as_ref()
@@ -653,11 +654,12 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
                 .as_ref()
                 .and_then(|view| view.operation_error.clone())
         });
+    let action_label = if running { tr("Disable") } else { tr("Enable") };
     let action = if running {
         button(
             p,
             "toggle-listening",
-            tr("Disable"),
+            action_label,
             ButtonKind::Secondary,
             |ui: &mut Ui, _| ui.send(Request::Desktop(DesktopAction::StopListening)),
         )
@@ -665,7 +667,7 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
         button(
             p,
             "toggle-listening",
-            tr("Enable"),
+            action_label,
             ButtonKind::Primary,
             |ui: &mut Ui, _| ui.send(Request::Desktop(DesktopAction::StartListening)),
         )
@@ -714,7 +716,7 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
     if let Some(error) = error {
         rows.extend(error_notes(p, &error));
     }
-    section(p, "listening", tr("Status"), rows)
+    (search, section(p, "listening", tr("Status"), rows))
 }
 
 /// What a shortcuts portal granted for `target`, since the desktop decides

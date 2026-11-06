@@ -223,8 +223,9 @@ Settings search (`settings-search`, every OS): while on, General starts with
 a single-line search field. Typing keeps only the rows and cards whose title
 or description matches case-insensitively; the Advanced fold's rows match
 without opening it, and the fold control hides while a query is set.
-Permissions and errors always stay; the listener and desktop-shortcut cards
-stay while their titles match, and count as a match. Nothing matching shows
+Permissions and errors always stay; the listener card matches its status,
+hint, and Enable/Disable text, and the desktop-shortcut card matches its
+title, and either counts as a match when shown. Nothing matching shows
 "No settings match" with the kit's empty state, and clearing the field
 restores the pane. The gate is the pane
 ([general/search.rs](../../src/rune_ui/general/search.rs) reads

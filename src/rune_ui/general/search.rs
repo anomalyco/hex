@@ -40,9 +40,12 @@ pub(crate) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         .children(os::permissions_section(ui, p))
         .children(os::error_section(ui, p));
     let mut matched = false;
-    if ui.platform.caps.listener_control && (!searching || matches(query, tr("Status"), None)) {
-        content = content.child(s::listener_card(ui, p));
-        matched |= searching;
+    if ui.platform.caps.listener_control {
+        let (text, card) = s::listener_card(ui, p);
+        if !searching || matches(query, &text, None) {
+            content = content.child(card);
+            matched |= searching;
+        }
     }
     if !ui.records_shortcuts() {
         let title = tr("Desktop shortcuts");

@@ -1013,14 +1013,13 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Vec
         );
     }
     if clipboard_note_shown(ui) {
+        let copy = tr(
+            "This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it.",
+        );
         rows.push_described(
             tr("Restore clipboard on GNOME"),
-            Some(tr("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it.")),
-            note(
-                "clipboard-restore-note",
-                tr("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it."),
-                p.muted(),
-            ),
+            Some(copy),
+            note("clipboard-restore-note", copy, p.muted()),
         );
     }
     rows.into_rows()

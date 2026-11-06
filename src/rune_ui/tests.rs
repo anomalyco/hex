@@ -475,7 +475,7 @@ fn settings_search_keeps_permissions_and_status_cards() {
     assert!(rt.find("desktop-shortcuts").is_some());
     assert!(rt.find("settings-empty").is_none());
 
-    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("status"));
+    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("enabled"));
     settle(&mut rt);
     assert!(rt.find("listening").is_some());
     assert!(rt.find("settings-empty").is_none());
