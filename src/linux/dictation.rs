@@ -811,7 +811,7 @@ pub(crate) fn run(
                     finishing = Some(Finishing {
                         raw: recording_raw,
                         ..begin_finishing(&capture, released_at, print.take(), || {
-                            suppressor.restore_then(|| feedback::play(Tone::DictationStop))
+                            suppressor.restore_then(feedback::deferred_stop())
                         })
                     });
                 }
