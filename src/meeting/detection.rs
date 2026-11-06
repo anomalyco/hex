@@ -41,14 +41,23 @@ const CALL_SITES: [(&str, MeetingSource); 4] = [
     ("app.gather.town", MeetingSource::Gather),
 ];
 
-/// The websites Labs › More call apps names. Off, they are unknown pages and
-/// a call there stays a plain browser call.
-const MORE_CALL_SITES: [(&str, MeetingSource); 5] = [
-    ("voice.google.com", MeetingSource::GoogleVoice),
-    ("messenger.com", MeetingSource::Messenger),
-    ("teams.live.com", MeetingSource::Teams),
-    ("facetime.apple.com", MeetingSource::FaceTime),
-    ("web.groupme.com", MeetingSource::GroupMe),
+/// The websites Labs › More call apps names, with the label an offer's "…"
+/// saves as that site's provider. Teams and FaceTime pages have their own
+/// choice, shown apart from the apps' names.
+const MORE_CALL_SITES: [(&str, MeetingSource, &str); 5] = [
+    (
+        "voice.google.com",
+        MeetingSource::GoogleVoice,
+        "Google Voice",
+    ),
+    ("messenger.com", MeetingSource::Messenger, "Messenger"),
+    ("teams.live.com", MeetingSource::Teams, "Teams (web)"),
+    (
+        "facetime.apple.com",
+        MeetingSource::FaceTime,
+        "FaceTime (web)",
+    ),
+    ("web.groupme.com", MeetingSource::GroupMe, "GroupMe"),
 ];
 
 /// How long a condition has held across observations, by the monotonic
@@ -111,8 +120,17 @@ fn known_provider_label(key: &str) -> Option<&'static str> {
                 .find(|(host, _)| *host == key)
                 .map(|(_, source)| source.label())
         })
+        // A Labs › More call apps page's own label; sites cannot be calls
+        // while the lab is off, so this changes nothing then.
         .or_else(|| {
-            // The lab's names are unknown while it is off, exactly as before.
+            MORE_CALL_SITES
+                .iter()
+                .find(|(host, _, _)| *host == key)
+                .map(|(_, _, label)| *label)
+        })
+        .or_else(|| is_webex_host(key).then_some(MeetingSource::Webex.label()))
+        .or_else(|| {
+            // The lab's app names are unknown while it is off, as before.
             if !crate::labs::more_call_apps() {
                 return None;
             }
@@ -120,13 +138,6 @@ fn known_provider_label(key: &str) -> Option<&'static str> {
                 .iter()
                 .find(|(known, _)| *known == key)
                 .map(|(_, label)| *label)
-                .or_else(|| {
-                    MORE_CALL_SITES
-                        .iter()
-                        .find(|(host, _)| *host == key)
-                        .map(|(_, source)| source.label())
-                })
-                .or_else(|| is_webex_host(key).then_some(MeetingSource::Webex.label()))
         })
 }
 
@@ -842,8 +853,8 @@ fn call_site_source(host: &str, more_call_apps: bool) -> Option<MeetingSource> {
     }
     MORE_CALL_SITES
         .iter()
-        .find(|(known, _)| *known == host)
-        .map(|(_, source)| *source)
+        .find(|(known, _, _)| *known == host)
+        .map(|(_, source, _)| *source)
 }
 
 /// The last page a browser showed while it held the microphone. The call's
@@ -1539,6 +1550,77 @@ mod tests {
         assert_eq!(groupme.source, MeetingSource::GroupMe);
         assert_eq!(groupme.required_stability(), BROWSER_STABLE_FOR);
         assert_eq!(call.required_stability(), BROWSER_STABLE_FOR);
+    }
+
+    #[test]
+    fn teams_and_facetime_pages_have_their_own_provider_and_choice() {
+        let teams = super::candidate_from_microphone(
+            &brave(),
+            &context(
+                "Brave Browser",
+                Some("https://teams.live.com/meet/123"),
+                "A call",
+            ),
+            true,
+        )
+        .unwrap();
+        assert_eq!(teams.source, MeetingSource::Teams);
+        // The page is named after the service; its provider is its own.
+        assert_eq!(teams.offer_title(), "Microsoft Teams call detected");
+        let provider = teams.provider().unwrap();
+        assert_eq!(provider.key, "teams.live.com");
+        assert_eq!(provider.label, "Teams (web)");
+
+        let web = MeetingProviderChoice {
+            key: "teams.live.com".into(),
+            label: "Teams (web)".into(),
+            policy: MeetingPolicy::AlwaysRecord,
+        };
+        assert_eq!(
+            teams.policy(std::slice::from_ref(&web)),
+            MeetingPolicy::AlwaysRecord
+        );
+        // The Teams app's choice does not cover its website.
+        let app = MeetingProviderChoice {
+            key: "com.microsoft.teams2".into(),
+            label: "Microsoft Teams".into(),
+            policy: MeetingPolicy::NeverOffer,
+        };
+        assert_eq!(
+            teams.policy(std::slice::from_ref(&app)),
+            MeetingPolicy::Ask,
+            "the app's choice is not the page's"
+        );
+        assert_eq!(
+            teams.policy(&[app, web]),
+            MeetingPolicy::AlwaysRecord,
+            "the page's own choice wins"
+        );
+
+        let facetime = super::candidate_from_microphone(
+            &brave(),
+            &context(
+                "Brave Browser",
+                Some("https://facetime.apple.com/join/abc"),
+                "A call",
+            ),
+            true,
+        )
+        .unwrap();
+        assert_eq!(facetime.source, MeetingSource::FaceTime);
+        assert_eq!(facetime.offer_title(), "FaceTime call detected");
+        let provider = facetime.provider().unwrap();
+        assert_eq!(provider.key, "facetime.apple.com");
+        assert_eq!(provider.label, "FaceTime (web)");
+
+        assert_ne!(
+            known_provider_label("teams.live.com"),
+            known_provider_label("com.microsoft.teams2")
+        );
+        assert_ne!(
+            known_provider_label("facetime.apple.com"),
+            known_provider_label("com.apple.FaceTime")
+        );
     }
 
     #[test]

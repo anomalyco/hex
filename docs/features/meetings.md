@@ -292,10 +292,13 @@ the browser's page, pages on `voice.google.com` (Google Voice), `messenger.com`,
 `web.groupme.com` are named, and any `webex.com` subdomain is Webex, with one
 `webex.com` provider choice covering them all. Settings › Meetings › Detected
 calls lists the seven apps, Google Voice, Messenger, and GroupMe only while
-the lab is on (`app_settings::known_meeting_providers`); a Teams or FaceTime
-page uses that app's choice, and a Webex page's `webex.com` choice is made
-from an offer's "…", so those three have no row of their own. Their Ask /
-Always record / Never offer choices work as the existing services' do. Off,
+the lab is on (`app_settings::known_meeting_providers`). A Teams page gets its
+own `teams.live.com` choice from an offer's "…", shown as "Teams (web)", and a
+FaceTime page its own `facetime.apple.com` choice ("FaceTime (web)"); neither
+follows the Teams or FaceTime app's choice. A Webex page's `webex.com` choice
+is made the same way and covers every subdomain, so those three have no
+always-listed row. Their Ask / Always record / Never offer choices work as the
+existing services' do. Off,
 offers are unchanged: a Signal or Telegram process is not a meeting app, and
 those pages are unknown pages (a plain "Browser call" after 20 s). The
 microphone app list in `hex meeting probe` and the logs still resolves and

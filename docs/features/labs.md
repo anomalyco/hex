@@ -763,10 +763,12 @@ count after 2 s. A browser on Google Voice (`voice.google.com`), Messenger
 subdomain is named after the service; these names need the browser's page,
 which Hex reads on macOS ([meetings.md](meetings.md#detect-and-offer)).
 Detected calls lists the seven apps, Google Voice, Messenger, and GroupMe
-while the lab is on. Teams and FaceTime pages use those apps' own choices,
-and a Webex page's `webex.com` choice is set from an offer's "…", so none of
-the three has a separate row; Ask / Always record / Never offer work as for
-the existing services. Off, offers are unchanged: those processes are not meeting apps,
+while the lab is on. A Teams page gets its own `teams.live.com` choice from
+an offer's "…", shown as "Teams (web)", and a FaceTime page its own
+`facetime.apple.com` choice ("FaceTime (web)"); neither follows the Teams or
+FaceTime app's choice. A Webex page's `webex.com` choice is set the same way
+and covers every subdomain, so those three have no always-listed row; Ask /
+Always record / Never offer work as for the existing services. Off, offers are unchanged: those processes are not meeting apps,
 the pages stay unknown pages ("Browser call") after 20 s, and Detected calls
 lists exactly the services it did before. Checks:
 `more_call_apps_are_unknown_until_their_lab_is_on`,
