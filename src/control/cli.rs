@@ -555,7 +555,7 @@ pub fn run(command: ControlCli) -> u8 {
 }
 
 /// `hex model install`: the running Hex downloads in the background;
-/// without one, Linux and Windows download here.
+/// without one, Linux and Windows download and select here.
 fn install_model(model: Option<String>, language: Option<String>, output: Output) -> u8 {
     let model = match model {
         Some(model) => model,
@@ -566,14 +566,93 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
     };
     #[cfg(not(target_os = "macos"))]
     if !running() {
-        return report(selection(Some(model), language).and_then(|selection| {
-            crate::transcription::local_transcriber::install(
-                &selection,
-                &std::sync::atomic::AtomicBool::new(false),
-            )
-        }));
+        let selection = match selection(Some(model), language) {
+            Ok(selection) => selection,
+            Err(error) => return fail(&format!("{error:#}")),
+        };
+        if let Err(error) = crate::transcription::local_transcriber::install(
+            &selection,
+            &std::sync::atomic::AtomicBool::new(false),
+        ) {
+            return fail(&format!("{error:#}"));
+        }
+        return select_installed(&selection, output);
     }
     send(ControlCommand::ModelInstall { model, language }, output)
+}
+
+/// `model install` with no Hex running: make the switch the app would have
+/// made. A Hex that started while the model downloaded takes the choice;
+/// otherwise it is saved under the service lock `settings apply` uses, so a
+/// starting Hex is never written behind.
+#[cfg(not(target_os = "macos"))]
+fn select_installed(
+    selection: &crate::transcription::models::TranscriptionSelection,
+    output: Output,
+) -> u8 {
+    if running() {
+        return select_in_running_hex(selection, output);
+    }
+    #[cfg(target_os = "linux")]
+    let lock = crate::desktop::instance::acquire("service");
+    #[cfg(not(target_os = "linux"))]
+    let lock: color_eyre::Result<()> = Ok(());
+    match lock {
+        Ok(_lock) if !running() => match save_selection(selection) {
+            Ok(message) => {
+                println!("{message}");
+                0
+            }
+            Err(error) => fail(&format!(
+                "the model is installed, but selecting it failed: {error:#}"
+            )),
+        },
+        Ok(_) => select_in_running_hex(selection, output),
+        #[cfg(target_os = "linux")]
+        Err(_) if crate::linux::service::instance_answers() => fail(&format!(
+            "the model is installed, but an older Hex is still running; \
+             run `hex restart`, then `hex model use {}`",
+            selection.model.as_str()
+        )),
+        Err(_) => fail(&format!(
+            "the model is installed, but Hex is starting and holds its settings; \
+             run `hex model use {}` once it answers",
+            selection.model.as_str()
+        )),
+    }
+}
+
+/// Hands a downloaded model to a Hex that started while it downloaded.
+#[cfg(not(target_os = "macos"))]
+fn select_in_running_hex(
+    selection: &crate::transcription::models::TranscriptionSelection,
+    output: Output,
+) -> u8 {
+    send(
+        ControlCommand::ModelUse {
+            model: selection.model.as_str().to_owned(),
+            language: Some(selection.language.clone()),
+        },
+        output,
+    )
+}
+
+/// Records a downloaded model as the selected one, as the app's own switch
+/// does. An unchanged selection is left alone.
+#[cfg(not(target_os = "macos"))]
+fn save_selection(
+    selection: &crate::transcription::models::TranscriptionSelection,
+) -> color_eyre::Result<String> {
+    let name = crate::transcription::models::definition(selection.model).name;
+    let mut settings = crate::app_settings::AppSettings::load()?;
+    if settings.transcription == *selection {
+        return Ok(format!(
+            "{name} ({}) is already selected",
+            selection.language
+        ));
+    }
+    settings.save_transcription(selection.clone())?;
+    Ok(format!("Switched to {name} ({})", selection.language))
 }
 
 /// `hex model import`: checks, copies, and records the file here, in this

@@ -2592,6 +2592,30 @@ mod tests {
     }
 
     #[test]
+    fn saving_a_selection_persists_it_and_keeps_other_settings() {
+        let dir = TestSettingsDir::new("save-selection");
+        let mut settings = AppSettings {
+            sound_effects: false,
+            microphone: Some("Test microphone".into()),
+            ..AppSettings::default()
+        };
+        let previous = settings.transcription.clone();
+        let selection = TranscriptionSelection {
+            model: TranscriptionModelId::WhisperLargeV3Turbo,
+            language: "fr".into(),
+        };
+        settings
+            .save_transcription_with(selection.clone(), |next| next.write_to(&dir.path))
+            .unwrap();
+
+        let (persisted, _) = AppSettings::read_from(&dir.path).unwrap();
+        assert_eq!(persisted.transcription, selection);
+        assert_eq!(persisted.microphone.as_deref(), Some("Test microphone"));
+        assert!(!persisted.sound_effects);
+        assert!(persisted.transcription_recents.contains(&previous));
+    }
+
+    #[test]
     fn invalid_remembered_languages_are_not_offered_by_model_switching() {
         let mut settings = AppSettings {
             transcription_recents: vec![
