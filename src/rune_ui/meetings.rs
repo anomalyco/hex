@@ -90,8 +90,9 @@ pub(super) struct Meeting {
     pub(super) app: Option<String>,
     pub(super) summary: Option<String>,
     pub(super) notes_running: bool,
-    /// The exported Markdown still exists, so trashing takes it too.
-    pub(super) has_markdown: bool,
+    /// What the overflow menu reveals: the exported Markdown while it still
+    /// exists, else the recording folder. Trash takes the Markdown too.
+    pub(super) reveal: crate::meeting::RevealTarget,
     pub(super) error: Option<String>,
     pub(super) export_error: Option<String>,
     pub(super) notes_error: Option<String>,
@@ -340,7 +341,9 @@ impl MeetingsPane {
                 app: None,
                 summary: None,
                 notes_running: false,
-                has_markdown: false,
+                reveal: crate::meeting::RevealTarget::Folder(
+                    format!("/Users/kit/Library/Application Support/hex/meetings/{id}").into(),
+                ),
                 error: None,
                 export_error: None,
                 notes_error: None,
@@ -368,7 +371,9 @@ impl MeetingsPane {
             38,
         );
         notes.app = Some("Zoom".into());
-        notes.has_markdown = true;
+        notes.reveal = crate::meeting::RevealTarget::Markdown(
+            "/Users/kit/Documents/Hex Meetings/Arcade launch plan.md".into(),
+        );
         notes.summary = Some(
             "One login for every Anomaly Arcade game, aiming for twenty to thirty games over the next couple of months. The build screen needs a proposal before more polish."
                 .into(),
@@ -874,7 +879,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
                     button(
                         p,
                         "meeting-confirm-delete",
-                        if meeting.has_markdown {
+                        if meeting.reveal.is_markdown() {
                             tr("Trash recording & Markdown")
                         } else {
                             tr("Trash recording")
@@ -1155,16 +1160,18 @@ fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> Option
         items += 1;
     }
     if !active {
-        let id = meeting.id.clone();
+        // The label and the file it reveals are one value, so they can't
+        // disagree.
+        let reveal = meeting.reveal.clone();
         menu = menu.item(
-            MenuItem::new(if meeting.has_markdown {
+            MenuItem::new(if reveal.is_markdown() {
                 tr("Reveal Markdown")
             } else {
                 tr("Reveal files")
             })
             .on_select(move |ui: &mut Ui| {
                 ui.open = None;
-                ask(ui, MeetingRequest::Reveal(id.clone()));
+                ask(ui, MeetingRequest::Reveal(reveal.clone()));
             }),
         );
         items += 1;

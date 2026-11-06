@@ -1390,6 +1390,42 @@ fn the_overflow_menu_copies_the_summary_and_asks_for_new_notes() {
 }
 
 #[test]
+fn reveal_markdown_asks_for_the_exported_file_and_reveal_files_for_the_recording() {
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    tap(&mut rt, "meeting-more");
+    assert!(
+        texts(&rt).iter().any(|text| text == "Reveal Markdown"),
+        "the meeting with a Markdown copy"
+    );
+    tap(&mut rt, "meeting-actions-item1");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Meeting(MeetingRequest::Reveal(
+            crate::meeting::RevealTarget::Markdown(
+                "/Users/kit/Documents/Hex Meetings/Arcade launch plan.md".into()
+            )
+        ))]
+    );
+
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    tap(&mut rt, "meeting-preview-design");
+    tap(&mut rt, "meeting-more");
+    assert!(
+        texts(&rt).iter().any(|text| text == "Reveal files"),
+        "no Markdown copy to reveal"
+    );
+    tap(&mut rt, "meeting-actions-item0");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Meeting(MeetingRequest::Reveal(
+            crate::meeting::RevealTarget::Folder(
+                "/Users/kit/Library/Application Support/hex/meetings/preview-design".into()
+            )
+        ))]
+    );
+}
+
+#[test]
 fn copy_section_copies_one_chapter() {
     let rt = runtime("meetings", true, PANE_SIZE);
     assert!(rt.find("chapters").is_none(), "no chapters, no section");

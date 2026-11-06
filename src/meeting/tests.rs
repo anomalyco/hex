@@ -475,6 +475,23 @@ fn deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording(
     fs::remove_dir_all(base).unwrap();
 }
 
+#[test]
+fn the_exported_markdown_is_the_reveal_target_only_while_it_exists() {
+    let (base, directory) = finished_meeting("reveal", "Design sync");
+    let manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    assert_eq!(
+        RevealTarget::for_meeting(&manifest, &directory),
+        RevealTarget::Markdown(export.clone())
+    );
+    fs::remove_file(&export).unwrap();
+    assert_eq!(
+        RevealTarget::for_meeting(&read_manifest(&directory).unwrap(), &directory),
+        RevealTarget::Folder(directory.clone())
+    );
+    fs::remove_dir_all(base).unwrap();
+}
+
 fn retention_manifest(
     id: &str,
     status: MeetingStatus,
