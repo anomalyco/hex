@@ -139,8 +139,8 @@ cargo run -- devices
 cargo run -- model devices
 ```
 
-Install the selected model (with Hex stopped, `model install` downloads in
-this process), load it, and transcribe a WAV file:
+Install the selected model (with Hex stopped, `model install` downloads and
+selects it in this process), load it, and transcribe a WAV file:
 
 ```powershell
 cargo run -- model install
