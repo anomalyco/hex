@@ -459,8 +459,7 @@ pub(crate) fn current_pane(ui: &Ui) -> &'static str {
     }
 }
 
-/// The OS's rules for a shortcut, the ones Settings applies when recording
-/// one; shared with `hex settings set`.
+/// The OS's rules for a shortcut, as Settings records it and `hex settings set`.
 pub(crate) fn shortcut_rule(
     slot: crate::app_settings::HotkeySlot,
     binding: &HotkeyBinding,
@@ -481,10 +480,11 @@ pub(crate) fn shortcut_rule(
         HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
         #[cfg(target_os = "macos")]
         HotkeySlot::Screenshot => ShortcutTarget::Screenshot,
-        // Labs › Second dictation shortcut and Screenshots are macOS's;
-        // elsewhere a saved one meets the dictation shortcut's rules.
+        #[cfg(target_os = "macos")]
+        HotkeySlot::ScreenshotRecord => ShortcutTarget::ScreenshotRecord,
+        // Labs' shortcuts are macOS's; elsewhere a saved one meets dictation's rules.
         #[cfg(not(target_os = "macos"))]
-        HotkeySlot::SecondDictation | HotkeySlot::Screenshot => ShortcutTarget::Dictation,
+        _ => ShortcutTarget::Dictation,
     };
     host::validate_hotkey(target, binding)
 }

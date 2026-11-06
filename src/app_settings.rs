@@ -36,7 +36,9 @@ pub use labs::*;
 pub use meeting_folder::default_meeting_output_folder;
 pub use meetings::*;
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
-pub use screenshots::{ScreenshotSettings, screenshot_hotkey, screenshot_settings};
+pub use screenshots::{
+    ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey, screenshot_settings,
+};
 
 static RECORDING_DUCK_VOLUME: AtomicU32 = AtomicU32::new(0.2_f32.to_bits());
 // Until settings load, "While dictating" is its default, not Mute: the
@@ -1102,6 +1104,15 @@ impl AppSettings {
             tracing::warn!("cleared a left-click capture replay shortcut");
             self.capture.replay_hotkey = None;
         }
+        if self
+            .screenshots
+            .record_hotkey
+            .as_ref()
+            .is_some_and(HotkeyBinding::is_bare_primary_click)
+        {
+            tracing::warn!("cleared a left-click screenshot record shortcut");
+            self.screenshots.record_hotkey = None;
+        }
     }
 }
 
@@ -1131,6 +1142,8 @@ pub enum HotkeySlot {
     Cancel,
     /// Labs › Screenshots (macOS).
     Screenshot,
+    /// Labs › Screenshots' record shortcut (macOS, with Annotate).
+    ScreenshotRecord,
 }
 
 impl AppSettings {
@@ -1181,6 +1194,12 @@ impl AppSettings {
         }
         if slot != HotkeySlot::Screenshot && cfg!(target_os = "macos") && self.labs.screenshots {
             others.push(self.screenshots.hotkey.clone());
+        }
+        if slot != HotkeySlot::ScreenshotRecord
+            && self.screenshot_recording_available()
+            && let Some(record) = &self.screenshots.record_hotkey
+        {
+            others.push(record.clone());
         }
         hotkey_conflicts(binding, others)
     }

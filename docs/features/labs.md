@@ -82,7 +82,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        the Meetings pane (#1271), whose note names the lab (#1274)
 │                                        // checks: floats_only_by_opt_in_*, looks_for_nothing_while_the_lab_is_off (linux/meeting_capsules.rs),
 │                                        // gnome_meeting_capsules_is_its_own_bit_*; Rune's xwayland pointer tests; not run on a GNOME session
-├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
+├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.record_hotkey (unbound) + screenshots.folder (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
 ├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
 │                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
@@ -955,6 +955,8 @@ shortcut uses) opens a second copy of Annotate's capture picker
                       slides in from past the right edge on the HUD's spring and out the same way
                       (Reduce Motion: a fade); ✕ shows inside its top-left corner on hover;
                       click -> opens it in the editor, drag -> the file, ✕ -> closes
+                      a dictation while it shows -> held, "Listening…" then "Processing…" on it;
+                        the words open the shot in the editor with them, never pasted
                       a failure -> the error tone; there is no success sound (Hex has no shutter cue)
 ```
 
@@ -973,10 +975,28 @@ editor
 ├── Copy (⌘C)     -> the edited PNG on the clipboard
 ├── Save (⌘S)     -> a new file in screenshots.folder; the first shot is never changed
 ├── Send to…      -> a list of open OpenCode sessions (typing searches title, folder, id,
-│                    as Annotate's; ↑↓ Enter); the PNG goes to the session as an image
+│                    as Annotate's; ↑↓ Enter); the PNG goes to the session as an image,
+│                    with the words said over it as its text ("Screenshot" without any);
+│                    picked while a dictation goes, it waits for the words
+├── dictation (the shortcut, or the microphone under the shot, which starts and finishes
+│   one like `hex dictation toggle`)
+│                 -> talks over the shot: the words show under it (3 lines, then "…"),
+│                    each dictation's added; never pasted; ✕ beside them clears them
 ├── a drag on the panel's edge or the toolbar's gap -> moves it, kept on the display
-└── Escape        -> ends the text, else closes the list, else closes the editor
+└── Escape        -> cancels a dictation over the shot (its words and a waiting send never
+                     land; the panel stays), else ends the text, else closes the list,
+                     else closes the editor
 ```
+
+Talking over a shot
+([screenshots/narration.rs](../../src/screenshots/narration.rs)) is the
+shortcut's own dictation, on the loaded model and through the mode's
+processing; only where its text lands changes. The listener asks at a
+dictation's start whether the editor (first) or the thumbnail shows, and
+at its finish hands the transcript to that shot instead of pasting it, as
+`hex dictation stop --print` does. A short, silent, cancelled, or failed
+clip lands nothing. Dictation never takes Escape, so the editor's Escape
+cancels it through the listener.
 
 The edited shot is drawn on the GPU at the shot's own pixels, the marks
 as the editor draws them (an offscreen Rune view), then cropped; without
@@ -989,6 +1009,42 @@ Left to do: no blur or highlight tool, colour or stroke choice, moving or
 deleting a single mark, redo, or zoom; a shot larger than the GPU's
 largest texture exports without its marks; Send lists sessions only, not
 Annotate's rules; no Save as or drag out of the editor.
+
+Recording the screen
+([screenshots/recording.rs](../../src/screenshots/recording.rs)) needs
+Annotate on (`capture.enabled`): a recording is an Annotate capture
+(`CaptureCommand::Clip`) on capture-core's recorder, narrated from the
+dictation timeline. Its shortcut (`screenshots.record_hotkey`) is unbound
+until the drawer's Record screen row sets one (a key is required; the
+trash button clears it); without Annotate the row says "Needs Annotate".
+
+```ts
+record shortcut  -> the same picker, "Full screen · Click to record"; area, window (Space), or display
+│                   while an Annotate capture records -> nothing
+├── recording    -> Annotate's capsule shows it recording, as any capture; talk to narrate
+├── record shortcut again (or the capsule's stop) -> stops; the capsule folds unless it failed
+│                   ├── no clipboard, no router: nothing is sent or copied on its own
+│                   └── the corner card, from the first frame, its length in a pill
+│                       click -> the editor; drag -> the movie; a dictation never lands on it
+└── editor       -> the frame above a filmstrip of 12 frames; a drag on the strip moves the
+                    nearer end of the span kept (never under 0.5 s) and shows the frame there;
+                    the words said inside the span under it, read-only; no marks, no Copy
+                    ├── Save     -> "Hex Recording 2026-11-04 at 14.03.22.mp4" in screenshots.folder,
+                    │               copied whole or cut without re-encoding (`scrawl-helper trim`)
+                    └── Send to… -> a contact sheet of up to 4 frames in the span as the image,
+                                    the span's words and "Screen recording (m:ss): <movie>" as text
+```
+
+Checks: `the_record_shortcut_records_and_never_while_the_picker_shows` in
+[screenshots.rs](../../src/screenshots.rs),
+`a_stopped_screenshot_recording_folds_the_capsule` in
+[capture_capsule/feed.rs](../../src/rune_ui/capture_capsule/feed.rs), the
+trim, words, sheet, and no-marks tests and the `trim` editor golden in
+[screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
+and the `recording` thumbnail golden. Not yet observed: a real recording
+on a Mac, its card, trimming and saving a movie, and a session receiving
+a sent recording. Left to do: no playback in the editor, no audio-only or
+GIF export, and the recording shows no countdown.
 
 The shortcut is taken in Hex's session tap (`screenshots::key`, called
 from [suppression.rs](../../src/suppression.rs) before the listener's
@@ -1031,10 +1087,13 @@ and `a_large_shot_shrinks_for_its_thumbnail` in
 file in one second, and the PNG's density in
 [screenshots/save.rs](../../src/screenshots/save.rs); the system shortcut
 read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
-`thumbnail_goldens` (rest and hover, light and dark) and the thumbnail's
-timer in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
-`editor_goldens` (marks and the Send to… list, light and dark), the
-layout, each tool's drag, text, undo, the list's search, and both exports
+`thumbnail_goldens` (rest, hover, and listening, light and dark) and the
+thumbnail's timer, held while someone talks over it, in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
+`editor_goldens` (marks, the Send to… list, and words while a dictation
+records, light and dark), the layout and the words row's height, words
+landing only while transcribed, Escape dropping them and a waiting send, a
+waiting send going once they land, each tool's drag, text, undo, the
+list's search, and both exports
 (`an_export_draws_the_marks_over_the_shot` renders on a GPU, skipping
 without one) in [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
 and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/screenshot_thumbnail/editor/marks.rs);
@@ -1042,7 +1101,8 @@ and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/s
 its card renders as `--scene mac-labs-screenshots`. Not yet observed: a
 real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
 clipboard paste, the thumbnail's drag, the editor on a real display
-(its keys, Copy, Save, and a session receiving a sent shot), and whether a session
+(its keys, Copy, Save, and a session receiving a sent shot), talking over a
+shot with a real shortcut and microphone, and whether a session
 tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
 symbolic hotkeys are dispatched, not tested). The row renders only in
 macOS builds, so the settings goldens don't change.

@@ -2,11 +2,18 @@
 //! display under the pointer, as macOS and CleanShot show theirs: it slides
 //! in from the display's edge and leaves the same way. A click opens it in
 //! the editor, a drag carries the file out, and ✕ closes it. It goes by itself
-//! a few seconds on, unless the pointer is on it.
+//! a few seconds on, unless the pointer is on it or someone talks over it:
+//! a dictation while it shows opens the shot in the editor with the words
+//! (`screenshots::narration`).
+//!
+//! A Screenshots recording lands here too, as its first frame with its
+//! length; a click opens it in the editor to trim, and a drag carries out
+//! its movie.
 
 pub(crate) mod editor;
 
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use rune::{
@@ -15,7 +22,8 @@ use rune::{
 };
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
-use super::controls::Paint;
+use self::editor::Listen;
+use super::controls::{Paint, status_dot};
 use crate::desktop::i18n::tr;
 
 /// The overlay: room for the largest card and its shadow.
@@ -48,15 +56,36 @@ const REDUCED: Spring =
 const TRAVEL_SCALE: f32 = 0.94;
 /// How long leaving takes, before the overlay hides.
 const LEAVE_S: f64 = 0.4;
+/// The listening pill's height, inside the card's bottom-left corner.
+const LISTEN_H: f32 = 24.0;
 
 static CLOSE: &rune::Icon = &rune_theme_opencode::icons::CLOSE;
+/// The card's overlay, and the file of the shot it shows, for the
+/// listener's thread.
+static CARD: OnceLock<OverlayHandle<Card>> = OnceLock::new();
+static SHOWN: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn shown() -> std::sync::MutexGuard<'static, Option<PathBuf>> {
+    SHOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// The shot the card shows.
 pub(crate) struct Shot {
+    /// The PNG, or a recording's capture folder.
     pub(crate) path: PathBuf,
     pub(crate) image: rune::Image,
     /// Its size in pixels.
     pub(crate) size: [u32; 2],
+    pub(crate) recording: Option<Recording>,
+}
+
+/// What a recording's card adds to its first frame.
+#[derive(Clone, Debug)]
+pub(crate) struct Recording {
+    pub(crate) movie: PathBuf,
+    pub(crate) duration_ms: u64,
 }
 
 #[derive(Default)]
@@ -64,6 +93,8 @@ pub(crate) struct Card {
     shot: Option<Shot>,
     on: bool,
     hovered: bool,
+    /// A dictation talking over the shot holds the card.
+    listen: Listen,
     /// Animation seconds it last appeared, or the pointer last left it.
     since: Option<f64>,
     /// Animation seconds it began to fade.
@@ -86,6 +117,7 @@ impl Card {
 
     fn close(&mut self, tx: &mut Tx) {
         if self.on {
+            shown().take();
             self.on = false;
             self.leaving = Some(self.now);
             tx.animated();
@@ -94,8 +126,10 @@ impl Card {
     }
 
     fn open(&mut self, tx: &mut Tx) {
-        if let Some(shot) = &self.shot {
-            editor::open(shot.path.clone());
+        match &self.shot {
+            Some(shot) if shot.recording.is_some() => editor::open_recording(shot.path.clone()),
+            Some(shot) => editor::open(shot.path.clone()),
+            None => {}
         }
         self.close(tx);
     }
@@ -125,7 +159,7 @@ fn poll(s: &mut Card, now: f64, tx: &mut Tx) -> bool {
         tx.wake_after(Duration::from_secs_f64(at + LEAVE_S - now));
         return false;
     }
-    if !s.on || s.hovered {
+    if !s.on || s.hovered || s.listen != Listen::Idle {
         return false;
     }
     let since = *s.since.get_or_insert(now);
@@ -170,6 +204,7 @@ impl Thumbnail {
         let overlay = app.overlay(spec, Card::default());
         let handle = overlay.clone();
         overlay.update(move |s, _| s.overlay = Some(handle));
+        let _ = CARD.set(overlay.clone());
         Self { overlay }
     }
 
@@ -177,6 +212,31 @@ impl Thumbnail {
     /// already small), in place of any before it. Safe from any thread;
     /// waits for the decode.
     pub(crate) fn show(&self, path: PathBuf, width: u32, height: u32, rgba: Vec<u8>) {
+        self.present(path, None, width, height, rgba);
+    }
+
+    /// Shows the recording in the capture folder `bundle`, from its first
+    /// frame, as [`Self::show`] does a shot. Nothing talks over it: it
+    /// already has its words.
+    pub(crate) fn show_recording(
+        &self,
+        bundle: PathBuf,
+        recording: Recording,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    ) {
+        self.present(bundle, Some(recording), width, height, rgba);
+    }
+
+    fn present(
+        &self,
+        path: PathBuf,
+        recording: Option<Recording>,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    ) {
         let images = rune::ImageCache::new(std::sync::Arc::new(|| {}));
         let image = images.rgba(width, height, rgba);
         if image.wait().is_err() {
@@ -184,10 +244,13 @@ impl Thumbnail {
         }
         let handle = self.overlay.clone();
         self.overlay.update(move |s, tx| {
+            *shown() = recording.is_none().then(|| path.clone());
+            s.listen = Listen::Idle;
             s.shot = Some(Shot {
                 path,
                 image,
                 size: [width, height],
+                recording,
             });
             s.on = true;
             s.hovered = false;
@@ -198,6 +261,43 @@ impl Thumbnail {
             tx.wake_after(Duration::ZERO);
         });
     }
+}
+
+/// The file of the shot the card shows, if it shows one. Safe from any
+/// thread.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn showing() -> Option<PathBuf> {
+    shown().clone()
+}
+
+/// A dictation over the card's shot is now `listen`; once idle, the card
+/// waits its usual few seconds again. Safe from any thread.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn listen(listen: Listen) {
+    if let Some(overlay) = CARD.get() {
+        overlay.update(move |s, tx| {
+            s.listen = listen;
+            s.since = Some(s.now);
+            tx.animated();
+            tx.wake_after(Duration::ZERO);
+        });
+    }
+}
+
+/// The words said over the card's shot at `path` open it in the editor, if
+/// the card still shows it; the card goes. Safe from any thread.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn heard(path: PathBuf, words: String) {
+    let Some(overlay) = CARD.get() else {
+        return;
+    };
+    overlay.update(move |s, tx| {
+        s.listen = Listen::Idle;
+        if s.on && s.shot.as_ref().is_some_and(|shot| shot.path == path) {
+            editor::open_with(path, words);
+            s.close(tx);
+        }
+    });
 }
 
 pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
@@ -226,9 +326,13 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .cursor(Cursor::Pointer)
         .on_press_tx(|s: &mut Card, tx| s.open(tx))
         .drag_out(|s: &Card| {
-            s.shot
-                .as_ref()
-                .map(|shot| rune::DragItem::new().file(shot.path.clone()))
+            s.shot.as_ref().map(|shot| {
+                let file = shot
+                    .recording
+                    .as_ref()
+                    .map_or(&shot.path, |recording| &recording.movie);
+                rune::DragItem::new().file(file.clone())
+            })
         })
         .child(
             el().absolute(0.0, 0.0)
@@ -249,6 +353,14 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .opacity_motion(FADE);
     // In from past the display's right edge, leaning back about the corner
     // it rests in, and out the same way; Reduce Motion only fades.
+    let length = shot
+        .recording
+        .as_ref()
+        .map(|recording| length(p, recording.duration_ms));
+    let listening = listening(p, s.listen).or(length).map(|pill| {
+        pill.key("listening")
+            .absolute(PAD + CLOSE_INSET, PAD + h - CLOSE_INSET - LISTEN_H)
+    });
     let travel = if cx.is_reduced_motion() {
         Transition::opacity().springs(SpringPair::new(REDUCED, REDUCED))
     } else {
@@ -275,7 +387,58 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .transition(travel)
         .child(card)
         .child(close);
-    root.child(group)
+    root.child(match listening {
+        Some(pill) => group.child(pill),
+        None => group,
+    })
+}
+
+/// A recording's length, in the pill's place.
+fn length(p: Paint, duration_ms: u64) -> El {
+    pill(p).child(
+        rune::text(editor::clip::duration_label(duration_ms))
+            .font(super::capture_capsule::surface::small())
+            .color(p.text())
+            .single_line(),
+    )
+}
+
+/// The card's pill: the listening one's, or a recording's length.
+fn pill(p: Paint) -> El {
+    let k = p.k;
+    let mut pill = rune::row()
+        .h(LISTEN_H)
+        .px(8.0)
+        .gap(6.0)
+        .center_y()
+        .radius(CLOSE_RADIUS)
+        .fill(k.c.bg_base);
+    for shadow in &k.elevation.floating {
+        pill = pill.box_shadow(*shadow);
+    }
+    pill
+}
+
+/// The pill on the card while someone talks over it: the recording dot and
+/// "Listening…", then "Processing…".
+fn listening(p: Paint, listen: Listen) -> Option<El> {
+    let (dot, label) = match listen {
+        Listen::Idle => return None,
+        Listen::Recording => (Some(p.danger()), tr("Listening…")),
+        Listen::Transcribing => (None, super::capture_capsule::surface::processing()),
+    };
+    let mut pill = pill(p);
+    if let Some(dot) = dot {
+        pill = pill.child(status_dot(dot));
+    }
+    Some(
+        pill.child(
+            rune::text(label)
+                .font(super::capture_capsule::surface::small())
+                .color(p.text())
+                .single_line(),
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -294,6 +457,7 @@ mod tests {
             path: PathBuf::from("/tmp/Hex Screenshot.png"),
             image,
             size,
+            recording: None,
         }
     }
 
@@ -322,6 +486,7 @@ mod tests {
             path: PathBuf::from("/tmp/Hex Screenshot.png"),
             image,
             size,
+            recording: None,
         }
     }
 
@@ -356,7 +521,8 @@ mod tests {
         (w, h, target.read(&gpu.device))
     }
 
-    /// The card at rest and under the pointer against
+    /// The card at rest, under the pointer, and held while someone talks
+    /// over it, against
     /// `tests/golden/screenshot-thumbnail-*.png`; `HEX_UPDATE_GOLDENS=1`
     /// rewrites them and `HEX_GOLDEN_RENDERS` also writes them there.
     /// Without a GPU adapter it skips. Checked on Linux only, like every
@@ -370,11 +536,24 @@ mod tests {
         };
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
         let mut misses = Vec::new();
-        for (name, hovered) in [("rest", false), ("hover", true)] {
+        for (name, hovered, listen, recording) in [
+            ("rest", false, Listen::Idle, false),
+            ("hover", true, Listen::Idle, false),
+            ("listening", false, Listen::Recording, false),
+            ("recording", false, Listen::Idle, true),
+        ] {
             for dark in [false, true] {
                 let theme = if dark { "dark" } else { "light" };
                 let name = format!("screenshot-thumbnail-{name}-{theme}");
-                let card = Card::still(desktop([1440, 900]), hovered);
+                let mut shot = desktop([1440, 900]);
+                shot.recording = recording.then(|| Recording {
+                    movie: PathBuf::from("/tmp/recording.mp4"),
+                    duration_ms: 12_400,
+                });
+                let card = Card {
+                    listen,
+                    ..Card::still(shot, hovered)
+                };
                 let (w, h, pixels) = render(&gpu, card, dark);
                 if let Some(renders) = std::env::var_os("HEX_GOLDEN_RENDERS") {
                     let renders = std::path::PathBuf::from(renders);
@@ -487,5 +666,26 @@ mod tests {
         poll(&mut card, 0.0, &mut tx);
         poll(&mut card, 60.0, &mut tx);
         assert!(card.on);
+    }
+
+    #[test]
+    fn talking_over_it_holds_it_until_the_words_are_in() {
+        let mut card = Card {
+            listen: Listen::Recording,
+            ..Card::still(shot([800, 600]), false)
+        };
+        let mut tx = Tx::default();
+        poll(&mut card, 0.0, &mut tx);
+        poll(&mut card, 30.0, &mut tx);
+        assert!(card.on, "held while recording");
+        card.listen = Listen::Transcribing;
+        poll(&mut card, 60.0, &mut tx);
+        assert!(card.on, "and while transcribing");
+        card.listen = Listen::Idle;
+        card.since = Some(60.0);
+        poll(&mut card, 64.9, &mut tx);
+        assert!(card.on, "then its usual few seconds again");
+        poll(&mut card, 65.0, &mut tx);
+        assert!(!card.on);
     }
 }

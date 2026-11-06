@@ -34,9 +34,15 @@ impl Stamp {
     }
 }
 
-/// `Hex Screenshot 2026-11-04 at 14.03.22`, then ` (2)`, ` (3)`… for
-/// `copy` past the first.
+/// A shot's file name, as [`name_as`] names it.
+#[cfg(test)]
 pub(crate) fn file_name(at: Stamp, copy: u32) -> String {
+    name_as("Hex Screenshot", "png", at, copy)
+}
+
+/// `<stem> 2026-11-04 at 14.03.22.<extension>`, then ` (2)`, ` (3)`… for
+/// `copy` past the first.
+fn name_as(stem: &str, extension: &str, at: Stamp, copy: u32) -> String {
     let Stamp {
         year,
         month,
@@ -45,22 +51,30 @@ pub(crate) fn file_name(at: Stamp, copy: u32) -> String {
         minute,
         second,
     } = at;
-    let base = format!(
-        "Hex Screenshot {year:04}-{month:02}-{day:02} at {hour:02}.{minute:02}.{second:02}"
-    );
+    let base = format!("{stem} {year:04}-{month:02}-{day:02} at {hour:02}.{minute:02}.{second:02}");
     if copy <= 1 {
-        format!("{base}.png")
+        format!("{base}.{extension}")
     } else {
-        format!("{base} ({copy}).png")
+        format!("{base} ({copy}).{extension}")
     }
 }
 
 /// A path in `folder` no file holds yet.
 pub(crate) fn free_path(folder: &Path, at: Stamp) -> PathBuf {
+    free_path_as(folder, at, "Hex Screenshot", "png")
+}
+
+/// A path in `folder` no file holds yet for a recording:
+/// `Hex Recording 2026-11-04 at 14.03.22.mp4`.
+pub(crate) fn recording_path(folder: &Path) -> PathBuf {
+    free_path_as(folder, Stamp::now(), "Hex Recording", "mp4")
+}
+
+fn free_path_as(folder: &Path, at: Stamp, stem: &str, extension: &str) -> PathBuf {
     (1..)
-        .map(|copy| folder.join(file_name(at, copy)))
+        .map(|copy| folder.join(name_as(stem, extension, at, copy)))
         .find(|path| !path.exists())
-        .unwrap_or_else(|| folder.join(file_name(at, 1)))
+        .unwrap_or_else(|| folder.join(name_as(stem, extension, at, 1)))
 }
 
 /// `rgba` as a PNG, marked with `scale` pixels a point (144 dpi on a

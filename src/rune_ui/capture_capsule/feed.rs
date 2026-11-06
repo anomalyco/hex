@@ -35,6 +35,9 @@ pub(crate) struct Follow {
     /// reached the capsule.
     route: Option<CaptureRoute>,
     phone: bool,
+    /// The shown capture is a Screenshots recording: once it stops, the
+    /// screenshot card takes it and the capsule folds.
+    clip: bool,
 }
 
 impl Follow {
@@ -93,6 +96,7 @@ impl Follow {
                 self.route = None;
                 self.worked = recording.worked;
                 self.began = recording.screen;
+                self.clip = recording.clip;
                 // No target chips: Annotate records the screen, and the
                 // capsule's toolbar (the pen) takes their place.
                 inputs.push(Input::Stage(Stage::Recording));
@@ -101,6 +105,18 @@ impl Follow {
                 inputs.push(Input::Worked);
             }
             self.began |= recording.screen;
+            return inputs;
+        }
+        // A stopped recording folds unless it failed, which still shows.
+        if std::mem::take(&mut self.clip)
+            && let Some((bundle, Stage::Recording)) = &self.shown
+            && !snapshot
+                .last
+                .as_ref()
+                .is_some_and(|last| last.bundle == *bundle && last.stage == Stage::Failed)
+        {
+            self.shown = None;
+            inputs.push(Input::Gone);
             return inputs;
         }
         let stage = self.stage(snapshot);
@@ -574,6 +590,7 @@ mod tests {
                 screen: true,
                 target: crate::capture_host::TargetKind::Display,
                 worked: false,
+                clip: false,
             }),
             finishing: Vec::new(),
             last: None,
@@ -630,6 +647,20 @@ mod tests {
             follow.next(&settled("a", Stage::Done)),
             [Input::Stage(Stage::Done)]
         );
+        assert_eq!(follow.next(&settled("a", Stage::Done)), []);
+    }
+
+    #[test]
+    fn a_stopped_screenshot_recording_folds_the_capsule() {
+        let mut follow = Follow::default();
+        let mut clip = recording("a");
+        clip.recording.as_mut().unwrap().clip = true;
+        assert_eq!(follow.next(&clip), [Input::Stage(Stage::Recording)]);
+        assert_eq!(
+            follow.next(&finishing("a", Stage::Stopping, false)),
+            [Input::Gone]
+        );
+        assert_eq!(follow.next(&finishing("a", Stage::Writing, false)), []);
         assert_eq!(follow.next(&settled("a", Stage::Done)), []);
     }
 

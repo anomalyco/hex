@@ -143,6 +143,14 @@ case "shrink":
   runAsync {
     emit(try await Media.shrink(movie: URL(filePath: arguments[1]), out: URL(filePath: out), maxEdge: maxEdge, bitRate: bitRate))
   }
+case "trim":
+  guard arguments.count >= 2, let out = option("--out", in: arguments),
+    let from = option("--from", in: arguments).flatMap(Int.init),
+    let to = option("--to", in: arguments).flatMap(Int.init)
+  else { fail("trim needs MOVIE --out FILE.mp4 --from MS --to MS") }
+  runAsync {
+    emit(try await Media.trim(movie: URL(filePath: arguments[1]), out: URL(filePath: out), fromMs: from, toMs: to))
+  }
 case "export":
   guard arguments.count >= 2 else { fail("export needs PLAN.json") }
   runAsync { try await Exporter.run(plan: URL(filePath: arguments[1])) }
@@ -160,5 +168,5 @@ case "qr":
   }
   emit(["qr": qr])
 default:
-  fail("usage: scrawl-helper devices|mirror|transcribe|transcribe-stream|speech-model|frames|audio|probe|export|shrink|permissions|sck-probe|qr …")
+  fail("usage: scrawl-helper devices|mirror|transcribe|transcribe-stream|speech-model|frames|audio|probe|export|shrink|trim|permissions|sck-probe|qr …")
 }

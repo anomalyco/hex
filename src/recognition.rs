@@ -1266,6 +1266,8 @@ fn handle_hotkey_action(
                 feedback::play_provisional_start();
             }
             worker.prepare_paste();
+            #[cfg(hex_capture)]
+            crate::screenshots::narration::started();
             events.dictation(DictationPhase::Started, "")?;
             if let Some(indicator) = indicator {
                 indicator.send(DictationIndicatorEvent::Started);
@@ -1287,6 +1289,8 @@ fn handle_hotkey_action(
         .map(drop),
         HotkeyAction::Discard(_) | HotkeyAction::Cancel | HotkeyAction::CancelShortcut => {
             feedback::retract_start();
+            #[cfg(hex_capture)]
+            crate::screenshots::narration::ended();
             if action == HotkeyAction::CancelShortcut {
                 feedback::play(Tone::Cancel);
             }
@@ -1338,6 +1342,9 @@ fn finish_hotkey_dictation(
     if dictation.become_intentional(action_at)? && release_while_idle {
         feedback::play(Tone::DictationStart);
     }
+    // A dictation over a screenshot lands its words there, never pasted.
+    #[cfg(hex_capture)]
+    let print = print.or_else(crate::screenshots::narration::claim);
     let finished = match print {
         None => finish_dictation(
             dictation,

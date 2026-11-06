@@ -264,6 +264,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Crop", "Recadrer"),
     ("Screenshot", "Capture d'écran"),
     ("Sending to {}…", "Envoi à {}…"),
+    ("Sending to {} once your words are in…", "Envoi à {} dès que vos mots seront là…"),
+    ("Talk over it", "Commenter à voix haute"),
+    ("Finish talking", "Terminer de parler"),
+    ("Clear words", "Effacer les mots"),
+    ("Hold your dictation shortcut to talk over it", "Maintenez votre raccourci de dictée pour commenter à voix haute"),
     ("Couldn't copy", "Copie impossible"),
     ("Couldn't send", "Envoi impossible"),
     ("Looking for sessions…", "Recherche des sessions…"),
@@ -1149,6 +1154,12 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "macOS prend ce raccourci en premier. Désactivez ses raccourcis de capture dans Raccourcis clavier › Captures d'écran, ou choisissez-en un autre"),
     ("Open Keyboard Settings", "Ouvrir les réglages Clavier"),
     ("Full screen · Click to capture", "Plein écran · Cliquez pour capturer"),
+    ("Record screen", "Enregistrer l’écran"),
+    ("Needs Annotate", "Nécessite Annotate"),
+    ("Full screen · Click to record", "Plein écran · Cliquez pour enregistrer"),
+    ("Screen recording", "Enregistrement d’écran"),
+    ("Nothing was said", "Rien n’a été dit"),
+    ("Trim", "Raccourcir"),
 ];
 
 #[cfg(test)]
