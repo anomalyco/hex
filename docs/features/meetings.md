@@ -160,8 +160,10 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     │   focus; if Rune still can't open them, the pane path above
     │   // checks: linux/meeting_capsules.rs gating tests; not run on GNOME
     └── not observed on a real GNOME session; no automated check
-Files -> Reveal opens the folder (xdg-open, Explorer); Delete moves to the
-    freedesktop Trash or the Recycle Bin
+Files -> Reveal Markdown selects the exported .md (Explorer) or opens the folder
+    holding it (xdg-open); Reveal files shows the recording folder (selected in
+    Explorer, opened by xdg-open); Delete moves to the freedesktop Trash or the
+    Recycle Bin
 ```
 
 The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and
@@ -933,7 +935,9 @@ Final publication                                   // meetings.output
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
-Meetings pane -> Copy icon on a completed row's hover, the card's Copy transcript icon, Reveal Markdown (or Reveal Files when none)
+Meetings pane -> Copy icon on a completed row's hover, the card's Copy
+    transcript icon, Reveal Markdown (selects the exported .md; Reveal files
+    opens the recording folder when none)
 Menu bar (idle) -> Copy Last Meeting Transcript
 Option-Control-V -> `MeetingPasteCursor` in `meeting/delta.rs` over the transcript
 │   through the press (meetings.copy-through-now)
@@ -961,9 +965,11 @@ List (on the title's edge, no divider; grouped Today / Yesterday / date)
 Detail (a raised card beside the list)
 ├── Title, status chip (not when Ready), date · time · duration · app
 ├── Ghost icons top right: Copy transcript, Rename (finished only), "…" menu
-│   └── Copy summary (stays open to show "Copied"), Reveal Markdown, Summarize /
-│       Regenerate summary ("Summarizing…" disabled while running), separator,
-│       Delete… (finished meetings only for the last three)
+│   └── Copy summary (stays open to show "Copied"), Reveal Markdown (Finder
+│       selects the exported .md; Reveal files opens the recording folder
+│       when there is none), Summarize / Regenerate summary ("Summarizing…"
+│       disabled while running), separator, Delete… (finished meetings only
+│       for the last three)
 ├── Errors at the top of the scroll area
 ├── Summary: one paragraph, at most two sentences
 ├── Chapters (when present): start, name, line, and a Copy section icon
@@ -985,15 +991,17 @@ Delete… (overflow menu) -> "Trash recording & Markdown" (or "Trash recording")
 Choice: Delete trashes the Markdown copy too, since it holds the transcript;
 both stay recoverable from the Trash. Sources:
 [rune_ui/meetings.rs](../../src/rune_ui/meetings.rs), the requests in
-[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), and `trash` /
-`rename` in [meeting.rs](../../src/meeting.rs). Checks:
+[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), and `RevealTarget` /
+`trash` / `rename` in [meeting.rs](../../src/meeting.rs). Checks:
 `deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording`,
 `renaming_updates_the_manifest_and_an_unedited_markdown_heading`,
-`retitling_replaces_only_a_matching_first_heading`, and the Rune pane tests
-`meetings_select_search_and_copy_a_transcript`,
+`retitling_replaces_only_a_matching_first_heading`,
+`the_exported_markdown_is_the_reveal_target_only_while_it_exists`, and the Rune
+pane tests `meetings_select_search_and_copy_a_transcript`,
 `meetings_rename_from_the_title_field`,
-`deleting_a_meeting_takes_the_menu_then_a_confirmation`, and
-`the_overflow_menu_copies_the_summary_and_asks_for_new_notes`.
+`deleting_a_meeting_takes_the_menu_then_a_confirmation`,
+`the_overflow_menu_copies_the_summary_and_asks_for_new_notes`, and
+`reveal_markdown_asks_for_the_exported_file_and_reveal_files_for_the_recording`.
 
 Scenes: `meetings`, `meetings-recording`, `meetings-actions`,
 `meetings-delete`, `meetings-rename`, `meetings-failed`, `meetings-empty`.

@@ -548,7 +548,8 @@ impl PlatformState {
     }
 }
 
-/// A meeting action the pane asks the meetings runtime for.
+/// A meeting action the pane asks the meetings runtime for. Reveal carries the
+/// `RevealTarget` the pane labeled its menu item with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum MeetingRequest {
     Start,
@@ -556,7 +557,7 @@ pub(super) enum MeetingRequest {
     Rename { id: String, title: String },
     Trash(String),
     Summarize(String),
-    Reveal(String),
+    Reveal(crate::meeting::RevealTarget),
     RevealFolder,
     ChooseFolder,
 }

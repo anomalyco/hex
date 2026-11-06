@@ -655,9 +655,13 @@ impl MacHost {
             MeetingRequest::Trash(id) => {
                 crate::meeting::trash(&id).map_err(|error| format!("{error:#}"))
             }
-            MeetingRequest::Reveal(id) => {
-                let root = crate::meeting::root().map_err(|error| format!("{error:#}"))?;
-                open_path(&root.join(id));
+            MeetingRequest::Reveal(target) => {
+                if target.is_markdown() {
+                    // `open -R` selects the exported Markdown in Finder.
+                    crate::meeting::reveal(target.path());
+                } else {
+                    open_path(target.path());
+                }
                 Ok(())
             }
             MeetingRequest::RevealFolder => {

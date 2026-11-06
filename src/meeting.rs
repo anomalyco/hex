@@ -1097,6 +1097,44 @@ pub fn transcript_markdown(entries: &[TranscriptEntry]) -> String {
         .join("\n\n")
 }
 
+/// The exported Markdown while it is still on disk: the file the pane's
+/// `Reveal Markdown` selects, and the one Trash takes with the recording.
+fn exported_markdown(manifest: &MeetingManifest) -> Option<PathBuf> {
+    manifest.export_path.clone().filter(|path| path.exists())
+}
+
+/// What the Meetings pane's reveal action shows: the exported Markdown while
+/// it still exists, else the meeting's recording folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RevealTarget {
+    Markdown(PathBuf),
+    Folder(PathBuf),
+}
+
+impl RevealTarget {
+    /// The target for one meeting: [`exported_markdown`] while it finds the
+    /// file, else its `directory`. The pane labels the menu with it and the
+    /// host reveals it, so the two can't disagree.
+    pub fn for_meeting(manifest: &MeetingManifest, directory: &Path) -> Self {
+        match exported_markdown(manifest) {
+            Some(path) => Self::Markdown(path),
+            None => Self::Folder(directory.to_path_buf()),
+        }
+    }
+
+    /// The file or folder the desktop's file manager shows.
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Markdown(path) | Self::Folder(path) => path,
+        }
+    }
+
+    /// Whether the pane labels this target `Reveal Markdown`.
+    pub fn is_markdown(&self) -> bool {
+        matches!(self, Self::Markdown(_))
+    }
+}
+
 /// Moves a finished meeting to the Trash: its exported Markdown first, then
 /// its recording folder. Refuses while it records, transcribes, or writes
 /// notes. A missing Markdown file is skipped.
@@ -1115,7 +1153,7 @@ fn trash_meeting(
     if notes_in_progress(&manifest.id) {
         return Err(eyre!("Wait for the notes to finish before deleting"));
     }
-    if let Some(path) = manifest.export_path.filter(|path| path.exists()) {
+    if let Some(path) = exported_markdown(&manifest) {
         move_to_trash(&path)?;
     }
     move_to_trash(directory)
@@ -1204,7 +1242,7 @@ fn trash_expired(
     if notes_in_progress(&manifest.id) {
         return Err(eyre!("its notes are being written"));
     }
-    if let Some(path) = manifest.export_path.filter(|path| path.exists()) {
+    if let Some(path) = exported_markdown(&manifest) {
         if manifest.export_sha256.is_some() && file_sha256(&path) == manifest.export_sha256 {
             move_to_trash(&path)?;
         } else {
