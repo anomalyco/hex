@@ -1151,6 +1151,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Save the last 15 seconds of your screen. macOS shows the screen-recording dot the whole time it's on", "Сохраняет последние 15 секунд экрана. Пока включено, macOS постоянно показывает точку записи экрана"),
     ("Replay last 15 s", "Сохранить последние 15 с"),
     ("Press to save the last 15 s; hold to narrate over it", "Нажмите, чтобы сохранить последние 15 с; удерживайте, чтобы озвучить"),
+    ("Settings search", "Поиск по настройкам"),
+    ("Find any setting in General with a search field", "Находите любую настройку в разделе «Основные» с помощью поля поиска"),
+    ("Search settings", "Поиск настроек"),
+    ("No settings match", "Нет подходящих настроек"),
+    ("Try another search", "Попробуйте другой запрос"),
 ];
 
 #[cfg(test)]
