@@ -340,10 +340,10 @@ pub fn run(
         }
         // Only the newest saved settings matter; they wait for a moment
         // without a recording.
-        if let Some(next) = updates.try_iter().last()
-            && !recording
+        if !recording
             && !start_pending
             && finishing.is_none()
+            && let Some(next) = updates.try_iter().last()
         {
             let next_config = WindowsDictationConfig::from_settings(&next);
             paste_with_shift.store(next_config.paste_with_shift, Ordering::Relaxed);
