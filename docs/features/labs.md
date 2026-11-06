@@ -57,6 +57,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Stop when the call ends no labs.stop_when_call_ends (macOS) a recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet (#835)
+├── More call apps no    labs.more_call_apps             (every OS with Meetings) Signal, Telegram, WeChat, LINE, Webex, Element, and Phone calls are offered,
+│                                        and calls on Google Voice, Messenger, Teams, FaceTime, GroupMe, and Webex pages are named
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
@@ -163,7 +165,8 @@ playground only after Hex restarts.
 Gate a Labs feature where its work starts (the worker, thread, or capture),
 not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
 `labs::playground()`, `labs::vocabulary_biasing()`,
-`app_settings::meetings_enabled()`, or `app_settings::hex_microphone_enabled()`.
+`labs::more_call_apps()`, `app_settings::meetings_enabled()`, or
+`app_settings::hex_microphone_enabled()`.
 Add a new feature to `labs::Feature` (name, settings key, description, audience), give
 it a row in `rune_ui/labs.rs` and a `hex settings` key, and default it off.
 When a feature graduates, remove it from Labs.
@@ -732,6 +735,46 @@ in [labs.rs](../../src/labs.rs) and the auto-stop checks listed in
 [meetings.md](meetings.md#record). Not yet observed: a real WhatsApp, Zoom,
 or Teams call on a Mac with the toggle on; the row renders only in macOS
 builds, so no golden changes.
+
+More call apps (`more-call-apps`, every OS with Meetings; its row shows
+wherever Meetings does): for calls in messaging apps and on websites call
+detection did not recognise. The gate, `labs::more_call_apps()`, is read by
+call detection's each pass ([meeting/watcher.rs](../../src/meeting/watcher.rs)
+passes it to `candidate_from_microphone`) and by Settings › Meetings ›
+Detected calls (`app_settings::known_meeting_providers`). While on, a
+microphone held by Signal (`org.whispersystems.signal-desktop`), Telegram
+(`ru.keepcoder.Telegram`, also `com.tdesktop.Telegram` and
+`org.telegram.desktop`), WeChat (`com.tencent.xinWeChat`), LINE
+(`jp.naver.line.mac`), Webex (`com.webex.meetingmanager`, also
+`com.cisco.webexmeetingsapp`), Element (`im.riot.app`), or the Phone app
+(`com.apple.mobilephone`) is that app's call ("Signal call", "Webex
+meeting", "Phone call", …). Each Electron app's helpers fold to its parent
+through [microphone_activity.rs](../../src/microphone_activity.rs), and on
+Windows and Linux the same apps' executables (`signal`, `signal-desktop`,
+`telegram`, `telegram-desktop`, `wechat`, `weixin`, `line`, `webex`,
+`element`, `element-desktop`) map to the same keys. Signal, Telegram, WeChat,
+LINE, and Element also hold the microphone for voice notes, so they keep it
+about 20 s before they count as calls, as WhatsApp does; Webex and Phone
+count after 2 s. A browser on Google Voice (`voice.google.com`), Messenger
+(`messenger.com`), Teams (`teams.live.com`), FaceTime
+(`facetime.apple.com`), GroupMe (`web.groupme.com`), or any `webex.com`
+subdomain is named after the service (a Webex page's provider is
+`webex.com`, so one choice covers every subdomain); these names need the
+browser's page, which Hex reads on macOS ([meetings.md](meetings.md#detect-and-offer)).
+Those choices and the new apps are listed in Detected calls, and Ask /
+Always record / Never offer work as for the existing services. Off, nothing changes: those processes are
+not meeting apps, the pages stay unknown pages ("Browser call") after 20 s,
+and Detected calls lists exactly the services it did before. Checks:
+`more_call_apps_are_unknown_until_their_lab_is_on`,
+`more_call_apps_names_its_apps_and_websites_with_their_lab_on`, and
+`a_telegram_voice_note_is_not_offered_but_a_sustained_call_is` in
+[meeting/detection.rs](../../src/meeting/detection.rs);
+`more_call_app_bundle_variants_and_executables_canonicalize` in
+[microphone_activity.rs](../../src/microphone_activity.rs);
+`more_call_apps_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real Signal, Telegram,
+WeChat, LINE, Webex, Element, or Phone call, or any of the websites. Goldens:
+`mac-labs` (light, dark), `windows-labs`, and `linux-labs` show the new row.
 
 Fix results in Output (`output-fixes`, issue 989, every OS): for a Try
 result in Settings › Output that comes out wrong. While on, the Try card

@@ -17,6 +17,8 @@ pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
 const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex picks a fast model", "Hex выбирает быструю модель"),
     ("Follow live transcript", "Следить за расшифровкой в реальном времени"),
+    ("More call apps", "Больше приложений для звонков"),
+    ("Offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on more websites.", "Предлагайте записывать звонки в Signal, Telegram, WeChat, LINE, Webex, Element и приложении «Телефон», а также распознавайте звонки на большем числе сайтов"),
     ("While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again.", "Пока встреча записывается, расшифровка прокручивается к самой новой строке. Прокрутите вверх, чтобы прочитать предыдущий текст; прокрутите обратно вниз, чтобы снова следить."),
     ("Summary models show once Hex connects to OpenCode.", "Модели для сводок появятся, когда Hex подключится к OpenCode."),
     ("Start OpenCode to choose a summary model. Hex keeps the saved one.", "Запустите OpenCode, чтобы выбрать модель для сводок. Hex сохранит выбранную ранее."),

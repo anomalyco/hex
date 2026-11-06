@@ -110,11 +110,12 @@ pub enum Feature {
     GnomeMeetingCapsules,
     Screenshots,
     FollowLiveTranscript,
+    MoreCallApps,
     AnnotateReplay,
 }
 
 impl Feature {
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 48] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -161,6 +162,7 @@ impl Feature {
         Self::GnomeMeetingCapsules,
         Self::Screenshots,
         Self::FollowLiveTranscript,
+        Self::MoreCallApps,
         Self::AnnotateReplay,
     ];
 
@@ -232,6 +234,7 @@ impl Feature {
             | Self::GnomeMeetingCapsules
             | Self::Screenshots
             | Self::FollowLiveTranscript
+            | Self::MoreCallApps
             | Self::AnnotateReplay
             | Self::NotchIndicator => Audience::Everyone,
         }
@@ -287,6 +290,7 @@ impl Feature {
             | Self::Screenshots
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay => 20261104,
+            Self::MoreCallApps => 20261106,
         }
     }
 
@@ -373,6 +377,7 @@ impl Feature {
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::FollowLiveTranscript
+            | Self::MoreCallApps
             | Self::FillerWords => true,
         }
     }
@@ -426,6 +431,7 @@ impl Feature {
             Self::GnomeMeetingCapsules => "gnome-meeting-capsules",
             Self::Screenshots => "screenshots",
             Self::FollowLiveTranscript => "follow-live-transcript",
+            Self::MoreCallApps => "more-call-apps",
             Self::AnnotateReplay => "annotate-replay",
         }
     }
@@ -479,6 +485,7 @@ impl Feature {
             Self::GnomeMeetingCapsules => "labs.gnome_meeting_capsules",
             Self::Screenshots => "labs.screenshots",
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
+            Self::MoreCallApps => "labs.more_call_apps",
             Self::AnnotateReplay => "labs.annotate_replay",
         }
     }
@@ -606,6 +613,9 @@ impl Feature {
             Self::FollowLiveTranscript => {
                 "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
             }
+            Self::MoreCallApps => {
+                "Offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on more websites."
+            }
             Self::AnnotateReplay => {
                 "Save the last 15 seconds of your screen with hex capture replay or capture.replay_hotkey; macOS shows the screen-recording dot the whole time it's on (macOS 27+)"
             }
@@ -665,6 +675,7 @@ impl Feature {
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
             Self::Screenshots => settings.labs.screenshots,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
+            Self::MoreCallApps => settings.labs.more_call_apps,
             Self::AnnotateReplay => settings.labs.annotate_replay,
         }
     }
@@ -720,6 +731,7 @@ impl Feature {
             &mut labs.gnome_meeting_capsules,
             &mut labs.screenshots,
             &mut labs.follow_live_transcript,
+            &mut labs.more_call_apps,
             &mut labs.annotate_replay,
         ]
     }
@@ -775,6 +787,7 @@ impl Feature {
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
+            Self::MoreCallApps => settings.labs.more_call_apps = on,
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
@@ -814,7 +827,9 @@ const STOP_WHEN_CALL_ENDS: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 const MOVABLE_MEETING_CAPSULES: u64 = 1 << 23;
-// 1 << 24 was Labs › Choose meeting summary model, now Meetings › Summaries.
+// Reuses 1 << 24, Labs › Choose meeting summary model before it became
+// Meetings › Summaries.
+const MORE_CALL_APPS: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 const MEETING_NOTES_VOCABULARY: u64 = 1 << 26;
 const NOTCH_INDICATOR: u64 = 1 << 27;
@@ -962,6 +977,12 @@ pub fn skip_pauses() -> bool {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn stop_when_call_ends() -> bool {
     on(STOP_WHEN_CALL_ENDS) && Feature::StopWhenCallEnds.on_this_os()
+}
+
+/// Calls in more apps and on more websites are named and offered (read by
+/// call detection and the window's Detected calls list).
+pub fn more_call_apps() -> bool {
+    on(MORE_CALL_APPS) && Feature::MoreCallApps.on_this_os()
 }
 
 /// A dictation saved to History keeps its 16 kHz audio, and History offers
@@ -1120,6 +1141,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::StopWhenCallEnds,
             settings.stop_when_call_ends,
             STOP_WHEN_CALL_ENDS,
+        ),
+        (
+            Feature::MoreCallApps,
+            settings.more_call_apps,
+            MORE_CALL_APPS,
         ),
         (
             Feature::KeepRecordings,
@@ -1699,6 +1725,18 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & GNOME_MEETING_CAPSULES, 0);
         assert_eq!(state & GNOME_CLIPBOARD_RESTORE, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn more_call_apps_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & MORE_CALL_APPS, 0);
+        labs.more_call_apps = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & MORE_CALL_APPS, 0);
+        assert_eq!(state & STOP_WHEN_CALL_ENDS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

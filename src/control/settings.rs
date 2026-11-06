@@ -425,6 +425,11 @@ const KEYS: &[Key] = &[
         "Labs: a meeting recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet, unless you keep recording (macOS)",
     ),
     key(
+        "labs.more_call_apps",
+        Kind::Bool,
+        "Labs: offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on Google Voice, Messenger, Teams, FaceTime, GroupMe, and Webex pages",
+    ),
+    key(
         "labs.movable_meeting_capsules",
         Kind::Bool,
         "Labs: drag meeting capsules such as Meeting transcript ready out of the way; they show in the corner you left them, shared with the recording capsule (macOS)",
@@ -705,6 +710,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.live_chapters", "meetings"),
     ("labs.subtitle_export", "meetings"),
     ("labs.stop_when_call_ends", "meetings"),
+    ("labs.more_call_apps", "meetings"),
     ("labs.movable_meeting_capsules", "meetings"),
     ("labs.meeting_notes_vocabulary", "meetings"),
     ("labs.meeting_finished_event", "meetings"),

@@ -17,8 +17,8 @@ use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, Os, Pl
 use super::settings::toggle_menu;
 use super::{Menu, Pane, ShortcutTarget, Ui, icons};
 use crate::app_settings::{
-    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, KNOWN_MEETING_PROVIDERS, MeetingPolicy,
-    MeetingProviderChoice, MeetingRetention, MeetingSummaries, ModifierSide,
+    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, MeetingPolicy, MeetingProviderChoice,
+    MeetingRetention, MeetingSummaries, ModifierSide,
 };
 use crate::audio::hex_microphone::DriverActionState;
 use crate::calendar::{CalendarAccess, CallProvider};
@@ -860,16 +860,14 @@ fn calendars_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 /// each with Ask / Always record / Never offer.
 fn detected_calls_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let choices = &ui.settings.meetings.providers;
-    let known = KNOWN_MEETING_PROVIDERS
+    let providers = crate::app_settings::known_meeting_providers(crate::labs::more_call_apps())
+        .collect::<Vec<_>>();
+    let known = providers
         .iter()
         .map(|(key, label)| (key.to_string(), label.to_string(), tr(label).to_owned()));
     let others = choices
         .iter()
-        .filter(|choice| {
-            !KNOWN_MEETING_PROVIDERS
-                .iter()
-                .any(|(key, _)| *key == choice.key)
-        })
+        .filter(|choice| !providers.iter().any(|(key, _)| *key == choice.key))
         .map(|choice| {
             (
                 choice.key.clone(),

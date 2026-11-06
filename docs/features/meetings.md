@@ -56,6 +56,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   └── Detected calls -> Ask / Always record / Never offer per provider // meetings.policy
 │       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
 │       │   Gather, Discord (always listed)
+│       ├── Labs › More call apps on -> also Signal, Telegram, WeChat, LINE, Webex, Element,
+│       │   Phone, Google Voice, Messenger, and GroupMe (always listed)
 │       └── then each website or app chosen for from an offer's "…"
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
            the pane leaves the sidebar
@@ -196,6 +198,15 @@ Zoom / Teams / Slack huddle / FaceTime / WhatsApp / Discord / browser call uses 
   as sitting in a space can hold it; Discord: com.hnc.Discord and its helpers,
   its Canary and PTB builds, Discord.exe, the Linux discord binary and Flatpak,
   #1283)
+Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser call on
+  voice.google.com, messenger.com, teams.live.com, facetime.apple.com,
+  web.groupme.com, or webex.com                 // Labs › More call apps, off by default
+  (Signal: org.whispersystems.signal-desktop; Telegram: ru.keepcoder.Telegram,
+  com.tdesktop.Telegram, org.telegram.desktop; WeChat: com.tencent.xinWeChat;
+  LINE: jp.naver.line.mac; Webex: com.webex.meetingmanager,
+  com.cisco.webexmeetingsapp; Element: im.riot.app; Phone: com.apple.mobilephone;
+  Signal, Telegram, WeChat, LINE, and Element wait 20 s, as voice notes also
+  hold the microphone; Webex and Phone wait 2 s)
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
   -> On the microphone for 2 s by the monotonic clock // meetings.detect
      │   Google Meet and Banshee (banshee.app) in a browser count as known
@@ -262,6 +273,33 @@ calls were never detected; Vivaldi was missing until #1105, so its calls
 `a_google_meet_call_in_arc_records_after_about_two_seconds`,
 `vivaldi_on_the_microphone_is_a_browser_call`. Not observed on a real
 Vivaldi call.
+
+Labs › More call apps (`labs.more_call_apps`, off by default; every OS with
+Meetings) widens which calls detection recognizes. While on, Signal, Telegram,
+WeChat, LINE, Webex, Element, and the Phone app are call apps: the Electron
+apps' helpers fold to their parents, and Windows and Linux executables
+(`signal`, `signal-desktop`, `telegram`, `telegram-desktop`, `wechat`,
+`weixin`, `line`, `webex`, `element`, `element-desktop`) map to the same keys
+in [microphone_activity.rs](../../src/microphone_activity.rs). Signal,
+Telegram, WeChat, LINE, and Element keep WhatsApp's about-20 s threshold
+because voice notes hold the microphone too; Webex and Phone take the normal
+2 s. On macOS, where Hex reads the browser's page, pages on `voice.google.com`
+(Google Voice), `messenger.com`, `teams.live.com` (the Teams source),
+`facetime.apple.com` (FaceTime), and `web.groupme.com` are named, and any
+`webex.com` subdomain is Webex, with one `webex.com` provider choice covering
+them all. Settings › Meetings › Detected
+calls lists the new apps and sites only while the lab is on
+(`app_settings::known_meeting_providers`), and their Ask / Always record /
+Never offer choices work as the existing services' do. Off, a Signal or
+Telegram process is not a meeting app, those pages are unknown pages (a plain
+"Browser call" after 20 s), and the provider list is exactly as before.
+Checks: `more_call_apps_are_unknown_until_their_lab_is_on`,
+`more_call_apps_names_its_apps_and_websites_with_their_lab_on`, and
+`a_telegram_voice_note_is_not_offered_but_a_sustained_call_is` in
+[meeting/detection.rs](../../src/meeting/detection.rs);
+`more_call_app_bundle_variants_and_executables_canonicalize` in
+[microphone_activity.rs](../../src/microphone_activity.rs). Not observed: any
+of these apps or websites on a real call.
 
 Chromium and Electron apps (Brave, Chrome, Edge, Arc, Slack, Teams) capture microphone
 audio in sandboxed `audio.mojom.AudioService` utility processes (`*.helper`) that

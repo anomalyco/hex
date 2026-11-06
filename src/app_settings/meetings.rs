@@ -251,6 +251,34 @@ pub const KNOWN_MEETING_PROVIDERS: [(&str, &str); 8] = [
     ("com.hnc.Discord", "Discord"),
 ];
 
+/// The call services Labs › More call apps adds, by the same provider keys.
+/// Settings lists them only while the lab is on; an offer's "…" still saves
+/// a choice for any of them.
+pub const MORE_MEETING_PROVIDERS: [(&str, &str); 10] = [
+    ("org.whispersystems.signal-desktop", "Signal"),
+    ("ru.keepcoder.Telegram", "Telegram"),
+    ("com.tencent.xinWeChat", "WeChat"),
+    ("jp.naver.line.mac", "LINE"),
+    ("com.webex.meetingmanager", "Webex"),
+    ("im.riot.app", "Element"),
+    ("com.apple.mobilephone", "Phone"),
+    ("voice.google.com", "Google Voice"),
+    ("messenger.com", "Messenger"),
+    ("web.groupme.com", "GroupMe"),
+];
+
+/// The providers Settings always lists: the known services, then Labs › More
+/// call apps' while `more_call_apps` is on.
+pub fn known_meeting_providers(
+    more_call_apps: bool,
+) -> impl Iterator<Item = (&'static str, &'static str)> {
+    KNOWN_MEETING_PROVIDERS.into_iter().chain(
+        MORE_MEETING_PROVIDERS
+            .into_iter()
+            .filter(move |_| more_call_apps),
+    )
+}
+
 /// What Hex does when it detects a call from a provider.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -439,4 +467,32 @@ pub fn meeting_output_folder() -> PathBuf {
         .unwrap_or_else(|error| error.into_inner())
         .clone()
         .unwrap_or_else(default_meeting_output_folder)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_extra_providers_are_listed_only_with_their_lab() {
+        let off = known_meeting_providers(false).collect::<Vec<_>>();
+        assert_eq!(off, KNOWN_MEETING_PROVIDERS);
+        assert!(!off.iter().any(|(key, _)| *key == "ru.keepcoder.Telegram"));
+
+        let on = known_meeting_providers(true).collect::<Vec<_>>();
+        assert_eq!(
+            on.len(),
+            KNOWN_MEETING_PROVIDERS.len() + MORE_MEETING_PROVIDERS.len()
+        );
+        assert!(on.contains(&("org.whispersystems.signal-desktop", "Signal")));
+        assert!(on.contains(&("ru.keepcoder.Telegram", "Telegram")));
+        assert!(on.contains(&("com.tencent.xinWeChat", "WeChat")));
+        assert!(on.contains(&("jp.naver.line.mac", "LINE")));
+        assert!(on.contains(&("com.webex.meetingmanager", "Webex")));
+        assert!(on.contains(&("im.riot.app", "Element")));
+        assert!(on.contains(&("com.apple.mobilephone", "Phone")));
+        assert!(on.contains(&("voice.google.com", "Google Voice")));
+        assert!(on.contains(&("messenger.com", "Messenger")));
+        assert!(on.contains(&("web.groupme.com", "GroupMe")));
+    }
 }
