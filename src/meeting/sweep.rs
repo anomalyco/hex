@@ -8,6 +8,8 @@ use std::path::Path;
 
 const MANIFEST: &str = "manifest.json";
 const STAGING: &str = "system.importing.wav";
+const SYSTEM: &str = "system.wav";
+const MICROPHONE: &str = "microphone.wav";
 
 /// Removes abandoned import folders under the meetings root. Runs once per
 /// launch, before the pending-finals pass; never fails launch.
@@ -32,7 +34,13 @@ fn remove_orphaned_in(root: &Path) -> usize {
         if directory.join(MANIFEST).exists() {
             continue;
         }
-        if !directory.join(STAGING).exists() {
+        // An import before its rename still has the staging file. Between the
+        // rename and the manifest write it has both finished tracks and no
+        // manifest; recordings write their manifest before any audio, so this
+        // pair is never a recording.
+        let staging = directory.join(STAGING).exists();
+        let renamed = directory.join(SYSTEM).exists() && directory.join(MICROPHONE).exists();
+        if !staging && !renamed {
             continue;
         }
         let active = match super::ActiveMeeting::try_acquire(&directory) {
@@ -102,12 +110,21 @@ mod tests {
         let recording = folder(&root, "recording");
         fs::write(recording.join("system.wav"), b"audio").unwrap();
 
+        // The narrow window between the import's rename and its manifest.
+        let renamed = folder(&root, "renamed");
+        fs::write(renamed.join(SYSTEM), b"audio").unwrap();
+        fs::write(renamed.join(MICROPHONE), b"empty").unwrap();
+
         let busy = folder(&root, "busy");
         fs::write(busy.join(STAGING), b"partial").unwrap();
         let held = super::super::ActiveMeeting::acquire(&busy).unwrap();
 
-        assert_eq!(remove_orphaned_in(&root), 1);
+        assert_eq!(remove_orphaned_in(&root), 2);
         assert!(!orphan.exists(), "the abandoned import was removed");
+        assert!(
+            !renamed.exists(),
+            "the renamed import without a manifest was removed"
+        );
         assert!(finished.exists(), "a folder with a manifest stays");
         assert!(finished.join(STAGING).exists(), "with its staging file");
         assert!(recording.exists(), "a folder with no staging file stays");

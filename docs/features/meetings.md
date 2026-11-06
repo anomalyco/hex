@@ -664,9 +664,9 @@ Meetings > Import audio… (macOS; Labs › Import audio, off by default) // mee
 │   Meetings as Audio could not be imported
 └── Quitting mid-import
     ├── Before final.pending -> a normal quit cancels decode and removes the
-    │   folder; a crash or a quit past the 5 s drain leaves
-    │   system.importing.wav with no manifest, and the next launch's sweep
-    │   removes that folder once its lock is free
+    │   folder; a crash or a quit past the 5 s drain leaves either
+    │   system.importing.wav or both finished tracks with no manifest, and the
+    │   next launch's sweep removes that folder once its lock is free
     ├── After final.pending -> next launch finishes it (the pending-finals
     │   thread), exactly like a recording Hex quit during
     └── During the final pass -> Interrupted with final.pending kept, so the

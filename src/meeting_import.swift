@@ -160,9 +160,9 @@ private func convertAudio(
                     let code = (error as NSError).code
                     // A short or malformed file ends at EOF, not as a read
                     // failure. AVAudioFile can answer the tail with a generic
-                    // nilError instead of a zero-frame read; at the file's
-                    // recorded end that is EOF, not corruption. Its error
-                    // code is not consulted (it is 0).
+                    // nilError instead of a zero-frame read; at or after the
+                    // file's recorded end, including after a short read, that
+                    // is EOF, not corruption. Its code is not consulted (0).
                     if code == Int(kAudioFileEndOfFileError)
                         || input.framePosition >= input.length
                     {
@@ -180,11 +180,6 @@ private func convertAudio(
                     inputExhausted = true
                     inputStatus.pointee = .endOfStream
                     return nil
-                }
-                // A short fixed-capacity read is the file's last block. Stop
-                // asking for more so AVAudioFile's tail error never arises.
-                if inputBuffer.frameLength < inputBuffer.frameCapacity {
-                    inputExhausted = true
                 }
                 inputStatus.pointee = .haveData
                 return inputBuffer

@@ -69,14 +69,14 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
         }
         let decoded = directory.join("system.importing.wav");
         decode(source, &decoded)?;
-        let system_path = directory.join("system.wav");
-        fs::rename(&decoded, &system_path).wrap_err("could not keep the imported audio")?;
-        set_owner_only(&system_path, false)?;
+        set_owner_only(&decoded, false)?;
+        sync_file(&decoded)?;
         create_empty_track(directory.join("microphone.wav"))?;
-        sync_file(&system_path)?;
         sync_directory(&directory)?;
 
-        let samples = wav_samples(&system_path)?;
+        // Everything fallible happens while the staging file still exists;
+        // after the rename, the manifest write is the very next step.
+        let samples = wav_samples(&decoded)?;
         let duration_ms = samples.saturating_mul(1_000) / u64::from(SAMPLE_RATE);
         let manifest = MeetingManifest {
             schema_version: 1,
@@ -118,6 +118,8 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
             export_sha256: None,
             imported: true,
         };
+        let system_path = directory.join("system.wav");
+        fs::rename(&decoded, &system_path).wrap_err("could not keep the imported audio")?;
         write_manifest(&directory, &manifest)?;
         fs::write(directory.join(FINAL_PENDING_FILE), b"")?;
         Ok((active, manifest, duration_ms))

@@ -1385,8 +1385,8 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   transcript.md, and Copy Last Transcript still say You/Them for imported
   meetings; only the pane and the user Markdown export say Speaker. Quitting
   cancels the decode and removes its folder; a crash or a quit past the drain
-  leaves only a staging file, which the next launch's sweep removes once its
-  lock is free. Checks:
+  leaves a staging file, or both finished tracks with no manifest, which the
+  next launch's sweep removes once its lock is free. Checks:
   `meeting_import_is_its_own_bit_and_off_by_default`
   ([labs.rs](../../src/labs.rs));
   `only_the_listed_audio_files_are_imported`,
