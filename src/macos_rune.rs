@@ -1268,6 +1268,13 @@ impl Pump {
                     .update(move |ui, _| crate::rune_ui::meeting_failed(ui, message));
                 show(&self.window, Destination::Meetings(None));
             }
+            ControllerEvent::ImportFailed { error } => {
+                tracing::error!(%error, "meeting audio import failed");
+                let message = error.clone();
+                self.window
+                    .update(move |ui, _| crate::rune_ui::meeting_import_failed(ui, message));
+                show(&self.window, Destination::Meetings(None));
+            }
         }
     }
 

@@ -646,6 +646,9 @@ impl MacHost {
             MeetingRequest::Stop => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::Stop),
+            MeetingRequest::Import(path) => self
+                .runtime()?
+                .meeting(crate::meeting::MeetingRequest::Import(path)),
             MeetingRequest::Summarize(id) => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::Summarize(id)),

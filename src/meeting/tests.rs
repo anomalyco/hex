@@ -169,6 +169,7 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        imported: false,
     };
     write_manifest(&directory, &manifest).unwrap();
 
@@ -215,6 +216,7 @@ fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() 
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        imported: false,
     };
     let (sender, receiver) = mpsc::sync_channel(4);
 
@@ -523,7 +525,27 @@ fn retention_manifest(
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        imported: false,
     }
+}
+
+#[test]
+fn imported_meetings_keep_their_flag_and_older_manifests_read_as_recorded() {
+    let mut manifest = retention_manifest("imported", MeetingStatus::Complete, 1, Some(2));
+    let recorded = serde_json::to_value(&manifest).unwrap();
+    assert!(
+        recorded.get("imported").is_none(),
+        "recorded meetings stay unchanged"
+    );
+
+    manifest.imported = true;
+    let json = serde_json::to_value(&manifest).unwrap();
+    assert_eq!(json["imported"], true);
+    let decoded: MeetingManifest = serde_json::from_value(json).unwrap();
+    assert!(decoded.imported);
+
+    let older: MeetingManifest = serde_json::from_value(recorded).unwrap();
+    assert!(!older.imported);
 }
 
 #[test]

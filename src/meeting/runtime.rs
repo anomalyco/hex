@@ -207,6 +207,15 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
             });
             window.open();
         }
+        ControllerEvent::ImportFailed { error } => {
+            tracing::error!(%error, "meeting audio import failed");
+            let message = error.clone();
+            window.update(move |ui, tx| {
+                crate::rune_ui::meeting_import_failed(ui, message);
+                crate::rune_ui::show(ui, Destination::Meetings(None), tx);
+            });
+            window.open();
+        }
         ControllerEvent::CallEnded { app, .. } => {
             tracing::info!(%app, "the call ended; the recording continues until Stop");
         }

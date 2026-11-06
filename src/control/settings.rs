@@ -475,6 +475,11 @@ const KEYS: &[Key] = &[
         "Labs: while a meeting records, its transcript in Meetings scrolls to the newest line; scroll up to read earlier text, back to the bottom to follow again",
     ),
     key(
+        "labs.meeting_import",
+        Kind::Bool,
+        "Labs: Meetings offers Import audio…, so a local audio file is transcribed and kept as a meeting (macOS)",
+    ),
+    key(
         "labs.output_fixes",
         Kind::Bool,
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",

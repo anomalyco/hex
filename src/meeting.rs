@@ -21,6 +21,9 @@ const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
 /// final transcription: its audio is
 /// saved and its final transcript runs at the next launch.
 const FINAL_PENDING_FILE: &str = "final.pending";
+/// While an audio import runs, until final.pending exists: marks the folder
+/// as an import the launch sweep may remove once its lock is free.
+const IMPORT_PENDING_FILE: &str = "import.pending";
 
 mod capture;
 mod chapters;
@@ -44,13 +47,17 @@ pub(crate) use os::{
 };
 mod delta;
 mod echo;
+mod finish;
 pub(crate) mod finished_events;
 pub(crate) mod generator;
+#[cfg(target_os = "macos")]
+pub(crate) mod import;
 pub(crate) mod mcp;
 mod notes;
 pub mod query;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod runtime;
+pub(crate) mod sweep;
 mod transcript;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod watcher;
@@ -136,6 +143,8 @@ pub enum MeetingRequest {
     Stop,
     /// Regenerate Apple Intelligence notes for a completed meeting.
     Summarize(String),
+    /// Import a local audio file as a meeting (macOS; Labs › Import audio).
+    Import(PathBuf),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -194,9 +203,23 @@ pub struct MeetingManifest {
     /// user edited stays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_sha256: Option<String>,
+    /// Imported from an audio file rather than recorded: one speaker track,
+    /// labelled Speaker.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub imported: bool,
 }
 
 impl MeetingManifest {
+    /// What a transcript line's source is called in the user's Markdown: an
+    /// imported meeting has one track, so every turn is just Speaker.
+    pub fn speaker_label(&self, source: MeetingSource) -> &'static str {
+        if self.imported {
+            "Speaker"
+        } else {
+            source.label()
+        }
+    }
+
     /// Where `title` came from, inferred for manifests that predate the field.
     pub fn title_source(&self) -> TitleSource {
         self.title_source.unwrap_or_else(|| {
@@ -439,6 +462,7 @@ pub fn record(
         chapters_refined: false,
         retention_applies: true,
         export_sha256: None,
+        imported: false,
     };
     set_title_source(&mut manifest, title_source);
     write_manifest(&meeting_dir, &manifest)?;
@@ -897,7 +921,8 @@ fn transcribe(
     Ok(())
 }
 
-/// Meetings Hex quit while recording, oldest first.
+/// Meetings Hex left with `final.pending` (quit while recording or
+/// importing), oldest first.
 pub fn pending_final_transcripts() -> Vec<String> {
     let Ok(entries) = root().and_then(|root| Ok(fs::read_dir(root)?)) else {
         return Vec::new();
@@ -911,10 +936,11 @@ pub fn pending_final_transcripts() -> Vec<String> {
     ids
 }
 
-/// Transcribes and publishes a meeting Hex quit while recording, as Stop
-/// would have. `None` when it is no longer pending or another process holds
-/// it. Quitting again, or a missing model, leaves it pending for the next
-/// launch; any other failure keeps it Interrupted with its draft.
+/// Transcribes and publishes a meeting left with `final.pending` (Hex quit
+/// while recording or importing), as Stop would have. `None` when it is no
+/// longer pending or another process holds it. Quitting again, or a missing
+/// model, leaves it pending for the next launch; any other failure keeps it
+/// Interrupted with its draft.
 pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
     let directory = root()?.join(id);
     let Some(_active) = ActiveMeeting::try_acquire(&directory)? else {
@@ -929,28 +955,12 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
     if !crate::transcription::models::is_installed(model, &selection.language) {
         return Err(eyre!("{} is not installed", model.name));
     }
-    let mut manifest = read_manifest(&directory)?;
+    let manifest = read_manifest(&directory)?;
     tracing::info!(
         meeting = id,
-        "finishing the transcript of a meeting Hex quit while recording"
+        "finishing a meeting transcript left pending by an earlier quit"
     );
-    match transcribe(&directory, &mut manifest, &selection, None) {
-        Ok(()) => {
-            manifest.status = MeetingStatus::Complete;
-            manifest.error = None;
-            write_manifest(&directory, &manifest)?;
-            finished_events::publish(&manifest.id);
-            Ok(Some(manifest))
-        }
-        Err(error) if crate::desktop::process_exit::quitting() => Err(error),
-        Err(error) => {
-            manifest.status = MeetingStatus::Interrupted;
-            manifest.error = Some(error.to_string());
-            write_manifest(&directory, &manifest)?;
-            let _ = fs::remove_file(&pending);
-            Err(error)
-        }
-    }
+    finish::finish_transcription(&directory, manifest, &selection).map(Some)
 }
 
 pub fn list() -> Result<Vec<MeetingManifest>> {
