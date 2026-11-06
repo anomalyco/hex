@@ -2,15 +2,18 @@
 //! top of the pane, the query it holds, the rows each section keeps, and the
 //! pane that assembles them.
 
-use rune::{El, Key, KeyEvent, row};
+use rune::{El, Key, KeyEvent, Tx, row};
 use rune_kit::TextInput;
 
-use super::super::controls::{CardRow, METRICS, Paint, page, section};
+use super::super::controls::{CardRow, METRICS, Paint, icon_row, page, section};
+use super::super::icons::CIRCLE_X;
 use super::super::list_detail::{SEARCH_ICON, empty_state};
 use super::super::platform_settings as os;
 use super::super::settings as s;
-use super::super::{Pane, Ui, scroll_body};
-use super::{advanced_open, advanced_toggle, application, basics, dictation, output};
+use super::super::{Pane, ShortcutTarget, Ui, scroll_body};
+use super::{
+    advanced_open, advanced_toggle, application, basics, dictation, output, shortcut_rows,
+};
 use crate::desktop::i18n::tr;
 use crate::labs::Feature;
 
@@ -19,7 +22,8 @@ const SEARCH_WIDTH: f32 = 320.0;
 /// The pane, with the search field first while its lab is on. With a query,
 /// every matching row shows whatever its fold, empty sections hide, and
 /// nothing matching shows the empty state; without one it is the pane as
-/// before.
+/// before. Permissions and errors always show; the listener and desktop
+/// shortcut cards show while their titles match.
 pub(crate) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let enabled = Feature::SettingsSearch.on(&ui.settings);
     let query = if enabled {
@@ -32,20 +36,21 @@ pub(crate) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     if enabled {
         content = content.child(search_row(ui, p));
     }
-    if searching {
-        content = content.children(os::error_section(ui, p));
-    } else {
-        content = content
-            .children(os::permissions_section(ui, p))
-            .children(os::error_section(ui, p));
-        if ui.platform.caps.listener_control {
-            content = content.child(s::listener_card(ui, p));
-        }
-        if !ui.records_shortcuts() {
+    content = content
+        .children(os::permissions_section(ui, p))
+        .children(os::error_section(ui, p));
+    let mut matched = false;
+    if ui.platform.caps.listener_control && (!searching || matches(query, tr("Status"), None)) {
+        content = content.child(s::listener_card(ui, p));
+        matched |= searching;
+    }
+    if !ui.records_shortcuts() {
+        let title = tr("Desktop shortcuts");
+        if !searching || matches(query, title, None) {
             content = content.child(s::desktop_commands(ui, p));
+            matched |= searching;
         }
     }
-    let mut matched = false;
     if let Some(basics) = basics(ui, p, layer, query) {
         content = content.child(basics);
         matched = true;
@@ -91,7 +96,8 @@ fn search_row(ui: &Ui, p: Paint) -> El {
         .placeholder(tr("Search settings"))
         .width(Some(SEARCH_WIDTH))
         .leading_icon(p.k.glyph.search)
-        .on_edit(|ui: &mut Ui| &mut ui.general_search);
+        .on_edit(|ui: &mut Ui| &mut ui.general_search)
+        .on_change(|ui: &mut Ui, _: &mut Tx| ui.open = None);
     if !ui.general_search.text.is_empty() {
         field = field.clear_button();
     }
@@ -112,6 +118,14 @@ pub(crate) fn focus_search_key(ui: &mut Ui, event: &KeyEvent) -> bool {
     if event.key != Key::Command('f') || event.mods.shift {
         return false;
     }
+    if ui.picker.open
+        || ui.explainer.open
+        || ui.sound_sets.open
+        || ui.vocabulary.open
+        || ui.tour.is_some()
+    {
+        return false;
+    }
     if ui.labs_open {
         super::super::labs::focus_search(ui);
         return true;
@@ -121,6 +135,47 @@ pub(crate) fn focus_search_key(ui: &mut Ui, event: &KeyEvent) -> bool {
         return true;
     }
     false
+}
+
+/// Toggle's cancel shortcut. A shortcuts portal would hold its key from
+/// every app for as long as Hex runs, so on Wayland it says to bind
+/// `hex dictation cancel` in the desktop instead. Its description comes back
+/// for search too.
+pub(super) fn cancel_rows(ui: &Ui, p: Paint) -> (&'static str, Vec<CardRow>) {
+    if matches!(
+        ui.shortcuts(),
+        Some(crate::desktop::host::DesktopShortcuts::Portal(_))
+    ) {
+        let description =
+            tr("Bind hex dictation cancel to a key in your desktop's keyboard shortcuts");
+        return (
+            description,
+            vec![
+                icon_row(
+                    p,
+                    "cancel-shortcut",
+                    &CIRCLE_X,
+                    tr("Cancel"),
+                    Some(description),
+                    row().key("cancel-shortcut-control"),
+                )
+                .into(),
+            ],
+        );
+    }
+    let description = tr("Discards the recording");
+    (
+        description,
+        shortcut_rows(
+            ui,
+            p,
+            "cancel-shortcut",
+            &CIRCLE_X,
+            tr("Cancel"),
+            ShortcutTarget::Cancel,
+            Some(description),
+        ),
+    )
 }
 
 /// Rows under construction, kept only while their title, or a description
@@ -158,10 +213,20 @@ impl<'a> Rows<'a> {
         }
     }
 
-    /// Keeps `rows` together when `title` matches, without the empty folds
-    /// while searching.
+    /// Keeps `rows` together when `title` matches.
     pub(super) fn extend(&mut self, title: &str, rows: impl IntoIterator<Item = CardRow>) {
-        if matches(self.query, title, None) {
+        self.extend_described(title, None, rows);
+    }
+
+    /// Keeps `rows` together when `title` or `description` matches, without
+    /// the empty folds while searching.
+    pub(super) fn extend_described(
+        &mut self,
+        title: &str,
+        description: Option<&str>,
+        rows: impl IntoIterator<Item = CardRow>,
+    ) {
+        if matches(self.query, title, description) {
             let rows = rows.into_iter();
             if self.query.is_empty() {
                 self.rows.extend(rows);

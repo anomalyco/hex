@@ -592,7 +592,7 @@ impl Feature {
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
             }
-            Self::SettingsSearch => "Search the General settings pane",
+            Self::SettingsSearch => "Find any setting in General with a search field",
             Self::HideMenuBarIcon => {
                 "Hide Hex's menu bar icon; shortcuts keep working, and opening Hex again shows Settings"
             }

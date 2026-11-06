@@ -433,6 +433,74 @@ fn settings_search_shows_with_its_lab_and_filters_general() {
 }
 
 #[test]
+fn settings_search_matches_descriptions() {
+    let mut rt = runtime("mac-settings", true, TALL_SIZE);
+    rt.state.settings.labs.settings_search = true;
+    rt.state.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+    rt.invalidate();
+    settle(&mut rt);
+
+    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("airpods"));
+    settle(&mut rt);
+    assert!(rt.find("avoid-bluetooth-microphone").is_some());
+
+    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("discards"));
+    settle(&mut rt);
+    assert!(rt.find("cancel-shortcut").is_some());
+    assert!(rt.find("settings-empty").is_none());
+}
+
+#[test]
+fn settings_search_keeps_permissions_and_status_cards() {
+    // A permissions card always shows, even when nothing matches it.
+    let mut rt = runtime("mac-settings-permissions", true, TALL_SIZE);
+    rt.state.settings.labs.settings_search = true;
+    rt.invalidate();
+    settle(&mut rt);
+    rt.update(|ui, _| {
+        ui.general_search = rune::TextEdit::new("no such setting");
+    });
+    settle(&mut rt);
+    assert!(rt.find("permissions").is_some());
+    assert!(rt.find("settings-empty").is_some());
+
+    // Without a portal, the desktop-commands card counts as a match, as
+    // does the listener card on its title.
+    let mut rt = runtime("commands", true, TALL_SIZE);
+    rt.state.settings.labs.settings_search = true;
+    rt.invalidate();
+    settle(&mut rt);
+    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("shortcut"));
+    settle(&mut rt);
+    assert!(rt.find("desktop-shortcuts").is_some());
+    assert!(rt.find("settings-empty").is_none());
+
+    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("status"));
+    settle(&mut rt);
+    assert!(rt.find("listening").is_some());
+    assert!(rt.find("settings-empty").is_none());
+}
+
+#[test]
+fn command_f_focuses_general_search_only_with_its_lab_and_pane() {
+    let mut rt = runtime("mac-settings", true, TALL_SIZE);
+    key(&mut rt, Key::Command('f'), Mods::default());
+    assert!(!rt.state.general_search.focused, "the lab is off");
+
+    rt.state.settings.labs.settings_search = true;
+    rt.invalidate();
+    settle(&mut rt);
+    key(&mut rt, Key::Command('f'), Mods::default());
+    assert!(rt.state.general_search.focused);
+
+    rt.state.general_search.focused = false;
+    tap(&mut rt, "nav-history");
+    assert_eq!(rt.state.pane, Pane::History);
+    key(&mut rt, Key::Command('f'), Mods::default());
+    assert!(!rt.state.general_search.focused, "another pane");
+}
+
+#[test]
 fn choosing_an_update_channel_saves_it_and_checks_now() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     tap(&mut rt, "advanced-toggle");

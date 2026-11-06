@@ -53,14 +53,16 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Opt
         rows.push(tr("Shortcut mode"), super::shortcut_mode::row(ui, p));
         // Toggle has a cancel shortcut; Hold has none.
         if ui.settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle {
-            rows.extend(tr("Cancel"), cancel_rows(ui, p));
+            let (description, cancel) = search::cancel_rows(ui, p);
+            rows.extend_described(tr("Cancel"), Some(description), cancel);
         }
         // Labs › Second dictation shortcut (macOS): another key that
         // dictates like the one above, such as on an external keyboard.
         #[cfg(target_os = "macos")]
         if crate::labs::Feature::SecondDictationShortcut.on(&ui.settings) {
-            rows.extend(
+            rows.extend_described(
                 tr("Second dictation shortcut"),
+                Some(tr("Dictates like the shortcut above")),
                 shortcut_rows(
                     ui,
                     p,
@@ -90,7 +92,11 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Opt
             );
         }
         if let Some(row) = configure_shortcuts_row(ui, p) {
-            rows.push(tr("Desktop shortcuts"), row);
+            rows.push_described(
+                tr("Desktop shortcuts"),
+                Some(tr("Change the keys your desktop gave Hex")),
+                row,
+            );
         }
     }
     let picker_button = value_button(
@@ -151,8 +157,10 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Opt
         }
         None => (s::transcription_status(ui, p), picker_button),
     };
-    rows.push(
+    let description_text = description.as_ref().map(|(text, _)| text.clone());
+    rows.push_described(
         tr("Speech model"),
+        description_text.as_deref(),
         icon_described_row(
             p,
             "transcription",
@@ -166,8 +174,9 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Opt
         rows.push(tr("Language"), row);
     }
     let vocabulary_note = super::vocabulary::unused_note(ui);
-    rows.push(
+    rows.push_described(
         tr("Vocabulary"),
+        vocabulary_note.as_deref(),
         icon_row(
             p,
             "vocabulary",
@@ -185,9 +194,11 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Opt
         ),
     );
     rows.extend(tr("Microphone"), microphone_rows(ui, p, layer));
-    rows.push(
+    let (description, row) = microphone_release_row(ui, p);
+    rows.push_described(
         tr("Turn off the mic when not dictating"),
-        microphone_release_row(ui, p),
+        Some(description),
+        row,
     );
     rows.extend(tr("Launch at login"), launch_at_login_rows(ui, p));
     (!rows.is_empty()).then(|| card(p, "basics", rows.into_rows()))
@@ -306,39 +317,6 @@ pub(super) fn shortcut_rows(
     rows
 }
 
-/// Toggle's cancel shortcut. A shortcuts portal would hold its key from
-/// every app for as long as Hex runs, so on Wayland it says to bind
-/// `hex dictation cancel` in the desktop instead.
-fn cancel_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
-    if matches!(
-        ui.shortcuts(),
-        Some(crate::desktop::host::DesktopShortcuts::Portal(_))
-    ) {
-        return vec![
-            icon_row(
-                p,
-                "cancel-shortcut",
-                &CIRCLE_X,
-                tr("Cancel"),
-                Some(tr(
-                    "Bind hex dictation cancel to a key in your desktop's keyboard shortcuts",
-                )),
-                row().key("cancel-shortcut-control"),
-            )
-            .into(),
-        ];
-    }
-    shortcut_rows(
-        ui,
-        p,
-        "cancel-shortcut",
-        &CIRCLE_X,
-        tr("Cancel"),
-        ShortcutTarget::Cancel,
-        Some(tr("Discards the recording")),
-    )
-}
-
 /// The desktop's own dialog for the shortcuts its portal bound, where the
 /// user changes a trigger the desktop kept from an earlier binding.
 fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
@@ -366,25 +344,29 @@ fn configure_shortcuts_row(ui: &Ui, p: Paint) -> Option<El> {
 /// Whether the microphone closes between dictations, beside the microphone
 /// picker: one switch, no confirmation, and a line saying what it means
 /// (issues 61 and #870's copy). The default keeps it ready.
-fn microphone_release_row(ui: &Ui, p: Paint) -> CardRow {
+fn microphone_release_row(ui: &Ui, p: Paint) -> (&'static str, CardRow) {
     let release = ui.settings.release_microphone_while_idle;
-    icon_toggle_row(
-        p,
-        "microphone-mode",
-        &ZAP,
-        tr("Turn off the mic when not dictating"),
-        if release {
-            tr("The mic opens only while you dictate; the first moment can be clipped")
-        } else {
-            tr("The mic stays ready so dictation starts instantly; your system shows it in use")
-        },
-        release,
-        |ui: &mut Ui| {
-            let release = !ui.settings.release_microphone_while_idle;
-            ui.update(|settings| settings.release_microphone_while_idle = release);
-        },
+    let description = if release {
+        tr("The mic opens only while you dictate; the first moment can be clipped")
+    } else {
+        tr("The mic stays ready so dictation starts instantly; your system shows it in use")
+    };
+    (
+        description,
+        icon_toggle_row(
+            p,
+            "microphone-mode",
+            &ZAP,
+            tr("Turn off the mic when not dictating"),
+            description,
+            release,
+            |ui: &mut Ui| {
+                let release = !ui.settings.release_microphone_while_idle;
+                ui.update(|settings| settings.release_microphone_while_idle = release);
+            },
+        )
+        .into(),
     )
-    .into()
 }
 
 /// Labs › Also pause the browser's permission, under Pause media on macOS:
@@ -949,8 +931,9 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Vec
         let volume = ui
             .duck_volume_drag
             .unwrap_or(settings.recording_duck_volume);
-        rows.push(
+        rows.push_described(
             tr("Lower to"),
+            Some(tr("Percent of the current output volume")),
             icon_row(
                 p,
                 "recording-duck-volume",
@@ -978,8 +961,9 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Vec
     if ui.platform.caps.os == super::platform::Os::Macos
         && settings.recording_audio_behavior == RecordingAudioBehavior::PauseMedia
     {
-        rows.extend(
+        rows.extend_described(
             tr("Screen & System Audio Recording"),
+            Some(tr("Lets Hex hear whether a tab is playing")),
             pause_browser_rows(ui, p).into_iter().map(CardRow::from),
         );
     }
@@ -1011,8 +995,9 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Vec
         ),
     );
     if ui.platform.caps.terminal_paste {
-        rows.push(
+        rows.push_described(
             tr("Terminal paste"),
+            Some(tr("Paste with Ctrl+Shift+V so terminals accept it")),
             icon_toggle_row(
                 p,
                 "terminal-paste",
@@ -1028,8 +1013,9 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Vec
         );
     }
     if clipboard_note_shown(ui) {
-        rows.push(
+        rows.push_described(
             tr("Restore clipboard on GNOME"),
+            Some(tr("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it.")),
             note(
                 "clipboard-restore-note",
                 tr("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it."),

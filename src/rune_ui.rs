@@ -1120,6 +1120,7 @@ impl Ui {
         self.flush_drafts();
         settings::cancel_capture(self);
         self.open = None;
+        self.general_search.clear();
         models::close(self);
         picker::close(self);
         explainer::close(self);

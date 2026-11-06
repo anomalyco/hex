@@ -221,16 +221,23 @@ other work). Check:
 
 Settings search (`settings-search`, every OS): while on, General starts with
 a single-line search field. Typing keeps only the rows and cards whose title
-matches case-insensitively; the Advanced fold's rows match without opening
-it, and the fold control hides while a query is set. Nothing matching shows
-"No settings match" with the kit's empty state, and clearing the
-field restores the pane. The gate is the pane
+or description matches case-insensitively; the Advanced fold's rows match
+without opening it, and the fold control hides while a query is set.
+Permissions and errors always stay; the listener and desktop-shortcut cards
+stay while their titles match, and count as a match. Nothing matching shows
+"No settings match" with the kit's empty state, and clearing the field
+restores the pane. The gate is the pane
 ([general/search.rs](../../src/rune_ui/general/search.rs) reads
 `labs::Feature::SettingsSearch`), so off, General is exactly as before.
-Checks: `settings_search_shows_with_its_lab_and_filters_general` in
+Checks: `settings_search_shows_with_its_lab_and_filters_general`,
+`settings_search_matches_descriptions`,
+`settings_search_keeps_permissions_and_status_cards`, and
+`command_f_focuses_general_search_only_with_its_lab_and_pane` in
 [tests.rs](../../src/rune_ui/tests.rs) and the matching test in
 [general/search.rs](../../src/rune_ui/general/search.rs). Not yet observed
-in a real window; the Labs page goldens on Linux carry the new row.
+in a real window; the Labs page goldens were regenerated for macOS
+(`mac-labs`, `mac-labs-link`, light and dark), Windows (`windows-labs`,
+light), and Linux (`linux-labs`, light).
 
 Keep dictation on clipboard (`keep-on-clipboard`, issue 200, macOS): while
 on, a pasted dictation stays on the clipboard. `paste::Paster` reads
