@@ -132,6 +132,7 @@ private func convertAudio(
     var finished = false
     var failure: Error?
     var wroteFrames: AVAudioFramePosition = 0
+    var previousReadShort = false
 
     while !finished {
         if isCancelled() != 0 {
@@ -161,10 +162,12 @@ private func convertAudio(
                     // A short or malformed file ends at EOF, not as a read
                     // failure. AVAudioFile can answer the tail with a generic
                     // nilError instead of a zero-frame read; at or after the
-                    // file's recorded end, including after a short read, that
-                    // is EOF, not corruption. Its code is not consulted (0).
+                    // file's recorded end, or after the previous read was
+                    // short (MP3's estimated length can be too high), that is
+                    // EOF. A mid-file error after a full read still fails.
                     if code == Int(kAudioFileEndOfFileError)
                         || input.framePosition >= input.length
+                        || previousReadShort
                     {
                         inputExhausted = true
                         inputStatus.pointee = .endOfStream
@@ -181,6 +184,10 @@ private func convertAudio(
                     inputStatus.pointee = .endOfStream
                     return nil
                 }
+                // A short read is not EOF by itself; it only lets a following
+                // read error at the tail count as EOF.
+                previousReadShort =
+                    inputBuffer.frameLength < inputBuffer.frameCapacity
                 inputStatus.pointee = .haveData
                 return inputBuffer
             }

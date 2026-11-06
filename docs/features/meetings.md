@@ -649,6 +649,8 @@ Meetings > Import audio… (macOS; Labs › Import audio, off by default) // mee
 │   bounded blocks (src/meeting_import.swift; no whole file in memory)
 ├── New owner-only Application Support/meetings/<created_ms>-<pid> folder,
 │   active.lock held
+│   ├── import.pending written under the lock before decode; removed only
+│   │   once final.pending is on disk
 │   ├── system.wav = the decoded audio; microphone.wav = an empty 16 kHz track
 │   ├── manifest: Transcribing, title = file name, samples/sample_rate/
 │   │   duration/created_at/ended_at, retention_applies, imported: true
@@ -664,9 +666,9 @@ Meetings > Import audio… (macOS; Labs › Import audio, off by default) // mee
 │   Meetings as Audio could not be imported
 └── Quitting mid-import
     ├── Before final.pending -> a normal quit cancels decode and removes the
-    │   folder; a crash or a quit past the 5 s drain leaves either
-    │   system.importing.wav or both finished tracks with no manifest, and the
-    │   next launch's sweep removes that folder once its lock is free
+    │   folder; a crash or a quit past the 5 s drain leaves import.pending and
+    │   no manifest, and the next launch's sweep removes that folder once its
+    │   lock is free
     ├── After final.pending -> next launch finishes it (the pending-finals
     │   thread), exactly like a recording Hex quit during
     └── During the final pass -> Interrupted with final.pending kept, so the

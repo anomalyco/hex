@@ -21,6 +21,9 @@ const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
 /// final transcription: its audio is
 /// saved and its final transcript runs at the next launch.
 const FINAL_PENDING_FILE: &str = "final.pending";
+/// While an audio import runs, until final.pending exists: marks the folder
+/// as an import the launch sweep may remove once its lock is free.
+const IMPORT_PENDING_FILE: &str = "import.pending";
 
 mod capture;
 mod chapters;

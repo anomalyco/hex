@@ -6,10 +6,9 @@
 use std::fs;
 use std::path::Path;
 
+use super::IMPORT_PENDING_FILE;
+
 const MANIFEST: &str = "manifest.json";
-const STAGING: &str = "system.importing.wav";
-const SYSTEM: &str = "system.wav";
-const MICROPHONE: &str = "microphone.wav";
 
 /// Removes abandoned import folders under the meetings root. Runs once per
 /// launch, before the pending-finals pass; never fails launch.
@@ -34,13 +33,10 @@ fn remove_orphaned_in(root: &Path) -> usize {
         if directory.join(MANIFEST).exists() {
             continue;
         }
-        // An import before its rename still has the staging file. Between the
-        // rename and the manifest write it has both finished tracks and no
-        // manifest; recordings write their manifest before any audio, so this
-        // pair is never a recording.
-        let staging = directory.join(STAGING).exists();
-        let renamed = directory.join(SYSTEM).exists() && directory.join(MICROPHONE).exists();
-        if !staging && !renamed {
+        // Only the marker written before decode and removed after
+        // final.pending identifies an interrupted import. Nothing else is
+        // guessed at from the files a folder happens to contain.
+        if !directory.join(IMPORT_PENDING_FILE).exists() {
             continue;
         }
         let active = match super::ActiveMeeting::try_acquire(&directory) {
@@ -100,34 +96,38 @@ mod tests {
     #[test]
     fn only_abandoned_import_folders_are_removed() {
         let root = temp_root("orphans");
+        // A marker with a partial staging file, before the import's rename.
         let orphan = folder(&root, "orphan");
-        fs::write(orphan.join(STAGING), b"partial").unwrap();
+        fs::write(orphan.join(IMPORT_PENDING_FILE), b"").unwrap();
+        fs::write(orphan.join("system.importing.wav"), b"partial").unwrap();
 
-        let finished = folder(&root, "finished");
-        fs::write(finished.join(STAGING), b"partial").unwrap();
-        fs::write(finished.join(MANIFEST), b"{}").unwrap();
+        // A marker with both finished tracks, between rename and manifest.
+        let renamed = folder(&root, "renamed");
+        fs::write(renamed.join(IMPORT_PENDING_FILE), b"").unwrap();
+        fs::write(renamed.join("system.wav"), b"audio").unwrap();
+        fs::write(renamed.join("microphone.wav"), b"empty").unwrap();
 
+        // Both tracks with no marker are never assumed to be an import.
         let recording = folder(&root, "recording");
         fs::write(recording.join("system.wav"), b"audio").unwrap();
+        fs::write(recording.join("microphone.wav"), b"empty").unwrap();
 
-        // The narrow window between the import's rename and its manifest.
-        let renamed = folder(&root, "renamed");
-        fs::write(renamed.join(SYSTEM), b"audio").unwrap();
-        fs::write(renamed.join(MICROPHONE), b"empty").unwrap();
+        // A marker with a manifest is a meeting, pending or finished.
+        let finished = folder(&root, "finished");
+        fs::write(finished.join(IMPORT_PENDING_FILE), b"").unwrap();
+        fs::write(finished.join(MANIFEST), b"{}").unwrap();
 
+        // A held lock means an import still uses the folder.
         let busy = folder(&root, "busy");
-        fs::write(busy.join(STAGING), b"partial").unwrap();
+        fs::write(busy.join(IMPORT_PENDING_FILE), b"").unwrap();
+        fs::write(busy.join("system.importing.wav"), b"partial").unwrap();
         let held = super::super::ActiveMeeting::acquire(&busy).unwrap();
 
         assert_eq!(remove_orphaned_in(&root), 2);
-        assert!(!orphan.exists(), "the abandoned import was removed");
-        assert!(
-            !renamed.exists(),
-            "the renamed import without a manifest was removed"
-        );
+        assert!(!orphan.exists(), "the pre-rename import was removed");
+        assert!(!renamed.exists(), "the renamed import was removed");
+        assert!(recording.exists(), "tracks without a marker stay");
         assert!(finished.exists(), "a folder with a manifest stays");
-        assert!(finished.join(STAGING).exists(), "with its staging file");
-        assert!(recording.exists(), "a folder with no staging file stays");
         assert!(busy.exists(), "a held lock keeps its folder");
 
         drop(held);

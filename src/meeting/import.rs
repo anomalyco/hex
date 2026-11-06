@@ -14,9 +14,9 @@ use std::ptr;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use super::{
-    ActiveMeeting, FINAL_PENDING_FILE, MeetingManifest, MeetingStatus, SAMPLE_RATE, TrackManifest,
-    create_empty_track, finish::finish_transcription, now_ms, root, set_owner_only, sync_directory,
-    sync_file, write_manifest,
+    ActiveMeeting, FINAL_PENDING_FILE, IMPORT_PENDING_FILE, MeetingManifest, MeetingStatus,
+    SAMPLE_RATE, TrackManifest, create_empty_track, finish::finish_transcription, now_ms, root,
+    set_owner_only, sync_directory, sync_file, write_manifest,
 };
 
 /// The extensions the picker offers and the native decoder reads.
@@ -64,6 +64,13 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
         fs::create_dir_all(&directory).wrap_err("could not create meeting directory")?;
         set_owner_only(&directory, true)?;
         let active = ActiveMeeting::acquire(&directory)?;
+        // The marker exists from before decode until final.pending is safely
+        // on disk: a crash leaves a folder the launch sweep can identify.
+        let marker = directory.join(IMPORT_PENDING_FILE);
+        fs::write(&marker, b"")?;
+        set_owner_only(&marker, false)?;
+        sync_file(&marker)?;
+        sync_directory(&directory)?;
         if crate::desktop::process_exit::quitting() {
             return Err(eyre!("Hex is quitting; the audio was not imported"));
         }
@@ -122,6 +129,10 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
         fs::rename(&decoded, &system_path).wrap_err("could not keep the imported audio")?;
         write_manifest(&directory, &manifest)?;
         fs::write(directory.join(FINAL_PENDING_FILE), b"")?;
+        // final.pending is durable before the import marker disappears.
+        sync_directory(&directory)?;
+        fs::remove_file(&marker)?;
+        sync_directory(&directory)?;
         Ok((active, manifest, duration_ms))
     })();
     let (_active, mut manifest, duration_ms) = match prepared {
