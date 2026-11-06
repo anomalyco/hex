@@ -1148,6 +1148,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", "O macOS usa este atalho primeiro. Desative os atalhos de captura dele em Atalhos de Teclado › Capturas de tela ou escolha outro"),
     ("Open Keyboard Settings", "Abrir Ajustes de Teclado"),
     ("Full screen · Click to capture", "Tela inteira · Clique para capturar"),
+    ("Settings search", "Pesquisa em Ajustes"),
+    ("Find any setting in General with a search field", "Encontre qualquer ajuste na seção Geral com um campo de pesquisa"),
+    ("Search settings", "Pesquisar ajustes"),
+    ("No settings match", "Nenhum ajuste corresponde"),
+    ("Try another search", "Tente outra pesquisa"),
 ];
 
 #[cfg(test)]

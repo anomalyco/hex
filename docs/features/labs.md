@@ -27,6 +27,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
+├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
@@ -217,6 +218,27 @@ row is exactly as before. The gate is the row itself (the feature does no
 other work). Check:
 `restore_default_brings_back_paste_last_only_with_its_lab_on` in
 [tests.rs](../../src/rune_ui/tests.rs).
+
+Settings search (`settings-search`, every OS): while on, General starts with
+a single-line search field. Typing keeps only the rows and cards whose title
+or description matches case-insensitively; the Advanced fold's rows match
+without opening it, and the fold control hides while a query is set.
+Permissions and errors always stay; the listener card matches its status,
+hint, and Enable/Disable text, and the desktop-shortcut card matches its
+title, and either counts as a match when shown. Nothing matching shows
+"No settings match" with the kit's empty state, and clearing the field
+restores the pane. The gate is the pane
+([general/search.rs](../../src/rune_ui/general/search.rs) reads
+`labs::Feature::SettingsSearch`), so off, General is exactly as before.
+Checks: `settings_search_shows_with_its_lab_and_filters_general`,
+`settings_search_matches_descriptions`,
+`settings_search_keeps_permissions_and_status_cards`, and
+`command_f_focuses_general_search_only_with_its_lab_and_pane` in
+[tests.rs](../../src/rune_ui/tests.rs) and the matching test in
+[general/search.rs](../../src/rune_ui/general/search.rs). Not yet observed
+in a real window; the Labs page goldens were regenerated for macOS
+(`mac-labs`, `mac-labs-link`, light and dark), Windows (`windows-labs`,
+light), and Linux (`linux-labs`, light).
 
 Keep dictation on clipboard (`keep-on-clipboard`, issue 200, macOS): while
 on, a pasted dictation stays on the clipboard. `paste::Paster` reads

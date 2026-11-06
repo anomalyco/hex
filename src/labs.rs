@@ -101,6 +101,7 @@ pub enum Feature {
     PickerDownloaded,
     SectionKeyAlone,
     KeepRecordings,
+    SettingsSearch,
     HideMenuBarIcon,
     MovableMeetingCapsules,
     GnomeClipboardRestore,
@@ -115,7 +116,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 49] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -153,6 +154,7 @@ impl Feature {
         Self::PickerDownloaded,
         Self::SectionKeyAlone,
         Self::KeepRecordings,
+        Self::SettingsSearch,
         Self::HideMenuBarIcon,
         Self::MovableMeetingCapsules,
         Self::GnomeClipboardRestore,
@@ -226,6 +228,7 @@ impl Feature {
             | Self::PickerDownloaded
             | Self::SectionKeyAlone
             | Self::KeepRecordings
+            | Self::SettingsSearch
             | Self::HideMenuBarIcon
             | Self::MovableMeetingCapsules
             | Self::GnomeClipboardRestore
@@ -290,7 +293,7 @@ impl Feature {
             | Self::Screenshots
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay => 20261104,
-            Self::MoreCallApps => 20261106,
+            Self::MoreCallApps | Self::SettingsSearch => 20261106,
         }
     }
 
@@ -378,6 +381,7 @@ impl Feature {
             | Self::MeetingFinishedEvent
             | Self::FollowLiveTranscript
             | Self::MoreCallApps
+            | Self::SettingsSearch
             | Self::FillerWords => true,
         }
     }
@@ -422,6 +426,7 @@ impl Feature {
             Self::PickerDownloaded => "picker-downloaded",
             Self::SectionKeyAlone => "section-key",
             Self::KeepRecordings => "keep-recordings",
+            Self::SettingsSearch => "settings-search",
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
             Self::MovableMeetingCapsules => "movable-meeting-capsules",
             Self::GnomeClipboardRestore => "gnome-clipboard-restore",
@@ -476,6 +481,7 @@ impl Feature {
             Self::PickerDownloaded => "labs.picker_downloaded",
             Self::SectionKeyAlone => "labs.section_key_alone",
             Self::KeepRecordings => "labs.keep_recordings",
+            Self::SettingsSearch => "labs.settings_search",
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
             Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
             Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
@@ -586,6 +592,7 @@ impl Feature {
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
             }
+            Self::SettingsSearch => "Find any setting in General with a search field",
             Self::HideMenuBarIcon => {
                 "Hide Hex's menu bar icon; shortcuts keep working, and opening Hex again shows Settings"
             }
@@ -666,6 +673,7 @@ impl Feature {
             Self::PickerDownloaded => settings.labs.picker_downloaded,
             Self::SectionKeyAlone => settings.labs.section_key_alone,
             Self::KeepRecordings => settings.labs.keep_recordings,
+            Self::SettingsSearch => settings.labs.settings_search,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
@@ -722,6 +730,7 @@ impl Feature {
             &mut labs.picker_downloaded,
             &mut labs.section_key_alone,
             &mut labs.keep_recordings,
+            &mut labs.settings_search,
             &mut labs.hide_menu_bar_icon,
             &mut labs.movable_meeting_capsules,
             &mut labs.gnome_clipboard_restore,
@@ -778,6 +787,7 @@ impl Feature {
             Self::ModelInPlace => settings.labs.model_in_place = on,
             Self::PickerDownloaded => settings.labs.picker_downloaded = on,
             Self::KeepRecordings => settings.labs.keep_recordings = on,
+            Self::SettingsSearch => settings.labs.settings_search = on,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,

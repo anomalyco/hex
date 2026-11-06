@@ -64,6 +64,8 @@ pub struct LabsSettings {
     pub section_key_alone: bool,
     /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
     pub keep_recordings: bool,
+    /// General's pane starts with a search field that filters its rows.
+    pub settings_search: bool,
     pub hide_menu_bar_icon: bool,
     pub movable_meeting_capsules: bool,
     /// A paste restores the clipboard through a running XWayland on Wayland desktops without data-control, such as GNOME (Linux, issue 1111).
@@ -129,6 +131,7 @@ impl Default for LabsSettings {
             picker_downloaded: false,
             section_key_alone: false,
             keep_recordings: false,
+            settings_search: false,
             hide_menu_bar_icon: false,
             movable_meeting_capsules: false,
             gnome_clipboard_restore: false,
