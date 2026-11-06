@@ -573,18 +573,39 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     s.sound();
     changed |= s.present(now);
     changed |= s.surface.tick(now);
+    // Whether the overlay is up this poll: the capsule stays up while it
+    // leaves, then hides. Worked out before the place block so a capsule
+    // coming back from hidden is placed on the pointer's display before
+    // Rune shows it.
+    let hidden = matches!(s.surface.pres, Pres::Hidden);
+    let since = match (hidden, s.hidden_since) {
+        (true, None) => *s.hidden_since.insert(now),
+        (true, Some(since)) => since,
+        (false, _) => {
+            s.hidden_since = None;
+            now
+        }
+    };
+    let leaving = since + HIDE_AFTER_S - now;
+    let shown = !hidden || leaving > 0.0;
     // Shown, the capsule stays put. It moves to the pointer's display when
-    // a new capture brings it, when its anchor changes, and while the
-    // picker follows the pointer; a notch read that changed on its own
-    // never moves it. Without an overlay (the playground and stills) there
-    // is nothing to measure or place, so the pretend notch stays.
+    // a new capture brings it, when its anchor changes, when it comes back
+    // from hidden, and while the picker follows the pointer; a notch read
+    // that changed on its own never moves it. Pinned to the measured
+    // screen, Rune's own follow never runs for it, so the picker's crossing
+    // is this block's: a changed read re-places display and inset together
+    // from one measurement. Only the fallback that couldn't read the screen
+    // keeps `UnderPointer`, where Rune can follow first and leave an inset
+    // from the other display for a frame. Without an overlay (the
+    // playground and stills) there is nothing to measure or place, so the
+    // pretend notch stays.
     let replaced = std::mem::take(&mut s.replace);
     let moved = s.placed != s.surface.anchor;
     if moved {
         s.placed = s.surface.anchor;
     }
     let following = matches!(s.surface.pres, Pres::Selecting { .. });
-    let step = move_of(replaced, moved, following);
+    let step = move_of(replaced, moved, following, shown && !s.shown);
     let mut remeasured = false;
     if s.surface.anchor == surface::Anchor::Notch {
         // The panel is fitted to the notch on the pointer's screen:
@@ -623,23 +644,13 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     s.live.sync(&s.surface);
     undo_ring::sync(&mut s.live.ring, &s.surface.pres, now, s.surface.reduced);
 
-    // The overlay stays up while the capsule leaves, then hides.
-    let hidden = matches!(s.surface.pres, Pres::Hidden);
-    let since = match (hidden, s.hidden_since) {
-        (true, None) => *s.hidden_since.insert(now),
-        (true, Some(since)) => since,
-        (false, _) => {
-            s.hidden_since = None;
-            now
-        }
-    };
-    let leaving = since + HIDE_AFTER_S - now;
+    // The overlay stays up while the capsule leaves, then hides; placed
+    // above, before Rune is asked to show it.
     if hidden && leaving > 0.0 {
         wake = earliest(wake, Some(leaving));
     }
     // Shown in the same poll as the step that brings the capsule in, so
     // Rune reveals the hidden pose and animates the entry from it.
-    let shown = !hidden || leaving > 0.0;
     if s.shown != shown {
         s.shown = shown;
         if let Some(overlay) = &s.overlay {
@@ -753,13 +764,14 @@ enum Move {
     Place,
 }
 
-/// Decides a poll's [`Move`]. The panel only goes to the pointer's display
-/// on a new capture (`replaced`), an anchor change (`moved`), or while the
-/// picker follows the pointer (`following`). A showing capsule that isn't
-/// following keeps its place however the pointer's screen's notch reads
-/// now: no new capture and no new anchor means nobody asked it to move.
-fn move_of(replaced: bool, moved: bool, following: bool) -> Move {
-    if replaced || moved {
+/// Decides a poll's [`Move`]. The panel goes to the pointer's display on a
+/// new capture (`replaced`), an anchor change (`moved`), a capsule coming
+/// back from hidden (`appearing`), or while the picker follows the pointer
+/// (`following`). A showing capsule that isn't following keeps its place
+/// however the pointer's screen's notch reads now: no new capture, no new
+/// anchor, and no show means nobody asked it to move.
+fn move_of(replaced: bool, moved: bool, following: bool, appearing: bool) -> Move {
+    if replaced || moved || appearing {
         Move::Place
     } else if following {
         Move::Follow
@@ -1110,7 +1122,7 @@ mod moves {
     /// move, so no changed measurement re-places it.
     #[test]
     fn a_showing_capsule_that_is_not_following_stays_put() {
-        assert_eq!(move_of(false, false, false), Move::Stay);
+        assert_eq!(move_of(false, false, false, false), Move::Stay);
         assert!(
             !Move::Stay.places(true),
             "a notch that changed is no reason to move"
@@ -1122,7 +1134,7 @@ mod moves {
     #[test]
     fn a_new_capture_places_the_capsule_on_the_pointers_display() {
         for following in [false, true] {
-            assert_eq!(move_of(true, false, following), Move::Place);
+            assert_eq!(move_of(true, false, following, false), Move::Place);
         }
         assert!(Move::Place.places(false));
     }
@@ -1131,7 +1143,18 @@ mod moves {
     #[test]
     fn an_anchor_change_places_the_capsule_again() {
         for following in [false, true] {
-            assert_eq!(move_of(false, true, following), Move::Place);
+            assert_eq!(move_of(false, true, following, false), Move::Place);
+        }
+        assert!(Move::Place.places(false));
+    }
+
+    /// A capsule coming back from hidden is placed on the pointer's display
+    /// before it shows: its display stays pinned while hidden, so without
+    /// this it would come back on the display it last hid on.
+    #[test]
+    fn a_capsule_coming_back_from_hidden_places_on_the_pointers_display() {
+        for following in [false, true] {
+            assert_eq!(move_of(false, false, following, true), Move::Place);
         }
         assert!(Move::Place.places(false));
     }
@@ -1141,7 +1164,7 @@ mod moves {
     /// whose notch reads the same, leaves it be.
     #[test]
     fn following_places_only_for_a_changed_notch() {
-        assert_eq!(move_of(false, false, true), Move::Follow);
+        assert_eq!(move_of(false, false, true, false), Move::Follow);
         assert!(Move::Follow.places(true));
         assert!(!Move::Follow.places(false));
     }

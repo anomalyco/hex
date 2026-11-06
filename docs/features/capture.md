@@ -561,13 +561,17 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     │   (number, name, reason) opens at the pointer and its Sent stays there
     └── notch -> a black shape grows out of the notch (the measured one on
         macOS's pointer screen, read when the panel may go to that display:
-        a new capture, an anchor change, or the picker following the pointer
-        to another display. A capsule that is showing and not following
-        stays put when the pointer moves, whatever the notch there reads;
-        left and right edges snapped to the backing pixels, the panel moved
-        under its middle and pinned to the display it was measured on, so
-        the panel and the notch can't disagree; following across displays
-        can show one frame at the previous inset before it re-places; 185 pt
+        a new capture, an anchor change, the capsule coming back from
+        hidden, or the picker following the pointer to another display. A
+        capsule that is showing and not following stays put when the
+        pointer moves, whatever the notch there reads; left and right edges
+        snapped to the backing pixels, the panel moved under its middle and
+        pinned to the display it was measured on, so the panel and the notch
+        can't disagree. Pinned, Rune never follows the pointer for it, so
+        the picker's crossing is Hex's re-place: a changed measurement moves
+        display and inset together, and only the fallback that couldn't read
+        the screen keeps `UnderPointer`, where Rune can show one frame at
+        the previous inset before Hex re-places it; 185 pt
         on a flat display, a pretend one the menu bar's height, so its panel
         lands within a point of the display's middle rather than exactly on
         it) into the pill and the same card, its content under the notch,
@@ -1045,11 +1049,13 @@ Checks:
   [mod.rs](../../src/rune_ui/capture_capsule/mod.rs), tested by
   `a_showing_capsule_that_is_not_following_stays_put`,
   `a_new_capture_places_the_capsule_on_the_pointers_display`,
-  `an_anchor_change_places_the_capsule_again`, and
+  `an_anchor_change_places_the_capsule_again`,
+  `a_capsule_coming_back_from_hidden_places_on_the_pointers_display`, and
   `following_places_only_for_a_changed_notch`: a showing capsule that isn't
-  following never moves because the pointer's notch changed, and following
-  moves it only for a changed notch. The native read and the re-place
-  themselves have no test: they need two real displays.
+  following never moves because the pointer's notch changed, a capsule coming
+  back from hidden is placed before it shows rather than on the display it
+  last hid on, and following moves it only for a changed notch. The native
+  read and the re-place themselves have no test: they need two real displays.
 - Playground: `hex capsule-playground` (feature builds; hidden), or
   `scripts/build-capsule-playground.sh` for an ad-hoc signed
   `Hex Playground.app`, runs the real capsule in a window of its own against a
