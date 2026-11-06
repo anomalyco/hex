@@ -573,38 +573,38 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     s.sound();
     changed |= s.present(now);
     changed |= s.surface.tick(now);
-    // Shown, it stays put; a new capture brings it to the pointer.
+    // Shown, the capsule stays put. It moves to the pointer's display when
+    // a new capture brings it, when its anchor changes, and while the
+    // picker follows the pointer; a notch read that changed on its own
+    // never moves it. Without an overlay (the playground and stills) there
+    // is nothing to measure or place, so the pretend notch stays.
     let replaced = std::mem::take(&mut s.replace);
-    if replaced && let Some(overlay) = &s.overlay {
-        overlay.set_display(rune::DisplayTarget::UnderPointer);
-    }
-    // Hanging from the notch, the panel is fitted to the one on the
-    // pointer's display: measured on macOS, the pretend one elsewhere. It's
-    // measured every poll, because Rune re-resolves `UnderPointer` when the
-    // overlay shows and, with the picker following the pointer, on every
-    // display change: a MacBook's inset must not stay on an external display
-    // the pointer moved to, nor the second capture's picker use the first
-    // one's. Nothing is re-placed unless that measurement changed.
-    let moved = s.placed != s.surface.anchor || replaced;
+    let moved = s.placed != s.surface.anchor;
     if moved {
         s.placed = s.surface.anchor;
     }
+    let following = matches!(s.surface.pres, Pres::Selecting { .. });
+    let step = move_of(replaced, moved, following);
     let mut remeasured = false;
     if s.surface.anchor == surface::Anchor::Notch {
-        let notch = measured_notch();
-        if notch != s.notch {
-            s.notch = notch;
-            let geometry = notch.map_or_else(notch::Geometry::default, |m| m.geometry);
-            changed |= s.surface.set_notch(geometry);
-            remeasured = true;
+        // The panel is fitted to the notch on the pointer's screen:
+        // measured on macOS, the pretend one elsewhere.
+        if step != Move::Stay && s.overlay.is_some() {
+            let notch = measured_notch();
+            if notch != s.notch {
+                s.notch = notch;
+                let geometry = notch.map_or_else(notch::Geometry::default, |m| m.geometry);
+                changed |= s.surface.set_notch(geometry);
+                remeasured = true;
+            }
         }
     } else {
         s.notch = None;
     }
-    if (moved || remeasured)
+    if step.places(remeasured)
         && let Some(overlay) = &s.overlay
     {
-        place(overlay, s.placed, s.notch.map(|m| m.panel_x));
+        place(overlay, s.placed, s.notch);
     }
 
     let earliest = |wake: Option<f64>, at: Option<f64>| match (wake, at) {
@@ -652,11 +652,10 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     }
     crate::capture_host::set_capsule_pill(shown.then_some(s.surface.shell));
     // The picker follows the pointer between displays.
-    let follow = matches!(s.surface.pres, Pres::Selecting { .. });
-    if s.follow != follow {
-        s.follow = follow;
+    if s.follow != following {
+        s.follow = following;
         if let Some(overlay) = &s.overlay {
-            overlay.set_follow_pointer(follow);
+            overlay.set_follow_pointer(following);
         }
     }
     take_keys(s);
@@ -686,10 +685,16 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
 /// Moves the overlay to where the capsule rests: under the menu bar, at
 /// the screen's top edge (the notch), or at the pointer (the cursor's
 /// card, whose rect is global, so on the primary display's origin).
-/// `notch_x` is the measured notch's panel origin, in points from the
-/// display's left; without one the panel stays centred.
-fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor, notch_x: Option<f32>) {
-    use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge};
+/// `notch` is the notch measured on the pointer's screen; the panel is
+/// pinned to that screen and its left edge put `panel_x` points from the
+/// screen's, so it can't land on another display than the one measured.
+/// Without one it stays centred on the pointer's screen.
+fn place(
+    overlay: &OverlayHandle<CapsuleState>,
+    anchor: surface::Anchor,
+    notch: Option<notch::Measured>,
+) {
+    use rune::{Align, DisplayTarget, NativeDisplayId, OverlayPlacement, ScreenEdge};
     let edge = |margin| OverlayPlacement::Edge {
         edge: ScreenEdge::Top,
         margin,
@@ -702,15 +707,21 @@ fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor, notch_x
             overlay.set_placement(Some(edge(PANEL_MARGIN)));
         }
         surface::Anchor::Notch => {
-            overlay.set_display(DisplayTarget::UnderPointer);
+            // The measured screen's, so the panel and its notch agree even
+            // if the pointer moves before Rune places it; the pointer's
+            // when it couldn't be read.
+            overlay.set_display(match notch.and_then(|m| m.display) {
+                Some(id) => DisplayTarget::Native(NativeDisplayId::MacOS(id)),
+                None => DisplayTarget::UnderPointer,
+            });
             // The panel's left edge on the display, so its walls land on the
             // notch's; its top stays on the screen's as it always has.
-            overlay.set_placement(Some(match notch_x {
-                Some(inset) => OverlayPlacement::Edge {
+            overlay.set_placement(Some(match notch {
+                Some(notch) => OverlayPlacement::Edge {
                     edge: ScreenEdge::Top,
                     margin: 0.0,
                     align: Align::Start,
-                    inset,
+                    inset: notch.panel_x,
                 },
                 None => edge(0.0),
             }));
@@ -726,6 +737,45 @@ fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor, notch_x
                 width: PANEL_W,
                 height: PANEL_H,
             }));
+        }
+    }
+}
+
+/// What a poll does about the panel's place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Move {
+    /// Nothing asked it to move: the notch isn't even read.
+    Stay,
+    /// The picker follows the pointer: read the notch, and place only if it
+    /// changed.
+    Follow,
+    /// A new capture or a new anchor: read the notch and place.
+    Place,
+}
+
+/// Decides a poll's [`Move`]. The panel only goes to the pointer's display
+/// on a new capture (`replaced`), an anchor change (`moved`), or while the
+/// picker follows the pointer (`following`). A showing capsule that isn't
+/// following keeps its place however the pointer's screen's notch reads
+/// now: no new capture and no new anchor means nobody asked it to move.
+fn move_of(replaced: bool, moved: bool, following: bool) -> Move {
+    if replaced || moved {
+        Move::Place
+    } else if following {
+        Move::Follow
+    } else {
+        Move::Stay
+    }
+}
+
+impl Move {
+    /// Whether the poll places the panel now. `changed` is whether the
+    /// notch read this poll differs from the one the panel is fitted to.
+    fn places(self, changed: bool) -> bool {
+        match self {
+            Move::Stay => false,
+            Move::Follow => changed,
+            Move::Place => true,
         }
     }
 }
@@ -1048,5 +1098,51 @@ impl Compositor<CapsuleState> for TraceFrames {
         if f.rt.scene.trace_mut().is_some() {
             trace_channels(f.rt);
         }
+    }
+}
+
+#[cfg(test)]
+mod moves {
+    use super::{Move, move_of};
+
+    /// Showing and not following the pointer, the capsule keeps its place:
+    /// whatever the pointer's screen's notch reads now, nothing asked it to
+    /// move, so no changed measurement re-places it.
+    #[test]
+    fn a_showing_capsule_that_is_not_following_stays_put() {
+        assert_eq!(move_of(false, false, false), Move::Stay);
+        assert!(
+            !Move::Stay.places(true),
+            "a notch that changed is no reason to move"
+        );
+    }
+
+    /// A new capture brings the capsule to the pointer's display, even when
+    /// the notch there reads the same as the one it was fitted to.
+    #[test]
+    fn a_new_capture_places_the_capsule_on_the_pointers_display() {
+        for following in [false, true] {
+            assert_eq!(move_of(true, false, following), Move::Place);
+        }
+        assert!(Move::Place.places(false));
+    }
+
+    /// A new anchor moves it too: its edge changed, so its place must.
+    #[test]
+    fn an_anchor_change_places_the_capsule_again() {
+        for following in [false, true] {
+            assert_eq!(move_of(false, true, following), Move::Place);
+        }
+        assert!(Move::Place.places(false));
+    }
+
+    /// Following the pointer, it re-places only when the notch on that
+    /// display read differently: moving within one display, or to a display
+    /// whose notch reads the same, leaves it be.
+    #[test]
+    fn following_places_only_for_a_changed_notch() {
+        assert_eq!(move_of(false, false, true), Move::Follow);
+        assert!(Move::Follow.places(true));
+        assert!(!Move::Follow.places(false));
     }
 }

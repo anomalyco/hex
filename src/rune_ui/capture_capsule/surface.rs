@@ -1250,7 +1250,9 @@ mod tests {
     #[test]
     fn the_notch_shell_fits_a_measured_notch() {
         // A 210 pt notch, 12 pt right of its 1512 pt display's middle.
-        let notch::Measured { geometry, panel_x } = notch::fitted(663.0, 873.0, 1.0);
+        let notch::Measured {
+            geometry, panel_x, ..
+        } = notch::fitted(663.0, 873.0, 1.0);
         let tucked = geometry.tucked();
         assert_eq!(tucked, [geometry.left, -notch::REACH, 210.0, notch::REACH]);
         assert_eq!(

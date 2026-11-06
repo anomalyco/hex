@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSEvent, NSScreen, NSStatusBar};
-use objc2_foundation::NSRect;
+use objc2_foundation::{NSNumber, NSRect, NSString};
 use rune::{DisplayTarget, OverlayHandle, OverlayPlacement};
 
 use super::{Hud, HudEvent, HudSender, LIVE_TEXT_GAP, WINDOW, set_live_text};
@@ -19,8 +19,11 @@ const STATUS_LEVEL: isize = 25;
 
 /// The screen under the pointer (else the main one) as `hud_placement`
 /// reads it, the primary screen's top, which Rune's global space hangs
-/// from, and the screen's backing scale.
-pub(crate) fn pointer_screen(mtm: MainThreadMarker) -> Option<(hud_placement::Screen, f64, f64)> {
+/// from, the screen's backing scale, and its `NSScreenNumber`, which Rune's
+/// `NativeDisplayId::MacOS` pins an overlay to.
+pub(crate) fn pointer_screen(
+    mtm: MainThreadMarker,
+) -> Option<(hud_placement::Screen, f64, f64, Option<u32>)> {
     let pointer = NSEvent::mouseLocation();
     let screens = NSScreen::screens(mtm);
     let primary = screens.iter().next()?;
@@ -57,7 +60,19 @@ pub(crate) fn pointer_screen(mtm: MainThreadMarker) -> Option<(hud_placement::Sc
         metrics,
         primary.frame().origin.y + primary.frame().size.height,
         screen.backingScaleFactor(),
+        screen_number(&screen),
     ))
+}
+
+/// The screen's `NSScreenNumber` (`CGDirectDisplayID`), the id Rune's
+/// `NativeDisplayId::MacOS` matches: winit reports a monitor's native id
+/// the same way (`CGDisplayGetDisplayIDFromUUID`), so a measured notch can
+/// pin the panel to the display it was read on.
+fn screen_number(screen: &NSScreen) -> Option<u32> {
+    let description = screen.deviceDescription();
+    let key = NSString::from_str("NSScreenNumber");
+    let number = description.objectForKey(&key)?;
+    Some(number.downcast_ref::<NSNumber>()?.unsignedIntValue())
 }
 
 /// The HUD's window and widest plate, and how far its island
@@ -134,7 +149,7 @@ impl Hud {
     /// With the HUD hidden, the live text starts where its plate would sit
     /// under the menu bar.
     pub(super) fn place_live_text_without_hud(&self) {
-        let Some((screen, primary_top, _)) = MainThreadMarker::new().and_then(pointer_screen)
+        let Some((screen, primary_top, _, _)) = MainThreadMarker::new().and_then(pointer_screen)
         else {
             return;
         };
@@ -149,7 +164,8 @@ impl Hud {
     }
 
     pub(super) fn place_on_pointer_screen(&mut self, overlay: &OverlayHandle<Hud>) {
-        let Some((mut metrics, primary_top, _)) = MainThreadMarker::new().and_then(pointer_screen)
+        let Some((mut metrics, primary_top, _, _)) =
+            MainThreadMarker::new().and_then(pointer_screen)
         else {
             return;
         };

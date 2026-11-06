@@ -70,13 +70,19 @@ impl Geometry {
     }
 }
 
-/// A measured notch fitted to the panel: its edges in panel points, and
-/// where the panel's left edge goes on the screen it was measured on.
+/// A measured notch fitted to the panel: its edges in panel points, where
+/// the panel's left edge goes on the screen it was measured on, and that
+/// screen.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Measured {
     pub(crate) geometry: Geometry,
     /// The panel's left edge, in points from the display's left.
     pub(crate) panel_x: f32,
+    /// The screen's `NSScreenNumber`, Rune's `NativeDisplayId::MacOS`, so
+    /// the panel is pinned to the display its notch was measured on rather
+    /// than to whichever one the pointer is on when Rune places it. `None`
+    /// where the screen can't be read, which keeps `UnderPointer`.
+    pub(crate) display: Option<u32>,
 }
 
 /// The notch spanning `left`..`right` (points from the display's left),
@@ -93,6 +99,7 @@ pub(crate) fn fitted(left: f32, right: f32, scale: f32) -> Measured {
             right: right - panel_x,
         },
         panel_x,
+        display: None,
     }
 }
 
@@ -100,12 +107,15 @@ pub(crate) fn fitted(left: f32, right: f32, scale: f32) -> Measured {
 /// when it can't be read, which keeps the pretend one.
 #[cfg(target_os = "macos")]
 pub(crate) fn measured() -> Option<Measured> {
-    let (screen, _, scale) = crate::rune_hud::pointer_screen(objc2::MainThreadMarker::new()?)?;
+    let (screen, _, scale, display) =
+        crate::rune_hud::pointer_screen(objc2::MainThreadMarker::new()?)?;
     // The HUD's pretend notch on a flat display, the hardware one otherwise.
     let screen = screen.pretending_notch();
     let notch = screen.notch()?;
     let left = (notch.x - notch.width * 0.5 - screen.frame.x) as f32;
-    Some(fitted(left, left + notch.width as f32, scale as f32))
+    let mut measured = fitted(left, left + notch.width as f32, scale as f32);
+    measured.display = display;
+    Some(measured)
 }
 
 /// A screen the capsule's notch flow shows on, in points.
@@ -214,7 +224,9 @@ mod tests {
     #[test]
     fn a_measured_notch_moves_the_panel_with_its_edges() {
         // aux_left 663 and aux_right 664: 185 pt wide, its middle at 755.5.
-        let Measured { geometry, panel_x } = fitted(663.0, 848.0, 2.0);
+        let Measured {
+            geometry, panel_x, ..
+        } = fitted(663.0, 848.0, 2.0);
         assert_eq!(panel_x, 435.5, "the panel is off the display's middle");
         assert_eq!(geometry.width(), 185.0);
         assert_eq!(geometry.centre(), CX);
@@ -227,7 +239,9 @@ mod tests {
         assert_eq!(geometry.tucked(), [CX - 92.5, -REACH, 185.0, REACH]);
         // At 1× a half point can't be kept, so the panel takes the whole
         // pixel nearest and the notch sits half a point off its middle.
-        let Measured { geometry, panel_x } = fitted(663.0, 848.0, 1.0);
+        let Measured {
+            geometry, panel_x, ..
+        } = fitted(663.0, 848.0, 1.0);
         assert_eq!(panel_x, 436.0);
         assert_eq!(
             (panel_x + geometry.left, panel_x + geometry.right),
@@ -239,7 +253,9 @@ mod tests {
     /// origin included.
     #[test]
     fn a_two_x_notch_lands_on_whole_pixels() {
-        let Measured { geometry, panel_x } = fitted(663.5, 849.0, 2.0);
+        let Measured {
+            geometry, panel_x, ..
+        } = fitted(663.5, 849.0, 2.0);
         let whole = |points: f32| (points * 2.0).fract() == 0.0;
         assert!(whole(panel_x), "the panel's origin is a whole pixel");
         assert!(whole(geometry.left) && whole(geometry.right));
@@ -252,7 +268,9 @@ mod tests {
     /// placed, so neither wall sits half a pixel off.
     #[test]
     fn edges_between_pixels_snap_outward_or_inward() {
-        let Measured { geometry, panel_x } = fitted(663.25, 848.75, 2.0);
+        let Measured {
+            geometry, panel_x, ..
+        } = fitted(663.25, 848.75, 2.0);
         assert_eq!(panel_x, 436.5);
         assert_eq!(
             (panel_x + geometry.left, panel_x + geometry.right),

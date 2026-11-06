@@ -560,13 +560,18 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     ├── cursor -> recording stays under the menu bar; the "Send to" card
     │   (number, name, reason) opens at the pointer and its Sent stays there
     └── notch -> a black shape grows out of the notch (the measured one on
-        macOS's pointer screen, re-read every poll so the picker following
-        the pointer to another display refits it; left and right edges
-        snapped to the backing pixels and the panel moved under its middle;
-        185 pt on a flat display, a pretend one the menu bar's height, so its
-        panel lands within a point of the display's middle rather than
-        exactly on it) into the pill and the same card, its content under the
-        notch, and shrinks back into it
+        macOS's pointer screen, read when the panel may go to that display:
+        a new capture, an anchor change, or the picker following the pointer
+        to another display. A capsule that is showing and not following
+        stays put when the pointer moves, whatever the notch there reads;
+        left and right edges snapped to the backing pixels, the panel moved
+        under its middle and pinned to the display it was measured on, so
+        the panel and the notch can't disagree; following across displays
+        can show one frame at the previous inset before it re-places; 185 pt
+        on a flat display, a pretend one the menu bar's height, so its panel
+        lands within a point of the display's middle rather than exactly on
+        it) into the pill and the same card, its content under the notch,
+        and shrinks back into it
         (capture_capsule/notch.rs). The playground's "Prototypes/Capture capsule/notch"
         story plays it on a 14-inch MacBook Pro and a 27-inch display, side
         by side or each whole, at their real sizes
@@ -1036,8 +1041,15 @@ Checks:
   `edges_between_pixels_snap_outward_or_inward`. Flat displays go through
   the same measured path with the pretend notch, so their panel is
   pixel-snapped within a point of the display's middle, not exactly on it.
-  The re-measure itself (every poll, not only on an anchor change) has no
-  test: it needs two real displays.
+  Which poll re-measures and re-places is decided by `move_of` in
+  [mod.rs](../../src/rune_ui/capture_capsule/mod.rs), tested by
+  `a_showing_capsule_that_is_not_following_stays_put`,
+  `a_new_capture_places_the_capsule_on_the_pointers_display`,
+  `an_anchor_change_places_the_capsule_again`, and
+  `following_places_only_for_a_changed_notch`: a showing capsule that isn't
+  following never moves because the pointer's notch changed, and following
+  moves it only for a changed notch. The native read and the re-place
+  themselves have no test: they need two real displays.
 - Playground: `hex capsule-playground` (feature builds; hidden), or
   `scripts/build-capsule-playground.sh` for an ad-hoc signed
   `Hex Playground.app`, runs the real capsule in a window of its own against a
