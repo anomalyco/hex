@@ -690,6 +690,8 @@ pub(crate) struct Ui {
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     mic_level: general::MicLevel,
+    /// General's search, while Labs › Settings search is on.
+    general_search: TextEdit,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
@@ -809,6 +811,7 @@ impl Ui {
             input_sources_listed_at: f64::NEG_INFINITY,
             microphones_listing: None,
             mic_level: general::MicLevel::default(),
+            general_search: TextEdit::default(),
             advanced: Vec::new(),
             labs_open: false,
             lab_store: labs::Store::default(),
@@ -1158,9 +1161,8 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         ui.quit();
         return true;
     }
-    // ⌘F (Ctrl+F off macOS) searches Labs.
-    if event.key == rune::Key::Command('f') && ui.labs_open && !event.mods.shift {
-        labs::focus_search(ui);
+    // ⌘F (Ctrl+F off macOS) searches Labs or General.
+    if general::focus_search_key(ui, event) {
         return true;
     }
     if let rune::Key::Command(digit @ '1'..='9') = event.key

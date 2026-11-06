@@ -386,6 +386,53 @@ fn restore_default_brings_back_paste_last_only_with_its_lab_on() {
 }
 
 #[test]
+fn settings_search_shows_with_its_lab_and_filters_general() {
+    let mut rt = runtime("portal", true, TALL_SIZE);
+    assert!(
+        rt.find("settings-search").is_none(),
+        "hidden while Labs › Settings search is off"
+    );
+
+    rt.state.settings.labs.settings_search = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("settings-search").is_some());
+    key(&mut rt, Key::Command('f'), Mods::default());
+    assert!(rt.state.general_search.focused, "⌘F focuses the field");
+
+    // A match keeps its card and hides the others.
+    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("microphone"));
+    settle(&mut rt);
+    assert!(rt.find("microphone").is_some());
+    assert!(rt.find("transcription").is_none());
+    assert!(rt.find("settings-empty").is_none());
+
+    // Advanced stays folded, but its rows match.
+    assert!(!rt.state.advanced.contains(&Pane::General));
+    rt.update(|ui, _| ui.general_search = rune::TextEdit::new("terminal paste"));
+    settle(&mut rt);
+    assert!(rt.find("terminal-paste").is_some());
+    assert!(
+        rt.find("advanced-toggle").is_none(),
+        "the fold hides while searching"
+    );
+
+    // Nothing matching shows the empty state; clearing restores the pane.
+    rt.update(|ui, _| {
+        ui.general_search = rune::TextEdit::new("no such setting");
+    });
+    settle(&mut rt);
+    assert!(rt.find("settings-empty").is_some());
+    assert!(rt.find("microphone").is_none());
+
+    rt.update(|ui, _| ui.general_search = rune::TextEdit::new(""));
+    settle(&mut rt);
+    assert!(rt.find("settings-empty").is_none());
+    assert!(rt.find("microphone").is_some());
+    assert!(rt.find("basics").is_some());
+}
+
+#[test]
 fn choosing_an_update_channel_saves_it_and_checks_now() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     tap(&mut rt, "advanced-toggle");

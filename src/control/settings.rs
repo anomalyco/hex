@@ -280,6 +280,11 @@ const KEYS: &[Key] = &[
         "Labs: provisional words beside the HUD while dictating",
     ),
     key(
+        "labs.settings_search",
+        Kind::Bool,
+        "Labs: a search field at the top of General that filters its rows",
+    ),
+    key(
         "labs.live_chapters",
         Kind::Bool,
         "Labs: chapter meeting transcripts while recording",

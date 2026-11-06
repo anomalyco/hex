@@ -16,6 +16,7 @@ use rune::{El, Icon, TextEdit, Tx, row, text};
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
 use super::icons::{BOOK, CAMERA, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
+use super::list_detail::SEARCH_ICON;
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
 use crate::desktop::i18n::{tr, tr_fill};
@@ -351,6 +352,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         Some(&WAVE),
         tr("Live text"),
         tr("Show provisional words beside the HUD while dictating"),
+    ));
+    rows.push(row(
+        Feature::SettingsSearch,
+        Some(SEARCH_ICON),
+        tr("Settings search"),
+        tr("Find any setting in General with a search field"),
     ));
     if caps.meetings {
         rows.push(row(
@@ -734,6 +741,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::PickerDownloaded => "lab-picker-downloaded",
         Feature::SectionKeyAlone => "lab-section-key",
         Feature::KeepRecordings => "lab-keep-recordings",
+        Feature::SettingsSearch => "lab-settings-search",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
