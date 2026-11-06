@@ -18,9 +18,9 @@ use crate::rune_ui::live_text::Spot;
 const STATUS_LEVEL: isize = 25;
 
 /// The screen under the pointer (else the main one) as `hud_placement`
-/// reads it, and the primary screen's top, which Rune's global space hangs
-/// from.
-fn pointer_screen(mtm: MainThreadMarker) -> Option<(hud_placement::Screen, f64)> {
+/// reads it, the primary screen's top, which Rune's global space hangs
+/// from, and the screen's backing scale.
+pub(crate) fn pointer_screen(mtm: MainThreadMarker) -> Option<(hud_placement::Screen, f64, f64)> {
     let pointer = NSEvent::mouseLocation();
     let screens = NSScreen::screens(mtm);
     let primary = screens.iter().next()?;
@@ -51,6 +51,7 @@ fn pointer_screen(mtm: MainThreadMarker) -> Option<(hud_placement::Screen, f64)>
     Some((
         metrics,
         primary.frame().origin.y + primary.frame().size.height,
+        screen.backingScaleFactor(),
     ))
 }
 
@@ -128,7 +129,8 @@ impl Hud {
     /// With the HUD hidden, the live text starts where its plate would sit
     /// under the menu bar.
     pub(super) fn place_live_text_without_hud(&self) {
-        let Some((screen, primary_top)) = MainThreadMarker::new().and_then(pointer_screen) else {
+        let Some((screen, primary_top, _)) = MainThreadMarker::new().and_then(pointer_screen)
+        else {
             return;
         };
         let content = content(0.0);
@@ -142,7 +144,7 @@ impl Hud {
     }
 
     pub(super) fn place_on_pointer_screen(&mut self, overlay: &OverlayHandle<Hud>) {
-        let Some((mut metrics, primary_top)) = MainThreadMarker::new().and_then(pointer_screen)
+        let Some((mut metrics, primary_top, _)) = MainThreadMarker::new().and_then(pointer_screen)
         else {
             return;
         };

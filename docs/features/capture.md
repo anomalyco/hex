@@ -559,8 +559,10 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     │   then the capsule folds into the menu-bar item
     ├── cursor -> recording stays under the menu bar; the "Send to" card
     │   (number, name, reason) opens at the pointer and its Sent stays there
-    └── notch -> a black shape grows out of the notch (185 pt wide; on a
-        flat display a pretend one the menu bar's height) into the pill and
+    └── notch -> a black shape grows out of the notch (the measured one on
+        macOS's pointer screen, left and right edges snapped to the backing
+        pixels and the panel moved under its middle; 185 pt on a flat
+        display, a pretend one the menu bar's height) into the pill and
         the same card, its content under the notch, and shrinks back into it
         (capture_capsule/notch.rs). The playground's "Prototypes/Capture capsule/notch"
         story plays it on a 14-inch MacBook Pro and a 27-inch display, side
@@ -573,8 +575,8 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     simulation), bars, or a line; only the capture adds a red dot or a small
     screen, the cue alternating each loop
     Gap: only the shapes are prototyped; the menu-bar item's capture list
-    is not, the app doesn't read the screen's notch (the overlay still puts
-    the pill's content under it), and no flow but list has run live
+    is not, the app reads the notch's edges but not its height (the walls
+    run up past the screen's top), and no flow but list has run live
 
 The on-screen picker                     // capture.picker (capture_capsule/picker.rs)
 ├── A full-screen Rune overlay on the pointer's display, under the capsule,
@@ -1009,6 +1011,9 @@ Checks:
   `the_menu_bar_hint_is_brief_and_its_chips_send`,
   `the_cursor_card_lists_its_guesses_at_the_pointer`,
   `the_notch_hangs_from_the_top_edge`,
+  `the_default_notch_rests_where_it_always_has`,
+  `the_notch_shell_fits_a_measured_notch`,
+  `a_measured_notch_refreshes_the_entry_and_the_rest`,
   `the_menu_bar_flow_folds_up_toward_the_menu_bar`, goldens
   `tests/golden/capture-capsule-*.png`, and
   `the_capsule_moves_inside_its_panel_and_comes_to_rest`, which traces every

@@ -353,6 +353,9 @@ pub(crate) struct CapsuleState {
     replace: bool,
     /// Where the overlay was last placed for ([`Surface::anchor`]).
     placed: surface::Anchor,
+    /// The notch the capsule hangs from on the pointer's display, when it
+    /// could be measured.
+    notch: Option<notch::Measured>,
     /// The keys Hex's tap hands the capsule ([`Flow::keys`]): the overlay
     /// never takes focus.
     keys: Option<(
@@ -395,6 +398,7 @@ impl CapsuleState {
             follow: false,
             replace: false,
             placed: surface::Anchor::Top,
+            notch: None,
             keys: None,
             hovering: [false; 2],
             picker: None,
@@ -569,6 +573,28 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     s.sound();
     changed |= s.present(now);
     changed |= s.surface.tick(now);
+    // Shown, it stays put; a new capture brings it to the pointer.
+    let replaced = std::mem::take(&mut s.replace);
+    if replaced && let Some(overlay) = &s.overlay {
+        overlay.set_display(rune::DisplayTarget::UnderPointer);
+    }
+    // Hanging from the notch, the panel is fitted to the one on the
+    // pointer's display: measured on macOS, the pretend one elsewhere.
+    if s.placed != s.surface.anchor || replaced {
+        s.placed = s.surface.anchor;
+        if s.placed == surface::Anchor::Notch {
+            s.notch = measured_notch();
+            let geometry = s
+                .notch
+                .map_or_else(notch::Geometry::default, |m| m.geometry);
+            changed |= s.surface.set_notch(geometry);
+        } else {
+            s.notch = None;
+        }
+        if let Some(overlay) = &s.overlay {
+            place(overlay, s.placed, s.notch.map(|m| m.panel_x));
+        }
+    }
 
     let earliest = |wake: Option<f64>, at: Option<f64>| match (wake, at) {
         (Some(a), Some(b)) => Some(a.min(b)),
@@ -614,18 +640,6 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
         }
     }
     crate::capture_host::set_capsule_pill(shown.then_some(s.surface.shell));
-    // Shown, it stays put; a new capture brings it to the pointer.
-    if std::mem::take(&mut s.replace)
-        && let Some(overlay) = &s.overlay
-    {
-        overlay.set_display(rune::DisplayTarget::UnderPointer);
-    }
-    if s.placed != s.surface.anchor {
-        s.placed = s.surface.anchor;
-        if let Some(overlay) = &s.overlay {
-            place(overlay, s.placed);
-        }
-    }
     // The picker follows the pointer between displays.
     let follow = matches!(s.surface.pres, Pres::Selecting { .. });
     if s.follow != follow {
@@ -661,7 +675,9 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
 /// Moves the overlay to where the capsule rests: under the menu bar, at
 /// the screen's top edge (the notch), or at the pointer (the cursor's
 /// card, whose rect is global, so on the primary display's origin).
-fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor) {
+/// `notch_x` is the measured notch's panel origin, in points from the
+/// display's left; without one the panel stays centred.
+fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor, notch_x: Option<f32>) {
     use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge};
     let edge = |margin| OverlayPlacement::Edge {
         edge: ScreenEdge::Top,
@@ -676,7 +692,17 @@ fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor) {
         }
         surface::Anchor::Notch => {
             overlay.set_display(DisplayTarget::UnderPointer);
-            overlay.set_placement(Some(edge(0.0)));
+            // The panel's left edge on the display, so its walls land on the
+            // notch's; its top stays on the screen's as it always has.
+            overlay.set_placement(Some(match notch_x {
+                Some(inset) => OverlayPlacement::Edge {
+                    edge: ScreenEdge::Top,
+                    margin: 0.0,
+                    align: Align::Start,
+                    inset,
+                },
+                None => edge(0.0),
+            }));
         }
         surface::Anchor::Cursor => {
             let Some([x, y]) = scrawl_capture::screens::pointer() else {
@@ -691,6 +717,18 @@ fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor) {
             }));
         }
     }
+}
+
+/// The notch the capsule can hang from: the pointer's screen's on macOS,
+/// or `None` where there is no notch to read.
+#[cfg(target_os = "macos")]
+fn measured_notch() -> Option<notch::Measured> {
+    notch::measured()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn measured_notch() -> Option<notch::Measured> {
+    None
 }
 
 /// Takes, changes, or lets go of the keys the capsule wants from Hex's tap.

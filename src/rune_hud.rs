@@ -17,6 +17,8 @@ pub(crate) mod dot_scope;
 pub(crate) mod hud_placement;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+pub(crate) use macos::pointer_screen;
 pub(crate) mod spring;
 
 use std::sync::atomic::{AtomicBool, Ordering};

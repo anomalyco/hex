@@ -513,10 +513,11 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
 /// Every state is centred on [`CX`], except the recording capsule with its
 /// chips: it centres the chip row (`Area … ✕`) where the picker puts the
 /// same row and hangs the lead off its left, so switching to Area or Window
-/// moves no chip.
+/// moves no chip. At [`Anchor::Notch`] the whole capsule centres on the
+/// notch instead of the panel.
 #[cfg(test)]
 pub(crate) fn layout(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
-    layout_at(pres, clock, Anchor::Top)
+    layout_at(pres, clock, Anchor::Top, notch::Geometry::default())
 }
 
 /// The guesses `pres` lists as rows in a card, not as chips.
@@ -528,12 +529,17 @@ fn card_picks(pres: &Pres) -> &[(String, String)] {
 }
 
 /// [`layout`] resting at `anchor`, with a card's rows under the top line.
-pub(crate) fn layout_at(pres: &Pres, clock: &str, anchor: Anchor) -> ([f32; 4], Vec<Item>) {
+pub(crate) fn layout_at(
+    pres: &Pres,
+    clock: &str,
+    anchor: Anchor,
+    notch: notch::Geometry,
+) -> ([f32; 4], Vec<Item>) {
     let (mut shell, mut items) = line(pres, clock);
     let picks = card_picks(pres);
     let (dx, dy) = match anchor {
         Anchor::Top => (0.0, 0.0),
-        Anchor::Notch => (0.0, -TOP),
+        Anchor::Notch => (notch.centre() - CX, -TOP),
         Anchor::Cursor => (CURSOR_X - shell[0], CURSOR_Y - TOP),
     };
     shell[0] += dx;
@@ -572,11 +578,12 @@ pub(crate) fn layout_at(pres: &Pres, clock: &str, anchor: Anchor) -> ([f32; 4], 
         shell[3] = hints_y + CARD_HINTS_H + ISLAND_INSET - shell[1];
     }
     // The notch's walls run up past the screen's top edge, so only its
-    // bottom corners round, and it's never narrower than the notch.
+    // bottom corners round, and it's never narrower than the notch: the
+    // notch with 12 pt either side, centred on it.
     if anchor == Anchor::Notch {
-        let wider = (notch::MIN_WIDTH - shell[2]).max(0.0);
-        shell[0] -= wider * 0.5;
-        shell[2] += wider;
+        let width = notch.min_width().max(shell[2]);
+        shell[0] = notch.centre() - width * 0.5;
+        shell[2] = width;
         shell[1] -= notch::REACH;
         shell[3] += notch::REACH;
     }
@@ -719,9 +726,9 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
 
 /// Where the capsule enters from and leaves to: its own width,
 /// [`TOP_FROM`] of its height, or at the notch, the notch.
-fn pose(rest: [f32; 4], anchor: Anchor) -> [f32; 4] {
+fn pose(rest: [f32; 4], anchor: Anchor, notch: notch::Geometry) -> [f32; 4] {
     if anchor == Anchor::Notch {
-        return notch::tucked();
+        return notch.tucked();
     }
     [rest[0], rest[1], rest[2], rest[3] * TOP_FROM]
 }
@@ -779,6 +786,9 @@ pub(crate) struct Surface {
     /// Where the capsule rests (`capture.capsule_flow`): the app moves
     /// the overlay when it changes.
     pub(crate) anchor: Anchor,
+    /// The notch it hangs from, in panel points: the pretend one until the
+    /// app measures the screen under the pointer.
+    notch: notch::Geometry,
     /// An entry's second frame, from the origin pose to rest, and where it
     /// goes.
     entry: Option<(f64, [f32; 4], Vec<Item>)>,
@@ -793,12 +803,13 @@ impl Default for Surface {
 
 impl Surface {
     pub(crate) fn new() -> Self {
+        let notch = notch::Geometry::default();
         let shell = [CX - 60.0, TOP, 120.0, ISLAND_H];
         Self {
             pres: Pres::Hidden,
             clock: "0:00".into(),
             reduced: false,
-            shell: pose(shell, Anchor::Top),
+            shell: pose(shell, Anchor::Top, notch),
             shell_on: false,
             shell_motion: tuning::get().island,
             shell_fade: tuning::get().island_scale,
@@ -809,6 +820,7 @@ impl Surface {
             morph_settle: 0.0,
             events: Vec::new(),
             anchor: Anchor::Top,
+            notch,
             entry: None,
             generation: 0,
         }
@@ -821,12 +833,12 @@ impl Surface {
     )]
     pub(crate) fn settled(mut self, pres: Pres) -> Self {
         self.anchor = anchor_for(&pres, self.anchor);
-        let (rest, items) = layout_at(&pres, &self.clock, self.anchor);
+        let (rest, items) = layout_at(&pres, &self.clock, self.anchor, self.notch);
         self.shell_on = !matches!(pres, Pres::Hidden);
         self.shell = if self.shell_on {
             rest
         } else {
-            pose(rest, self.anchor)
+            pose(rest, self.anchor, self.notch)
         };
         self.items = items
             .iter()
@@ -835,6 +847,33 @@ impl Surface {
         self.highlight = self.highlight_for(&items, tuning::get().island);
         self.pres = pres;
         self
+    }
+
+    /// Fits the capsule to `notch`, re-laying out what it already shows: a
+    /// measured notch arrives after the entry or rest was computed from the
+    /// pretend one. True when the geometry changed.
+    pub(crate) fn set_notch(&mut self, notch: notch::Geometry) -> bool {
+        if self.notch == notch {
+            return false;
+        }
+        self.notch = notch;
+        if self.anchor != Anchor::Notch {
+            return true;
+        }
+        let (rest, items) = layout_at(&self.pres, &self.clock, self.anchor, notch);
+        if let Some((_, due, due_items)) = self.entry.as_mut() {
+            *due = rest;
+            *due_items = items;
+            // The entry starts from the notch, so its origin pose follows.
+            self.shell = pose(rest, self.anchor, notch);
+        } else if self.shell_on {
+            self.apply(rest, items);
+        } else {
+            self.shell = pose(rest, self.anchor, notch);
+            self.items.clear();
+            self.highlight = None;
+        }
+        true
     }
 
     fn shown(&mut self, item: &Item, motion: Spring) -> Shown {
@@ -913,7 +952,7 @@ impl Surface {
                 tuning::get().island
             } else {
                 if !self.reduced {
-                    self.shell = pose(self.shell, self.anchor);
+                    self.shell = pose(self.shell, self.anchor, self.notch);
                 }
                 tuning::get().island_scale
             };
@@ -925,7 +964,7 @@ impl Surface {
             return;
         }
 
-        let (rest, items) = layout_at(&next, &self.clock, self.anchor);
+        let (rest, items) = layout_at(&next, &self.clock, self.anchor, self.notch);
         if !self.shell_on || moved || matches!(prev, Pres::Hidden) {
             // Entry: this commit puts the capsule at its origin pose,
             // invisibly and instantly; the next frame springs it to rest.
@@ -933,7 +972,7 @@ impl Surface {
             self.shell = if self.reduced {
                 rest
             } else {
-                pose(rest, self.anchor)
+                pose(rest, self.anchor, self.notch)
             };
             self.shell_on = false;
             self.instant = true;
@@ -1172,6 +1211,95 @@ mod tests {
         });
     }
 
+    /// The default geometry is the pretend notch: the resting capsule is
+    /// exactly where it was before any notch was measured.
+    #[test]
+    fn the_default_notch_rests_where_it_always_has() {
+        let (shell, _) = layout_at(
+            &Pres::Processing,
+            "0:00",
+            Anchor::Notch,
+            notch::Geometry::default(),
+        );
+        assert_eq!(
+            shell,
+            [
+                CX - notch::MIN_WIDTH * 0.5,
+                -notch::REACH,
+                notch::MIN_WIDTH,
+                ISLAND_H + notch::REACH,
+            ]
+        );
+    }
+
+    /// A measured notch fits the shell to its edges, wherever it sits on
+    /// the display: tucked, exactly the notch; at rest, the notch with 12 pt
+    /// either side.
+    #[test]
+    fn the_notch_shell_fits_a_measured_notch() {
+        // A 210 pt notch, 12 pt right of its 1512 pt display's middle.
+        let notch::Measured { geometry, panel_x } = notch::fitted(663.0, 873.0, 1.0);
+        let tucked = geometry.tucked();
+        assert_eq!(tucked, [geometry.left, -notch::REACH, 210.0, notch::REACH]);
+        assert_eq!(
+            (panel_x + tucked[0], panel_x + tucked[0] + tucked[2]),
+            (663.0, 873.0),
+            "the tucked shell is the notch itself"
+        );
+        let (shell, items) = layout_at(&Pres::Processing, "0:00", Anchor::Notch, geometry);
+        assert_eq!(shell[2], 210.0 + 2.0 * 12.0);
+        assert_eq!(shell[0], geometry.left - 12.0);
+        assert_eq!(shell[0] + shell[2], geometry.right + 12.0);
+        assert_eq!(
+            (panel_x + shell[0], panel_x + shell[0] + shell[2]),
+            (663.0 - 12.0, 873.0 + 12.0),
+            "the resting shell covers the notch and 12 pt either side"
+        );
+        let item = items.first().expect("the processing label").rect;
+        assert_eq!(item[0] + item[2] * 0.5, geometry.centre());
+    }
+
+    /// The content centres on the notch, not the panel: a notch off the
+    /// panel's middle still holds the capsule's line.
+    #[test]
+    fn notch_content_centres_on_the_notch() {
+        let geometry = notch::Geometry {
+            left: 200.0,
+            right: 420.0,
+        };
+        let (shell, items) = layout_at(&Pres::Processing, "0:00", Anchor::Notch, geometry);
+        assert_eq!(shell[0], geometry.centre() - geometry.min_width() * 0.5);
+        let item = items.first().expect("the processing label").rect;
+        assert_eq!(item[0] + item[2] * 0.5, 310.0);
+    }
+
+    /// A notch measured after the capsule was laid out moves it: both a
+    /// pending entry's rest and a shown capsule's rest follow its edges.
+    #[test]
+    fn a_measured_notch_refreshes_the_entry_and_the_rest() {
+        tuning::with_flow(CapsuleFlow::Notch, || {
+            let notch::Measured { geometry, .. } = notch::fitted(663.0, 873.0, 1.0);
+            let mut entering = Surface::new();
+            entering.set(recording(false), 0.0);
+            assert!(entering.set_notch(geometry), "a new notch is a change");
+            assert!(!entering.set_notch(geometry), "the same notch isn't");
+            assert_eq!(
+                entering.shell,
+                geometry.tucked(),
+                "the origin pose follows too"
+            );
+            assert!(entering.tick(0.001));
+            assert_eq!(entering.shell[0], geometry.left - 12.0);
+            assert_eq!(entering.shell[0] + entering.shell[2], geometry.right + 12.0);
+
+            let mut rest = Surface::new().settled(recording(false));
+            assert_eq!(rest.shell[0], notch::Geometry::default().left - 12.0);
+            assert!(rest.set_notch(geometry));
+            assert_eq!(rest.shell[0], geometry.left - 12.0);
+            assert_eq!(rest.shell[0] + rest.shell[2], geometry.right + 12.0);
+        });
+    }
+
     /// The menu-bar flow's guesses are chips with their numbers, and the
     /// capsule folds up toward the menu bar as it goes.
     #[test]
@@ -1201,7 +1329,7 @@ mod tests {
                 let mut s = Surface::new();
                 s.reduced = true;
                 s.set(recording(false), 0.0);
-                let (rest, _) = layout_at(&s.pres, &s.clock, s.anchor);
+                let (rest, _) = layout_at(&s.pres, &s.clock, s.anchor, s.notch);
                 assert_eq!(s.shell, rest, "{flow:?} enters at rest");
                 let now = run(&mut s, 0.0, 1.0);
                 assert!(s.shell_on);
