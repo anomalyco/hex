@@ -109,7 +109,7 @@ pub struct MeetingCandidate {
     pub call: Option<String>,
 }
 
-fn known_provider_label(key: &str) -> Option<&'static str> {
+fn known_provider_label(key: &str, more_call_apps: bool) -> Option<&'static str> {
     KNOWN_MEETING_PROVIDERS
         .iter()
         .find(|(known, _)| *known == key)
@@ -120,24 +120,23 @@ fn known_provider_label(key: &str) -> Option<&'static str> {
                 .find(|(host, _)| *host == key)
                 .map(|(_, source)| source.label())
         })
-        // A Labs › More call apps page's own label; sites cannot be calls
-        // while the lab is off, so this changes nothing then.
         .or_else(|| {
-            MORE_CALL_SITES
-                .iter()
-                .find(|(host, _, _)| *host == key)
-                .map(|(_, _, label)| *label)
-        })
-        .or_else(|| is_webex_host(key).then_some(MeetingSource::Webex.label()))
-        .or_else(|| {
-            // The lab's app names are unknown while it is off, as before.
-            if !crate::labs::more_call_apps() {
+            // Labs › More call apps' app and page names, off, leave their keys
+            // labelled by the raw bundle id or host, exactly as before.
+            if !more_call_apps {
                 return None;
             }
             MORE_MEETING_PROVIDERS
                 .iter()
                 .find(|(known, _)| *known == key)
                 .map(|(_, label)| *label)
+                .or_else(|| {
+                    MORE_CALL_SITES
+                        .iter()
+                        .find(|(host, _, _)| *host == key)
+                        .map(|(_, _, label)| *label)
+                })
+                .or_else(|| is_webex_host(key).then_some(MeetingSource::Webex.label()))
         })
 }
 
@@ -236,10 +235,11 @@ impl MeetingCandidate {
 
     /// Whose call this is, for the user's Ask / Always record / Never offer
     /// choice: the website when known, else the app. Known services use the
-    /// name Settings lists them under.
-    pub fn provider(&self) -> Option<MeetingProvider> {
+    /// name Settings lists them under; `more_call_apps` is Labs › More call
+    /// apps, whose names are unknown while it is off.
+    pub fn provider(&self, more_call_apps: bool) -> Option<MeetingProvider> {
         let key = self.site.clone().or_else(|| self.application.clone())?;
-        let label = known_provider_label(&key)
+        let label = known_provider_label(&key, more_call_apps)
             .map(str::to_string)
             .or_else(|| self.site.clone())
             .or_else(|| self.application_name.clone())
@@ -249,8 +249,8 @@ impl MeetingCandidate {
 
     /// Whether one click may set this provider to Always record: not for a
     /// browser whose page is unknown, which would record every page.
-    pub fn can_always_record(&self) -> bool {
-        self.provider().is_some()
+    pub fn can_always_record(&self, more_call_apps: bool) -> bool {
+        self.provider(more_call_apps).is_some()
             && !(self.source == MeetingSource::BrowserCall && self.site.is_none())
     }
 
@@ -1259,7 +1259,10 @@ mod tests {
                     .unwrap();
             assert_eq!(web.source, MeetingSource::Gather, "{url}");
         }
-        assert_eq!(known_provider_label("com.gather.GatherV2"), Some("Gather"));
+        assert_eq!(
+            known_provider_label("com.gather.GatherV2", false),
+            Some("Gather")
+        );
     }
 
     #[test]
@@ -1289,7 +1292,10 @@ mod tests {
             assert_eq!(call.application.as_deref(), Some("com.hnc.Discord"));
             assert_eq!(call.required_stability(), STABLE_FOR);
         }
-        assert_eq!(known_provider_label("com.hnc.Discord"), Some("Discord"));
+        assert_eq!(
+            known_provider_label("com.hnc.Discord", false),
+            Some("Discord")
+        );
     }
 
     #[test]
@@ -1329,7 +1335,7 @@ mod tests {
         assert_eq!(web.source, MeetingSource::WhatsApp);
         assert_eq!(web.required_stability(), BROWSER_STABLE_FOR);
         assert_eq!(
-            known_provider_label("net.whatsapp.WhatsApp"),
+            known_provider_label("net.whatsapp.WhatsApp", false),
             Some("WhatsApp")
         );
     }
@@ -1369,6 +1375,40 @@ mod tests {
         assert_eq!(call.source, MeetingSource::BrowserCall);
         assert_eq!(call.site.as_deref(), Some("voice.google.com"));
         assert_eq!(call.offer_title(), "Call on voice.google.com");
+        assert_eq!(
+            call.provider(false).unwrap().label,
+            "voice.google.com",
+            "off, the provider is still the host"
+        );
+
+        // A Webex page's provider is its own host too.
+        let webex_page = context(
+            "Brave Browser",
+            Some("https://meetings.webex.com/mw"),
+            "Webex",
+        );
+        let webex = candidate_from_microphone(&brave(), &webex_page).unwrap();
+        assert_eq!(webex.source, MeetingSource::BrowserCall);
+        assert_eq!(webex.site.as_deref(), Some("meetings.webex.com"));
+        assert_eq!(
+            webex.provider(false).unwrap().label,
+            "meetings.webex.com",
+            "off, a Webex page is not named"
+        );
+
+        // On, the lab names them.
+        assert_eq!(
+            super::candidate_from_microphone(&brave(), &page, true)
+                .unwrap()
+                .provider(true)
+                .unwrap()
+                .label,
+            "Google Voice"
+        );
+        let webex = super::candidate_from_microphone(&brave(), &webex_page, true).unwrap();
+        let provider = webex.provider(true).unwrap();
+        assert_eq!(provider.key, "webex.com");
+        assert_eq!(provider.label, "Webex");
     }
 
     #[test]
@@ -1567,7 +1607,7 @@ mod tests {
         assert_eq!(teams.source, MeetingSource::Teams);
         // The page is named after the service; its provider is its own.
         assert_eq!(teams.offer_title(), "Microsoft Teams call detected");
-        let provider = teams.provider().unwrap();
+        let provider = teams.provider(true).unwrap();
         assert_eq!(provider.key, "teams.live.com");
         assert_eq!(provider.label, "Teams (web)");
 
@@ -1609,17 +1649,17 @@ mod tests {
         .unwrap();
         assert_eq!(facetime.source, MeetingSource::FaceTime);
         assert_eq!(facetime.offer_title(), "FaceTime call detected");
-        let provider = facetime.provider().unwrap();
+        let provider = facetime.provider(true).unwrap();
         assert_eq!(provider.key, "facetime.apple.com");
         assert_eq!(provider.label, "FaceTime (web)");
 
         assert_ne!(
-            known_provider_label("teams.live.com"),
-            known_provider_label("com.microsoft.teams2")
+            known_provider_label("teams.live.com", true),
+            known_provider_label("com.microsoft.teams2", false)
         );
         assert_ne!(
-            known_provider_label("facetime.apple.com"),
-            known_provider_label("com.apple.FaceTime")
+            known_provider_label("facetime.apple.com", true),
+            known_provider_label("com.apple.FaceTime", false)
         );
     }
 
@@ -2004,21 +2044,21 @@ mod tests {
             "Problems",
         );
         let site = candidate_from_microphone(&brave(), &problems).unwrap();
-        let provider = site.provider().unwrap();
+        let provider = site.provider(false).unwrap();
         assert_eq!(provider.key, "problems.kitlangton.com");
         assert_eq!(
             site.policy(&[provider.choose(MeetingPolicy::NeverOffer)]),
             MeetingPolicy::NeverOffer
         );
-        assert!(site.can_always_record());
+        assert!(site.can_always_record(false));
 
         let unknown = candidate_from_microphone(&brave(), &ContextSnapshot::default()).unwrap();
-        let app = unknown.provider().unwrap();
+        let app = unknown.provider(false).unwrap();
         assert_eq!(
             (app.key.as_str(), app.label.as_str()),
             ("com.brave.Browser", "Brave Browser")
         );
-        assert!(!unknown.can_always_record());
+        assert!(!unknown.can_always_record(false));
         let never_site = [choice("problems.kitlangton.com", MeetingPolicy::NeverOffer)];
         assert_eq!(unknown.policy(&never_site), MeetingPolicy::Ask);
         // A browser's choice covers its sites unless the site has its own.
@@ -2053,25 +2093,25 @@ mod tests {
             ),
         )
         .unwrap();
-        let provider = meet.provider().unwrap();
+        let provider = meet.provider(false).unwrap();
         assert_eq!(
             (provider.key.as_str(), provider.label.as_str()),
             ("meet.google.com", "Google Meet")
         );
         let slack = slack_huddle();
-        assert_eq!(slack.provider().unwrap().label, "Slack huddles");
+        assert_eq!(slack.provider(false).unwrap().label, "Slack huddles");
         let banshee = candidate_from_microphone(
             &brave(),
             &context("Brave Browser", Some("https://banshee.app/room-1"), "Room"),
         )
         .unwrap();
-        let provider = banshee.provider().unwrap();
+        let provider = banshee.provider(false).unwrap();
         assert_eq!(
             (provider.key.as_str(), provider.label.as_str()),
             ("banshee.app", "Banshee")
         );
-        assert!(banshee.can_always_record());
-        assert!(slack.can_always_record());
+        assert!(banshee.can_always_record(false));
+        assert!(slack.can_always_record(false));
     }
 
     fn slack_huddle() -> MeetingCandidate {
