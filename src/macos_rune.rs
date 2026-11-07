@@ -655,6 +655,10 @@ static DRAIN: crate::desktop::process_exit::Drain = crate::desktop::process_exit
 // ---------------------------------------------------------------------------
 // Runtime thread
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one thread's whole context, built once at startup"
+)]
 fn run_runtime(
     settings: AppSettings,
     initial_input_source: Option<String>,
