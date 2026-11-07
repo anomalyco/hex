@@ -198,8 +198,8 @@ mod tests {
     fn the_file_name_follows_the_title_and_keeps_the_date_and_time() {
         let folder = folder("rename");
         let stamp = LocalTime::from_ms(STARTED).file_stamp();
-        let current = folder.join(format!("{stamp} Teams call — 2:00 PM.md"));
-        fs::write(&current, "# Teams call — 2:00 PM\n").unwrap();
+        let current = folder.join(format!("{stamp} Teams call 2.00 PM.md"));
+        fs::write(&current, "# Teams call 2.00 PM\n").unwrap();
         let mut manifest = manifest(current.clone());
 
         let renamed = rename_to_title(&mut manifest, "Quarterly planning", true).expect("renamed");
@@ -211,7 +211,7 @@ mod tests {
         assert!(!current.exists());
         assert_eq!(
             fs::read_to_string(&renamed).unwrap(),
-            "# Teams call — 2:00 PM\n"
+            "# Teams call 2.00 PM\n"
         );
         assert_eq!(manifest.export_path, Some(renamed));
         fs::remove_dir_all(folder).unwrap();

@@ -1427,12 +1427,14 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   listener card; any other failure keeps its logged message, truncated to one
   line. The gate is `labs::failure_notices()` (toggle
   `labs.failure_notices`, off by default), read when each failure reaches the
-  HUD; with it off, no notice is drawn. Every OS shows notices for a failed
-  accepted dictation job; Windows and macOS also show one for a microphone that
-  fails to open. Linux does not show one where its HUD never received a
-  failure today. Checks: `a_failure_notice_lasts_six_seconds`,
+  HUD; with it off, no notice is drawn. Every OS shows a notice for a failed
+  accepted job. Windows and macOS also show one when the microphone fails to
+  open. On Linux, notices cover failed transcriptions only: a microphone-open
+  failure never reaches its HUD today. A job failure that arrives while a newer
+  capture records is skipped. Checks: `a_failure_notice_lasts_six_seconds`,
   `a_new_capture_dismisses_a_failure_notice_at_once`,
-  `only_a_notices_own_deadline_dismisses_it`, and
+  `only_a_notices_own_deadline_dismisses_it`,
+  `a_failure_arriving_after_a_queued_words_end_stays_visible`, and
   `a_failure_notice_takes_the_plate_from_the_live_words` in
   [rune_ui/live_text.rs](../../src/rune_ui/live_text.rs), and
   `failure_notices_is_its_own_bit_and_off_by_default` in

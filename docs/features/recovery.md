@@ -284,8 +284,8 @@ MacBook lid closed (macOS)                            // built-in mic is off but
   │     -> Settings: "… is off while the lid is closed, so Hex listens to …"
   ├── no other input -> "the built-in microphone is off while the lid is closed"
   │     └── failed dictation -> Settings listener card explains it   // macOS
-  │           "Last dictation failed: The built-in microphone is off while the lid is
-  │            closed. Open the lid or connect a microphone."
+  │           "Last dictation failed: Built-in mic is off with the lid closed.
+  │            Open the lid or connect a mic."
   │           -> clears once a later dictation completes; the listener's own failure keeps priority
   └── lid opens or closes -> re-resolve like a device-list change // IOKit clamshell notification
         -> switch once capture is idle
@@ -348,7 +348,7 @@ headphone-jack UID and data-source codes come from CoreAudio's documented
 values, not a jack microphone observed with the lid closed. The listener card's
 lid-closed wording is a pure mapping and shared projection test
 (`known_microphone_failures_get_an_actionable_explanation`,
-`a_stopped_listener_explains_itself_before_a_dictation_failure`); the macOS
+`a_startup_reader_ignores_the_previous_sessions_failure`); the macOS
 card is not natively verified.
 
 `recover.cold-open`: "Release when idle" opens for a gesture, not an idle retry

@@ -43,7 +43,7 @@ use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use objc2_foundation::{MainThreadMarker, NSAppleEventManager, NSObject, NSString, NSTimer};
 
 use crate::app_settings::AppSettings;
-use crate::desktop::activity::{DesktopActivity, last_completed_at, warning_with_listener_failure};
+use crate::desktop::activity::{DesktopActivity, last_completed_at};
 use crate::desktop::events::EventReader;
 use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopShortcuts,
@@ -161,6 +161,17 @@ type Wake = Arc<dyn Fn() + Send + Sync>;
 struct Shared {
     published: Mutex<Option<Arc<Published>>>,
     wakers: Mutex<Vec<Wake>>,
+    /// The listener's event log, which the runtime reads and the tour shares.
+    event_path: PathBuf,
+    /// When this run began, in the event log's wall-clock ms, captured before
+    /// the listener thread starts.
+    started_at: u64,
+}
+
+impl Shared {
+    fn event_path(&self) -> &Path {
+        &self.event_path
+    }
 }
 
 /// The window's and the menu bar's connection to the runtime.
@@ -171,14 +182,13 @@ pub(crate) struct RuntimeHandle {
     meeting_requests: SyncSender<MeetingRequest>,
     recognition_controls: SyncSender<RecognitionControl>,
     history: Option<crate::history::History>,
-    event_path: PathBuf,
     indicator: crate::dictation::indicator::DictationIndicatorSender,
 }
 
 impl RuntimeHandle {
     /// The listener's event log, which the tour reads for practice dictations.
     pub(crate) fn event_path(&self) -> &Path {
-        &self.event_path
+        self.shared.event_path()
     }
 
     pub(crate) fn history(&self) -> Option<crate::history::History> {
@@ -403,6 +413,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let (recognition_start, start_receiver) = mpsc::sync_channel(1);
     let recognition_indicator = indicator.clone();
     let recognition_history = history.clone();
+    let started_at = crate::desktop::events::now_ms();
     let listener_failure = Arc::new(Mutex::new(None::<String>));
     let recognition_failure = listener_failure.clone();
     let recognition = thread::Builder::new()
@@ -449,14 +460,17 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
         })?;
 
     let (requests, request_receiver) = mpsc::channel();
-    let shared = Arc::new(Shared::default());
+    let shared = Arc::new(Shared {
+        event_path: event_path.clone(),
+        started_at,
+        ..Shared::default()
+    });
     let handle = RuntimeHandle {
         requests: requests.clone(),
         shared: shared.clone(),
         meeting_requests: meeting_requests.clone(),
         recognition_controls: recognition_controls.clone(),
         history: history.clone(),
-        event_path: event_path.clone(),
         indicator: indicator.clone(),
     };
     RUNTIME
@@ -474,7 +488,6 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                 shutdown,
                 (!setup_ready).then_some(recognition_start),
                 listener_failure,
-                event_path,
             )
         })?;
     // A closed window is only ordered out, and AppKit keeps it on the Space
@@ -655,10 +668,6 @@ static DRAIN: crate::desktop::process_exit::Drain = crate::desktop::process_exit
 // ---------------------------------------------------------------------------
 // Runtime thread
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one thread's whole context, built once at startup"
-)]
 fn run_runtime(
     settings: AppSettings,
     initial_input_source: Option<String>,
@@ -667,9 +676,8 @@ fn run_runtime(
     shutdown: &AtomicBool,
     recognition_start: Option<SyncSender<()>>,
     listener_failure: Arc<Mutex<Option<String>>>,
-    event_path: PathBuf,
 ) {
-    let mut event_reader = EventReader::open(event_path);
+    let mut event_reader = EventReader::open(shared.event_path().to_path_buf());
     let mut activity = DesktopActivity::default();
     activity.refresh(&mut event_reader);
     let last_completed_at = last_completed_at(event_reader.events().iter());
@@ -686,6 +694,7 @@ fn run_runtime(
         event_reader,
         activity,
         last_completed_at,
+        started_at: shared.started_at,
     };
     loop {
         let mut next = match requests.recv_timeout(RUNTIME_TICK) {
@@ -740,6 +749,9 @@ struct Runtime {
     activity: DesktopActivity,
     /// When the current session's newest dictation completed.
     last_completed_at: Option<u64>,
+    /// When this runtime started, in the event log's wall-clock ms. Failures
+    /// older than this belong to the previous session.
+    started_at: u64,
 }
 
 impl Runtime {
@@ -885,12 +897,11 @@ impl Runtime {
                     "Waiting for setup"
                 }
                 .into(),
-                warning: warning_with_listener_failure(
-                    &self.activity,
-                    self.last_completed_at,
-                    failure,
-                ),
+                warning: failure,
                 notice: None,
+                last_failure: self
+                    .activity
+                    .visible_failure_since(self.started_at, self.last_completed_at),
                 shortcuts: DesktopShortcuts::Registered,
                 shortcuts_configurable: false,
             },
