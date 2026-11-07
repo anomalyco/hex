@@ -33,6 +33,7 @@ static NEXT_PUBLISHER: AtomicU64 = AtomicU64::new(1);
 static DEMANDS: AtomicUsize = AtomicUsize::new(0);
 #[cfg(target_os = "linux")]
 static TYPING: AtomicUsize = AtomicUsize::new(0);
+static CLIENTS: AtomicUsize = AtomicUsize::new(0);
 
 fn board() -> MutexGuard<'static, Board> {
     BOARD.lock().unwrap_or_else(|error| error.into_inner())
@@ -84,9 +85,29 @@ impl Drop for TypingDemand {
     }
 }
 
-/// Whether anything holds a [`Demand`], or a `TypingDemand` on Linux.
+/// Asks dictation streams to publish their text for a `/dictations` client
+/// that asked for partials, without the Live text plate. It shares the
+/// engine demand with [`Demand`], but never publishes to the plate.
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
+pub(crate) struct ClientDemand(());
+
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
+pub(crate) fn client_demand() -> ClientDemand {
+    CLIENTS.fetch_add(1, Ordering::AcqRel);
+    ClientDemand(())
+}
+
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
+impl Drop for ClientDemand {
+    fn drop(&mut self) {
+        CLIENTS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Whether anything holds a [`Demand`], a `ClientDemand`, or a
+/// `TypingDemand` on Linux.
 pub(crate) fn demanded() -> bool {
-    DEMANDS.load(Ordering::Acquire) > 0 || typing_demanded()
+    DEMANDS.load(Ordering::Acquire) > 0 || CLIENTS.load(Ordering::Acquire) > 0 || typing_demanded()
 }
 
 /// Whether a `TypingDemand` is held: Live typing is Linux only.

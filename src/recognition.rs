@@ -615,8 +615,12 @@ pub fn listen(
                         source,
                         owner_token,
                         levels,
+                        partials,
                         reply,
                     }) => {
+                        // A programmatic capture doesn't stream here, so it
+                        // has no live text: a client's partials end at once.
+                        drop(partials);
                         if programmatic.is_some() || input.is_recording() || hotkeys.any_recording()
                         {
                             let _ = reply.send(Err("dictation-busy".into()));

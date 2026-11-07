@@ -1142,7 +1142,7 @@ impl DictationCapture {
     /// engine logs each stream's count of changes). Every OS's capture loop
     /// calls it after ingesting audio; it does nothing without live text. The
     /// change is also returned, so a host can send it to Live typing's input
-    /// method without showing the plate.
+    /// method or a `/dictations` client without showing the plate.
     pub fn report_live_text(&mut self) -> Option<Partial> {
         let partial = self.take_partial()?;
         let recording = self.recording.as_mut()?;
