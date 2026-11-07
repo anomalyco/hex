@@ -30,6 +30,7 @@ use std::time::Duration;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString};
 
 use crate::app_settings::{CAPS_LOCK_USAGE, PhysicalModifierKeys, physical_key_bit};
+use crate::audio::CaptureInstant;
 
 const KEYBOARD_USAGE_PAGE: u32 = 0x07;
 const GENERIC_DESKTOP_USAGE_PAGE: i32 = 0x01;
@@ -118,13 +119,13 @@ static OWNER: AtomicU64 = AtomicU64::new(0);
 static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
 
 /// Labs › Caps Lock dictation's listener, called on the tracker thread for
-/// each physical Caps Lock key-down.
-static CAPS_LOCK_PRESSED: Mutex<Option<fn()>> = Mutex::new(None);
+/// each physical Caps Lock key-down with its press timestamp.
+static CAPS_LOCK_PRESSED: Mutex<Option<fn(CaptureInstant)>> = Mutex::new(None);
 
 /// Registers or clears the one Caps Lock press listener. The tracker stays
 /// independent of the feature: with no listener it records held keys as
 /// before.
-pub(crate) fn watch_caps_lock(pressed: Option<fn()>) {
+pub(crate) fn watch_caps_lock(pressed: Option<fn(CaptureInstant)>) {
     *CAPS_LOCK_PRESSED
         .lock()
         .unwrap_or_else(|error| error.into_inner()) = pressed;
@@ -215,12 +216,13 @@ unsafe extern "C" fn value_changed(
     context.publish(&devices);
     drop(devices);
     if newly_pressed {
-        // The hook only posts to a bounded channel; it never touches IOKit.
+        // The hook only records the press and timestamp; no IOKit runs here.
+        let pressed_at = CaptureInstant::now();
         let listener = *CAPS_LOCK_PRESSED
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         if let Some(listener) = listener {
-            listener();
+            listener(pressed_at);
         }
     }
 }

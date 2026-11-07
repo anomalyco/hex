@@ -436,19 +436,21 @@ Lock press toggles a hands-free dictation. From idle it starts a capture that
 stays recording without a hold; the next Caps Lock press finishes it and hands
 it to the normal transcription, processing, and paste flow. A hold capture,
 a pending double tap, or another shortcut's recording is left alone. Escape
-cancels the Caps Lock capture in every shortcut mode, and the normal dictation
-shortcut keeps working when nothing records (while a Caps Lock capture runs it
-stands down, as a second shortcut does). Turning the lab off mid-capture
-cancels that capture.
+cancels the Caps Lock capture in every shortcut mode; Toggle mode's configured
+cancel shortcut does not, only Escape does for a Caps Lock capture. The normal
+dictation shortcut keeps working when nothing records (while a Caps Lock
+capture runs it stands down, as a second shortcut does). Turning the lab off
+mid-capture cancels that capture.
 
 Caps Lock never changes typing: every press also resets the system Caps Lock
 state off through `IOHIDSetModifierLockState`, so the next keys stay
 lowercase. The key's light follows Hex's dictation state through the
-keyboard's HID LED output element (usage page 0x08, usage 0x02): on while a
-capture records, blinking while an accepted job transcribes or processes, and
-off when nothing is left or the capture is discarded, cancelled, or failed.
-Turning the lab off or quitting Hex clears the light and stops forcing the
-lock off, so Caps Lock behaves normally again.
+keyboard's HID LED output element (usage page 0x08, usage 0x02). It is on
+while any capture records, including a normal-shortcut or Annotate capture,
+blinking while an accepted job transcribes or processes, and off when nothing
+is left or the capture is discarded, cancelled, or failed. Turning the lab off
+or quitting Hex clears the light and stops forcing the lock off, so Caps Lock
+behaves normally again.
 
 ```ts
 Labs › Caps Lock dictation on                        // labs.caps_lock_dictation
@@ -456,6 +458,7 @@ Labs › Caps Lock dictation on                        // labs.caps_lock_dictati
 ├── Caps Lock press, that capture running -> finishes and pastes normally
 ├── Hold capture / pending double tap / another shortcut recording -> ignored
 ├── Escape while it records -> cancels (the tap keeps Escape from the app)
+├── Toggle mode's other cancel shortcut -> does not touch a Caps Lock capture
 ├── software Caps Lock -> off after every press; typing is unchanged
 ├── light -> solid recording, blink transcribing/processing, off done/cancelled/failed
 ├── Labs off mid-capture -> cancels it, light off, normal Caps Lock returns
@@ -464,24 +467,41 @@ Labs › Caps Lock dictation on                        // labs.caps_lock_dictati
 
 The gate is `labs::caps_lock_dictation()` in the listener
 ([recognition.rs](../../src/recognition.rs)), which starts and stops the
-feature's worker each pass. Detection comes from the raw HID tracker's Caps
-Lock usage 0x39 ([suppression/physical_keys.rs](../../src/suppression/physical_keys.rs))
-and the event tap's AlphaShift flag change
-([suppression.rs](../../src/suppression.rs)); the two are deduplicated so a
-press registers once. The worker
-([caps_lock_dictation/macos.rs](../../src/caps_lock_dictation/macos.rs))
-owns every IOKit call, the LED element cache, and the blink timer; no IOKit
-work runs on the event-tap or audio threads. The pure press decision and light
-model live in
+feature's worker each pass. Detection needs both halves of a physical press:
+the raw HID tracker records Caps Lock usage 0x39 with its press timestamp
+([suppression/physical_keys.rs](../../src/suppression/physical_keys.rs)), and
+the event tap confirms it with an AlphaShift change edge within 300 ms
+([suppression.rs](../../src/suppression.rs)). A key remapped to Control or
+Escape never changes AlphaShift, so it never toggles dictation. Hex's own
+lock-reset edge has no pending HID press and is ignored. Without Input
+Monitoring the HID tracker is inactive, so an AlphaShift on edge is the
+fallback press and off edges remain resets. Confirmed presses reach the
+listener with the HID timestamp, before any IOKit work. The light model stays
+on the listener and publishes its pattern through an atomic; the worker
+([caps_lock_dictation/macos.rs](../../src/caps_lock_dictation/macos.rs)) owns
+every IOKit call, re-enumerates keyboards on a bounded refresh, and runs the
+blink timer. No IOKit work runs on the event-tap or audio threads. The pure
+press gate, press decision, and light model live in
 [caps_lock_dictation.rs](../../src/caps_lock_dictation.rs). The LED needs
 Input Monitoring, which Hex already asks for; without it, dictation still
 works and the light stays under macOS's control. Checks:
-`a_press_starts_when_idle_and_finishes_its_own_recording`,
+`an_older_jobs_stage_event_never_interrupts_a_newer_capture`,
+`a_stage_event_for_an_unknown_job_changes_nothing`,
 `the_light_is_solid_recording_blinking_working_and_off_after`,
 `the_light_waits_for_every_accepted_job`,
-`cancelling_or_failing_a_capture_turns_the_light_off`, and
-`both_press_paths_report_one_press` in
+`cancelling_or_failing_a_capture_turns_the_light_off`,
+`a_delayed_alpha_shift_edge_confirms_one_hid_press`,
+`a_hid_press_without_an_alpha_shift_edge_never_presses`,
+`without_the_hid_tracker_an_on_edge_is_the_fallback_press`, and
+`the_light_pattern_codes_round_trip` in
 [caps_lock_dictation.rs](../../src/caps_lock_dictation.rs);
+`escape_cancels_a_caps_lock_capture_in_hold_mode`,
+`the_dictation_shortcut_stands_down_while_caps_lock_records`,
+`turning_the_caps_lock_lab_off_stops_its_capture`,
+`caps_lock_never_starts_over_a_pending_double_tap`, and
+`a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode` in
+[recognition.rs](../../src/recognition.rs) and
+[suppression/tests.rs](../../src/suppression/tests.rs);
 `caps_lock_dictation_is_its_own_bit_and_macos_only` in
 [labs.rs](../../src/labs.rs);
 `contributed_options_are_labs_toggles_off_by_default` in

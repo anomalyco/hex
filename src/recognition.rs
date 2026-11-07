@@ -54,6 +54,13 @@ impl DictationSink<'_> {
             hud.meter(samples);
         }
     }
+
+    /// A non-dictation capture (Annotate) moves only the Caps Lock light, not
+    /// the dictation HUD.
+    #[cfg(hex_capture)]
+    fn caps_only(&self, event: DictationIndicatorEvent) {
+        self.caps_lock.observe(event);
+    }
 }
 
 #[derive(Debug)]
@@ -213,6 +220,16 @@ impl Hotkeys {
             .any(DictationHotkey::is_recording)
     }
 
+    /// Whether a machine other than `shortcut`'s has a double-tap gesture
+    /// waiting to become a recording.
+    fn pending_gesture_besides(&self, shortcut: Shortcut) -> bool {
+        Shortcut::ALL
+            .into_iter()
+            .filter(|other| *other != shortcut)
+            .filter_map(|other| self.machine(other))
+            .any(DictationHotkey::has_pending_gesture)
+    }
+
     fn any_recording(&self) -> bool {
         Shortcut::ALL
             .into_iter()
@@ -291,9 +308,12 @@ impl Hotkeys {
     }
 
     /// A Caps Lock press, if the lab's machine should act on it. A hold
-    /// capture or another shortcut recording is left undisturbed.
+    /// capture, another shortcut recording, or a pending double-tap gesture
+    /// is left undisturbed.
     fn caps_lock_press(&mut self) -> Option<HotkeyAction> {
-        if self.recording_besides(Shortcut::CapsLock) {
+        if self.recording_besides(Shortcut::CapsLock)
+            || self.pending_gesture_besides(Shortcut::CapsLock)
+        {
             return None;
         }
         let action = self.caps_lock.caps_lock_toggle()?;
@@ -301,6 +321,17 @@ impl Hotkeys {
             self.raw_capture = false;
         }
         Some(action)
+    }
+
+    /// Stands a Caps Lock capture down when its lab turns off. Returns
+    /// whether one was recording so the caller can cancel it.
+    fn stop_caps_lock(&mut self) -> bool {
+        if self.caps_lock.is_recording() {
+            self.caps_lock.suspend();
+            true
+        } else {
+            false
+        }
     }
 
     /// Feeds one input to every machine, and returns what each did with
@@ -460,6 +491,9 @@ pub fn listen(
     emit_state(&mut events, hotkeys.any_recording(), &input.device_name())?;
     tracing::info!(device = %input.device_name(), "dictation listener started");
 
+    #[cfg(hex_capture)]
+    let mut capture_was_recording = false;
+
     while !shutdown.load(Ordering::Relaxed) {
         #[cfg(hex_capture)]
         crate::capture_host::CaptureHost::reconcile(
@@ -468,12 +502,25 @@ pub fn listen(
             &capture_environment,
             &input,
         );
+        #[cfg(hex_capture)]
+        {
+            let capture_recording = capture_host
+                .as_ref()
+                .is_some_and(|host| host.recording_since(&input).is_some());
+            if capture_recording != capture_was_recording {
+                capture_was_recording = capture_recording;
+                indicator.caps_only(if capture_recording {
+                    DictationIndicatorEvent::Started
+                } else {
+                    DictationIndicatorEvent::Cancelled
+                });
+            }
+        }
         let caps_lock_on = crate::labs::caps_lock_dictation();
         caps_lock.set_enabled(caps_lock_on);
         // Turning the lab off mid-capture cancels it, as unbinding the
         // second shortcut does.
-        if !caps_lock_on && hotkeys.caps_lock.is_recording() {
-            hotkeys.suspend(Shortcut::CapsLock);
+        if !caps_lock_on && hotkeys.stop_caps_lock() {
             handle_hotkey_action(
                 HotkeyAction::Cancel,
                 false,
@@ -922,10 +969,11 @@ pub fn listen(
                 microphone_policy.release_while_idle,
             )?;
         }
-        // Caps Lock presses arrive from the light worker, off the audio and
-        // input threads. Never start one while a shortcut is recorded or a
-        // programmatic dictation owns the microphone.
-        while caps_lock.try_recv_press() {
+        // Caps Lock presses arrive from the tap, off the audio and input
+        // threads, with the physical press's own timestamp. Never start one
+        // while a shortcut is recorded or a programmatic dictation owns the
+        // microphone.
+        while let Some(at) = caps_lock.try_recv_press() {
             if hotkey_capture_suspended || programmatic.is_some() {
                 continue;
             }
@@ -935,7 +983,7 @@ pub fn listen(
             let accepted = handle_hotkey_action(
                 action,
                 hotkeys.raw_capture,
-                CaptureInstant::now(),
+                at,
                 &input,
                 &dictation_worker,
                 &context,
@@ -1904,7 +1952,13 @@ fn handle_dictation_event(
                 },
             });
         }
-        WorkerEvent::Cancelled { .. } => {}
+        WorkerEvent::Cancelled { job_id } => {
+            // A submitted job left the HUD's job set only when it completed
+            // or failed; tell both the HUD and the light that it is gone.
+            indicator.send(DictationIndicatorEvent::JobCancelled {
+                job_id: job_id.value(),
+            });
+        }
         WorkerEvent::ModelFailed(error) => {
             tracing::error!(%error, "dictation failed");
             feedback::play(Tone::Error);
@@ -1993,6 +2047,115 @@ mod tests {
         assert_eq!(press(OPTION_KEY_MASK, 7_000), [(DICTATION, FINISH)]);
         assert!(press(0, 7_100).is_empty());
         assert!(!hotkeys.any_recording());
+    }
+
+    fn caps_lock_hotkeys(
+        base: CaptureInstant,
+        dictation: crate::app_settings::RuntimeHotkey,
+    ) -> Hotkeys {
+        let mut caps_lock =
+            DictationHotkey::new(base, false, crate::app_settings::RuntimeHotkey::default());
+        caps_lock.set_toggle(true);
+        caps_lock.set_cancel(Some(
+            crate::app_settings::HotkeyBinding::cancel_default().runtime(),
+        ));
+        Hotkeys {
+            dictation: DictationHotkey::new(base, false, dictation),
+            second: None,
+            raw: None,
+            caps_lock,
+            raw_capture: false,
+        }
+    }
+
+    fn option_binding() -> crate::app_settings::RuntimeHotkey {
+        crate::app_settings::RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers::option(),
+            key_code: None,
+        }
+    }
+
+    #[test]
+    fn escape_cancels_a_caps_lock_capture_in_hold_mode() {
+        let base = CaptureInstant::from_nanos(70_000_000_000);
+        let mut hotkeys = caps_lock_hotkeys(base, option_binding());
+        assert_eq!(hotkeys.caps_lock_press(), Some(HotkeyAction::Start));
+        assert!(hotkeys.caps_lock.is_recording());
+
+        let actions = hotkeys.process(
+            InputEvent::Key {
+                code: 53,
+                down: true,
+                flags: 0,
+            },
+            base + Duration::from_millis(500),
+        );
+        assert!(
+            actions.contains(&(Shortcut::CapsLock, HotkeyAction::CancelShortcut)),
+            "Hold mode still cancels a Caps Lock capture on Escape: {actions:?}"
+        );
+        assert!(!hotkeys.caps_lock.is_recording());
+    }
+
+    #[test]
+    fn the_dictation_shortcut_stands_down_while_caps_lock_records() {
+        let base = CaptureInstant::from_nanos(80_000_000_000);
+        let mut hotkeys = caps_lock_hotkeys(base, option_binding());
+        assert_eq!(hotkeys.caps_lock_press(), Some(HotkeyAction::Start));
+
+        assert!(
+            hotkeys
+                .process(
+                    InputEvent::Flags(crate::app_settings::OPTION_KEY_MASK),
+                    base + Duration::from_millis(100),
+                )
+                .is_empty(),
+            "the normal shortcut does not start or finish a Caps Lock capture"
+        );
+        assert!(hotkeys.caps_lock.is_recording());
+        assert!(!hotkeys.dictation.is_recording());
+    }
+
+    #[test]
+    fn turning_the_caps_lock_lab_off_stops_its_capture() {
+        let base = CaptureInstant::from_nanos(90_000_000_000);
+        let mut hotkeys = caps_lock_hotkeys(base, option_binding());
+        assert_eq!(hotkeys.caps_lock_press(), Some(HotkeyAction::Start));
+        assert!(hotkeys.stop_caps_lock());
+        assert!(!hotkeys.caps_lock.is_recording());
+        assert!(!hotkeys.stop_caps_lock(), "nothing is left to cancel");
+    }
+
+    #[test]
+    fn caps_lock_never_starts_over_a_pending_double_tap() {
+        use crate::app_settings::{HotkeyModifiers, OPTION_KEY_MASK, RuntimeHotkey};
+        let base = CaptureInstant::from_nanos(100_000_000_000);
+        let space = RuntimeHotkey {
+            modifiers: HotkeyModifiers::option(),
+            key_code: Some(49),
+        };
+        let mut hotkeys = caps_lock_hotkeys(base, space);
+        hotkeys.dictation.set_double_tap_enabled(true);
+        hotkeys.dictation.set_double_tap_only(true);
+        assert!(
+            hotkeys
+                .process(
+                    InputEvent::Key {
+                        code: 49,
+                        down: true,
+                        flags: OPTION_KEY_MASK,
+                    },
+                    base,
+                )
+                .is_empty()
+        );
+        assert!(hotkeys.dictation.has_pending_gesture());
+        assert_eq!(
+            hotkeys.caps_lock_press(),
+            None,
+            "a Caps Lock start leaves the pending double tap alone"
+        );
+        assert!(!hotkeys.caps_lock.is_recording());
     }
 
     #[test]

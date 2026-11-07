@@ -200,6 +200,12 @@ impl DictationHotkey {
         matches!(self.state, State::Recording { .. } | State::Locked)
     }
 
+    /// Whether a double-tap gesture is in flight and still waiting for its
+    /// second tap.
+    pub fn has_pending_gesture(&self) -> bool {
+        self.state.is_pending_gesture()
+    }
+
     /// Recording hands-free: locked by a double tap, a Toggle release, or
     /// `hex dictation start`.
     #[cfg(test)]

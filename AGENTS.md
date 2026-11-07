@@ -714,7 +714,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   separate pre-roll setting. Capture has
   no automatic duration limit; release or
   an explicit stop ends it.
-- Only Toggle mode has a cancel (#786, #1022): its cancel shortcut
+- Only Toggle mode has a cancel (#786, #1022), except a Labs › Caps Lock
+  dictation capture, which is hands-free in every shortcut mode and whose own
+  machine always cancels on Escape. Its cancel shortcut
   (`cancel_hotkey`, Escape by default, rebindable in General under Shortcut
   mode) discards the active recording with the cancel tone: nothing is
   transcribed, pasted, or saved to History, and jobs already transcribing
@@ -727,9 +729,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   on Wayland Hex binds nothing for it and Settings says to bind
   `hex dictation cancel` in the desktop. `hex dictation cancel` discards
   whatever records, in any mode. Hold mode has no cancel: Escape ends no
-  capture there, not even as a chord. Every other intentional dictation
-  finishes and pastes; only short taps, chords, and silent captures discard,
-  and Hex itself ends a capture only when its input or microphone is lost.
+  capture there, not even as a chord, except a Labs › Caps Lock dictation
+  capture, whose own machine always cancels on Escape. Every other intentional
+  dictation finishes and pastes; only short taps, chords, and silent captures
+  discard, and Hex itself ends a capture only when its input or microphone is
+  lost.
 - A dictation discarded for silence (level under the silence threshold, or no
   speech the detector hears) is discarded quietly on every OS: no error tone,
   no note, nothing in Settings. The log keeps the measured level and peak

@@ -9,9 +9,7 @@ use std::time::Duration;
 
 use color_eyre::eyre::{Result, eyre};
 
-#[cfg(test)]
-use crate::app_settings::HotkeyBinding;
-use crate::app_settings::{HOTKEY_MODIFIERS_MASK, RuntimeHotkey, RuntimeHotkeys};
+use crate::app_settings::{HOTKEY_MODIFIERS_MASK, HotkeyBinding, RuntimeHotkey, RuntimeHotkeys};
 use crate::audio::CaptureInstant;
 use crate::dictation::{BOTH_SIDES_WINDOW, MINIMUM_HOLD_DURATION};
 
@@ -419,6 +417,9 @@ struct EventTapContext {
     takes_escape: Arc<AtomicBool>,
     takes_cancel: Arc<AtomicBool>,
     caps_lock_cancel: Arc<AtomicBool>,
+    /// The AlphaShift bit last observed, so only actual changes reach the
+    /// Caps Lock gate.
+    caps_lock_shift: AtomicBool,
     key_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
     physical_tap: AtomicPtr<c_void>,
@@ -566,10 +567,17 @@ unsafe extern "C" fn event_callback(
         };
     }
     // Labs › Caps Lock dictation: every AlphaShift change, including Hex's
-    // own lock reset, reaches its worker; no IOKit runs on this thread.
+    // own lock reset, reaches the gate; no IOKit runs on this thread.
     if event_type == EVENT_FLAGS_CHANGED {
         // SAFETY: CoreGraphics supplied a valid event to this callback.
-        crate::caps_lock_dictation::flags_changed(unsafe { CGEventGetFlags(event) });
+        let flags = unsafe { CGEventGetFlags(event) };
+        let shift = flags & crate::caps_lock_dictation::ALPHA_SHIFT_MASK != 0;
+        let was_shift = context.caps_lock_shift.swap(shift, Ordering::AcqRel);
+        if shift != was_shift {
+            // SAFETY: CoreGraphics supplied a valid event.
+            let at = CaptureInstant::from_nanos(unsafe { CGEventGetTimestamp(event) });
+            crate::caps_lock_dictation::alpha_shift(shift, at);
+        }
     }
     #[cfg(hex_capture)]
     let screenshot_swallows = match screenshot_tap(event_type, event) {
@@ -699,14 +707,11 @@ unsafe extern "C" fn event_callback(
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let mut hotkeys = crate::app_settings::runtime_hotkeys();
-    if !context.takes_cancel.load(Ordering::Acquire) {
-        hotkeys.cancel = None;
-    } else if context.caps_lock_cancel.load(Ordering::Acquire) {
-        // A Caps Lock capture is hands-free in Hold mode too, and its machine
-        // always cancels on Escape, so the tap keeps that key from the app
-        // even when Toggle mode has a different cancel shortcut.
-        hotkeys.cancel = Some(crate::app_settings::HotkeyBinding::cancel_default().runtime());
-    }
+    hotkeys.cancel = tap_cancel_binding(
+        hotkeys.cancel,
+        context.takes_cancel.load(Ordering::Acquire),
+        context.caps_lock_cancel.load(Ordering::Acquire),
+    );
     let suppress = suppression.process_all(
         input,
         hotkeys,
@@ -988,6 +993,23 @@ fn send_input(context: &EventTapContext, event: InputEvent, capture_at: CaptureI
 struct ShortcutSuppression {
     // Repeats and releases keep the original press's suppression decision.
     key_presses: HashMap<u16, bool>,
+}
+
+/// The tap's cancel binding: only while the listener arms it. A Caps Lock
+/// capture always cancels on Escape, even in Hold mode or with a different
+/// Toggle-mode cancel shortcut, so the tap keeps Escape from the app then.
+fn tap_cancel_binding(
+    armed: Option<RuntimeHotkey>,
+    takes_cancel: bool,
+    caps_lock_cancel: bool,
+) -> Option<RuntimeHotkey> {
+    if !takes_cancel {
+        None
+    } else if caps_lock_cancel {
+        Some(HotkeyBinding::cancel_default().runtime())
+    } else {
+        armed
+    }
 }
 
 impl ShortcutSuppression {

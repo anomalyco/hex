@@ -20,6 +20,7 @@ fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<Obse
         takes_escape: Arc::new(AtomicBool::new(takes_escape)),
         takes_cancel: Arc::new(AtomicBool::new(false)),
         caps_lock_cancel: Arc::new(AtomicBool::new(false)),
+        caps_lock_shift: AtomicBool::new(false),
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
@@ -2561,6 +2562,38 @@ fn the_cancel_key_is_suppressed_only_while_armed() {
     };
     assert!(suppression.process_all(escape(true), armed, true, false));
     assert!(suppression.process_all(escape(false), armed, true, false));
+}
+
+#[test]
+fn a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode() {
+    let escape = HotkeyBinding::cancel_default().runtime();
+    let custom = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers::default(),
+        key_code: Some(1),
+    };
+    assert_eq!(tap_cancel_binding(Some(custom), false, true), None);
+    assert_eq!(
+        tap_cancel_binding(Some(custom), true, true),
+        Some(escape),
+        "a Caps Lock capture cancels on Escape even with another Toggle cancel"
+    );
+    assert_eq!(tap_cancel_binding(Some(custom), true, false), Some(custom));
+
+    let mut suppression = ShortcutSuppression::default();
+    let armed = RuntimeHotkeys {
+        cancel: tap_cancel_binding(Some(custom), true, true),
+        ..RuntimeHotkeys::default()
+    };
+    assert!(suppression.process_all(
+        InputEvent::Key {
+            code: ESCAPE_KEY_CODE,
+            down: true,
+            flags: NO_FLAGS,
+        },
+        armed,
+        true,
+        false,
+    ));
 }
 
 #[test]

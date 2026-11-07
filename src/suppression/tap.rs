@@ -193,6 +193,7 @@ pub(super) fn run_event_tap(
         takes_escape: flags.takes_escape,
         takes_cancel: flags.takes_cancel,
         caps_lock_cancel: flags.caps_lock_cancel,
+        caps_lock_shift: AtomicBool::new(false),
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
