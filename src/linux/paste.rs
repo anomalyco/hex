@@ -258,7 +258,7 @@ pub(crate) fn missing_wayland_helper() -> Option<&'static str> {
     missing_wl_copy(std::env::var_os("PATH").as_deref())
 }
 
-/// The listener warning Settings and `hex status` show while one runs.
+/// The notice Settings and `hex status` show while one runs.
 pub(crate) fn listener_warning(running: bool) -> Option<String> {
     if !running {
         return None;

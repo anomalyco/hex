@@ -33,6 +33,10 @@ pub(crate) struct DesktopListenerSnapshot {
     pub(crate) status: String,
     #[serde(default)]
     pub(crate) warning: Option<String>,
+    /// An environment notice while listening (e.g. a missing paste helper),
+    /// never a dictation failure.
+    #[serde(default)]
+    pub(crate) notice: Option<String>,
     #[serde(default)]
     pub(crate) shortcuts: DesktopShortcuts,
     /// The desktop can show its own dialog for Hex's shortcuts.
@@ -147,6 +151,7 @@ mod tests {
         assert!(snapshot.running);
         assert_eq!(snapshot.status, "Listening");
         assert!(snapshot.warning.is_none());
+        assert!(snapshot.notice.is_none());
         assert_eq!(snapshot.shortcuts, DesktopShortcuts::Unregistered);
     }
 }

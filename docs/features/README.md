@@ -1700,7 +1700,7 @@ Linux beta                               // not macOS feature parity
 │       │   `hex status` reports the window and HUD stopped, with the reason (#979)
 │       ├── Neither (Rune refused it, or no layer-shell and no XWayland)
 │       │   -> process.log warns once; `hex status` reports `hud_limitation`
-│       │   and the listener warning (a missing wl-copy outranks it)
+│       │   and the listener's notice or warning (a missing wl-copy outranks it)
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
 ├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, desktop/tray_icon, rune::Tray)
 │   ├── Mark -> white; black when the desktop's color scheme prefers light (portal Settings color-scheme)

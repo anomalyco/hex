@@ -640,19 +640,17 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> (String, El) {
         (false, _) => tr_fill("Enable Hex to dictate into any app with {}", &shortcut),
     };
     let search = format!("{status} {hint} {} {}", tr("Enable"), tr("Disable"));
-    let warning = ui
+    let failure = ui
         .view
         .as_ref()
-        .and_then(|view| view.listener.warning.clone());
-    // While the listener runs, its warning names the environment (a missing
-    // paste helper or HUD), not a failed dictation.
-    let failure = warning.map(|warning| {
-        if running {
-            (warning, p.warning())
-        } else {
-            (tr_fill("Last dictation failed: {}", &warning), p.danger())
-        }
-    });
+        .and_then(|view| view.listener.warning.clone())
+        .map(|failure| (tr_fill("Last dictation failed: {}", &failure), p.danger()))
+        .or_else(|| {
+            ui.view
+                .as_ref()
+                .and_then(|view| view.listener.notice.clone())
+                .map(|notice| (notice, p.warning()))
+        });
     let error = ui
         .error
         .clone()

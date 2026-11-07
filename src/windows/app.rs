@@ -694,6 +694,7 @@ impl WindowsDesktopHost {
                 status: self.status.clone(),
                 warning: visible_failure(&self.activity, self.last_completed_at)
                     .or_else(|| self.indicator.failure()),
+                notice: None,
                 shortcuts: DesktopShortcuts::Registered,
                 shortcuts_configurable: false,
             },

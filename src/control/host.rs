@@ -549,7 +549,12 @@ fn status(host: &dyn Host) -> Result<ControlReply, ControlError> {
         memory_footprint_bytes: super::memory_footprint(),
         listener: ListenerReport {
             running: state.listener.running,
-            status: match &state.listener.warning {
+            status: match state
+                .listener
+                .notice
+                .as_ref()
+                .or(state.listener.warning.as_ref())
+            {
                 Some(warning) => format!("{} ({warning})", state.listener.status),
                 None => state.listener.status.clone(),
             },
@@ -624,6 +629,7 @@ mod tests {
                     running: true,
                     status: "Enabled".into(),
                     warning: None,
+                    notice: None,
                     shortcuts: Default::default(),
                     shortcuts_configurable: false,
                 },

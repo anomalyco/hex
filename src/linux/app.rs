@@ -384,9 +384,9 @@ impl HostHandle {
             .map(|why| window_failure_message(&why))
             .or_else(crate::linux::rune_hud::limitation);
         let mut desktop = snapshot.desktop;
-        // A missing wl-copy (stops all output) outranks the HUD's limitation.
-        if desktop.listener.running {
-            desktop.listener.warning = desktop.listener.warning.take().or(hud_limitation.clone());
+        // A running listener also reports the missing HUD as its warning.
+        if desktop.listener.running && desktop.listener.warning.is_none() {
+            desktop.listener.warning = hud_limitation.clone();
         }
         Status {
             desktop,
@@ -1395,13 +1395,13 @@ impl LinuxDesktopHost {
 
     fn snapshot(&self) -> DesktopSnapshot {
         let update_status = self.updater.status();
-        let running = self.is_running();
         DesktopSnapshot {
             activity: self.activity.clone(),
             listener: DesktopListenerSnapshot {
-                running,
+                running: self.is_running(),
                 status: self.status.clone(),
-                warning: crate::linux::paste::listener_warning(running),
+                warning: None,
+                notice: crate::linux::paste::listener_warning(self.is_running()),
                 shortcuts: self
                     .listener
                     .as_ref()
