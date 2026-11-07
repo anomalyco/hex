@@ -1562,6 +1562,8 @@ or the managed rows in the window.
 ```ts
 Linux beta                               // not macOS feature parity
 ├── hex start -> One per-user Hex -> Alt-Space capture -> Stream (Vulkan GPU) -> Paste
+├── Labs › Live typing (labs.live_typing, off, Wayland) -> zwp_input_method_v2 preedit in the focused field
+│   └── Final text committed through the input method; no active input, another input method, multi-line, or no answer -> Paste  // labs.live-typing
 ├── Speech engine (General › Advanced › Dictation; transcription_device) -> Auto | GPU | CPU (#856)
 │   ├── Auto -> best GPU unless gpu-failures.json lists it under its current driver
 │   │   (kernel + Vulkan driver libraries), then another GPU, then the CPU;

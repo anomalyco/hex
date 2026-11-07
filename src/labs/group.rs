@@ -52,6 +52,7 @@ impl Feature {
     pub const fn group(self) -> Group {
         match self {
             Self::LiveText
+            | Self::LiveTyping
             | Self::NotchIndicator
             | Self::VocabularyBiasing
             | Self::PauseBrowser

@@ -27,6 +27,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
+├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
@@ -166,7 +167,8 @@ plate turned on after launch never flashes the last dictation's words,
 #1075; elsewhere only when Live text is on at launch);
 the window always attaches the playground with Rune's own ⇧⌘D off, and its
 sidebar item, ⇧⌘D, the macOS View menu, and story links open it only while
-the toggle is on. Live chapters are read when a recording starts. Nothing
+the toggle is on. Live typing is read as each hotkey capture starts. Live
+chapters are read when a recording starts. Nothing
 starts at launch for a feature that is off. Limit: the macOS window's fixed
 size is chosen when it is created, so it becomes resizable for the
 playground only after Hex restarts.
@@ -1352,6 +1354,34 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs). The line has no golden
   and no `--snap` scene (overlays have none), and nothing headless checks
   how it appears and hides on screen.
+- Live typing: on a Wayland session, a hotkey dictation's provisional words
+  are an underlined input-method preedit in the focused text field, replaced
+  on each update, and its final text is committed through
+  `zwp_input_method_v2` instead of the clipboard paste (`labs.live-typing`;
+  the toggle is `labs.live_typing`, off by default, Linux only). It is read
+  as each hotkey capture starts, never for a Local API dictation, `/streams`,
+  or Voice Action; the final text still goes through Output's processing, and
+  History and Paste Last update as they do for a paste. Hex creates the
+  input method only for a capture and
+  destroys it at Finish or Cancel, so another input method keeps the seat
+  while Hex is idle; a newer capture's Begin takes over from an older job,
+  which then pastes. It falls back to today's paste when the compositor has
+  no `zwp_input_method_manager_v2`, another input method holds the seat
+  (`unavailable`), the field has no active text input, the final text is
+  multi-line or over 4000 bytes, or Finish does not answer within 350 ms. The
+  plate stays off unless Labs › Live text itself is on: a Live typing capture
+  holds `dictation::live_text::TypingDemand`, which the engine sees but the
+  plate does not. Checks in
+  [linux/live_typing.rs](../../src/linux/live_typing.rs):
+  `provisional_words_become_one_preedit_line`,
+  `a_preedit_stops_at_a_character_boundary`,
+  `only_one_line_text_within_the_limit_commits_through_the_input_method`,
+  `the_cursor_sits_after_the_preedit`, and
+  `done_events_number_the_commit_serial_and_apply_activation`; and
+  `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
+  [dictation/live_text.rs](../../src/dictation/live_text.rs). **Not verified
+  on a real compositor**: only unit tests and the build, plus the Linux Labs
+  golden's new card.
 - Playground: Rune's playground in the window (every OS), `labs.playground`
   (off by default, applied at once). While on, a **Playground** sidebar item,
   ⇧⌘D (View › Playground on macOS), or Ctrl+Shift+D swaps the window for a list of

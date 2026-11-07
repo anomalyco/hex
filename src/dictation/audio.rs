@@ -862,7 +862,7 @@ impl Owner {
                 {
                     self.capture.begin_stream(engine);
                 }
-                self.capture.report_live_text();
+                let _ = self.capture.report_live_text();
                 #[cfg(hex_capture)]
                 {
                     let sample_rate = self.sample_rate();

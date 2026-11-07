@@ -405,6 +405,37 @@ Output shows a note pointing to it. Checks:
 `gnome_desktops_point_to_the_clipboard_lab_until_it_is_on` (constructed state;
 not run on GNOME).
 
+### Live Typing (Labs, Linux Wayland)
+
+```ts
+Labs › Live typing on (labs.live_typing, off by default, Wayland only)  // labs.live-typing
+Hotkey capture starts -> Begin: zwp_input_method_manager_v2.get_input_method(seat)
+  -> The capture holds a dictation::live_text::TypingDemand, so its stream publishes text
+  -> Each stable + tentative change -> set_preedit_string + commit, underlined in the focused field
+  -> Escape, a short tap, silence, a lost microphone, or the listener quitting -> Cancel: clear, destroy
+Release -> Process the final text -> Finish
+  ├── Active text input and one line within 4000 bytes -> clear preedit, commit_string, destroy -> inserted, clipboard untouched
+  └── No active text input, unavailable, multi-line, too long, or no answer in 350 ms
+      -> clear preedit, destroy -> LinuxPaster.paste as today
+```
+
+The input method exists only while a capture records, so another input
+method (fcitx, ibus) keeps the seat while Hex is idle; a compositor that
+already has one reports `unavailable` and Live typing stays inert. A newer
+capture's Begin takes over from an older job, whose Finish then returns false
+and pastes. History, last dictation, tones, and Output are unchanged: a
+committed dictation counts as pasted. On X11, with Live text off, or with the
+toggle off, nothing starts and the capture behaves exactly as before.
+Checks (unit tests only): `provisional_words_become_one_preedit_line`,
+`a_preedit_stops_at_a_character_boundary`,
+`only_one_line_text_within_the_limit_commits_through_the_input_method`,
+`the_cursor_sits_after_the_preedit`, and
+`done_events_number_the_commit_serial_and_apply_activation` in
+[linux/live_typing.rs](../../src/linux/live_typing.rs), and
+`a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
+[dictation/live_text.rs](../../src/dictation/live_text.rs). **Not verified on
+a real compositor**: no GTK/Qt field, Sway, KWin, Mutter, or Hyprland run.
+
 **Fixed November 3, 2026 (issue 1158):** on Linux with PipeWire, Hex's
 microphone stream (held open while the microphone is kept ready) was named
 by the ALSA plugin after the binary, with spaces and varying by packaging,
@@ -819,6 +850,10 @@ Model advertises streaming, GPU device             // dictate.streaming
   ├── Provisional: never pasted, copied, or kept (the final text replaces it)
   ├── A failed or interrupted stream clears the text while the capture goes on
   └── process.log: `partials` on "finished live stream"; per change at debug (no words)
+  Labs + labs.live_typing (Linux Wayland) -> The same text is the focused field's preedit  // labs.live-typing
+  ├── Finish -> Clear the preedit, commit the processed text through zwp_input_method_v2, no clipboard
+  ├── Begin on each hotkey capture, destroyed at Finish or Cancel; another input method keeps the seat while idle
+  └── No active text input, another input method, multi-line or over 4000 bytes, or no answer in 350 ms -> Paste as usual
   Picker -> "Streams" tag on catalog models whose artifact streams   // setup.model-card
   Picker -> The saved language's Recommended/Fastest/Most accurate cards first  // setup.model-routing
   ├── el: Cohere; tr, ms, fil, fa, mk, ar, ja, fi, sv, da: Whisper turbo first

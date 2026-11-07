@@ -121,6 +121,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex Microphone virtual input and real-time voice filters", "Виртуальный вход Hex Microphone и голосовые фильтры в реальном времени"),
     ("Live text", "Текст в реальном времени"),
     ("Show provisional words beside the HUD while dictating", "Показывать предварительные слова рядом с HUD во время диктовки"),
+    ("Live typing", "Ввод в реальном времени"),
+    ("Show provisional words in the focused text field while dictating on Wayland, then type the final text there", "Показывает промежуточные слова в поле ввода при диктовке в Wayland и вводит туда итоговый текст"),
     ("Live chapters", "Главы в реальном времени"),
     ("Break meeting transcripts into chapters while recording", "Разбивать расшифровки встреч на главы во время записи"),
     ("Scene and story browser in the window", "Обозреватель сцен и историй в окне"),

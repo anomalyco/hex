@@ -68,6 +68,7 @@ pub enum Feature {
     VoiceFilter,
     Playground,
     LiveText,
+    LiveTyping,
     LiveChapters,
     VocabularyBiasing,
     TerminalPaste,
@@ -119,11 +120,12 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 52] = [
+    pub const ALL: [Self; 53] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
         Self::LiveText,
+        Self::LiveTyping,
         Self::LiveChapters,
         Self::VocabularyBiasing,
         Self::TerminalPaste,
@@ -201,6 +203,7 @@ impl Feature {
             Self::VoiceFilter | Self::Playground => Audience::Dev,
             Self::Meetings
             | Self::LiveText
+            | Self::LiveTyping
             | Self::LiveChapters
             | Self::VocabularyBiasing
             | Self::TerminalPaste
@@ -303,7 +306,7 @@ impl Feature {
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay => 20261104,
             Self::MoreCallApps | Self::SettingsSearch | Self::MeetingImport => 20261106,
-            Self::QuitClosesWindow | Self::ExpireMeetingAudio => 20261107,
+            Self::LiveTyping | Self::QuitClosesWindow | Self::ExpireMeetingAudio => 20261107,
         }
     }
 
@@ -343,9 +346,10 @@ impl Feature {
             | Self::MeetingImport => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
-            Self::SectionKeyAlone | Self::GnomeClipboardRestore | Self::GnomeMeetingCapsules => {
-                cfg!(target_os = "linux")
-            }
+            Self::SectionKeyAlone
+            | Self::GnomeClipboardRestore
+            | Self::GnomeMeetingCapsules
+            | Self::LiveTyping => cfg!(target_os = "linux"),
             Self::StandaloneSpecialKeys | Self::SkipPauses => {
                 cfg!(any(target_os = "linux", target_os = "windows"))
             }
@@ -406,6 +410,7 @@ impl Feature {
             Self::VoiceFilter => "voice-filter",
             Self::Playground => "playground",
             Self::LiveText => "live-text",
+            Self::LiveTyping => "live-typing",
             Self::LiveChapters => "live-chapters",
             Self::VocabularyBiasing => "vocabulary-biasing",
             Self::TerminalPaste => "terminal-paste",
@@ -464,6 +469,7 @@ impl Feature {
             Self::VoiceFilter => "experimental.hex_microphone",
             Self::Playground => "labs.playground",
             Self::LiveText => "labs.live_text",
+            Self::LiveTyping => "labs.live_typing",
             Self::LiveChapters => "labs.live_chapters",
             Self::VocabularyBiasing => "labs.vocabulary_biasing",
             Self::TerminalPaste => "paste_with_shift",
@@ -525,6 +531,9 @@ impl Feature {
             }
             Self::Playground => "Scene and story browser in the window",
             Self::LiveText => "Show provisional words beside the HUD while dictating",
+            Self::LiveTyping => {
+                "Show provisional words in the focused text field on Wayland and type the final text there (Linux)"
+            }
             Self::LiveChapters => "Break meeting transcripts into chapters while recording",
             Self::VocabularyBiasing => {
                 "Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"
@@ -668,6 +677,7 @@ impl Feature {
             Self::VoiceFilter => settings.experimental.hex_microphone,
             Self::Playground => settings.labs.playground,
             Self::LiveText => settings.labs.live_text,
+            Self::LiveTyping => settings.labs.live_typing,
             Self::LiveChapters => settings.labs.live_chapters,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing,
             Self::TerminalPaste => settings.paste_with_shift,
@@ -732,6 +742,7 @@ impl Feature {
             &mut settings.share_dictation_shortcut,
             &mut labs.playground,
             &mut labs.live_text,
+            &mut labs.live_typing,
             &mut labs.live_chapters,
             &mut labs.vocabulary_biasing,
             &mut labs.mouse_shortcuts,
@@ -790,6 +801,7 @@ impl Feature {
             Self::VoiceFilter => settings.experimental.hex_microphone = on,
             Self::Playground => settings.labs.playground = on,
             Self::LiveText => settings.labs.live_text = on,
+            Self::LiveTyping => settings.labs.live_typing = on,
             Self::LiveChapters => settings.labs.live_chapters = on,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing = on,
             Self::TerminalPaste => settings.paste_with_shift = on,
@@ -894,6 +906,7 @@ const MEETING_IMPORT: u64 = 1 << (MINUTES_SHIFT + MINUTES_BITS as u64);
 const QUIT_CLOSES_WINDOW: u64 = MEETING_IMPORT << 1;
 /// The next bit above Quit closes Settings, also clear of the minutes below.
 const EXPIRE_MEETING_AUDIO: u64 = QUIT_CLOSES_WINDOW << 1;
+const LIVE_TYPING: u64 = EXPIRE_MEETING_AUDIO << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -917,6 +930,14 @@ fn state() -> u64 {
 /// Live text: provisional words beside the HUD (read as each dictation starts).
 pub fn live_text() -> bool {
     on(LIVE_TEXT)
+}
+
+/// Live typing: provisional words in the focused text field as an
+/// input-method preedit on Wayland, and the final text typed there instead of
+/// pasted (Linux; read as each hotkey capture starts).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn live_typing() -> bool {
+    on(LIVE_TYPING) && Feature::LiveTyping.on_this_os()
 }
 
 /// Live chapters while a meeting records.
@@ -1159,6 +1180,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
     let minutes = u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60)) << MINUTES_SHIFT;
     [
         (Feature::LiveText, settings.live_text, LIVE_TEXT),
+        (Feature::LiveTyping, settings.live_typing, LIVE_TYPING),
         (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
         (Feature::Playground, settings.playground, PLAYGROUND),
         (
@@ -1302,6 +1324,7 @@ pub fn active_names(settings: &AppSettings) -> Vec<String> {
 pub fn log_launch() {
     tracing::info!(
         live_text = live_text(),
+        live_typing = live_typing(),
         live_chapters = live_chapters(),
         playground = playground(),
         vocabulary_biasing = vocabulary_biasing(),

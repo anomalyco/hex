@@ -1123,18 +1123,16 @@ impl DictationCapture {
         self.recording.as_mut()?.stream.as_mut()?.take_partial()
     }
 
-    /// Shows the live text on the HUDs when it changed, and logs at debug
-    /// how far it has got: word counts against the audio fed, never the
-    /// words (the engine logs each stream's count of changes). Every OS's
-    /// capture loop calls it after ingesting audio; it does nothing without
-    /// live text.
-    pub fn report_live_text(&mut self) {
-        let Some(partial) = self.take_partial() else {
-            return;
-        };
-        let Some(recording) = &mut self.recording else {
-            return;
-        };
+    /// Shows the live text on the HUDs when it changed and Labs › Live text
+    /// (or the first run's practice) wants it, and logs at debug how far it
+    /// has got: word counts against the audio fed, never the words (the
+    /// engine logs each stream's count of changes). Every OS's capture loop
+    /// calls it after ingesting audio; it does nothing without live text. The
+    /// change is also returned, so a host can send it to Live typing's input
+    /// method without showing the plate.
+    pub fn report_live_text(&mut self) -> Option<Partial> {
+        let partial = self.take_partial()?;
+        let recording = self.recording.as_mut()?;
         tracing::debug!(
             fed_ms = recording
                 .stream
@@ -1144,10 +1142,13 @@ impl DictationCapture {
             tentative_words = partial.tentative.split_whitespace().count(),
             "live text"
         );
-        recording
-            .live_text
-            .get_or_insert_with(crate::dictation::live_text::Publisher::new)
-            .show(&partial);
+        if crate::labs::live_text() || crate::dictation::live_text::board_demanded() {
+            recording
+                .live_text
+                .get_or_insert_with(crate::dictation::live_text::Publisher::new)
+                .show(&partial);
+        }
+        Some(partial)
     }
 
     /// Opens a live stream for the active recording when the engine's model
