@@ -189,21 +189,63 @@ fn first_save_preserves_exact_original_once_even_after_reload() {
 }
 
 #[test]
-fn malformed_json_and_non_objects_launch_with_defaults_and_are_backed_up() {
-    for original in [&b"{not json"[..], &b"null"[..], &b"[]"[..], &b"\xff"[..]] {
+fn malformed_json_uses_defaults_and_refuses_to_be_replaced() {
+    let original = b"{\n    \"sound_effects\": true,\n    \"not json\":\n}";
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(settings, AppSettings::default());
+    let mut modified = settings;
+    modified.sound_effect_volume = 0.5;
+    let error = modified.write_to(&file.path).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(message.contains("isn't valid JSON"), "{message}");
+    assert!(message.contains("line 4 column 1"), "{message}");
+    assert!(message.contains("fix or remove it"), "{message}");
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+
+    // Once fixed, the same settings save normally.
+    fs::write(&file.path, b"{}").unwrap();
+    modified.write_to(&file.path).unwrap();
+    assert!(file.backups().is_empty());
+}
+
+#[test]
+fn non_object_json_uses_defaults_and_refuses_to_be_replaced() {
+    for original in [&b"null"[..], &b"[]"[..], &b"42"[..]] {
         let file = SettingsFile::new(original);
         let settings = AppSettings::load_from(&file.path).unwrap();
         assert_eq!(settings, AppSettings::default());
+        let error = AppSettings::default().write_to(&file.path).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("must be a JSON object"), "{message}");
+        assert!(message.contains("fix or remove it"), "{message}");
         assert_eq!(fs::read(&file.path).unwrap(), original);
-        settings.write_to(&file.path).unwrap();
-        assert_eq!(file.backups().len(), 1);
-        assert_eq!(fs::read(&file.backups()[0]).unwrap(), original);
+        assert!(file.backups().is_empty());
     }
 }
 
 #[test]
+fn a_broken_settings_file_is_named_at_launch_with_its_parse_error() {
+    let file = SettingsFile::new(b"{\n    \"sound_effects\": true,\n    \"not json\":\n}");
+    let note = unparseable_note(&file.path).unwrap();
+    assert!(note.contains("using defaults until it's fixed"), "{note}");
+    assert!(note.contains("line 4 column 1"), "{note}");
+
+    let file = SettingsFile::new(b"[]");
+    assert!(
+        unparseable_note(&file.path)
+            .unwrap()
+            .contains("must be a JSON object")
+    );
+
+    let file = SettingsFile::new(b"{}");
+    assert!(unparseable_note(&file.path).is_none());
+}
+
+#[test]
 fn backup_failure_blocks_save_and_preserves_original() {
-    let original = b"{bad json";
+    let original = br#"{"sound_effects":"bad"}"#;
     let file = SettingsFile::new(original);
     fs::create_dir(backup_path(&file.path, original)).unwrap();
     assert!(AppSettings::default().write_to(&file.path).is_err());
@@ -212,7 +254,7 @@ fn backup_failure_blocks_save_and_preserves_original() {
 
 #[test]
 fn interrupted_save_reuses_the_complete_backup_but_refuses_a_partial_one() {
-    let original = b"{bad json";
+    let original = br#"{"sound_effects":"bad"}"#;
     let file = SettingsFile::new(original);
     backup(&file.path, original).unwrap();
     AppSettings::default().write_to(&file.path).unwrap();

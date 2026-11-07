@@ -49,14 +49,21 @@ Launch -> read settings.json
 ├── Unknown keys -> ignored
 ├── Invalid field -> log its key and reason -> that field's default
 │   └── Valid siblings and unrelated sections stay
-├── Invalid JSON / unreadable file -> log why -> defaults in memory
-└── Save over invalid settings -> preserve exact original first
-    ├── settings.json.unreadable-<sha256>, owner-only; same bytes backed up once
-    └── Backup fails / original cannot be read -> save fails, original stays
+├── Invalid JSON / not a JSON object -> log why -> defaults in memory
+│   └── launch says so; invalid JSON names serde's line and column
+└── Save
+    ├── Invalid JSON / not an object -> save refused
+    │   └── fix or remove the file; original stays exactly as it was
+    └── Invalid fields -> preserve exact original first
+        ├── settings.json.unreadable-<sha256>, owner-only; same bytes backed up once
+        └── Backup fails / original cannot be read -> save fails, original stays
 ```
 
 Loading repaired settings does not itself rewrite the file. A later settings
-save (including a migration save) takes the backup before replacing it.
+save (including a migration save) takes the backup before replacing invalid
+fields. A file that is not valid JSON, or is valid JSON but not an object, is
+never backed up or replaced: every save is refused until it's fixed or removed,
+and launch keeps running with defaults in memory while naming the parse error.
 Backups are never automatically removed. On Linux, the running Hex checks
 `settings.json` every two seconds and adopts an edit made outside the window
 (by hand or by an agent), so its modes reach the listener and the next save
@@ -67,9 +74,10 @@ read the file; existing `null` values also load in the current build.
 
 Source and checks: [settings persistence](../../src/app_settings/persistence.rs)
 and its [tests](../../src/app_settings/persistence/tests.rs): old-shape retention,
-invalid enums, nested types, list entries, unknown keys, invalid JSON,
-exactly-once private backups, interrupted saves, and backup failure. These
-checks use temporary files; they do not exercise a real app launch.
+invalid enums, nested types, list entries, unknown keys, invalid JSON and
+non-object documents (defaults, refused saves, no backup), exactly-once private
+backups, interrupted saves, and backup failure. These checks use temporary
+files; they do not exercise a real app launch.
 
 ### Finish Without Losing Other Work
 

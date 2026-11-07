@@ -1,5 +1,6 @@
-//! Settings recovery is in memory. The first write preserves unreadable bytes
-//! beside the original, including when a migration is the first writer.
+//! Settings recovery is in memory. A save refuses a file that isn't a JSON
+//! object; the first write over invalid fields preserves those bytes beside
+//! the original, including when a migration is the first writer.
 
 use std::borrow::Cow;
 use std::fs::{self, OpenOptions};
@@ -13,7 +14,7 @@ use serde_json::Value;
 use serde_path_to_error::Segment;
 use sha2::{Digest, Sha256};
 
-use super::AppSettings;
+use super::{AppSettings, path};
 use crate::policy::Policy;
 
 // A settings editor and a background migration may save at the same time.
@@ -24,7 +25,10 @@ impl AppSettings {
     /// resolved. Invalid settings are recovered by `load_from` in place.
     pub fn load_for_launch() -> (Self, Option<String>) {
         match Self::load() {
-            Ok(settings) => (settings, None),
+            Ok(settings) => (
+                settings,
+                path().ok().and_then(|path| unparseable_note(&path)),
+            ),
             Err(error) => {
                 tracing::error!(error = format!("{error:#}"), "could not load settings");
                 (
@@ -124,6 +128,11 @@ impl AppSettings {
         fs::create_dir_all(parent)?;
         let original = match fs::read(path) {
             Ok(original) => {
+                if let Some(reason) = syntax_error(&original) {
+                    return Err(eyre!(
+                        "settings.json {reason}; fix or remove it and try again"
+                    ));
+                }
                 if needs_backup(&original) {
                     backup(path, &original)?;
                 }
@@ -161,6 +170,30 @@ fn warn(key: &str, reason: &str) {
     tracing::warn!(key, reason, "invalid setting; using its default in memory");
 }
 
+/// The launch note for a settings file that isn't a JSON object. Loading
+/// already used defaults for it, and a save refuses to replace it.
+fn unparseable_note(path: &Path) -> Option<String> {
+    let reason = syntax_error(&fs::read(path).ok()?)?;
+    Some(format!(
+        "Hex couldn't read settings.json and is using defaults until it's fixed. (settings.json {reason})"
+    ))
+}
+
+/// `data` as a settings JSON object, or why it isn't one. A JSON syntax error
+/// keeps serde's line and column.
+fn settings_object(data: &[u8]) -> Result<Value, String> {
+    match serde_json::from_slice(data) {
+        Ok(value @ Value::Object(_)) => Ok(value),
+        Ok(_) => Err("must be a JSON object".into()),
+        Err(error) => Err(format!("isn't valid JSON: {error}")),
+    }
+}
+
+/// Why `data` isn't a settings JSON object, if it isn't.
+fn syntax_error(data: &[u8]) -> Option<String> {
+    settings_object(data).err()
+}
+
 /// Recognition hints saved before they merged into the vocabulary: the
 /// selected model's, then the recent models' from newest.
 fn legacy_recognition_hints(data: &[u8]) -> Vec<String> {
@@ -186,14 +219,10 @@ fn legacy_recognition_hints(data: &[u8]) -> Vec<String> {
 }
 
 fn decode(data: &[u8]) -> (AppSettings, bool) {
-    let mut value: Value = match serde_json::from_slice(data) {
-        Ok(Value::Object(object)) => Value::Object(object),
-        Ok(_) => {
-            warn("$", "settings must be a JSON object");
-            return (AppSettings::default(), true);
-        }
-        Err(error) => {
-            warn("$", &error.to_string());
+    let mut value = match settings_object(data) {
+        Ok(value) => value,
+        Err(reason) => {
+            warn("$", &format!("settings.json {reason}"));
             return (AppSettings::default(), true);
         }
     };
@@ -242,7 +271,7 @@ fn remove(value: &mut Value, path: &[&Segment]) -> bool {
 }
 
 fn needs_backup(data: &[u8]) -> bool {
-    if !serde_json::from_slice::<Value>(data).is_ok_and(|value| value.is_object()) {
+    if syntax_error(data).is_some() {
         return true;
     }
     let Ok(settings) = serde_json::from_slice::<AppSettings>(data) else {

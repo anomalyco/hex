@@ -2029,8 +2029,9 @@ Mutter, or i3.
 
 Listener starts consume the host's settings snapshot; the foreground
 `hex dictate` command loads its own snapshot once. Invalid startup settings leave
-defaults available only for editing and block capture until a successful settings
-commit or a restart with valid settings. Dismissing the load error does
+defaults available only for editing and block capture until the file is fixed and
+saved, or a restart reads valid settings. A file that isn't valid JSON must be
+fixed or removed first: saving over it is refused. Dismissing the load error does
 not authorize recording with defaults. Feedback is initialized at these entry
 points, so a delayed listener start cannot reset a newer live volume selection.
 

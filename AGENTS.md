@@ -604,10 +604,13 @@ CoreAudio formats, AppleScript details, or event serialization.
 
 - Settings errors never prevent launch. `app_settings/persistence` defaults
   only invalid fields in memory and logs each key and reason; unknown keys
-  are ignored. Invalid JSON or unreadable files use defaults without changing
-  the original. Before any save over invalid settings, preserve the exact
-  original beside it as `settings.json.unreadable-<sha256>` (owner-only;
-  identical originals share one backup). A failed backup blocks the save.
+  are ignored. Invalid JSON or an unreadable file uses defaults without
+  changing the original, and launch reports the parse error. Before any
+  save over invalid fields, preserve the exact original beside it as
+  `settings.json.unreadable-<sha256>` (owner-only; identical originals share
+  one backup). A failed backup blocks the save. A file that isn't a JSON
+  object is never backed up or replaced: every save is refused until it's
+  fixed or removed.
   Keep saved values readable by older builds: an unchosen
   `meetings.retention` is omitted, not `null`. Do not omit optional fields
   whose absence restores a nonempty default, such as `paste_last_hotkey`.
