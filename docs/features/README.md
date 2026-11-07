@@ -2005,7 +2005,7 @@ Linux process                            // maintain.linux-service
 ├── hex start / desktop autostart / hex service -> Same, without the window
 ├── hex dictation|paste-last -> Socket worker -> Listener queue (never the UI thread)
 ├── hex status -> Published status; hex quit / Quit Hex / launcher action -> Drain, exit 0
-├── Any stop still draining after 20 s -> _exit before the unit's 30 s TimeoutStopSec
+├── Any instance stop still draining after 20 s -> _exit before the unit's 30 s TimeoutStopSec
 │   └── A transcription or paste cut by the deadline is lost; checked by unit tests only,
 │       no observed systemd stop
 ├── Stop / SIGTERM after a full window queue -> The window's quit is retried until taken

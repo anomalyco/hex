@@ -490,6 +490,9 @@ pub(crate) fn run(
     let reopen = take_reopen_marker();
     let first = activation.or(reopen.then(Activation::default));
     run_window(&host, requests, first, shutdown);
+    // A window Quit ends the window before the host thread notices, so bound
+    // that wait even if the host is stuck and never arms it.
+    crate::desktop::process_exit::arm_deadline();
     shutdown.store(true, Ordering::Release);
     let _ = worker.join();
     drop(local_api);

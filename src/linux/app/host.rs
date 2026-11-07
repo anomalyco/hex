@@ -33,12 +33,15 @@ pub(super) fn run_host(
     let mut tray_meetings = None;
     loop {
         let seen = host.refreshed();
-        let mut began_stopping = false;
+        // Arm before taking the lock: a stop that waits on a busy host is
+        // exactly what the deadline is for. `arm_deadline` is once-guarded.
+        if shutdown.load(Ordering::Acquire) {
+            arm_deadline();
+        }
         let (done, route, snapshot, interval) = {
             let mut guard = host.lock();
             if shutdown.load(Ordering::Acquire) && !stopping {
                 stopping = true;
-                began_stopping = true;
                 linux_service::notify("STOPPING=1");
                 guard.stop();
                 guard.cancel_transcription_preparation();
@@ -62,9 +65,6 @@ pub(super) fn run_host(
                 interval,
             )
         };
-        if began_stopping {
-            arm_deadline();
-        }
         if stopping {
             set_pending_work(if done {
                 PendingWork::Teardown

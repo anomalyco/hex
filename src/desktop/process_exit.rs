@@ -117,9 +117,10 @@ fn end_process() -> ! {
 #[derive(Clone, Copy)]
 pub(crate) enum PendingWork {
     /// The host still drains the listener, an uncommitted shortcut edit, or
-    /// model preparation.
+    /// model preparation; the window and meetings may also be stopping.
     Draining = 1,
-    /// The host finished; the window and meetings teardown still run.
+    /// The listener drained; the socket server, window, meetings, local API,
+    /// or tray are still stopping.
     Teardown = 2,
 }
 
@@ -135,9 +136,13 @@ pub(crate) fn set_pending_work(work: PendingWork) {
 #[cfg(target_os = "linux")]
 fn pending_work() -> &'static str {
     match PENDING_WORK.load(Ordering::Acquire) {
-        1 => "draining the listener, an uncommitted shortcut edit, or model preparation",
-        2 => "the host finished; the window or meetings are still stopping",
-        _ => "stopping",
+        1 => {
+            "the listener, a shortcut edit, or model preparation (the window and meetings may also be stopping)"
+        }
+        2 => {
+            "the listener drained; the socket server, window, meetings, local API, or tray are still stopping"
+        }
+        _ => "the host had not noticed the stop yet",
     }
 }
 
