@@ -565,6 +565,9 @@ impl CapsLockDictation {
                         "Caps Lock dictation's light worker did not stop in time; detaching it"
                     );
                 }
+                // A timed-out worker detaches here instead of blocking the
+                // listener; it still clears the light before it exits.
+                drop(worker.thread);
             }
             while inner.presses.try_recv().is_ok() {}
             inner.enabled = false;
