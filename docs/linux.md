@@ -113,14 +113,18 @@ current value, or dropped so Xlib uses `~/.Xauthority`. A unit started with no
 display at all (the desktop never imported its environment into systemd) adopts
 the user manager's `WAYLAND_DISPLAY`, else the newest Wayland socket of yours in
 `XDG_RUNTIME_DIR` that answers. One started with only Xwayland's `DISPLAY` does
-the same when the login is a Wayland session: the user manager names a live
-`WAYLAND_DISPLAY`, or `XDG_SESSION_TYPE` is `wayland` (from Hex's environment,
-else the user manager's). Otherwise a pure X11 login keeps its X display, so
-paste keeps reaching X11 apps. Without the adoption, a Wayland desktop's paste
-goes through XWayland, which native Wayland windows never see, and restoring
-the clipboard clears the compositor's. Hyprland imports nothing by default; add
-this to its config so the service, its paste helpers, and the HUD get your
-session:
+the same when `XDG_SESSION_TYPE` is `wayland` (from Hex's environment, else the
+user manager's): it takes the manager's live `WAYLAND_DISPLAY`, else the newest
+answering socket. An explicit `x11` keeps its X display even when the user
+manager still names a nested compositor or another login's display, and so does
+an absent or other type without a live manager display, so paste keeps reaching
+X11 apps. Launchers (`hex`, `hex start`, `hex restart`) make the same decision
+before they write `session.env`, so the service and the launcher agree on the
+session; a launcher with no display at all still refuses to start. Without the
+adoption, a Wayland desktop's paste goes through XWayland, which native Wayland
+windows never see, and restoring the clipboard clears the compositor's.
+Hyprland imports nothing by default; add this to its config so the service, its
+paste helpers, and the HUD get your session:
 
 ```ini
 exec-once = dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
@@ -149,7 +153,8 @@ time, so a client's dictation and the shortcut never end each other.
 For development, run `cargo run --release`. `hex dictate` remains an explicit
 foreground diagnostic listener without the window or HUD and cannot coexist
 with Hex's listener. Like `hex service`, it adopts the session's Wayland
-display when its shell has none (#756, #1506). `hex` commands reach only the
+display when its shell has none, or only Xwayland's `DISPLAY` on a Wayland
+login (#756, #1506). `hex` commands reach only the
 service listener, so a foreground `hex dictate` receives none and says so at
 startup when no shortcut is bound. With
 `HEX_APPLICATION_SUPPORT_DIR` set, launches never start, stop, or restart the
