@@ -1301,22 +1301,33 @@ Descriptive meeting file names (`meeting-descriptive-filenames`, every OS
 with Meetings; its row shows wherever Meetings does): an exported meeting
 Markdown is named `<YYYY-MM-DD HHMM> <title>.md` in the user's meeting folder.
 By default that name is written once at export and kept. While on, after the
-notes are applied to the file (final title and summary) and after a user
-rename, Hex renames it in place to the same date and time prefix and the new
-display title, sanitized exactly as export does. It renames only the file the
-manifest's `export_path` names, only while it exists, and only when the name
-differs; its own current path never counts as a collision, so a taken name
-gets the first free `" (2)"` … with no copy or overwrite. `std::fs::rename`
+notes are applied to the file (final title and summary), after chapter
+refinement changes the title, and after a user rename, Hex renames it in place
+to the same date and time prefix and the new display title, sanitized exactly
+as export does. The date and time prefix is kept from the file's own name
+while it starts with `YYYY-MM-DD HHMM`, so a timezone change does not shift
+it. It renames only the file the manifest's `export_path` names, only while it
+exists, and only when the name differs; its own file never counts as a
+collision (the same device and inode, so a case-only title change on macOS is
+not one), so a taken name gets the first free `" (2)"` … with no copy or
+overwrite. `std::fs::rename`
 in the same folder is atomic, then the manifest is written as usual, so
 Reveal, Delete to Trash, and retention follow the new path.
 `export_sha256` stays as it was: a rename does not change the bytes, so
 retention still recognizes Hex's copy and still protects one the user edited.
 A missing file, an unchanged name, or a failed rename logs and keeps the old
-path; notes and rename never fail because of it. A user rename while notes
-are being written leaves the file name to the notes writer, which renames it
-with the title it applies. Checks:
+path; notes and rename never fail because of it. If Hex stops between the file
+rename and the manifest write, the manifest keeps the old path: Reveal falls
+back to the recording folder and the Markdown stays in the folder untouched.
+A user rename while notes are being written leaves the file name to the notes
+writer, which renames it with the title it applies. Checks:
 `the_file_name_follows_the_title_and_keeps_the_date_and_time`,
+`a_rename_keeps_the_stamp_export_wrote`,
+`only_a_leading_date_and_time_stamp_is_kept`,
+`the_same_file_under_another_spelling_is_not_a_collision`,
 `a_taken_name_gets_the_next_number_without_overwriting`,
+`a_numbered_current_name_stays_when_the_plain_name_is_taken`,
+`a_title_with_no_name_left_falls_back_to_meeting`,
 `a_missing_or_unchanged_name_renames_nothing`, and
 `the_lab_gate_off_leaves_the_file_alone` in
 [meeting/export_name.rs](../../src/meeting/export_name.rs);
@@ -1325,9 +1336,9 @@ with the title it applies. Checks:
 `notes_rename_the_export_only_with_descriptive_file_names` in
 [meeting/notes.rs](../../src/meeting/notes.rs); and
 `meeting_descriptive_filenames_is_its_own_bit_and_off_by_default` in
-[labs.rs](../../src/labs.rs). Not yet observed: a real notes run renaming a
-real meeting folder, and the Labs page goldens (`mac-labs`, `windows-labs`,
-`linux-labs`) show the new card.
+[labs.rs](../../src/labs.rs). The Labs page goldens (`mac-labs`, `windows-labs`,
+`linux-labs`) show the new card. Not yet observed: a real macOS end-to-end run
+renaming an exported meeting file.
 
 Meeting platform icons (`meeting-platform-icons`, issue 1290) graduated:
 each recording in the Meetings list always shows its call service's icon, or

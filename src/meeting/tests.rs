@@ -380,10 +380,11 @@ fn a_rename_follows_the_title_when_descriptive_file_names_are_on() {
     let path = renamed.export_path.clone().unwrap();
     assert_ne!(path, export);
     assert!(!export.exists());
-    let stamp = super::transcript::LocalTime::from_ms(renamed.created_at_ms).file_stamp();
+    // The rename keeps the file's own date and time prefix, not one
+    // recomputed from `created_at_ms`.
     assert_eq!(
         path.file_name().unwrap().to_string_lossy(),
-        format!("{stamp} Arcade planning.md")
+        "2026-10-15 1418 Arcade planning.md"
     );
     assert!(
         fs::read_to_string(&path)

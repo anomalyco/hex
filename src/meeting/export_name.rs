@@ -43,8 +43,37 @@ pub(super) fn file_stem(manifest: &MeetingManifest, title: &str) -> String {
     )
 }
 
+/// `<stamp> <title>` for a file that already exists at `current`: its own
+/// leading date and time stamp when it has one, so a timezone change does not
+/// shift a name export already wrote, else the meeting's computed stamp.
+fn file_stem_from(current: &Path, manifest: &MeetingManifest, title: &str) -> String {
+    let stamp = current
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(existing_stamp)
+        .map_or_else(
+            || LocalTime::from_ms(manifest.created_at_ms).file_stamp(),
+            String::from,
+        );
+    format!("{stamp} {}", file_title(title))
+}
+
+/// The leading `YYYY-MM-DD HHMM` of an exported file's stem, if it has one.
+fn existing_stamp(stem: &str) -> Option<&str> {
+    let stamp = stem.get(..15)?;
+    let bytes = stamp.as_bytes();
+    let shaped = bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b' '
+        && [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 13, 14]
+            .iter()
+            .all(|&index| bytes[index].is_ascii_digit());
+    (shaped && stem.as_bytes().get(15) == Some(&b' ')).then_some(stamp)
+}
+
 /// The first free `<stem>.md`, `<stem> (2).md`, … path in `folder`.
-/// `current`, the file's own path, never counts as a collision.
+/// `current`, the file's own path, never counts as a collision, including a
+/// case-only spelling a case-insensitive volume resolves to that same file.
 pub(super) fn path_without_collision(
     folder: &Path,
     stem: &str,
@@ -58,8 +87,24 @@ pub(super) fn path_without_collision(
                 format!("{stem} ({attempt}).md")
             })
         })
-        .find(|path| Some(path.as_path()) == current || !path.exists())
+        .find(|path| {
+            current.is_some_and(|current| is_current_file(path, current)) || !path.exists()
+        })
         .ok_or_else(|| eyre!("too many meeting files named {stem}"))
+}
+
+/// Whether `candidate` is the file at `current` itself. `current` is exact
+/// path bytes off Unix; on Unix the same device and inode count, so a case
+/// change on a case-insensitive volume is not a collision.
+fn is_current_file(candidate: &Path, current: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(candidate), Ok(current)) = (fs::metadata(candidate), fs::metadata(current)) {
+            return candidate.dev() == current.dev() && candidate.ino() == current.ino();
+        }
+    }
+    candidate == current
 }
 
 /// Renames the exported Markdown to the meeting's current title, keeping
@@ -77,7 +122,7 @@ pub(super) fn rename_to_title(
     }
     let current = manifest.export_path.clone().filter(|path| path.exists())?;
     let folder = current.parent()?;
-    let stem = file_stem(manifest, title);
+    let stem = file_stem_from(&current, manifest, title);
     let target = match path_without_collision(folder, &stem, Some(&current)) {
         Ok(path) => path,
         Err(error) => {
@@ -191,6 +236,91 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(&taken).unwrap(), "another meeting\n");
         assert!(!current.exists());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_rename_keeps_the_stamp_export_wrote() {
+        let folder = folder("keep-stamp");
+        let current = folder.join("2020-01-02 0930 Old title.md");
+        fs::write(&current, "the meeting\n").unwrap();
+        let mut manifest = manifest(current.clone());
+        assert_ne!(LocalTime::from_ms(STARTED).file_stamp(), "2020-01-02 0930");
+
+        let renamed = rename_to_title(&mut manifest, "New title", true).expect("renamed");
+
+        assert_eq!(
+            renamed.file_name().unwrap().to_string_lossy(),
+            "2020-01-02 0930 New title.md"
+        );
+        assert!(!current.exists());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn only_a_leading_date_and_time_stamp_is_kept() {
+        assert_eq!(
+            existing_stamp("2026-10-15 1418 Title"),
+            Some("2026-10-15 1418")
+        );
+        assert_eq!(existing_stamp("2026-10-15 1418"), None);
+        assert_eq!(existing_stamp("2026-1-15 1418 Title"), None);
+        assert_eq!(existing_stamp("2026/10/15 1418 Title"), None);
+        assert_eq!(existing_stamp("Title"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_same_file_under_another_spelling_is_not_a_collision() {
+        let folder = folder("same-file");
+        let current = folder.join("2026-10-15 1418 arcade planning.md");
+        fs::write(&current, "the meeting\n").unwrap();
+        let target = folder.join("2026-10-15 1418 Arcade planning.md");
+        fs::hard_link(&current, &target).unwrap();
+
+        assert_eq!(
+            path_without_collision(&folder, "2026-10-15 1418 Arcade planning", Some(&current))
+                .unwrap(),
+            target
+        );
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_numbered_current_name_stays_when_the_plain_name_is_taken() {
+        let folder = folder("numbered");
+        let stamp = LocalTime::from_ms(STARTED).file_stamp();
+        let taken = folder.join(format!("{stamp} Arcade planning.md"));
+        fs::write(&taken, "another meeting\n").unwrap();
+        let current = folder.join(format!("{stamp} Arcade planning (2).md"));
+        fs::write(&current, "the meeting\n").unwrap();
+        let mut manifest = manifest(current.clone());
+
+        assert_eq!(
+            rename_to_title(&mut manifest, "Arcade planning", true),
+            None
+        );
+
+        assert!(current.exists());
+        assert_eq!(fs::read_to_string(&current).unwrap(), "the meeting\n");
+        assert_eq!(manifest.export_path, Some(current));
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_title_with_no_name_left_falls_back_to_meeting() {
+        let folder = folder("empty-title");
+        let stamp = LocalTime::from_ms(STARTED).file_stamp();
+        let current = folder.join(format!("{stamp} Old title.md"));
+        fs::write(&current, "the meeting\n").unwrap();
+        let mut manifest = manifest(current.clone());
+
+        let renamed = rename_to_title(&mut manifest, "///", true).expect("renamed");
+
+        assert_eq!(
+            renamed.file_name().unwrap().to_string_lossy(),
+            format!("{stamp} Meeting.md")
+        );
         fs::remove_dir_all(folder).unwrap();
     }
 

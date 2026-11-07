@@ -1043,10 +1043,10 @@ Final publication                                   // meetings.output
     ├── Title, date, duration, app, You / Them turns
     ├── Never overwrites; adds " (2)"
     ├── Labs › Descriptive meeting file names on (off by default) ->
-    │   applying notes or a rename renames it in place to the new title,
-    │   keeping the date and time prefix; a taken name adds " (2)" without
-    │   overwriting (manifest export_path follows; Reveal, Trash, and
-    │   retention read it)
+    │   applying notes, refining chapters, or a rename renames it in place to
+    │   the new title, keeping the date and time prefix; a taken name adds
+    │   " (2)" without overwriting (manifest export_path follows; Reveal,
+    │   Trash, and retention read it)
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
@@ -1097,7 +1097,8 @@ searching
 Rename -> inline field; Enter or Save          // meetings.rename
   -> manifest title; Markdown heading only while it reads the old title
   -> file name unchanged by default; with Labs › Descriptive meeting file
-     names on it follows the title, keeping the date and time prefix
+     names on it follows a changed title only when the heading did too,
+     keeping the date and time prefix
   -> empty title refused
 Delete… (overflow menu) -> "Trash recording & Markdown" (or "Trash recording")
   / Cancel, under the title in place of the icons until answered
@@ -1280,13 +1281,15 @@ Title rule: the shown title is the user's title unless it is still the default
 the provisional title, else the default. Named or renamed meetings keep their
 name. By default the exported file keeps its name when the title changes, so
 links, open editors, and Reveal keep working. With Labs › Descriptive meeting
-file names on (off by default), applying notes or renaming the meeting renames
-the file in place to `<YYYY-MM-DD HHMM> <new title>.md`, keeping the original
-date and time prefix;
-its own current path is never a collision, a taken name gets `" (2)"`, no copy
-is made, and Reveal, Trash, and retention follow the manifest's new
-`export_path`. A failed rename leaves the old path and never fails the notes or
-the rename.
+file names on (off by default), applying notes, refining chapters that change
+the title, or renaming the meeting renames the file in place to
+`<YYYY-MM-DD HHMM> <new title>.md`, keeping the original date and time prefix;
+its own file is never a collision, a taken name gets `" (2)"`, no copy is made,
+and Reveal, Trash, and retention follow the manifest's new `export_path`. A
+failed rename leaves the old path and never fails the notes or the rename. If
+Hex stops between the file rename and the manifest write, the manifest keeps
+the old path: Reveal falls back to the recording folder and the Markdown stays
+in the folder untouched.
 
 Action items and decisions are gone: other agents read the transcript for
 details (MCP). Older manifests still decode: a list summary is joined into one
@@ -1380,7 +1383,9 @@ plus up to three of the longest chapters in meeting order, once there are two:
 would pass that is left out). While recording, the last chapter runs until now.
 A title the user typed, including a rename while recording or transcribing, is
 never extended. Manifests without the field read as `user` when their title is
-not the default.
+not the default. A boundary pass that changes the title also renames the
+exported Markdown with Labs › Descriptive meeting file names on, under the
+same date and time prefix and collision rules as notes.
 
 Read surfaces: `hex meetings chapters <id> [--json]`, `hex meetings show <id>
 --chapter N`, a `## Chapters` list in `show`, `chapters` in `show --json`

@@ -1225,17 +1225,20 @@ fn rename_meeting_with(
     set_title_source(&mut manifest, TitleSource::User);
     let next = display_title(&manifest);
     let mut markdown_error = None;
-    if previous != next
+    let mut heading_updated = previous != next;
+    if heading_updated
         && let Some(path) = manifest.export_path.clone().filter(|path| path.exists())
         && let Err(error) =
             notes::retitle_markdown_file(&path, &mut manifest.export_sha256, &previous, &next)
     {
         tracing::warn!(%error, meeting = id, "could not retitle meeting Markdown");
         markdown_error = Some(error);
+        heading_updated = false;
     }
     // The notes writer applies its own title and renames the file; leaving
-    // the name alone here keeps it from racing that in-place rewrite.
-    if !notes_in_progress(&manifest.id) {
+    // the name alone here keeps it from racing that in-place rewrite. A
+    // failed heading update keeps the old name too, as notes do.
+    if heading_updated && !notes_in_progress(&manifest.id) {
         export_name::rename_to_title(&mut manifest, &next, descriptive_filenames);
     }
     write_manifest(directory, &manifest)?;
