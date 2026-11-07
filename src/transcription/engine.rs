@@ -403,36 +403,8 @@ pub struct TranscriptionEngine {
     thread: Option<JoinHandle<()>>,
 }
 
-/// The GGUF selection the engine's model held after its last command, and a
-/// reload already sent but not yet handled.
-#[derive(Default)]
-struct Holds {
-    current: Option<crate::transcription::models::TranscriptionSelection>,
-    /// A reload the next queued transcription runs behind, so it is the
-    /// selection that transcription will actually use.
-    requested: Option<crate::transcription::models::TranscriptionSelection>,
-}
-
-impl Holds {
-    /// The selection the next queued transcription will run on.
-    fn selection(&self) -> Option<&crate::transcription::models::TranscriptionSelection> {
-        self.requested.as_ref().or(self.current.as_ref())
-    }
-
-    /// Records what the model holds after a finished command. A requested
-    /// reload stays in front until the selection it names is in place, or
-    /// parked to be loaded by the next command that needs it.
-    fn publish(&mut self, current: Option<&crate::transcription::models::TranscriptionSelection>) {
-        if self.current.as_ref() != current {
-            self.current = current.cloned();
-        }
-        if self.current == self.requested {
-            self.requested = None;
-        }
-    }
-}
-
-type Held = Arc<Mutex<Holds>>;
+/// The GGUF selection the engine's model held after its last command.
+type Held = Arc<Mutex<Option<crate::transcription::models::TranscriptionSelection>>>;
 
 /// A live stream for one capture. Feed it the capture's 16 kHz audio in order,
 /// then either [`TranscriptionEngine::finish`] or drop it to cancel.
@@ -561,10 +533,7 @@ impl TranscriptionEngine {
         let requests = Arc::new(AtomicU64::new(0));
         let running = Running::default();
         let stalled = Arc::new(AtomicBool::new(false));
-        let held = Held::new(Mutex::new(Holds {
-            current: model.gguf_selection().cloned(),
-            requested: None,
-        }));
+        let held = Held::new(Mutex::new(model.gguf_selection().cloned()));
         let dictating = Arc::new(AtomicBool::new(false));
         let worker = Worker {
             model: Some(model),
@@ -811,15 +780,8 @@ impl TranscriptionEngine {
         selection: crate::transcription::models::TranscriptionSelection,
     ) -> Result<()> {
         self.commands
-            .send(Command::Reload(selection.clone()))
-            .map_err(|_| eyre!("transcription engine stopped"))?;
-        // Every transcription sent from here queues behind the reload, so
-        // the engine already holds its selection even before the load runs.
-        self.held
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .requested = Some(selection);
-        Ok(())
+            .send(Command::Reload(selection))
+            .map_err(|_| eyre!("transcription engine stopped"))
     }
 
     /// Drops the engine on its own thread, so replacing the model from the
@@ -848,8 +810,7 @@ impl TranscriptionEngine {
     }
 
     /// Whether the model holds the GGUF `selection` as of its last finished
-    /// command, or a queued reload will. Readable while dictation runs,
-    /// unlike the model itself.
+    /// command. Readable while dictation runs, unlike the model itself.
     pub(crate) fn holds(
         &self,
         selection: &crate::transcription::models::TranscriptionSelection,
@@ -857,22 +818,20 @@ impl TranscriptionEngine {
         self.held
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .selection()
+            .as_ref()
             == Some(selection)
     }
 }
 
 impl TranscriptionEngine {
-    /// The GGUF selection the next queued transcription will run on: a
-    /// reload already sent, else the one the model last held.
+    /// The GGUF selection the model held after its last finished command.
     pub(crate) fn held_selection(
         &self,
     ) -> Option<crate::transcription::models::TranscriptionSelection> {
         self.held
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .selection()
-            .cloned()
+            .clone()
     }
 }
 
@@ -1160,10 +1119,10 @@ impl Worker {
             Some(model) => model.gguf_selection(),
             None => self.parked.as_ref(),
         };
-        self.held
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .publish(current);
+        let mut held = self.held.lock().unwrap_or_else(|error| error.into_inner());
+        if held.as_ref() != current {
+            *held = current.cloned();
+        }
     }
 
     fn run_offline(&mut self, clip: Vec<f32>, offline: Offline, source: Source, job: Job) {
@@ -1344,27 +1303,6 @@ mod tests {
         assert_eq!(Source::Stream.label(), "stream");
         assert_eq!(Source::Offline.label(), "offline");
         assert_eq!(Source::Fallback("x".into()).label(), "fallback");
-    }
-
-    #[test]
-    fn a_queued_reload_is_the_selection_the_next_transcription_uses() {
-        use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
-
-        let (engine, commands) = TranscriptionEngine::for_test();
-        assert_eq!(engine.held_selection(), None);
-        let selection = TranscriptionSelection {
-            model: TranscriptionModelId::default(),
-            language: "de".into(),
-        };
-        engine.reload(selection.clone()).unwrap();
-        // The worker has not loaded it yet, but a transcription sent now
-        // queues behind the reload and runs on this selection.
-        assert_eq!(engine.held_selection(), Some(selection.clone()));
-        assert!(engine.holds(&selection));
-        assert!(matches!(
-            commands.try_recv(),
-            Ok(Command::Reload(reload)) if reload == selection
-        ));
     }
 
     #[test]

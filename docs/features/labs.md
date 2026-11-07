@@ -359,9 +359,10 @@ untouched, because "er" and "um" are ordinary German and Portuguese words.
 The language comes from the submission, not the setting in force while the
 text is processed: macOS reads the saved transcription selection when the
 dictation is submitted, while Linux and Windows read the selection the
-transcription engine holds at submission (including a reload already sent,
-whose transcriptions queue behind it), falling back to the saved selection
-when none is held. It is rule-based, with
+transcription engine holds at submission, falling back to the saved selection
+when none is held. On Linux and Windows, a dictation finished while an
+in-place model reload for a language change is still running uses the previous
+language for this check. It is rule-based, with
 no model and no added latency. The English fillers "um", "umm", "uh", "uhh",
 "erm", "er", and "ah" are removed as whole words, lowercase or capitalised
 only, so "umbrella", "ahead", "error", "Uhura", "uh-huh", and "ER" stay. The
