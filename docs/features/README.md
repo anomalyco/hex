@@ -1683,7 +1683,12 @@ Linux beta                               // not macOS feature parity
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
 ├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, desktop/tray_icon, rune::Tray)
 │   ├── Mark -> white; black when the desktop's color scheme prefers light (portal Settings color-scheme)
-│   │   └── Read when the tray is created; a later switch applies at the next launch
+│   │   ├── Read when the tray is created; a later switch applies at the next launch
+│   │   ├── // check: only_an_explicit_light_color_scheme_gets_the_dark_mark
+│   │   │   // decodes the portal value; not checked against a real KDE or GNOME panel
+│   │   └── KDE's portal derives the scheme from the window palette, so a mixed theme
+│   │       with light windows and a dark panel (Breeze Twilight) gets the black mark on
+│   │       a dark panel
 │   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
