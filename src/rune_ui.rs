@@ -1127,6 +1127,7 @@ impl Ui {
         explainer::close(self);
         sound_sets::close(self);
         vocabulary::close(self);
+        history::close_stats(self);
         self.output.prompt_copied = false;
         if self.pane == Pane::HudLab {
             self.ask(platform::PlatformRequest::EndHudDemo);
