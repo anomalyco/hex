@@ -67,7 +67,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── ⌘Q closes Settings no labs.quit_closes_window      (macOS) the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, the menu bar icon still quits (#1473)
-├── Notch indicator no    labs.notch_indicator         (macOS) with the indicator at Top, the notch widens sideways in the Dynamic Island's compact style: an orange mic and level bars, the macOS spinner, a green checkmark; flat screens keep it below the menu bar
+├── Notch indicator no    labs.notch_indicator         (macOS) on a screen with a notch, the HUD widens the notch sideways in the Dynamic Island's compact style at either visible position: an orange mic and level bars, the macOS spinner, a green checkmark; Hidden still hides it, and flat screens keep the Top/Bottom setting
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Vocabulary in meeting notes no labs.meeting_notes_vocabulary (every OS with Meetings)
 │                                        final meeting titles and summaries (and Regenerate summary) read the vocabulary ahead of the transcript (#1154)
@@ -1017,13 +1017,15 @@ Reduce Motion -> the spinner, bars' wobble, and light hold still (Pose::clock st
 The gate, `labs::notch_indicator()`, is read each time the HUD is placed on
 the pointer's screen (`Hud::place_on_pointer_screen` in
 [rune_hud/macos.rs](../../src/rune_hud/macos.rs)), so it applies from the
-next dictation. `hud_placement::ears` places it only on a screen whose
-`NSScreen` reports a notch, and only with Settings' indicator position at
-Top; a flat external display, Bottom, and Hidden keep what they did, and
-with the lab off HUD Lab's placement stands. Linux and Windows have no row,
+next dictation. `hud_placement::notch_placement` places `ears` only on a
+screen whose `NSScreen` reports a notch, at either visible Settings position:
+Top and Bottom both grow the island, while Hidden still hides the HUD. A flat
+external display keeps honoring Top and Bottom, and with the lab off HUD
+Lab's placement stands. Linux and Windows have no row,
 `hex labs on notch-indicator` doesn't know it there, and `hex settings set
 labs.notch_indicator` answers `unsupported` (as any `labs.` switch for
 another OS now does). Checks: `ears_widen_the_notch_sideways_at_its_own_height`
+and `the_notch_indicator_wins_at_top_or_bottom_but_still_needs_a_notch`
 in [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs);
 `the_notch_indicator_holds_done_for_its_checkmark` in
 [dictation/indicator.rs](../../src/dictation/indicator.rs);

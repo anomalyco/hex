@@ -422,7 +422,7 @@ const KEYS: &[Key] = &[
     key(
         "labs.notch_indicator",
         Kind::Bool,
-        "Labs: with indicator_position top, the recording indicator grows out of the notch on a screen that has one, and sits below the menu bar elsewhere (macOS)",
+        "Labs: on a screen with a notch, the recording indicator grows out of the notch at either visible position; Hidden still hides it, and flat screens keep the Top or Bottom setting (macOS)",
     ),
     key(
         "labs.skip_pauses",
