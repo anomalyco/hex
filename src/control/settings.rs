@@ -280,6 +280,11 @@ const KEYS: &[Key] = &[
         "Labs: provisional words beside the HUD while dictating",
     ),
     key(
+        "labs.live_typing",
+        Kind::Bool,
+        "Labs: provisional words in the focused text field as an underlined input-method preedit, and the final text typed there instead of pasted (Linux Wayland)",
+    ),
+    key(
         "labs.settings_search",
         Kind::Bool,
         "Labs: a search field at the top of General that filters its rows",

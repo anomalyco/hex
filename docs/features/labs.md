@@ -27,6 +27,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
+├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
@@ -166,7 +167,8 @@ plate turned on after launch never flashes the last dictation's words,
 #1075; elsewhere only when Live text is on at launch);
 the window always attaches the playground with Rune's own ⇧⌘D off, and its
 sidebar item, ⇧⌘D, the macOS View menu, and story links open it only while
-the toggle is on. Live chapters are read when a recording starts. Nothing
+the toggle is on. Live typing is read at the hold threshold (or the Toggle
+press). Live chapters are read when a recording starts. Nothing
 starts at launch for a feature that is off. Limit: the macOS window's fixed
 size is chosen when it is created, so it becomes resizable for the
 playground only after Hex restarts.
@@ -1352,6 +1354,64 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs). The line has no golden
   and no `--snap` scene (overlays have none), and nothing headless checks
   how it appears and hides on screen.
+- Live typing: on a wlroots-family Wayland session, a hotkey dictation's
+  provisional words are an underlined input-method preedit in the focused
+  text field, replaced on each update, and its final text is committed
+  through `zwp_input_method_v2` instead of the clipboard paste
+  (`labs.live-typing`; the toggle is `labs.live_typing`, off by default, Linux
+  only, and its card is hidden in an X11 session). It is read at the hold
+  threshold, or at the Toggle press, never for a Local API
+  dictation, `/streams`, or Voice Action; the final text still goes through
+  Output's processing, and History and Paste Last update as they do for a
+  paste. Hex creates the input method when the capture becomes intentional
+  (the hold threshold, or at once in Toggle) and destroys it at Finish or
+  Cancel, including post-release processing, so short taps and chords create
+  none and another input method keeps the seat while Hex is idle. A newer
+  capture's Begin takes over from an older job, which then pastes. A CPU
+  engine or a model that cannot stream shows no provisional words while
+  speaking; the final text still commits through the input method. Hex's own
+  first-run practice field on Linux is an ordinary focused field, so it
+  receives the preedit and commit too while Live typing is on. It falls back
+  to today's paste when the compositor has no
+  `zwp_input_method_manager_v2` (KWin and Mutter do not offer it, so KDE and
+  GNOME paste), another input method holds the seat (`unavailable`), the
+  field has no active text input, the final text is multi-line or over 4000
+  bytes, or the 350 ms decision passes without a commit: a caller that wins
+  the abandonment waits up to 250 ms for the preedit to clear and then
+  pastes even if the compositor never answered, while a commit the owner
+  already claimed is given up to 750 ms and is never pasted over. After an
+  abandoned Finish, Live typing starts no new captures and pastes instead
+  until Hex restarts; a session that had already begun still finishes and
+  cancels. The claim is one atomic Pending → Committing or
+  Pending → Abandoned change, so only one side wins. A residual Wayland race
+  can still let a `done` event arrive after the serial is read; that
+  preedit or commit is then ignored by the compositor. A commit ignored for
+  a stale serial has already returned “inserted”, so that dictation is lost
+  rather than pasted (wlroots does not enforce the serial today). The
+  plate stays off unless Labs › Live text itself is on: a Live typing capture
+  takes `dictation::live_text::TypingDemand` at that same intentional start,
+  before the stream opens, so the engine sees it but the plate does not, and
+  the plate decision is stored once when the stream opens. Checks in
+  [linux/live_typing.rs](../../src/linux/live_typing.rs):
+  `provisional_words_become_one_preedit_line`,
+  `a_preedit_stops_at_a_character_boundary`,
+  `only_one_line_text_within_the_limit_commits_through_the_input_method`,
+  `the_cursor_sits_after_the_preedit`,
+  `done_events_number_the_commit_serial_and_apply_activation`,
+  `the_owner_wins_the_commit_before_queueing_it`,
+  `a_waiting_caller_wins_abandonment_before_the_owner_claims`,
+  `a_started_session_cancels_when_dropped`,
+  `a_session_that_never_started_sends_nothing`,
+  `finishing_a_session_never_sends_cancel`,
+  `only_the_newest_preedit_waits_and_it_wakes_once`,
+  `a_full_control_queue_stops_new_sessions_but_not_old_ones`, and
+  `a_stopped_owner_still_finishes_and_cancels_a_session_that_began`;
+  `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
+  [dictation/live_text.rs](../../src/dictation/live_text.rs); and
+  `the_plate_follows_the_decision_made_when_the_stream_opened` in
+  [dictation.rs](../../src/dictation.rs). **Not verified
+  on a real compositor**: only unit tests and the build, plus the Linux Labs
+  golden's new card.
 - Playground: Rune's playground in the window (every OS), `labs.playground`
   (off by default, applied at once). While on, a **Playground** sidebar item,
   ⇧⌘D (View › Playground on macOS), or Ctrl+Shift+D swaps the window for a list of

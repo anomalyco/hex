@@ -25,6 +25,15 @@ Notice supplied with the files:
 
 The weights are provided as-is, without warranties, as the licence states.
 
+## Wayland Input Method Protocol
+
+`src/linux/protocols/input-method-unstable-v2.xml` is the upstream
+`input-method-unstable-v2` protocol description, copied unchanged from
+wayland-protocols-misc 0.3.12. It is MIT licensed; the copyright header is
+kept in the file.
+
+Upstream: https://gitlab.freedesktop.org/wayland/wayland-protocols
+
 ## Lucide And Feather
 
 The settings sidebar icons in `assets/icons/` (`settings`, `modes`,

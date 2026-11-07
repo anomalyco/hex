@@ -353,6 +353,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Live text"),
         tr("Show provisional words beside the HUD while dictating"),
     ));
+    if caps.os == super::platform::Os::Linux && ui.platform.wayland {
+        rows.push(row(
+            Feature::LiveTyping,
+            Some(&KEYBOARD),
+            tr("Live typing"),
+            tr("Show provisional words in the focused text field while dictating on Wayland, then type the final text there"),
+        ));
+    }
     rows.push(row(
         Feature::SettingsSearch,
         Some(SEARCH_ICON),
@@ -729,6 +737,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::VoiceFilter => "lab-voice-filter",
         Feature::Playground => "lab-playground",
         Feature::LiveText => "lab-live-text",
+        Feature::LiveTyping => "lab-live-typing",
         Feature::LiveChapters => "lab-live-chapters",
         Feature::VocabularyBiasing => "lab-vocabulary-biasing",
         Feature::TerminalPaste => "lab-terminal-paste",

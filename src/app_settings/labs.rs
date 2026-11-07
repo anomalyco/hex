@@ -8,6 +8,9 @@ use super::*;
 pub struct LabsSettings {
     /// Live text beside the HUD while dictating.
     pub live_text: bool,
+    /// Provisional words in the focused text field as a Wayland input-method
+    /// preedit, with the final text committed there (Linux Wayland).
+    pub live_typing: bool,
     pub live_chapters: bool,
     pub playground: bool,
     /// Parakeet transcription biased toward the vocabulary.
@@ -107,6 +110,7 @@ impl Default for LabsSettings {
     fn default() -> Self {
         Self {
             live_text: false,
+            live_typing: false,
             live_chapters: false,
             playground: false,
             vocabulary_biasing: false,

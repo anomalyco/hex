@@ -270,6 +270,8 @@ pub(super) enum ScrawlRequest {
 #[derive(Clone, Debug)]
 pub(super) struct PlatformState {
     pub(super) caps: Capabilities,
+    /// Whether this Linux window is on Wayland (previews are).
+    pub(super) wayland: bool,
     pub(super) input_sources: Vec<crate::transcription::keyboard_model_switching::InputSource>,
     /// Microphone, Accessibility, and whether the selected
     /// speech model is installed. Every permission is ready where the OS has
@@ -364,10 +366,24 @@ pub(super) enum DemoRequest {
     StopPlayback,
 }
 
+/// Whether this real Linux session is Wayland; other OSes have no row that
+/// asks, and a preview is Wayland so its Linux scenes show the Wayland labs.
+fn wayland_session() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux::session::LinuxSession::detect().is_wayland()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
 impl PlatformState {
     pub(super) fn new(caps: Capabilities) -> Self {
         Self {
             caps,
+            wayland: wayland_session(),
             input_sources: Vec::new(),
             permissions: crate::desktop::onboarding::status_with_transcription_model(false),
             permissions_asked: Vec::new(),
@@ -518,6 +534,7 @@ impl PlatformState {
     pub(super) fn preview(caps: Capabilities) -> Self {
         let mut state = Self::new(caps);
         state.preview = true;
+        state.wayland = true;
         let ready = PermissionState::Ready;
         state.permissions = SetupStatus {
             microphone: ready,

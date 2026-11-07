@@ -13,6 +13,7 @@ pub(crate) mod icons;
 pub(crate) mod linux_input;
 pub(crate) use linux_input as input;
 pub(crate) mod input_route;
+pub(crate) mod live_typing;
 pub(crate) mod login_item;
 pub(crate) mod meeting_capsules;
 pub(crate) mod paste;
