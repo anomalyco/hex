@@ -611,10 +611,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   original beside it as `settings.json.unreadable-<sha256>` (owner-only;
   identical originals share one backup). A failed backup blocks the save. A
   file that isn't a JSON object is never backed up or replaced: every save is
-  refused until it's fixed or removed. A process that loaded such a file
-  refuses every save even after the file is fixed, until a fresh load (a
-  `hex settings set`/`hex vocabulary` command, the Linux poll, or a restart)
-  reads it. The refusal and launch note use the same wording on every OS.
+  refused until a restart. A process that loaded such a file keeps refusing
+  saves even after the file is fixed, because its in-memory settings may be
+  stale defaults. On Linux only, the two-second poll also clears that refusal
+  when it adopts a valid or removed file. The refusal and launch note use the
+  same wording on every OS.
   Keep saved values readable by older builds: an unchosen
   `meetings.retention` is omitted, not `null`. Do not omit optional fields
   whose absence restores a nonempty default, such as `paste_last_hotkey`.

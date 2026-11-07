@@ -233,8 +233,12 @@ fn malformed_json_uses_defaults_and_refuses_to_be_replaced() {
     assert_eq!(fs::read(&file.path).unwrap(), b"{}");
     assert!(file.backups().is_empty());
 
-    // A fresh load clears that, and the same settings save normally.
+    // Reading the fixed file does not clear the refusal; the save stays
+    // refused until a restart or the Linux poll adopts the file.
     AppSettings::load_from(&file.path).unwrap();
+    assert!(modified.write_to(&file.path).is_err());
+    assert_eq!(fs::read(&file.path).unwrap(), b"{}");
+    AppSettings::forget_unparseable(&file.path);
     modified.write_to(&file.path).unwrap();
     assert!(file.backups().is_empty());
 }
@@ -261,10 +265,19 @@ fn stale_defaults_cannot_replace_a_file_fixed_while_the_process_runs() {
     assert_eq!(fs::read(&file.path).unwrap(), fixed);
     assert!(file.backups().is_empty());
 
-    // Reading the fixed file clears the refusal; the stale settings then save
-    // over it as any save would.
+    // Reading the fixed file does not clear the refusal: the running app's
+    // in-memory settings are still the stale defaults that load used.
     let loaded = AppSettings::load_from(&file.path).unwrap();
     assert_eq!(loaded.sound_effect_volume, 0.37);
+    let (read, _) = AppSettings::read_from(&file.path).unwrap();
+    assert_eq!(read.sound_effect_volume, 0.37);
+    let error = stale.write_to(&file.path).unwrap_err();
+    assert!(format!("{error:#}").contains("couldn't be read when Hex loaded it"));
+    assert_eq!(fs::read(&file.path).unwrap(), fixed);
+    assert!(file.backups().is_empty());
+
+    // The Linux poll's explicit clear (and only that) lets a save through.
+    AppSettings::forget_unparseable(&file.path);
     stale.write_to(&file.path).unwrap();
     let saved: Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
     assert_eq!(saved["sound_effect_volume"], json!(0.5));

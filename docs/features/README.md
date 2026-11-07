@@ -2031,10 +2031,10 @@ Listener starts consume the host's settings snapshot; the foreground
 `hex dictate` command loads its own snapshot once. A settings file that isn't
 valid JSON, or isn't a JSON object, starts Hex with defaults and shows the parse
 error, but no longer blocks dictation; saving over it is refused, even after it
-is fixed, until a fresh load reads it or Hex restarts. Its two-second poll
-keeps the running settings when the file isn't a JSON object and adopts a fixed
-or removed file, so the window's next save works without a restart. A load that
-fails outright still blocks capture until a successful save or a restart.
+is fixed, until Hex restarts. Its two-second poll keeps the running settings
+when the file isn't a JSON object, and adopting a fixed or removed file also
+clears that refusal, so the window's next save works without a restart. A load
+that fails outright still blocks capture until a successful save or a restart.
 Dismissing that failed-load error does not authorize recording with defaults.
 Feedback is initialized at these entry points, so a delayed listener start
 cannot reset a newer live volume selection.

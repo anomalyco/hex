@@ -80,6 +80,14 @@ impl AppSettings {
         Ok(Self::load_checked_from(path)?.0)
     }
 
+    /// Clears the refusal recorded for a file that wasn't a JSON object.
+    /// Only the Linux poll calls this, after it adopts a valid or removed
+    /// file; every other platform waits for a restart.
+    #[cfg(any(target_os = "linux", test))]
+    pub(crate) fn forget_unparseable(path: &Path) {
+        remember_unparseable(path, false);
+    }
+
     /// `load_from` with the file problem it recovered from, from the same
     /// read, so a caller deciding whether to adopt cannot race an edit.
     pub(crate) fn load_checked_from(path: &Path) -> Result<(Self, Option<LoadIssue>)> {
@@ -115,7 +123,6 @@ impl AppSettings {
         let data = match fs::read(path) {
             Ok(data) => data,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                remember_unparseable(path, false);
                 return Ok((Self::default(), false, None));
             }
             Err(error) => {
@@ -124,10 +131,7 @@ impl AppSettings {
             }
         };
         let issue = match settings_object(&data) {
-            Ok(_) => {
-                remember_unparseable(path, false);
-                None
-            }
+            Ok(_) => None,
             Err(reason) => {
                 remember_unparseable(path, true);
                 Some(LoadIssue::Unparseable(reason))

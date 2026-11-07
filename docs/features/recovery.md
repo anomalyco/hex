@@ -57,7 +57,7 @@ Launch -> read settings.json
     ├── Invalid JSON / not an object on disk -> save refused
     │   └── fix or remove the file; original stays exactly as it was
     ├── This process loaded a file that wasn't an object -> save refused
-    │   └── even after the file is fixed; a fresh load or restart clears it
+    │   └── even after the file is fixed; a restart (or the Linux poll) clears it
     └── Invalid fields -> preserve exact original first
         ├── settings.json.unreadable-<sha256>, owner-only; same bytes backed up once
         └── Backup fails / original cannot be read -> save fails, original stays
@@ -66,13 +66,12 @@ Launch -> read settings.json
 Loading repaired settings does not itself rewrite the file. A later settings
 save (including a migration save) takes the backup before replacing invalid
 fields. A file that is not valid JSON, or is valid JSON but not an object, is
-never backed up or replaced: every save is refused until a fresh read sees a
-fixed file, and launch keeps running with defaults in memory while naming the
-parse error. A process that loaded such a file keeps refusing saves even after
-the file is fixed, because its in-memory settings may be stale defaults; the
-refusal says to restart. `hex settings set` and `hex vocabulary` load the file
-before saving, so on any OS they clear that refusal after a fix and the running
-app adopts their save.
+never backed up or replaced: every save is refused until Hex restarts, and
+launch keeps running with defaults in memory while naming the parse error. A
+process that loaded such a file keeps refusing saves even after the file is
+fixed, because its in-memory settings may be stale defaults. Reading the fixed
+file does not clear that refusal; the refusal says to restart. On Linux only,
+the two-second poll clears it when it adopts a valid or removed file.
 Backups are never automatically removed. On Linux, the running Hex checks
 `settings.json` every two seconds and adopts an edit made outside the window
 (by hand or by an agent), so its modes reach the listener and the next save
@@ -92,8 +91,8 @@ Source and checks: [settings persistence](../../src/app_settings/persistence.rs)
 and its [tests](../../src/app_settings/persistence/tests.rs): old-shape retention,
 invalid enums, nested types, list entries, unknown keys, invalid JSON and
 non-object documents (defaults, refused saves, no backup), a file fixed while
-the process still holds stale settings (refused until a fresh load), exactly-once
-private backups, interrupted saves, and backup failure. These checks use
+the process still holds stale settings (refused until the explicit clear),
+exactly-once private backups, interrupted saves, and backup failure. These checks use
 temporary files; they do not exercise a real app launch or the Linux poll.
 
 ### Finish Without Losing Other Work

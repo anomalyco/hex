@@ -746,6 +746,9 @@ impl LinuxDesktopHost {
                 self.settings_error = Some(issue.reload_error());
             }
             Ok((settings, None)) => {
+                // Adopting a fixed or removed file also clears this process's
+                // stale-defaults refusal; nowhere else does.
+                AppSettings::forget_unparseable(&path);
                 if settings != self.settings {
                     tracing::info!("settings.json changed outside Hex; applying it");
                 }
