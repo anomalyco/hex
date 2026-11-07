@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,7 +14,7 @@ use crate::control::{PrintReply, PrintedTranscript};
 use crate::desktop::events::{
     DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
-use crate::dictation::service::{DictationControl, Effect, MICROPHONE_LOST, ServiceDictations};
+use crate::dictation::service::{DictationQueue, Effect, MICROPHONE_LOST, ServiceDictations};
 use crate::dictation::{DictationCapture, Finish, ReleaseWait};
 use crate::feedback::{self, Tone};
 use crate::linux::input::{
@@ -107,35 +107,6 @@ impl Drop for OutputWorker {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
-    }
-}
-
-/// The local API's `/dictations` controls. The host keeps one queue for
-/// whichever listener runs; while none does, a control goes unanswered and
-/// the API answers `service-capture-unavailable`.
-#[derive(Clone)]
-pub(crate) struct DictationQueue(Arc<Mutex<mpsc::Receiver<DictationControl>>>);
-
-impl From<mpsc::Receiver<DictationControl>> for DictationQueue {
-    fn from(receiver: mpsc::Receiver<DictationControl>) -> Self {
-        Self(Arc::new(Mutex::new(receiver)))
-    }
-}
-
-/// A queue nothing sends to: a listener without the local API.
-impl Default for DictationQueue {
-    fn default() -> Self {
-        mpsc::sync_channel(0).1.into()
-    }
-}
-
-impl DictationQueue {
-    fn drain(&self) -> Vec<DictationControl> {
-        self.0
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .try_iter()
-            .collect()
     }
 }
 
@@ -937,7 +908,10 @@ pub(crate) fn run(
                     suppressor.suppress();
                 }
                 stream_when_due(&mut capture, &engine, toggle);
-                capture.report_live_text();
+                // A client's dictation is the only capture while it records.
+                if let Some(partial) = capture.report_live_text() {
+                    service.partial(&partial);
+                }
             }
             RecoveringAudioInputEvent::Timeout => {}
             RecoveringAudioInputEvent::Interrupted => {
@@ -1274,10 +1248,11 @@ mod tests {
             let (reply, answer) = mpsc::sync_channel(1);
             assert_eq!(
                 owner.control(
-                    DictationControl::Start {
+                    crate::dictation::service::DictationControl::Start {
                         source: "test".into(),
                         owner_token: "hex_a".into(),
                         levels,
+                        partials: None,
                         reply,
                     },
                     false,

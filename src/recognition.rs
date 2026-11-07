@@ -481,10 +481,13 @@ pub fn listen(
                         )?;
                         let _ = reply.send(outcome);
                     }
+                    // A programmatic capture doesn't stream here, so it has
+                    // no live text: a client's partials end at once.
                     RecognitionControl::Dictation(DictationControl::Start {
                         source,
                         owner_token,
                         levels,
+                        partials: _,
                         reply,
                     }) => {
                         if programmatic.is_some() || input.is_recording() || hotkeys.any_recording()

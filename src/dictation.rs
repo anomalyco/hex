@@ -1126,14 +1126,10 @@ impl DictationCapture {
     /// how far it has got: word counts against the audio fed, never the
     /// words (the engine logs each stream's count of changes). Every OS's
     /// capture loop calls it after ingesting audio; it does nothing without
-    /// live text.
-    pub fn report_live_text(&mut self) {
-        let Some(partial) = self.take_partial() else {
-            return;
-        };
-        let Some(recording) = &mut self.recording else {
-            return;
-        };
+    /// live text. Returns the text it showed, for a `/dictations` client.
+    pub fn report_live_text(&mut self) -> Option<Partial> {
+        let partial = self.take_partial()?;
+        let recording = self.recording.as_mut()?;
         tracing::debug!(
             fed_ms = recording
                 .stream
@@ -1147,6 +1143,7 @@ impl DictationCapture {
             .live_text
             .get_or_insert_with(crate::dictation::live_text::Publisher::new)
             .show(&partial);
+        Some(partial)
     }
 
     /// Opens a live stream for the active recording when the engine's model
