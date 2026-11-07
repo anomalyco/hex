@@ -3,6 +3,7 @@
 //! quit.
 
 use super::*;
+use crate::desktop::process_exit::{PendingWork, arm_deadline, set_pending_work};
 
 /// Sends the window's Quit without waiting. A full bounded queue means the
 /// window has not taken its earlier requests yet, so the host retries next
@@ -62,7 +63,14 @@ pub(super) fn run_host(
             )
         };
         if began_stopping {
-            linux_service::arm_exit_deadline();
+            arm_deadline();
+        }
+        if stopping {
+            set_pending_work(if done {
+                PendingWork::Teardown
+            } else {
+                PendingWork::Draining
+            });
         }
         if stopping && !quit_sent {
             // The main thread may be waiting for the next window request,

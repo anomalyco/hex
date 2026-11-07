@@ -2005,8 +2005,10 @@ Linux process                            // maintain.linux-service
 ├── hex start / desktop autostart / hex service -> Same, without the window
 ├── hex dictation|paste-last -> Socket worker -> Listener queue (never the UI thread)
 ├── hex status -> Published status; hex quit / Quit Hex / launcher action -> Drain, exit 0
-├── Stop / SIGTERM after a full window queue -> Quit is retried, never lost
-│   └── Drain still stuck after 10 s -> Hex exits before the unit's 30 s TimeoutStopSec
+├── Any stop still draining after 20 s -> _exit before the unit's 30 s TimeoutStopSec
+│   └── A transcription or paste cut by the deadline is lost; checked by unit tests only,
+│       no observed systemd stop
+├── Stop / SIGTERM after a full window queue -> The window's quit is retried until taken
 ├── Open the window -> Maps at 980×760 (min = max), tiling WMs float it -> Resizable from 860×560
 ├── Close the window -> Keep microphone, accepted jobs, model preparation, and HUD
 │   └── Uncommitted shortcut capture -> Cancel and restore the prior listening state
