@@ -276,7 +276,11 @@ mod tests {
         let current = folder.join("2026-10-15 1418 arcade planning.md");
         fs::write(&current, "the meeting\n").unwrap();
         let target = folder.join("2026-10-15 1418 Arcade planning.md");
-        fs::hard_link(&current, &target).unwrap();
+        // APFS already resolves the case-only name to the same file; a
+        // case-sensitive volume needs the hard link to make one.
+        if let Err(error) = fs::hard_link(&current, &target) {
+            assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        }
 
         assert_eq!(
             path_without_collision(&folder, "2026-10-15 1418 Arcade planning", Some(&current))
