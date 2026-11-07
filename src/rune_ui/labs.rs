@@ -7,13 +7,35 @@
 //! while off.
 
 mod group;
+mod list;
 #[cfg(all(target_os = "macos", hex_capture))]
 mod screenshots;
 mod store;
 
 use rune::{El, Icon, TextEdit, Tx, row, text};
 
-pub(super) use self::store::{page, search_field, tabs};
+/// The Labs page under its title bar.
+pub(super) fn page(ui: &Ui, p: Paint) -> El {
+    match ui.lab_store.layout {
+        Layout::Store => store::page(ui, p),
+        layout => list::page(ui, p, layout),
+    }
+}
+
+/// Beside the title: today's store has its search; the directions have
+/// nothing.
+pub(super) fn title_accessory(ui: &Ui, p: Paint) -> Option<El> {
+    (ui.lab_store.layout == Layout::Store).then(|| store::search_field(ui, p))
+}
+
+/// At the title bar's end: today's store has its tabs.
+pub(super) fn actions(ui: &Ui, p: Paint) -> Vec<El> {
+    if ui.lab_store.layout == Layout::Store {
+        vec![store::tabs(ui, p)]
+    } else {
+        Vec::new()
+    }
+}
 use super::controls::{self, Paint};
 use super::icons::{BOOK, CAMERA, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::list_detail::SEARCH_ICON;
@@ -187,6 +209,21 @@ pub(super) enum Tab {
     On,
 }
 
+/// How the Labs page lays out its labs (t1402). Temporary and internal:
+/// only `--snap` scenes pick a direction while Kit compares them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Layout {
+    /// Today's store: search, tabs, chips, New in Labs, and cards.
+    #[default]
+    Store,
+    /// A settings pane: rows under each group's label.
+    List,
+    /// Rows under the pane each lab moves to when it graduates.
+    ByPane,
+    /// What's on first, then everything else, each row tagged with its pane.
+    OnFirst,
+}
+
 /// What the Labs store shows: its search, tab, and chip.
 #[derive(Default)]
 pub(super) struct Store {
@@ -194,6 +231,7 @@ pub(super) struct Store {
     pub(super) tab: Tab,
     /// The chip selected: only this group's labs show.
     pub(super) group: Option<Group>,
+    pub(super) layout: Layout,
 }
 
 impl Store {
@@ -836,6 +874,39 @@ fn extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
             p,
             crate::screenshots::system_takes_shortcut(),
         )),
+        _ => None,
+    }
+}
+
+/// A lab's own settings as a card row under its row, indented one level,
+/// while it's on.
+fn list_extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
+    if !entry.on {
+        return None;
+    }
+    let indent = controls::METRICS.row_px * 2.0;
+    match entry.lab {
+        Lab::Feature(Feature::UnloadIdle) => Some(
+            controls::setting_row(
+                p,
+                "unload-after",
+                tr("Unload after"),
+                None,
+                unload_after(ui, p),
+            )
+            .pl(indent),
+        ),
+        #[cfg(all(target_os = "macos", hex_capture))]
+        Lab::Feature(Feature::Screenshots) => Some(
+            row()
+                .key("screenshots-settings")
+                .pl(indent)
+                .pr(controls::METRICS.row_px)
+                .pb(12.0)
+                .child(
+                    screenshots::body(ui, p, crate::screenshots::system_takes_shortcut()).grow(1.0),
+                ),
+        ),
         _ => None,
     }
 }

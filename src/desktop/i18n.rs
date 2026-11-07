@@ -1442,6 +1442,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Models", ["Modele", "模型", "モデル", "Modelle", "Modelos", "Моделі"]),
     ("New in Labs", ["Nowości w Laboratorium", "实验室新功能", "ラボの新機能", "Neu in Labs", "Novedades en Labs", "Нове в Лабораторії"]),
     ("New", ["Nowe", "新", "新着", "Neu", "Nuevo", "Нове"]),
+    ("Turned on", ["Włączone", "已开启", "オン", "Aktiviert", "Activados", "Увімкнені"]),
+    ("Everything else", ["Pozostałe", "其他", "その他", "Alle anderen", "Todo lo demás", "Решта"]),
     ("Unfinished features. They may change or break.", ["Niedokończone funkcje. Mogą się zmienić lub zepsuć.", "未完成的功能，可能会变化或出错。", "未完成の機能です。変更されたり動かなくなったりすることがあります。", "Unfertige Funktionen. Sie können sich ändern oder kaputtgehen.", "Funciones sin terminar. Pueden cambiar o fallar.", "Незавершені функції. Вони можуть змінитися або зламатися."]),
     ("No labs match", ["Brak pasujących eksperymentów", "没有匹配的实验功能", "一致するラボはありません", "Keine passenden Labs", "Ningún lab coincide", "Немає відповідних експериментів"]),
     ("Settings search", ["Wyszukiwanie w ustawieniach", "设置搜索", "設定の検索", "Suche in den Einstellungen", "Búsqueda en Ajustes", "Пошук у налаштуваннях"]),
