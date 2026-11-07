@@ -44,7 +44,7 @@ struct DictationSink<'a> {
 impl DictationSink<'_> {
     fn send(&self, event: DictationIndicatorEvent) {
         if let Some(hud) = self.hud {
-            hud.send(event);
+            hud.send(event.clone());
         }
         self.caps_lock.observe(event);
     }
