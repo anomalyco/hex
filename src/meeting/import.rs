@@ -123,6 +123,7 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
             chapters_refined: false,
             retention_applies: true,
             export_sha256: None,
+            audio_removed_at_ms: None,
             imported: true,
         };
         let system_path = directory.join("system.wav");

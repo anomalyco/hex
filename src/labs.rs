@@ -115,10 +115,11 @@ pub enum Feature {
     AnnotateReplay,
     MeetingImport,
     QuitClosesWindow,
+    ExpireMeetingAudio,
 }
 
 impl Feature {
-    pub const ALL: [Self; 51] = [
+    pub const ALL: [Self; 52] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -170,6 +171,7 @@ impl Feature {
         Self::AnnotateReplay,
         Self::MeetingImport,
         Self::QuitClosesWindow,
+        Self::ExpireMeetingAudio,
     ];
 
     /// The features this OS and build have.
@@ -244,6 +246,7 @@ impl Feature {
             | Self::MoreCallApps
             | Self::AnnotateReplay
             | Self::MeetingImport
+            | Self::ExpireMeetingAudio
             | Self::NotchIndicator
             | Self::QuitClosesWindow => Audience::Everyone,
         }
@@ -300,7 +303,7 @@ impl Feature {
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay => 20261104,
             Self::MoreCallApps | Self::SettingsSearch | Self::MeetingImport => 20261106,
-            Self::QuitClosesWindow => 20261107,
+            Self::QuitClosesWindow | Self::ExpireMeetingAudio => 20261107,
         }
     }
 
@@ -390,6 +393,7 @@ impl Feature {
             | Self::MeetingFinishedEvent
             | Self::FollowLiveTranscript
             | Self::MoreCallApps
+            | Self::ExpireMeetingAudio
             | Self::SettingsSearch
             | Self::FillerWords => true,
         }
@@ -449,6 +453,7 @@ impl Feature {
             Self::AnnotateReplay => "annotate-replay",
             Self::MeetingImport => "meeting-import",
             Self::QuitClosesWindow => "quit-closes-window",
+            Self::ExpireMeetingAudio => "expire-meeting-audio",
         }
     }
 
@@ -506,6 +511,7 @@ impl Feature {
             Self::AnnotateReplay => "labs.annotate_replay",
             Self::MeetingImport => "labs.meeting_import",
             Self::QuitClosesWindow => "labs.quit_closes_window",
+            Self::ExpireMeetingAudio => "labs.expire_meeting_audio",
         }
     }
 
@@ -645,6 +651,9 @@ impl Feature {
             Self::QuitClosesWindow => {
                 "⌘Q closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits"
             }
+            Self::ExpireMeetingAudio => {
+                "Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings."
+            }
         }
     }
 
@@ -706,6 +715,7 @@ impl Feature {
             Self::AnnotateReplay => settings.labs.annotate_replay,
             Self::MeetingImport => settings.labs.meeting_import,
             Self::QuitClosesWindow => settings.labs.quit_closes_window,
+            Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
         }
     }
 
@@ -765,6 +775,7 @@ impl Feature {
             &mut labs.annotate_replay,
             &mut labs.meeting_import,
             &mut labs.quit_closes_window,
+            &mut labs.expire_meeting_audio,
         ]
     }
 
@@ -824,6 +835,7 @@ impl Feature {
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
             Self::MeetingImport => settings.labs.meeting_import = on,
             Self::QuitClosesWindow => settings.labs.quit_closes_window = on,
+            Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -880,6 +892,8 @@ const MINUTES_MASK: u64 = (1 << MINUTES_BITS) - 1;
 const MEETING_IMPORT: u64 = 1 << (MINUTES_SHIFT + MINUTES_BITS as u64);
 /// The next bit above Import audio's switch, clear of the minutes below it.
 const QUIT_CLOSES_WINDOW: u64 = MEETING_IMPORT << 1;
+/// The next bit above Quit closes Settings, also clear of the minutes below.
+const EXPIRE_MEETING_AUDIO: u64 = QUIT_CLOSES_WINDOW << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1112,6 +1126,13 @@ pub fn meeting_import() -> bool {
     on(MEETING_IMPORT) && Feature::MeetingImport.on_this_os()
 }
 
+/// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
+/// (read by the meeting controller's expiry pass and the window's Settings
+/// row).
+pub fn expire_meeting_audio() -> bool {
+    on(EXPIRE_MEETING_AUDIO) && Feature::ExpireMeetingAudio.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -1251,6 +1272,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::QuitClosesWindow,
             settings.quit_closes_window,
             QUIT_CLOSES_WINDOW,
+        ),
+        (
+            Feature::ExpireMeetingAudio,
+            settings.expire_meeting_audio,
+            EXPIRE_MEETING_AUDIO,
         ),
         (
             Feature::GnomeMeetingCapsules,
@@ -1828,6 +1854,19 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & MEETING_IMPORT, 0);
         assert_eq!(state & ANNOTATE_REPLAY, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+    }
+
+    #[test]
+    fn expire_meeting_audio_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & EXPIRE_MEETING_AUDIO, 0);
+        labs.expire_meeting_audio = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & EXPIRE_MEETING_AUDIO, 0);
+        assert_eq!(state & MEETING_IMPORT, 0);
+        assert_eq!(state & QUIT_CLOSES_WINDOW, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
     }
 

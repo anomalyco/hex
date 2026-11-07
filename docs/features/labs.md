@@ -81,6 +81,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
 │                                        file is decoded locally, transcribed with the selected model, saved as a normal
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
+├── Expire meeting audio separately no labs.expire_meeting_audio (every OS with Meetings)
+│                                        Meetings › Settings adds Keep audio under Keep meetings: finished meetings drop
+│                                        their WAVs on their own schedule (at or beyond Keep meetings it has no effect),
+│                                        keeping transcript, notes, summary, and Markdown
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
@@ -1245,6 +1249,45 @@ ending the stream); `meeting_finished_event_is_its_own_bit_and_off_by_default`
 in [labs.rs](../../src/labs.rs). Not yet observed: a real recorded call
 sending the event, on any OS; the Labs page goldens that show Meetings rows
 need regenerating with the new row.
+
+Expire meeting audio separately (`expire-meeting-audio`, every OS with
+Meetings; its row shows wherever Meetings does): meeting WAVs are most of a
+meeting's disk use, and people asked to keep the text longer than the audio.
+While on, Meetings › Settings shows **Keep audio** under **Keep meetings**
+with Follow Keep meetings, 24 hours, 7 days, 30 days, and Forever; the choice
+persists as `meetings.audio_retention` (omitted while unchosen, like
+`meetings.retention`). Follow Keep meetings, or no choice, means audio follows
+the whole-meeting retention, exactly as today. A chosen window at or beyond
+Keep meetings has no effect: the whole meeting expires first and takes its
+audio with it. Chosen, the meeting controller
+runs a second pass after the whole-meeting one at launch, hourly, and soon
+after either retention or the lab changes: a Complete meeting (its final
+transcript published), with no `final.pending`, no recorder lock, and no notes
+being written, whose age from `ended_at_ms` (else `created_at_ms`) is strictly
+past the audio window moves only `system.wav` and `microphone.wav` to the
+platform Trash and records `audio_removed_at_ms` in the manifest. The
+transcript, rolling drafts, notes, summary, and exported Markdown stay;
+Interrupted, Failed, Starting, Recording, Transcribing, and pending meetings
+keep their audio for a later pass; Forever, an unchosen window, or the lab off
+moves nothing. The row shows while the lab is on, and the pass reads
+`app_settings::meeting_audio_retention()`, which returns the saved value only
+while `labs::expire_meeting_audio()` is on. A meeting whose audio is gone still
+lists, opens, searches, exports, and copies its text; `hex meeting transcribe`
+and `hex meeting echo` (debug) fail saying its audio was deleted without
+changing its status. Checks:
+`separate_audio_expiry_covers_only_finished_meetings_older_than_it`,
+`audio_expiry_moves_only_the_wavs_and_records_it`, and
+`audio_expiry_leaves_unfinished_pending_locked_or_annotated_meetings` in
+[tests.rs](../../src/meeting/tests.rs);
+`a_separate_audio_retention_needs_its_lab_and_a_choice` in
+[meetings.rs](../../src/app_settings/meetings.rs);
+`expire_meeting_audio_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs); `keep_audio_shows_with_its_lab_and_saves_its_window`
+in [tests/panes.rs](../../src/rune_ui/tests/panes.rs);
+`every_persisted_setting_has_a_cli_key` in
+[control/settings.rs](../../src/control/settings.rs). Not yet observed: a real
+pass moving WAVs to a real Trash. The Labs page goldens (`mac-labs`,
+`windows-labs`, `linux-labs`) show the new card.
 
 Meeting platform icons (`meeting-platform-icons`, issue 1290) graduated:
 each recording in the Meetings list always shows its call service's icon, or

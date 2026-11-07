@@ -54,6 +54,8 @@ static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
 /// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
 static MEETING_RETENTION: AtomicU8 = AtomicU8::new(RETENTION_UNSET);
+/// [`MeetingRetention::encode`]d; [`RETENTION_UNSET`] until settings apply.
+static MEETING_AUDIO_RETENTION: AtomicU8 = AtomicU8::new(RETENTION_UNSET);
 const RETENTION_UNSET: u8 = u8::MAX;
 static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 static MEETING_PROVIDERS: OnceLock<RwLock<Vec<MeetingProviderChoice>>> = OnceLock::new();
@@ -787,6 +789,10 @@ impl AppSettings {
         );
         MEETING_RETENTION.store(
             MeetingRetention::encode(self.meetings.retention),
+            Ordering::Release,
+        );
+        MEETING_AUDIO_RETENTION.store(
+            MeetingRetention::encode(self.meetings.audio_retention),
             Ordering::Release,
         );
         *MEETING_OUTPUT_FOLDER
@@ -2063,7 +2069,7 @@ mod tests {
             "sound_effects": false,
             "history_retention": null,
             "show_dock_icon": "sometimes",
-            "meetings": {"enabled": true, "retention": "quarterly"},
+            "meetings": {"enabled": true, "retention": "quarterly", "audio_retention": "never"},
             "recording_duck_volume": 7.0
         }"#;
         fs::write(&dir.path, file).unwrap();
@@ -2074,6 +2080,7 @@ mod tests {
         assert_eq!(settings.history_retention, defaults.history_retention);
         assert_eq!(settings.show_dock_icon, defaults.show_dock_icon);
         assert_eq!(settings.meetings.retention, None);
+        assert_eq!(settings.meetings.audio_retention, None);
         assert_eq!(
             settings.recording_duck_volume,
             defaults.recording_duck_volume
@@ -2086,16 +2093,25 @@ mod tests {
 
         // `null` reads as unchosen, and unchosen is never written as `null`,
         // which 3.1.0 can't read.
-        fs::write(&dir.path, r#"{"meetings": {"retention": null}}"#).unwrap();
-        assert_eq!(
-            AppSettings::load_from(&dir.path)
-                .unwrap()
-                .meetings
-                .retention,
-            None
-        );
+        fs::write(
+            &dir.path,
+            r#"{"meetings": {"retention": null, "audio_retention": null}}"#,
+        )
+        .unwrap();
+        let settings = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(settings.meetings.retention, None);
+        assert_eq!(settings.meetings.audio_retention, None);
         let saved = serde_json::to_value(AppSettings::default()).unwrap();
         assert!(saved["meetings"].get("retention").is_none());
+        assert!(saved["meetings"].get("audio_retention").is_none());
+
+        // A chosen audio retention survives a save and load.
+        fs::write(&dir.path, r#"{"meetings": {"audio_retention": "week"}}"#).unwrap();
+        let settings = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(
+            settings.meetings.audio_retention,
+            Some(crate::app_settings::MeetingRetention::Week)
+        );
 
         // Even malformed JSON defaults in memory and stays in place.
         fs::write(&dir.path, "{ not json").unwrap();

@@ -87,6 +87,9 @@ pub struct LabsSettings {
     pub follow_live_transcript: bool,
     /// Meetings offers Import audio…: a local audio file becomes a meeting (macOS).
     pub meeting_import: bool,
+    /// Finished meetings drop their WAV tracks on `meetings.audio_retention`,
+    /// keeping their transcripts, notes, and summary.
+    pub expire_meeting_audio: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
     /// Calls in more apps (Signal, Telegram, WeChat, LINE, Webex, Element, Phone) and on more websites are offered and named.
@@ -149,6 +152,7 @@ impl Default for LabsSettings {
             screenshots: false,
             follow_live_transcript: false,
             meeting_import: false,
+            expire_meeting_audio: false,
             groups: std::collections::BTreeMap::new(),
         }
     }

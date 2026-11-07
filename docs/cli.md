@@ -456,6 +456,11 @@ observe input-source changes or show these controls.
   older ones stay until you choose). Hex moves meetings that ended longer
   ago than that to the Trash at launch and hourly, Meetings on or off, and
   `hex meetings` and `hex mcp` no longer list them.
+- `meetings.audio_retention` is `day`, `week`, `month`, `forever`, or `none`
+  (the default). With Labs › Expire meeting audio separately on, a finished
+  meeting's WAVs move to the Trash on that window while its transcript,
+  notes, summary, and Markdown stay; `none` follows `meetings.retention`.
+  With the lab off it does nothing.
 - `transcription.model` and `transcription.language` are read-only here: use
   `hex model use`. `transcription_recents` and `meetings.calendar.connected`
   are read-only (connecting a calendar asks macOS for access from Settings).
@@ -474,7 +479,7 @@ Writable keys: `release_microphone_while_idle`,
 `history_retention`, `meetings.enabled`,
 `meetings.output_folder`, `meetings.summaries`, `meetings.opencode_model`,
 `meetings.show_recording_indicator`, `meetings.recording_indicator_corner`,
-`meetings.retention`, `meetings.providers`, `meetings.calendar.excluded_calendars`,
+`meetings.retention`, `meetings.audio_retention`, `meetings.providers`, `meetings.calendar.excluded_calendars`,
 `meetings.calendar.remind`, `meetings.calendar.lead_minutes`,
 `experimental.hex_microphone`, `experimental.hex_microphone_mode`,
 `experimental.hex_microphone_comfort_noise`,

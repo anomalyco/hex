@@ -773,7 +773,9 @@ mod tests {
         log.flush().unwrap();
         let written = fs::read_to_string(&path).unwrap();
         assert_eq!(written.lines().count(), 2);
-        assert!(!written.contains("4321"), "{written}");
+        // A digit sequence can occur inside a millisecond timestamp, so check
+        // the words instead.
+        assert!(!written.contains("bank pin"), "{written}");
         fs::remove_file(path).unwrap();
     }
 

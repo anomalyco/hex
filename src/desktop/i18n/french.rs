@@ -582,6 +582,12 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Remind me before meetings", "Me rappeler avant les réunions"),
     ("Shows a reminder with Record and Join buttons", "Affiche un rappel avec les boutons Enregistrer et Rejoindre"),
     ("Keep meetings", "Conserver les réunions"),
+    ("Keep audio", "Conserver l'audio"),
+    ("Follow Keep meetings", "Comme Conserver les réunions"),
+    ("Expire meeting audio separately", "Faire expirer l'audio des réunions séparément"),
+    ("Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings.", "Choisissez combien de temps conserver l'audio des réunions. Les transcriptions, notes et résumés suivent Conserver les réunions."),
+    ("Audio follows Keep meetings. Choose a time to delete only meeting audio first", "L'audio suit Conserver les réunions. Choisissez une durée pour supprimer d'abord uniquement l'audio des réunions"),
+    ("Finished meetings keep their transcript, notes, summary, and Markdown after their audio moves to the Trash", "Les réunions terminées conservent leur transcription, leurs notes, leur résumé et le Markdown après le déplacement de leur audio dans la corbeille"),
     ("Audio, transcripts, notes, and Hex's Markdown copy move to the Trash", "L'audio, les transcriptions, les notes et la copie Markdown de Hex vont à la Corbeille"),
     ("Audio, transcripts, notes, and Hex's Markdown copy move to the Trash. Meetings from before this setting stay until you choose", "L'audio, les transcriptions, les notes et la copie Markdown de Hex vont à la Corbeille. Les réunions antérieures à ce réglage restent jusqu'à ce que vous choisissiez"),
     ("Deleted after {}", "Supprimées après {}"),
@@ -1174,8 +1180,7 @@ mod tests {
     #[test]
     fn every_interface_string_has_a_french_translation() {
         let french = super::table();
-        let missing: Vec<&str> = super::super::TRANSLATIONS
-            .iter()
+        let missing: Vec<&str> = super::super::all_translations()
             .map(|(english, _)| *english)
             .filter(|english| french.get(english).is_none_or(|text| text.is_empty()))
             .collect();

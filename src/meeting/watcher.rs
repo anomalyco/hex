@@ -243,24 +243,33 @@ const EXPIRY_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 /// Moves meetings past their retention to the Trash: at launch, then
 /// hourly, and soon after the setting changes. Meetings off still expires
-/// what was recorded, since kept meetings are a liability.
+/// what was recorded, since kept meetings are a liability. A separate audio
+/// retention runs after the whole-meeting pass, and only while its Labs
+/// feature is on.
 #[derive(Default)]
 struct MeetingExpiry {
-    last: Option<(Instant, Option<crate::app_settings::MeetingRetention>)>,
+    last: Option<(
+        Instant,
+        Option<crate::app_settings::MeetingRetention>,
+        Option<crate::app_settings::MeetingRetention>,
+    )>,
 }
 
 impl MeetingExpiry {
     fn poll(&mut self) {
         let retention = crate::app_settings::meeting_retention();
-        if self
-            .last
-            .is_some_and(|(at, last)| last == retention && at.elapsed() < EXPIRY_INTERVAL)
-        {
+        let audio = crate::app_settings::meeting_audio_retention();
+        if self.last.is_some_and(|(at, last, last_audio)| {
+            last == retention && last_audio == audio && at.elapsed() < EXPIRY_INTERVAL
+        }) {
             return;
         }
-        self.last = Some((Instant::now(), retention));
+        self.last = Some((Instant::now(), retention, audio));
         if let Err(error) = meeting::expire(retention) {
             tracing::warn!(%error, "could not expire old meetings");
+        }
+        if let Err(error) = meeting::expire_audio(audio) {
+            tracing::warn!(%error, "could not expire old meeting audio");
         }
     }
 }
