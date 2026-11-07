@@ -652,7 +652,7 @@ impl Feature {
                 "⌘Q closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits"
             }
             Self::ExpireMeetingAudio => {
-                "Choose how long to keep meeting audio. Transcripts, notes and summaries follow Keep meetings."
+                "Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings."
             }
         }
     }
@@ -1866,6 +1866,7 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & EXPIRE_MEETING_AUDIO, 0);
         assert_eq!(state & MEETING_IMPORT, 0);
+        assert_eq!(state & QUIT_CLOSES_WINDOW, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
     }
 

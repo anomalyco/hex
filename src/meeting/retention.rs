@@ -179,7 +179,7 @@ pub(super) fn trash_audio_tracks(
     notes_busy: impl Fn(&str) -> bool,
     mut move_to_trash: impl FnMut(&Path) -> Result<()>,
 ) -> Result<()> {
-    let mut manifest = read_manifest(directory)?;
+    let manifest = read_manifest(directory)?;
     if manifest.status != MeetingStatus::Complete {
         return Err(eyre!("the meeting is not finished"));
     }
@@ -195,12 +195,14 @@ pub(super) fn trash_audio_tracks(
     if manifest.audio_removed_at_ms.is_some() {
         return Ok(());
     }
-    for file in ["system.wav", "microphone.wav"] {
+    for file in [&manifest.system.file, &manifest.microphone.file] {
         let path = directory.join(file);
         if path.exists() {
             move_to_trash(&path)?;
         }
     }
+    // Re-read so concurrent manifest updates are not lost.
+    let mut manifest = read_manifest(directory)?;
     manifest.audio_removed_at_ms = Some(now_ms());
     write_manifest(directory, &manifest)
 }

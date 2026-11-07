@@ -732,14 +732,6 @@ fn has_recorded_audio(manifest: &MeetingManifest) -> bool {
     manifest.system.samples > 0 || manifest.microphone.samples > 0
 }
 
-/// Whether a meeting's WAV tracks are still on disk (Labs › Expire meeting
-/// audio separately may have moved them to the Trash).
-fn audio_tracks_exist(directory: &Path, manifest: &MeetingManifest) -> bool {
-    [&manifest.system.file, &manifest.microphone.file]
-        .iter()
-        .any(|file| directory.join(file).exists())
-}
-
 fn prepare_for_transcription(
     directory: &Path,
     manifest: &mut MeetingManifest,
@@ -1248,7 +1240,7 @@ pub fn transcribe_meeting(id: &str) -> Result<MeetingManifest> {
         return Err(eyre!("Stop the recording before transcribing it"));
     }
     let mut manifest = read_manifest(&directory)?;
-    if manifest.audio_removed_at_ms.is_some() || !audio_tracks_exist(&directory, &manifest) {
+    if manifest.audio_removed_at_ms.is_some() {
         return Err(eyre!("this meeting's audio was deleted"));
     }
     if !has_recorded_audio(&manifest) {

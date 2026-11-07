@@ -425,7 +425,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
             Feature::ExpireMeetingAudio,
             Some(&CLOCK),
             tr("Expire meeting audio separately"),
-            tr("Choose how long to keep meeting audio. Transcripts, notes and summaries follow Keep meetings."),
+            tr("Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings."),
         ));
     }
     rows.push(row(

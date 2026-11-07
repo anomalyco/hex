@@ -581,7 +581,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Keep audio", "Хранить аудио"),
     ("Follow Keep meetings", "Как «Хранить встречи»"),
     ("Expire meeting audio separately", "Удалять аудио встреч отдельно"),
-    ("Choose how long to keep meeting audio. Transcripts, notes and summaries follow Keep meetings.", "Выберите, как долго хранить аудио встреч. Расшифровки, заметки и сводки следуют параметру «Хранить встречи»."),
+    ("Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings.", "Выберите, как долго хранить аудио встреч. Расшифровки, заметки и сводки следуют параметру «Хранить встречи»."),
     ("Audio follows Keep meetings. Choose a time to delete only meeting audio first", "Аудио следует параметру «Хранить встречи». Выберите срок, чтобы сначала удалять только аудио встреч"),
     ("Finished meetings keep their transcript, notes, summary, and Markdown after their audio moves to the Trash", "Завершённые встречи сохраняют расшифровку, заметки, сводку и Markdown после перемещения аудио в корзину"),
     ("Audio, transcripts, notes, and Hex's Markdown copy move to the Trash", "Звук, расшифровки, заметки и копия Markdown от Hex перемещаются в Корзину"),
@@ -1180,8 +1180,7 @@ mod tests {
     #[test]
     fn every_interface_string_has_a_russian_translation() {
         let russian = super::table();
-        let missing: Vec<&str> = super::super::TRANSLATIONS
-            .iter()
+        let missing: Vec<&str> = super::super::all_translations()
             .map(|(english, _)| *english)
             .filter(|english| russian.get(english).is_none_or(|text| text.is_empty()))
             .collect();

@@ -611,6 +611,44 @@ fn audio_expiry_moves_only_the_wavs_and_records_it() {
 }
 
 #[test]
+fn audio_expiry_keeps_a_rename_that_lands_while_the_wavs_move() {
+    let (base, directory) = finished_meeting("audio-expiry-rename", "Design sync");
+    let mut manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    manifest.export_sha256 = file_sha256(&export);
+    write_manifest(&directory, &manifest).unwrap();
+    fs::write(directory.join("system.wav"), b"system").unwrap();
+    fs::write(directory.join("microphone.wav"), b"microphone").unwrap();
+    let mut renamed = None;
+    trash_audio_tracks(
+        &directory,
+        |_| false,
+        |path| {
+            if renamed.is_none() {
+                renamed = Some(rename_meeting(&directory, "Arcade planning").unwrap());
+            }
+            fs::remove_file(path)?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    let renamed = renamed.expect("the rename ran before the first WAV moved");
+    assert!(
+        renamed.export_sha256.is_some(),
+        "the rename claimed its copy"
+    );
+    let manifest = read_manifest(&directory).unwrap();
+    assert_eq!(manifest.title, "Arcade planning");
+    assert_eq!(manifest.export_sha256, renamed.export_sha256);
+    assert!(manifest.audio_removed_at_ms.is_some());
+    assert_eq!(
+        file_sha256(manifest.export_path.as_ref().unwrap()),
+        manifest.export_sha256
+    );
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
 fn audio_expiry_leaves_unfinished_pending_locked_or_annotated_meetings() {
     let (base, directory) = finished_meeting("audio-skip", "Design sync");
     fs::write(directory.join("system.wav"), b"system").unwrap();

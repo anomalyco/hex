@@ -1156,7 +1156,8 @@ Meetings › Settings -> Keep audio, right under Keep meetings
 │   Follow Keep meetings / 24 hours / 7 days / 30 days / Forever
 │   `meetings.audio_retention` day|week|month|forever, or omitted
 │   ├── Follow Keep meetings (default) -> audio follows `meetings.retention`
-│   ├── Chosen -> only that window applies to the WAVs
+│   ├── Chosen -> only that window applies to the WAVs; at or beyond Keep
+│   │   meetings it has no effect, since the whole meeting expires first
 │   └── Off -> no Keep audio row, and no separate audio pass
 Meeting controller, lab on and an audio retention chosen // labs.expire_meeting_audio
 ├── Runs after the whole-meeting pass, at launch, hourly, and soon after
@@ -1190,6 +1191,8 @@ Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
 `separate_audio_expiry_covers_only_finished_meetings_older_than_it`,
 `audio_expiry_moves_only_the_wavs_and_records_it`, and
 `audio_expiry_leaves_unfinished_pending_locked_or_annotated_meetings`;
+`keep_audio_shows_with_its_lab_and_saves_its_window` in
+[tests/panes.rs](../../src/rune_ui/tests/panes.rs);
 `a_separate_audio_retention_needs_its_lab_and_a_choice` in
 [app_settings/meetings.rs](../../src/app_settings/meetings.rs), and
 `an_unreadable_setting_keeps_its_default_and_the_rest_loads` in

@@ -83,7 +83,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
 ├── Expire meeting audio separately no labs.expire_meeting_audio (every OS with Meetings)
 │                                        Meetings › Settings adds Keep audio under Keep meetings: finished meetings drop
-│                                        their WAVs on their own schedule, keeping transcript, notes, summary, and Markdown
+│                                        their WAVs on their own schedule (at or beyond Keep meetings it has no effect),
+│                                        keeping transcript, notes, summary, and Markdown
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
@@ -1256,7 +1257,9 @@ While on, Meetings › Settings shows **Keep audio** under **Keep meetings**
 with Follow Keep meetings, 24 hours, 7 days, 30 days, and Forever; the choice
 persists as `meetings.audio_retention` (omitted while unchosen, like
 `meetings.retention`). Follow Keep meetings, or no choice, means audio follows
-the whole-meeting retention, exactly as today. Chosen, the meeting controller
+the whole-meeting retention, exactly as today. A chosen window at or beyond
+Keep meetings has no effect: the whole meeting expires first and takes its
+audio with it. Chosen, the meeting controller
 runs a second pass after the whole-meeting one at launch, hourly, and soon
 after either retention or the lab changes: a Complete meeting (its final
 transcript published), with no `final.pending`, no recorder lock, and no notes
@@ -1279,7 +1282,9 @@ changing its status. Checks:
 `a_separate_audio_retention_needs_its_lab_and_a_choice` in
 [meetings.rs](../../src/app_settings/meetings.rs);
 `expire_meeting_audio_is_its_own_bit_and_off_by_default` in
-[labs.rs](../../src/labs.rs); `every_persisted_setting_has_a_cli_key` in
+[labs.rs](../../src/labs.rs); `keep_audio_shows_with_its_lab_and_saves_its_window`
+in [tests/panes.rs](../../src/rune_ui/tests/panes.rs);
+`every_persisted_setting_has_a_cli_key` in
 [control/settings.rs](../../src/control/settings.rs). Not yet observed: a real
 pass moving WAVs to a real Trash. The Labs page goldens (`mac-labs`,
 `windows-labs`, `linux-labs`) show the new card.
