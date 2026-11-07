@@ -1211,10 +1211,14 @@ mod tests {
                 "{name}: {typed}"
             );
         }
+        // The five typo marks come from the swearing scene, which only test
+        // and debug builds carry.
+        #[cfg(hex_dev_onboarding)]
         let a = Scene::play(
             &t,
             Box::leak(Box::new(scene_script::bundled("A-incontinence.scene"))),
         );
+        #[cfg(hex_dev_onboarding)]
         assert_eq!(a.typos(), 5);
     }
 

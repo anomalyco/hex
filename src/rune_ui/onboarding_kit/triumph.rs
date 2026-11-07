@@ -372,6 +372,9 @@ mod tests {
         }
     }
 
+    /// The swearing scenes are the only long payoff, and only test and debug
+    /// builds carry them: a release build has nothing to plan here.
+    #[cfg(hex_dev_onboarding)]
     #[test]
     fn the_cheers_cascade_and_the_effects_follow() {
         let t = Timing::default();
