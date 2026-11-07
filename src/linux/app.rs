@@ -148,7 +148,7 @@ struct LinuxDesktopHost {
     updater: crate::updater::Updater,
     output: crate::linux::dictation::DictationOutput,
     /// The local API's `/dictations` controls, for whichever listener runs.
-    dictations: crate::linux::dictation::DictationQueue,
+    dictations: crate::dictation::service::DictationQueue,
     /// Hosts the personal transformations workspace while a mode uses one.
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
@@ -626,7 +626,7 @@ impl LinuxDesktopHost {
             transcription_error: None,
             updater,
             output,
-            dictations: crate::linux::dictation::DictationQueue::default(),
+            dictations: crate::dictation::service::DictationQueue::default(),
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
             settings_modified: settings_modified(),

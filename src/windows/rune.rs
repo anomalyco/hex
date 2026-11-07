@@ -232,7 +232,12 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         })
         .map_err(|_| eyre!("the Hex runtime already started"))?;
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
-    let local_api = crate::local_api::LocalApi::start_for_app(&event_path, control_calls, None);
+    let (dictation_controls, dictations) = mpsc::sync_channel(8);
+    let local_api = crate::local_api::LocalApi::start_for_app(
+        &event_path,
+        control_calls,
+        Some(dictation_controls),
+    );
     let quit = window.clone();
     let runtime_tray = tray.clone();
     let runtime_shared = shared.clone();
@@ -249,6 +254,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                 shutdown,
                 hud,
                 runtime_tray.as_deref(),
+                dictations.into(),
             );
             quit.quit();
         })?;
@@ -305,12 +311,19 @@ fn run_runtime(
     shutdown: &AtomicBool,
     indicator: crate::rune_hud::HudSender,
     tray: Option<&rune::Tray>,
+    dictations: crate::dictation::service::DictationQueue,
 ) {
     let mut tray_view = None;
     let mut tray_meetings = None;
     indicator.set_position(settings.indicator_position);
-    let mut host =
-        WindowsDesktopHost::new(event_path, settings, settings_error, history, indicator);
+    let mut host = WindowsDesktopHost::new(
+        event_path,
+        settings,
+        settings_error,
+        history,
+        indicator,
+        dictations,
+    );
     loop {
         let mut next = match requests.recv_timeout(RUNTIME_TICK) {
             Ok(request) => Some(request),

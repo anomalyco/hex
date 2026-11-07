@@ -2174,12 +2174,16 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No silence gate                  // model output, unlike hotkey dictation;
 │   │                                     // only recognition-hint echoes are dropped
-│   ├── Linux -> The listener records it (dictation::service owner)
+│   ├── Linux, Windows -> The listener records it (dictation::service owner)
+│   │   ├── With the microphone chosen in Settings, as the shortcut does
 │   │   ├── Shortcut or `hex dictation` records -> 409 dictation-busy
 │   │   ├── Client's dictation records -> shortcut starts and ends nothing
 │   │   ├── Lapsed lease or owner's cancel -> only that dictation is dropped
-│   │   └── Microphone lost -> finish answers microphone-lost (no kept clip)
-│   └── Windows, hex service -> serviceCapture false, 404 service-capture-unavailable
+│   │   ├── Microphone lost -> finish answers microphone-lost (no kept clip)
+│   │   └── Start with "partials": true -> GET /dictations/{id}/partials
+│   │       └── SSE {stable, tentative} while the model streams (GPU)
+│   ├── macOS -> No partials: dictationPartials false; the SSE ends at once
+│   └── hex service -> serviceCapture false, 404 service-capture-unavailable
 └── Distribution
     ├── SDK 0.3.0 -> Published
     └── Turnkey signed helper -> Unfinished
@@ -2201,6 +2205,18 @@ without a hold threshold or release tail. Unit tests cover ownership, lease
 expiry, busy refusal beside a shortcut capture, and the HTTP round trip
 (`local_api` tests now run on Linux). A live Linux microphone run through the
 SDK is unverified.
+
+Windows `/dictations` uses the same owner in the listener
+([windows/dictation.rs](../../src/windows/dictation.rs)), so a client gets
+Hex's microphone choice, pre-roll, and While dictating behavior, and the HUD
+shows the recording. Live text is opt-in per dictation: `POST /dictations
+{"source": "…", "partials": true}` holds a live-text demand for the
+recording's stream, and `GET /dictations/{id}/partials` (owner token, once)
+sends `data: {"stable": "…", "tentative": "…"}` after each change until the
+dictation ends; it is provisional, and `/finish` returns the transcript.
+`/capabilities` reports `dictationPartials`. Checked live on Windows x64
+(start, partials subscription, finish, a silent room's empty transcript);
+not run on Linux.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and
