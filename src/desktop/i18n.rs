@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 mod french;
+mod meetings;
 mod portuguese;
 mod russian;
 mod text_language;
@@ -329,12 +330,16 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
     static TABLES: OnceLock<[HashMap<&'static str, &'static str>; 6]> = OnceLock::new();
     TABLES.get_or_init(|| {
         std::array::from_fn(|column| {
-            TRANSLATIONS
-                .iter()
+            all_translations()
                 .map(|(english, translated)| (*english, translated[column]))
                 .collect()
         })
     })
+}
+
+/// Every translated string: the main table and the Meetings rows beside it.
+fn all_translations() -> impl Iterator<Item = &'static (&'static str, [&'static str; 6])> {
+    TRANSLATIONS.iter().chain(meetings::TRANSLATIONS)
 }
 
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
@@ -1374,19 +1379,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("You", ["Ty", "你", "あなた", "Du", "Tú", "Ви"]),
     ("Your 5s sample", ["Twoja próbka 5 s", "你的 5 秒录音", "あなたの5秒サンプル", "Deine 5-Sek.-Aufnahme", "Tu muestra de 5 s", "Ваш зразок на 5 с"]),
     ("Your voice", ["Twój głos", "你的声音", "自分の声", "Deine Stimme", "Tu voz", "Ваш голос"]),
-    // The Rune Meetings pane and the OS-only Settings rows.
-    ("Today", ["Dzisiaj", "今天", "今日", "Heute", "Hoy", "Сьогодні"]),
-    ("Yesterday", ["Wczoraj", "昨天", "昨日", "Gestern", "Ayer", "Учора"]),
-    ("More", ["Więcej", "更多", "その他", "Mehr", "Más", "Більше"]),
-    ("Them", ["Rozmówcy", "对方", "相手", "Andere", "Ellos", "Співрозмовники"]),
-    ("Meeting titles and short summaries, written on this Mac", ["Tytuły spotkań i krótkie podsumowania tworzone na tym Macu", "会议标题和简短摘要，在这台 Mac 上生成", "会議のタイトルと短い要約をこの Mac で作成", "Besprechungstitel und kurze Zusammenfassungen, auf diesem Mac erstellt", "Títulos de reuniones y resúmenes breves, escritos en este Mac", "Назви зустрічей і короткі підсумки, створені на цьому Mac"]),
-    ("This Mac does not support Apple Intelligence", ["Ten Mac nie obsługuje Apple Intelligence", "这台 Mac 不支持 Apple 智能", "この Mac は Apple Intelligence に対応していません", "Dieser Mac unterstützt Apple Intelligence nicht", "Este Mac no es compatible con Apple Intelligence", "Цей Mac не підтримує Apple Intelligence"]),
-    ("Turn on Apple Intelligence in System Settings to use this", ["Włącz Apple Intelligence w Ustawieniach systemowych, aby z tego korzystać", "在“系统设置”中打开 Apple 智能以使用此功能", "使用するにはシステム設定で Apple Intelligence をオンにしてください", "Aktiviere Apple Intelligence in den Systemeinstellungen, um dies zu nutzen", "Activa Apple Intelligence en Ajustes del Sistema para usar esto", "Щоб скористатися цим, увімкніть Apple Intelligence у Системних параметрах"]),
-    ("The Apple Intelligence model is still downloading", ["Model Apple Intelligence wciąż się pobiera", "Apple 智能模型仍在下载", "Apple Intelligence のモデルをダウンロード中です", "Das Apple-Intelligence-Modell wird noch geladen", "El modelo de Apple Intelligence aún se está descargando", "Модель Apple Intelligence ще завантажується"]),
-    ("Requires macOS 26 or later", ["Wymaga macOS 26 lub nowszego", "需要 macOS 26 或更高版本", "macOS 26 以降が必要です", "Erfordert macOS 26 oder neuer", "Requiere macOS 26 o posterior", "Потрібна macOS 26 або новіша"]),
-    ("Apple Intelligence is unavailable", ["Apple Intelligence jest niedostępne", "Apple 智能不可用", "Apple Intelligence は利用できません", "Apple Intelligence ist nicht verfügbar", "Apple Intelligence no está disponible", "Немає доступу до Apple Intelligence"]),
-    ("Still grey? Fix it", ["Nadal szare? Napraw", "还是灰色的？修复", "まだグレーのまま？修復", "Noch grau? Beheben", "¿Sigue gris? Reparar", "Ще сіре? Виправити"]),
-    ("An older Hex entry can keep this off", ["Starszy wpis Hex może to blokować", "旧版 Hex 条目可能会导致此项无法开启", "古い Hex の項目が妨げになっている場合があります", "Ein älterer Hex-Eintrag kann dies blockieren", "Una entrada anterior de Hex puede impedirlo", "Старий запис Hex може блокувати це"]),
     ("and answer the one that's lit", ["i odpowiedz na podświetloną", "并回复亮起的那条", "して、光っているメッセージに答えます", "und beantworte die hervorgehobene", "y responde al que está iluminado", "і дайте відповідь на підсвічене"]),
     ("and say anything.", ["i powiedz cokolwiek.", "，随便说点什么。", "して、何か話してください。", "und sag irgendetwas.", "y di cualquier cosa.", "і скажіть будь-що."]),
     ("and say it.", ["i to powiedz.", "，说出来。", "して、話してください。", "und sprich es aus.", "y dilo.", "і скажіть це."]),
@@ -1515,7 +1507,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::TRANSLATIONS;
+    use super::all_translations;
     use super::{language_from_env, primary_subtag};
 
     #[test]
@@ -1644,7 +1636,7 @@ mod tests {
 
     #[test]
     fn templates_keep_their_placeholder_in_every_language() {
-        for (english, translated) in TRANSLATIONS {
+        for (english, translated) in all_translations() {
             if english.contains("{}") {
                 for translation in translated {
                     assert!(
@@ -1773,7 +1765,7 @@ mod tests {
 
     #[test]
     fn every_translated_string_has_every_language() {
-        let table: std::collections::HashMap<_, _> = TRANSLATIONS.iter().copied().collect();
+        let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
         let mut checked = 0;
         for source in SOURCES {
             for literal in translated_literals(source) {
@@ -1797,7 +1789,7 @@ mod tests {
     #[test]
     fn every_sound_set_string_has_every_language() {
         use crate::feedback::{Cue, SoundSet};
-        let table: std::collections::HashMap<_, _> = TRANSLATIONS.iter().copied().collect();
+        let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
         let strings = SoundSet::ALL
             .into_iter()
             .flat_map(|set| [set.name(), set.character()])
@@ -1816,7 +1808,7 @@ mod tests {
 
     #[test]
     fn named_placeholders_survive_translation() {
-        for (english, translated) in TRANSLATIONS {
+        for (english, translated) in all_translations() {
             let names = english
                 .split('{')
                 .skip(1)
@@ -1837,7 +1829,7 @@ mod tests {
     #[test]
     fn keys_are_unique() {
         let mut seen = std::collections::HashSet::new();
-        for (english, _) in TRANSLATIONS {
+        for (english, _) in all_translations() {
             assert!(
                 seen.insert(english),
                 "duplicate translation key {english:?}"
