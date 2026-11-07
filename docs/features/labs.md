@@ -66,6 +66,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
+├── ⌘Q closes Settings no labs.quit_closes_window      (macOS) the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, the menu bar icon still quits (#1473)
 ├── Notch indicator no    labs.notch_indicator         (macOS) with the indicator at Top, the notch widens sideways in the Dynamic Island's compact style: an orange mic and level bars, the macOS spinner, a green checkmark; flat screens keep it below the menu bar
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
 ├── Vocabulary in meeting notes no labs.meeting_notes_vocabulary (every OS with Meetings)
@@ -965,6 +966,23 @@ only); `hide_menu_bar_icon_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: the icon hiding on a real
 Mac, or macOS restoring an item's remembered visibility; the row renders
 only in macOS builds, so no golden changes.
+
+⌘Q closes Settings (`quit-closes-window`, issue 1473, macOS): for people who
+press ⌘Q to put the Settings window away and expect dictation to keep running.
+Only the app menu's Quit Hex item (⌘Q, `quitHex:` in the main menu) changes:
+while the lab is on it closes the window, exactly as Close Window (⌘W) does, so
+Hex hides the window, restores the Dock policy for a closed window, and keeps
+listening. The gate, `labs::quit_closes_window()`, is read each time
+`macos_rune::MenuTarget::quit_hex` runs, so turning it on or off applies at
+once. The status item's Quit Hex (⌘Q in its own menu), AppKit's terminate (the
+quit Apple event, logout, the Dock's Quit), `hex quit`, and `hex restart` still
+quit and drain as before, and with the lab off ⌘Q quits exactly as it did.
+Checks: `quit_closes_window_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs); the existing menu, close, and drain tests are
+unchanged. Not yet observed: ⌘Q with the lab on in a real macOS build (this
+change was built and tested on Linux, where the row and the handler don't
+exist, so the handler's branch has no compiled check yet); the row renders only
+in macOS builds, so no golden changes.
 
 Notch indicator (`notch-indicator`, macOS only): for MacBooks with a
 notch, a recording indicator in the Dynamic Island's compact style that

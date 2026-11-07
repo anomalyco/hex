@@ -504,6 +504,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Hide menu bar icon"),
                 tr("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings"),
             ));
+            // macOS's app menu Quit Hex closes the window instead.
+            rows.push(row(
+                Feature::QuitClosesWindow,
+                None,
+                tr("⌘Q closes Settings"),
+                tr("⌘Q closes the Settings window instead of quitting Hex. Dictation keeps running; quit from the menu bar icon"),
+            ));
             // macOS's HUD reads the screen's notch from NSScreen.
             rows.push(row(
                 Feature::NotchIndicator,
@@ -751,6 +758,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::SettingsSearch => "lab-settings-search",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
+        Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
         Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
