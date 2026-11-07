@@ -36,6 +36,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar", "Em uma tela com notch, o indicador de gravação sai do notch em vez de ficar abaixo da barra de menus"),
     ("Hide menu bar icon", "Ocultar ícone da barra de menus"),
     ("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings", "Oculta o ícone do Hex na barra de menus. Os atalhos continuam funcionando; abra o Hex de novo pelo Finder ou Spotlight para ver os Ajustes"),
+    ("⌘Q closes Settings", "⌘Q fecha os Ajustes"),
+    ("⌘Q closes the Settings window instead of quitting Hex. Dictation keeps running; quit from the menu bar icon", "⌘Q fecha a janela de Ajustes em vez de encerrar o Hex. O ditado continua funcionando; para encerrar, use o ícone da barra de menus"),
     ("Movable meeting capsules", "Cápsulas de reunião móveis"),
     ("Drag meeting capsules out of the way; they come back in the corner you left them", "Arraste as cápsulas de reunião para fora do caminho; elas voltam no canto onde você as deixou"),
     ("Choose meeting summary model", "Escolher o modelo dos resumos de reunião"),

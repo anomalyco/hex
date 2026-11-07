@@ -67,6 +67,8 @@ pub struct LabsSettings {
     /// General's pane starts with a search field that filters its rows.
     pub settings_search: bool,
     pub hide_menu_bar_icon: bool,
+    /// ⌘Q closes the Settings window instead of quitting Hex (macOS).
+    pub quit_closes_window: bool,
     pub movable_meeting_capsules: bool,
     /// A paste restores the clipboard through a running XWayland on Wayland desktops without data-control, such as GNOME (Linux, issue 1111).
     pub gnome_clipboard_restore: bool,
@@ -135,6 +137,7 @@ impl Default for LabsSettings {
             keep_recordings: false,
             settings_search: false,
             hide_menu_bar_icon: false,
+            quit_closes_window: false,
             movable_meeting_capsules: false,
             gnome_clipboard_restore: false,
             meeting_notes_vocabulary: false,

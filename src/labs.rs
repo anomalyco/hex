@@ -114,10 +114,11 @@ pub enum Feature {
     MoreCallApps,
     AnnotateReplay,
     MeetingImport,
+    QuitClosesWindow,
 }
 
 impl Feature {
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 51] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -168,6 +169,7 @@ impl Feature {
         Self::MoreCallApps,
         Self::AnnotateReplay,
         Self::MeetingImport,
+        Self::QuitClosesWindow,
     ];
 
     /// The features this OS and build have.
@@ -242,7 +244,8 @@ impl Feature {
             | Self::MoreCallApps
             | Self::AnnotateReplay
             | Self::MeetingImport
-            | Self::NotchIndicator => Audience::Everyone,
+            | Self::NotchIndicator
+            | Self::QuitClosesWindow => Audience::Everyone,
         }
     }
 
@@ -297,6 +300,7 @@ impl Feature {
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay => 20261104,
             Self::MoreCallApps | Self::SettingsSearch | Self::MeetingImport => 20261106,
+            Self::QuitClosesWindow => 20261107,
         }
     }
 
@@ -351,6 +355,7 @@ impl Feature {
             | Self::SidedChords
             | Self::RecentDictations
             | Self::HideMenuBarIcon
+            | Self::QuitClosesWindow
             | Self::NotchIndicator
             | Self::Screenshots => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
@@ -443,6 +448,7 @@ impl Feature {
             Self::MoreCallApps => "more-call-apps",
             Self::AnnotateReplay => "annotate-replay",
             Self::MeetingImport => "meeting-import",
+            Self::QuitClosesWindow => "quit-closes-window",
         }
     }
 
@@ -499,6 +505,7 @@ impl Feature {
             Self::MoreCallApps => "labs.more_call_apps",
             Self::AnnotateReplay => "labs.annotate_replay",
             Self::MeetingImport => "labs.meeting_import",
+            Self::QuitClosesWindow => "labs.quit_closes_window",
         }
     }
 
@@ -635,6 +642,9 @@ impl Feature {
             Self::MeetingImport => {
                 "Import an audio file into Meetings and transcribe it on this Mac"
             }
+            Self::QuitClosesWindow => {
+                "⌘Q closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits"
+            }
         }
     }
 
@@ -695,6 +705,7 @@ impl Feature {
             Self::MoreCallApps => settings.labs.more_call_apps,
             Self::AnnotateReplay => settings.labs.annotate_replay,
             Self::MeetingImport => settings.labs.meeting_import,
+            Self::QuitClosesWindow => settings.labs.quit_closes_window,
         }
     }
 
@@ -753,6 +764,7 @@ impl Feature {
             &mut labs.more_call_apps,
             &mut labs.annotate_replay,
             &mut labs.meeting_import,
+            &mut labs.quit_closes_window,
         ]
     }
 
@@ -811,6 +823,7 @@ impl Feature {
             Self::MoreCallApps => settings.labs.more_call_apps = on,
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
             Self::MeetingImport => settings.labs.meeting_import = on,
+            Self::QuitClosesWindow => settings.labs.quit_closes_window = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -865,6 +878,8 @@ const MINUTES_BITS: u32 = 11;
 const MINUTES_MASK: u64 = (1 << MINUTES_BITS) - 1;
 /// Bits 1..31 are full, so this switch sits above the minutes.
 const MEETING_IMPORT: u64 = 1 << (MINUTES_SHIFT + MINUTES_BITS as u64);
+/// The next bit above Import audio's switch, clear of the minutes below it.
+const QUIT_CLOSES_WINDOW: u64 = MEETING_IMPORT << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1023,6 +1038,13 @@ pub fn keep_recordings() -> bool {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn hide_menu_bar_icon() -> bool {
     on(HIDE_MENU_BAR_ICON) && Feature::HideMenuBarIcon.on_this_os()
+}
+
+/// ⌘Q closes the Settings window instead of quitting Hex (macOS; read each
+/// time the app menu's Quit Hex runs).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn quit_closes_window() -> bool {
+    on(QUIT_CLOSES_WINDOW) && Feature::QuitClosesWindow.on_this_os()
 }
 
 /// The meeting panel capsules (Meeting transcript ready, Recording
@@ -1224,6 +1246,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MeetingImport,
             settings.meeting_import,
             MEETING_IMPORT,
+        ),
+        (
+            Feature::QuitClosesWindow,
+            settings.quit_closes_window,
+            QUIT_CLOSES_WINDOW,
         ),
         (
             Feature::GnomeMeetingCapsules,
@@ -1680,6 +1707,20 @@ mod tests {
         assert_ne!(state & HIDE_MENU_BAR_ICON, 0);
         assert_eq!(state & KEEP_RECORDINGS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn quit_closes_window_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & QUIT_CLOSES_WINDOW, 0);
+        labs.quit_closes_window = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & QUIT_CLOSES_WINDOW, 0);
+        assert_eq!(state & MEETING_IMPORT, 0);
+        assert_eq!(state & HIDE_MENU_BAR_ICON, 0);
+        // The switch sits above the minutes, which keep their value.
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
     }
 
     #[test]

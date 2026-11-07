@@ -1360,7 +1360,13 @@ objc2::define_class!(
 
         #[unsafe(method(quitHex:))]
         fn quit_hex(&self, _sender: Option<&AnyObject>) {
-            with_window(|window| window.quit());
+            // Labs › ⌘Q closes Settings: the window hides and Hex keeps
+            // dictating; the status item's Quit Hex still quits.
+            if crate::labs::quit_closes_window() {
+                with_window(|window| window.close());
+            } else {
+                with_window(|window| window.quit());
+            }
         }
 
         #[unsafe(method(closeWindow:))]

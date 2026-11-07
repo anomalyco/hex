@@ -1274,6 +1274,8 @@ Menu bar and Settings                    // maintenance
 │   ├── Paste Last Dictation ⌥⇧V (saved binding), Copy Recent Dictation ▸ (Labs),
 │   │   Copy Last Meeting Transcript (Meetings on), Speech Model ▸
 │   ├── Settings… ⌘, · Check for Updates… · Quit Hex ⌘Q
+│   │   └── Labs > ⌘Q closes Settings (off, #1473) -> ⌘Q closes the Settings
+│   │       window instead; dictation keeps running, the menu bar icon quits (labs.md)
 │   ├── No Meetings… (Settings… opens the same window) and no Show Hex in
 │   │   Screen Recordings (Annotate's pane has it)
 │   └── check: the_menu_reads_meeting_then_actions_then_the_app,
@@ -1287,7 +1289,7 @@ Menu bar and Settings                    // maintenance
 ├── Check for Updates -> The updater (maintain.updates); opens the window, whose
 │   footer then says "Checking for updates…", "Hex is up to date", or
 │   "Couldn't check for updates" (#1120)
-└── Quit -> Orderly shutdown
+└── Quit -> Orderly shutdown (⌘Q closes Settings instead while its Lab is on)
 ```
 
 ```ts
