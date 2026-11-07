@@ -578,7 +578,7 @@ impl Feature {
                 "Use Menu, Pause, or Scroll Lock alone as a shortcut, such as Caps Lock remapped to Menu"
             }
             Self::HistoryStats => {
-                "Show a summary of your retained dictations at the top of History, with hex history stats"
+                "Add a Stats button to History that shows a summary of your retained dictations, with hex history stats"
             }
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"

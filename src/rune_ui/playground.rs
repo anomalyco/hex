@@ -190,6 +190,7 @@ const PATHS: &[(&str, &str)] = &[
     ("history", "Window/History/History"),
     ("history-menu", "Window/History/Retention menu"),
     ("history-clear", "Window/History/Clear all asks first"),
+    ("history-stats", "Window/History/Stats dialog"),
     ("history-empty", "Window/History/Empty"),
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),

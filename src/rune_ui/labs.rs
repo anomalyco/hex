@@ -615,7 +615,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         Feature::HistoryStats,
         None,
         tr("Dictation stats"),
-        tr("Show a summary of your retained dictations at the top of History, with hex history stats"),
+        tr("Add a Stats button to History that shows a summary of your retained dictations, with hex history stats"),
     ));
     rows.push(row(
         Feature::KeepRecordings,

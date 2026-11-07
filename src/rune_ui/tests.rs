@@ -1302,6 +1302,95 @@ fn history_selects_deletes_and_clears_in_two_steps() {
 }
 
 #[test]
+fn history_stats_button_opens_and_closes_the_dialog() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    assert!(!rt.state.settings.labs.history_stats);
+    assert!(rt.find("history-stats-open").is_none(), "off, no Stats");
+    rt.state.history.stats = Some(history::HistoryPane::fixture_stats());
+    rt.state.settings.labs.history_stats = true;
+    crate::labs::apply(&rt.state.settings.labs);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("history-stats-open").is_some(), "on, Stats shows");
+    assert!(
+        rt.find("history-stats").is_none(),
+        "the summary is no longer a block above the list"
+    );
+
+    tap(&mut rt, "history-stats-open");
+    assert!(rt.state.history.stats_open);
+    assert!(rt.find("history-stats-dialog").is_some());
+    assert!(texts(&rt).iter().any(|text| text == "Dictation stats"));
+    tap(&mut rt, "history-stats-close");
+    assert!(!rt.state.history.stats_open);
+    assert!(rt.find("history-stats-dialog").is_none());
+
+    tap(&mut rt, "history-stats-open");
+    let pane = rt.state.pane;
+    key(
+        &mut rt,
+        Key::Command('1'),
+        Mods {
+            cmd: true,
+            ..Mods::default()
+        },
+    );
+    assert!(rt.state.history.stats_open);
+    assert_eq!(
+        rt.state.pane, pane,
+        "Command-1 waits while the stats dialog is open"
+    );
+    rt.update(on_close);
+    settle(&mut rt);
+    assert!(
+        !rt.state.history.stats_open,
+        "closing the window closes the dialog"
+    );
+
+    tap(&mut rt, "history-stats-open");
+    rt.update(|ui, tx| show(ui, Destination::History, tx));
+    settle(&mut rt);
+    assert!(
+        !rt.state.history.stats_open,
+        "showing History again closes the dialog"
+    );
+
+    tap(&mut rt, "history-stats-open");
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    assert!(!rt.state.history.stats_open, "Escape closes the dialog");
+    assert!(
+        focused(&rt).ends_with("history-stats-open"),
+        "focus returns to Stats: {}",
+        focused(&rt)
+    );
+
+    tap(&mut rt, "history-stats-open");
+    rt.state.history.stats = Some(Default::default());
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        !rt.state.history.stats_open,
+        "emptying the stats closes the dialog"
+    );
+    assert!(rt.find("history-stats-open").is_none());
+
+    rt.state.history.stats = Some(history::HistoryPane::fixture_stats());
+    rt.invalidate();
+    settle(&mut rt);
+    tap(&mut rt, "history-stats-open");
+    rt.state.settings.labs.history_stats = false;
+    crate::labs::apply(&rt.state.settings.labs);
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        !rt.state.history.stats_open,
+        "turning the lab off closes the dialog"
+    );
+    assert!(rt.find("history-stats-open").is_none());
+}
+
+#[test]
 fn history_menu_sets_retention_and_keep_recordings() {
     let mut rt = runtime("history-menu", true, PANE_SIZE);
     let shown = texts(&rt);
