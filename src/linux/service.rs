@@ -110,7 +110,9 @@ pub(crate) fn refresh_x_authority() {
     if Path::new(&saved).exists() {
         return;
     }
-    let live = manager_environment("XAUTHORITY").filter(|path| Path::new(path).exists());
+    let live = manager_environment()
+        .and_then(|environment| environment_value(&environment, "XAUTHORITY"))
+        .filter(|path| Path::new(path).exists());
     // Called on the main thread before Hex starts any other thread.
     unsafe {
         match live {
@@ -123,12 +125,39 @@ pub(crate) fn refresh_x_authority() {
 /// A service the user manager started before the desktop imported its
 /// environment has no display: Hyprland, for one, imports nothing into
 /// systemd unless its config runs `dbus-update-activation-environment`
-/// (#756). Adopts the user manager's current `WAYLAND_DISPLAY`, else the
-/// newest Wayland socket of this user's in `XDG_RUNTIME_DIR` that accepts a
-/// connection. Returns the display it adopted. Called on the main thread
-/// before Hex starts any other thread.
+/// (#756). One started with only Xwayland's `DISPLAY` has the same problem on
+/// a Wayland desktop: its paste goes through X11, which native Wayland
+/// windows never see, and restoring that clipboard clears the compositor's.
+/// Adopts the Wayland display when this process has none: with no display at
+/// all, as before, or with only an X display when the session type is
+/// `wayland` (`XDG_SESSION_TYPE`, this process's else the user manager's).
+/// Any other explicit type (`x11`, `tty`, …) keeps its X display and its
+/// paste, and an absent type adopts only the user manager's live display.
+/// Returns the display it adopted. Called on the main thread before Hex starts
+/// any other thread.
 pub(crate) fn adopt_wayland_display() -> Option<String> {
-    if custom_root() || graphical_session() {
+    adopt_wayland_display_when(true)
+}
+
+/// A launcher adopts only behind Xwayland's `DISPLAY`: that is the one case
+/// where the session it computes, and writes to `session.env`, differs from
+/// the service's. With no display at all it keeps today's behavior, including
+/// "Start Hex from your graphical login session".
+pub(crate) fn adopt_wayland_display_for_launcher() -> Option<String> {
+    adopt_wayland_display_when(false)
+}
+
+fn adopt_wayland_display_when(adopt_without_display: bool) -> Option<String> {
+    // A custom root or a display already in this process's environment needs
+    // no user-manager query.
+    if custom_root() || process_environment("WAYLAND_DISPLAY").is_some() {
+        return None;
+    }
+    let display = process_environment("DISPLAY");
+    let own_session = process_environment("XDG_SESSION_TYPE");
+    // An explicit non-Wayland login keeps its X display, so the decision needs
+    // no user-manager read; `manager_environment` spawns `systemctl`.
+    if display.is_some() && explicit_non_wayland_session(own_session.as_deref()) {
         return None;
     }
     let uid = unsafe { libc::getuid() };
@@ -136,14 +165,94 @@ pub(crate) fn adopt_wayland_display() -> Option<String> {
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(format!("/run/user/{uid}")));
-    let display = manager_environment("WAYLAND_DISPLAY")
-        .filter(|display| wayland_socket(&runtime.join(display), uid))
-        .or_else(|| newest_wayland_socket(&runtime, uid))?;
+    // One user-manager read answers both keys the decision needs.
+    let manager = manager_environment();
+    let manager_display = manager
+        .as_deref()
+        .and_then(|environment| environment_value(environment, "WAYLAND_DISPLAY"));
+    let manager_socket = manager_display
+        .as_deref()
+        .is_some_and(|display| wayland_socket(&runtime.join(display), uid));
+    let session_type = own_session.or_else(|| {
+        manager
+            .as_deref()
+            .and_then(|environment| environment_value(environment, "XDG_SESSION_TYPE"))
+    });
+    // A manager display that no longer answers is not this login's.
+    let manager_display = manager_display.filter(|_| manager_socket);
+    let display = match wayland_adoption(
+        display.as_deref(),
+        session_type.as_deref(),
+        manager_socket,
+        adopt_without_display,
+    ) {
+        WaylandAdoption::Skip => return None,
+        WaylandAdoption::Manager => manager_display?,
+        WaylandAdoption::ManagerOrNewest => {
+            manager_display.or_else(|| newest_wayland_socket(&runtime, uid))?
+        }
+    };
     unsafe {
         std::env::set_var("XDG_RUNTIME_DIR", &runtime);
         std::env::set_var("WAYLAND_DISPLAY", &display);
     }
     Some(display)
+}
+
+/// Where `adopt_wayland_display` may take a Wayland display from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WaylandAdoption {
+    /// Nothing to adopt: a launcher with no display, or an X11 login.
+    Skip,
+    /// The user manager's live `WAYLAND_DISPLAY` is the login's Wayland
+    /// display.
+    Manager,
+    /// A Wayland login: the user manager's live `WAYLAND_DISPLAY`, else the
+    /// newest Wayland socket that answers.
+    ManagerOrNewest,
+}
+
+/// What a process may adopt, from its own display and the user manager's
+/// evidence. `session_type` is `XDG_SESSION_TYPE` from this process, else the
+/// user manager's; `manager_socket` says the manager's `WAYLAND_DISPLAY` names
+/// a live socket. With `DISPLAY` set, only an explicit `wayland` login scans
+/// for a socket. Any other explicit type (`x11`, `tty`, `mir`, …) keeps its X
+/// display even when the manager still names a nested compositor or another
+/// login's display; only an absent type adopts the manager's live display. A
+/// service with no display at all keeps its manager-else-newest path (#756); a
+/// launcher there keeps today's "start from your graphical login session".
+fn wayland_adoption(
+    display: Option<&str>,
+    session_type: Option<&str>,
+    manager_socket: bool,
+    adopt_without_display: bool,
+) -> WaylandAdoption {
+    // `session.env` writes an empty value for a display the desktop lacked.
+    let has_display = display.is_some_and(|display| !display.is_empty());
+    if !has_display {
+        return if adopt_without_display {
+            WaylandAdoption::ManagerOrNewest
+        } else {
+            WaylandAdoption::Skip
+        };
+    }
+    if explicit_non_wayland_session(session_type) {
+        return WaylandAdoption::Skip;
+    }
+    if session_type.is_some() {
+        return WaylandAdoption::ManagerOrNewest;
+    }
+    if manager_socket {
+        WaylandAdoption::Manager
+    } else {
+        WaylandAdoption::Skip
+    }
+}
+
+/// An explicit `XDG_SESSION_TYPE` other than `wayland` is evidence of a login
+/// that keeps its X display: `x11`, `tty` (startx), `mir`, `unspecified`, …
+fn explicit_non_wayland_session(session_type: Option<&str>) -> bool {
+    session_type.is_some_and(|session| !session.eq_ignore_ascii_case("wayland"))
 }
 
 /// The newest `wayland-*` socket in `runtime` that `uid` owns and that
@@ -175,9 +284,15 @@ fn wayland_socket(path: &Path, uid: u32) -> bool {
         && UnixStream::connect(path).is_ok()
 }
 
-/// A variable in the systemd user manager's environment, which the desktop
-/// session imports at each login.
-fn manager_environment(key: &str) -> Option<String> {
+/// A variable in this process's environment, where an empty value means
+/// unset: `session.env` writes empty values for a desktop's missing keys.
+fn process_environment(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|value| !value.is_empty())
+}
+
+/// The systemd user manager's environment, which the desktop session imports
+/// at each login. Read once per process that needs more than one key.
+fn manager_environment() -> Option<String> {
     if custom_root() {
         return None;
     }
@@ -187,8 +302,10 @@ fn manager_environment(key: &str) -> Option<String> {
         .stderr(std::process::Stdio::null())
         .output()
         .ok()?;
-    output.status.success().then_some(())?;
-    environment_value(&String::from_utf8_lossy(&output.stdout), key)
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn environment_value(environment: &str, key: &str) -> Option<String> {
@@ -1175,5 +1292,77 @@ mod tests {
             Some("/run/user/1000/.mutter-Xwaylandauth.X1")
         );
         assert_eq!(environment_value("XAUTHORITY=\n", "XAUTHORITY"), None);
+    }
+
+    #[test]
+    fn a_live_manager_socket_is_adopted_without_a_session_type() {
+        for adopt_without_display in [false, true] {
+            assert_eq!(
+                wayland_adoption(Some(":1"), None, true, adopt_without_display),
+                WaylandAdoption::Manager
+            );
+            assert_eq!(
+                wayland_adoption(Some(":1"), Some("tty"), true, adopt_without_display),
+                WaylandAdoption::Skip
+            );
+        }
+    }
+
+    #[test]
+    fn a_wayland_session_behind_an_x_display_may_scan_for_a_socket() {
+        for session in ["wayland", "Wayland"] {
+            for manager_socket in [false, true] {
+                assert_eq!(
+                    wayland_adoption(Some(":1"), Some(session), manager_socket, false),
+                    WaylandAdoption::ManagerOrNewest
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_explicit_non_wayland_login_keeps_its_x_display() {
+        for session in ["x11", "X11", "tty"] {
+            for adopt_without_display in [false, true] {
+                assert_eq!(
+                    wayland_adoption(Some(":1"), Some(session), true, adopt_without_display),
+                    WaylandAdoption::Skip
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_unknown_login_adopts_only_a_live_manager_socket() {
+        for adopt_without_display in [false, true] {
+            assert_eq!(
+                wayland_adoption(Some(":1"), None, true, adopt_without_display),
+                WaylandAdoption::Manager
+            );
+            assert_eq!(
+                wayland_adoption(Some(":1"), None, false, adopt_without_display),
+                WaylandAdoption::Skip
+            );
+            assert_eq!(
+                wayland_adoption(Some(":1"), Some("tty"), false, adopt_without_display),
+                WaylandAdoption::Skip
+            );
+        }
+    }
+
+    #[test]
+    fn no_display_keeps_service_discovery_but_not_a_launcher() {
+        for display in [None, Some("")] {
+            for manager_socket in [false, true] {
+                assert_eq!(
+                    wayland_adoption(display, Some("x11"), manager_socket, true),
+                    WaylandAdoption::ManagerOrNewest
+                );
+                assert_eq!(
+                    wayland_adoption(display, Some("wayland"), manager_socket, false),
+                    WaylandAdoption::Skip
+                );
+            }
+        }
     }
 }

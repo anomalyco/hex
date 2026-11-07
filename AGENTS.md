@@ -296,11 +296,18 @@ substitute for source inspection or a second roadmap.
   capture-transcribe-paste loop with Paste Last,
   and paste.
 - `linux/service` also adopts the session's Wayland display at `hex service`
-  start when the unit has none (Hyprland imports nothing into systemd; #756):
-  the user manager's `WAYLAND_DISPLAY`, else the newest answering
-  `$XDG_RUNTIME_DIR/wayland-*` socket the user owns. `linux/rune_hud`'s
-  `limitation()` names the HUD's failure: no display, no layer-shell, or
-  Rune's overlay error.
+  start when the unit has none, or has only Xwayland's `DISPLAY` on a Wayland
+  login (Hyprland imports nothing into systemd; #756): with `DISPLAY` set, an
+  explicit `wayland` `XDG_SESSION_TYPE` (Hex's, else the user manager's) takes
+  the manager's live `WAYLAND_DISPLAY`, else the newest answering
+  `$XDG_RUNTIME_DIR/wayland-*` socket the user owns. Any other explicit type
+  (`x11`, `tty`, `mir`, …) keeps its X display even when the manager still
+  names a nested compositor or another login's display, and only an absent
+  type adopts the manager's live display. Launchers (`hex`, `hex start`'s app,
+  `hex restart`) make the same decision before they compute or write
+  `session.env`, so both sides agree on the session; an explicit non-Wayland
+  type skips the user-manager read entirely. `linux/rune_hud`'s `limitation()`
+  names the HUD's failure: no display, no layer-shell, or Rune's overlay error.
 - `linux/gnome_shortcuts`: on GNOME without a GlobalShortcuts portal
   (GNOME 46, #781), Hex's own custom keybindings under
   `…/media-keys/custom-keybindings/hex-*/` via `gsettings`
