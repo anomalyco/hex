@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/Hona/strobe/main/schema/strobe.v1.json",
+  "$schema": "https://raw.githubusercontent.com/anomalyco/strobe/main/schema/strobe.v1.json",
   "build": {
     "command": "cargo build --locked --release --bin hex",
     "output": {
