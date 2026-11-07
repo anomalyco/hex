@@ -682,8 +682,10 @@ nothing for stats, and sums again when the entries or the toggle change, or
 once when the dialog closes because the stats emptied) and where
 `hex history stats` starts (off, it fails naming `hex labs on
 history-stats` before History is read), and the window's own setting for the
-button and dialog. Turning the switch off, emptying retained history, or
-leaving History closes the dialog. Off, History is exactly as before. Checks:
+button and dialog. Closing the window, opening History again from the menu bar
+or `hex window show history`, turning the switch off, emptying retained
+history, or leaving History closes the dialog, and Command-1…9 pane shortcuts
+wait while it is open. Off, History is exactly as before. Checks:
 the tests in [history/stats.rs](../../src/history/stats.rs) (words, speed,
 changes, top apps, streak across a gap, expired entries skipped past the search
 cap); `history_stats_parse_sum_retained_entries_and_need_the_labs_toggle` in
