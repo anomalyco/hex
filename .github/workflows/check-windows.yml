@@ -55,7 +55,7 @@ jobs:
       - run: cargo clippy --release --all-targets -- -D warnings
       - run: cargo nextest run --release --profile ci
       - run: cargo build --locked --release
-      - name: Check the executable needs no Visual C++ Redistributable or Vulkan loader
+      - name: Check the executable needs no Visual C++ Redistributable or Vulkan loader, and is a GUI program
         shell: pwsh
         run: |
           $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
@@ -67,6 +67,9 @@ jobs:
           # time, a missing or Vulkan 1.0 one stops Hex before main (#1240).
           $static = ($imports -join "`n") -split 'delay load dependencies' | Select-Object -First 1
           if ($static -match 'vulkan-1\.dll') { throw "hex.exe imports vulkan-1.dll at load time instead of delay-loading it" }
+          # A GUI program, so opening Hex shows no console window (#850).
+          $headers = & $dumpbin.FullName /headers target\release\hex.exe
+          if (-not ($headers | Select-String -SimpleMatch 'subsystem (Windows GUI)')) { throw "hex.exe is not a Windows GUI program" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: hex-windows-x86_64

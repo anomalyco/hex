@@ -17,6 +17,8 @@ pub(crate) mod dot_scope;
 pub(crate) mod hud_placement;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+pub(crate) use macos::pointer_screen;
 pub(crate) mod spring;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -308,7 +310,33 @@ impl Hud {
         }
     }
 
+    /// Hides the overlay once its exit has settled, fading the window out
+    /// on Windows (macOS hides at once, as before) so frames still queued
+    /// for the screen reach it before the window and its GPU surface go
+    /// (#1359).
+    fn fade_out(&mut self) {
+        self.unplace();
+        if std::mem::take(&mut self.shown)
+            && let Some(overlay) = &self.this
+        {
+            #[cfg(target_os = "windows")]
+            overlay.fade_out(EXIT_FADE);
+            #[cfg(not(target_os = "windows"))]
+            overlay.hide();
+        }
+    }
+
     fn hide(&mut self) {
+        self.unplace();
+        if std::mem::take(&mut self.shown)
+            && let Some(overlay) = &self.this
+        {
+            overlay.hide();
+        }
+    }
+
+    /// The next show places the overlay again.
+    fn unplace(&mut self) {
         #[cfg(not(target_os = "macos"))]
         {
             self.edge_placed = None;
@@ -317,19 +345,19 @@ impl Hud {
         {
             self.placed = None;
         }
-        if std::mem::take(&mut self.shown)
-            && let Some(overlay) = &self.this
-        {
-            overlay.hide();
-        }
     }
 }
 
+/// How long the Windows HUD's window fades after its exit settles.
+#[cfg(target_os = "windows")]
+const EXIT_FADE: Duration = Duration::from_millis(120);
+
 /// How long the hidden HUD keeps its GPU surface: the device it holds costs
 /// about 150 MB and the GPU driver's threads waking some 65 times a second.
-/// Windows gives it back, window included, as soon as the HUD hides: a hidden
+/// Windows gives it back, window included, once the HUD's exit fade ends: a hidden
 /// topmost window that presented with DXGI let NVIDIA's Instant Replay take
-/// Hex for the running game (#1308).
+/// Hex for the running game (#1308). The device itself waits five minutes for
+/// the next show either way, so dictations reuse one device (#1268).
 #[cfg(not(target_os = "windows"))]
 const GPU_IDLE: Duration = Duration::from_secs(5 * 60);
 #[cfg(target_os = "windows")]
@@ -693,7 +721,7 @@ impl Compositor<Hud> for HudCompositor {
             hud.follow_pointer(Instant::now());
         }
         if !active {
-            hud.hide();
+            hud.fade_out();
             drop(clear_pass(f.encoder, f.target));
             return;
         }
@@ -706,6 +734,7 @@ impl Compositor<Hud> for HudCompositor {
             .as_ref()
             .is_none_or(|(device, gpu)| *device != f.device_key() || gpu.format != f.format)
         {
+            tracing::info!(gpu = %rune::describe_gpu(f.device), "HUD draws");
             let painter =
                 prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
             self.gpu = Some((f.device_key(), painter));

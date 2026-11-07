@@ -45,7 +45,8 @@ const MOVE: Spring = Spring::new(0.24, 0.0);
 const FADE: Spring = Spring::new(0.20, 0.0);
 const BADGE_H: f32 = 22.0;
 const BADGE_PX: f32 = 8.0;
-const BADGE_GAP: f32 = 8.0;
+/// Clear of the crosshair's arms.
+const POINTER_GAP: f32 = 14.0;
 const BADGE_MARGIN: f32 = 8.0;
 const BADGE_MAX: f32 = 480.0;
 const BADGE_TEXT: TextStyle = TextStyle::new(12.0, 530.0).features("'tnum' 1");
@@ -58,8 +59,10 @@ pub(crate) const FULL_SCREEN: &str = "Full screen · Click to record";
 const HIDE_AFTER_S: f64 = 0.35;
 /// A pick that started no capture this long after shows the picker again.
 const RETRY_AFTER_S: f64 = 2.0;
-/// How often the open picker looks for the pointer on another display.
-const DISPLAY_EVERY: Duration = Duration::from_millis(100);
+/// How often the open picker looks for the pointer on another display. The
+/// capsule, pinned to a measured screen, re-reads it on the same cadence so
+/// the two cross displays together.
+pub(super) const DISPLAY_EVERY: Duration = Duration::from_millis(100);
 
 // ─── Geometry ────────────────────────────────────────────────────────────────
 
@@ -140,11 +143,13 @@ fn clip_rect([x, y, w, h]: [f32; 4], [sw, sh]: [f32; 2]) -> [f32; 4] {
     ]
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Anchor {
-    /// Just outside the bottom-right corner (an area), flipping above or
-    /// inside near the display's edges.
-    BelowTrailing,
+    /// Beside the pointer at one of the area's corners, on the outside of
+    /// the area (away from where the drag began), as CleanShot's readout
+    /// sits by its crosshair; it flips to the other side at the display's
+    /// edges.
+    Pointer([f32; 2]),
     /// Centred on the target.
     Center,
 }
@@ -157,17 +162,28 @@ fn place_badge(
     anchor: Anchor,
 ) -> [f32; 2] {
     let (bx, by) = match anchor {
-        Anchor::BelowTrailing => {
-            let below = y + h + BADGE_GAP;
-            let above = y - BADGE_GAP - bh;
-            let by = if below + bh <= sh - BADGE_MARGIN {
-                below
-            } else if above >= BADGE_MARGIN {
-                above
+        Anchor::Pointer([px, py]) => {
+            let [px, py] = [px.clamp(x, x + w), py.clamp(y, y + h)];
+            let after_x = px + POINTER_GAP;
+            let before_x = px - POINTER_GAP - bw;
+            let after_y = py + POINTER_GAP;
+            let before_y = py - POINTER_GAP - bh;
+            let fits_x = |bx: f32| bx >= BADGE_MARGIN && bx + bw <= sw - BADGE_MARGIN;
+            let fits_y = |by: f32| by >= BADGE_MARGIN && by + bh <= sh - BADGE_MARGIN;
+            let (first_x, second_x) = if px >= x + w * 0.5 {
+                (after_x, before_x)
             } else {
-                y + h - BADGE_GAP - bh
+                (before_x, after_x)
             };
-            (x + w - bw, by)
+            let (first_y, second_y) = if py >= y + h * 0.5 {
+                (after_y, before_y)
+            } else {
+                (before_y, after_y)
+            };
+            (
+                if fits_x(first_x) { first_x } else { second_x },
+                if fits_y(first_y) { first_y } else { second_y },
+            )
         }
         Anchor::Center => (x + (w - bw) / 2.0, y + (h - bh) / 2.0),
     };
@@ -309,7 +325,13 @@ impl Aim {
 
 impl Scene {
     /// What shows for `aim`; an empty target closes onto `rest`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn at(aim: &Aim, rest: [f32; 2]) -> Self {
+        Self::labelled(aim, rest, FULL_SCREEN)
+    }
+
+    /// [`Self::at`], labelling the whole display `screen`.
+    fn labelled(aim: &Aim, rest: [f32; 2], screen_label: &str) -> Self {
         let size = aim.size();
         let empty = [rest[0], rest[1], 0.0, 0.0];
         let screen = || (Kind::Screen, [0.0, 0.0, size[0], size[1]]);
@@ -332,16 +354,16 @@ impl Scene {
             Kind::None => None,
             Kind::Window => aim.hovered().map(|w| w.label.clone()),
             Kind::Area => Some(size_label(target[2], target[3])),
-            Kind::Screen => Some(FULL_SCREEN.to_owned()),
+            Kind::Screen => Some(screen_label.to_owned()),
         };
         let badge = label.map(|label| {
             let max = (size[0] - 2.0 * (BADGE_MARGIN + BADGE_PX) - 2.0).min(BADGE_MAX);
             let text = ellipsize(&label, BADGE_TEXT, max);
             let w = measure(&text, BADGE_TEXT).ceil() + 2.0 * BADGE_PX;
-            let anchor = if kind == Kind::Area {
-                Anchor::BelowTrailing
-            } else {
-                Anchor::Center
+            // An area is drawn only while a drag has a pointer.
+            let anchor = match aim.pointer {
+                Some(pointer) if kind == Kind::Area => Anchor::Pointer(pointer),
+                _ => Anchor::Center,
             };
             let [x, y] = place_badge(target, [w, BADGE_H], size, anchor);
             Badge {
@@ -406,6 +428,8 @@ pub(crate) struct PickerState {
     /// Draws a plain desktop with its windows under the picker (stills and
     /// clips).
     backdrop: bool,
+    /// The whole display's badge.
+    screen_label: &'static str,
 }
 
 impl PickerState {
@@ -430,6 +454,7 @@ impl PickerState {
             overlay: None,
             shown: false,
             backdrop: false,
+            screen_label: FULL_SCREEN,
         }
     }
 
@@ -479,11 +504,11 @@ impl PickerState {
             return false;
         };
         *self.shortcut.lock().unwrap_or_else(|e| e.into_inner()) = aim.shortcut();
-        let mut scene = Scene::at(aim, self.rest);
+        let mut scene = Scene::labelled(aim, self.rest, self.screen_label);
         if scene.kind == Kind::None && self.scene.kind != Kind::None {
             // The target closes onto the pointer, and grows from it next.
             self.rest = aim.pointer.unwrap_or(self.rest);
-            scene = Scene::at(aim, self.rest);
+            scene = Scene::labelled(aim, self.rest, self.screen_label);
         }
         scene.on = self.scene.on;
         match &scene.badge {
@@ -853,6 +878,17 @@ pub(super) fn placement(display: [f32; 4]) -> rune::OverlayPlacement {
     }
 }
 
+/// Which picker an overlay is: its window's name, whether recordings see
+/// it, whether it's made at launch, and who learns its window number.
+pub(crate) struct PickerRole {
+    pub(crate) name: &'static str,
+    /// The whole display's badge.
+    pub(crate) screen_label: &'static str,
+    pub(crate) exclude_from_capture: bool,
+    pub(crate) prewarm: bool,
+    pub(crate) created: fn(u32),
+}
+
 /// The picker overlay, as the app and the capsule hold it.
 #[derive(Clone)]
 pub(crate) struct PickerOverlay {
@@ -864,36 +900,60 @@ pub(crate) struct PickerOverlay {
 }
 
 impl PickerOverlay {
-    /// Adds the overlay, prewarmed and hidden, holding no GPU surface while
-    /// hidden (Windows and Linux). `act` starts what it picks; it runs on
+    /// Adds the overlay, hidden, holding no GPU surface while hidden, nor on
+    /// macOS and Windows a window. `act` starts what it picks; it runs on
     /// the main thread, so it must only hand the action on.
     pub(crate) fn install<S: 'static>(
         app: &mut rune::App<S>,
         act: impl Fn(Action) + Send + Sync + 'static,
     ) -> Self {
+        Self::install_as(
+            app,
+            act,
+            PickerRole {
+                name: "Hex capture picker",
+                screen_label: FULL_SCREEN,
+                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
+                prewarm: true,
+                created: |window| {
+                    crate::capture_host::exclude_window(
+                        crate::capture_host::OwnWindow::Picker,
+                        window,
+                    );
+                },
+            },
+        )
+    }
+
+    /// [`Self::install`] as another picker: the screenshot one has its own
+    /// window, kept out of every capture.
+    pub(crate) fn install_as<S: 'static>(
+        app: &mut rune::App<S>,
+        act: impl Fn(Action) + Send + Sync + 'static,
+        role: PickerRole,
+    ) -> Self {
         use rune::{OverlayLevel, OverlayOptions, OverlayPlacement, OverlaySpec};
-        let spec = OverlaySpec::new("Hex capture picker", (1440.0, 900.0), view)
+        let created = role.created;
+        let spec = OverlaySpec::new(role.name, (1440.0, 900.0), view)
             .options(OverlayOptions {
                 placement: Some(OverlayPlacement::FullScreen),
                 display: DISPLAY,
                 // Under the capsule, so its chips still take clicks.
                 level: OverlayLevel::AboveStatus,
-                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
+                exclude_from_capture: role.exclude_from_capture,
                 input: OverlayInput::All,
-                prewarm: true,
+                prewarm: role.prewarm,
                 ..Default::default()
             })
             .release_gpu_when_hidden()
             .poll(poll)
-            .on_created(|c| {
+            .on_created(move |c| {
                 if let Some(window) = c.window_number {
-                    crate::capture_host::exclude_window(
-                        crate::capture_host::OwnWindow::Picker,
-                        window,
-                    );
+                    created(window);
                 }
             });
         let mut state = PickerState::new();
+        state.screen_label = role.screen_label;
         let act: super::Act = Arc::new(act);
         state.act = Some(act.clone());
         let shortcut = state.shortcut.clone();
@@ -1247,36 +1307,39 @@ pub(crate) mod tests {
     #[test]
     fn the_badge_stays_on_the_display() {
         let size = [960.0, 600.0];
-        // Below the area's trailing corner, else above it, else inside.
+        let area = [100.0, 100.0, 200.0, 100.0];
+        let badge = [80.0, 22.0];
+        // Beside the pointer, outside the area, whichever corner it drags.
         assert_eq!(
-            place_badge(
-                [100.0, 100.0, 200.0, 100.0],
-                [80.0, 22.0],
-                size,
-                Anchor::BelowTrailing
-            ),
-            [220.0, 208.0]
+            place_badge(area, badge, size, Anchor::Pointer([300.0, 200.0])),
+            [314.0, 214.0]
         );
         assert_eq!(
             place_badge(
-                [100.0, 480.0, 200.0, 100.0],
-                [80.0, 22.0],
+                [200.0, 100.0, 200.0, 100.0],
+                badge,
                 size,
-                Anchor::BelowTrailing
+                Anchor::Pointer([200.0, 100.0])
             ),
-            [220.0, 450.0]
+            [106.0, 64.0]
         );
+        // A side with no room takes the other.
+        assert_eq!(
+            place_badge(area, badge, size, Anchor::Pointer([100.0, 100.0])),
+            [114.0, 64.0]
+        );
+        // Flipped inward at the display's edges.
         assert_eq!(
             place_badge(
                 [0.0, 0.0, 960.0, 600.0],
-                [80.0, 22.0],
+                badge,
                 size,
-                Anchor::BelowTrailing
+                Anchor::Pointer([960.0, 600.0])
             ),
-            [872.0, 570.0]
+            [866.0, 564.0]
         );
         assert_eq!(
-            place_badge([0.0, 0.0, 40.0, 40.0], [80.0, 22.0], size, Anchor::Center),
+            place_badge([0.0, 0.0, 40.0, 40.0], badge, size, Anchor::Center),
             [8.0, 9.0]
         );
     }

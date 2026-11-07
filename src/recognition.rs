@@ -778,12 +778,15 @@ pub fn listen(
             if context != next_context {
                 input_monitor.activity.invalidate();
             }
+            let switched_app = context.application != next_context.application;
             context = next_context;
             crate::dictation::vocabulary::focus(&context);
-            events.emit(&VoiceEvent::Context {
-                timestamp_ms: now_ms(),
-                application: context.application.clone(),
-            })?;
+            if switched_app {
+                events.emit(&VoiceEvent::Context {
+                    timestamp_ms: now_ms(),
+                    application: context.application.clone(),
+                })?;
+            }
         }
         let next_microphone_policy = crate::app_settings::microphone_policy();
         if next_microphone_policy.release_while_idle != microphone_policy.release_while_idle {
@@ -867,12 +870,17 @@ pub fn listen(
                     crate::app_settings::runtime_hotkeys(),
                     activity,
                 );
-                if action == crate::capture_host::ShortcutAction::Cancel {
-                    // Escape before the shortcut's keys came up: nothing else
-                    // hears it.
+                let swallow = matches!(
+                    action,
+                    crate::capture_host::ShortcutAction::Cancel
+                        | crate::capture_host::ShortcutAction::ReplayCancel
+                );
+                host.shortcut_at(action, capture_at, &input);
+                if swallow {
+                    // Escape before the shortcut's keys came up (or while
+                    // narrating a replay): nothing else hears it.
                     continue;
                 }
-                host.shortcut(action, &input);
             }
             // Escape closes the capsule's picker or open list (never an
             // Undo: that is a click). It never ends a dictation or a

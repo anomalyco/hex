@@ -142,6 +142,7 @@ impl Backend {
                 transcription: published.transcription.clone(),
                 update_status: published.update_status.clone(),
                 update_notes: published.update_notes.clone(),
+                update_blocked: None,
                 editing: false,
             },
             settings: published.settings.clone(),
@@ -175,7 +176,12 @@ impl ChordWatch {
         let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             // SAFETY: AppKit passes a live event for the handler's duration.
             let event_ref = unsafe { event.as_ref() };
-            let flags = event_ref.modifierFlags().bits() as u64;
+            // NSEvent's flags carry the same device-dependent side bits, and
+            // macOS's filter can rewrite a remapped Caps Lock there too.
+            let flags = crate::app_settings::normalized_modifier_flags(
+                event_ref.modifierFlags().bits() as u64,
+                crate::suppression::physical_keys::snapshot(),
+            );
             let chord = match event_ref.r#type() {
                 NSEventType::KeyDown => {
                     let characters = event_ref
@@ -462,19 +468,26 @@ pub(super) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
 }
 
 /// macOS accepts every binding the capture can produce, except that Paste
-/// Last fires only on a key press (`suppression::paste_action`), and the
-/// capture shortcut, pressed once to start and again to finish, and the
+/// Last and the screenshot shortcut fire only on a key press
+/// (`suppression::paste_action`), and the capture shortcut, pressed once to start and again to finish, and the
 /// send-to list's need a key.
 pub(super) fn validate_hotkey(
     target: ShortcutTarget,
     binding: &HotkeyBinding,
 ) -> Result<(), &'static str> {
-    if matches!(target, ShortcutTarget::PasteLast | ShortcutTarget::Cancel) && binding.key.is_none()
+    if matches!(
+        target,
+        ShortcutTarget::PasteLast | ShortcutTarget::Cancel | ShortcutTarget::Screenshot
+    ) && binding.key.is_none()
     {
         return Err(tr("Add a key"));
     }
     #[cfg(hex_capture)]
-    if target == ShortcutTarget::Capture && binding.key.is_none() {
+    if matches!(
+        target,
+        ShortcutTarget::Capture | ShortcutTarget::CaptureReplay
+    ) && binding.key.is_none()
+    {
         return Err(tr("Add a key"));
     }
     Ok(())
@@ -638,6 +651,9 @@ impl MacHost {
             MeetingRequest::Stop => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::Stop),
+            MeetingRequest::Import(path) => self
+                .runtime()?
+                .meeting(crate::meeting::MeetingRequest::Import(path)),
             MeetingRequest::Summarize(id) => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::Summarize(id)),
@@ -647,9 +663,13 @@ impl MacHost {
             MeetingRequest::Trash(id) => {
                 crate::meeting::trash(&id).map_err(|error| format!("{error:#}"))
             }
-            MeetingRequest::Reveal(id) => {
-                let root = crate::meeting::root().map_err(|error| format!("{error:#}"))?;
-                open_path(&root.join(id));
+            MeetingRequest::Reveal(target) => {
+                if target.is_markdown() {
+                    // `open -R` selects the exported Markdown in Finder.
+                    crate::meeting::reveal(target.path());
+                } else {
+                    open_path(target.path());
+                }
                 Ok(())
             }
             MeetingRequest::RevealFolder => {

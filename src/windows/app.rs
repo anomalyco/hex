@@ -694,6 +694,7 @@ impl WindowsDesktopHost {
                 status: self.status.clone(),
                 warning: visible_failure(&self.activity, self.last_completed_at)
                     .or_else(|| self.indicator.failure()),
+                notice: None,
                 shortcuts: DesktopShortcuts::Registered,
                 shortcuts_configurable: false,
             },
@@ -709,6 +710,7 @@ impl WindowsDesktopHost {
             },
             update_status: self.updater.status(),
             update_notes: self.updater.notes(),
+            update_blocked: self.updater.blocked(),
             settings: self.settings.clone(),
             state: self.activity.state.filter(|_| self.is_running()),
         }
@@ -733,9 +735,8 @@ fn last_completed_at<'a>(events: impl DoubleEndedIterator<Item = &'a VoiceEvent>
             VoiceEvent::Transcript {
                 timestamp_ms,
                 phase: TranscriptPhase::Completed,
-                text,
                 ..
-            } if !text.trim().is_empty() => return Some(*timestamp_ms),
+            } => return Some(*timestamp_ms),
             _ => {}
         }
     }
@@ -826,7 +827,6 @@ mod tests {
             VoiceEvent::SessionStarted { timestamp_ms: 2 },
             transcript(3, "First"),
             transcript(4, "Second"),
-            transcript(5, "  "),
         ];
         assert_eq!(last_completed_at(events.iter()), Some(4));
     }

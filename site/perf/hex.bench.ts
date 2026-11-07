@@ -10,8 +10,10 @@ export default bench({
     web: web({
       viewport: { width: 1440, height: 900 },
       url,
-      prepare: ({ playwright }) =>
-        playwright.page.addInitScript(() => {
+      // Every block must be on the landing page, not an error page or another route.
+      expect: { title: "Hex: voice dictation", url: "/hex/" },
+      prepare: ({ addInitScript }) =>
+        addInitScript(() => {
           // The show's own frames: one swapchain texture per drawn frame, as count.frame.
           if (typeof GPUCanvasContext === "undefined") return
           const take = GPUCanvasContext.prototype.getCurrentTexture

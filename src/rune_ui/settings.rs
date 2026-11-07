@@ -397,8 +397,12 @@ pub(super) fn conflicts(
         ShortcutTarget::Cancel => HotkeySlot::Cancel,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => HotkeySlot::Capture,
+        #[cfg(all(hex_capture, target_os = "macos"))]
+        ShortcutTarget::CaptureReplay => HotkeySlot::CaptureReplay,
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => HotkeySlot::SecondDictation,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::Screenshot => HotkeySlot::Screenshot,
     };
     settings.hotkey_in_use(slot, binding)
 }
@@ -427,8 +431,12 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::Cancel => Some(&settings.cancel_hotkey),
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => Some(&settings.capture.hotkey),
+        #[cfg(all(hex_capture, target_os = "macos"))]
+        ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey.as_ref(),
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey.as_ref(),
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::Screenshot => Some(&settings.screenshots.hotkey),
     }
 }
 
@@ -444,8 +452,12 @@ pub(super) fn set_binding(
         ShortcutTarget::Cancel => settings.cancel_hotkey = binding,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => settings.capture.hotkey = binding,
+        #[cfg(all(hex_capture, target_os = "macos"))]
+        ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey = Some(binding),
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey = Some(binding),
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::Screenshot => settings.screenshots.hotkey = binding,
     }
 }
 
@@ -596,7 +608,7 @@ pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
     ]
 }
 
-pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
+pub(super) fn listener_card(ui: &Ui, p: Paint) -> (String, El) {
     let running = ui.running();
     let status = match &ui.view {
         Some(view) => tr(&view.listener.status).to_string(),
@@ -627,11 +639,18 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
         (true, ShortcutMode::Hold) => tr_fill("Ready anywhere · Hold {} to dictate", &shortcut),
         (false, _) => tr_fill("Enable Hex to dictate into any app with {}", &shortcut),
     };
+    let search = format!("{status} {hint} {} {}", tr("Enable"), tr("Disable"));
     let failure = ui
         .view
         .as_ref()
         .and_then(|view| view.listener.warning.clone())
-        .map(|failure| tr_fill("Last dictation failed: {}", &failure));
+        .map(|failure| (tr_fill("Last dictation failed: {}", &failure), p.danger()))
+        .or_else(|| {
+            ui.view
+                .as_ref()
+                .and_then(|view| view.listener.notice.clone())
+                .map(|notice| (notice, p.warning()))
+        });
     let error = ui
         .error
         .clone()
@@ -641,11 +660,12 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
                 .as_ref()
                 .and_then(|view| view.operation_error.clone())
         });
+    let action_label = if running { tr("Disable") } else { tr("Enable") };
     let action = if running {
         button(
             p,
             "toggle-listening",
-            tr("Disable"),
+            action_label,
             ButtonKind::Secondary,
             |ui: &mut Ui, _| ui.send(Request::Desktop(DesktopAction::StopListening)),
         )
@@ -653,7 +673,7 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
         button(
             p,
             "toggle-listening",
-            tr("Enable"),
+            action_label,
             ButtonKind::Primary,
             |ui: &mut Ui, _| ui.send(Request::Desktop(DesktopAction::StartListening)),
         )
@@ -689,11 +709,11 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
                         .color(if no_model { p.danger() } else { p.muted() })
                         .wrap(),
                 )
-                .children(failure.map(|failure| {
+                .children(failure.map(|(failure, color)| {
                     text(failure)
                         .key("failure")
                         .font(DESCRIPTION)
-                        .color(p.danger())
+                        .color(color)
                         .wrap()
                 })),
         )
@@ -702,7 +722,7 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> El {
     if let Some(error) = error {
         rows.extend(error_notes(p, &error));
     }
-    section(p, "listening", tr("Status"), rows)
+    (search, section(p, "listening", tr("Status"), rows))
 }
 
 /// What a shortcuts portal granted for `target`, since the desktop decides
@@ -741,9 +761,11 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         // The portal lists Annotate's shortcut under that name.
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "Annotate",
+        #[cfg(all(hex_capture, target_os = "macos"))]
+        ShortcutTarget::CaptureReplay => return None,
         // macOS has no shortcuts portal.
         #[cfg(target_os = "macos")]
-        ShortcutTarget::SecondDictation => return None,
+        ShortcutTarget::SecondDictation | ShortcutTarget::Screenshot => return None,
     };
     granted.iter().find(|shortcut| shortcut.name == name)
 }
@@ -1188,8 +1210,12 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
         ShortcutTarget::Cancel => "cancel-hotkey",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "capture-hotkey",
+        #[cfg(all(hex_capture, target_os = "macos"))]
+        ShortcutTarget::CaptureReplay => "capture-replay-hotkey",
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => "second-dictation-hotkey",
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::Screenshot => "screenshot-hotkey",
     }
 }
 

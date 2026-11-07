@@ -8,6 +8,8 @@
 //! preview data and record the requests, so macOS and Windows surfaces render
 //! and are tested on Linux; a native host fills the same data on its own OS.
 
+use std::path::PathBuf;
+
 use super::meetings::Meeting;
 use crate::audio::hex_microphone::{
     DemoPlaybackTrack, DemoSnapshot, DemoSourceKind, HexMicrophoneStatus, TunedFilterConfig,
@@ -268,6 +270,8 @@ pub(super) enum ScrawlRequest {
 #[derive(Clone, Debug)]
 pub(super) struct PlatformState {
     pub(super) caps: Capabilities,
+    /// Whether this Linux window is on Wayland (previews are).
+    pub(super) wayland: bool,
     pub(super) input_sources: Vec<crate::transcription::keyboard_model_switching::InputSource>,
     /// Microphone, Accessibility, and whether the selected
     /// speech model is installed. Every permission is ready where the OS has
@@ -362,10 +366,24 @@ pub(super) enum DemoRequest {
     StopPlayback,
 }
 
+/// Whether this real Linux session is Wayland; other OSes have no row that
+/// asks, and a preview is Wayland so its Linux scenes show the Wayland labs.
+fn wayland_session() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux::session::LinuxSession::detect().is_wayland()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
 impl PlatformState {
     pub(super) fn new(caps: Capabilities) -> Self {
         Self {
             caps,
+            wayland: wayland_session(),
             input_sources: Vec::new(),
             permissions: crate::desktop::onboarding::status_with_transcription_model(false),
             permissions_asked: Vec::new(),
@@ -516,6 +534,7 @@ impl PlatformState {
     pub(super) fn preview(caps: Capabilities) -> Self {
         let mut state = Self::new(caps);
         state.preview = true;
+        state.wayland = true;
         let ready = PermissionState::Ready;
         state.permissions = SetupStatus {
             microphone: ready,
@@ -548,15 +567,21 @@ impl PlatformState {
     }
 }
 
-/// A meeting action the pane asks the meetings runtime for.
+/// A meeting action the pane asks the meetings runtime for. Reveal carries the
+/// `RevealTarget` the pane labeled its menu item with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum MeetingRequest {
     Start,
     Stop,
-    Rename { id: String, title: String },
+    /// Import a local audio file as a meeting (macOS; Labs › Import audio).
+    Import(PathBuf),
+    Rename {
+        id: String,
+        title: String,
+    },
     Trash(String),
     Summarize(String),
-    Reveal(String),
+    Reveal(crate::meeting::RevealTarget),
     RevealFolder,
     ChooseFolder,
 }
@@ -642,7 +667,9 @@ pub(super) fn poll_voice_filter(state: &mut PlatformState, refresh: bool) -> boo
             state.tuning = tuning;
             changed = true;
         }
-        let status = on.then(mic::status);
+        // A stable build has no filter, but an installed driver still needs
+        // its Uninstall.
+        let status = (on || mic::driver_bundle_installed()).then(mic::status);
         if state.hex_microphone != status {
             state.hex_microphone = status;
             changed = true;

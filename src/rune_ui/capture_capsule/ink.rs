@@ -39,7 +39,7 @@ const FRAME: Duration = Duration::from_micros(16_667);
 
 /// Scrawl's ink and laser colours: content drawn on the screen, like a
 /// pen's, not interface chrome, so they stay the same in either appearance.
-fn ink_red() -> Color {
+pub(crate) fn ink_red() -> Color {
     rune::color::hex("#ff3b30").unwrap_or(Color::WHITE)
 }
 
@@ -339,10 +339,10 @@ pub(crate) struct InkOverlay {
 }
 
 impl InkOverlay {
-    /// Adds the overlay, prewarmed and hidden; it shows over a capture's
-    /// target once its engine records. Hidden, it holds no GPU surface
-    /// (Windows and Linux): a full-screen swapchain held tens of megabytes
-    /// between captures.
+    /// Adds the overlay, hidden; it shows over a capture's target once its
+    /// engine records. Hidden, it holds no GPU surface (a full-screen
+    /// swapchain held tens of megabytes between captures), nor on macOS and
+    /// Windows a window.
     pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
         use rune::{
             DisplayTarget, OverlayInput, OverlayLevel, OverlayOptions, OverlayPlacement,
@@ -549,7 +549,7 @@ fn draw_surface(drawing: bool, scale: f32) -> El {
 
 /// One canvas holding `segments` (from, to, width), cropped to their bounds
 /// plus `pad` so a blur or opacity layer covers only what it draws.
-fn layer(
+pub(crate) fn layer(
     segments: impl Iterator<Item = ([f32; 2], [f32; 2], f32)>,
     color: Color,
     pad: f32,

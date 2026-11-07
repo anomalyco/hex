@@ -57,6 +57,9 @@ pub enum ScrawlCaptureAction {
     /// fire on the press only (GNOME's custom shortcuts, #781).
     Toggle,
     Status,
+    /// Export the last 15 s from the rolling clip buffer into a capture bundle
+    /// (`labs.annotate_replay`, macOS 27+).
+    Replay,
 }
 
 /// The window's panes, by the names `hex window show` takes.
@@ -95,6 +98,12 @@ pub enum ControlCommand {
         raw: bool,
     },
     PasteLast,
+    /// Labs › Screenshots (macOS): the display under the pointer, or with
+    /// `pick` the picker its shortcut opens.
+    Screenshot {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        pick: bool,
+    },
     MeetingRecord {
         #[serde(default)]
         title: Option<String>,
@@ -1062,6 +1071,8 @@ mod tests {
                 raw: true,
             },
             ControlCommand::PasteLast,
+            ControlCommand::Screenshot { pick: false },
+            ControlCommand::Screenshot { pick: true },
             ControlCommand::MeetingRecord {
                 title: Some("Design sync".into()),
             },

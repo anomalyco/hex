@@ -51,6 +51,6 @@ pub use plan::{
     AudioPlan, CursorDrawing, Exclusions, ExternalMic, Input, MANIFEST_NAME, MIC_WARMUP, Mic,
     Names, Plan, Rect, Source, SourcePlan,
 };
-pub use screenshot::{Image, screenshot};
+pub use screenshot::{Image, screenshot, screenshot_with};
 pub use session::{Finished, Finishing, Recording, SourceCursor};
 pub use time::{HostTime, MediaTime, Timebase};

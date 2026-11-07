@@ -28,6 +28,20 @@ pub fn screenshot(
     exclude: &Exclusions,
     long_edge: Option<u32>,
 ) -> Result<Image, Error> {
+    screenshot_with(source, exclude, long_edge, true)
+}
+
+/// [`screenshot`], drawing the cursor only with `cursor`.
+///
+/// # Errors
+///
+/// As [`screenshot`].
+pub fn screenshot_with(
+    source: &Source,
+    exclude: &Exclusions,
+    long_edge: Option<u32>,
+    cursor: bool,
+) -> Result<Image, Error> {
     let content =
         SCShareableContent::get().map_err(|error| Error::ShareableContent(error.to_string()))?;
     let target = Target::find(
@@ -38,7 +52,7 @@ pub fn screenshot(
         },
         exclude,
     )?;
-    let config = target.configure(SCStreamConfiguration::new());
+    let config = target.configure(SCStreamConfiguration::new().with_shows_cursor(cursor));
     let image = SCScreenshotManager::capture_image(&target.filter, &config)
         .map_err(|error| Error::Screenshot(error.to_string()))?;
     let width = u32::try_from(image.width()).map_err(|_| Error::InvalidDimensions)?;

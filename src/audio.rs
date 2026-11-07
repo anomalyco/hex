@@ -20,8 +20,6 @@ mod transport;
 pub(crate) mod voice_filter;
 #[cfg(target_os = "windows")]
 mod wasapi_capture;
-#[cfg(target_os = "windows")]
-pub(crate) use wasapi_capture::note_call as note_wasapi_call;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
@@ -316,6 +314,9 @@ pub struct RecoveringAudioInput {
     opener: Opener,
     route_generation_source: fn() -> u64,
     outage: Option<Option<String>>, // why no input opens; `Some(None)` once taken
+    /// The retry error last logged, so a microphone that stays gone (a closed
+    /// lid, an unplugged headset) logs once, not on every retry.
+    retry_warning: Option<String>,
 }
 
 /// Whether a listener's capture is idle, so [`RecoveringAudioInput`] may
@@ -651,6 +652,7 @@ impl RecoveringAudioInput {
             opener: Arc::new(open_configured_input),
             route_generation_source: input_route_generation,
             outage: None,
+            retry_warning: None,
         }
     }
 
@@ -717,6 +719,7 @@ impl RecoveringAudioInput {
         input.feed_hex_microphone(true);
         self.input = Some(input);
         self.outage = None;
+        self.retry_warning = None;
     }
 
     pub fn close(&mut self) {
@@ -726,6 +729,7 @@ impl RecoveringAudioInput {
         self.replacement = None;
         self.recovery.recovered();
         self.outage = None;
+        self.retry_warning = None;
     }
 
     pub fn is_open(&self) -> bool {
@@ -810,10 +814,13 @@ impl RecoveringAudioInput {
                         return RecoveringAudioInputEvent::OpenFailed(error);
                     }
                     self.recovery.failed(now);
-                    tracing::warn!(
-                        %error,
-                        "could not reopen dictation microphone; retrying"
-                    );
+                    if self.retry_warning.as_ref() != Some(&error) {
+                        tracing::warn!(
+                            %error,
+                            "could not reopen dictation microphone; retrying"
+                        );
+                        self.retry_warning = Some(error.clone());
+                    }
                     if self.recovery.blocks_audio() {
                         self.outage.get_or_insert(Some(error));
                     }
@@ -1083,14 +1090,9 @@ use lid::closed as lid_closed;
 /// without a readable name, such as CoreAudio's placeholder when no input
 /// exists, cannot be selected or opened, so it is left out.
 fn input_devices_of(host: &cpal::Host) -> Result<(Vec<Device>, Vec<String>)> {
-    #[cfg(target_os = "windows")]
-    let devices = wasapi_capture::capture_devices(host)?;
-    #[cfg(not(target_os = "windows"))]
-    let devices = host
+    Ok(host
         .input_devices()
-        .wrap_err("could not enumerate input devices")?;
-    Ok(devices
-        .into_iter()
+        .wrap_err("could not enumerate input devices")?
         .filter_map(|device| device_name(&device).map(|name| (device, name)))
         .unzip())
 }

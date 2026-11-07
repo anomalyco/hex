@@ -1,5 +1,7 @@
 use super::*;
-use crate::app_settings::{MeetingRetention, MeetingSettings, RecordingAudioBehavior};
+use crate::app_settings::{
+    MeetingRetention, MeetingSettings, MeetingSummaries, RecordingAudioBehavior,
+};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -38,6 +40,15 @@ impl SettingsFile {
 impl Drop for SettingsFile {
     fn drop(&mut self) {
         fs::remove_dir_all(self.path.parent().unwrap()).unwrap();
+    }
+}
+
+/// The note `load_for_launch` builds for `path`, without using the real
+/// settings folder.
+fn launch_note(path: &Path) -> Option<String> {
+    match AppSettings::load_checked_from(path).unwrap().1 {
+        Some(LoadIssue::Unparseable(reason)) => Some(reason.launch_note()),
+        Some(LoadIssue::Unreadable) | None => None,
     }
 }
 
@@ -187,21 +198,133 @@ fn first_save_preserves_exact_original_once_even_after_reload() {
 }
 
 #[test]
-fn malformed_json_and_non_objects_launch_with_defaults_and_are_backed_up() {
-    for original in [&b"{not json"[..], &b"null"[..], &b"[]"[..], &b"\xff"[..]] {
+fn malformed_json_uses_defaults_and_refuses_to_be_replaced() {
+    let original = b"{\n    \"sound_effects\": true,\n    \"not json\":\n}";
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(settings, AppSettings::default());
+    let mut modified = settings;
+    modified.sound_effect_volume = 0.5;
+    let error = modified.write_to(&file.path).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(message.contains("isn't valid JSON"), "{message}");
+    assert!(message.contains("line 4 column 1"), "{message}");
+    assert!(
+        message.contains("Fix or remove it, then restart Hex"),
+        "{message}"
+    );
+    assert!(message.contains("Nothing was saved"), "{message}");
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+
+    // The process still remembers the broken load: a fixed file is not
+    // replaced by the defaults that load used.
+    fs::write(&file.path, b"{}").unwrap();
+    let error = modified.write_to(&file.path).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("couldn't be read when Hex loaded it"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Restart Hex to load the fixed file"),
+        "{message}"
+    );
+    assert_eq!(fs::read(&file.path).unwrap(), b"{}");
+    assert!(file.backups().is_empty());
+
+    // Reading the fixed file does not clear the refusal; the save stays
+    // refused until a restart or the Linux poll adopts the file.
+    AppSettings::load_from(&file.path).unwrap();
+    assert!(modified.write_to(&file.path).is_err());
+    assert_eq!(fs::read(&file.path).unwrap(), b"{}");
+    AppSettings::forget_unparseable(&file.path);
+    modified.write_to(&file.path).unwrap();
+    assert!(file.backups().is_empty());
+}
+
+#[test]
+fn stale_defaults_cannot_replace_a_file_fixed_while_the_process_runs() {
+    let broken = b"{\n    \"sound_effects\": true,\n    \"not json\":\n}";
+    let file = SettingsFile::new(broken);
+    let stale = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(stale, AppSettings::default());
+
+    let fixed = br#"{"sound_effect_volume":0.37}"#;
+    fs::write(&file.path, fixed).unwrap();
+    let error = stale.write_to(&file.path).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("couldn't be read when Hex loaded it"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Restart Hex to load the fixed file"),
+        "{message}"
+    );
+    assert_eq!(fs::read(&file.path).unwrap(), fixed);
+    assert!(file.backups().is_empty());
+
+    // Reading the fixed file does not clear the refusal: the running app's
+    // in-memory settings are still the stale defaults that load used.
+    let loaded = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(loaded.sound_effect_volume, 0.37);
+    let (read, _) = AppSettings::read_from(&file.path).unwrap();
+    assert_eq!(read.sound_effect_volume, 0.37);
+    let error = stale.write_to(&file.path).unwrap_err();
+    assert!(format!("{error:#}").contains("couldn't be read when Hex loaded it"));
+    assert_eq!(fs::read(&file.path).unwrap(), fixed);
+    assert!(file.backups().is_empty());
+
+    // The Linux poll's explicit clear (and only that) lets a save through.
+    AppSettings::forget_unparseable(&file.path);
+    stale.write_to(&file.path).unwrap();
+    let saved: Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
+    assert_eq!(saved["sound_effect_volume"], json!(0.5));
+    assert!(file.backups().is_empty());
+}
+
+#[test]
+fn non_object_json_uses_defaults_and_refuses_to_be_replaced() {
+    for original in [&b"null"[..], &b"[]"[..], &b"42"[..]] {
         let file = SettingsFile::new(original);
         let settings = AppSettings::load_from(&file.path).unwrap();
         assert_eq!(settings, AppSettings::default());
+        let error = AppSettings::default().write_to(&file.path).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("must be a JSON object"), "{message}");
+        assert!(
+            message.contains("Fix or remove it, then restart Hex"),
+            "{message}"
+        );
         assert_eq!(fs::read(&file.path).unwrap(), original);
-        settings.write_to(&file.path).unwrap();
-        assert_eq!(file.backups().len(), 1);
-        assert_eq!(fs::read(&file.backups()[0]).unwrap(), original);
+        assert!(file.backups().is_empty());
     }
 }
 
 #[test]
+fn a_broken_settings_file_is_named_at_launch_with_its_parse_error() {
+    let file = SettingsFile::new(b"{\n    \"sound_effects\": true,\n    \"not json\":\n}");
+    let note = launch_note(&file.path).unwrap();
+    assert!(note.contains("started with defaults"), "{note}");
+    assert!(note.contains("Your file wasn't changed"), "{note}");
+    assert!(note.contains("then restart Hex"), "{note}");
+    assert!(note.contains("line 4 column 1"), "{note}");
+
+    let file = SettingsFile::new(b"[]");
+    assert!(
+        launch_note(&file.path)
+            .unwrap()
+            .contains("must be a JSON object")
+    );
+
+    let file = SettingsFile::new(b"{}");
+    assert!(launch_note(&file.path).is_none());
+}
+
+#[test]
 fn backup_failure_blocks_save_and_preserves_original() {
-    let original = b"{bad json";
+    let original = br#"{"sound_effects":"bad"}"#;
     let file = SettingsFile::new(original);
     fs::create_dir(backup_path(&file.path, original)).unwrap();
     assert!(AppSettings::default().write_to(&file.path).is_err());
@@ -210,7 +333,7 @@ fn backup_failure_blocks_save_and_preserves_original() {
 
 #[test]
 fn interrupted_save_reuses_the_complete_backup_but_refuses_a_partial_one() {
-    let original = b"{bad json";
+    let original = br#"{"sound_effects":"bad"}"#;
     let file = SettingsFile::new(original);
     backup(&file.path, original).unwrap();
     AppSettings::default().write_to(&file.path).unwrap();
@@ -255,6 +378,12 @@ fn unreadable_file_does_not_block_load_or_get_overwritten() {
         AppSettings::load_from(&file.path).unwrap(),
         AppSettings::default()
     );
+    // An unreadable file is not a parse error, so launch has no note for it.
+    assert!(!matches!(
+        AppSettings::load_checked_from(&file.path).unwrap().1,
+        Some(LoadIssue::Unparseable(_))
+    ));
+    assert!(launch_note(&file.path).is_none());
     assert!(AppSettings::default().write_to(&file.path).is_err());
     assert!(file.path.is_dir());
 }
@@ -263,7 +392,7 @@ fn unreadable_file_does_not_block_load_or_get_overwritten() {
 fn a_managed_lock_reads_off_and_never_rewrites_the_saved_switch() {
     use crate::policy::{Lock, Policy};
     let file = SettingsFile::new(
-        br#"{"meetings":{"enabled":true,"summarize_with_opencode":true},"labs":{"live_text":true}}"#,
+        br#"{"meetings":{"enabled":true,"summarize_with_apple_intelligence":false,"summarize_with_opencode":true},"labs":{"live_text":true}}"#,
     );
     let policy = Policy::default()
         .with(Lock::Meetings)
@@ -271,7 +400,7 @@ fn a_managed_lock_reads_off_and_never_rewrites_the_saved_switch() {
         .with(Lock::Labs);
     let (mut settings, _) = AppSettings::read_managed_from(&file.path, policy).unwrap();
     assert!(!settings.meetings.enabled);
-    assert!(!settings.meetings.summarize_with_opencode);
+    assert_eq!(settings.meetings.summaries, MeetingSummaries::Off);
     assert!(!settings.labs.live_text);
 
     // Saving another change, or the locked switch itself, keeps the file's.
@@ -280,7 +409,7 @@ fn a_managed_lock_reads_off_and_never_rewrites_the_saved_switch() {
     settings.write_managed_to(&file.path, policy).unwrap();
     let saved: serde_json::Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
     assert_eq!(saved["meetings"]["enabled"], json!(true));
-    assert_eq!(saved["meetings"]["summarize_with_opencode"], json!(true));
+    assert_eq!(saved["meetings"]["summaries"], json!("opencode"));
     assert_eq!(saved["labs"]["live_text"], json!(true));
     assert_eq!(saved["sound_effects"], json!(false));
 

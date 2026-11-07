@@ -258,6 +258,8 @@ fn meeting_live_replay() {
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        audio_removed_at_ms: None,
+        imported: false,
     };
     write_manifest(&directory, &manifest).unwrap();
 

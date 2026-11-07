@@ -362,8 +362,9 @@ fn every_state_draws_its_pieces() {
         ("processing", &["processing"]),
         ("saved", &["done", "paste", "inspect", "close"]),
         ("failed", &["done", "close"]),
-        ("rule-sent", &["done", "why", "undo", "close"]),
-        ("rule-final", &["done", "why", "paste", "inspect", "close"]),
+        // A rule's send counts down on the Undo chip, with no words.
+        ("rule-sent", &["done", "undo", "close"]),
+        ("rule-final", &["done", "paste", "inspect", "close"]),
         ("guess", &["done", "ask", "list", "row-SEER", "remembers"]),
         ("guess-five", &["done", "ask", "list", "row-SEER"]),
         ("no-answer", &["done", "why", "ask", "list"]),
@@ -389,7 +390,7 @@ fn every_state_draws_its_pieces() {
         ("list-guess", &["paste", "inspect"]),
         // Trimmed to Search and ✕: the capture is already copied.
         ("guess", &["field", "paste", "inspect", "footer"]),
-        ("rule-sent", &["paste", "ask", "inspect"]),
+        ("rule-sent", &["why", "paste", "ask", "inspect"]),
         ("rule-final", &["ask"]),
         ("sent", &["paste", "inspect"]),
     ];
@@ -505,7 +506,12 @@ fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>
         _ => {
             // A card's guesses hang under the line.
             use super::surface::{Anchor, anchor_for, layout_at};
-            let (shell, _) = layout_at(&pres, "0:00", anchor_for(&pres, Anchor::Top));
+            let (shell, _) = layout_at(
+                &pres,
+                "0:00",
+                anchor_for(&pres, Anchor::Top),
+                super::notch::Geometry::default(),
+            );
             (shell[1] + shell[3] + 36.0).max(TOP + 40.0 + 36.0)
         }
     };
@@ -663,13 +669,17 @@ fn top_line_from_env() {
     }
 }
 
-/// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark.
+/// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark;
+/// `HEX_CAPSULE_LANGUAGE=de` (any interface language code) in that language.
 #[test]
 fn capture_capsule_snapshots() {
     let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS") else {
         return;
     };
     top_line_from_env();
+    if let Ok(language) = std::env::var("HEX_CAPSULE_LANGUAGE") {
+        crate::desktop::i18n::apply(Some(&language));
+    }
     let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
         eprintln!("skipping capture capsule snapshots: no GPU adapter");
         return;
@@ -1193,18 +1203,20 @@ fn clicks_on_the_capsule_do_what_they_say() {
         click_on(&mut rt, "ask", 0);
         assert!(keys(&rt).iter().any(|k| k == "field"), "{:?}", keys(&rt));
 
-        // A rule's send: Undo takes it back and offers the list again, where
-        // a click redirects it.
+        // A rule's send: pointing at Undo holds it, Undo takes it back and
+        // offers the list again, where a click redirects it.
         let (mut rt, actions) = live(routed(rule()));
         click_on(&mut rt, "undo", 0);
-        assert_eq!(
-            *actions.lock().unwrap(),
-            vec![Action::Undo { to: "SEER".into() }]
-        );
+        let undo = [
+            Action::Hold(true),
+            Action::Undo { to: "SEER".into() },
+            Action::Hold(false),
+        ];
+        assert_eq!(*actions.lock().unwrap(), undo);
         click_on(&mut rt, "row-HOME", 0);
         assert_eq!(
             *actions.lock().unwrap(),
-            vec![Action::Undo { to: "SEER".into() }, send("HOME")]
+            [undo.as_slice(), &[send("HOME")]].concat()
         );
 
         // ✕ closes.

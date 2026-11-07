@@ -1,0 +1,11 @@
+hivemind: waiting for mini: cpu 84% busy (hysteresis: waiting for <= 80% after > 90%) (normal, up to 1800 s)
+hivemind: this can queue for up to 1800 s. Agents: give this shell a timeout of 2400000 ms or more (or run 'hivemind run --async --do "..." -- ...'), or the queue wait is lost.
+hivemind: synced onboarding-unified -> mini:/Users/administrator/mac-remote.noindex/src/onboarding-unified-73dccb77 (seed=existing, 500ms)
+exit 0
+total 262304
+drwxr-xr-x  6 administrator  staff       192 Nov  4 16:38 .
+drwxr-xr-x  8 administrator  staff       256 Nov  4 16:36 ..
+-rw-r--r--  1 administrator  staff  62402671 Nov  4 16:38 flow-dark.mp4
+-rw-r--r--  1 administrator  staff  61338419 Nov  4 16:38 flow-silent.mp4
+-rw-r--r--  1 administrator  staff       877 Nov  4 16:38 flow.log
+-rw-r--r--  1 administrator  staff   9504044 Nov  4 16:38 flow.wav

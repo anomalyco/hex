@@ -1,5 +1,5 @@
 //! Traditional Chinese (zh-Hant) interface strings, keyed by the English
-//! source string like [`super::TRANSLATIONS`]. Each string is the
+//! source string like [`super::all_translations`]. Each string is the
 //! Simplified Chinese one converted with the checked-in tables below:
 //! Taiwan wording first ([`PHRASES`]: 設定, 預設, 檔案, 快速鍵, 貼上),
 //! then character by character ([`CHARACTERS`]), so a new Simplified string
@@ -14,8 +14,7 @@ pub(super) fn table() -> &'static HashMap<&'static str, String> {
     static TABLE: OnceLock<HashMap<&'static str, String>> = OnceLock::new();
     TABLE.get_or_init(|| {
         let simplified = super::column_for_code("zh") as usize;
-        super::TRANSLATIONS
-            .iter()
+        super::all_translations()
             .map(|(english, translated)| (*english, convert(translated[simplified])))
             .collect()
     })
@@ -226,7 +225,7 @@ mod tests {
     #[test]
     fn every_string_has_a_traditional_translation() {
         let simplified = super::super::column_for_code("zh") as usize;
-        for (english, translated) in super::super::TRANSLATIONS {
+        for (english, translated) in super::super::all_translations() {
             let traditional = table().get(english).expect("every string converts");
             assert!(!traditional.is_empty(), "{english:?} is empty");
             assert_eq!(

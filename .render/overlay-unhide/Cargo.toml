@@ -1,0 +1,13 @@
+[package]
+name = "overlay-unhide-repro"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "2d882f76b95563093eae12498e9990927c91d66b" }
+objc2 = "0.5.2"
+block2 = "0.5"
+objc2-foundation = { version = "0.2.2", features = ["NSArray", "NSString", "NSGeometry"] }

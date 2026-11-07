@@ -81,6 +81,11 @@ const SOURCE_MARKER: &str = "source-build";
 #[derive(Clone, Debug)]
 pub struct Staged(PathBuf);
 
+/// Only Windows explains beside Download update why it can't update itself.
+pub fn blocked() -> Option<&'static str> {
+    None
+}
+
 pub fn method() -> Method {
     // geteuid has no preconditions and does not mutate process state.
     let user = unsafe { libc::geteuid() };

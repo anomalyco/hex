@@ -4,6 +4,10 @@
 
 /// Whether this is a developer, local, test, or dev-channel build.
 pub fn is_dev_build() -> bool {
+    #[cfg(test)]
+    if STABLE.get() {
+        return false;
+    }
     is_dev_build_for(
         cfg!(debug_assertions),
         cfg!(test),
@@ -12,6 +16,25 @@ pub fn is_dev_build() -> bool {
         option_env!("HEX_BUILD_CHANNEL"),
         crate::VERSION,
     )
+}
+
+#[cfg(test)]
+thread_local! {
+    static STABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// In a test, this thread acts as a stable build until the guard drops.
+/// The window's tests use it, and they run on Linux.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn pretend_stable() -> impl Drop {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            STABLE.set(false);
+        }
+    }
+    STABLE.set(true);
+    Guard
 }
 
 pub(crate) fn is_dev_build_for(

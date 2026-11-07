@@ -252,7 +252,16 @@ const TAP_OR_HOLD_THRESHOLD: Duration = Duration::from_millis(300);
 /// Desktops that repeat a held shortcut's press (KWin) repeat it sooner
 /// than this, so a press after a longer gap is a new press.
 const KEY_REPEAT_GAP: Duration = Duration::from_secs(1);
+/// How often an X11 monitor checks timed shortcut state while a key is down
+/// or a release is settling.
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
+/// How long a listening portal waits for the desktop's next signal: a press
+/// wakes it at once, and this only bounds how long a queued `hex` command
+/// waits behind it.
+const PORTAL_WAIT: Duration = Duration::from_millis(50);
+/// How long a monitor without a portal sleeps: a `hex` command wakes it, and
+/// its next portal check is due much later than this.
+const COMMAND_WAIT: Duration = Duration::from_millis(250);
 /// Binding through the portal can wait for the user to approve a dialog.
 const PORTAL_READY_TIMEOUT: Duration = Duration::from_secs(65);
 
@@ -492,7 +501,15 @@ fn trigger_has_modifiers(granted: Option<&str>, requested: &LinuxHotkey) -> bool
 /// (GNOME, KDE), so a shortcut changed in Hex gets a new id, which the
 /// desktop binds to the new trigger (#575). An unchanged shortcut keeps its
 /// id, and with it any trigger the user assigned in the desktop.
-fn portal_shortcut_id(base: &str, trigger: &str) -> String {
+///
+/// With `desktop_assigns` (Hyprland), the desktop ignores the trigger and
+/// the user binds the id by name in its config, so the id is the bare
+/// `base`: recording another key in Hex must not leave that bind pointing
+/// at a name Hex no longer listens to (#1376).
+fn portal_shortcut_id(base: &str, trigger: &str, desktop_assigns: bool) -> String {
+    if desktop_assigns {
+        return base.to_string();
+    }
     format!("{base}-{}", trigger.replace('+', "-"))
 }
 
@@ -912,15 +929,40 @@ impl Dispatcher {
         let queued: Vec<_> = commands.try_iter().collect();
         drop(commands);
         for command in queued {
-            self.keys.command();
-            match command {
-                ListenerCommand::Shortcut(command) => self.input(Input::Command(command)),
-                // Recording stops now, so a following start isn't blocked.
-                ListenerCommand::StopAndPrint(reply) => match self.state.stop_dictation() {
-                    Some(_) => self.pending.push(HotkeyEvent::FinishPrinting(reply)),
-                    None => reply.send(crate::control::PrintedTranscript::NotRecording),
-                },
-            }
+            self.command(command);
+        }
+    }
+
+    /// Waits up to `timeout` for a `hex` command, so a monitor with no
+    /// shortcuts to watch sleeps until one arrives, then feeds it and any
+    /// others already queued.
+    fn wait_for_commands(&mut self, timeout: Duration) {
+        let waiting = self
+            .commands
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let first = waiting.recv_timeout(timeout);
+        drop(waiting);
+        match first {
+            Ok(command) => self.command(command),
+            // Nothing can send another command; keep the loop from spinning
+            // until it sees the listener's stop.
+            Err(mpsc::RecvTimeoutError::Disconnected) => thread::sleep(POLL_INTERVAL),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        self.commands();
+    }
+
+    fn command(&mut self, command: ListenerCommand) {
+        self.keys.command();
+        match command {
+            ListenerCommand::Shortcut(command) => self.input(Input::Command(command)),
+            // Recording stops now, so a following start isn't blocked.
+            ListenerCommand::StopAndPrint(reply) => match self.state.stop_dictation() {
+                Some(_) => self.pending.push(HotkeyEvent::FinishPrinting(reply)),
+                None => reply.send(crate::control::PrintedTranscript::NotRecording),
+            },
         }
     }
 
@@ -1071,7 +1113,9 @@ impl Backend {
         self.mark_ready(DesktopShortcuts::Commands);
         let mut probe = probe.then(|| crate::linux::portal::PortalProbe::new(self.stop.clone()));
         while !self.stopping() {
-            dispatcher.commands();
+            // No portal: `hex` commands are the only input, so wait on their
+            // queue; the probe is due far less often than this.
+            dispatcher.wait_for_commands(COMMAND_WAIT);
             if !dispatcher.flush()? {
                 return Ok(None);
             }
@@ -1080,7 +1124,6 @@ impl Backend {
             {
                 return Ok(Some(portal));
             }
-            thread::sleep(POLL_INTERVAL);
         }
         Ok(None)
     }
@@ -1104,6 +1147,7 @@ impl Backend {
                 .as_ref()
                 .map(|key| (Shortcut::RawDictation, key)),
         ];
+        let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let mut shortcuts = Vec::new();
         let mut ids: [Option<String>; Shortcut::ALL.len()] = Default::default();
         for (shortcut, key) in requested.into_iter().flatten() {
@@ -1114,7 +1158,7 @@ impl Backend {
                 continue;
             }
             let trigger = key.portal_trigger()?;
-            let id = portal_shortcut_id(base, &trigger);
+            let id = portal_shortcut_id(base, &trigger, desktop_assigns);
             ids[shortcut.index()] = Some(id.clone());
             shortcuts.push(crate::linux::portal::Shortcut {
                 id,
@@ -1163,7 +1207,6 @@ impl Backend {
                 ));
             }
         };
-        let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let project = |granted: &std::collections::HashMap<String, Option<String>>| {
             project_grants(granted, &requested, &ids, desktop_assigns)
         };
@@ -1205,7 +1248,9 @@ impl Backend {
                 .find(|shortcut| ids[shortcut.index()].as_deref() == Some(id))
         };
         while !self.stopping() {
-            for event in portal.events() {
+            // Wakes on the desktop's signals; the timeout only lets queued
+            // `hex` commands through while nothing is pressed.
+            for event in portal.wait_events(PORTAL_WAIT) {
                 let input = match event {
                     crate::linux::portal::Event::Pressed(id) => match shortcut_for(&id) {
                         Some(shortcut) => {
@@ -1258,7 +1303,6 @@ impl Backend {
             if !dispatcher.flush()? {
                 break;
             }
-            thread::sleep(POLL_INTERVAL);
         }
         if self.status.forget.load(Ordering::Acquire)
             && let Err(error) = portal.forget()
@@ -1714,7 +1758,8 @@ mod tests {
 
     #[test]
     fn a_changed_portal_trigger_gets_a_new_shortcut_id() {
-        let id = |trigger: &str| portal_shortcut_id(Shortcut::Dictation.portal_id().0, trigger);
+        let id =
+            |trigger: &str| portal_shortcut_id(Shortcut::Dictation.portal_id().0, trigger, false);
         assert_eq!(id("ALT+space"), "dictation-ALT-space");
         assert_eq!(id("ALT+space"), id("ALT+space"));
         assert_ne!(id("ALT+space"), id("CTRL+ALT+space"));
@@ -1732,6 +1777,20 @@ mod tests {
             Some("Press <ctrl>F9")
         );
         assert_eq!(granted_trigger(&granted, &ids, Shortcut::PasteLast), None);
+    }
+
+    /// #1376: Hyprland binds Hex's shortcuts by name in its config and
+    /// ignores the trigger, so a key recorded in Hex keeps the same name.
+    #[test]
+    fn a_desktop_that_assigns_keys_keeps_one_shortcut_id() {
+        let id = |shortcut: Shortcut, trigger: &str| {
+            portal_shortcut_id(shortcut.portal_id().0, trigger, true)
+        };
+        assert_eq!(id(Shortcut::Dictation, "ALT+space"), "dictation");
+        assert_eq!(id(Shortcut::Dictation, "CTRL+ALT+j"), "dictation");
+        assert_eq!(id(Shortcut::PasteLast, "CTRL+ALT+v"), "paste-last");
+        assert_eq!(id(Shortcut::Capture, "F9"), "capture");
+        assert_eq!(id(Shortcut::RawDictation, "CTRL+r"), "raw-dictation");
     }
 
     #[test]
@@ -2605,6 +2664,28 @@ mod tests {
         assert_eq!([wait(), wait()], [START, Finish]);
         stop.store(true, Ordering::Release);
         worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn an_idle_monitor_wakes_at_once_for_a_hex_command() {
+        let (sender, events) = mpsc::sync_channel(4);
+        let (commands, receiver) = mpsc::sync_channel(4);
+        let mut dispatcher = Dispatcher::new(
+            &HotkeyOptions::default(),
+            sender,
+            receiver.into(),
+            ShortcutKeys::default(),
+        );
+        let sent = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            commands.send(Command::DictationToggle.into()).unwrap();
+        });
+        let started = Instant::now();
+        dispatcher.wait_for_commands(Duration::from_secs(5));
+        assert!(dispatcher.flush().unwrap());
+        assert_eq!(events.recv_timeout(Duration::from_secs(1)).unwrap(), START);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        sent.join().unwrap();
     }
 
     #[test]

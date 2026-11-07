@@ -39,7 +39,7 @@
         "hex-data/settings.json": {
           "enable_on_launch": false,
           "history_retention": "forever",
-          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings", "anomaly-hex-identity"]
         }
       },
       "guard": [
@@ -58,7 +58,7 @@
           "enable_on_launch": true,
           "release_microphone_while_idle": true,
           "history_retention": "forever",
-          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings", "anomaly-hex-identity"]
         }
       }
     },
@@ -69,7 +69,7 @@
           "enable_on_launch": true,
           "release_microphone_while_idle": false,
           "history_retention": "forever",
-          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings"]
+          "migrations": ["scrawl-capture-settings", "scrawl-routing-settings", "anomaly-hex-identity"]
         }
       }
     },

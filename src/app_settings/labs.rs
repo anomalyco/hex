@@ -2,12 +2,15 @@
 
 use super::*;
 
-/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and `labs.enabled` is ignored.
+/// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`) are ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LabsSettings {
     /// Live text beside the HUD while dictating.
     pub live_text: bool,
+    /// Provisional words in the focused text field as a Wayland input-method
+    /// preedit, with the final text committed there (Linux Wayland).
+    pub live_typing: bool,
     pub live_chapters: bool,
     pub playground: bool,
     /// Parakeet transcription biased toward the vocabulary.
@@ -64,21 +67,42 @@ pub struct LabsSettings {
     pub section_key_alone: bool,
     /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
     pub keep_recordings: bool,
+    /// General's pane starts with a search field that filters its rows.
+    pub settings_search: bool,
     pub hide_menu_bar_icon: bool,
+    /// ⌘Q closes the Settings window instead of quitting Hex (macOS).
+    pub quit_closes_window: bool,
     pub movable_meeting_capsules: bool,
-    pub meeting_summary_model: bool,
     /// A paste restores the clipboard through a running XWayland on Wayland desktops without data-control, such as GNOME (Linux, issue 1111).
     pub gnome_clipboard_restore: bool,
     /// Meeting titles and summaries read the vocabulary (issue 1154).
     pub meeting_notes_vocabulary: bool,
-    /// With the indicator at the top, the HUD grows out of the notch on a screen with one (macOS).
+    /// At either visible indicator position, the HUD grows out of the notch on a screen with one (macOS).
     pub notch_indicator: bool,
     /// The local API's `GET /meetings/events` tells a subscriber each finished meeting's id (issue 964).
     pub meeting_finished_event: bool,
     /// The meeting capsules float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux, issue 1274).
     pub gnome_meeting_capsules: bool,
-    /// Each recording in the Meetings list shows its call app's icon, or a neutral one (issue 1290).
-    pub meeting_platform_icons: bool,
+    /// The screenshot shortcut takes an area or a window (macOS); its
+    /// shortcut and folder are `screenshots.*`.
+    pub screenshots: bool,
+    /// A recording meeting's transcript scrolls to its newest line, until scrolled up (issue 1332).
+    pub follow_live_transcript: bool,
+    /// Meetings offers Import audio…: a local audio file becomes a meeting (macOS).
+    pub meeting_import: bool,
+    /// Notes or a rename rename an exported meeting's Markdown to the meeting's title, keeping its date and time.
+    pub meeting_descriptive_filenames: bool,
+    /// Finished meetings drop their WAV tracks on `meetings.audio_retention`,
+    /// keeping their transcripts, notes, and summary.
+    pub expire_meeting_audio: bool,
+    /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
+    pub annotate_replay: bool,
+    /// Calls in more apps (Signal, Telegram, WeChat, LINE, Webex, Element, Phone) and on more websites are offered and named.
+    pub more_call_apps: bool,
+    /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
+    /// id; a group not here is open while it holds a lab that's on.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub groups: std::collections::BTreeMap<String, bool>,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -88,6 +112,7 @@ impl Default for LabsSettings {
     fn default() -> Self {
         Self {
             live_text: false,
+            live_typing: false,
             live_chapters: false,
             playground: false,
             vocabulary_biasing: false,
@@ -119,15 +144,23 @@ impl Default for LabsSettings {
             picker_downloaded: false,
             section_key_alone: false,
             keep_recordings: false,
+            settings_search: false,
             hide_menu_bar_icon: false,
+            quit_closes_window: false,
             movable_meeting_capsules: false,
-            meeting_summary_model: false,
             gnome_clipboard_restore: false,
             meeting_notes_vocabulary: false,
             notch_indicator: false,
             meeting_finished_event: false,
+            annotate_replay: false,
+            more_call_apps: false,
             gnome_meeting_capsules: false,
-            meeting_platform_icons: false,
+            screenshots: false,
+            follow_live_transcript: false,
+            meeting_import: false,
+            meeting_descriptive_filenames: false,
+            expire_meeting_audio: false,
+            groups: std::collections::BTreeMap::new(),
         }
     }
 }

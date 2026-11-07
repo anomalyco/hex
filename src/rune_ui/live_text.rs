@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use rune::{
     Anim, Cx, El, OverlayHandle, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, row,
@@ -96,8 +97,10 @@ pub(crate) fn refollow_pointer() {
 pub(crate) type Place = fn() -> Spot;
 
 /// Adds the plate to the app. It shows only while a dictation publishes its
-/// text (Labs › Live text, applied at once), so it's prewarmed only when
-/// Live text is on at launch.
+/// text (Labs › Live text, applied at once). On macOS it's always
+/// prewarmed, since Live text may be turned on after launch and an
+/// unprewarmed plate reappears for a frame with the last dictation's words
+/// (#1075); elsewhere only when Live text is on at launch.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
     let spec = OverlaySpec {
         name: "Hex live text",
@@ -111,7 +114,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
         view,
     }
     .options(OverlayOptions {
-        prewarm: crate::labs::live_text(),
+        prewarm: cfg!(target_os = "macos") || crate::labs::live_text(),
         #[cfg(not(target_os = "macos"))]
         display: crate::rune_hud::display(),
         ..Default::default()
@@ -128,13 +131,10 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
             if shown.swap(false, Ordering::AcqRel) {
                 // Hidden from the same queue that shows it, so a recording
                 // that ends as its plate appears never leaves it showing.
+                // Its last words stay while it fades (macOS and Windows);
+                // the next appearance replaces them first.
                 let handle = overlay.clone();
-                overlay.update(move |plate, tx| {
-                    plate.stable.clear();
-                    plate.tentative.clear();
-                    tx.instant();
-                    handle.hide();
-                });
+                overlay.update(move |_, _| handle.fade_out(FADE));
             }
             return;
         };
@@ -153,6 +153,9 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
         });
     });
 }
+
+/// How long the plate fades out once a dictation stops publishing.
+const FADE: Duration = Duration::from_millis(150);
 
 /// The model's first update often has no words yet.
 fn is_blank(partial: &Partial) -> bool {

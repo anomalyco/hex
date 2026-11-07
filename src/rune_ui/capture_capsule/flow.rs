@@ -4,13 +4,22 @@
 //! [`Flow::input`] and [`Flow::tick`] move it, [`Flow::pres`] says what the
 //! capsule draws, and each returns the [`Action`]s the host carries out.
 
+use rune::TextEdit;
 use scrawl_capture::capture::Stage;
 
 use crate::capture_host::CaptureNeed;
+use crate::desktop::i18n::{tr, tr_fill};
 
 use super::tuning::{self, CapsuleFlow};
+mod done;
+mod press;
 mod routes;
+mod step;
+mod words;
+use done::*;
 use routes::{sections, sent_to, short};
+pub(crate) use words::copied;
+use words::{already_sent_to, not_running, plain_reason};
 
 /// A send, a rule's or a pick's, can be taken back with the Undo button for this
 /// long (Scrawl's `SMART_SEND_UNDO`).
@@ -24,6 +33,9 @@ pub(crate) const CHIPS_MIN_S: f64 = 0.9;
 /// The chips never fold under the pointer, and stay this much longer once
 /// it leaves (Scrawl's `REVEAL_LINGER_MS`).
 pub(crate) const CHIPS_LINGER_S: f64 = 1.2;
+/// A countdown the pointer held goes on with at least this long left, so
+/// it never ends the instant the pointer leaves.
+const RESUME_LEFT_S: f64 = 1.0;
 /// The recording's ✕ asks "Discard?" for this long, then the capsule goes
 /// back to recording; never while the pointer is on it, and this much
 /// longer once it leaves.
@@ -63,9 +75,9 @@ impl Mode {
 
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Mode::Area => "Area",
-            Mode::Window => "Window",
-            Mode::Screen => "Screen",
+            Mode::Area => tr("Area"),
+            Mode::Window => tr("Window"),
+            Mode::Screen => tr("Screen"),
             Mode::Iphone => "iPhone",
         }
     }
@@ -85,6 +97,9 @@ pub(crate) struct Dest {
     /// The session id a send names, so two sessions with one title never
     /// collide.
     pub(crate) session: String,
+    /// The name of the session's folder, when known: the search matches
+    /// it, and a row shows it only when its title alone can't tell it apart.
+    pub(crate) folder: Option<String>,
 }
 
 impl Dest {
@@ -95,6 +110,7 @@ impl Dest {
             session: name.clone(),
             name,
             why: why.into(),
+            folder: None,
         }
     }
 
@@ -103,6 +119,10 @@ impl Dest {
             session: session.into(),
             ..self
         }
+    }
+
+    pub(crate) fn folder(self, folder: Option<String>) -> Self {
+        Self { folder, ..self }
     }
 }
 
@@ -284,6 +304,9 @@ pub(crate) enum Action {
     Undo {
         to: String,
     },
+    /// Hold a rule's send while the pointer is on the capsule (`true`),
+    /// or let it go on with the time it had left.
+    Hold(bool),
     /// Send the capture to the session `to`; `always` saves a rule for
     /// `site`.
     Send {
@@ -377,15 +400,21 @@ pub(crate) struct Done {
     pub(crate) lead: Lead,
     pub(crate) text: String,
     pub(crate) why: Option<String>,
-    /// It can still be taken back: the Undo chip shows, with no countdown.
+    /// It can still be taken back: the Undo chip shows.
     pub(crate) undo: bool,
+    /// When Undo goes, on the flow's clock: the chip's ring drains to it.
+    /// `None` while Undo waits on the router with no window to count.
+    pub(crate) countdown: Option<f64>,
+    /// The pointer holds the countdown: how long it had left. The ring
+    /// stands still until the pointer leaves.
+    pub(crate) held: Option<f64>,
     /// The Send to… chip's label.
     pub(crate) ask: Option<String>,
     /// The capture shortcut opens the search from here: its keycaps sit
     /// on the chip ("Search ⌥⇧S").
     pub(crate) ask_keys: bool,
     /// Open: what's typed into the field, and the list under it.
-    pub(crate) open: Option<(String, List)>,
+    pub(crate) open: Option<(TextEdit, List)>,
     /// A written capture: Paste and Inspect, as Scrawl's capsule offers.
     pub(crate) hand_off: bool,
     /// The guesses in the capsule itself, picked with a click: chips
@@ -408,6 +437,8 @@ impl Done {
             text: text.into(),
             why: None,
             undo: false,
+            countdown: None,
+            held: None,
             ask: None,
             ask_keys: false,
             open: None,
@@ -534,7 +565,7 @@ struct Routed {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Open {
-    query: String,
+    query: Box<TextEdit>,
     selected: usize,
     /// Searching every session (Send to…): the field
     /// takes typing. Otherwise it's the suggestions a capture opens with.
@@ -549,7 +580,7 @@ struct Open {
 impl Open {
     fn suggesting() -> Self {
         Self {
-            query: String::new(),
+            query: Box::default(),
             selected: 0,
             typing: false,
             back: false,
@@ -591,12 +622,30 @@ impl Sent {
     }
 }
 
+/// An Undo countdown the pointer holds: since when, and the window's end
+/// as it stood.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pause {
+    since: f64,
+    end: f64,
+    /// A rule's: the router holds its send too.
+    router: bool,
+}
+
 /// The capsule's state machine.
 #[derive(Clone, Debug)]
 pub(crate) struct Flow {
     phase: Phase,
     /// The pointer is on the capsule.
     hovered: bool,
+    /// The pointer moved on the capsule since its suggestions last
+    /// changed: typing over them searches. Being on it isn't enough, since
+    /// a list that opens or grows under a resting pointer is hovered too,
+    /// while Kit may still be typing in the app in front.
+    aimed: bool,
+    /// The pointer holds the Undo countdown: nothing sends or expires
+    /// until it leaves.
+    pause: Option<Pause>,
     /// No finished capsule leaves before this: a fold or the pointer's
     /// leaving gives it a moment more.
     hold_floor: f64,
@@ -650,6 +699,8 @@ impl Flow {
         Self {
             phase: Phase::Hidden,
             hovered: false,
+            aimed: false,
+            pause: None,
             hold_floor: 0.0,
             phone: false,
             switching: false,
@@ -716,10 +767,12 @@ impl Flow {
         self.cues.extend(cue);
     }
 
-    /// The pointer came onto the capsule or left it.
-    pub(crate) fn hover(&mut self, on: bool, now: f64) {
+    /// The pointer came onto the capsule or left it. On it, an Undo
+    /// countdown holds (and the router holds a rule's send with it).
+    pub(crate) fn hover(&mut self, on: bool, now: f64) -> Vec<Action> {
         self.hovered = on;
         if !on {
+            self.aimed = false;
             self.hold_floor = self.hold_floor.max(now + CHIPS_LINGER_S);
         }
         if let (
@@ -737,14 +790,89 @@ impl Flow {
                 *until = until.max(now + DISCARD_LINGER_S);
             }
         }
+        self.hold_countdown(now)
+    }
+
+    /// The Undo window's clock: held, it stands where the pointer stopped it.
+    fn clock(&self, now: f64) -> f64 {
+        self.pause.map_or(now, |pause| pause.since.min(now))
+    }
+
+    /// Where Undo's window ends, as the capsule draws it now.
+    fn countdown(&self, now: f64) -> Option<f64> {
+        match self.pres_of(now) {
+            Pres::Done(done) if done.undo => done.countdown,
+            _ => None,
+        }
+    }
+
+    /// Holds the Undo countdown while the pointer is on the capsule, one
+    /// that starts under it too, and lets it go on with what it had left
+    /// (at least [`RESUME_LEFT_S`]) once the pointer leaves. The router
+    /// holds a rule's send alongside ([`Action::Hold`]); a pick went
+    /// already, so only its Undo waits.
+    fn hold_countdown(&mut self, now: f64) -> Vec<Action> {
+        let end = self.countdown(now);
+        match (self.hovered, end, self.pause) {
+            (true, Some(end), Some(pause)) if pause.end == end => Vec::new(),
+            (true, Some(end), old) => {
+                let router = matches!(self.phase, Phase::Routed(_));
+                self.pause = Some(Pause {
+                    since: now,
+                    end,
+                    router,
+                });
+                match (old.is_some_and(|old| old.router), router) {
+                    (_, true) => vec![Action::Hold(true)],
+                    (true, false) => vec![Action::Hold(false)],
+                    (false, false) => Vec::new(),
+                }
+            }
+            (_, _, Some(pause)) => {
+                self.pause = None;
+                if end == Some(pause.end) {
+                    let left = (pause.end - pause.since).clamp(RESUME_LEFT_S, undo_s());
+                    let by = now + left - pause.end;
+                    match &mut self.phase {
+                        Phase::Routed(routed) => routed.at += by,
+                        Phase::Sent(sent) => sent.at += by,
+                        _ => {}
+                    }
+                }
+                if pause.router {
+                    vec![Action::Hold(false)]
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The pointer moved on the capsule. True when that changes the keys
+    /// it takes.
+    pub(crate) fn pointer_moved(&mut self) -> bool {
+        let before = self.keys();
+        self.aimed = self.hovered;
+        self.keys() != before
     }
 
     pub(crate) fn input(&mut self, input: Input, now: f64) -> Vec<Action> {
+        // A new capture or a new answer may change the list under a resting
+        // pointer: it has to move again before typing searches.
+        if matches!(
+            input,
+            Input::Stage(_) | Input::Routed(_) | Input::Refined(_) | Input::Undone(_)
+        ) {
+            self.aimed = false;
+        }
         let before = self.phase.clone();
         let actions = self.step(input, now);
         self.cue(&before, &actions);
         self.closing(&before);
         self.left_waiting(before, &actions);
+        let mut actions = actions;
+        actions.extend(self.hold_countdown(now));
         actions
     }
 
@@ -799,615 +927,6 @@ impl Flow {
         }
     }
 
-    fn step(&mut self, input: Input, now: f64) -> Vec<Action> {
-        let mut actions = Vec::new();
-        if input == Input::NothingHeard {
-            self.silent = true;
-            return actions;
-        }
-        if let Input::Drawing(on) = input {
-            self.drawing = on;
-            return actions;
-        }
-        if input == Input::Stage(Stage::Recording) {
-            self.silent = false;
-            if !matches!(self.phase, Phase::Recording { .. }) {
-                self.drawing = false;
-            }
-        }
-        if matches!(input, Input::Stage(_)) {
-            self.closed = false;
-            self.waiting = None;
-            self.settled = false;
-            self.undoing = false;
-            self.superseded = false;
-        }
-        if let Input::Undone(undone) = input {
-            // The earlier send's, taken back before the pick went.
-            if std::mem::take(&mut self.superseded) {
-                return actions;
-            }
-            self.undoing = false;
-            // Too late, it stays where it went.
-            self.settled |= undone == Undone::TooLate;
-        }
-        // The send an Undo takes back, arriving late (it went, queued, or
-        // failed), changes nothing: the list it reopened stays.
-        if self.undoing
-            && matches!(
-                input,
-                Input::Settled | Input::Delivered(_) | Input::Failed(Failure::Send(_), _)
-            )
-        {
-            return actions;
-        }
-        // News of the earlier send under the pick shown says nothing of it.
-        if self.superseded
-            && let Phase::Sent(sent) = &self.phase
-            && match &input {
-                Input::Delivered(Delivered::Sent { to } | Delivered::Queued { to, .. })
-                | Input::Failed(Failure::Send(to), _) => *to != sent.to,
-                _ => false,
-            }
-        {
-            return actions;
-        }
-        if matches!(input, Input::Settled | Input::Delivered(_)) {
-            self.waiting = None;
-            if input == Input::Settled {
-                self.settled = true;
-                self.hold_floor = self.hold_floor.max(now + tuning::get().brief_hold_s);
-                // A rule's send went: it sounds Sent, once.
-                if let Phase::Routed(routed) = &mut self.phase
-                    && matches!(routed.route, Route::Rule { .. })
-                    && !std::mem::replace(&mut routed.delivered, true)
-                {
-                    self.cues.push(Cue::Sent);
-                }
-                return actions;
-            }
-        }
-        match input {
-            // A capture finishing without its screen: its capsule says
-            // where it went first.
-            Input::NeedsPermission(need)
-                if matches!(
-                    self.phase,
-                    Phase::Processing
-                        | Phase::Saved { .. }
-                        | Phase::Routed(_)
-                        | Phase::Sent(_)
-                        | Phase::Queued { .. }
-                ) =>
-            {
-                self.helper_next = Some(need);
-                return actions;
-            }
-            Input::NeedsPermission(need) => {
-                self.helper_next = None;
-                // Pressed again while it's up: it stays as it stands.
-                let grant = match &self.phase {
-                    Phase::Permission {
-                        need: shown, grant, ..
-                    } if *shown == need => *grant,
-                    _ => Grant::Off,
-                };
-                self.phase = Phase::Permission {
-                    need,
-                    grant,
-                    at: now,
-                };
-                return actions;
-            }
-            Input::Permission(need, grant) => {
-                if let Phase::Permission {
-                    need: shown,
-                    grant: was,
-                    at,
-                } = &mut self.phase
-                {
-                    // Still off once Allow was pressed: it waits on System
-                    // Settings.
-                    let grant = if grant == Grant::Off && *was == Grant::Asked {
-                        Grant::Asked
-                    } else {
-                        grant
-                    };
-                    if (*shown, *was) != (need, grant) {
-                        *shown = need;
-                        *was = grant;
-                        *at = now;
-                    }
-                }
-                return actions;
-            }
-            _ => {}
-        }
-        if let Input::Phone(phone) = input {
-            self.phone = phone;
-            if !phone && self.phase == Phase::Selecting(Mode::Iphone) {
-                self.phase = Phase::Selecting(Mode::Screen);
-            }
-            return actions;
-        }
-        let switching = matches!(input, Input::Stage(_) | Input::Failed(..) | Input::Gone)
-            && std::mem::take(&mut self.switching);
-        let phase = std::mem::replace(&mut self.phase, Phase::Hidden);
-        self.phase = match (phase, input) {
-            (_, Input::Stage(stage)) => match stage {
-                Stage::Recording => Phase::Recording {
-                    chips_until: None,
-                    discard_until: None,
-                },
-                Stage::Stopping | Stage::Transcribing | Stage::Rendering | Stage::Writing => {
-                    Phase::Processing
-                }
-                Stage::Done => Phase::Saved { at: now },
-                Stage::Cancelled => Phase::Hidden,
-                Stage::Failed => Phase::Failed {
-                    at: now,
-                    what: Failure::Save,
-                    why: None,
-                },
-            },
-            (_, Input::Failed(what, why)) => Phase::Failed {
-                at: now,
-                what: match what {
-                    Failure::Save if switching => Failure::Start,
-                    what => what,
-                },
-                why: why.as_deref().map(short_reason),
-            },
-            (Phase::Recording { discard_until, .. }, Input::Chips) => Phase::Recording {
-                chips_until: Some(now + tuning::get().chips_open_s),
-                discard_until,
-            },
-            (
-                Phase::Recording {
-                    chips_until,
-                    discard_until,
-                },
-                Input::Worked,
-            ) => Phase::Recording {
-                chips_until: chips_until.map(|until| {
-                    until
-                        .min(until - tuning::get().chips_open_s + CHIPS_MIN_S)
-                        .max(now)
-                }),
-                discard_until,
-            },
-            (Phase::Recording { .. }, Input::Gone) => Phase::Hidden,
-            (Phase::Selecting(mode), Input::Record) => {
-                actions.push(Action::Record(mode));
-                Phase::Selecting(mode)
-            }
-            // Closed before the router answered (dismissed, or the answer
-            // came after the hold): it stays closed, and `hex capture list`
-            // and `hex capture send` still offer the capture.
-            // A guess still waits for Send to….
-            (Phase::Hidden, Input::Routed(route)) if self.closed => {
-                if !self.settled {
-                    self.waiting = waits(Routed {
-                        route,
-                        at: now,
-                        open: None,
-                        taken_back: false,
-                        already_with: None,
-                        taken_from: None,
-                        delivered: false,
-                    });
-                }
-                Phase::Hidden
-            }
-            (Phase::Hidden, Input::Delivered(_)) if self.closed => Phase::Hidden,
-            // Closed with nothing picked: Send to… brings the list
-            // back.
-            (Phase::Hidden | Phase::Kept { .. }, Input::OpenList) if self.waiting.is_some() => {
-                let routed = self.waiting.take().expect("checked");
-                self.phase = Phase::Routed(Routed { at: now, ..routed });
-                return self.step(Input::OpenList, now);
-            }
-            // A queued send went on a retry: Hex can't take it back.
-            (_, Input::Delivered(delivered)) => match delivered {
-                Delivered::Sent { to } => Phase::Sent(Sent {
-                    undoable: false,
-                    ..Sent::picked(&Dest::new(to, ""), false, now, None)
-                }),
-                Delivered::Queued { why, .. } => Phase::Queued { why, at: now },
-            },
-            (Phase::Routed(routed), Input::Refined(route)) if !routed.taken_back => {
-                Phase::Routed(routes::refine(routed, route, now, self.suggest_on_route))
-            }
-            (_, Input::Routed(route)) => {
-                let suggests = self.suggest_on_route
-                    && !matches!(
-                        route,
-                        Route::Rule { .. }
-                            | Route::ResolvingRule { .. }
-                            | Route::Unreachable { .. }
-                    )
-                    && sections(&route) != (&[][..], &[][..]);
-                Phase::Routed(Routed {
-                    route,
-                    at: now,
-                    open: suggests.then(Open::suggesting),
-                    taken_back: false,
-                    already_with: None,
-                    taken_from: None,
-                    delivered: false,
-                })
-            }
-            (Phase::Routed(routed), Input::OpenList)
-                if matches!(routed.route, Route::Unreachable { .. }) =>
-            {
-                Phase::Routed(routed)
-            }
-            // The capture shortcut over the suggestions searches every
-            // session; in the search it records anew, which the listener
-            // does itself.
-            (Phase::Routed(routed), Input::Record)
-                if routed.open.as_ref().is_some_and(|open| !open.typing) =>
-            {
-                self.phase = Phase::Routed(routed);
-                return self.step(Input::OpenList, now);
-            }
-            (Phase::Routed(mut routed), Input::OpenList) => {
-                match &mut routed.open {
-                    Some(open) if !open.typing => {
-                        open.typing = true;
-                        open.back = true;
-                        open.selected = 0;
-                    }
-                    Some(_) => {}
-                    None => {
-                        // A guess opens on itself; a rule on the next best place.
-                        let selected = usize::from(matches!(routed.route, Route::Rule { .. }));
-                        routed.open = Some(Open {
-                            selected,
-                            typing: true,
-                            ..Open::suggesting()
-                        });
-                    }
-                }
-                clamp(&mut routed);
-                Phase::Routed(routed)
-            }
-            (Phase::Routed(mut routed), input @ (Input::Type(_) | Input::Backspace)) => {
-                if let Some(open) = routed.open.as_mut().filter(|open| open.typing) {
-                    match input {
-                        Input::Type(typed) => open.query.push_str(&typed),
-                        _ => {
-                            open.query.pop();
-                        }
-                    }
-                    open.selected = 0;
-                }
-                Phase::Routed(routed)
-            }
-            (Phase::Routed(mut routed), Input::Move(by)) => {
-                if let Some(open) = &mut routed.open {
-                    open.selected = (open.selected as i64 + i64::from(by)).max(0) as usize;
-                }
-                clamp(&mut routed);
-                Phase::Routed(routed)
-            }
-            (Phase::Routed(routed), Input::Send { always }) => {
-                let selected = routed.open.as_ref().map(|open| open.selected);
-                send(routed, selected, always, now, &mut actions)
-            }
-            (Phase::Routed(routed), Input::SendRow(row)) => {
-                send(routed, Some(row), false, now, &mut actions)
-            }
-            (Phase::Routed(mut routed), Input::Cycle(by)) => {
-                let rows = routed
-                    .open
-                    .as_ref()
-                    .filter(|open| !open.typing)
-                    .map_or(0, |open| list(&routed.route, open).rows().count());
-                if let Some(open) = routed.open.as_mut().filter(|_| rows > 0) {
-                    let rows = rows as i64;
-                    open.selected =
-                        (open.selected as i64 + i64::from(by)).rem_euclid(rows) as usize;
-                }
-                Phase::Routed(routed)
-            }
-            (Phase::Routed(mut routed), Input::Shift(down)) => {
-                if let Some(open) = &mut routed.open {
-                    open.shift = down;
-                }
-                Phase::Routed(routed)
-            }
-            // A click away from a search opened over the suggestions goes
-            // back to them, as Escape does.
-            (Phase::Routed(mut routed), input @ (Input::ClickAway | Input::Escape))
-                if routed
-                    .open
-                    .as_ref()
-                    .is_some_and(|open| open.typing && open.back)
-                    && (input == Input::Escape || !self.hovered) =>
-            {
-                if let Some(open) = &mut routed.open {
-                    *open = Open {
-                        shift: open.shift,
-                        ..Open::suggesting()
-                    };
-                }
-                Phase::Routed(routed)
-            }
-            // Taken back, folding it starts its hold: it leaves like any
-            // finished capsule, and Send to… brings it back.
-            (Phase::Routed(mut routed), Input::ClickAway) if !self.hovered => {
-                if routed.taken_back {
-                    routed.at = now;
-                }
-                if routed.open.take().is_some() {
-                    self.fold_hold(now);
-                }
-                Phase::Routed(routed)
-            }
-            (phase, Input::ClickAway) => phase,
-            // Taken back, ✕ (or Escape in its open list) is the dismissal:
-            // the bundle is kept. Too late, it's where it went.
-            (
-                Phase::Routed(Routed {
-                    taken_back: true,
-                    already_with,
-                    open,
-                    ..
-                }),
-                input @ (Input::Escape | Input::Dismiss),
-            ) if input == Input::Dismiss
-                || open.as_ref().is_some_and(|open| open.typing && !open.back) =>
-            {
-                match already_with {
-                    None => Phase::Kept { at: now },
-                    Some(_) => Phase::Hidden,
-                }
-            }
-            // Escape only reaches an open list; it folds it. It never takes
-            // a send back: that is the Undo button's.
-            (Phase::Routed(mut routed), Input::Escape)
-                if routed.open.as_ref().is_some_and(|open| open.typing) =>
-            {
-                if routed.open.take().is_some() {
-                    self.fold_hold(now);
-                }
-                Phase::Routed(routed)
-            }
-            (Phase::Routed(routed), Input::Undo) => {
-                if let Route::ResolvingRule { name } = &routed.route {
-                    actions.push(Action::Undo { to: name.clone() });
-                    return {
-                        self.phase = Phase::TakenBack { at: now };
-                        actions
-                    };
-                }
-                // The chip is only there while the window runs; a click that
-                // lands as it ends still counts, and the router answers too
-                // late if it was.
-                match (rule_to(&routed.route).cloned(), !routed.taken_back) {
-                    (Some(to), true) => {
-                        actions.push(Action::Undo {
-                            to: to.name.clone(),
-                        });
-                        taking_back(Some(routed.route), &to, now)
-                    }
-                    _ => Phase::Routed(routed),
-                }
-            }
-            (Phase::Sent(sent), Input::Undo) if sent.undoable => {
-                actions.push(Action::Undo {
-                    to: sent.to.clone(),
-                });
-                let from = sent.from();
-                taking_back(sent.back, &from, now)
-            }
-            // Nothing to list: dismissing says where the bundle is.
-            (Phase::TakenBack { .. }, Input::Dismiss) => Phase::Kept { at: now },
-            // Escape closes the picker, but never ends a recording: it may be
-            // meant for the app being recorded.
-            (Phase::Selecting(_), Input::Escape) => {
-                actions.push(Action::Cancel);
-                Phase::Hidden
-            }
-            // Pasted or dismissed: the take-back it asked for says nothing.
-            (Phase::Hidden, Input::Undone(_)) => Phase::Hidden,
-            // The list opened as the Undo was asked for. Taken back, it
-            // stays as it is; too late, the session it went to has it.
-            (Phase::Routed(mut routed), Input::Undone(undone)) if routed.taken_back => {
-                if let (Undone::TooLate, None, Some(from)) =
-                    (undone, &routed.already_with, routed.taken_from.clone())
-                {
-                    if let Route::Guess {
-                        suggested, recent, ..
-                    } = &mut routed.route
-                    {
-                        for dest in suggested.iter_mut().chain(recent.iter_mut()) {
-                            if dest.session == from.session {
-                                dest.why = "has it".into();
-                            }
-                        }
-                    }
-                    routed.already_with = Some(from.name);
-                }
-                Phase::Routed(routed)
-            }
-            (Phase::TakenBack { at }, Input::Undone(_)) => Phase::TakenBack { at },
-            // An Undo never ends the capture: the list comes back with the
-            // same sessions, the one it went to last, until a pick or a
-            // dismissal. Too late to take back, a pick sends a copy.
-            (phase, Input::Undone(undone)) => {
-                let (route, from) = match phase {
-                    Phase::Routed(Routed {
-                        route: route @ Route::Rule { .. },
-                        ..
-                    }) => {
-                        let from = rule_to(&route).cloned();
-                        (Some(route), from)
-                    }
-                    Phase::Sent(sent) => {
-                        let from = sent.from();
-                        (sent.back, Some(from))
-                    }
-                    other if undone == Undone::TooLate => {
-                        self.phase = other;
-                        return actions;
-                    }
-                    _ => (None, None),
-                };
-                let too_late = undone == Undone::TooLate;
-                match (route, &from) {
-                    (Some(route), Some(from)) => offered_again(route, from, too_late, now),
-                    _ => None,
-                }
-                .map_or_else(
-                    || match (too_late, from) {
-                        (true, Some(from)) => Phase::TooLate {
-                            to: from.name,
-                            at: now,
-                        },
-                        _ => Phase::TakenBack { at: now },
-                    },
-                    Phase::Routed,
-                )
-            }
-            // Escape is the app's everywhere else: it is never claimed, so
-            // one that arrives is ignored.
-            (phase, Input::Escape | Input::Undo) => phase,
-            (_, Input::Dismiss) => Phase::Hidden,
-            (phase, _) => phase,
-        };
-        actions
-    }
-
-    /// What a click on `id` does: the action for the host, after moving
-    /// the capsule as the click shows.
-    pub(crate) fn click(&mut self, id: super::surface::Id, now: f64) -> Vec<Action> {
-        let before = self.phase.clone();
-        let cued = self.cues.len();
-        let actions = self.press(id, now);
-        // A click that became an input cued already.
-        if self.cues.len() == cued {
-            self.cue(&before, &actions);
-        }
-        self.closing(&before);
-        self.left_waiting(before, &actions);
-        actions
-    }
-
-    fn press(&mut self, id: super::surface::Id, now: f64) -> Vec<Action> {
-        use super::surface::Id;
-        match (&self.phase, id) {
-            (Phase::Selecting(current), Id::Mode(mode)) => {
-                if *current == mode && mode.shows_record() {
-                    return vec![Action::Record(mode)];
-                }
-                self.phase = Phase::Selecting(mode);
-                Vec::new()
-            }
-            (Phase::Selecting(mode), Id::Record) => vec![Action::Record(*mode)],
-            // A chip restarts rather than retargets (Scrawl's
-            // `switch_recording`): Screen is what's recording, so it only
-            // folds the chips; iPhone starts the phone in its place; Window
-            // and Area drop it and become the picker.
-            (Phase::Recording { .. }, Id::Mode(mode)) => match mode {
-                Mode::Screen => {
-                    self.phase = Phase::Recording {
-                        chips_until: None,
-                        discard_until: None,
-                    };
-                    Vec::new()
-                }
-                Mode::Iphone => {
-                    self.phase = Phase::Recording {
-                        chips_until: None,
-                        discard_until: None,
-                    };
-                    self.switching = true;
-                    vec![Action::Switch(mode)]
-                }
-                Mode::Area | Mode::Window => {
-                    self.phase = Phase::Selecting(mode);
-                    vec![Action::Discard]
-                }
-            },
-            (Phase::Recording { .. }, Id::Finish) => vec![Action::Finish],
-            (Phase::Recording { .. }, Id::Pen) => vec![Action::Pen],
-            // Discarding a recording takes a second click: ✕ asks first.
-            (Phase::Recording { .. }, Id::Cancel | Id::Close) => {
-                self.phase = Phase::Recording {
-                    chips_until: None,
-                    discard_until: Some(now + DISCARD_ASK_S),
-                };
-                Vec::new()
-            }
-            (Phase::Recording { .. }, Id::Keep) => {
-                self.phase = Phase::Recording {
-                    chips_until: None,
-                    discard_until: None,
-                };
-                Vec::new()
-            }
-            (
-                Phase::Recording {
-                    discard_until: Some(_),
-                    ..
-                },
-                Id::Discard,
-            )
-            | (Phase::Selecting(_), Id::Cancel | Id::Close) => {
-                self.phase = Phase::Hidden;
-                vec![Action::Cancel]
-            }
-            // Pasting here takes back a send still waiting out its Undo, as
-            // Scrawl's Paste does.
-            (_, Id::Paste) => {
-                let mut actions: Vec<Action> = self.undoable(now).into_iter().collect();
-                actions.push(Action::Paste);
-                self.phase = Phase::Hidden;
-                actions
-            }
-            (_, Id::Inspect) => {
-                self.phase = Phase::Hidden;
-                vec![Action::Inspect]
-            }
-            (_, Id::Undo) => self.input(Input::Undo, now),
-            (Phase::Permission { need, grant, .. }, Id::Ask) => {
-                let need = *need;
-                match *grant {
-                    Grant::Off | Grant::Asked => {
-                        self.phase = Phase::Permission {
-                            need,
-                            grant: Grant::Asked,
-                            at: now,
-                        };
-                        vec![Action::Allow(need)]
-                    }
-                    Grant::Restart => vec![Action::Restart],
-                    Grant::Ready => {
-                        self.phase = Phase::Hidden;
-                        vec![Action::Record(Mode::Screen)]
-                    }
-                }
-            }
-            (_, Id::Ask) => self.input(Input::OpenList, now),
-            (_, Id::Row(row) | Id::Pick(row)) => self.input(Input::SendRow(row), now),
-            (_, Id::Next) => self.input(Input::Cycle(1), now),
-            // The toast's line is its one guess: a click sends it.
-            (
-                Phase::Routed(Routed {
-                    open: Some(open), ..
-                }),
-                Id::Done,
-            ) if !open.typing && tuning::get().flow == CapsuleFlow::Toast => {
-                self.input(Input::Send { always: false }, now)
-            }
-            // ✕ beside "Sent to X" just closes, a rule's as a pick's.
-            (_, Id::Close) => self.input(Input::Dismiss, now),
-            _ => Vec::new(),
-        }
-    }
-
     /// The keys the capsule takes from Hex's tap: the picker's, an open
     /// list's (Escape only in a list Kit opened or the picker). Closed or
     /// routed with nothing open, it takes none.
@@ -1426,6 +945,7 @@ impl Flow {
             } else {
                 CapsuleKeys::Suggest {
                     cycle: tuning::get().flow == CapsuleFlow::Toast,
+                    search: self.aimed,
                 }
             }),
             Phase::Routed(Routed {
@@ -1440,7 +960,7 @@ impl Flow {
 
     /// The take-back for a send still waiting out its Undo.
     fn undoable(&self, now: f64) -> Option<Action> {
-        routes::undoable(&self.phase, now)
+        routes::undoable(&self.phase, self.clock(now))
     }
 
     /// Runs what time decides: the chips closing, the Undo window ending,
@@ -1475,7 +995,7 @@ impl Flow {
                         };
                     }
                 }
-                due || matches!(&self.phase, Phase::Routed(r) if !r.delivered && matches!(r.route, Route::Rule { .. } | Route::ResolvingRule { .. }) && now - r.at <= 3.0)
+                due
             }
         }
     }
@@ -1488,19 +1008,13 @@ impl Flow {
 
     /// When `tick` next has something to do.
     pub(crate) fn next_due(&self, now: f64) -> Option<f64> {
-        // The Undo chip leaves when the window ends; it counts nothing down.
+        // The Undo chip leaves when the window ends; its ring drains
+        // without a tick.
         let undo_at = |at: f64| {
             let end = at + undo_s();
             (end > now).then_some(end)
         };
         let due = match &self.phase {
-            Phase::Routed(r)
-                if !r.delivered
-                    && matches!(r.route, Route::Rule { .. } | Route::ResolvingRule { .. })
-                    && now - r.at < 3.0 =>
-            {
-                Some(r.at + (now - r.at).floor() + 1.0)
-            }
             Phase::Recording {
                 chips_until,
                 discard_until,
@@ -1509,6 +1023,8 @@ impl Flow {
                 .flatten()
                 .min_by(f64::total_cmp)
                 .filter(|_| !self.hovered),
+            // A held countdown ends only once the pointer leaves.
+            _ if self.pause.is_some() => None,
             Phase::Routed(Routed {
                 route: Route::Rule { .. },
                 at,
@@ -1526,18 +1042,24 @@ impl Flow {
     /// What the capsule draws at `now`.
     pub(crate) fn pres(&self, now: f64) -> Pres {
         let mut pres = self.pres_of(now);
+        if let (Pres::Done(done), Some(pause)) = (&mut pres, self.pause)
+            && done.countdown == Some(pause.end)
+        {
+            done.held = Some(pause.end - pause.since);
+        }
         // Scrawl's "No speech": a capture with no words still copies.
         if let Pres::Done(done) = &mut pres
             && self.silent
-            && done.text.is_empty()
+            && (done.text.is_empty() || done.text == copied())
             && done.why.is_none()
         {
-            done.why = Some("no speech".into());
+            done.why = Some(tr("no speech").into());
         }
         pres
     }
 
     fn pres_of(&self, now: f64) -> Pres {
+        let now = self.clock(now);
         let undo_left = |at: f64| now - at < undo_s();
         match &self.phase {
             Phase::Hidden => Pres::Hidden,
@@ -1561,474 +1083,43 @@ impl Flow {
             Phase::Processing => Pres::Processing,
             Phase::Saved { .. } => Pres::Done(Done {
                 hand_off: true,
-                ..Done::plain(Lead::Check, "")
+                ..Done::plain(Lead::Check, copied())
             }),
             Phase::Failed { what, why, .. } => Pres::Done(Done {
                 why: why.clone(),
                 ..Done::plain(
                     Lead::Warning,
                     match what {
-                        Failure::Start => "Couldn't start".to_owned(),
-                        Failure::Save => "Couldn't save".to_owned(),
-                        Failure::Send(to) => format!("Couldn't send to {}", short(to)),
+                        Failure::Start => tr("Couldn't start").to_owned(),
+                        Failure::Save => tr("Couldn't save").to_owned(),
+                        Failure::Send(to) => tr_fill("Couldn't send to {}", &short(to)),
                     },
                 )
             }),
             Phase::Permission { need, grant, .. } => Pres::Done(permission_done(*need, *grant)),
-            Phase::TakenBack { .. } => Pres::Done(Done::plain(Lead::Check, "Taken back")),
-            Phase::Kept { .. } => Pres::Done(Done::plain(Lead::Check, "Kept")),
+            Phase::TakenBack { .. } => Pres::Done(Done::plain(Lead::Check, tr("Taken back"))),
+            Phase::Kept { .. } => Pres::Done(Done::plain(Lead::Check, tr("Kept"))),
             Phase::TooLate { to, .. } => Pres::Done(Done {
-                why: Some("too late".into()),
                 hand_off: true,
-                ..Done::plain(Lead::Check, sent_to(to))
+                ..Done::plain(Lead::Check, already_sent_to(to))
             }),
             Phase::Queued { why, .. } => Pres::Done(Done {
                 why: Some(why.clone()),
                 hand_off: true,
                 ..Done::plain(Lead::Check, "")
             }),
-            // A pick went at once: the check, and a plain Undo (no ring,
-            // no drain) while it can still be taken back.
+            // A pick went at once: the check, and Undo with its ring while
+            // it can still be taken back.
             Phase::Sent(sent) => Pres::Done(Done {
-                why: sent.rule_saved.then(|| "saved rule".into()),
+                why: sent.rule_saved.then(|| tr("always").into()),
                 undo: sent.undoable && undo_left(sent.at),
+                countdown: (sent.undoable && undo_left(sent.at)).then(|| sent.at + undo_s()),
                 hand_off: true,
                 ..Done::plain(Lead::Check, sent_to(&sent.to))
             }),
             Phase::Routed(routed) => Pres::Done(routed_done(routed, now)),
         }
     }
-}
-
-/// The permission helper as the finished capsule draws it: what's needed
-/// and why in one line, and the one thing to do about it.
-fn permission_done(need: CaptureNeed, grant: Grant) -> Done {
-    Done {
-        no_frame: true,
-        ..permission_lines(need, grant)
-    }
-}
-
-fn permission_lines(need: CaptureNeed, grant: Grant) -> Done {
-    let name = need.name();
-    let why = match need {
-        CaptureNeed::ScreenRecording => "to see your screen",
-        CaptureNeed::Microphone => "to hear you",
-        CaptureNeed::Accessibility => "to follow your clicks",
-    };
-    match grant {
-        Grant::Off => Done {
-            why: Some(why.into()),
-            ask: Some("Allow".into()),
-            ..Done::plain(Lead::Warning, format!("Hex needs {name}"))
-        },
-        Grant::Asked => Done {
-            why: Some("turn Hex on in System Settings".into()),
-            ask: Some("Allow".into()),
-            ..Done::plain(Lead::Warning, format!("Hex needs {name}"))
-        },
-        Grant::Restart => Done {
-            why: Some("turns on when Hex restarts".into()),
-            ask: Some("Restart Hex".into()),
-            ..Done::plain(Lead::Warning, format!("{name} is on"))
-        },
-        Grant::Ready => Done {
-            ask: Some("Capture".into()),
-            ask_keys: true,
-            ..Done::plain(Lead::Check, format!("{name} is on"))
-        },
-    }
-}
-
-/// A closed list that still waits for a pick: a guess, or one offered
-/// again after an Undo; a rule's was sent, as was one too late to take
-/// back, and an unreachable one lists nothing.
-fn waits(routed: Routed) -> Option<Routed> {
-    let (suggested, recent) = sections(&routed.route);
-    (!matches!(routed.route, Route::Rule { .. })
-        && routed.already_with.is_none()
-        && !(suggested.is_empty() && recent.is_empty()))
-    .then_some(Routed {
-        open: None,
-        ..routed
-    })
-}
-
-fn hold_until(phase: &Phase) -> Option<f64> {
-    match phase {
-        Phase::Routed(r)
-            if !r.delivered
-                && !r.taken_back
-                && matches!(r.route, Route::Rule { .. } | Route::ResolvingRule { .. }) =>
-        {
-            None
-        }
-        Phase::Saved { at } => Some(at + tuning::get().done_hold_s),
-        Phase::Queued { at, .. } | Phase::TooLate { at, .. } => {
-            Some(at + tuning::get().brief_hold_s)
-        }
-        // A send leaves once its Undo window ends (a send with none, and
-        // a queued one, after the brief hold).
-        Phase::Sent(sent) if sent.undoable => Some(sent.at + undo_s()),
-        Phase::Sent(sent) => Some(sent.at + tuning::get().brief_hold_s),
-        // The suggestions leave like any finished capsule, and so does a
-        // take-back once folded (from when it folded); a search, or a
-        // take-back's open list, stays.
-        Phase::Routed(Routed {
-            route: Route::Rule { .. },
-            at,
-            open: None,
-            taken_back: false,
-            ..
-        }) => Some(at + undo_s()),
-        // Too late to take back, folded: it's where it went, so it leaves
-        // as the other settled sends do.
-        Phase::Routed(Routed {
-            at,
-            open: None,
-            already_with: Some(_),
-            ..
-        }) => Some(at + tuning::get().brief_hold_s),
-        Phase::Routed(Routed {
-            at,
-            open,
-            taken_back,
-            ..
-        }) if open.as_ref().is_none_or(|open| !open.typing && !taken_back) => {
-            // The menu-bar flow's hint is brief: the capture waits in the
-            // menu bar.
-            let hint = open.is_some() && tuning::get().flow == CapsuleFlow::MenuBar;
-            Some(
-                at + if hint {
-                    MENU_HINT_S
-                } else {
-                    tuning::get().done_hold_s
-                },
-            )
-        }
-        Phase::Kept { at } | Phase::TakenBack { at } | Phase::Failed { at, .. } => {
-            Some(at + tuning::get().brief_hold_s)
-        }
-        Phase::Permission {
-            grant: Grant::Ready,
-            at,
-            ..
-        } => Some(at + tuning::get().done_hold_s),
-        // Waiting on Kit: it stays a good while, and ✕ closes it.
-        Phase::Permission { at, .. } => Some(at + PERMISSION_HOLD_S),
-        _ => None,
-    }
-}
-
-/// The list for `route`: its suggestions, then the newest sessions, and
-/// searching, every session whose name has the query.
-fn list(route: &Route, open: &Open) -> List {
-    let query = open.query.to_lowercase();
-    let (suggested, recent) = sections(route);
-    let site = match route {
-        Route::Guess { site, .. } | Route::Rule { site, .. } => site.clone(),
-        _ => None,
-    };
-    let always = site.map(|site| (site, open.shift));
-    let every = || suggested.iter().chain(recent);
-    let mut list = List {
-        rows: every()
-            .filter(|dest| dest.name.to_lowercase().contains(&query))
-            .take(SUGGEST_ROWS)
-            .cloned()
-            .collect(),
-        title: if open.typing {
-            "All sessions"
-        } else {
-            "Send to"
-        },
-        // Searching keeps the suggestions' height, so the footer is all
-        // that comes in.
-        min_rows: if open.typing {
-            every().take(SUGGEST_ROWS).count()
-        } else {
-            0
-        },
-        selected: open.selected,
-        footer: if open.typing {
-            Footer::Search {
-                remember: always.is_some(),
-            }
-        } else {
-            Footer::Suggesting
-        },
-        always,
-    };
-    // Shift down, the highlighted row is where the rule would send it.
-    if list.always.as_ref().is_some_and(|(_, shift)| *shift)
-        && let Some(row) = list.rows.get_mut(list.selected)
-    {
-        row.why = "always".into();
-    }
-    list
-}
-
-fn clamp(routed: &mut Routed) {
-    let Some(open) = &routed.open else { return };
-    let count = list(&routed.route, open).rows().count();
-    if let Some(open) = &mut routed.open {
-        open.selected = open.selected.min(count.saturating_sub(1));
-    }
-}
-
-fn send(
-    routed: Routed,
-    row: Option<usize>,
-    always: bool,
-    now: f64,
-    actions: &mut Vec<Action>,
-) -> Phase {
-    let Some(open) = &routed.open else {
-        return Phase::Routed(routed);
-    };
-    let list = list(&routed.route, open);
-    let Some(dest) = row.and_then(|row| list.rows().nth(row)) else {
-        return Phase::Routed(routed);
-    };
-    // The rule's own session already has it: the list just closes.
-    if !(always || open.shift)
-        && rule_to(&routed.route).is_some_and(|to| to.session == dest.session)
-    {
-        return Phase::Routed(Routed {
-            open: None,
-            ..routed
-        });
-    }
-    let site = match (&routed.route, always || open.shift) {
-        (Route::Guess { site, .. } | Route::Rule { site, .. }, true) => site.clone(),
-        _ => None,
-    };
-    actions.push(Action::Send {
-        to: dest.session.clone(),
-        always: site.clone(),
-    });
-    Phase::Sent(Sent::picked(
-        dest,
-        site.is_some(),
-        now,
-        Some(routed.route.clone()),
-    ))
-}
-
-/// Where a rule sent it.
-fn rule_to(route: &Route) -> Option<&Dest> {
-    match route {
-        Route::Rule { to, .. } => Some(to),
-        _ => None,
-    }
-}
-
-/// The open list again after an Undo of the send to `from`: the same
-/// sessions as a guess, `from` once, last of all. Taken back, nothing is
-/// sent; too late, `from` keeps it. `None` when there's nothing to list.
-fn offered_again(route: Route, from: &Dest, too_late: bool, now: f64) -> Option<Routed> {
-    let (mut suggested, mut recent, site) = match route {
-        Route::Rule {
-            suggested,
-            recent,
-            site,
-            ..
-        }
-        | Route::Guess {
-            suggested,
-            recent,
-            site,
-        } => (suggested, recent, site),
-        Route::Nothing { recent } | Route::NoAnswer { recent } => (Vec::new(), recent, None),
-        Route::Unreachable { .. } | Route::ResolvingRule { .. } => return None,
-    };
-    // A rule's session leads its suggestions and may be among the recent
-    // ones too: it is listed once, at the end of the whole list.
-    let mut last = None;
-    for rows in [&mut suggested, &mut recent] {
-        rows.retain(|dest| {
-            let taken = dest.session == from.session;
-            if taken && last.is_none() {
-                last = Some(dest.clone());
-            }
-            !taken
-        });
-    }
-    if let Some(dest) = last {
-        let rows = if recent.is_empty() {
-            &mut suggested
-        } else {
-            &mut recent
-        };
-        rows.push(Dest {
-            why: if too_late { "has it" } else { "taken back" }.into(),
-            ..dest
-        });
-    }
-    if suggested.is_empty() && recent.is_empty() {
-        return None;
-    }
-    Some(Routed {
-        route: Route::Guess {
-            suggested,
-            recent,
-            site,
-        },
-        at: now,
-        open: Some(Open::suggesting()),
-        taken_back: true,
-        already_with: too_late.then(|| from.name.clone()),
-        taken_from: Some(from.clone()),
-        delivered: false,
-    })
-}
-
-/// What the capsule shows the moment an Undo of the send to `from` is
-/// asked for: the list again (or "Taken back" with nothing to list), never
-/// gone, whatever the router answers.
-fn taking_back(route: Option<Route>, from: &Dest, now: f64) -> Phase {
-    route
-        .and_then(|route| offered_again(route, from, false, now))
-        .map_or(Phase::TakenBack { at: now }, Phase::Routed)
-}
-
-fn routed_done(routed: &Routed, now: f64) -> Done {
-    let undo = now - routed.at < undo_s();
-    let base = match &routed.route {
-        // Sent nowhere, it waits for a pick: a click on Send to… reopens the list.
-        _ if routed.taken_back => Done {
-            // Too late, it's where it went: nothing to offer.
-            ask: routed.already_with.is_none().then(|| "Send to…".into()),
-            why: routed.already_with.as_ref().map(|_| "too late".into()),
-            ..Done::plain(
-                Lead::Check,
-                match &routed.already_with {
-                    Some(to) => sent_to(to),
-                    None => "Taken back".into(),
-                },
-            )
-        },
-        Route::Rule { to, .. } => Done {
-            why: routes::countdown(routed, now).or_else(|| Some("rule".into())),
-            undo: undo || !routed.delivered,
-            ..Done::plain(
-                Lead::Check,
-                if routed.delivered {
-                    sent_to(&to.name)
-                } else {
-                    format!("Sending to {}", short(&to.name))
-                },
-            )
-        },
-        Route::ResolvingRule { name } => Done {
-            why: routes::countdown(routed, now),
-            undo: true,
-            ..Done::plain(Lead::Check, format!("Sending to {}", short(name)))
-        },
-        // The suggestions are the ask (closed, Send to… opens them).
-        Route::Guess { .. } => Done {
-            ask: Some("Send to…".into()),
-            ..Done::plain(Lead::Check, "")
-        },
-        Route::Nothing { .. } => Done {
-            ask: Some("Send to…".into()),
-            ..Done::plain(Lead::Check, "")
-        },
-        Route::NoAnswer { .. } => Done {
-            why: Some("no answer".into()),
-            ask: Some("Send to…".into()),
-            ..Done::plain(Lead::Check, "")
-        },
-        // Still copied, so Paste and Inspect stay; there's nothing to list.
-        Route::Unreachable { why } => Done {
-            why: Some(short_reason(why)),
-            ..Done::plain(Lead::Warning, "Couldn't reach OpenCode")
-        },
-    };
-    match &routed.open {
-        // The suggestions hang under a finished capsule that keeps Paste
-        // and Inspect, and its note.
-        Some(open) if !open.typing => offered(base, list(&routed.route, open)),
-        // Searching, the field takes the chips' place.
-        Some(open) => Done {
-            why: None,
-            undo: false,
-            ask: None,
-            open: Some((open.query.clone(), list(&routed.route, open))),
-            ..base
-        },
-        None => Done {
-            hand_off: true,
-            ..base
-        },
-    }
-}
-
-/// The suggestions as the flow in use offers them (`capture.capsule_flow`).
-fn offered(base: Done, list: List) -> Done {
-    let names = || {
-        list.rows()
-            .map(|dest| (short(&dest.name), dest.why.clone()))
-            .collect()
-    };
-    match tuning::get().flow {
-        // Just Search and its shortcut beside "Copied": a click on a row
-        // sends, and the capture is already on the clipboard to paste.
-        CapsuleFlow::List => Done {
-            text: if base.text.is_empty() {
-                "Copied".into()
-            } else {
-                base.text.clone()
-            },
-            ask: Some("Search".into()),
-            ask_keys: true,
-            open: Some((String::new(), list)),
-            hand_off: false,
-            ..base
-        },
-        // One guess at a time on one quiet line; ⏎ sends it, ⇥ moves on.
-        CapsuleFlow::Toast => Done {
-            text: format!(
-                "Send to {}",
-                list.selected_dest()
-                    .map(|dest| short(&dest.name))
-                    .unwrap_or_default()
-            ),
-            why: Some("⏎".into()),
-            ask: None,
-            cycle: list.rows().count() > 1,
-            sends: true,
-            ..base
-        },
-        // The frame alone, then the guesses as chips.
-        CapsuleFlow::MenuBar => Done {
-            text: String::new(),
-            why: None,
-            ask: None,
-            picks: names(),
-            ..base
-        },
-        CapsuleFlow::Cursor | CapsuleFlow::Notch => Done {
-            text: "Send to".into(),
-            why: None,
-            ask: None,
-            picks: names(),
-            ..base
-        },
-    }
-}
-
-/// A host error (`{error:#}`, outer context first) as the capsule's reason:
-/// the root cause on its first line, kept to what fits beside the message.
-fn short_reason(error: &str) -> String {
-    const MAX: usize = 32;
-    let line = error.lines().next().unwrap_or_default().trim();
-    let cause = line.rsplit(": ").next().unwrap_or(line).trim();
-    if cause.chars().count() <= MAX {
-        return cause.to_owned();
-    }
-    let cut: String = cause.chars().take(MAX - 1).collect();
-    format!("{}…", cut.trim_end())
 }
 
 #[cfg(test)]
@@ -2097,7 +1188,13 @@ mod tests {
             assert_eq!(shown.text, "Send to SEER");
             assert_eq!(shown.why.as_deref(), Some("⏎"));
             assert!(shown.cycle && shown.sends && shown.open.is_none());
-            assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: true }));
+            assert_eq!(
+                flow.keys(),
+                Some(CapsuleKeys::Suggest {
+                    cycle: true,
+                    search: false
+                })
+            );
             flow.input(Input::Cycle(1), 0.5);
             assert_eq!(done(&flow, 0.5).text, "Send to HEX");
             flow.input(Input::Cycle(-1), 0.6);
@@ -2195,12 +1292,43 @@ mod tests {
         flow.input(Input::Type("ho".into()), 9.1);
         flow.input(Input::Type("x".into()), 9.2);
         flow.input(Input::Backspace, 9.3);
-        assert_eq!(done(&flow, 9.3).open.unwrap().0, "ho");
+        assert_eq!(done(&flow, 9.3).open.unwrap().0.text, "ho");
         flow.input(Input::SendRow(0), 9.4);
         assert_eq!(flow.keys(), None, "a send takes no keys: Undo is a click");
 
         flow.input(Input::Stage(Stage::Done), 20.0);
         assert_eq!(flow.keys(), None);
+    }
+
+    /// The search's field is a `TextEdit` fed by Hex's tap: typing inserts
+    /// at the caret, Backspace takes one character (not one byte) back,
+    /// and the caret follows the text.
+    #[test]
+    fn the_search_field_edits_at_its_caret() {
+        let mut flow = Flow::new();
+        flow.input(Input::Stage(Stage::Recording), 0.0);
+        flow.input(Input::Routed(rule()), 2.0);
+        flow.input(Input::OpenList, 9.0);
+        let field = |flow: &Flow| done(flow, 9.5).open.unwrap().0;
+        assert_eq!(field(&flow).text, "");
+
+        flow.input(Input::Type("hé".into()), 9.1);
+        flow.input(Input::Type("x".into()), 9.2);
+        let typed = field(&flow);
+        assert_eq!(typed.text, "héx");
+        assert_eq!(typed.range(), (4, 4), "the caret sits after what's typed");
+
+        flow.input(Input::Backspace, 9.3);
+        flow.input(Input::Backspace, 9.3);
+        let typed = field(&flow);
+        assert_eq!(typed.text, "h");
+        assert_eq!(typed.range(), (1, 1));
+
+        flow.input(Input::Backspace, 9.4);
+        flow.input(Input::Backspace, 9.4);
+        let typed = field(&flow);
+        assert_eq!(typed.text, "", "Backspace on an empty field does nothing");
+        assert_eq!(typed.range(), (0, 0));
     }
 
     #[test]
@@ -2255,7 +1383,7 @@ mod tests {
             assert_eq!(flow.pres(6.0), Pres::Processing);
         }
         flow.input(Input::Stage(Stage::Done), 7.0);
-        assert_eq!(done(&flow, 7.0).text, "");
+        assert_eq!(done(&flow, 7.0).text, copied());
         assert!(flow.tick(7.0 + tuning::get().done_hold_s));
         assert_eq!(flow.pres(40.0), Pres::Hidden);
     }
@@ -2365,9 +1493,12 @@ mod tests {
         assert_eq!(done(&flow, 10.0).lead, Lead::Check);
         assert_eq!(done(&flow, 10.0).ask, None, "Undo, as a pick has");
         assert_eq!(done(&flow, 15.0).ask, None, "nothing after the window");
-        assert_eq!(done(&flow, 10.0).why.as_deref(), Some("3 s"));
-        assert_eq!(done(&flow, 11.0).why.as_deref(), Some("2 s"));
-        assert_eq!(done(&flow, 12.0).why.as_deref(), Some("1 s"));
+        // No words count it down: the Undo chip's ring drains to the
+        // window's end, the same moment whenever it is asked.
+        assert_eq!(done(&flow, 10.0).why, None);
+        for t in [10.0, 11.0, 12.0] {
+            assert_eq!(done(&flow, t).countdown, Some(10.0 + undo_s()));
+        }
         let actions = flow.input(Input::Undo, 11.0);
         assert_eq!(actions, vec![Action::Undo { to: "SEER".into() }]);
         flow.input(Input::Undone(Undone::TakenBack), 11.4);
@@ -2393,6 +1524,53 @@ mod tests {
         let leaves = undo_s().max(3.0 + tuning::get().brief_hold_s);
         assert!(late.tick(leaves));
         assert_eq!(late.pres(leaves), Pres::Hidden);
+    }
+
+    /// The pointer on the capsule holds Undo's countdown (the router holds
+    /// a rule's send with it); leaving lets it go on with what it had left.
+    #[test]
+    fn hover_holds_the_undo_countdown_and_leaving_resumes_it() {
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(rule()), 10.0);
+        assert_eq!(flow.hover(true, 11.5), [Action::Hold(true)]);
+        for t in [12.0, 15.0, 30.0] {
+            let held = done(&flow, t);
+            assert!(held.undo, "Undo never runs out under the pointer");
+            assert_eq!(held.countdown, Some(10.0 + undo_s()));
+            assert_eq!(held.held, Some(undo_s() - 1.5), "the ring stands still");
+        }
+        assert_eq!(flow.next_due(30.0), None);
+        // Two seconds held, it ends two seconds later than it would have.
+        assert_eq!(flow.hover(false, 13.5), [Action::Hold(false)]);
+        let going = done(&flow, 13.5);
+        assert_eq!(going.countdown, Some(10.0 + undo_s() + 2.0));
+        assert_eq!(going.held, None);
+        assert_eq!(flow.next_due(13.5), Some(10.0 + undo_s() + 2.0));
+
+        // A pick's window too, the capsule's alone; one let go near its
+        // end keeps a second.
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::SendRow(0), 1.0);
+        assert!(flow.hover(true, 1.0 + undo_s() - 0.5).is_empty(), "it went");
+        assert!(done(&flow, 20.0).undo);
+        assert!(flow.hover(false, 20.0).is_empty());
+        assert_eq!(done(&flow, 20.0).countdown, Some(20.0 + RESUME_LEFT_S));
+        assert!(done(&flow, 20.0 + RESUME_LEFT_S - 0.01).undo);
+        assert!(!done(&flow, 20.0 + RESUME_LEFT_S).undo);
+
+        // One that starts under the pointer holds from the start, and an
+        // Undo while it's held still counts and lets the router go.
+        let mut flow = Flow::new();
+        flow.hover(true, 0.0);
+        assert!(
+            flow.input(Input::Routed(rule()), 1.0)
+                .contains(&Action::Hold(true))
+        );
+        assert_eq!(done(&flow, 9.0).held, Some(undo_s()));
+        let actions = flow.input(Input::Undo, 9.0);
+        assert_eq!(actions.first(), Some(&Action::Undo { to: "SEER".into() }));
+        assert!(actions.contains(&Action::Hold(false)), "{actions:?}");
     }
 
     /// The pointer on a finished capsule holds it; leaving gives it a moment.
@@ -2514,7 +1692,10 @@ mod tests {
             // 1-3 pick; Escape stays the app's.
             assert_eq!(
                 flow.keys(),
-                Some(CapsuleKeys::Suggest { cycle: false }),
+                Some(CapsuleKeys::Suggest {
+                    cycle: false,
+                    search: false
+                }),
                 "{how}"
             );
             // The router's answer changes nothing, and nothing times out.
@@ -2534,8 +1715,8 @@ mod tests {
             assert_eq!(done(&flow, 1_000.0).text, "Sent to HOME", "{how}");
         }
 
-        // Even with nothing else to offer, it stays until dismissed, and
-        // dismissing says where the bundle is.
+        // Even with nothing else to offer, the list comes back with the
+        // session it was taken from, so Search can still send it.
         let mut flow = Flow::new();
         let lone = Route::Rule {
             to: Dest::new("SEER", "rule"),
@@ -2546,14 +1727,10 @@ mod tests {
         flow.input(Input::Routed(lone), 0.0);
         flow.input(Input::Undo, 1.0);
         flow.input(Input::Undone(Undone::TakenBack), 1.2);
-        assert_eq!(done(&flow, 1.2).text, "Taken back");
-        // Nothing to list: no keys are Hex's, and it leaves by itself.
-        assert_eq!(flow.keys(), None);
-        let brief = tuning::get().brief_hold_s;
-        assert!(!flow.tick(1.0 + brief - 0.1));
-        flow.input(Input::Dismiss, 3.0);
-        let kept = done(&flow, 3.0);
-        assert_eq!((kept.text.as_str(), kept.why.as_deref()), ("Kept", None));
+        assert_eq!(rows(&flow, 1.2), ["SEER"]);
+        assert!(done(&flow, 1.2).open.is_some());
+        assert!(flow.keys().is_some());
+        assert!(!flow.tick(1_000.0), "it waits for a pick");
     }
 
     #[test]
@@ -2573,7 +1750,10 @@ mod tests {
         assert_eq!(list.selected, 0);
         assert_eq!(
             flow.keys(),
-            Some(crate::capture_host::CapsuleKeys::Suggest { cycle: false })
+            Some(crate::capture_host::CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            })
         );
         // It never leaves by itself.
         assert!(flow.next_due(1.2).is_none());
@@ -2636,6 +1816,38 @@ mod tests {
         }
     }
 
+    /// A host that named a session by id (an old build, or a rule that only
+    /// knew the id) still reads as a name in the pill, including "Already sent".
+    #[test]
+    fn a_session_named_by_its_id_reads_as_a_session() {
+        let to = Dest::new("ses_e853b1bd3ffe68OoWKFGtjPy43", "rule")
+            .session("ses_e853b1bd3ffe68OoWKFGtjPy43");
+        let route = Route::Rule {
+            to: to.clone(),
+            suggested: vec![to],
+            recent: Vec::new(),
+            site: None,
+        };
+        assert_eq!(
+            routes::sent_to("ses_e853b1bd3ffe68OoWKFGtjPy43"),
+            "Sent to session"
+        );
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(route), 0.0);
+        assert_eq!(
+            done(&flow, 0.0).text,
+            "Sending to session",
+            "the rule's own send, before OpenCode takes it"
+        );
+        flow.input(Input::Settled, 0.5);
+        assert_eq!(done(&flow, 0.5).text, "Sent to session");
+        flow.input(Input::Undo, 1.0);
+        flow.input(Input::Undone(Undone::TooLate), 1.2);
+        let shown = done(&flow, 1.2);
+        assert_eq!(shown.text, "Already sent to session");
+        assert_eq!(shown.why, None);
+    }
+
     #[test]
     fn too_late_to_take_back_offers_the_list_for_a_copy() {
         let mut flow = Flow::new();
@@ -2643,11 +1855,11 @@ mod tests {
         flow.input(Input::Undo, 1.0);
         flow.input(Input::Undone(Undone::TooLate), 1.2);
         let shown = done(&flow, 1.2);
-        assert_eq!(shown.text, "Sent to SEER");
-        assert_eq!(shown.why.as_deref(), Some("too late"));
+        assert_eq!(shown.text, "Already sent to SEER");
+        assert_eq!(shown.why, None);
         assert_eq!(rows(&flow, 1.2), ["HEX", "HOME", "SEER"]);
         let (_, list) = shown.open.unwrap();
-        assert_eq!(list.rows[2].why, "has it");
+        assert_eq!(list.rows[2].why, "already sent");
         assert!(!flow.tick(1_000.0), "it waits for a pick");
         // Pick 2: a copy goes to #2.
         assert_eq!(
@@ -2666,8 +1878,8 @@ mod tests {
         flow.input(Input::Undone(Undone::TooLate), 1.2);
         flow.input(Input::ClickAway, 2.0);
         let folded = done(&flow, 2.0);
-        assert_eq!(folded.text, "Sent to SEER");
-        assert_eq!(folded.why.as_deref(), Some("too late"));
+        assert_eq!(folded.text, "Already sent to SEER");
+        assert_eq!(folded.why, None);
         assert_eq!(folded.ask, None, "it is where it went");
         flow.input(Input::Dismiss, 3.0);
         assert_eq!(flow.pres(3.0), Pres::Hidden);
@@ -2813,19 +2025,21 @@ mod tests {
         assert!(flow.take_cues().is_empty(), "once");
     }
 
-    /// Rule countdowns wake each second; a picked send keeps its plain Undo.
+    /// An Undo window never wakes the capsule to count: its ring drains on
+    /// its own, so the capsule changes only when the window ends.
     #[test]
-    fn the_rule_countdown_wakes_each_second() {
+    fn an_undo_window_wakes_only_when_it_ends() {
         let mut flow = Flow::new();
         flow.input(Input::Routed(rule()), 10.0);
-        assert_ne!(flow.pres(10.5), flow.pres(10.0 + undo_s() - 0.5));
-        assert_eq!(flow.next_due(10.0), Some(11.0));
-        assert_eq!(flow.next_due(12.0), Some(13.0));
+        flow.input(Input::Settled, 10.2);
+        assert_eq!(flow.pres(10.5), flow.pres(10.0 + undo_s() - 0.5));
+        assert_eq!(flow.next_due(10.5), Some(10.0 + undo_s()));
         assert_ne!(flow.pres(10.0), flow.pres(10.0 + undo_s()));
 
         let mut flow = Flow::new();
         flow.input(Input::Routed(guess()), 0.0);
         flow.input(Input::SendRow(0), 1.0);
+        assert_eq!(done(&flow, 1.5).countdown, Some(1.0 + undo_s()));
         assert_eq!(flow.pres(1.5), flow.pres(1.0 + undo_s() - 0.5));
         assert_eq!(flow.next_due(1.5), Some(1.0 + undo_s()));
     }
@@ -3008,7 +2222,10 @@ mod tests {
         assert!(flow.input(Input::ClickAway, 0.7).is_empty());
         assert_eq!(
             flow.keys(),
-            Some(CapsuleKeys::Suggest { cycle: false }),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            }),
             "back to the suggestions it opened over"
         );
         assert!(flow.input(Input::ClickAway, 0.75).is_empty());
@@ -3152,7 +2369,7 @@ mod tests {
         flow.input(Input::OpenList, 1.0);
         let open = done(&flow, 1.0);
         let (query, list) = open.open.expect("open");
-        assert_eq!(query, "");
+        assert_eq!(query.text, "");
         assert_eq!(list.selected_dest().unwrap().name, "SEER");
         assert_eq!(list.footer, Footer::Search { remember: true });
         assert_eq!(list.title, "All sessions");
@@ -3185,7 +2402,13 @@ mod tests {
         assert_eq!(list.selected, 0, "the best is marked");
         assert_eq!(list.footer, Footer::Suggesting);
         assert_eq!(list.always, Some(("problems.kitlangton.com".into(), false)));
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: false }));
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            })
+        );
         assert!(flow.take_cues().is_empty(), "nothing sent, nothing heard");
         flow.tick(4.0);
         assert!(matches!(flow.pres(4.0), Pres::Done(_)), "no countdown runs");
@@ -3220,7 +2443,7 @@ mod tests {
         );
         flow.input(Input::Type("hom".into()), 1.5);
         let (query, list) = done(&flow, 1.5).open.unwrap();
-        assert_eq!(query, "hom");
+        assert_eq!(query.text, "hom");
         assert_eq!(list.title, "All sessions");
         assert_eq!(
             list.rows().map(|d| d.name.as_str()).collect::<Vec<_>>(),
@@ -3229,9 +2452,165 @@ mod tests {
         assert_eq!(list.min_rows, height, "fewer matches keep the height");
         assert!(flow.input(Input::Escape, 2.0).is_empty());
         let (query, list) = done(&flow, 2.0).open.unwrap();
-        assert_eq!(query, "", "Escape goes back to the suggestions");
+        assert_eq!(query.text, "", "Escape goes back to the suggestions");
         assert!(list.suggesting());
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: false }));
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            })
+        );
+    }
+
+    /// t1326: typing over the suggestions searched nothing; the letters went
+    /// to the app in front.
+    #[test]
+    fn typing_over_the_suggestions_with_the_pointer_on_them_searches() {
+        use crate::capture_host::CapsuleKeys;
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        flow.hover(true, 0.5);
+        assert!(flow.pointer_moved(), "the pointer on them changes the keys");
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: true
+            })
+        );
+        for typed in ["h", "e", "x"] {
+            flow.input(Input::Type(typed.into()), 1.0);
+        }
+        let (query, list) = done(&flow, 1.0).open.unwrap();
+        assert_eq!(query.text, "hex");
+        assert_eq!(query.range(), (3, 3), "the caret follows what was typed");
+        assert_eq!(list.title, "All sessions");
+        assert_eq!(
+            list.rows().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+            ["HEX"]
+        );
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::List),
+            "the search takes typing"
+        );
+        flow.input(Input::Escape, 1.5);
+        let (query, list) = done(&flow, 1.5).open.unwrap();
+        assert_eq!(query.text, "", "Escape goes back to the suggestions");
+        assert!(list.suggesting());
+    }
+
+    /// Typing is the app's unless the pointer moved onto the suggestions
+    /// since they last changed: a list that opens under a resting pointer
+    /// takes nothing.
+    #[test]
+    fn typing_stays_the_apps_until_the_pointer_moves_onto_the_suggestions() {
+        use crate::capture_host::CapsuleKeys;
+        let quiet = Some(CapsuleKeys::Suggest {
+            cycle: false,
+            search: false,
+        });
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        assert_eq!(flow.keys(), quiet, "the pointer elsewhere");
+        assert!(
+            !flow.pointer_moved(),
+            "a move off the capsule changes nothing"
+        );
+        flow.hover(true, 0.5);
+        assert_eq!(flow.keys(), quiet, "opened under a resting pointer");
+        flow.pointer_moved();
+        assert_ne!(flow.keys(), quiet);
+        flow.hover(false, 1.0);
+        assert_eq!(flow.keys(), quiet, "the pointer left");
+        flow.hover(true, 1.5);
+        flow.pointer_moved();
+        flow.input(Input::Routed(guess()), 2.0);
+        assert_eq!(flow.keys(), quiet, "a new answer under a resting pointer");
+        flow.pointer_moved();
+        assert_ne!(flow.keys(), quiet);
+    }
+
+    fn sessions(dests: &[(&str, &str, &str)]) -> Route {
+        Route::Guess {
+            suggested: dests
+                .iter()
+                .map(|&(name, folder, id)| {
+                    Dest::new(name, "1 h ago")
+                        .session(id)
+                        .folder(Some(folder.into()))
+                })
+                .collect(),
+            recent: Vec::new(),
+            site: None,
+        }
+    }
+
+    fn search(route: Route, query: &str) -> Vec<(String, String)> {
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(route), 0.0);
+        flow.input(Input::OpenList, 0.5);
+        flow.input(Input::Type(query.into()), 1.0);
+        let (_, list) = done(&flow, 1.0).open.unwrap();
+        list.rows()
+            .map(|dest| (dest.name.clone(), dest.why.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn the_search_matches_every_word_in_the_title_folder_or_id() {
+        let route = || {
+            sessions(&[
+                (
+                    "Annotate type to search",
+                    "annotate-type-to-search",
+                    "ses_1",
+                ),
+                ("Fix the capture tap", "hex", "ses_2"),
+                ("Hex release notes", "docs", "ses_3"),
+            ])
+        };
+        let names = |query| -> Vec<String> {
+            search(route(), query)
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        };
+        assert_eq!(
+            names("search ANNOTATE"),
+            ["Annotate type to search"],
+            "any order, any case"
+        );
+        assert_eq!(
+            search(route(), "hex"),
+            [
+                ("Hex release notes".into(), "1 h ago".into()),
+                ("Fix the capture tap".into(), "hex · 1 h ago".into()),
+            ],
+            "titles first, and a folder match names its folder"
+        );
+        assert_eq!(
+            names("capture hex"),
+            ["Fix the capture tap"],
+            "title and folder"
+        );
+        assert_eq!(names("ses_3"), ["Hex release notes"], "the id");
+        assert!(names("hex search").is_empty(), "every word, in one session");
+    }
+
+    #[test]
+    fn a_row_names_its_folder_only_beside_a_row_with_the_same_title() {
+        let route = sessions(&[
+            ("HOME", "home", "ses_1"),
+            ("Hex", "hex", "ses_2"),
+            ("home", "dotfiles", "ses_3"),
+        ]);
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(route), 0.0);
+        let (_, list) = done(&flow, 0.0).open.unwrap();
+        let notes: Vec<_> = list.rows().map(|dest| dest.why.as_str()).collect();
+        assert_eq!(notes, ["home · 1 h ago", "1 h ago", "dotfiles · 1 h ago"]);
     }
 
     #[test]
@@ -3262,7 +2641,7 @@ mod tests {
         );
         let sent = done(&flow, 2.0);
         assert_eq!(sent.text, "Sent to HEX");
-        assert_eq!(sent.why.as_deref(), Some("saved rule"));
+        assert_eq!(sent.why.as_deref(), Some("always"));
         assert!(sent.undo);
         assert_eq!(
             flow.click(Id::Undo, 2.5),
@@ -3314,7 +2693,7 @@ mod tests {
             }]
         );
         let shown = done(&flow, 1.0);
-        assert_eq!(shown.why.as_deref(), Some("saved rule"));
+        assert_eq!(shown.why.as_deref(), Some("always"));
     }
 
     #[test]
@@ -3350,14 +2729,20 @@ mod tests {
         let mut flow = Flow::new();
         flow.input(Input::Stage(Stage::Done), 0.0);
         flow.input(Input::Routed(guess()), 0.0);
-        assert_eq!(flow.keys(), Some(CapsuleKeys::Suggest { cycle: false }));
+        assert_eq!(
+            flow.keys(),
+            Some(CapsuleKeys::Suggest {
+                cycle: false,
+                search: false
+            })
+        );
         // Its hold runs out: hidden, and no key is the capsule's.
         assert!(flow.tick(hold + 1.0));
         assert_eq!(flow.pres(hold + 1.0), Pres::Hidden);
         assert_eq!(flow.keys(), None);
         assert!(flow.input(Input::OpenList, 30.0).is_empty());
         let (query, list) = done(&flow, 30.0).open.expect("the list is open");
-        assert_eq!(query, "");
+        assert_eq!(query.text, "");
         assert_eq!(list.selected_dest().unwrap().name, "SEER");
         assert_eq!(flow.keys(), Some(CapsuleKeys::List));
         // Escape folds the list; it then leaves with its hold and waits again.
@@ -3436,7 +2821,7 @@ mod tests {
                 always: Some("problems.kitlangton.com".into())
             }]
         );
-        assert_eq!(done(&flow, 1.0).why.as_deref(), Some("saved rule"));
+        assert_eq!(done(&flow, 1.0).why.as_deref(), Some("always"));
 
         // And in the list an Undo of the rule's send reopens.
         let mut flow = Flow::new();
@@ -3546,7 +2931,7 @@ mod tests {
             0.0,
         );
         let shown = done(&flow, 0.0);
-        assert_eq!(shown.why.as_deref(), Some("no answer"));
+        assert_eq!(shown.why.as_deref(), Some("no suggestions"));
         let (_, list) = shown.open.expect("recent sessions are the suggestions");
         assert_eq!(list.rows().next().unwrap().name, "HOME");
     }
@@ -3563,7 +2948,7 @@ mod tests {
         let shown = done(&flow, 0.0);
         assert_eq!(shown.lead, Lead::Warning);
         assert_eq!(shown.text, "Couldn't reach OpenCode");
-        assert_eq!(shown.why.as_deref(), Some("didn't answer in time"));
+        assert_eq!(shown.why.as_deref(), Some("OpenCode didn't answer"));
         assert_eq!(shown.ask, None);
         assert!(shown.hand_off);
         // Nothing to list, and a stray OpenList opens
@@ -3674,10 +3059,6 @@ mod tests {
         );
         assert_eq!(done(&flow, 12.0).text, "Couldn't send to SEER");
         assert_eq!(done(&flow, 12.0).why.as_deref(), Some("offline"));
-        assert_eq!(
-            short_reason("Screen Recording permission is off for Hex"),
-            "Screen Recording permission is…"
-        );
     }
 
     #[test]

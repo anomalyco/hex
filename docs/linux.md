@@ -22,6 +22,23 @@ elsewhere (KDE, GNOME). Shortcuts are general: the desktop's GlobalShortcuts por
 your desktop's own keybindings running `hex` commands (see
 [Shortcuts](#shortcuts)).
 
+With **Labs › Live typing** on (`labs.live_typing`, off by default), a hotkey
+dictation's provisional words are an underlined input-method preedit in the
+focused text field and the final text is committed through
+`zwp_input_method_v2`, so it lands without the clipboard and Ctrl-V.
+`zwp_input_method_manager_v2` is a wlroots-family protocol (Sway, Hyprland,
+and other wlroots compositors); KWin and Mutter do not offer it, so KDE and
+GNOME use the paste above. Hex takes the input method when the capture
+becomes intentional (the hold threshold, or at once in Toggle) and gives the
+seat back at Finish or Cancel, including post-release processing; short taps
+and chords create none. It falls back to the paste above when the compositor
+does not offer the protocol, another input method (fcitx, ibus) holds the
+seat, the focused field has no active text input, the final text is
+multi-line, or the compositor does not answer in time. A CPU engine or a
+model that cannot stream shows no provisional words while speaking, but the
+final text still goes in through the input method. It has **not** been
+verified on a real compositor yet; only its unit tests and the build ran.
+
 For Nix/NixOS, use the [Nix guide](nix.md). Nix owns updates to that installation;
 Hex's signed updater owns only the direct-install layout below.
 
@@ -36,8 +53,13 @@ StatusNotifierItem host, such as Waybar, KDE, or Omarchy's bar), Hex shows a
 tray icon: click it to open the window, or use its menu: **Show Hex**,
 **Paste last dictation**, the downloaded speech models, the update once one
 is ready (**Restart to update**), **Enable / Disable Hex**, and **Quit Hex**;
-while Hex records or transcribes, the menu and tooltip say so. Without a
-tray, quit with **Quit Hex** at the bottom of the window's sidebar, the launcher's **Quit Hex** action, or `hex quit`.
+while Hex records or transcribes, the menu and tooltip say so. The mark is white,
+and black when the desktop's color scheme prefers light; Hex reads that setting
+when it creates the tray, so a later switch applies at the next launch. KDE's
+portal takes the scheme from the window palette, so a mixed theme with light
+windows and a dark panel (such as Breeze Twilight) gets a black mark on a dark
+panel. Without a tray, quit with **Quit Hex** at the bottom of the window's
+sidebar, the launcher's **Quit Hex** action, or `hex quit`.
 
 The window opens at 980×760 logical pixels and floats on tiling window
 managers with no window rule: it maps with its minimum size equal to its
@@ -167,6 +189,12 @@ sh install-linux.sh
 ~/.local/bin/hex model install
 ~/.local/bin/hex
 ```
+
+When `wl-copy` is missing, the installer prints the commands to install the
+Wayland helpers: on Debian or Ubuntu, `sudo apt install wl-clipboard wtype`; on
+Fedora, `sudo dnf install wl-clipboard wtype`; on Arch, `sudo pacman -S --needed
+wl-clipboard wtype`. `wtype` is only needed on wlroots compositors and niri,
+where Hex uses it; GNOME and KDE paste through their RemoteDesktop portal.
 
 The installer verifies the signed release feed, exact artifact size, and
 SHA-256 before installing. It uses no root access. It creates the managed
@@ -416,23 +444,22 @@ dictation rules:
   their menu, and the paste lands there instead of the message box
   (#1023). Hex still logs the
   paste as sent. Ctrl+Space or a key without modifiers works.
-  Hyprland names each shortcut `anomaly.hex:<shortcut>-<trigger>`: Hex's app
-  id, the shortcut, and the key Settings records with `+` written as `-`.
-  With the default keys these are `anomaly.hex:dictation-ALT-space` and
-  `anomaly.hex:paste-last-CTRL-ALT-v` (Annotate: `anomaly.hex:capture-F9`).
-  The name changes when you record another key in Settings, so list the
-  current names with `hyprctl globalshortcuts` while Hex runs and bind those.
-  For example:
+  Hyprland names each shortcut `anomaly.hex:<shortcut>`: `anomaly.hex:dictation`,
+  `anomaly.hex:paste-last`, `anomaly.hex:capture` (Annotate), and
+  `anomaly.hex:raw-dictation` (Dictate without processing). The names stay the
+  same when you record another key in Settings (#1376), so a bind keeps
+  working; `hyprctl globalshortcuts` lists them while Hex runs. For example:
 
 ```lua
-hl.bind("End", hl.dsp.global("anomaly.hex:dictation-ALT-space"))
-hl.bind("F10", hl.dsp.global("anomaly.hex:paste-last-CTRL-ALT-v"))
+hl.bind("End", hl.dsp.global("anomaly.hex:dictation"))
+hl.bind("F10", hl.dsp.global("anomaly.hex:paste-last"))
 ```
 
   Traditional Hyprland configs write
-  `bind = , End, global, anomaly.hex:dictation-ALT-space`. Binds to
+  `bind = , End, global, anomaly.hex:dictation`. Earlier builds put the
+  recorded key in the name (`anomaly.hex:dictation-ALT-space`), and binds to
   `hex:dictation` or `hex:paste-last` (names from before Hex's app id was
-  `anomaly.hex`) do nothing; replace them. Remove any `cancel-dictation`
+  `anomaly.hex`) are older still; both do nothing now, so replace them. Remove any `cancel-dictation`
   bind: Hex no longer has it. Hyprland 0.56's Lua binds send no release when the modifier comes
   up before the key (Alt before Z); 0.57 fixes this. On 0.56, Toggle is
   unaffected: the next press still finishes. In Hold, recording continues
@@ -540,9 +567,10 @@ again from Hex until something else copies. It restores only if nothing newer
 replaced the transcript in the meantime: a later dictation, a copy, or another
 application. An empty clipboard stays empty. A larger or unreadable clipboard
 is left holding the transcript, and Hex's log says why. When automatic paste
-fails, the transcript stays on the clipboard for Ctrl+V. Nothing confirms the
-target read the paste, so a target stalled past the delay can paste the
-restored clipboard instead (see [#24](https://github.com/anomalyco/hex/issues/24)).
+fails after `wl-copy` has taken the transcript, it stays on the clipboard for
+Ctrl+V. Nothing confirms the target read the paste, so a target stalled past
+the delay can paste the restored clipboard instead (see
+[#24](https://github.com/anomalyco/hex/issues/24)).
 On Wayland, restoring needs the compositor's `ext-data-control` protocol
 (KDE Plasma 6, recent wlroots compositors) or `wlr-data-control` (wlroots
 compositors, niri, Hyprland); without either the transcript stays, and
@@ -566,9 +594,11 @@ approved, so you're asked only once.
 - Export the compositor's nonempty `WAYLAND_DISPLAY` in the launch environment.
   Hex and its window (winit) select the same native backend even when XWayland's
   `DISPLAY` is also present. `XDG_SESSION_TYPE` alone does not select Wayland.
-- Install `wl-clipboard`. Hex copies each transcript, then sends Ctrl+V (or
-  Ctrl+Shift+V with terminal paste) through one of two general paths, chosen at
-  the first paste:
+- Install `wl-clipboard`. Every Wayland copy and paste runs `wl-copy`; without
+  it, Settings and `hex status` warn while the listener runs, and a dictation
+  fails naming the package to install. Hex copies each transcript, then sends
+  Ctrl+V (or Ctrl+Shift+V with terminal paste) through one of two general
+  paths, chosen at the first paste:
   - `wtype`, when the compositor offers the virtual keyboard protocol
     (`zwp_virtual_keyboard_manager_v1`; wlroots compositors and niri) and
     `wtype` is installed.
@@ -578,7 +608,8 @@ approved, so you're asked only once.
     token (`remote-desktop-token` in Hex's data folder), so it asks once. Revoke
     it in the desktop's settings.
   - With neither, the dictation fails with "Copied to the clipboard; press
-    Ctrl+V to paste" and the transcript stays on the clipboard.
+    Ctrl+V to paste" and, with `wl-copy` installed, the transcript stays on the
+    clipboard.
 
   There is no silent XWayland, direct-typing, uinput, or privileged
   input-injection fallback; the only XWayland uses besides the HUD are the

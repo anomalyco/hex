@@ -39,15 +39,16 @@ use crate::audio::recording_environment::{
 const TIMELINE_BUFFER_DURATION: Duration = Duration::from_secs(10);
 const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
 
-/// How much audio a shortcut capture keeps from before its press. Muting or
-/// pausing other audio while dictating takes effect only after the press, so
-/// the audio before it holds whatever was playing (#1309): those captures
-/// keep none. Ducking and doing nothing keep [`PRE_ROLL_DURATION`].
+/// How much audio a shortcut capture keeps from before its press. Muting,
+/// pausing, or lowering other audio while dictating takes effect only after
+/// the press, so the audio before it holds whatever was playing (#1309,
+/// #1468): those captures keep none. Doing nothing keeps
+/// [`PRE_ROLL_DURATION`].
 pub fn hotkey_pre_roll(behavior: crate::app_settings::RecordingAudioBehavior) -> Duration {
     use crate::app_settings::RecordingAudioBehavior::{DoNothing, Duck, Mute, PauseMedia};
     match behavior {
-        Mute | PauseMedia => Duration::ZERO,
-        Duck | DoNothing => PRE_ROLL_DURATION,
+        Mute | PauseMedia | Duck => Duration::ZERO,
+        DoNothing => PRE_ROLL_DURATION,
     }
 }
 pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
@@ -632,6 +633,10 @@ struct Recording {
     input_buffer: Vec<f32>,
     resampler: Option<Fft<f32>>,
     stream: Option<LiveStream>,
+    /// Whether this recording's stream should show the live text plate,
+    /// decided once when the stream opens so toggling Labs › Live text
+    /// mid-capture changes nothing.
+    show_live_text: bool,
     voice: VoiceTrack,
     /// This recording's hold on the HUDs' live text, from its first text;
     /// dropping the recording clears it.
@@ -705,6 +710,7 @@ impl Recording {
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
             resampler,
             stream: None,
+            show_live_text: false,
             voice: VoiceTrack::default(),
             live_text: None,
             #[cfg(target_os = "macos")]
@@ -1122,18 +1128,16 @@ impl DictationCapture {
         self.recording.as_mut()?.stream.as_mut()?.take_partial()
     }
 
-    /// Shows the live text on the HUDs when it changed, and logs at debug
-    /// how far it has got: word counts against the audio fed, never the
-    /// words (the engine logs each stream's count of changes). Every OS's
-    /// capture loop calls it after ingesting audio; it does nothing without
-    /// live text.
-    pub fn report_live_text(&mut self) {
-        let Some(partial) = self.take_partial() else {
-            return;
-        };
-        let Some(recording) = &mut self.recording else {
-            return;
-        };
+    /// Shows the live text on the HUDs when it changed and Labs › Live text
+    /// (or the first run's practice) wants it, and logs at debug how far it
+    /// has got: word counts against the audio fed, never the words (the
+    /// engine logs each stream's count of changes). Every OS's capture loop
+    /// calls it after ingesting audio; it does nothing without live text. The
+    /// change is also returned, so a host can send it to Live typing's input
+    /// method without showing the plate.
+    pub fn report_live_text(&mut self) -> Option<Partial> {
+        let partial = self.take_partial()?;
+        let recording = self.recording.as_mut()?;
         tracing::debug!(
             fed_ms = recording
                 .stream
@@ -1143,10 +1147,13 @@ impl DictationCapture {
             tentative_words = partial.tentative.split_whitespace().count(),
             "live text"
         );
-        recording
-            .live_text
-            .get_or_insert_with(crate::dictation::live_text::Publisher::new)
-            .show(&partial);
+        if recording.show_live_text {
+            recording
+                .live_text
+                .get_or_insert_with(crate::dictation::live_text::Publisher::new)
+                .show(&partial);
+        }
+        Some(partial)
     }
 
     /// Opens a live stream for the active recording when the engine's model
@@ -1159,6 +1166,8 @@ impl DictationCapture {
         };
         if recording.stream.is_none() {
             recording.stream = engine.begin();
+            recording.show_live_text = recording.stream.is_some()
+                && (crate::labs::live_text() || crate::dictation::live_text::board_demanded());
             recording.feed_stream();
         }
     }
@@ -1559,14 +1568,9 @@ mod tests {
     }
 
     #[test]
-    fn muting_or_pausing_while_dictating_keeps_no_pre_roll() {
+    fn suppressing_audio_while_dictating_keeps_no_pre_roll() {
         use crate::app_settings::RecordingAudioBehavior::{DoNothing, Duck, Mute, PauseMedia};
-        for (behavior, kept) in [
-            (Mute, 0),
-            (PauseMedia, 0),
-            (Duck, 7_200),
-            (DoNothing, 7_200),
-        ] {
+        for (behavior, kept) in [(Mute, 0), (PauseMedia, 0), (Duck, 0), (DoNothing, 7_200)] {
             let pre_roll = hotkey_pre_roll(behavior);
             let origin = capture_time();
             let mut warm = DictationCapture::new(16_000);
@@ -2083,6 +2087,50 @@ mod tests {
                 tentative: " is".into(),
             }
         }
+    }
+
+    #[test]
+    fn the_plate_follows_the_decision_made_when_the_stream_opened() {
+        use crate::transcription::engine::Command;
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let engine = engine.with_live_text();
+        let start = capture_time();
+        let mut capture = DictationCapture::new(16_000);
+        capture.start(start);
+        assert!(capture.become_intentional(start + MINIMUM_HOLD_DURATION));
+        capture.begin_stream(&engine);
+        let partials = commands
+            .try_iter()
+            .find_map(|command| match command {
+                Command::Begin { partials, .. } => partials,
+                _ => None,
+            })
+            .expect("a stream");
+        capture.ingest(&[0.5; 16_000], start + Duration::from_secs(1));
+        // The decision is the recording's, captured when the stream opened;
+        // a later toggle never re-decides it.
+        capture
+            .recording
+            .as_mut()
+            .expect("recording")
+            .show_live_text = false;
+        partials.publish(Partial {
+            stable: "hello".into(),
+            tentative: String::new(),
+        });
+        assert_eq!(
+            capture.report_live_text().map(|partial| partial.stable),
+            Some("hello".into())
+        );
+        assert!(
+            capture
+                .recording
+                .as_ref()
+                .expect("recording")
+                .live_text
+                .is_none(),
+            "the plate needs the decision made when the stream opened"
+        );
     }
 
     #[test]

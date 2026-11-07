@@ -196,7 +196,7 @@ impl Capsule {
         let Some(Kind::Offer(candidate)) = &self.kind else {
             return false;
         };
-        let Some(provider) = candidate.provider() else {
+        let Some(provider) = candidate.provider(crate::labs::more_call_apps()) else {
             return false;
         };
         tracing::info!(key = %provider.key, ?policy, "meeting provider choice made from an offer");
@@ -578,6 +578,7 @@ impl MeetingCapsules {
                 });
             }
             ControllerEvent::Failed { .. } => self.close_recording(),
+            ControllerEvent::ImportFailed { .. } => {}
             ControllerEvent::OpenMeeting(_)
             | ControllerEvent::Chapters(_)
             | ControllerEvent::NotesStarted => {}
@@ -806,7 +807,7 @@ fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
         Kind::Offer(candidate) if capsule.more_open => offer_choices(p, candidate),
         Kind::Offer(candidate) => {
             let mut actions = Vec::new();
-            if candidate.provider().is_some() {
+            if candidate.provider(crate::labs::more_call_apps()).is_some() {
                 actions.push(
                     button(p, "offer-more", "…", false, |c| {
                         c.set_more_open(true);
@@ -983,8 +984,9 @@ fn reminder(
 /// The offer's "…": never offer this provider again, or always record it
 /// (which records this call too).
 fn offer_choices(p: Paint, candidate: &MeetingCandidate) -> (rune::Color, String, String, Vec<El>) {
+    let more_call_apps = crate::labs::more_call_apps();
     let label = candidate
-        .provider()
+        .provider(more_call_apps)
         .map_or_else(String::new, |provider| provider.label);
     let mut actions = vec![
         button(p, "offer-cancel", tr("Cancel"), false, |c| {
@@ -996,7 +998,7 @@ fn offer_choices(p: Paint, candidate: &MeetingCandidate) -> (rune::Color, String
             c.close();
         }),
     ];
-    if candidate.can_always_record() {
+    if candidate.can_always_record(more_call_apps) {
         actions.push(button(p, "always-record", tr("Always record"), true, |c| {
             let Some(Kind::Offer(candidate)) = &c.kind else {
                 return;

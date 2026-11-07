@@ -1,5 +1,5 @@
 //! The OpenCode model catalog and the model and thinking pickers that each
-//! mode's rewriting uses, and Labs › Choose meeting summary model's picker:
+//! mode's rewriting uses, and Meetings › Settings' summary model picker:
 //! the catalog loads off the UI thread only while a pane that uses it shows,
 //! a stopped OpenCode is looked for again at a coarse interval, failures
 //! wait for an explicit retry, and choosing a mode's model also picks its
@@ -13,7 +13,7 @@ use rune_kit::{
     Badge, Combobox, ComboboxOption, ComboboxState, Placement, Select, SelectAppearance,
 };
 
-use super::controls::{ButtonKind, Paint, button, icon_row, setting_row};
+use super::controls::{ButtonKind, Paint, button, setting_row};
 use super::modes::Selection;
 use super::{Menu, Ui};
 use crate::app_settings::AppSettings;
@@ -31,7 +31,7 @@ const MODEL_FIELD_WIDTH: f32 = 240.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Target {
     Mode(Selection),
-    /// `meetings.opencode_model` (Labs › Choose meeting summary model): no
+    /// `meetings.opencode_model` (Meetings › Settings › Summaries): no
     /// thinking variant, and its default entry clears it, so Hex picks one
     /// of its fast models.
     MeetingSummary,
@@ -48,6 +48,9 @@ pub(super) struct Models {
     retry_at: Option<Instant>,
     /// The model popover: open, its search, and its highlight.
     pub(super) picker: ComboboxState,
+    /// Whether the popover was open at the last poll, so opening it reads
+    /// the catalog again.
+    picker_was_open: bool,
 }
 
 impl Default for Models {
@@ -57,6 +60,7 @@ impl Default for Models {
             receiver: None,
             retry_at: None,
             picker: ComboboxState::default(),
+            picker_was_open: false,
         }
     }
 }
@@ -79,6 +83,13 @@ impl Models {
     /// shows), loads it the first time and looks for a stopped OpenCode
     /// now and then; otherwise touches nothing.
     pub(super) fn poll(&mut self, wanted: bool) -> bool {
+        let opened = self.picker.open && !self.picker_was_open;
+        self.picker_was_open = self.picker.open;
+        // Opening the picker reads the catalog again, keeping the models it
+        // shows until the new list arrives.
+        if wanted && opened && self.receiver.is_none() {
+            self.start_load();
+        }
         if let Some(receiver) = &self.receiver {
             let Ok(state) = receiver.try_recv() else {
                 return false;
@@ -345,7 +356,8 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
         )
         .label(field_label);
     let picker = model_picker(ui, p, target, field, layer);
-    let refresh = ui.models.available().then(|| {
+    // The meeting picker reads the catalog again each time it opens instead.
+    let refresh = (!meeting && ui.models.available()).then(|| {
         button(
             p,
             "refresh-models",
@@ -361,13 +373,12 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
         .child(picker)
         .children(refresh);
     if meeting {
-        let about = super::platform_settings::summary_model_about(model.unwrap_or_default());
-        return vec![icon_row(
+        let about = super::platform_settings::summary_model_problem(model.unwrap_or_default());
+        return vec![setting_row(
             p,
             "meeting-summary-model",
-            &super::icons::SPARKLES,
-            tr("Summary model"),
-            Some(about.as_str()),
+            tr("Model"),
+            about,
             control,
         )];
     }

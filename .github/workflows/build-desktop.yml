@@ -229,7 +229,7 @@ jobs:
             bash source/.github/release/check-x86-baseline.sh \
             "$(cygpath -u "$RUNNER_TEMP")/dist/hex-$HEX_VERSION-windows-$HEX_WINDOWS_LABEL.exe" \
             source/target/x86_64-pc-windows-msvc/release/build/transcribe-cpp-sys-*/out/lib/ggml*.lib
-      - name: Check the executable needs no Visual C++ Redistributable or Vulkan loader
+      - name: Check the executables need no Visual C++ Redistributable or Vulkan loader, hex.exe is a GUI program and hex.com a console one
         shell: pwsh
         run: |
           $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
@@ -243,6 +243,15 @@ jobs:
           # time, a missing or Vulkan 1.0 one stops Hex before main (#1240).
           $static = ($imports -join "`n") -split 'delay load dependencies' | Select-Object -First 1
           if ($static -match 'vulkan-1\.dll') { throw "hex.exe imports vulkan-1.dll at load time instead of delay-loading it" }
+          # A GUI program, so opening Hex shows no console window (#850).
+          $headers = & $dumpbin.FullName /headers "$env:RUNNER_TEMP/dist/hex-$env:HEX_VERSION-windows-$env:HEX_WINDOWS_LABEL.exe"
+          if (-not ($headers | Select-String -SimpleMatch 'subsystem (Windows GUI)')) { throw "hex.exe is not a Windows GUI program" }
+          # hex.com, its console entry point, is a console program that shells wait for.
+          $console = "$env:RUNNER_TEMP/dist/hex-$env:HEX_VERSION-windows-$env:HEX_WINDOWS_LABEL.com"
+          $consoleImports = & $dumpbin.FullName /dependents $console
+          if ($consoleImports | Select-String -Pattern 'VCRUNTIME|MSVCP|vcomp') { throw "hex.com imports Visual C++ runtime DLLs" }
+          $consoleHeaders = & $dumpbin.FullName /headers $console
+          if (-not ($consoleHeaders | Select-String -SimpleMatch 'subsystem (Windows CUI)')) { throw "hex.com is not a console program" }
       - id: upload
         uses: ./source/.github/release/upload
         with:

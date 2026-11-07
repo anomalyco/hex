@@ -31,6 +31,8 @@ static BOARD: Mutex<Board> = Mutex::new(Board {
 });
 static NEXT_PUBLISHER: AtomicU64 = AtomicU64::new(1);
 static DEMANDS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_os = "linux")]
+static TYPING: AtomicUsize = AtomicUsize::new(0);
 
 fn board() -> MutexGuard<'static, Board> {
     BOARD.lock().unwrap_or_else(|error| error.into_inner())
@@ -63,8 +65,44 @@ impl Drop for Demand {
     }
 }
 
-/// Whether anything holds a [`Demand`].
+/// Asks dictation streams to publish their text for Live typing's
+/// input-method preedit, without the Live text plate. It shares the engine
+/// demand with [`Demand`], but never publishes to the plate.
+#[cfg(target_os = "linux")]
+pub(crate) struct TypingDemand(());
+
+#[cfg(target_os = "linux")]
+pub(crate) fn typing_demand() -> TypingDemand {
+    TYPING.fetch_add(1, Ordering::AcqRel);
+    TypingDemand(())
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for TypingDemand {
+    fn drop(&mut self) {
+        TYPING.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Whether anything holds a [`Demand`], or a `TypingDemand` on Linux.
 pub(crate) fn demanded() -> bool {
+    DEMANDS.load(Ordering::Acquire) > 0 || typing_demanded()
+}
+
+/// Whether a `TypingDemand` is held: Live typing is Linux only.
+#[cfg(target_os = "linux")]
+fn typing_demanded() -> bool {
+    TYPING.load(Ordering::Acquire) > 0
+}
+
+#[cfg(not(target_os = "linux"))]
+fn typing_demanded() -> bool {
+    false
+}
+
+/// Whether the HUD's live text plate wants the published text (Labs › Live
+/// text, or the first run's practice field).
+pub(crate) fn board_demanded() -> bool {
     DEMANDS.load(Ordering::Acquire) > 0
 }
 
@@ -177,6 +215,21 @@ mod tests {
         );
         drop(newer);
         assert_eq!(seen.lock().unwrap().last(), Some(&None));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_typing_demand_feeds_the_engine_without_wanting_the_plate() {
+        let _turn = turn();
+        let before = board_demanded();
+        let demand = typing_demand();
+        assert!(demanded(), "the engine publishes for a typing demand");
+        assert_eq!(
+            board_demanded(),
+            before,
+            "typing alone never asks for the plate"
+        );
+        drop(demand);
     }
 
     #[test]

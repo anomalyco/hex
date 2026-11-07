@@ -17,12 +17,15 @@
 pub(crate) mod feed;
 pub(crate) mod flow;
 pub(crate) mod ink;
+mod list_view;
 pub(crate) mod notch;
 pub(crate) mod picker;
 #[cfg(target_os = "macos")]
 pub(crate) mod playground;
 pub(crate) mod surface;
 pub(crate) mod tuning;
+mod undo_ring;
+mod view;
 
 // Its scenes and goldens are macOS's chips and labels.
 #[cfg(all(test, target_os = "macos"))]
@@ -37,16 +40,20 @@ use rune::{
     Color, Compositor, Cx, El, Frame, LineCap, Live, LiveText, OverlayHandle, Path, Runtime, Shape,
     SpringPair, Transition, Tx, canvas, col, el, row, text,
 };
+use rune_kit::TextInput;
 
 use self::flow::{Action, Cue, Done, Flow, Footer, Input, Lead, List, Mode, Pres};
+use self::list_view::*;
 use self::surface::{
     CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LIST_PAD, LIST_Y, PANEL_H, PANEL_W,
-    PROCESSING, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H, THUMB_W,
-    THUMB_X, UNDO_LABEL, chord, clock_style, clock_width, corner, done_style, done_text_x,
-    ellipsize, measure, medium, small,
+    PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H, THUMB_W, THUMB_X,
+    chord, clock_style, clock_width, corner, done_style, done_text_x, ellipsize, measure, medium,
+    processing, small,
 };
 use self::tuning::ListFooter;
+use self::view::*;
 use super::controls::Paint;
+use crate::desktop::i18n::{tr, tr_fill};
 
 /// Peak blur (pt) of the picker's badge and the list's rows softening in
 /// place.
@@ -70,20 +77,22 @@ const LIST_DROP: f32 = 6.0;
 
 // ─── Live values ─────────────────────────────────────────────────────────────
 
-const GLYPHS: usize = 11;
+/// Room for "Processing…" in the longest language.
+const GLYPHS: usize = 24;
 
 /// "Processing…" split into glyphs, each with its x and width as the whole
 /// label shapes them.
 fn processing_glyphs() -> [(char, f32, f32); GLYPHS] {
     let mut out = [(' ', 0.0, 0.0); GLYPHS];
-    for (k, (at, c)) in PROCESSING.char_indices().enumerate().take(GLYPHS) {
+    let label = processing();
+    for (k, (at, c)) in label.char_indices().enumerate().take(GLYPHS) {
         let end = at + c.len_utf8();
         let x = if at == 0 {
             0.0
         } else {
-            measure(&PROCESSING[..at], medium())
+            measure(&label[..at], medium())
         };
-        out[k] = (c, x, measure(&PROCESSING[..end], medium()) - x);
+        out[k] = (c, x, measure(&label[..end], medium()) - x);
     }
     out
 }
@@ -142,7 +151,7 @@ impl Meter {
             spin: std::array::from_fn(|_| Live::new(0.18)),
             shimmer: std::array::from_fn(|_| Live::new(1.0)),
             shimmer_at: {
-                let total = measure(PROCESSING, medium()).max(1.0);
+                let total = measure(processing(), medium()).max(1.0);
                 let glyphs = processing_glyphs();
                 std::array::from_fn(|k| (glyphs[k].1 + glyphs[k].2 * 0.5) / total)
             },
@@ -257,6 +266,8 @@ pub(crate) struct Animated {
     morphs: u32,
     /// The shown capture's first frame, decoded, for [`Lead::Thumbnail`].
     thumb: Option<rune::Image>,
+    /// The Undo chip's countdown, while it has one.
+    ring: Option<undo_ring::Ring>,
 }
 
 impl Animated {
@@ -270,6 +281,7 @@ impl Animated {
             clock: LiveText::new(surface.clock.clone()),
             morphs: surface.morphs,
             thumb: None,
+            ring: None,
         }
     }
 
@@ -341,6 +353,9 @@ pub(crate) struct CapsuleState {
     replace: bool,
     /// Where the overlay was last placed for ([`Surface::anchor`]).
     placed: surface::Anchor,
+    /// The notch the capsule hangs from on the pointer's display, when it
+    /// could be measured.
+    notch: Option<notch::Measured>,
     /// The keys Hex's tap hands the capsule ([`Flow::keys`]): the overlay
     /// never takes focus.
     keys: Option<(
@@ -383,6 +398,7 @@ impl CapsuleState {
             follow: false,
             replace: false,
             placed: surface::Anchor::Top,
+            notch: None,
             keys: None,
             hovering: [false; 2],
             picker: None,
@@ -407,6 +423,15 @@ impl CapsuleState {
         state.live.thumb = thumb;
         let pres = state.with_thumb(pres);
         state.surface = std::mem::take(&mut state.surface).settled(pres);
+        // An Undo ring two seconds in, so a still shows it draining.
+        if let Pres::Done(Done {
+            countdown: Some(end),
+            ..
+        }) = &state.surface.pres
+        {
+            let now = end - flow::undo_s() + 2.0;
+            undo_ring::sync(&mut state.live.ring, &state.surface.pres, now, false);
+        }
         state.live.meter.publish(0.4);
         // The shimmer's band would leave most of a still's label dim.
         for glyph in &state.live.meter.shimmer {
@@ -472,10 +497,22 @@ impl CapsuleState {
             return;
         }
         let now = self.now;
-        self.flow.hover(on, now);
+        let actions = self.flow.hover(on, now);
+        self.dispatch(actions);
         self.present(now);
         self.live.sync(&self.surface);
         tx.wake_after(Duration::ZERO);
+    }
+
+    /// The pointer moved on the capsule: typing over its suggestions may
+    /// search now, so the tap's keys change at once.
+    fn pointer_moved(&mut self, tx: &mut Tx) {
+        if self.flow.pointer_moved() {
+            take_keys(self);
+            tx.wake_after(Duration::ZERO);
+        } else {
+            tx.live_only();
+        }
     }
 
     /// Moves the surface to what the flow shows. True when it changed.
@@ -536,23 +573,10 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     s.sound();
     changed |= s.present(now);
     changed |= s.surface.tick(now);
-
-    let earliest = |wake: Option<f64>, at: Option<f64>| match (wake, at) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    };
-    let mut wake = s.surface.next_due().map(|due| due - now);
-    wake = earliest(wake, s.flow.next_due(now).map(|due| due - now));
-    if let Some(since) = s.recording_since {
-        let secs = (now - since).max(0.0);
-        let whole = secs as u64;
-        let clock = format!("{}:{:02}", whole / 60, whole % 60);
-        changed |= s.live.set_clock(&mut s.surface, &clock, now);
-        wake = earliest(wake, Some(whole as f64 + 1.0 - secs));
-    }
-    s.live.sync(&s.surface);
-
-    // The overlay stays up while the capsule leaves, then hides.
+    // Whether the overlay is up this poll: the capsule stays up while it
+    // leaves, then hides. Worked out before the place block so a capsule
+    // coming back from hidden is placed on the pointer's display before
+    // Rune shows it.
     let hidden = matches!(s.surface.pres, Pres::Hidden);
     let since = match (hidden, s.hidden_since) {
         (true, None) => *s.hidden_since.insert(now),
@@ -563,12 +587,83 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
         }
     };
     let leaving = since + HIDE_AFTER_S - now;
+    let shown = !hidden || leaving > 0.0;
+    // Shown, the capsule stays put. It moves to the pointer's display when
+    // a new capture brings it, when its anchor changes, when it comes back
+    // from hidden, and while the picker is open; a notch read that changed
+    // on its own never moves it. Pinned to the measured screen, Rune's own
+    // follow never runs for it, so the picker's crossing is this block's:
+    // while the picker is open, the poll is woken every `DISPLAY_EVERY` to
+    // re-read the pointer's screen, and a changed read re-places display and
+    // inset together from one measurement, so the capsule crosses with the
+    // picker within that cadence. Only the fallback that couldn't read the
+    // screen keeps `UnderPointer`, where Rune can follow first and leave an
+    // inset from the other display for a frame. Without an overlay (the
+    // playground and stills) there is nothing to measure or place, so the
+    // pretend notch stays.
+    let replaced = std::mem::take(&mut s.replace);
+    let moved = s.placed != s.surface.anchor;
+    if moved {
+        s.placed = s.surface.anchor;
+    }
+    let following = matches!(s.surface.pres, Pres::Selecting { .. });
+    let step = move_of(replaced, moved, following, shown && !s.shown);
+    let mut remeasured = false;
+    if s.surface.anchor == surface::Anchor::Notch {
+        // The panel is fitted to the notch on the pointer's screen:
+        // measured on macOS, the pretend one elsewhere.
+        if step != Move::Stay && s.overlay.is_some() {
+            let notch = measured_notch();
+            if notch != s.notch {
+                s.notch = notch;
+                let geometry = notch.map_or_else(notch::Geometry::default, |m| m.geometry);
+                changed |= s.surface.set_notch(geometry);
+                remeasured = true;
+            }
+        }
+    } else {
+        s.notch = None;
+    }
+    if step.places(remeasured)
+        && let Some(overlay) = &s.overlay
+    {
+        place(overlay, s.placed, s.notch);
+    }
+
+    let earliest = |wake: Option<f64>, at: Option<f64>| match (wake, at) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
+    let mut wake = s.surface.next_due().map(|due| due - now);
+    wake = earliest(wake, s.flow.next_due(now).map(|due| due - now));
+    // Pinned to the measured screen, Rune doesn't follow the pointer for
+    // the capsule and nothing else wakes an idle poll, so look again at the
+    // picker's cadence while it is open: the read that crosses displays
+    // comes within one check of the picker's own.
+    if follows_display(
+        following,
+        s.surface.anchor == surface::Anchor::Notch,
+        s.overlay.is_some(),
+    ) {
+        wake = earliest(wake, Some(picker::DISPLAY_EVERY.as_secs_f64()));
+    }
+    if let Some(since) = s.recording_since {
+        let secs = (now - since).max(0.0);
+        let whole = secs as u64;
+        let clock = format!("{}:{:02}", whole / 60, whole % 60);
+        changed |= s.live.set_clock(&mut s.surface, &clock, now);
+        wake = earliest(wake, Some(whole as f64 + 1.0 - secs));
+    }
+    s.live.sync(&s.surface);
+    undo_ring::sync(&mut s.live.ring, &s.surface.pres, now, s.surface.reduced);
+
+    // The overlay stays up while the capsule leaves, then hides; placed
+    // above, before Rune is asked to show it.
     if hidden && leaving > 0.0 {
         wake = earliest(wake, Some(leaving));
     }
     // Shown in the same poll as the step that brings the capsule in, so
-    // Rune reveals the prewarmed hidden pose and animates the entry from it.
-    let shown = !hidden || leaving > 0.0;
+    // Rune reveals the hidden pose and animates the entry from it.
     if s.shown != shown {
         s.shown = shown;
         if let Some(overlay) = &s.overlay {
@@ -580,24 +675,11 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
         }
     }
     crate::capture_host::set_capsule_pill(shown.then_some(s.surface.shell));
-    // Shown, it stays put; a new capture brings it to the pointer.
-    if std::mem::take(&mut s.replace)
-        && let Some(overlay) = &s.overlay
-    {
-        overlay.set_display(rune::DisplayTarget::UnderPointer);
-    }
-    if s.placed != s.surface.anchor {
-        s.placed = s.surface.anchor;
-        if let Some(overlay) = &s.overlay {
-            place(overlay, s.placed);
-        }
-    }
     // The picker follows the pointer between displays.
-    let follow = matches!(s.surface.pres, Pres::Selecting { .. });
-    if s.follow != follow {
-        s.follow = follow;
+    if s.follow != following {
+        s.follow = following;
         if let Some(overlay) = &s.overlay {
-            overlay.set_follow_pointer(follow);
+            overlay.set_follow_pointer(following);
         }
     }
     take_keys(s);
@@ -627,8 +709,16 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
 /// Moves the overlay to where the capsule rests: under the menu bar, at
 /// the screen's top edge (the notch), or at the pointer (the cursor's
 /// card, whose rect is global, so on the primary display's origin).
-fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor) {
-    use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge};
+/// `notch` is the notch measured on the pointer's screen; the panel is
+/// pinned to that screen and its left edge put `panel_x` points from the
+/// screen's, so it can't land on another display than the one measured.
+/// Without one it stays centred on the pointer's screen.
+fn place(
+    overlay: &OverlayHandle<CapsuleState>,
+    anchor: surface::Anchor,
+    notch: Option<notch::Measured>,
+) {
+    use rune::{Align, DisplayTarget, NativeDisplayId, OverlayPlacement, ScreenEdge};
     let edge = |margin| OverlayPlacement::Edge {
         edge: ScreenEdge::Top,
         margin,
@@ -641,8 +731,24 @@ fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor) {
             overlay.set_placement(Some(edge(PANEL_MARGIN)));
         }
         surface::Anchor::Notch => {
-            overlay.set_display(DisplayTarget::UnderPointer);
-            overlay.set_placement(Some(edge(0.0)));
+            // The measured screen's, so the panel and its notch agree even
+            // if the pointer moves before Rune places it; the pointer's
+            // when it couldn't be read.
+            overlay.set_display(match notch.and_then(|m| m.display) {
+                Some(id) => DisplayTarget::Native(NativeDisplayId::MacOS(id)),
+                None => DisplayTarget::UnderPointer,
+            });
+            // The panel's left edge on the display, so its walls land on the
+            // notch's; its top stays on the screen's as it always has.
+            overlay.set_placement(Some(match notch {
+                Some(notch) => OverlayPlacement::Edge {
+                    edge: ScreenEdge::Top,
+                    margin: 0.0,
+                    align: Align::Start,
+                    inset: notch.panel_x,
+                },
+                None => edge(0.0),
+            }));
         }
         surface::Anchor::Cursor => {
             let Some([x, y]) = scrawl_capture::screens::pointer() else {
@@ -657,6 +763,67 @@ fn place(overlay: &OverlayHandle<CapsuleState>, anchor: surface::Anchor) {
             }));
         }
     }
+}
+
+/// What a poll does about the panel's place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Move {
+    /// Nothing asked it to move: the notch isn't even read.
+    Stay,
+    /// The picker follows the pointer: read the notch, and place only if it
+    /// changed.
+    Follow,
+    /// A new capture or a new anchor: read the notch and place.
+    Place,
+}
+
+/// Decides a poll's [`Move`]. The panel goes to the pointer's display on a
+/// new capture (`replaced`), an anchor change (`moved`), a capsule coming
+/// back from hidden (`appearing`), or while the picker is open
+/// (`following`). A showing capsule that isn't following keeps its place
+/// however the pointer's screen's notch reads now: no new capture, no new
+/// anchor, and no show means nobody asked it to move.
+fn move_of(replaced: bool, moved: bool, following: bool, appearing: bool) -> Move {
+    if replaced || moved || appearing {
+        Move::Place
+    } else if following {
+        Move::Follow
+    } else {
+        Move::Stay
+    }
+}
+
+/// Whether a poll must look at the pointer's screen again on its own: the
+/// picker is open (`following`) over a capsule pinned to a measured notch
+/// (`pinned`), with an overlay to place (`resolved`). Pinned, Rune's own
+/// follow never runs, so this wake is what lets the capsule cross displays
+/// with the picker.
+fn follows_display(following: bool, pinned: bool, resolved: bool) -> bool {
+    following && pinned && resolved
+}
+
+impl Move {
+    /// Whether the poll places the panel now. `changed` is whether the
+    /// notch read this poll differs from the one the panel is fitted to.
+    fn places(self, changed: bool) -> bool {
+        match self {
+            Move::Stay => false,
+            Move::Follow => changed,
+            Move::Place => true,
+        }
+    }
+}
+
+/// The notch the capsule can hang from: the pointer's screen's on macOS,
+/// or `None` where there is no notch to read.
+#[cfg(target_os = "macos")]
+fn measured_notch() -> Option<notch::Measured> {
+    notch::measured()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn measured_notch() -> Option<notch::Measured> {
+    None
 }
 
 /// Takes, changes, or lets go of the keys the capsule wants from Hex's tap.
@@ -713,8 +880,8 @@ pub(crate) struct CaptureCapsule {
 pub(crate) const PANEL_MARGIN: f32 = 14.0;
 
 impl CaptureCapsule {
-    /// Adds the capsule's overlay, prewarmed and hidden, holding no GPU
-    /// surface while hidden (Windows and Linux). `act` carries out what a
+    /// Adds the capsule's overlay, hidden. It holds no GPU surface while
+    /// hidden, nor on macOS and Windows a window (#1315, #1308). `act` carries out what a
     /// press or key asks for; it runs on the main thread, so it must only
     /// hand the action on.
     pub(crate) fn install<S: 'static>(
@@ -741,6 +908,9 @@ impl CaptureCapsule {
                 ..Default::default()
             })
             .release_gpu_when_hidden()
+            // Its panel is made for each show, so the entry plays from the
+            // hidden pose rather than settling.
+            .animate_reveal()
             .poll(poll)
             .compositor(TraceFrames::default())
             .on_created(|c| {
@@ -792,1103 +962,6 @@ impl CaptureCapsule {
             tx.wake_after(Duration::ZERO);
         });
     }
-}
-
-// ─── View ────────────────────────────────────────────────────────────────────
-
-/// The sound for a cue, from the chosen sound set.
-fn tone(cue: Cue) -> crate::feedback::Tone {
-    use crate::feedback::Tone;
-    match cue {
-        Cue::Start => Tone::CaptureStart,
-        Cue::Stop => Tone::CaptureStop,
-        Cue::Sent => Tone::CaptureSent,
-        Cue::TakenBack => Tone::CaptureUndo,
-        Cue::Discarded => Tone::Cancel,
-        Cue::Failed => Tone::Error,
-    }
-}
-
-fn view(s: &CapsuleState, cx: &mut Cx<CapsuleState>) -> El {
-    #[cfg(target_os = "macos")]
-    if s.playground.is_some() {
-        return playground::view(s, cx);
-    }
-    s.reduced.set(cx.is_reduced_motion());
-    let p = Paint::new(cx.system_dark(), cx.env().scale);
-    let capsule = capsule(p, &s.surface, &s.live, cx);
-    if s.backdrop {
-        let mut backdrop = el().size(PANEL_W, PANEL_H).fill(p.k.c.layer_03);
-        // Stills and clips have no pointer: the cursor's card draws one
-        // where the app would find it.
-        if s.surface.anchor == surface::Anchor::Cursor {
-            backdrop = backdrop.child(pointer(p));
-        }
-        if tuning::get().flow == tuning::CapsuleFlow::MenuBar {
-            backdrop = backdrop.child(menu_item(p));
-        }
-        return backdrop.child(capsule);
-    }
-    capsule
-}
-
-/// Hex's menu-bar item where the menu-bar flow folds the capsule, for
-/// stills and clips, which have no menu bar.
-fn menu_item(p: Paint) -> El {
-    let [x, y, w, h] = surface::MENU_FOLD;
-    el().key("menu-item")
-        .absolute(x, y)
-        .size(w, h)
-        .radius(h * 0.5)
-        .border(1.2, p.muted())
-        .child(
-            el().absolute(w * 0.5 - 2.5, h * 0.5 - 2.5)
-                .size(5.0, 5.0)
-                .radius(2.5)
-                .fill(p.muted()),
-        )
-}
-
-/// The arrow pointer just above and left of the cursor's card.
-fn pointer(p: Paint) -> El {
-    let arrow = Path::new()
-        .move_to([1.0, 1.0])
-        .line_to([1.0, 16.0])
-        .line_to([5.0, 12.5])
-        .line_to([7.6, 18.2])
-        .line_to([10.2, 17.0])
-        .line_to([7.7, 11.6])
-        .line_to([12.6, 11.2])
-        .close();
-    let shape = Shape::new()
-        .view_box(14.0, 20.0)
-        .fill_path(&arrow, p.k.c.text_base)
-        .stroke_path(&arrow, 1.2, LineCap::Round, p.k.c.bg_base);
-    canvas(shape)
-        .key("pointer")
-        .absolute(
-            surface::CURSOR_X - surface::POINTER_OFFSET[0],
-            surface::CURSOR_Y - surface::POINTER_OFFSET[1],
-        )
-        .size(14.0, 20.0)
-}
-
-/// How content comes and goes, all of it together over the walls' move:
-/// a blur, a scale toward the capsule's middle, so the pieces shrink and
-/// grow as one, and a fade. Reduce Motion keeps the fade alone.
-fn presence(surface: &Surface, rect: [f32; 4], reduced: bool) -> Transition {
-    let t = tuning::get();
-    let springs = SpringPair::new(t.content_in, t.content_out);
-    if reduced {
-        return Transition::opacity().springs(springs);
-    }
-    let [sx, sy, sw, sh] = surface.shell;
-    let [x, y, w, h] = rect;
-    let middle = rune::Vec2::new(
-        (sx + sw * 0.5 - x) / w.max(1.0),
-        (sy + sh * 0.5 - y) / h.max(1.0),
-    );
-    Transition::scale_anchor(t.content_scale, middle)
-        .combined(Transition::blur(t.content_blur))
-        .springs(springs)
-}
-
-/// The capsule in its `PANEL_W` × `PANEL_H` panel. Its live chips and
-/// buttons and the list are the only `.hit()` boxes: a click anywhere else
-/// on it reaches the app beneath, and hover still comes from the pointer.
-fn capsule(p: Paint, surface: &Surface, live: &Animated, cx: &mut Cx<CapsuleState>) -> El {
-    // The notch is black in either appearance, so what's on it is dark's.
-    let p = if surface.anchor == surface::Anchor::Notch {
-        Paint::new(true, 1.0 / p.hair)
-    } else {
-        p
-    };
-    let reduced = cx.is_reduced_motion() || surface.reduced;
-    if surface.reduced {
-        cx.reduced_motion(true);
-    }
-    let mut root = el()
-        .key("panel")
-        .size(PANEL_W, PANEL_H)
-        .child(shell(p, surface, &live.meter));
-    // Everything inside is masked by the capsule as it moves: a box on the
-    // shell's rect and spring clips to its rounded shape, and the box
-    // inside it moves back by the same amount on the same spring, so the
-    // content stays where it's laid out while the walls pass over it.
-    let [x, y, w, h] = surface.shell;
-    let mut inner = el()
-        .key("inner")
-        .absolute(-x, -y)
-        .size(PANEL_W, PANEL_H)
-        .motion(surface.shell_motion);
-    if let Some(highlight) = &surface.highlight {
-        inner = inner.child(
-            placed(el(), highlight)
-                .trace_name("highlight")
-                .radius(surface::CHIP_RADIUS)
-                .fill(p.k.c.layer_02)
-                .box_shadow(rune::Shadow {
-                    spread: p.hair,
-                    color: p.k.c.border_base,
-                    ..Default::default()
-                })
-                .transition(presence(surface, highlight.rect, reduced)),
-        );
-    }
-    // Content entering over content that leaves crossfades additively,
-    // without a midpoint dip. The highlight is a shared background, so it
-    // stays outside; nothing inside overlaps at rest.
-    let mut content = el()
-        .key("content")
-        .absolute(0.0, 0.0)
-        .size(PANEL_W, PANEL_H)
-        .dissolve();
-    for shown in &surface.items {
-        let transition = presence(surface, shown.rect, reduced);
-        content = content.child(item(p, surface, live, shown).transition(transition));
-    }
-    let clip = el()
-        .key("clip")
-        .absolute(x, y)
-        .size(w, h)
-        .motion(surface.shell_motion)
-        .clip_rounded(corner(h))
-        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::Pill, on, tx));
-    root = root.child(clip.child(inner.child(content)));
-    if let Pres::Done(Done {
-        open: Some((_, list)),
-        ..
-    }) = &surface.pres
-    {
-        root = root.child(list_view(p, list, x, w, reduced));
-    }
-    root
-}
-
-fn placed(e: El, shown: &Shown) -> El {
-    let [x, y, w, h] = shown.rect;
-    e.key(shown.key.clone())
-        .absolute(x, y)
-        .size(w, h)
-        .motion(shown.motion)
-}
-
-/// The capsule's edge in dark: a hairline lit from above, which the list
-/// panel wears too.
-fn rim(k: &rune_kit::Kit, w: f32, h: f32, radius: f32) -> El {
-    el().key("rim")
-        .absolute(0.0, 0.0)
-        .size(w, h)
-        .radius(radius)
-        .border_gradient(0.5, k.light(0.12), k.light(0.03))
-}
-
-fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
-    let k = p.k;
-    let [x, y, w, h] = surface.shell;
-    let mut body = el()
-        .key("shell")
-        .trace_name("shell")
-        .absolute(x, y)
-        .size(w, h)
-        .radius(corner(h));
-    // At the notch it's the notch: black, with no edge or shadow, and
-    // tucked into the notch rather than gone when hidden. Under Reduce
-    // Motion it never travels, so it fades at rest instead.
-    if surface.anchor == surface::Anchor::Notch {
-        body = body.fill(k.c.black).motion(surface.shell_motion);
-        if surface.reduced {
-            body = body
-                .opacity(if surface.shell_on { 1.0 } else { 0.0 })
-                .opacity_motion(surface.shell_fade);
-        }
-        return body.role("group").label("Capture");
-    }
-    body = body.fill(k.c.bg_base);
-    for shadow in &k.elevation.overlay {
-        body = body.box_shadow(*shadow);
-    }
-    // The glow inside the edge while the shape morphs, stronger at the top.
-    body = body.child(
-        el().key("glow")
-            .absolute(0.0, 0.0)
-            .size(w, h)
-            .radius(corner(h))
-            .box_shadow(rune::Shadow {
-                y: 1.5,
-                blur: 8.0,
-                color: k.alpha(k.c.text_base, if k.dark { 0.10 } else { 0.06 }),
-                inset: true,
-                ..Default::default()
-            })
-            .live_opacity(&meter.glow)
-            .motion(surface.shell_motion),
-    );
-    if k.dark {
-        // Dark, a hairline lit from above, as Scrawl's capsule has.
-        body = body.child(rim(k, w, h, corner(h)).motion(surface.shell_motion));
-    }
-    body.opacity(if surface.shell_on { 1.0 } else { 0.0 })
-        .motion(surface.shell_motion)
-        .opacity_motion(surface.shell_fade)
-        .role("group")
-        .label("Capture")
-}
-
-fn label(content: &str, style: rune::TextStyle, color: Color) -> El {
-    text(content).font(style).color(color)
-}
-
-fn press(id: Id) -> impl Fn(&mut CapsuleState, &mut Tx) + 'static {
-    move |s: &mut CapsuleState, tx: &mut Tx| s.click(id, tx)
-}
-
-fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) -> El {
-    let c = &p.k.c;
-    let id = shown.id;
-    let base = placed(row().center(), shown).trace_name(id.trace_key());
-    match id {
-        Id::Mode(mode) => {
-            let fg = if shown.active { p.text() } else { p.muted() };
-            let mut chip = base
-                .radius(surface::CHIP_RADIUS)
-                .gap(SEG_ICON_GAP)
-                .child(mark(id, SEG_ICON, fg))
-                .child(label(mode.label(), medium(), fg))
-                .press(c.pressed);
-            if !shown.active {
-                chip = chip.hover(c.hover);
-            }
-            chip.role("button")
-                .label(mode.label())
-                .hit()
-                .on_press_tx(press(id))
-        }
-        // The recording's toolbar: the pen, lit with the accent while
-        // drawing. Later tools join it, before the divider.
-        Id::Pen => {
-            let lit = shown.active;
-            let ink = if lit { c.bg_base } else { p.muted() };
-            let button = icon_button(p, mark(id, 16.0, ink));
-            let button = if lit { button.fill(p.accent()) } else { button };
-            base.child(
-                button
-                    .role("button")
-                    .label("Draw")
-                    .checked(lit)
-                    .help("Draw")
-                    .hit()
-                    .on_press_tx(press(id)),
-            )
-        }
-        Id::Divider => base.child(el().size(surface::DIVIDER_W, 16.0).fill(c.border_base)),
-        // Stop: a filled square, Finish's icon.
-        Id::Finish => {
-            let side = 10.0;
-            let square = Shape::new()
-                .view_box(side, side)
-                .fill_path(&rounded(0.0, 0.0, side, side, 2.0), p.text());
-            base.child(
-                icon_button(p, canvas(square).size(side, side))
-                    .role("button")
-                    .label("Stop")
-                    .help("Stop")
-                    .hit()
-                    .on_press_tx(press(id)),
-            )
-        }
-        // Cancel: ✕, which asks before discarding.
-        Id::Cancel => base.child(
-            icon_button(p, close_glyph(p))
-                .role("button")
-                .label("Discard")
-                .help("Discard")
-                .hit()
-                .on_press_tx(press(id)),
-        ),
-        Id::Record => {
-            let name = "Record";
-            base.radius(surface::CHIP_RADIUS)
-                .fill(c.bg_contrast)
-                .hover(c.contrast_hover)
-                .press(c.contrast_pressed)
-                .child(label(name, medium(), c.text_contrast))
-                .role("button")
-                .label(name)
-                .hit()
-                .on_press_tx(press(id))
-        }
-        Id::Keep => {
-            let name = surface::KEEP_LABEL;
-            base.radius(surface::CHIP_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
-                .child(label(name, medium(), p.muted()))
-                .role("button")
-                .label(name)
-                .hit()
-                .on_press_tx(press(id))
-        }
-        // Destructive, so the danger ink on the neutral chip, never the
-        // accent.
-        Id::Discard => base
-            .radius(surface::CHIP_RADIUS)
-            .fill(c.layer_02)
-            .hover(c.hover)
-            .press(c.pressed)
-            .child(label(surface::DISCARD_LABEL, medium(), p.danger()))
-            .role("button")
-            .label(surface::DISCARD_LABEL)
-            .hit()
-            .on_press_tx(press(id)),
-        Id::Close => base.child(
-            row()
-                .center()
-                .size(28.0, 28.0)
-                .radius(ICON_BUTTON_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
-                .child(close_glyph(p))
-                .role("button")
-                .label("Close")
-                .hit()
-                .on_press_tx(press(id)),
-        ),
-        Id::Lead => placed(el(), shown)
-            .trace_name("lead")
-            .child(dot(p, &live.meter))
-            .child(timer(p, surface, live)),
-        Id::Processing => placed(el(), shown)
-            .trace_name("processing")
-            .child(spinner(p, &live.meter))
-            .child(processing_label(p, &live.meter)),
-        Id::Done => {
-            let lead = match &surface.pres {
-                Pres::Done(done) => done.lead,
-                _ => Lead::Check,
-            };
-            let ink = match tuning::get().top_line {
-                tuning::TopLine::Quiet => p.muted(),
-                tuning::TopLine::Icons => p.text(),
-            };
-            let mut done = placed(el(), shown).trace_name("done").child(glyph(
-                p,
-                lead,
-                live.thumb.as_ref().map(rune::Image::pixels),
-            ));
-            if !shown.ident.is_empty() {
-                done = done.child(
-                    row()
-                        .center_y()
-                        .absolute(done_text_x(lead), 0.0)
-                        .h(CHIP_H)
-                        .child(label(&shown.ident, done_style(), ink)),
-                );
-            }
-            let sends = matches!(&surface.pres, Pres::Done(done) if done.sends);
-            if sends {
-                return done
-                    .radius(surface::CHIP_RADIUS)
-                    .hover(c.hover)
-                    .press(c.pressed)
-                    .role("button")
-                    .label(shown.ident.clone())
-                    .hit()
-                    .on_press_tx(press(id));
-            }
-            done.role("text").label(if shown.ident.is_empty() {
-                "Copied".to_owned()
-            } else {
-                shown.ident.clone()
-            })
-        }
-        Id::Next => keyed(p, base, &["⇥"], "Next", medium()).on_press_tx(press(id)),
-        // A chip beside the frame in the menu-bar flow.
-        Id::Pick(_) if tuning::get().flow == tuning::CapsuleFlow::MenuBar => {
-            keyed(p, base, &[], shown.text(), medium()).on_press_tx(press(id))
-        }
-        Id::Pick(row) => pick_row(p, base, shown, row),
-        Id::CardHints => base
-            .justify_start()
-            .px(ROW_PX)
-            .child(hint(p, "Search", &surface::shortcut_keycaps()))
-            .role("text")
-            .label(format!("Search {}", shown.text())),
-        Id::Why => placed(row().center_y(), shown)
-            .trace_name("why")
-            .child(quiet(p, shown.text(), done_style())),
-        // The quiet way out of a send that just went.
-        // Click only: Escape meant for another app was taking sends back.
-        Id::Undo => keyed(p, base, &[], UNDO_LABEL, medium()).on_press_tx(press(id)),
-        // Search, with the capture shortcut that opens it as Settings draws it.
-        Id::Ask
-            if matches!(
-                &surface.pres,
-                Pres::Done(Done { ask: Some(ask), ask_keys: true, .. }) if *ask == shown.ident
-            ) =>
-        {
-            base.justify_start()
-                .pl(CHIP_PX)
-                .pr(surface::keycaps_inset())
-                .gap(surface::KEYCAPS_GAP)
-                .radius(surface::CHIP_RADIUS)
-                .hover(c.hover)
-                .press(c.pressed)
-                .child(label(&shown.ident, medium(), p.muted()))
-                .child(el().grow(1.0))
-                .child(super::controls::keycaps(
-                    p,
-                    "ask-keys",
-                    &surface::shortcut_keycaps(),
-                ))
-                .role("button")
-                .label(shown.ident.clone())
-                .hit()
-                .on_press_tx(press(id))
-        }
-        Id::Ask => keyed(p, base, &[], &shown.ident, medium()).on_press_tx(press(id)),
-        Id::Paste | Id::Inspect => {
-            let (name, help) = if id == Id::Paste {
-                ("Paste", "Paste the capture")
-            } else {
-                ("Inspect", "Open the capture")
-            };
-            base.child(
-                row()
-                    .center()
-                    .size(28.0, 28.0)
-                    .radius(ICON_BUTTON_RADIUS)
-                    .hover(c.hover)
-                    .press(c.pressed)
-                    .child(mark(id, 16.0, p.muted()))
-                    .role("button")
-                    .label(name)
-                    .help(help)
-                    .hit()
-                    .on_press_tx(press(id)),
-            )
-        }
-        Id::Field => {
-            let typed = match &surface.pres {
-                Pres::Done(Done {
-                    open: Some((typed, _)),
-                    ..
-                }) => typed.as_str(),
-                _ => "",
-            };
-            field(p, base, typed)
-        }
-        // Rows live in the list, never in the capsule.
-        Id::Row(_) => base,
-    }
-}
-
-/// A guess in the cursor's or the notch's card, as the list's rows read:
-/// its name and its reason, the best one's in the accent.
-fn pick_row(p: Paint, base: El, shown: &Shown, row: usize) -> El {
-    let c = &p.k.c;
-    let room = shown.rect[2] - 4.0 * ROW_PX - measure(shown.text(), medium());
-    let note = ellipsize(shown.note(), small(), room.max(24.0));
-    base.justify_start()
-        .px(ROW_PX)
-        .gap(ROW_PX)
-        .radius(ROW_RADIUS + 2.0)
-        .hover(c.hover)
-        .press(c.pressed)
-        .child(label(shown.text(), medium(), p.text()))
-        .child(el().grow(1.0))
-        .child(
-            label(
-                &note,
-                small(),
-                if row == 0 { p.accent() } else { p.muted() },
-            )
-            .offset(0.0, (medium().size - small().size) * BASELINE_DROP),
-        )
-        .role("button")
-        .label(shown.text().to_owned())
-        .hit()
-        .on_press_tx(press(Id::Pick(row)))
-}
-
-/// A chip's label, then its shortcut, if any, as one quiet word.
-fn keyed(p: Paint, base: El, keys: &[&str], name: &str, style: rune::TextStyle) -> El {
-    let mut chip = base
-        .radius(surface::CHIP_RADIUS)
-        .gap(HINT_GAP)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
-        .child(label(name, style, p.muted()));
-    if !keys.is_empty() {
-        chip = chip.child(quiet(p, &chord(keys), style));
-    }
-    chip.role("button").label(name.to_owned()).hit()
-}
-
-/// Small faint text (a shortcut, a note) beside words in `beside`, on
-/// their baseline: centring a smaller line in the same row would lift it.
-fn quiet(p: Paint, content: &str, beside: rune::TextStyle) -> El {
-    label(content, small(), p.faint()).offset(0.0, (beside.size - small().size) * BASELINE_DROP)
-}
-
-/// A centred line's baseline sits this many ems below its middle: half
-/// the theme face's ascender less its descender (Inter: 0.969, 0.242).
-const BASELINE_DROP: f32 = 0.364;
-
-/// What a hint does in the muted ink, then its keys as Settings draws a
-/// shortcut: keycaps in one small tray ("Send [⏎]").
-fn hint<S: AsRef<str>>(p: Paint, copy: &str, keys: &[S]) -> El {
-    let mut hint = row().center_y().gap(HINT_GAP);
-    if !copy.is_empty() {
-        hint = hint.child(label(copy, small(), p.muted()));
-    }
-    if !keys.is_empty() {
-        hint = hint.child(super::controls::keycaps(p, "keys", &key_parts(keys)));
-    }
-    hint
-}
-
-/// A [`hint`]'s width.
-fn hint_width<S: AsRef<str>>(copy: &str, keys: &[S]) -> f32 {
-    let gap = if copy.is_empty() || keys.is_empty() {
-        0.0
-    } else {
-        HINT_GAP
-    };
-    let tray = if keys.is_empty() {
-        0.0
-    } else {
-        super::controls::keycaps_width(&key_parts(keys), measure)
-    };
-    measure(copy, small()) + gap + tray
-}
-
-fn key_parts<S: AsRef<str>>(keys: &[S]) -> Vec<String> {
-    keys.iter().map(|key| key.as_ref().to_owned()).collect()
-}
-
-/// The open capsule's field: what's typed and the caret, or the
-/// placeholder.
-fn field(p: Paint, base: El, typed: &str) -> El {
-    let caret = el()
-        .key("caret")
-        .size(1.5, 15.0)
-        .radius(0.75)
-        .fill(p.accent());
-    let inner = if typed.is_empty() {
-        row()
-            .center_y()
-            .gap(1.0)
-            .child(caret)
-            .child(label("Send to…", medium(), p.faint()))
-    } else {
-        row()
-            .center_y()
-            .gap(1.0)
-            .child(label(typed, medium(), p.text()))
-            .child(caret)
-    };
-    base.trace_name("field")
-        .px(CHIP_PX)
-        .radius(surface::CHIP_RADIUS)
-        .fill(p.k.c.layer_01)
-        .child(inner.grow(1.0))
-        .role("textbox")
-        .label("Send to")
-}
-
-/// The finished capsule's check, or its warning: its ink spans 12…20,
-/// where the recording dot's does.
-fn glyph(p: Paint, lead: Lead, thumb: Option<&rune::Pixels>) -> El {
-    let glyph = match (lead, thumb) {
-        (Lead::Thumbnail, Some(pixels)) => return thumbnail(p, pixels),
-        (Lead::Check | Lead::Thumbnail, _) => {
-            rune::icon(p.k.glyph.check_small, CHECK).color(p.success())
-        }
-        (Lead::Warning, _) => mark(Id::Why, CHECK, p.k.c.warning.fg),
-    };
-    glyph.absolute(8.0, (CHIP_H - CHECK) * 0.5)
-}
-
-/// The kit's ✕, at the size Hex's icon buttons draw it.
-fn close_glyph(p: Paint) -> El {
-    rune::icon(p.k.glyph.close, 16.0).color(p.muted())
-}
-
-/// The capsule's own line marks (the modes, the pen, Paste, Inspect, the
-/// warning, the badges) all draw at this stroke in points, the line of the
-/// kit's ✕ beside them, whatever their size.
-const MARK_STROKE: f32 = 0.8;
-
-/// [`MARK_STROKE`] on the 24 × 24 grid of a mark drawn `size` points.
-fn mark_stroke(size: f32) -> f32 {
-    MARK_STROKE * 24.0 / size
-}
-
-/// One of the capsule's own line marks, `size` points square.
-fn mark(id: Id, size: f32, color: Color) -> El {
-    canvas(icon(id, mark_stroke(size), color)).size(size, size)
-}
-
-const CHECK: f32 = 16.0;
-/// A 28 pt icon button's corners, concentric with the shell's.
-const ICON_BUTTON_RADIUS: f32 = surface::CHIP_RADIUS - 2.0;
-const THUMB_RADIUS: f32 = 4.0;
-
-/// The capture's first frame, cropped to fill a small rounded card, with a
-/// hairline over its edge so a white page still reads on the capsule.
-fn thumbnail(p: Paint, pixels: &rune::Pixels) -> El {
-    el().absolute(THUMB_X, (CHIP_H - THUMB_H) * 0.5)
-        .size(THUMB_W, THUMB_H)
-        .radius(THUMB_RADIUS)
-        .fill(p.k.c.layer_02)
-        .pixels_fit(pixels, rune::SurfaceFit::Fill)
-        .child(
-            el().absolute(0.0, 0.0)
-                .size(THUMB_W, THUMB_H)
-                .radius(THUMB_RADIUS)
-                .border(p.hair, p.k.alpha(p.k.c.text_base, 0.14)),
-        )
-}
-
-/// The timer in tabular digits, bound to its `LiveText` in a box as wide
-/// as the clock.
-fn timer(p: Paint, surface: &Surface, live: &Animated) -> El {
-    row().center_y().absolute(LEAD_TEXT_X, 0.0).h(CHIP_H).child(
-        label(&surface.clock, clock_style(), p.text())
-            .live_text(&live.clock)
-            .w(clock_width(&surface.clock)),
-    )
-}
-
-/// "Processing…", each glyph at its place in the shaped label and lit by
-/// the shimmer.
-fn processing_label(p: Paint, meter: &Meter) -> El {
-    let mut glyphs = el()
-        .absolute(PROCESSING_TEXT_X, 0.0)
-        .h(CHIP_H)
-        .w(measure(PROCESSING, medium()))
-        .role("text")
-        .label(PROCESSING);
-    for ((c, x, w), live) in processing_glyphs().into_iter().zip(&meter.shimmer) {
-        glyphs = glyphs.child(
-            row()
-                .center_y()
-                .absolute(x, 0.0)
-                .h(CHIP_H)
-                .w(w)
-                .child(label(c.encode_utf8(&mut [0; 4]), medium(), p.text()))
-                .live_opacity(live),
-        );
-    }
-    glyphs
-}
-
-/// The recording dot: a breathing core with a glow, and a ripple ring
-/// every 1.6 s.
-fn dot(p: Paint, meter: &Meter) -> El {
-    let red = p.danger();
-    let ring = 20.0;
-    let core = 8.0;
-    el().absolute(0.0, 0.0)
-        .size(CHIP_H, CHIP_H)
-        .child(
-            el().absolute((CHIP_H - ring) * 0.5, (CHIP_H - ring) * 0.5)
-                .size(ring, ring)
-                .radius(ring * 0.5)
-                .fill(p.k.alpha(red, 0.5))
-                .live_scale(&meter.ring_scale)
-                .live_opacity(&meter.ring_alpha),
-        )
-        .child(
-            el().absolute((CHIP_H - core) * 0.5, (CHIP_H - core) * 0.5)
-                .size(core, core)
-                .radius(core * 0.5)
-                .fill(red)
-                .shadow(0.0, 7.0, red.alpha(0.55))
-                .live_opacity(&meter.core),
-        )
-}
-
-/// Eight dots around a 6.2 pt circle with a bright head going round.
-fn spinner(p: Paint, meter: &Meter) -> El {
-    let mut dots = el().absolute(0.0, 0.0).size(CHIP_H, CHIP_H);
-    let d = 2.7;
-    for (k, live) in meter.spin.iter().enumerate() {
-        let angle = k as f32 * std::f32::consts::FRAC_PI_4 - std::f32::consts::FRAC_PI_2;
-        let (x, y) = (
-            CHIP_H * 0.5 + 6.2 * angle.cos(),
-            CHIP_H * 0.5 + 6.2 * angle.sin(),
-        );
-        dots = dots.child(
-            el().absolute(x - d * 0.5, y - d * 0.5)
-                .size(d, d)
-                .radius(d * 0.5)
-                .fill(p.text())
-                .live_opacity(live),
-        );
-    }
-    dots
-}
-
-/// The list hanging under the open capsule, `x` and `w` its shell's.
-fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) -> El {
-    let k = p.k;
-    let h = list_height(list);
-    // Rows and headers keep their identity across a filter: the ones that
-    // stay slide to their new slot sharp, the rest soften out in place.
-    let blur = if reduced { 0.0 } else { PRESENCE_BLUR };
-    let scale = if reduced { 1.0 } else { 0.96 };
-    let t = tuning::get();
-    let springs = SpringPair::new(t.content_in, t.content_out);
-    let in_place = Transition::blur(blur)
-        .combined(Transition::scale(scale))
-        .springs(springs);
-    let mut body = col().absolute(0.0, 0.0).w(w).px(LIST_PAD).pt(LIST_PAD);
-    let suggesting = list.suggesting();
-    let saving = list.always.as_ref().is_some_and(|(_, shift)| *shift);
-    // Over the suggestions, the header's right says what ⇧ does (the
-    // search's footer says it there).
-    let remembers = (suggesting && list.always.is_some()).then(|| {
-        label(
-            "⇧ remembers",
-            k.ty.small_medium,
-            if saving { p.accent() } else { p.faint() },
-        )
-        .key("remembers")
-    });
-    if headed(list) {
-        body = body.child(
-            row()
-                .key(format!("section-{}", list.title))
-                .items_end()
-                .h(HEADER_H)
-                .px(ROW_PX)
-                .pb(HEADER_PB)
-                .child(label(list.title, k.ty.small_medium, p.faint()))
-                .child(el().grow(1.0))
-                .children(remembers)
-                .transition(in_place),
-        );
-    }
-    for (n, dest) in list.rows.iter().enumerate() {
-        // The name keeps its width; a long reason is cut first, to no
-        // less than two fifths of the row.
-        let content = w - 2.0 * LIST_PAD - 2.0 * ROW_PX - 2.0 * ROW_PX;
-        let why_room = (content - measure(&dest.name, medium())).max(content * 0.4);
-        let why = ellipsize(&dest.why, small(), why_room);
-        let max = content - measure(&why, small());
-        let mut entry = row()
-            .key(format!("row-{}", dest.name))
-            .trace_name("row")
-            .center_y()
-            .h(ROW_H)
-            .px(ROW_PX)
-            .gap(ROW_PX)
-            .radius(ROW_RADIUS)
-            .hover(k.c.hover)
-            .press(k.c.pressed)
-            .child(label(
-                &ellipsize(&dest.name, medium(), max),
-                medium(),
-                p.text(),
-            ))
-            .child(el().grow(1.0))
-            // The best suggestion is marked by its reason, on the
-            // name's baseline; Shift down, so is where a rule would send.
-            .child(
-                label(
-                    &why,
-                    small(),
-                    if (suggesting && n == 0) || saving && n == list.selected {
-                        p.accent()
-                    } else {
-                        p.muted()
-                    },
-                )
-                .offset(0.0, (medium().size - small().size) * BASELINE_DROP),
-            )
-            .role("button")
-            .label(dest.name.clone())
-            .hit()
-            .on_press_tx(press(Id::Row(n)))
-            .transition(in_place);
-        // The suggestions mark only the best, by its reason: a click
-        // picks, so no row is "selected" until the search opens.
-        if n == list.selected && !suggesting {
-            entry = entry.fill(k.c.layer_02);
-        }
-        body = body.child(entry);
-    }
-    let footer = match (&list.always, list.footer) {
-        (_, Footer::Suggesting) => None,
-        (Some((site, true)), _) => Some(saving_hint(p, list, site, w)),
-        (_, Footer::Search { remember }) => Some(search_hints(p, remember, w)),
-    };
-    list_panel(p, body, footer, x, w, h, blur)
-}
-
-/// The search's hints, as one quiet line: what each key does, then the
-/// key ("Send ⏎"); the highlighted row already says where. The capture
-/// shortcut, which records anew from here, sits on the right.
-fn search_hints(p: Paint, remember: bool, w: f32) -> El {
-    const SEND: [&str; 1] = ["⏎"];
-    const REMEMBER: [&str; 2] = ["⇧", "⏎"];
-    let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
-    let shortcut = surface::shortcut_keycaps();
-    let used = hint_width("Send", &SEND) + HINTS_GAP;
-    let remember = remember && used + hint_width("Remember", &REMEMBER) <= room;
-    let used = used
-        + if remember {
-            hint_width("Remember", &REMEMBER)
-        } else {
-            0.0
-        };
-    let capture = used + HINTS_GAP + hint_width("New capture", &shortcut) <= room;
-    row()
-        .center_y()
-        .gap(HINTS_GAP)
-        .child(hint(p, "Send", &SEND).key("send"))
-        .children(remember.then(|| hint(p, "Remember", &REMEMBER).key("remember")))
-        .child(el().grow(1.0))
-        .children(capture.then(|| hint(p, "New capture", &shortcut).key("capture")))
-}
-
-/// Shift down: the footer says where the rule will send `site`, each in
-/// a badge with its kind's icon: "Always send [🌐 site] to [💬 SEER]",
-/// following the highlighted row.
-fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
-    let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
-    let to = list.selected_dest().map(|dest| dest.name.as_str());
-    let words = measure("Always send", small()) + measure("to", small()) + 3.0 * BADGE_GAP;
-    let badges =
-        if to.is_some() { 2.0 } else { 1.0 } * (2.0 * BADGE_PX + BADGE_ICON + BADGE_ICON_GAP);
-    let left = (room - words - badges).max(0.0);
-    let to_w = to.map_or(0.0, |to| measure(to, small()));
-    let site_w = measure(site, small());
-    let (site_room, to_room) = if site_w + to_w <= left {
-        (site_w, to_w)
-    } else {
-        let to_room = to_w.min(left * 0.4);
-        (left - to_room, to_room)
-    };
-    let mut hint = row()
-        .center_y()
-        .gap(BADGE_GAP)
-        .key("saving")
-        .child(label("Always send", small(), p.muted()))
-        .child(
-            badge(
-                p,
-                Badge::of_site(site),
-                &ellipsize(site, small(), site_room),
-            )
-            .key("site"),
-        );
-    hint = match to {
-        Some(to) => hint
-            .child(label("to", small(), p.muted()))
-            .child(badge(p, Badge::Chat, &ellipsize(to, small(), to_room)).key("to")),
-        None => hint.child(label("to…", small(), p.muted())),
-    };
-    hint.child(el().grow(1.0))
-}
-
-const BADGE_H: f32 = 20.0;
-const BADGE_PX: f32 = 6.0;
-const BADGE_RADIUS: f32 = 5.0;
-const BADGE_GAP: f32 = 6.0;
-const BADGE_ICON: f32 = 12.0;
-const BADGE_ICON_GAP: f32 = 4.0;
-
-/// What a [`badge`] names, which picks its icon.
-#[derive(Clone, Copy)]
-enum Badge {
-    Website,
-    App,
-    Chat,
-}
-
-impl Badge {
-    /// A rule's key is a site's host or an app's name.
-    fn of_site(site: &str) -> Self {
-        if site.contains('.') && !site.contains(char::is_whitespace) {
-            Self::Website
-        } else {
-            Self::App
-        }
-    }
-}
-
-/// A name in a rounded rect after its kind's icon: what a Shift pick's
-/// rule ties together.
-fn badge(p: Paint, kind: Badge, name: &str) -> El {
-    let k = p.k;
-    row()
-        .center()
-        .gap(BADGE_ICON_GAP)
-        .h(BADGE_H)
-        .px(BADGE_PX)
-        .radius(BADGE_RADIUS)
-        .fill(k.alpha(k.c.text_base, 0.09))
-        .child(
-            canvas(badge_icon(kind, mark_stroke(BADGE_ICON), p.muted()))
-                .size(BADGE_ICON, BADGE_ICON),
-        )
-        .child(label(name, small(), p.text()))
-}
-
-/// A badge's line icon on the 24 × 24 grid: a globe, an app window, or a
-/// chat bubble.
-fn badge_icon(kind: Badge, width: f32, color: Color) -> Shape {
-    let line = |a: [f32; 2], b: [f32; 2]| Path::new().move_to(a).line_to(b);
-    let paths = match kind {
-        Badge::Website => vec![
-            rounded(3.0, 3.0, 18.0, 18.0, 9.0),
-            line([3.0, 12.0], [21.0, 12.0]),
-            Path::new()
-                .move_to([12.0, 3.0])
-                .cubic_to([7.5, 8.0], [7.5, 16.0], [12.0, 21.0])
-                .cubic_to([16.5, 16.0], [16.5, 8.0], [12.0, 3.0])
-                .close(),
-        ],
-        Badge::App => vec![
-            rounded(3.0, 3.5, 18.0, 17.0, 3.0),
-            line([3.0, 8.5], [21.0, 8.5]),
-        ],
-        Badge::Chat => vec![
-            Path::new()
-                .move_to([7.0, 4.0])
-                .line_to([17.0, 4.0])
-                .cubic_to([19.2, 4.0], [21.0, 5.8], [21.0, 8.0])
-                .line_to([21.0, 13.0])
-                .cubic_to([21.0, 15.2], [19.2, 17.0], [17.0, 17.0])
-                .line_to([11.0, 17.0])
-                .line_to([6.5, 20.5])
-                .line_to([6.5, 17.0])
-                .cubic_to([4.6, 16.8], [3.0, 15.1], [3.0, 13.0])
-                .line_to([3.0, 8.0])
-                .cubic_to([3.0, 5.8], [4.8, 4.0], [7.0, 4.0])
-                .close(),
-        ],
-    };
-    paths
-        .iter()
-        .fold(Shape::new().view_box(24.0, 24.0), |shape, path| {
-            shape.stroke_path(path, width, LineCap::Round, color)
-        })
-}
-
-/// The footer's height, and the list's below its last row.
-fn footer_height() -> f32 {
-    match tuning::get().list_footer {
-        ListFooter::Band => LIST_PAD + BAND_H,
-        ListFooter::Well => LIST_PAD + WELL_H + LIST_PAD,
-    }
-}
-
-/// The hints set apart from the rows: (A) a full-width band on a quiet
-/// fill under a rule, or (B) a rounded well inset like the rows.
-fn footer_box(p: Paint, hints: El, w: f32, h: f32) -> El {
-    let k = p.k;
-    match tuning::get().list_footer {
-        ListFooter::Band => el()
-            .key("footer")
-            .absolute(0.0, h - BAND_H)
-            .size(w, BAND_H)
-            .fill(k.c.layer_01)
-            .child(
-                el().key("rule")
-                    .absolute(0.0, 0.0)
-                    .size(w, p.hair)
-                    .fill(k.c.border_weak),
-            )
-            .child(
-                row()
-                    .absolute(0.0, 0.0)
-                    .size(w, BAND_H)
-                    .center_y()
-                    .px(LIST_PAD + ROW_PX)
-                    .child(hints.grow(1.0)),
-            ),
-        ListFooter::Well => el()
-            .key("footer")
-            .absolute(LIST_PAD, h - LIST_PAD - WELL_H)
-            .size(w - 2.0 * LIST_PAD, WELL_H)
-            .radius(ROW_RADIUS)
-            .fill(k.c.layer_01)
-            .child(
-                row()
-                    .absolute(0.0, 0.0)
-                    .size(w - 2.0 * LIST_PAD, WELL_H)
-                    .center_y()
-                    .px(ROW_PX)
-                    .child(hints.grow(1.0)),
-            ),
-    }
-}
-
-fn list_panel(p: Paint, body: El, hints: Option<El>, x: f32, w: f32, h: f32, blur: f32) -> El {
-    let k = p.k;
-    let mut panel = el()
-        .key("list")
-        .trace_name("list")
-        .absolute(x, LIST_Y)
-        .size(w, h)
-        .radius(LIST_RADIUS)
-        .fill(k.c.bg_base);
-    for shadow in &k.elevation.overlay {
-        panel = panel.box_shadow(*shadow);
-    }
-    // The clip is on an inner box: clipping the panel itself would cut off
-    // its own ring and shadow.
-    panel = panel.child(
-        el().absolute(0.0, 0.0)
-            .size(w, h)
-            .radius(LIST_RADIUS)
-            .clip_rounded(LIST_RADIUS)
-            .child(body)
-            .children(hints.map(|hints| footer_box(p, hints, w, h))),
-    );
-    if k.dark {
-        panel = panel.child(rim(k, w, h, LIST_RADIUS));
-    }
-    panel
-        .motion(tuning::get().island)
-        .role("list")
-        .label("Send to")
-        .hit()
-        // Hex's tap reports a press on the list before the list hears it:
-        // the pointer being here keeps it from reading as a click away.
-        .on_hover_change(|s: &mut CapsuleState, on, tx| s.hover(Part::List, on, tx))
-        .transition(
-            Transition::offset(0.0, -LIST_DROP)
-                .combined(Transition::opacity())
-                .combined(Transition::blur(blur))
-                .springs(SpringPair::new(
-                    tuning::get().content_in,
-                    tuning::get().content_out,
-                )),
-        )
-}
-
-/// Whether the list shows its header: over rows, or the room a search
-/// keeps for them.
-fn headed(list: &List) -> bool {
-    !list.rows.is_empty() || list.min_rows > 0
-}
-
-/// The list's height: its header, rows (at least the room it keeps), and
-/// the search's footer.
-pub(crate) fn list_height(list: &List) -> f32 {
-    let header = if headed(list) { HEADER_H } else { 0.0 };
-    let rows = list.rows.len().max(list.min_rows) as f32;
-    let footer = if list.suggesting() {
-        LIST_PAD
-    } else {
-        footer_height()
-    };
-    LIST_PAD + header + rows * ROW_H + footer
 }
 
 /// A rounded rectangle on the icon grid.
@@ -2059,5 +1132,75 @@ impl Compositor<CapsuleState> for TraceFrames {
         if f.rt.scene.trace_mut().is_some() {
             trace_channels(f.rt);
         }
+    }
+}
+
+#[cfg(test)]
+mod moves {
+    use super::{Move, follows_display, move_of};
+
+    /// Showing and not following the pointer, the capsule keeps its place:
+    /// whatever the pointer's screen's notch reads now, nothing asked it to
+    /// move, so no changed measurement re-places it.
+    #[test]
+    fn a_showing_capsule_that_is_not_following_stays_put() {
+        assert_eq!(move_of(false, false, false, false), Move::Stay);
+        assert!(
+            !Move::Stay.places(true),
+            "a notch that changed is no reason to move"
+        );
+    }
+
+    /// A new capture brings the capsule to the pointer's display, even when
+    /// the notch there reads the same as the one it was fitted to.
+    #[test]
+    fn a_new_capture_places_the_capsule_on_the_pointers_display() {
+        for following in [false, true] {
+            assert_eq!(move_of(true, false, following, false), Move::Place);
+        }
+        assert!(Move::Place.places(false));
+    }
+
+    /// A new anchor moves it too: its edge changed, so its place must.
+    #[test]
+    fn an_anchor_change_places_the_capsule_again() {
+        for following in [false, true] {
+            assert_eq!(move_of(false, true, following, false), Move::Place);
+        }
+        assert!(Move::Place.places(false));
+    }
+
+    /// A capsule coming back from hidden is placed on the pointer's display
+    /// before it shows: its display stays pinned while hidden, so without
+    /// this it would come back on the display it last hid on.
+    #[test]
+    fn a_capsule_coming_back_from_hidden_places_on_the_pointers_display() {
+        for following in [false, true] {
+            assert_eq!(move_of(false, false, following, true), Move::Place);
+        }
+        assert!(Move::Place.places(false));
+    }
+
+    /// Following the pointer, it re-places only when the notch on that
+    /// display read differently: moving within one display, or to a display
+    /// whose notch reads the same, leaves it be.
+    #[test]
+    fn following_places_only_for_a_changed_notch() {
+        assert_eq!(move_of(false, false, true, false), Move::Follow);
+        assert!(Move::Follow.places(true));
+        assert!(!Move::Follow.places(false));
+    }
+
+    /// Only an open picker over a capsule pinned to a measured notch that
+    /// has an overlay to place asks a poll to look at the pointer's screen
+    /// again: a settled capsule keeps its place, the cursor card follows the
+    /// pointer itself, and without an overlay (the playground and stills)
+    /// there is nothing to place.
+    #[test]
+    fn only_an_open_picker_over_a_pinned_capsule_looks_again() {
+        assert!(follows_display(true, true, true));
+        assert!(!follows_display(false, true, true));
+        assert!(!follows_display(true, false, true));
+        assert!(!follows_display(true, true, false));
     }
 }

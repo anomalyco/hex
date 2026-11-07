@@ -1,11 +1,14 @@
-//! Settings recovery is in memory. The first write preserves unreadable bytes
-//! beside the original, including when a migration is the first writer.
+//! Settings recovery is in memory. A save refuses a file that isn't a JSON
+//! object, and a process that loaded one refuses to save stale defaults until
+//! a fresh read sees a fix; the first write over invalid fields preserves
+//! those bytes beside the original, including when a migration is first.
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 use color_eyre::eyre::{Result, eyre};
 use serde::Deserialize;
@@ -13,36 +16,86 @@ use serde_json::Value;
 use serde_path_to_error::Segment;
 use sha2::{Digest, Sha256};
 
-use super::AppSettings;
+use super::{AppSettings, path};
 use crate::policy::Policy;
 
 // A settings editor and a background migration may save at the same time.
 static WRITER: Mutex<()> = Mutex::new(());
 
+/// Paths whose last read found something other than a JSON object. While one
+/// is here, a save refuses to write the defaults that read used, even after
+/// the file is fixed, until a fresh read (a control command, the Linux poll,
+/// or a restart) clears it. Keyed by path so tests in one process do not
+/// interfere.
+static UNPARSEABLE: LazyLock<Mutex<HashSet<PathBuf>>> = LazyLock::new(Default::default);
+
+/// What launch loaded: settings for the first render and the note to show.
+pub(crate) struct LaunchLoad {
+    pub(crate) settings: AppSettings,
+    pub(crate) note: Option<LaunchNote>,
+}
+
+/// Why launch shows a note. Only a failed load makes the defaults unsafe to
+/// record with; a file that isn't a JSON object still dictates with them.
+pub(crate) enum LaunchNote {
+    Unparseable(String),
+    Failed(String),
+}
+
+impl LaunchNote {
+    pub(crate) fn into_message(self) -> String {
+        match self {
+            Self::Unparseable(message) | Self::Failed(message) => message,
+        }
+    }
+}
+
 impl AppSettings {
     /// Launch stays available even when the data folder itself cannot be
     /// resolved. Invalid settings are recovered by `load_from` in place.
-    pub fn load_for_launch() -> (Self, Option<String>) {
-        match Self::load() {
-            Ok(settings) => (settings, None),
+    pub(crate) fn load_for_launch() -> LaunchLoad {
+        match path().and_then(|path| Self::load_checked_from(&path)) {
+            Ok((settings, issue)) => {
+                let note = match issue {
+                    Some(LoadIssue::Unparseable(reason)) => {
+                        Some(LaunchNote::Unparseable(reason.launch_note()))
+                    }
+                    Some(LoadIssue::Unreadable) | None => None,
+                };
+                LaunchLoad { settings, note }
+            }
             Err(error) => {
                 tracing::error!(error = format!("{error:#}"), "could not load settings");
-                (
-                    Self::default(),
-                    Some(format!(
+                LaunchLoad {
+                    settings: Self::default(),
+                    note: Some(LaunchNote::Failed(format!(
                         "Hex couldn't read its settings and started with defaults. ({error:#})"
-                    )),
-                )
+                    ))),
+                }
             }
         }
     }
 
     pub(crate) fn load_from(path: &Path) -> Result<Self> {
-        let (settings, migrated) = Self::read_from(path)?;
+        Ok(Self::load_checked_from(path)?.0)
+    }
+
+    /// Clears the refusal recorded for a file that wasn't a JSON object.
+    /// Only the Linux poll calls this, after it adopts a valid or removed
+    /// file; every other platform waits for a restart.
+    #[cfg(any(target_os = "linux", test))]
+    pub(crate) fn forget_unparseable(path: &Path) {
+        remember_unparseable(path, false);
+    }
+
+    /// `load_from` with the file problem it recovered from, from the same
+    /// read, so a caller deciding whether to adopt cannot race an edit.
+    pub(crate) fn load_checked_from(path: &Path) -> Result<(Self, Option<LoadIssue>)> {
+        let (settings, migrated, issue) = Self::read_managed_checked_from(path, Policy::current())?;
         if migrated && let Err(error) = settings.write_to(path) {
             tracing::warn!(%error, "could not persist normalized settings");
         }
-        Ok(settings)
+        Ok((settings, issue))
     }
 
     /// What `load_from` loads, without writing anything back: true when
@@ -53,20 +106,35 @@ impl AppSettings {
     }
 
     pub(super) fn read_managed_from(path: &Path, policy: Policy) -> Result<(Self, bool)> {
-        let (mut settings, migrated) = Self::read_saved_from(path)?;
-        policy.enforce(&mut settings);
+        let (settings, migrated, _) = Self::read_managed_checked_from(path, policy)?;
         Ok((settings, migrated))
     }
 
-    fn read_saved_from(path: &Path) -> Result<(Self, bool)> {
+    fn read_managed_checked_from(
+        path: &Path,
+        policy: Policy,
+    ) -> Result<(Self, bool, Option<LoadIssue>)> {
+        let (mut settings, migrated, issue) = Self::read_saved_from(path)?;
+        policy.enforce(&mut settings);
+        Ok((settings, migrated, issue))
+    }
+
+    fn read_saved_from(path: &Path) -> Result<(Self, bool, Option<LoadIssue>)> {
         let data = match fs::read(path) {
             Ok(data) => data,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok((Self::default(), false));
+                return Ok((Self::default(), false, None));
             }
             Err(error) => {
                 tracing::warn!(path = %path.display(), %error, "could not read settings; using defaults without changing the file");
-                return Ok((Self::default(), false));
+                return Ok((Self::default(), false, Some(LoadIssue::Unreadable)));
+            }
+        };
+        let issue = match settings_object(&data) {
+            Ok(_) => None,
+            Err(reason) => {
+                remember_unparseable(path, true);
+                Some(LoadIssue::Unparseable(reason))
             }
         };
         let (mut settings, mut repaired) = decode(&data);
@@ -108,7 +176,7 @@ impl AppSettings {
         // keep their existing write-on-load behavior for healthy settings.
         let migrated =
             !repaired && (!hints.is_empty() || serde_json::to_value(&settings)? != loaded);
-        Ok((settings, migrated))
+        Ok((settings, migrated, issue))
     }
 
     pub(super) fn write_to(&self, path: &Path) -> Result<()> {
@@ -124,19 +192,30 @@ impl AppSettings {
         fs::create_dir_all(parent)?;
         let original = match fs::read(path) {
             Ok(original) => {
-                if needs_backup(&original) {
-                    backup(path, &original)?;
+                if let Err(reason) = settings_object(&original) {
+                    return Err(eyre!("{}", reason.save_error()));
                 }
                 Some(original)
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                #[cfg(target_os = "macos")]
-                crate::desktop::onboarding::record_pending_at(parent)?;
-                None
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             // Never overwrite something we could not read and preserve.
             Err(error) => return Err(error.into()),
         };
+        // The in-memory settings came from a file that wasn't a JSON object.
+        // They may be stale defaults, so a fixed file must be loaded instead.
+        if load_found_unparseable(path) {
+            return Err(eyre!(
+                "settings.json couldn't be read when Hex loaded it. Restart Hex to load the fixed file. Nothing was saved."
+            ));
+        }
+        match &original {
+            Some(original) if needs_backup(original) => backup(path, original)?,
+            None => {
+                #[cfg(target_os = "macos")]
+                crate::desktop::onboarding::record_pending_at(parent)?;
+            }
+            _ => {}
+        }
         let bytes = serde_json::to_vec_pretty(&*self.as_saved(policy, original.as_deref()))?;
         crate::durable::write(path, &bytes)?;
         Ok(())
@@ -148,7 +227,9 @@ impl AppSettings {
         if !policy.any() {
             return Cow::Borrowed(self);
         }
-        let saved = saved.map_or_else(Self::default, |data| decode(data).0);
+        let mut saved = saved.map_or_else(Self::default, |data| decode(data).0);
+        // A file from before `meetings.summaries` keeps its choice under a lock.
+        saved.migrate_meeting_summaries();
         let mut written = self.clone();
         policy.keep_saved(&mut written, &saved);
         Cow::Owned(written)
@@ -157,6 +238,103 @@ impl AppSettings {
 
 fn warn(key: &str, reason: &str) {
     tracing::warn!(key, reason, "invalid setting; using its default in memory");
+}
+
+fn remember_unparseable(path: &Path, unparseable: bool) {
+    let mut paths = UNPARSEABLE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if unparseable {
+        paths.insert(path.to_path_buf());
+    } else {
+        paths.remove(path);
+    }
+}
+
+fn load_found_unparseable(path: &Path) -> bool {
+    UNPARSEABLE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .contains(path)
+}
+
+/// Why a load used defaults without a settings JSON object on disk, even
+/// though it recovered in memory.
+pub(crate) enum LoadIssue {
+    Unparseable(Unparseable),
+    Unreadable,
+}
+
+impl LoadIssue {
+    /// What a running Hex says when a saved edit can't be adopted.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn reload_error(&self) -> String {
+        match self {
+            Self::Unparseable(reason) => reason.reload_error(),
+            Self::Unreadable => {
+                "Hex couldn't read settings.json; keeping the settings it already has.".into()
+            }
+        }
+    }
+}
+
+/// Why a settings file isn't a JSON object.
+pub(crate) enum Unparseable {
+    /// serde's message keeps its line and column.
+    InvalidJson(String),
+    NotObject,
+}
+
+impl Unparseable {
+    /// "isn't valid JSON (<serde error>)" or "must be a JSON object".
+    fn sentence(&self) -> String {
+        match self {
+            Self::InvalidJson(error) => format!("isn't valid JSON ({error})"),
+            Self::NotObject => "must be a JSON object".into(),
+        }
+    }
+
+    /// What the launch note puts in parentheses.
+    fn reason(&self) -> &str {
+        match self {
+            Self::InvalidJson(error) => error,
+            Self::NotObject => "must be a JSON object",
+        }
+    }
+
+    fn launch_note(&self) -> String {
+        format!(
+            "Hex couldn't read settings.json and started with defaults. Your file wasn't changed; fix or remove it, then restart Hex. ({})",
+            self.reason()
+        )
+    }
+
+    /// The error a save returns; nothing is written.
+    fn save_error(&self) -> String {
+        format!(
+            "settings.json {}. Fix or remove it, then restart Hex. Nothing was saved.",
+            self.sentence()
+        )
+    }
+
+    /// What a running Hex says when a saved edit isn't a JSON object.
+    #[cfg(target_os = "linux")]
+    fn reload_error(&self) -> String {
+        format!(
+            "settings.json {}. Fix or remove it, then restart Hex.",
+            self.sentence()
+        )
+    }
+}
+
+/// `data` as a settings JSON object, or why it isn't one. A JSON syntax error
+/// keeps serde's line and column.
+fn settings_object(data: &[u8]) -> Result<Value, Unparseable> {
+    match serde_json::from_slice(data) {
+        Ok(value @ Value::Object(_)) => Ok(value),
+        Ok(_) => Err(Unparseable::NotObject),
+        Err(error) => Err(Unparseable::InvalidJson(error.to_string())),
+    }
 }
 
 /// Recognition hints saved before they merged into the vocabulary: the
@@ -184,14 +362,10 @@ fn legacy_recognition_hints(data: &[u8]) -> Vec<String> {
 }
 
 fn decode(data: &[u8]) -> (AppSettings, bool) {
-    let mut value: Value = match serde_json::from_slice(data) {
-        Ok(Value::Object(object)) => Value::Object(object),
-        Ok(_) => {
-            warn("$", "settings must be a JSON object");
-            return (AppSettings::default(), true);
-        }
-        Err(error) => {
-            warn("$", &error.to_string());
+    let mut value = match settings_object(data) {
+        Ok(value) => value,
+        Err(reason) => {
+            warn("$", &format!("settings.json {}", reason.sentence()));
             return (AppSettings::default(), true);
         }
     };
@@ -240,7 +414,7 @@ fn remove(value: &mut Value, path: &[&Segment]) -> bool {
 }
 
 fn needs_backup(data: &[u8]) -> bool {
-    if !serde_json::from_slice::<Value>(data).is_ok_and(|value| value.is_object()) {
+    if settings_object(data).is_err() {
         return true;
     }
     let Ok(settings) = serde_json::from_slice::<AppSettings>(data) else {

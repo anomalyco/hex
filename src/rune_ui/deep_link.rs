@@ -2,8 +2,8 @@
 //! `hex://labs/<feature>` (`hex labs link <feature>` prints it), and
 //! `hex://settings/<pane>` (`hex-test://` in a test build). A Labs link
 //! opens the store, on Turned on with `?tab=on`, on a chip with
-//! `?category=<id>`, searching with `?search=<words>`, and with a lab's
-//! drawer open when it names one; it never turns a lab on. Story links live
+//! `?category=<id>`, searching with `?search=<words>`, and on a lab's group
+//! chip when it names one; it never turns a lab on. Story links live
 //! in `story_link`.
 
 use rune::Tx;
@@ -84,7 +84,7 @@ pub(crate) fn parse(link: &str, scheme: &str) -> Option<Result<Target, String>> 
     })
 }
 
-/// The link that opens `feature`'s drawer in Labs.
+/// The link that opens Labs on `feature`'s group.
 pub(crate) fn labs_link(scheme: &str, feature: crate::labs::Feature) -> String {
     format!("{scheme}://labs/{}", feature.name())
 }

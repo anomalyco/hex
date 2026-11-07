@@ -151,9 +151,18 @@ Track the remaining shortcut requests explicitly:
   it still needs physical chord-discard and cold-microphone checks.
 - [#67](https://github.com/anomalyco/hex/issues/67): standalone keypad/character
   bindings need explicit key-consumption, cancellation, and rebinding semantics.
-- [#37](https://github.com/anomalyco/hex/issues/37): remaining Caps
-  Lock-to-Control behavior needs physical remapping evidence. Side-less flags
-  and actual Right Control flags are distinct.
+- [#37](https://github.com/anomalyco/hex/issues/37): Caps Lock remapped to
+  Control is read through a raw HID modifier tracker below macOS's keyboard
+  filter, so a Right Control shortcut no longer starts from it while Either
+  still does; the shortcut recorder applies the same normalization while the
+  listener's input monitor is running. Hex never requests Input Monitoring:
+  the tracker runs only when Hex already has it (turn Hex on under System
+  Settings › Privacy & Security › Input Monitoring and restart Hex), skips
+  itself otherwise, and gives up rather than delay listener startup. Without
+  it, Right Control still starts from a remapped Caps Lock, and correctness
+  depends on the raw Caps Lock callback arriving before its flags event, which
+  is unproven. Needs a physical remap run on hardware. CI covers constructed
+  HID snapshots only.
 
 On-demand rewrite [PR #63](https://github.com/anomalyco/hex/pull/63) remains under
 review: publish the shared last transcript only after successful paste, require
@@ -272,6 +281,18 @@ the Hex UI becomes a client. Today the running app serves
 [`/streams`](docs/streams.md) on dictation's loaded model, with dictation
 first; the service keeps that contract, so stream clients such as Seer don't
 change.
+
+## Grow Labs › Screenshots
+
+The ⌘⇧4 lab (docs/features/labs.md) shoots an area, a window, or a display
+to the clipboard, a folder, and a corner thumbnail. Next, once a person has
+used it on a real Mac:
+
+- A markup editor from the thumbnail: arrows, text, boxes, blur, crop.
+- Scrolling capture of a long window.
+- Copy the text in a shot (OCR, Apple's Vision).
+- A self-timer before the shot.
+- Pin a shot to the screen as a floating window.
 
 ## Deliberate Deferrals
 

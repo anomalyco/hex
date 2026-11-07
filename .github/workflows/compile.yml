@@ -17,6 +17,9 @@ on:
       - "native/**"
       - "resources/**"
       - "assets/**"
+      - "nix/**"
+      - "scripts/check-nix-git-pins.py"
+      - "scripts/test-check-nix-git-pins.py"
       - ".github/workflows/compile.yml"
   workflow_dispatch:
 
@@ -44,6 +47,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Check Nix Git pins
+        run: |
+          python3 scripts/test-check-nix-git-pins.py
+          python3 scripts/check-nix-git-pins.py
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
@@ -115,3 +122,6 @@ jobs:
           $combined = if ($env:CMAKE_PREFIX_PATH) { "$prefix;$env:CMAKE_PREFIX_PATH" } else { $prefix }
           Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$combined"
       - run: cargo clippy --locked --bin hex -- -D warnings
+      # hex.com, the console entry point beside the GUI hex.exe.
+      - run: cargo clippy --locked -p hex-console --all-targets -- -D warnings
+      - run: cargo test --locked -p hex-console

@@ -40,11 +40,13 @@ alternatives were rejected:
 - CI fetches Rune like any other crate; Rune is an ordinary dependency (no
   cargo feature), so every check builds and tests it. The check workflows run
   on pushes to `dev`.
-- Nix: `nix/package.nix` lists Rune's hash under `cargoLock.outputHashes` as
-  `rune-0.0.1`. One entry covers every crate from the repository. **Every
-  Rune pin bump must update it.** To get the new hash, set it to
-  `lib.fakeHash` and run `nix build .#hex.cargoDeps`; the error prints the
-  hash to use.
+- Nix: `nix/package.nix` lists Rune's rev and hash in
+  `cargoGitDependencies."rune-0.0.1"`, and the hash lands under
+  `cargoLock.outputHashes` as `rune-0.0.1`. One entry covers every crate from
+  the repository. **Every Rune pin bump must update both.** To get the new
+  hash, set it to `lib.fakeHash` and run `nix build .#hex.cargoDeps`; the
+  error prints the hash to use. `scripts/check-nix-git-pins.py` fails a pull
+  request whose recorded rev does not match `Cargo.lock`.
 - A pin bump changes the `rev` on all three crates together, followed by
   `cargo update -p rune -p rune-kit -p rune-theme-opencode`. Keep `windows`
   0.62.2 for `gpu-allocator` in `Cargo.lock` so Windows DX12 builds stay green.
