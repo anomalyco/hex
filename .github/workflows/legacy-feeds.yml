@@ -1,0 +1,45 @@
+name: Legacy feeds
+
+# Points the frozen 2.3.1 Linux and Windows update feeds at the current
+# stable release, so those installs update into the new Hex
+# (.github/release/legacy-feeds.sh; docs/releasing.md, "Old clients").
+# `check` signs and verifies without uploading. The job holds the release
+# signing key and the R2 key, so it checks out only .github/release/ and
+# treats the downloaded executables as data.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The current stable version, e.g. 3.4.0
+        required: true
+        type: string
+      mode:
+        description: check signs and verifies; publish uploads
+        required: true
+        default: check
+        type: choice
+        options: [check, publish]
+
+permissions:
+  contents: read
+
+jobs:
+  feeds:
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      HEX_RELEASE_BUCKET: hex-production-files
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: /.github/release/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Sign and publish
+        env:
+          HEX_RELEASE_SIGNING_KEY: ${{ secrets.HEX_RELEASE_SIGNING_KEY }}
+          R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          MODE: ${{ inputs.mode }}
+          VERSION: ${{ inputs.version }}
+        run: bash .github/release/legacy-feeds.sh "$MODE" "$VERSION"

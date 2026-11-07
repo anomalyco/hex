@@ -2,8 +2,9 @@ name: Legacy appcast
 
 # Replaces the frozen 2.3.1 appcast (https://anoma.ly/hex/files/appcast.xml,
 # which Kit-era Macs read through Kit's redirect) with
-# packaging/macos/legacy-appcast.xml: one informational item, with no
-# enclosure, that points those installs at https://anoma.ly/hex. Run it when
+# packaging/macos/legacy-appcast.xml: one item that points those installs
+# at https://anoma.ly/hex, either informational or an update to the released
+# Hex.zip signed with the old Sparkle key. Run it when
 # that item changes (docs/releasing.md, "Old clients").
 # The job holds the R2 key, so it checks out only .github/release/ and the
 # appcast, which it treats as data, and uploads with .github/release/r2-put.sh.
@@ -31,8 +32,14 @@ jobs:
         run: |
           appcast=packaging/macos/legacy-appcast.xml
           python3 -c 'import sys, xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])' "$appcast"
-          grep -Fq '<sparkle:informationalUpdate' "$appcast"
           grep -Fq 'https://anoma.ly/hex' "$appcast"
+          # Either an informational item, or an update to a release-service
+          # file signed with the old Sparkle key (SUPublicEDKey).
+          if ! grep -Fq '<sparkle:informationalUpdate' "$appcast"; then
+            grep -Eq '<enclosure url="https://anoma\.ly/release/hex/files/[0-9a-f]{64}/Hex\.zip"' "$appcast"
+            grep -Eq 'sparkle:edSignature="[A-Za-z0-9+/]{86}=="' "$appcast"
+            grep -Eq 'length="[0-9]+"' "$appcast"
+          fi
           curl -fsS https://anoma.ly/hex/files/appcast.xml -o live.xml
           { echo '### Live → new appcast'; echo '```diff'; diff -u live.xml "$appcast" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload it

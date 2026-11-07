@@ -376,11 +376,14 @@ expected_binary="$support_dir/current/hex"
 if printf '%s' "$support_dir" | LC_ALL=C grep -Eq '["\\[:cntrl:]]'; then
   fail "Hex service path contains unsupported characters."
 fi
-if [ -L "$unit" ] || { [ -e "$unit" ] && ! grep -Fxq '# X-Hex-Managed=true' "$unit"; }; then
+# 2.3.1 and earlier marked their files X-HEX-Managed and kept Hex in
+# voice-control; installing over them moves those installs here.
+legacy_binary="$data_home/voice-control/current/hex"
+if [ -L "$unit" ] || { [ -e "$unit" ] && ! grep -Fxq -e '# X-Hex-Managed=true' -e '# X-HEX-Managed=true' "$unit"; }; then
   fail "Refusing to replace an unmanaged systemd unit: $unit"
 fi
 if { [ -e "$binary" ] || [ -L "$binary" ]; } \
-  && { [ ! -L "$binary" ] || [ "$(readlink "$binary")" != "$expected_binary" ]; }
+  && { [ ! -L "$binary" ] || { [ "$(readlink "$binary")" != "$expected_binary" ] && [ "$(readlink "$binary")" != "$legacy_binary" ]; }; }
 then
   fail "Refusing to replace an unmanaged file: $binary"
 fi
@@ -501,7 +504,7 @@ mv -Tf "$autostart_staged" "$autostart_entry"
 autostart_staged=
 # Earlier installs named both entries hex.desktop.
 for desktop in "$applications/hex.desktop" "$autostart/hex.desktop"; do
-  if [ -f "$desktop" ] && [ ! -L "$desktop" ] && grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
+  if [ -f "$desktop" ] && [ ! -L "$desktop" ] && grep -Fxq -e 'X-Hex-Managed=true' -e 'X-HEX-Managed=true' "$desktop"; then
     rm -f "$desktop"
   fi
 done

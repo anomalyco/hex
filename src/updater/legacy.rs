@@ -25,6 +25,8 @@ pub fn take_over() -> bool {
     let Some((legacy, root)) = legacy_install() else {
         return false;
     };
+    // .github/release/legacy-feeds.sh looks for this message in a build
+    // before pointing 2.3.1's feeds at it.
     tracing::info!(legacy = %legacy.display(), root = %root.display(), "moving a 2.3.1 install into the managed layout");
     let relaunched =
         adopt(&legacy, &root).and_then(|executable| relaunch(&executable, &legacy, &root));
