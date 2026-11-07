@@ -6,7 +6,7 @@
 transcribes on-device with Apple Speech (`SpeechTranscriber` on iOS 26+) or
 FluidAudio Parakeet V2 (iOS 18+), and removes each capture's file after
 inference, cancellation, or failure. The keyboard extension sends commands and
-inserts completed text over the shared App Group (`group.com.kitlangton.hex.mobile`);
+inserts completed text over the shared App Group (`group.anomaly.hex.mobile`);
 it never accesses the microphone, speech model, or network.
 
 ## Capabilities
