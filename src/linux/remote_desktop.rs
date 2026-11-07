@@ -151,7 +151,7 @@ impl RemoteDesktop {
 
     /// Presses and releases Ctrl+V, or Ctrl+Shift+V for terminals.
     pub(crate) fn paste(&self, with_shift: bool) -> Result<()> {
-        for (keysym, state) in paste_keys(with_shift) {
+        send_keys(&paste_keys(with_shift), |keysym, state| {
             self.bus.call_portal(
                 "NotifyKeyboardKeysym",
                 &(
@@ -160,10 +160,41 @@ impl RemoteDesktop {
                     keysym,
                     state,
                 ),
-            )?;
-        }
-        Ok(())
+            )
+        })
     }
+}
+
+/// Sends each key in order. A call that fails may still have reached the
+/// desktop, so every key pressed so far is released before the error returns.
+fn send_keys(keys: &[(i32, u32)], mut notify: impl FnMut(i32, u32) -> Result<()>) -> Result<()> {
+    let mut pressed = Vec::new();
+    for &(keysym, state) in keys {
+        if state == PRESSED {
+            // Recorded before the call: a timeout does not mean it never ran.
+            pressed.push(keysym);
+        }
+        if let Err(error) = notify(keysym, state) {
+            tracing::warn!(
+                keysym = format!("{keysym:#x}"),
+                state,
+                error = format!("{error:#}"),
+                "could not send a paste key"
+            );
+            for keysym in pressed.iter().rev() {
+                if let Err(error) = notify(*keysym, RELEASED) {
+                    tracing::warn!(
+                        keysym = format!("{keysym:#x}"),
+                        error = format!("{error:#}"),
+                        "could not release a paste key"
+                    );
+                }
+            }
+            return Err(error)
+                .wrap_err_with(|| format!("could not send keysym {keysym:#x} in state {state}"));
+        }
+    }
+    Ok(())
 }
 
 impl Drop for RemoteDesktop {
@@ -240,6 +271,75 @@ mod tests {
                 (XK_CONTROL_L, PRESSED),
                 (XK_SHIFT_L, PRESSED),
                 (XK_V, PRESSED),
+                (XK_V, RELEASED),
+                (XK_SHIFT_L, RELEASED),
+                (XK_CONTROL_L, RELEASED)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_successful_paste_sends_each_key_once() {
+        for with_shift in [false, true] {
+            let keys = paste_keys(with_shift);
+            let mut sent = Vec::new();
+            send_keys(&keys, |keysym, state| {
+                sent.push((keysym, state));
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(sent, keys);
+        }
+    }
+
+    #[test]
+    fn a_failed_paste_releases_every_key_it_pressed() {
+        for with_shift in [false, true] {
+            let keys = paste_keys(with_shift);
+            for fail_at in 0..keys.len() {
+                let mut sent = Vec::new();
+                let result = send_keys(&keys, |keysym, state| {
+                    sent.push((keysym, state));
+                    if sent.len() == fail_at + 1 {
+                        return Err(eyre!("injected failure"));
+                    }
+                    Ok(())
+                });
+                assert!(result.is_err());
+                // A press that timed out may still have reached the desktop,
+                // so it is released too.
+                let mut expected: Vec<_> = sent[..=fail_at]
+                    .iter()
+                    .filter(|(_, state)| *state == PRESSED)
+                    .map(|(keysym, _)| (*keysym, RELEASED))
+                    .collect();
+                expected.reverse();
+                assert_eq!(&sent[fail_at + 1..], expected, "failed at {fail_at}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_failed_cleanup_release_keeps_the_original_error() {
+        let keys = paste_keys(true);
+        let mut sent = Vec::new();
+        let error = send_keys(&keys, |keysym, state| {
+            sent.push((keysym, state));
+            match sent.len() {
+                // The V press fails partway.
+                3 => Err(eyre!("the original failure")),
+                // Its release fails too, which must not stop the cleanup.
+                4 => Err(eyre!("a cleanup failure")),
+                _ => Ok(()),
+            }
+        })
+        .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(error.contains("the original failure"), "{error}");
+        assert!(!error.contains("a cleanup failure"), "{error}");
+        assert_eq!(
+            &sent[3..],
+            [
                 (XK_V, RELEASED),
                 (XK_SHIFT_L, RELEASED),
                 (XK_CONTROL_L, RELEASED)
