@@ -330,9 +330,13 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     crate::keyboard::initialize_layout()?;
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());
-    // Never a silent launch failure: unreadable settings start with defaults
+    // Never a silent launch failure: invalid settings start with defaults
     // and the window says why (#744).
-    let (mut settings, settings_error) = AppSettings::load_for_launch();
+    let launch = AppSettings::load_for_launch();
+    let mut settings = launch.settings;
+    let settings_error = launch
+        .note
+        .map(crate::app_settings::LaunchNote::into_message);
     // Preload bundled feedback sounds on a worker so onboarding and the Sounds
     // sheet play immediately even before permissions let `recognition` start.
     // Opens no audio output device until a tone actually plays.

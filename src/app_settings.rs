@@ -24,6 +24,9 @@ mod meeting_folder;
 mod meetings;
 mod persistence;
 mod screenshots;
+#[cfg(target_os = "linux")]
+pub(crate) use persistence::LaunchLoad;
+pub(crate) use persistence::LaunchNote;
 mod shortcut_repair;
 
 #[cfg(hex_capture)]

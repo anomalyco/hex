@@ -2028,11 +2028,16 @@ this does not show whether a launcher's token focuses it). Not yet on KWin,
 Mutter, or i3.
 
 Listener starts consume the host's settings snapshot; the foreground
-`hex dictate` command loads its own snapshot once. Invalid startup settings leave
-defaults available only for editing and block capture until a successful settings
-commit or a restart with valid settings. Dismissing the load error does
-not authorize recording with defaults. Feedback is initialized at these entry
-points, so a delayed listener start cannot reset a newer live volume selection.
+`hex dictate` command loads its own snapshot once. A settings file that isn't
+valid JSON, or isn't a JSON object, starts Hex with defaults and shows the parse
+error, but no longer blocks dictation; saving over it is refused, even after it
+is fixed, until Hex restarts. Its two-second poll keeps the running settings
+when the file isn't a JSON object, and adopting a fixed or removed file also
+clears that refusal, so the window's next save works without a restart. A load
+that fails outright still blocks capture until a successful save or a restart.
+Dismissing that failed-load error does not authorize recording with defaults.
+Feedback is initialized at these entry points, so a delayed listener start
+cannot reset a newer live volume selection.
 
 Checks: [test-linux-service.py](../../scripts/test-linux-service.py) exercises
 the real socket and process lifetime without a display, installed model, or
