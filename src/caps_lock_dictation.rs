@@ -28,7 +28,7 @@ use std::sync::LazyLock;
 #[cfg(target_os = "macos")]
 use std::sync::Mutex;
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc::Sender;
 

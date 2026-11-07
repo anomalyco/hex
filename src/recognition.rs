@@ -505,7 +505,7 @@ pub fn listen(
         #[cfg(hex_capture)]
         {
             let capture_recording = capture_host
-                .as_ref()
+                .as_mut()
                 .is_some_and(|host| host.recording_since(&input).is_some());
             if capture_recording != capture_was_recording {
                 capture_was_recording = capture_recording;
