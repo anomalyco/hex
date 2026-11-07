@@ -1,13 +1,19 @@
-//! Microphone-timeline gaps on the Linux listener. A short step between
-//! chunks (a Bluetooth stream starting, #619) is filled with silence so the
-//! capture keeps going; a longer one is a discontinuity, and audio from either
-//! side of it must not be stitched together. The macOS owner applies the same
-//! rule in [`crate::dictation::audio`].
+//! Microphone-timeline gaps on the Linux listener. cpal's ALSA and PipeWire
+//! timestamps are wall-clock-derived, so a large apparent step may be clock
+//! noise rather than a stalled stream: every gap up to the stream-stall
+//! timeout is filled with silence so a held dictation keeps going. Only a
+//! longer one is a discontinuity, and audio from either side of it must not be
+//! stitched together. macOS applies its own stricter 250 ms limit in
+//! [`crate::dictation::audio`].
 
 use std::time::Duration;
 
-use crate::audio::CaptureInstant;
-use crate::dictation::{CHUNK_GAP_TOLERANCE, MAX_PADDED_GAP};
+use crate::audio::{CaptureInstant, STREAM_STALL_TIMEOUT};
+use crate::dictation::CHUNK_GAP_TOLERANCE;
+
+/// Linux pads any gap the stream-stall watchdog would not already have
+/// treated as a dead stream.
+const MAX_PADDED_GAP: Duration = STREAM_STALL_TIMEOUT;
 
 /// One chunk on the microphone timeline, relative to the chunk before it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,15 +73,25 @@ mod tests {
             ),
             ChunkStep::Pad(1_600)
         );
-        // A gap at the 250 ms limit is still bridged.
+        // 300 ms pads on Linux, where timestamps are wall-clock derived.
         assert_eq!(
             chunk_step(
-                Some(before(Duration::from_millis(350))),
+                Some(before(Duration::from_millis(400))),
                 1_600,
                 through(),
                 16_000
             ),
-            ChunkStep::Pad(4_000)
+            ChunkStep::Pad(4_800)
+        );
+        // A gap at the stream-stall timeout is still bridged.
+        assert_eq!(
+            chunk_step(
+                Some(before(Duration::from_millis(4_100))),
+                1_600,
+                through(),
+                16_000
+            ),
+            ChunkStep::Pad(64_000)
         );
         // Jitter within the tolerance and a stream's first chunk are neither.
         assert_eq!(
@@ -94,15 +110,15 @@ mod tests {
     }
 
     #[test]
-    fn a_long_microphone_gap_is_not_stitched() {
+    fn a_gap_past_the_stream_stall_timeout_is_not_stitched() {
         assert_eq!(
             chunk_step(
-                Some(before(Duration::from_millis(400))),
+                Some(before(Duration::from_millis(5_100))),
                 1_600,
                 through(),
                 16_000
             ),
-            ChunkStep::Discontinuity(Duration::from_millis(300))
+            ChunkStep::Discontinuity(Duration::from_secs(5))
         );
     }
 }

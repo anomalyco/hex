@@ -508,8 +508,9 @@ pub(crate) fn run(
     // the stream is closed, replaced, or reopened.
     let mut last_captured_through: Option<CaptureInstant> = None;
     // A discontinuity ended the capture a release was finishing: its audio
-    // belongs to the old capture, so replace that once it is submitted.
-    let mut restart_capture = false;
+    // belongs to the old capture, so replace that once it is submitted. The
+    // rate is the one in effect when the gap arrived.
+    let mut restart_capture: Option<u32> = None;
     let mut finishing: Option<Finishing> = None;
     // The recording skips processing (Dictate without processing).
     let mut recording_raw = false;
@@ -711,15 +712,16 @@ pub(crate) fn run(
                 raw,
                 &mut active_typing,
             )?;
-            if silent {
-                reopen_silent_stream(&mut input, release_while_idle);
+            if silent && reopen_silent_stream(&mut input, release_while_idle) {
+                // Recovery blocks audio until a reopened stream arrives, so
+                // a press must wait for it rather than start a dead capture.
+                timeline.restart();
+                clock.reset();
+                last_captured_through = None;
+                audio_ready = false;
             }
-            if std::mem::take(&mut restart_capture) {
-                capture = DictationCapture::new(if audio_ready {
-                    input.sample_rate()
-                } else {
-                    16_000
-                });
+            if let Some(sample_rate) = restart_capture.take() {
+                capture = DictationCapture::new(sample_rate);
             }
             suppressor.restore();
             if release_while_idle && !timeline.wants_audio() {
@@ -991,20 +993,22 @@ pub(crate) fn run(
                     sample_rate,
                 );
                 if let ChunkStep::Discontinuity(gap) = step {
-                    // A stall this long cannot be bridged: a recording is
-                    // ended as a stream interruption would end it, and audio
-                    // from the far side starts a fresh capture.
+                    // A gap past the stall watchdog cannot be bridged: end
+                    // any live capture and start the audio after it fresh.
+                    let cancelled =
+                        service.is_active() || (capture.is_recording() && finishing.is_none());
                     tracing::warn!(
                         gap_ms = gap.as_millis() as u64,
                         recording = capture.is_recording(),
-                        "microphone audio skipped; discarded the capture"
+                        cancelled,
+                        "microphone audio skipped; {}",
+                        if cancelled {
+                            "discarded the capture"
+                        } else {
+                            "restarted the capture timeline"
+                        }
                     );
-                    timeline.restart();
                     clock.reset();
-                    // Only a live service capture, an active recording, or a
-                    // release still finishing a capture loses audio here.
-                    let affected =
-                        service.is_active() || capture.is_recording() || finishing.is_some();
                     // A release still in its tail finishes with the audio it
                     // has, from the old capture.
                     if let Some(finish) = &mut finishing {
@@ -1021,25 +1025,25 @@ pub(crate) fn run(
                         suppressor.restore();
                         events.dictation(DictationPhase::Cancelled, "")?;
                     }
-                    if affected {
+                    if cancelled {
                         events.dictation(
                             DictationPhase::Failed(
                                 "microphone audio skipped; the capture was discarded".into(),
                             ),
                             "",
                         )?;
+                        emit_state(
+                            &mut events,
+                            active_state(capture.is_recording(), pending),
+                            &device_label,
+                        )?;
                     }
-                    emit_state(
-                        &mut events,
-                        active_state(capture.is_recording(), pending),
-                        &device_label,
-                    )?;
                     last_captured_through = Some(captured_through);
                     if finishing.is_some() {
                         // The release submits the old capture next loop;
                         // replace it before any later audio arrives.
-                        restart_capture = true;
-                        continue;
+                        restart_capture = Some(sample_rate);
+                        continue; // This chunk belongs to neither capture.
                     }
                     capture = DictationCapture::new(sample_rate);
                 }
@@ -1066,31 +1070,28 @@ pub(crate) fn run(
                         sample_rate,
                     );
                 }
-                let mut padding = Vec::new();
+                let mut padded = Vec::new();
                 if let ChunkStep::Pad(frames) = step {
-                    // A short hiccup (often a Bluetooth stream starting) is
-                    // filled with silence on the timeline instead of failing
-                    // the capture.
-                    padding.resize(frames, 0.0);
-                    padding.extend_from_slice(&samples);
+                    // A hiccup (often a Bluetooth stream starting) is filled
+                    // with silence so the capture keeps going.
+                    padded.resize(frames, 0.0);
+                    padded.extend_from_slice(&samples);
                     tracing::warn!(
                         gap_ms = (frames as f64 * 1_000.0 / f64::from(sample_rate)) as u64,
                         recording = capture.is_recording(),
-                        "microphone audio skipped briefly; filled the gap with silence"
+                        "microphone audio skipped; filled the gap with silence"
                     );
                 }
-                let samples: &[f32] = if padding.is_empty() {
-                    &samples
-                } else {
-                    &padding
-                };
-                crate::audio::input_level::record(samples);
-                timeline.feed(samples, sample_rate, captured_through);
-                capture.ingest(samples, captured_through);
+                let captured: &[f32] = if padded.is_empty() { &samples } else { &padded };
+                crate::audio::input_level::record(captured);
+                // The sink turns timestamp gaps into its own Gap markers, so
+                // it gets the real chunk rather than the padded one.
+                timeline.feed(&samples, sample_rate, captured_through);
+                capture.ingest(captured, captured_through);
                 last_captured_through = Some(captured_through);
                 if capture.is_recording() {
-                    indicator.meter(samples);
-                    service.audio(samples, Instant::now());
+                    indicator.meter(captured);
+                    service.audio(captured, Instant::now());
                 }
                 if capture.become_intentional(captured_through) && finishing.is_none() {
                     // Ordinary shortcut chords and short taps never mute,
@@ -1348,16 +1349,19 @@ fn submit_capture(
 /// A warm microphone whose finished dictation was exactly zero: the stream
 /// runs but its device was handed to another app, and stays silent until
 /// reopened (#1122). Reopen it as after a stream failure. A microphone
-/// released while idle already opens fresh for the next press.
-fn reopen_silent_stream(input: &mut RecoveringAudioInput, release_while_idle: bool) {
+/// released while idle already opens fresh for the next press. Returns
+/// whether recovery was requested; the caller must treat the stream as
+/// unavailable until it reopens.
+fn reopen_silent_stream(input: &mut RecoveringAudioInput, release_while_idle: bool) -> bool {
     if release_while_idle || !input.is_open() || input.is_recovering() {
-        return;
+        return false;
     }
     tracing::warn!(
         device = %input.device_name(),
         "dictation audio was digital silence; reopening the microphone"
     );
     input.request_recovery();
+    true
 }
 
 /// Starts Live typing at the hold threshold (or the Toggle press), before
@@ -1538,7 +1542,7 @@ mod tests {
     }
 
     #[test]
-    fn a_digital_silence_finish_asks_to_reopen_the_microphone() {
+    fn submit_capture_reports_when_a_clip_is_digital_silence() {
         let (engine, _commands) = TranscriptionEngine::for_test();
         let (mut events, path) = event_log();
         let (jobs, queued) = mpsc::sync_channel(2);
@@ -1566,6 +1570,28 @@ mod tests {
         assert!(queued.try_recv().is_err());
         drop(events);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_warm_silent_stream_reopens_once_unless_released() {
+        let (mut input, opened) = RecoveringAudioInput::pending_for_test();
+        let (replacement, _samples) = crate::audio::AudioInput::channel_for_test();
+        opened
+            .send((0, Ok(crate::audio::Opened::Input(Box::new(replacement)))))
+            .unwrap();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert!(reopen_silent_stream(&mut input, false));
+        assert!(input.is_recovering());
+        // A second finish cannot queue another replacement.
+        assert!(!reopen_silent_stream(&mut input, false));
+
+        // Release while idle keeps the stream closed instead.
+        let (mut idle, _opened) = RecoveringAudioInput::pending_for_test();
+        assert!(!reopen_silent_stream(&mut idle, true));
+        assert!(!idle.is_recovering());
     }
 
     #[test]
