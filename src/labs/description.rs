@@ -14,9 +14,7 @@ impl Feature {
             }
             Self::Playground => "Scene and story browser in the window",
             Self::LiveText => "Show provisional words beside the HUD while dictating",
-            Self::FailureNotices => {
-                "When a dictation fails, show why next to the recording indicator"
-            }
+            Self::FailureNotices => "Show why a dictation failed beside the HUD",
             Self::LiveTyping => {
                 "Show provisional words in the focused text field while dictating on Wayland, then type the final text there"
             }

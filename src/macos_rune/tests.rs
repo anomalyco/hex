@@ -105,6 +105,7 @@ impl Fixture {
                 event_reader: crate::desktop::events::EventReader::open(""),
                 activity: crate::desktop::activity::DesktopActivity::default(),
                 last_completed_at: None,
+                started_at: 0,
             },
             started,
             release,

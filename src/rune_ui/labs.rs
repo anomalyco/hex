@@ -357,7 +357,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         Feature::FailureNotices,
         None,
         tr("Failure notices"),
-        tr("When a dictation fails, show why next to the recording indicator"),
+        tr("Show why a dictation failed beside the HUD"),
     ));
     if caps.os == super::platform::Os::Linux && ui.platform.wayland {
         rows.push(row(
@@ -831,6 +831,8 @@ fn flip(ui: &mut Ui, lab: Lab) {
     ui.update(|settings| feature.set(settings, on));
     match feature {
         Feature::KeyboardModelSwitching => ui.open = None,
+        // A notice already on screen leaves with its lab.
+        Feature::FailureNotices if !on => crate::rune_ui::live_text::dismiss_failure(),
         // Hex hears the browser through System Audio Recording.
         Feature::PauseBrowser if on && !ui.platform.system_audio => {
             ui.ask(super::platform::PlatformRequest::SystemAudio);

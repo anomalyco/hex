@@ -59,6 +59,8 @@ pub(crate) struct WindowsDesktopHost {
     activity: DesktopActivity,
     /// When the current session's newest dictation completed.
     last_completed_at: Option<u64>,
+    /// When this host started, so a previous session's failure is ignored.
+    started_at: u64,
     listener: Option<RunningListener>,
     session_before_start: Option<u64>,
     awaiting_session_start: bool,
@@ -198,6 +200,7 @@ impl WindowsDesktopHost {
         let mut activity = DesktopActivity::default();
         activity.refresh(&mut event_reader);
         let last_completed_at = last_completed_at(event_reader.events().iter());
+        let started_at = crate::desktop::events::now_ms();
         let mode_runtime = Arc::new(RwLock::new(
             crate::dictation::modes::ModeRuntime::from_settings(&settings),
         ));
@@ -216,6 +219,7 @@ impl WindowsDesktopHost {
             event_reader,
             activity,
             last_completed_at,
+            started_at,
             listener: None,
             session_before_start: None,
             awaiting_session_start: false,
@@ -692,10 +696,10 @@ impl WindowsDesktopHost {
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
-                warning: self
+                warning: self.indicator.failure(),
+                last_failure: self
                     .activity
-                    .visible_failure(self.last_completed_at)
-                    .or_else(|| self.indicator.failure()),
+                    .visible_failure_since(self.started_at, self.last_completed_at),
                 notice: None,
                 shortcuts: DesktopShortcuts::Registered,
                 shortcuts_configurable: false,

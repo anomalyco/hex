@@ -991,11 +991,10 @@ mod tests {
             preparation,
             recognition_start: None,
             listener_failure: Default::default(),
-            event_reader: crate::desktop::events::EventReader::open(
-                std::env::temp_dir().join("hex-control-test.ndjson"),
-            ),
+            event_reader: crate::desktop::events::EventReader::open(""),
             activity: Default::default(),
             last_completed_at: None,
+            started_at: 0,
         };
         let selection = TranscriptionSelection {
             model: TranscriptionModelId::WhisperLargeV3Turbo,

@@ -1333,7 +1333,6 @@ impl LinuxDesktopHost {
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
-                warning: None,
                 notice: crate::linux::paste::listener_warning(self.is_running()),
                 shortcuts: self
                     .listener
@@ -1344,6 +1343,7 @@ impl LinuxDesktopHost {
                     .listener
                     .as_ref()
                     .is_some_and(|listener| listener.hotkey_status.configurable()),
+                ..DesktopListenerSnapshot::default()
             },
             operation_error: self
                 .error

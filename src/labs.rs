@@ -1227,6 +1227,7 @@ pub fn active_names(settings: &AppSettings) -> Vec<String> {
 pub fn log_launch() {
     tracing::info!(
         live_text = live_text(),
+        failure_notices = failure_notices(),
         live_typing = live_typing(),
         live_chapters = live_chapters(),
         playground = playground(),

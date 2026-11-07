@@ -79,6 +79,9 @@ fn set_live_text(spot: Spot) {
 #[derive(Clone)]
 pub(crate) struct HudSender {
     overlay: OverlayHandle<Hud>,
+    /// Whether a capture is active, so an older job's failure never covers
+    /// a newer recording's live notice.
+    recording: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     animating: Arc<AtomicBool>,
     #[cfg(target_os = "windows")]
@@ -107,17 +110,31 @@ const FIRST_FRAME: std::time::Duration = std::time::Duration::from_millis(1500);
 
 impl HudSender {
     pub(crate) fn send(&self, event: HudEvent) {
+        if matches!(&event, HudEvent::Started) {
+            self.recording.store(true, Ordering::Release);
+        } else if matches!(
+            &event,
+            HudEvent::Submitted { .. }
+                | HudEvent::Discarded
+                | HudEvent::Cancelled
+                | HudEvent::Failed { .. }
+                | HudEvent::Reset
+        ) {
+            self.recording.store(false, Ordering::Release);
+        }
         match &event {
             HudEvent::Started => {
                 crate::rune_ui::live_text::capture_started();
             }
             HudEvent::Failed {
                 message: Some(message),
-            }
-            | HudEvent::JobFailed {
+            } => crate::rune_ui::live_text::show_failure(message),
+            HudEvent::JobFailed {
                 message: Some(message),
                 ..
-            } => crate::rune_ui::live_text::show_failure(message),
+            } if !self.recording.load(Ordering::Acquire) => {
+                crate::rune_ui::live_text::show_failure(message)
+            }
             _ => {}
         }
         #[cfg(target_os = "windows")]
@@ -473,6 +490,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
     overlay.update(move |hud, _| hud.this = Some(this));
     HudSender {
         overlay,
+        recording: Arc::default(),
         #[cfg(target_os = "macos")]
         animating,
         #[cfg(target_os = "windows")]

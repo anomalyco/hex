@@ -643,10 +643,18 @@ pub(super) fn listener_card(ui: &Ui, p: Paint) -> (String, El) {
     let failure = ui
         .view
         .as_ref()
-        .and_then(|view| view.listener.warning.as_deref())
+        .and_then(|view| {
+            view.listener
+                .warning
+                .as_deref()
+                .or(view.listener.last_failure.as_deref())
+        })
         .map(|failure| {
             let explanation = crate::desktop::activity::failure_explanation(failure);
-            (tr_fill("Last dictation failed: {}", &explanation), p.danger())
+            (
+                tr_fill("Last dictation failed: {}", &explanation),
+                p.danger(),
+            )
         })
         .or_else(|| {
             ui.view

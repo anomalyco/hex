@@ -39,6 +39,42 @@ pub(crate) struct Plate {
     /// Labs › Failure notices: why the last dictation failed, shown instead
     /// of the live words while it lasts.
     failure: Option<String>,
+    /// Whether live words are being published (a recording is showing text).
+    live: bool,
+    /// Whether the overlay is on screen. Every change happens in an overlay
+    /// update, in queue order, so a queued hide cannot race a newer notice.
+    shown: bool,
+}
+
+impl Plate {
+    fn set_words(&mut self, stable: String, tentative: String) {
+        self.stable = stable;
+        self.tentative = tentative;
+        self.live = true;
+    }
+
+    /// The recording stopped publishing words. Its last words stay drawn
+    /// while the plate fades.
+    fn words_ended(&mut self) {
+        self.live = false;
+    }
+
+    fn show_failure(&mut self, message: String) {
+        self.failure = Some(message);
+    }
+
+    fn take_failure(&mut self) -> bool {
+        self.failure.take().is_some()
+    }
+
+    fn mark_shown(&mut self, shown: bool) {
+        self.shown = shown;
+    }
+
+    /// Nothing live or failed remains to justify the plate.
+    fn should_hide(&self) -> bool {
+        !self.live && self.failure.is_none()
+    }
 }
 
 /// A failure notice's message and deadline, kept apart from the drawn plate
@@ -125,8 +161,10 @@ impl Spot {
 /// The plate's overlay, once installed.
 static LIVE: std::sync::OnceLock<rune::OverlayHandle<Plate>> = std::sync::OnceLock::new();
 
-/// Whether the plate is on screen, so a new update shows it once.
-static SHOWN: AtomicBool = AtomicBool::new(false);
+/// Whether a non-blank partial has been queued since the last words-ended
+/// update. It lets that update be skipped while nothing was ever shown,
+/// without deciding visibility outside the overlay's queue.
+static WORDS: AtomicBool = AtomicBool::new(false);
 
 /// Where the plate goes, kept for a failure notice that appears after
 /// installation.
@@ -194,31 +232,39 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>, place: Place) {
     crate::dictation::live_text::watch(move |partial| {
         let partial = partial.filter(|partial| !is_blank(partial));
         let Some(Partial { stable, tentative }) = partial.cloned() else {
+            // Nothing was published since the last end and no notice is up:
+            // this is a no-op, and skipping it keeps a dictation that never
+            // showed text off the update queue.
+            let words = WORDS.swap(false, Ordering::AcqRel);
+            let notice_up = crate::labs::failure_notices() && notice().message.is_some();
+            if !words && !notice_up {
+                return;
+            }
             let handle = overlay.clone();
             overlay.update(move |plate, _| {
-                plate.stable.clear();
-                plate.tentative.clear();
-                if plate.failure.is_none() && SHOWN.swap(false, Ordering::AcqRel) {
+                plate.words_ended();
+                if plate.should_hide() && plate.shown {
                     // Hidden from the same queue that shows it, so a recording
                     // that ends as its plate appears never leaves it showing.
                     // Its last words stay while it fades (macOS and Windows);
                     // the next appearance replaces them first.
                     handle.fade_out(FADE);
+                    plate.mark_shown(false);
                 }
             });
             return;
         };
-        let appearing = !SHOWN.swap(true, Ordering::AcqRel);
+        WORDS.store(true, Ordering::Release);
         let handle = overlay.clone();
         overlay.update(move |plate, tx| {
-            plate.stable = stable;
-            plate.tentative = tentative;
+            plate.set_words(stable, tentative);
             tx.instant();
-            if plate.failure.is_none() && appearing {
+            if plate.failure.is_none() && !plate.shown {
                 // Placed and shown after the new words, so it appears
                 // where it belongs with them already drawn.
                 place().apply(&handle);
                 handle.show();
+                plate.mark_shown(true);
             }
         });
     });
@@ -237,14 +283,14 @@ pub(crate) fn show_failure(message: &str) {
     let message = crate::desktop::activity::failure_explanation(message);
     let deadline = notice().show(message.clone(), Instant::now());
     schedule(deadline);
-    let appearing = !SHOWN.swap(true, Ordering::AcqRel);
     let handle = overlay.clone();
     overlay.update(move |plate, tx| {
-        plate.failure = Some(message);
+        plate.show_failure(message);
         tx.instant();
-        if appearing {
+        if !plate.shown {
             place().apply(&handle);
             handle.show();
+            plate.mark_shown(true);
         }
     });
 }
@@ -252,6 +298,15 @@ pub(crate) fn show_failure(message: &str) {
 /// Hides a failure notice at once when a new capture starts; live words
 /// already on the plate stay.
 pub(crate) fn capture_started() {
+    dismiss_notice();
+}
+
+/// Hides a failure notice when Labs › Failure notices is turned off.
+pub(crate) fn dismiss_failure() {
+    dismiss_notice();
+}
+
+fn dismiss_notice() {
     let cleared = { notice().capture_started() };
     if !cleared {
         return;
@@ -261,18 +316,16 @@ pub(crate) fn capture_started() {
     };
     let handle = overlay.clone();
     overlay.update(move |plate, tx| {
-        // A failure that arrived after this capture started keeps its notice.
+        // A failure that arrived after this dismissal keeps its notice.
         if notice().message.is_some() {
             return;
         }
-        if plate.failure.take().is_some() {
+        if plate.take_failure() {
             tx.instant();
         }
-        if plate.stable.trim().is_empty()
-            && plate.tentative.trim().is_empty()
-            && SHOWN.swap(false, Ordering::AcqRel)
-        {
+        if plate.should_hide() && plate.shown {
             handle.fade_out(FADE);
+            plate.mark_shown(false);
         }
     });
 }
@@ -324,14 +377,12 @@ fn hide_expired(deadline: Instant) {
         if notice().message.is_some() {
             return;
         }
-        if plate.failure.take().is_some() {
+        if plate.take_failure() {
             tx.instant();
         }
-        if plate.stable.trim().is_empty()
-            && plate.tentative.trim().is_empty()
-            && SHOWN.swap(false, Ordering::AcqRel)
-        {
+        if plate.should_hide() && plate.shown {
             handle.fade_out(FADE);
+            plate.mark_shown(false);
         }
     });
 }
@@ -494,7 +545,7 @@ mod tests {
             Plate {
                 stable: stable.into(),
                 tentative: tentative.into(),
-                failure: None,
+                ..Plate::default()
             },
             dark,
         )
@@ -600,12 +651,35 @@ mod tests {
     }
 
     #[test]
+    fn a_failure_arriving_after_a_queued_words_end_stays_visible() {
+        let mut plate = Plate::default();
+        plate.set_words("old words".into(), String::new());
+        plate.mark_shown(true);
+
+        // A queued words-ended update runs first and would hide an empty
+        // plate, but the failure queued behind it brings the plate back.
+        plate.words_ended();
+        assert!(plate.should_hide());
+        plate.show_failure("No microphone is available.".into());
+        assert!(!plate.should_hide());
+        assert_eq!(plate.stable, "old words", "the old words stay for the fade");
+
+        // Once the notice is up, a later words end cannot hide it.
+        plate.words_ended();
+        assert!(!plate.should_hide());
+        assert!(plate.take_failure());
+        assert!(plate.should_hide());
+        plate.mark_shown(false);
+    }
+
+    #[test]
     fn a_failure_notice_takes_the_plate_from_the_live_words() {
         let rt = runtime_plate(
             Plate {
                 stable: SHORT.into(),
                 tentative: " and then".into(),
                 failure: Some("No microphone is available. Connect a microphone.".into()),
+                ..Plate::default()
             },
             false,
         );
