@@ -91,8 +91,8 @@ enum SessionAdoption {
     Service,
     /// A launcher adopts only behind Xwayland's `DISPLAY`, so the session it
     /// computes and writes to `session.env` is the one its service reports.
-    /// A launcher that becomes Hex then opens on Wayland, matching
-    /// `LinuxSession::detect` and winit when both displays are set.
+    /// The adopted `WAYLAND_DISPLAY` is what makes winit choose Wayland,
+    /// matching `LinuxSession::detect`, even when `DISPLAY` is also set.
     Launcher,
 }
 
@@ -100,9 +100,9 @@ enum SessionAdoption {
 /// Wayland display when their unit or shell has none (#756, #1506). A
 /// launcher adopts only behind Xwayland's `DISPLAY`, before it computes or
 /// writes the session environment; with no display at all it keeps today's
-/// "Start Hex from your graphical login session". The window, commands that
-/// only forward or read, and the embedded service keep whatever display their
-/// parent gave them.
+/// behavior, including "Start Hex from your graphical login session" when it
+/// would start the unit. The window, commands that only forward or read, and
+/// the embedded service keep whatever display their parent gave them.
 fn session_adoption(command: &Command) -> Option<SessionAdoption> {
     match command {
         Command::Service { embedded: false } | Command::Dictate { .. } => {

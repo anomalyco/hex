@@ -115,12 +115,14 @@ the user manager's `WAYLAND_DISPLAY`, else the newest Wayland socket of yours in
 `XDG_RUNTIME_DIR` that answers. One started with only Xwayland's `DISPLAY` does
 the same when `XDG_SESSION_TYPE` is `wayland` (from Hex's environment, else the
 user manager's): it takes the manager's live `WAYLAND_DISPLAY`, else the newest
-answering socket. An explicit `x11` keeps its X display even when the user
-manager still names a nested compositor or another login's display, and so does
-an absent or other type without a live manager display, so paste keeps reaching
-X11 apps. Launchers (`hex`, `hex start`, `hex restart`) make the same decision
-before they write `session.env`, so the service and the launcher agree on the
-session; a launcher with no display at all still refuses to start. Without the
+answering socket. Any other explicit session type (`x11`, `tty` from startx,
+`mir`, …) keeps its X display even when the user manager still names a nested
+compositor or another login's display, so paste keeps reaching X11 apps; only
+an absent type adopts a live manager display. Launchers (`hex`, `hex start`,
+`hex restart`) make the same decision before they write `session.env`, so the
+service and the launcher agree on the session; a launcher never adopts without
+a display, and when it would start the unit with nothing to write it still
+refuses with "Start Hex from your graphical login session". Without the
 adoption, a Wayland desktop's paste goes through XWayland, which native Wayland
 windows never see, and restoring the clipboard clears the compositor's.
 Hyprland imports nothing by default; add this to its config so the service, its

@@ -2018,11 +2018,13 @@ Linux process                            // maintain.linux-service
 │   │       or Wayland socket discovery (unless HEX_SYSTEMD_UNIT explicitly opts in)
 │   └── Two racing launches -> One Hex; the other forwards and exits 0
 ├── hex start / desktop autostart / hex service -> Same, without the window
-│   └── No WAYLAND_DISPLAY (none at all, or only Xwayland's DISPLAY on a Wayland login)
+│   └── No WAYLAND_DISPLAY (none at all, or only Xwayland's DISPLAY)
 │       -> Adopt the manager's live WAYLAND_DISPLAY, else the newest answering socket
-│       (#756); an explicit x11 login keeps its X display. Launchers adopt first, so
-│       session.env agrees. The shortcut backend follows the adopted session: the
-│       portal, or the `hex` commands where it has none, never X11 key grabs
+│       (#756); behind DISPLAY only for an explicit wayland session type, or an unset
+│       one whose manager names a live display. An explicit x11 or tty login keeps its
+│       X display. Launchers adopt first, so session.env agrees. The shortcut backend
+│       follows the adopted Wayland session: the portal, or the `hex` commands where
+│       it has none
 ├── hex dictation|paste-last -> Socket worker -> Listener queue (never the UI thread)
 ├── hex dictate -> Foreground listener; adopts the session's Wayland display like hex service;
 │   `hex` commands reach only the service listener, never it (#1506)
