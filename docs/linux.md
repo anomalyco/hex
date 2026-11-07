@@ -141,7 +141,10 @@ time, so a client's dictation and the shortcut never end each other.
 
 For development, run `cargo run --release`. `hex dictate` remains an explicit
 foreground diagnostic listener without the window or HUD and cannot coexist
-with Hex's listener. With
+with Hex's listener. Like `hex service`, it adopts the session's Wayland
+display when its shell has none (#756, #1506). `hex` commands reach only the
+service listener, so a foreground `hex dictate` receives none and says so at
+startup when no shortcut is bound. With
 `HEX_APPLICATION_SUPPORT_DIR` set, launches never start, stop, or restart the
 installed user unit; they forward to the Hex using that data directory or
 become it. `HEX_SYSTEMD_UNIT` names another unit for isolated tests.
@@ -473,7 +476,8 @@ hl.bind("F10", hl.dsp.global("anomaly.hex:paste-last"))
   Ctrl+V.
 - **Wayland without the portal** (for example Sway): nothing registers global
   shortcuts. Settings lists these commands; bind them in your desktop's own
-  keyboard configuration:
+  keyboard configuration. They reach only the listener `hex start` or
+  `hex service` runs; a foreground `hex dictate` can't receive them:
 
 ```sh
 hex dictation start     # bind to a key's press: start recording

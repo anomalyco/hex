@@ -860,11 +860,34 @@ impl ShortcutState {
 /// `hex` commands for whichever monitor runs now. The listener keeps one
 /// queue while it registers its shortcuts again after a settings change.
 #[derive(Clone)]
-pub(crate) struct CommandQueue(Arc<Mutex<Receiver<ListenerCommand>>>);
+pub(crate) struct CommandQueue {
+    commands: Arc<Mutex<Receiver<ListenerCommand>>>,
+    /// Whether `hex` commands reach this listener: they go to the service,
+    /// never to a foreground `hex dictate` process.
+    connected: bool,
+}
 
 impl From<Receiver<ListenerCommand>> for CommandQueue {
     fn from(receiver: Receiver<ListenerCommand>) -> Self {
-        Self(Arc::new(Mutex::new(receiver)))
+        Self {
+            commands: Arc::new(Mutex::new(receiver)),
+            connected: true,
+        }
+    }
+}
+
+impl CommandQueue {
+    /// A queue nothing sends to: the foreground `hex dictate` listener.
+    pub(crate) fn disconnected() -> Self {
+        Self {
+            commands: Arc::new(Mutex::new(mpsc::channel().1)),
+            connected: false,
+        }
+    }
+
+    /// Whether this listener's `hex` commands arrive through this queue.
+    pub(crate) fn connected(&self) -> bool {
+        self.connected
     }
 }
 
@@ -920,10 +943,13 @@ impl Dispatcher {
 
     /// Feeds every queued `hex` command.
     fn commands(&mut self) {
-        // Without a sender (`hex dictate`), only shortcuts remain.
+        // `hex dictate` has no queue anything sends to: only shortcuts remain.
+        if !self.commands.connected() {
+            return;
+        }
         let commands = self
             .commands
-            .0
+            .commands
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let queued: Vec<_> = commands.try_iter().collect();
@@ -939,7 +965,7 @@ impl Dispatcher {
     fn wait_for_commands(&mut self, timeout: Duration) {
         let waiting = self
             .commands
-            .0
+            .commands
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let first = waiting.recv_timeout(timeout);
@@ -1195,7 +1221,7 @@ impl Backend {
                 tracing::warn!(
                     error = format!("{error:#}"),
                     desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
-                    "the shortcuts portal's backend could not bind Hex's shortcuts; dictation follows the hex commands"
+                    "the shortcuts portal's backend could not bind Hex's shortcuts; dictation follows the hex commands, which reach the service listener (`hex start`) but not a foreground `hex dictate`"
                 );
                 drop(portal);
                 self.wait_for_portal(&mut dispatcher, false)?;

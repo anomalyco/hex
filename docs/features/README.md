@@ -1638,6 +1638,8 @@ Linux beta                               // not macOS feature parity
 │   │       // check: only_backend_failures_count_as_a_missing_portal (the
 │   │       // classification only); not run on niri
 │   ├── Wayland without the portal -> Bind `hex` commands in the desktop
+│   │   ├── The commands reach only the service listener (`hex start`/`hex service`);
+│   │   │   a foreground `hex dictate` receives none and says so at startup (#1506)
 │   │   ├── General hides shortcut rows and lists the commands
 │   │   └── GNOME: Add GNOME keyboard shortcuts -> custom shortcuts running
 │   │       `hex dictation toggle` (#781); written only while the listener has no
@@ -2017,6 +2019,8 @@ Linux process                            // maintain.linux-service
 │   └── Two racing launches -> One Hex; the other forwards and exits 0
 ├── hex start / desktop autostart / hex service -> Same, without the window
 ├── hex dictation|paste-last -> Socket worker -> Listener queue (never the UI thread)
+├── hex dictate -> Foreground listener; adopts the session's Wayland display like hex service;
+│   `hex` commands reach only the service listener, never it (#1506)
 ├── hex status -> Published status; hex quit / Quit Hex / launcher action -> Drain, exit 0
 ├── Any instance stop still draining after 20 s -> _exit before the unit's 30 s TimeoutStopSec
 │   └── A transcription or paste cut by the deadline is lost; checked by unit tests only,

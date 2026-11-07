@@ -14,6 +14,7 @@ use crate::control::{PrintReply, PrintedTranscript};
 use crate::desktop::events::{
     DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
+use crate::desktop::host::DesktopShortcuts;
 use crate::dictation::service::{DictationControl, Effect, MICROPHONE_LOST, ServiceDictations};
 use crate::dictation::{DictationCapture, Finish, ReleaseWait};
 use crate::feedback::{self, Tone};
@@ -302,6 +303,35 @@ impl DictationOutput {
     }
 }
 
+/// The line a listener prints once its shortcuts are settled: what actually
+/// starts dictation from here. `commands` is whether `hex` commands reach
+/// this listener.
+fn readiness_message(
+    device: &str,
+    hotkey: &str,
+    shortcuts: &DesktopShortcuts,
+    commands: bool,
+) -> String {
+    let ready = format!("Hex dictation is ready on {device}.");
+    match shortcuts {
+        DesktopShortcuts::Registered | DesktopShortcuts::Portal(_) => {
+            format!("{ready} Hold {hotkey} to dictate; Ctrl-C stops.")
+        }
+        // A listener sets its status before it reports ready, so no running
+        // listener prints this.
+        DesktopShortcuts::Unregistered => format!("{ready} Ctrl-C stops."),
+        DesktopShortcuts::Commands if commands => format!(
+            "{ready} No shortcut is bound: bind `hex dictation start` and `hex dictation stop` \
+             (or `hex dictation toggle`) in your desktop's keybindings; Ctrl-C stops."
+        ),
+        DesktopShortcuts::Commands => format!(
+            "{ready} No shortcut is bound and this foreground listener can't receive `hex` \
+             commands: run `hex start` and bind `hex dictation toggle` in your desktop's \
+             keybindings; Ctrl-C stops."
+        ),
+    }
+}
+
 /// Runs hotkey dictation until `shutdown`. A prepared transcriber skips the
 /// model load; otherwise the supplied transcription selection is loaded here.
 /// `updates` change settings, the model, and shortcut registration in place.
@@ -523,7 +553,13 @@ pub(crate) fn run(
     })?;
     emit_state(&mut events, VoiceState::Listening, &device_label)?;
     println!(
-        "Hex dictation is ready on {device_label}. Hold {hotkey_label} to dictate; Ctrl-C stops."
+        "{}",
+        readiness_message(
+            &device_label,
+            &hotkey_label,
+            &hotkey_status.shortcuts(),
+            commands.connected(),
+        )
     );
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -1458,6 +1494,41 @@ mod tests {
                 .as_nanos()
         ));
         (EventLog::create(&path).unwrap(), path)
+    }
+
+    #[test]
+    fn the_ready_line_names_what_starts_dictation() {
+        assert_eq!(
+            readiness_message("System default", "Alt", &DesktopShortcuts::Registered, true),
+            "Hex dictation is ready on System default. Hold Alt to dictate; Ctrl-C stops."
+        );
+        assert_eq!(
+            readiness_message(
+                "Yeti",
+                "Alt+Space",
+                &DesktopShortcuts::Portal(Vec::new()),
+                false
+            ),
+            "Hex dictation is ready on Yeti. Hold Alt+Space to dictate; Ctrl-C stops."
+        );
+        let unregistered =
+            readiness_message("Yeti", "Alt+Space", &DesktopShortcuts::Unregistered, true);
+        assert!(!unregistered.contains("Hold"));
+
+        let service = readiness_message("Yeti", "Alt+Space", &DesktopShortcuts::Commands, true);
+        assert!(service.contains("No shortcut is bound"));
+        assert!(service.contains("`hex dictation start`"));
+        assert!(service.contains("`hex dictation stop`"));
+        assert!(service.contains("`hex dictation toggle`"));
+        assert!(service.contains("desktop's keybindings"));
+        assert!(!service.contains("Hold"));
+
+        let foreground = readiness_message("Yeti", "Alt+Space", &DesktopShortcuts::Commands, false);
+        assert!(foreground.contains("No shortcut is bound"));
+        assert!(foreground.contains("can't receive `hex` commands"));
+        assert!(foreground.contains("run `hex start`"));
+        assert!(foreground.contains("`hex dictation toggle`"));
+        assert!(!foreground.contains("Hold"));
     }
 
     /// Records `seconds` of speech-level audio in 100 ms chunks, streaming
