@@ -884,10 +884,11 @@ been observed by a test.
 **Lower audio** (`recording.environment.duck`) is an explicit fourth
 choice, off by default, on every OS. The slider appears only while selected and saves on
 release. It remembers its value across behavior changes. Intentional captures
-ramp the original output channels to that fraction over
-one second, preserving balance and silent channels, then restore on finish,
-cancel, or orderly shutdown. Changes apply to the next capture. The stop tone
-waits for restoration. A manually changed volume after settling is left alone;
+lower the original output channels to that fraction in about 120 ms,
+preserving balance and silent channels, then restore on finish, cancel, or
+orderly shutdown by easing back over one second. Changes apply to the next
+capture. The stop tone waits for restoration. A manually changed volume after
+settling is left alone;
 a newly selected output device is not lowered. Fixed-volume devices and outputs
 whose channel balance cannot be safely restored are left unchanged. Meetings do
 not acquire this dictation environment. Linux lowers the default sink's
@@ -902,10 +903,25 @@ HEX snapshots the volumes and applies a smooth ramp in
 [linux/audio_control.rs](../../src/linux/audio_control.rs), and the session
 adapter in [windows/audio_control.rs](../../src/windows/audio_control.rs). The worker runs inside the app and cannot restore volume after a
 hard process crash or SIGKILL. Changes during the ramp itself cannot be
-distinguished from delayed Bluetooth acknowledgements.
+distinguished from delayed Bluetooth acknowledgements. With the shorter
+lowering ramp, a Bluetooth output that acknowledges an earlier ramp step late
+could look like a manual change and stay lowered; not observed on a device.
 Fake-device tests cover relative volume, balance, silence, interrupted ramps,
 manual changes after settling, and partial-write rollback; settings/UI tests
 cover defaults, bounds, persistence, conditional visibility and platform gating.
+
+**Changed November 7, 2026 (issue 1468):** with Lower audio, lowering used to
+take a full second, so the start of every dictation stayed loud, and Duck also
+kept the 450 ms pre-roll, which captured audio from before the lower took
+effect. It now reaches the ducked volume in about 120 ms (`LOWER` in
+[audio/output_ducking.rs](../../src/audio/output_ducking.rs)), keeps no
+pre-roll like Mute and Pause media, and still eases back over one second when
+restored. Checks: `ducking_preserves_balance_silence_and_restores` and
+`lowering_finishes_at_its_own_duration_while_restoring_is_still_ramping` in
+that module, and `suppressing_audio_while_dictating_keeps_no_pre_roll` in
+[dictation.rs](../../src/dictation.rs) (constructed audio; not run on a device
+or physical output).
+
 On 2026-10-25, the macOS logic/settings checks and strict Clippy passed.
 The seven reference images were regenerated on Ubuntu 24.04 ARM64 with Mesa
 lavapipe, using the unmodified Linux-only Rune test module and
@@ -2062,7 +2078,7 @@ Linux General > Sounds                    // dictate.sound-theme
 
 Capture                                  // hex app and hex dictate
 ├── Shortcut starts capture -> Queue start sound immediately, before audio arrives
-├── Hold passes 300 ms -> While dictating mute/pause begins, never at the press
+├── Hold passes 300 ms -> While dictating mute/pause/lower begins, never at the press
 ├── Finish retained recording -> Stop sound at the release, while the 200 ms
 │   tail is still captured; a muted output unmutes first   // dictate.stop-tone
 │   └── Clip turns out near-silent or speechless -> Stop sound already played,
@@ -2081,7 +2097,7 @@ nonblocking. Output preparation failures are
 logged without blocking dictation. The Settings window saves the volume to
 `settings.json` and the service reloads it without restarting the listener. The start sound does not wait
 for the 300 ms capture-retention threshold; input delivery and audio-device
-latency still apply. **While dictating** mute or pause does: the audio loop
+latency still apply. **While dictating** mute, pause, or lower does: the audio loop
 requests it when the capture's audio reaches 300 ms past the press, and not
 during a release tail. Until 2026-10-22 the service muted at the press. This
 ordering is checked by reading the loop, not by a test or a muted device.

@@ -699,10 +699,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   fences remain required. Never strip Fn globally from shortcut matching.
 - Hold the shortcut to dictate and release to transcribe. Captures shorter than
   300 ms discard. A 450 ms hotkey pre-roll
-  protects speech onset, except when "While dictating" mutes or pauses other
-  audio: that audio predates the mute and holds whatever was playing, so those
-  hotkey captures keep no pre-roll (#1309; `dictation::hotkey_pre_roll`, every
-  OS). Ducking keeps 450 ms. There is no separate pre-roll setting. Capture has
+  protects speech onset, except when "While dictating" mutes, pauses, or lowers
+  other audio: that audio predates the suppression and holds whatever was
+  playing, so those hotkey captures keep no pre-roll (#1309, #1468;
+  `dictation::hotkey_pre_roll`, every OS). Do nothing keeps 450 ms. There is no
+  separate pre-roll setting. Capture has
   no automatic duration limit; release or
   an explicit stop ends it.
 - Only Toggle mode has a cancel (#786, #1022): its cancel shortcut
