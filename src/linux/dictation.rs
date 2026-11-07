@@ -923,7 +923,7 @@ pub(crate) fn run(
                 continue;
             }
             pending = pending.saturating_sub(1);
-            indicator.finished(result.is_ok());
+            indicator.finished(result.as_ref().err().map(String::as_str));
             match result {
                 Ok(text) => {
                     feedback::play(Tone::DictationDone);

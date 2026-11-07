@@ -353,6 +353,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Live text"),
         tr("Show provisional words beside the HUD while dictating"),
     ));
+    rows.push(row(
+        Feature::FailureNotices,
+        None,
+        tr("Failure notices"),
+        tr("Show why a dictation failed beside the HUD"),
+    ));
     if caps.os == super::platform::Os::Linux && ui.platform.wayland {
         rows.push(row(
             Feature::LiveTyping,
@@ -743,6 +749,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::VoiceFilter => "lab-voice-filter",
         Feature::Playground => "lab-playground",
         Feature::LiveText => "lab-live-text",
+        Feature::FailureNotices => "lab-failure-notices",
         Feature::LiveTyping => "lab-live-typing",
         Feature::LiveChapters => "lab-live-chapters",
         Feature::VocabularyBiasing => "lab-vocabulary-biasing",
@@ -824,6 +831,8 @@ fn flip(ui: &mut Ui, lab: Lab) {
     ui.update(|settings| feature.set(settings, on));
     match feature {
         Feature::KeyboardModelSwitching => ui.open = None,
+        // A notice already on screen leaves with its lab.
+        Feature::FailureNotices if !on => crate::rune_ui::live_text::dismiss_failure(),
         // Hex hears the browser through System Audio Recording.
         Feature::PauseBrowser if on && !ui.platform.system_audio => {
             ui.ask(super::platform::PlatformRequest::SystemAudio);
