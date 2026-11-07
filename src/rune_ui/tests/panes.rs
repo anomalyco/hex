@@ -83,6 +83,38 @@ fn settings_rows_follow_each_os() {
 }
 
 #[test]
+fn a_listener_notice_reads_apart_from_a_dictation_failure() {
+    let mut rt = runtime("portal", true, TALL_SIZE);
+    open_advanced(&mut rt, Pane::General);
+    if let Some(view) = &mut rt.state.view {
+        view.listener.warning = Some("Microphone unavailable".into());
+    }
+    refresh(&mut rt);
+    let shown = texts(&rt);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "Last dictation failed: Microphone unavailable"),
+        "{shown:?}"
+    );
+
+    let notice = "wl-copy is not installed. Install the wl-clipboard package, then try again.";
+    if let Some(view) = &mut rt.state.view {
+        view.listener.warning = None;
+        view.listener.notice = Some(notice.into());
+    }
+    refresh(&mut rt);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == notice), "{shown:?}");
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text.starts_with("Last dictation failed:")),
+        "{shown:?}"
+    );
+}
+
+#[test]
 fn launch_at_login_asks_the_login_item_and_needs_approval_first() {
     let mut rt = runtime("mac-settings", true, (980.0, 2400.0));
     tap(&mut rt, "launch-at-login");

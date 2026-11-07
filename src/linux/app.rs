@@ -428,6 +428,9 @@ pub(crate) fn run(
         .name("hex-background-portal".into())
         .spawn(crate::linux::login_item::announce_background);
     crate::labs::log_launch();
+    // Once, at startup: a Wayland session without wl-copy can record but
+    // never copy or paste, and Settings and `hex status` repeat this warning.
+    crate::linux::paste::missing_wayland_helper().inspect(|warning| tracing::warn!("{warning}"));
     crate::audio::hex_microphone::host_service();
     let launch = AppSettings::load_for_launch();
     crate::linux::dictation::initialize_feedback(&launch.settings);
@@ -1398,6 +1401,7 @@ impl LinuxDesktopHost {
                 running: self.is_running(),
                 status: self.status.clone(),
                 warning: None,
+                notice: crate::linux::paste::listener_warning(self.is_running()),
                 shortcuts: self
                     .listener
                     .as_ref()
