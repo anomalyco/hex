@@ -977,6 +977,16 @@ pub fn listen(
             if hotkey_capture_suspended || programmatic.is_some() {
                 continue;
             }
+            let caps_recording = hotkeys.caps_lock.is_recording();
+            #[cfg(hex_capture)]
+            let annotate_recording = capture_host
+                .as_mut()
+                .is_some_and(|host| host.recording_since(&input).is_some());
+            #[cfg(not(hex_capture))]
+            let annotate_recording = false;
+            if !caps_lock_can_press(caps_recording, annotate_recording) {
+                continue;
+            }
             let Some(action) = hotkeys.caps_lock_press() else {
                 continue;
             };
@@ -1535,6 +1545,13 @@ fn claims_escape(programmatic: bool, capture_escape: bool) -> bool {
     !programmatic && capture_escape
 }
 
+/// Whether a Caps Lock press may act. An Annotate capture records the
+/// narration itself, so a Caps Lock press must not start a dictation over it;
+/// a press that finishes an already-running Caps Lock capture still works.
+fn caps_lock_can_press(caps_recording: bool, annotate_recording: bool) -> bool {
+    caps_recording || !annotate_recording
+}
+
 /// Why a control can't start a capture now, if it can't.
 fn capture_refusal(other_recording: bool, suspended: bool) -> Option<ControlReply> {
     if other_recording {
@@ -2073,6 +2090,19 @@ mod tests {
             modifiers: crate::app_settings::HotkeyModifiers::option(),
             key_code: None,
         }
+    }
+
+    #[test]
+    fn caps_lock_does_not_start_over_an_annotate_recording() {
+        assert!(
+            !caps_lock_can_press(false, true),
+            "a Caps Lock start waits while Annotate records"
+        );
+        assert!(caps_lock_can_press(false, false));
+        assert!(
+            caps_lock_can_press(true, true),
+            "a Caps Lock capture still finishes while Annotate records"
+        );
     }
 
     #[test]

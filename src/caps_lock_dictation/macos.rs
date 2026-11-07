@@ -320,7 +320,14 @@ impl LedOutput {
         // SAFETY: `connection` is an open IOHIDParam user client for the
         // process's lifetime.
         let status = unsafe { IOHIDSetModifierLockState(connection, CAPS_LOCK_LOCK_STATE, false) };
-        if status != IO_RETURN_SUCCESS {
+        if status == IO_RETURN_SUCCESS {
+            // The software state is now off; the next on edge is a real press
+            // even if this reset produced no event of its own.
+            super::LAST_ALPHA_SHIFT.store(false, Ordering::Release);
+        } else {
+            // No reset edge is coming, so don't let the marker swallow a
+            // later off edge.
+            super::RESETTING.store(false, Ordering::Release);
             tracing::warn!(
                 status = format_args!("0x{:08x}", status as u32),
                 "Caps Lock dictation could not clear the Caps Lock state"
@@ -404,9 +411,11 @@ fn keyboard_matching() -> CFRetained<CFDictionary<CFString, CFNumber>> {
 }
 
 fn led_matching() -> CFRetained<CFDictionary<CFString, CFNumber>> {
-    // The element-key siblings of the device keys above.
-    let page_key = CFString::from_static_str("ElementUsagePage");
-    let usage_key = CFString::from_static_str("ElementUsage");
+    // IOHIDKeys.h defines kIOHIDElementUsagePageKey as "UsagePage" and
+    // kIOHIDElementUsageKey as "Usage": the element-key siblings of the
+    // device keys above.
+    let page_key = CFString::from_static_str("UsagePage");
+    let usage_key = CFString::from_static_str("Usage");
     let page = CFNumber::new_i32(LED_USAGE_PAGE as i32);
     let usage = CFNumber::new_i32(CAPS_LOCK_LED_USAGE as i32);
     CFDictionary::from_slices(&[&page_key, &usage_key], &[&page, &usage])
@@ -414,8 +423,9 @@ fn led_matching() -> CFRetained<CFDictionary<CFString, CFNumber>> {
 
 #[allow(deprecated)] // libc's replacement is the mach2 crate, which Hex doesn't depend on.
 fn system_connection() -> Option<u32> {
-    // SAFETY: `IOServiceMatching` consumes its dictionary; the returned
-    // service is released here and the opened connection closes on drop.
+    // SAFETY: `IOServiceGetMatchingService` consumes the matching dictionary;
+    // the returned service is released here and the opened connection closes
+    // on drop.
     unsafe {
         let matching = IOServiceMatching(c"IOHIDSystem".as_ptr());
         if matching.is_null() {

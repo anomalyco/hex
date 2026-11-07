@@ -8,10 +8,10 @@
 //! tracker sees Caps Lock usage 0x39 go down below macOS's keyboard filter,
 //! and the event tap sees the AlphaShift flag change the press causes. A key
 //! remapped to Control or Escape changes no AlphaShift flag, so it never
-//! toggles dictation. Hex's own lock reset produces an AlphaShift edge with no
-//! pending HID press, so it is ignored too. When the HID tracker is inactive
-//! (Input Monitoring is not granted), an AlphaShift on edge is the fallback
-//! press and off edges remain resets.
+//! toggles dictation. The worker marks Hex's own lock-reset edge, so the tap
+//! drops that off edge before it can reach the press gate. When the HID
+//! tracker is inactive (Input Monitoring is not granted), an AlphaShift on
+//! edge is the fallback press and off edges remain resets.
 //!
 //! The light needs the same Input Monitoring permission: macOS exposes
 //! keyboard LED output elements only to a process it lets read HID
@@ -155,8 +155,8 @@ impl LedModel {
 /// The raw HID press and AlphaShift edge waiting to be matched.
 ///
 /// A HID key-down alone is not a press: a Caps Lock remapped to Control or
-/// Escape still reports usage 0x39 but never changes AlphaShift. Conversely,
-/// Hex's own lock reset changes AlphaShift with nothing pending. The two
+/// Escape still reports usage 0x39 but never changes AlphaShift. Hex's own
+/// lock reset is marked by the worker and never reaches this gate. The two
 /// observations may arrive in either order and their timestamps may be a few
 /// milliseconds apart, so each side is kept until a matching one arrives.
 #[derive(Debug, Default)]
@@ -316,11 +316,11 @@ pub(crate) fn alpha_shift(shift: bool, at: CaptureInstant) {
     }
     // Hex's own lock reset produces an off edge; it must never become a
     // press, even when a remapped HID press happens to be pending nearby.
-    if !shift && RESETTING.swap(false, Ordering::AcqRel) {
+    // Clear the marker on any edge so a stale one cannot swallow a later
+    // on-edge press.
+    let was_resetting = RESETTING.swap(false, Ordering::AcqRel);
+    if !shift && was_resetting {
         return;
-    }
-    if shift {
-        RESETTING.store(false, Ordering::Release);
     }
     let tracker_active = crate::suppression::physical_keys::snapshot().is_some();
     let pressed = HID_GATE

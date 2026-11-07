@@ -473,7 +473,7 @@ the raw HID tracker records Caps Lock usage 0x39 with its press timestamp
 the event tap confirms it with an AlphaShift change edge within 300 ms
 ([suppression.rs](../../src/suppression.rs)). A key remapped to Control or
 Escape never changes AlphaShift, so it never toggles dictation. Hex's own
-lock-reset edge has no pending HID press and is ignored. A Caps Lock activation
+lock-reset edge is marked and dropped before the press gate. A Caps Lock activation
 delay configured above 300 ms would make those presses invisible; the default
 has no delay. Without Input Monitoring the HID tracker is inactive, so an AlphaShift on edge is the
 fallback press and off edges remain resets. Confirmed presses reach the
@@ -485,7 +485,10 @@ blink timer. No IOKit work runs on the event-tap or audio threads. The pure
 press gate, press decision, and light model live in
 [caps_lock_dictation.rs](../../src/caps_lock_dictation.rs). The LED needs
 Input Monitoring, which Hex already asks for; without it, dictation still
-works and the light stays under macOS's control. Checks:
+works and the light stays under macOS's control. Some keyboards, built-in ones
+included, may not expose a Caps Lock LED output element, and macOS's own light
+update after a reset can race Hex's write; neither changes dictation or the
+lock reset. Checks:
 `an_older_jobs_stage_event_never_interrupts_a_newer_capture`,
 `a_stage_event_for_an_unknown_job_changes_nothing`,
 `the_light_is_solid_recording_blinking_working_and_off_after`,
@@ -499,6 +502,7 @@ works and the light stays under macOS's control. Checks:
 `the_light_pattern_codes_round_trip` in
 [caps_lock_dictation.rs](../../src/caps_lock_dictation.rs);
 `escape_cancels_a_caps_lock_capture_in_hold_mode`,
+`caps_lock_does_not_start_over_an_annotate_recording`,
 `the_dictation_shortcut_stands_down_while_caps_lock_records`,
 `turning_the_caps_lock_lab_off_stops_its_capture`,
 `caps_lock_never_starts_over_a_pending_double_tap`, and
