@@ -21,6 +21,20 @@ pub const LEFT_OPTION_MASK: u64 = 0x0000_0020;
 pub const RIGHT_OPTION_MASK: u64 = 0x0000_0040;
 pub const RIGHT_CONTROL_MASK: u64 = 0x0000_2000;
 
+/// Keyboard-page (0x07) usages of the physical keys the macOS raw HID
+/// tracker follows. macOS's HID keyboard filter can rewrite Caps Lock
+/// (0x39) to Right Control (0xE4) before CoreGraphics sees it, so these are
+/// the only evidence of what the keyboard actually holds.
+pub const CAPS_LOCK_USAGE: u16 = 0x39;
+pub const LEFT_CONTROL_USAGE: u16 = 0xE0;
+pub const LEFT_SHIFT_USAGE: u16 = 0xE1;
+pub const LEFT_OPTION_USAGE: u16 = 0xE2;
+pub const LEFT_COMMAND_USAGE: u16 = 0xE3;
+pub const RIGHT_CONTROL_USAGE: u16 = 0xE4;
+pub const RIGHT_SHIFT_USAGE: u16 = 0xE5;
+pub const RIGHT_OPTION_USAGE: u16 = 0xE6;
+pub const RIGHT_COMMAND_USAGE: u16 = 0xE7;
+
 /// Which of a modifier's keys a shortcut holds. `Either` is one key on either side (or both,
 /// as before chords); `Both` is the left and the right key together, such as both Options.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -1093,6 +1107,91 @@ pub(super) fn side_from_flags(
     }
 }
 
+/// The bit [`PhysicalModifierKeys`] keeps for a tracked keyboard-page usage.
+pub const fn physical_key_bit(usage: u16) -> Option<u8> {
+    match usage {
+        CAPS_LOCK_USAGE => Some(0),
+        LEFT_CONTROL_USAGE => Some(1),
+        LEFT_SHIFT_USAGE => Some(2),
+        LEFT_OPTION_USAGE => Some(3),
+        LEFT_COMMAND_USAGE => Some(4),
+        RIGHT_CONTROL_USAGE => Some(5),
+        RIGHT_SHIFT_USAGE => Some(6),
+        RIGHT_OPTION_USAGE => Some(7),
+        RIGHT_COMMAND_USAGE => Some(8),
+        _ => None,
+    }
+}
+
+/// The physical keys held right now, by HID keyboard-page usage, as the
+/// macOS raw HID tracker reads them. A bit per tracked usage keeps the
+/// snapshot `Copy` and cheap for the event tap.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PhysicalModifierKeys(u16);
+
+impl PhysicalModifierKeys {
+    const TRACKED_MASK: u16 = (1 << 9) - 1;
+
+    pub const fn from_bits(bits: u16) -> Self {
+        Self(bits & Self::TRACKED_MASK)
+    }
+
+    pub fn from_usages(usages: impl IntoIterator<Item = u16>) -> Self {
+        let mut bits = 0;
+        for usage in usages {
+            if let Some(bit) = physical_key_bit(usage) {
+                bits |= 1 << bit;
+            }
+        }
+        Self(bits)
+    }
+
+    pub const fn bits(self) -> u16 {
+        self.0
+    }
+
+    pub const fn is_held(self, usage: u16) -> bool {
+        match physical_key_bit(usage) {
+            Some(bit) => self.0 & (1 << bit) != 0,
+            None => false,
+        }
+    }
+}
+
+/// The CoreGraphics flags with the side bits macOS's HID keyboard filter
+/// invents removed.
+///
+/// A Caps Lock remapped to Control arrives as Right Control, so a Right
+/// Control shortcut would also start from Caps Lock. The raw HID tracker
+/// still sees the physical key: when Caps Lock is held and a modifier's
+/// side-specific bit is set without that side's physical key held, its side
+/// bit is cleared and the general flag kept, which matches as either side.
+/// A real side press (its physical key held), a release, or an inactive
+/// tracker (`None`) leaves `flags` untouched, so a lagging HID callback can
+/// at worst reproduce the flags CoreGraphics already reports.
+pub fn normalized_modifier_flags(flags: u64, physical: Option<PhysicalModifierKeys>) -> u64 {
+    let Some(physical) = physical.filter(|keys| keys.is_held(CAPS_LOCK_USAGE)) else {
+        return flags;
+    };
+    const SIDES: [(u64, u16, u64); 8] = [
+        (LEFT_CONTROL_MASK, LEFT_CONTROL_USAGE, CONTROL_KEY_MASK),
+        (RIGHT_CONTROL_MASK, RIGHT_CONTROL_USAGE, CONTROL_KEY_MASK),
+        (LEFT_SHIFT_MASK, LEFT_SHIFT_USAGE, SHIFT_KEY_MASK),
+        (RIGHT_SHIFT_MASK, RIGHT_SHIFT_USAGE, SHIFT_KEY_MASK),
+        (LEFT_OPTION_MASK, LEFT_OPTION_USAGE, OPTION_KEY_MASK),
+        (RIGHT_OPTION_MASK, RIGHT_OPTION_USAGE, OPTION_KEY_MASK),
+        (LEFT_COMMAND_MASK, LEFT_COMMAND_USAGE, COMMAND_KEY_MASK),
+        (RIGHT_COMMAND_MASK, RIGHT_COMMAND_USAGE, COMMAND_KEY_MASK),
+    ];
+    SIDES.iter().fold(flags, |flags, &(side, usage, general)| {
+        if flags & side != 0 && !physical.is_held(usage) {
+            (flags & !side) | general
+        } else {
+            flags
+        }
+    })
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeHotkeys {
     pub dictation: RuntimeHotkey,
@@ -1139,5 +1238,80 @@ impl Default for RuntimeHotkeys {
             second_dictation: None,
             cancel: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn caps_lock_and(usages: impl IntoIterator<Item = u16>) -> PhysicalModifierKeys {
+        PhysicalModifierKeys::from_usages([CAPS_LOCK_USAGE].into_iter().chain(usages))
+    }
+
+    #[test]
+    fn a_remapped_caps_lock_loses_the_right_control_side() {
+        let remapped = normalized_modifier_flags(
+            CONTROL_KEY_MASK | RIGHT_CONTROL_MASK,
+            Some(caps_lock_and([])),
+        );
+        assert_eq!(remapped, CONTROL_KEY_MASK);
+        assert_eq!(
+            modifiers_from_flags(remapped).control,
+            Some(ModifierSide::Either)
+        );
+    }
+
+    #[test]
+    fn a_real_right_control_press_is_untouched() {
+        let flags = CONTROL_KEY_MASK | RIGHT_CONTROL_MASK;
+        assert_eq!(
+            normalized_modifier_flags(flags, Some(caps_lock_and([RIGHT_CONTROL_USAGE]))),
+            flags
+        );
+    }
+
+    #[test]
+    fn flags_are_untouched_without_caps_lock() {
+        let flags = CONTROL_KEY_MASK | RIGHT_CONTROL_MASK;
+        assert_eq!(
+            normalized_modifier_flags(
+                flags,
+                Some(PhysicalModifierKeys::from_usages([RIGHT_SHIFT_USAGE]))
+            ),
+            flags
+        );
+    }
+
+    #[test]
+    fn an_inactive_tracker_leaves_flags_untouched() {
+        let flags = CONTROL_KEY_MASK | RIGHT_CONTROL_MASK;
+        assert_eq!(normalized_modifier_flags(flags, None), flags);
+    }
+
+    #[test]
+    fn every_side_is_normalized_and_keeps_its_general_flag() {
+        let flags = OPTION_KEY_MASK
+            | RIGHT_OPTION_MASK
+            | COMMAND_KEY_MASK
+            | RIGHT_COMMAND_MASK
+            | SHIFT_KEY_MASK
+            | LEFT_SHIFT_MASK;
+        let normalized = normalized_modifier_flags(flags, Some(caps_lock_and([LEFT_SHIFT_USAGE])));
+        assert_eq!(
+            normalized,
+            OPTION_KEY_MASK | COMMAND_KEY_MASK | SHIFT_KEY_MASK | LEFT_SHIFT_MASK
+        );
+        let held = modifiers_from_flags(normalized);
+        assert_eq!(held.shift, Some(ModifierSide::Left));
+        assert_eq!(held.option, Some(ModifierSide::Either));
+        assert_eq!(held.command, Some(ModifierSide::Either));
+    }
+
+    #[test]
+    fn untracked_usages_are_ignored() {
+        let keys = PhysicalModifierKeys::from_usages([0x04, CAPS_LOCK_USAGE]);
+        assert!(keys.is_held(CAPS_LOCK_USAGE));
+        assert!(!keys.is_held(0x04));
     }
 }

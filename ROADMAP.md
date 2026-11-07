@@ -151,9 +151,13 @@ Track the remaining shortcut requests explicitly:
   it still needs physical chord-discard and cold-microphone checks.
 - [#67](https://github.com/anomalyco/hex/issues/67): standalone keypad/character
   bindings need explicit key-consumption, cancellation, and rebinding semantics.
-- [#37](https://github.com/anomalyco/hex/issues/37): remaining Caps
-  Lock-to-Control behavior needs physical remapping evidence. Side-less flags
-  and actual Right Control flags are distinct.
+- [#37](https://github.com/anomalyco/hex/issues/37): Caps Lock remapped to
+  Control is read through a raw HID modifier tracker below macOS's keyboard
+  filter, so a Right Control shortcut no longer starts from it while Either
+  still does; the shortcut recorder applies the same normalization. Needs a
+  physical remap run on hardware. CI covers constructed HID snapshots only,
+  and the tracker falls back to unchanged CoreGraphics flags if it cannot
+  open.
 
 On-demand rewrite [PR #63](https://github.com/anomalyco/hex/pull/63) remains under
 review: publish the shared last transcript only after successful paste, require

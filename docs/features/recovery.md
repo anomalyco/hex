@@ -712,16 +712,29 @@ These five known gaps still limit recovery claims; they are not proposed feature
 ### Remapped Control
 
 ```ts
-remapped keyboard -> Quartz modifier event -> InputEvent::Flags
-                                              └── keycode discarded
-side-less Control fixture -> does not prove remapped-key identity
-listen-only native metadata -> establish distinguishability before choosing a fix
+Caps Lock remapped to Control
+  -> IOHIDKeyboardFilter rewrites usage 0x39 to Right Control (0xE4)
+  -> Quartz flags carry Right Control; the event keycode cannot tell them apart
+  -> raw IOHIDManager below the filter reads Caps Lock 0x39 and E0-E7
+  -> side bit set, its physical key not held, Caps Lock held
+     -> drop the side bit, keep the general flag -> matches as either side
+  -> physical E4 held -> a genuine Right Control press is untouched
+  -> tracker inactive -> CoreGraphics flags unchanged (today's behavior)
 ```
-Source/check: [suppression.rs](../../src/suppression.rs),
-`remapped_control_does_not_start_or_hold_right_control_dictation`;
-issue [#37](https://github.com/anomalyco/hex/issues/37).
-Missing evidence: affected-keyboard metadata showing whether Quartz preserves
-enough identity to distinguish the remapped key.
+Source: [suppression/physical_keys.rs](../../src/suppression/physical_keys.rs)
+(IOHIDManager on its own run loop, one `PhysicalKeyMonitor` per input monitor),
+[app_settings/hotkeys.rs](../../src/app_settings/hotkeys.rs) (`PhysicalModifierKeys`
+and `normalized_modifier_flags`), [suppression.rs](../../src/suppression.rs)
+(flags-changed and key-event flags), and
+[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs) (the shortcut recorder).
+Checks: the normalization tests in `app_settings/hotkeys.rs` and
+`normalized_remapped_caps_lock_starts_only_a_side_less_control_binding` in
+`suppression/tests.rs` (constructed snapshots and events).
+Issue [#37](https://github.com/anomalyco/hex/issues/37).
+Missing evidence: a physical Caps Lock-to-Control remap has not been run in CI
+or on hardware. If IOHIDManager cannot open (Input Monitoring, TCC, or a
+keyboard that reports differently), the tracker logs once, stays inactive, and
+matching keeps today's CoreGraphics flags.
 
 ### Native Muting And Missed Holds
 
