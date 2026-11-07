@@ -1681,7 +1681,9 @@ Linux beta                               // not macOS feature parity
 │       │   -> process.log warns once; `hex status` reports `hud_limitation`
 │       │   and the listener warning
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
-├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, rune::Tray)
+├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, desktop/tray_icon, rune::Tray)
+│   ├── Mark -> white; black when the desktop's color scheme prefers light (portal Settings color-scheme)
+│   │   └── Read when the tray is created; a later switch applies at the next launch
 │   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
@@ -1876,7 +1878,7 @@ Windows updates follow `maintain.updates` ([updater.rs](../../src/updater.rs),
 state. They pass the cross-compiled Clippy check, but no one has clicked them
 on a real Windows PC. The white tray mark vanished on a light taskbar
 ([#460](https://github.com/anomalyco/hex/issues/460)); a light taskbar now gets
-the same mark in black (`light_taskbar_gets_a_dark_mark_with_the_same_shape`
+the same mark in black (`a_light_tray_gets_a_dark_mark_with_the_same_shape`
 checks the pixels, not a real taskbar). Releases are Authenticode-signed once Azure Artifact
 Signing is configured ([windows-signing.md](../windows-signing.md)).
 

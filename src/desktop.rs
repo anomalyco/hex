@@ -16,4 +16,6 @@ pub(crate) mod opencode_service;
 pub(crate) mod permission_guide;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod process_exit;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) mod tray_icon;
 pub(crate) mod tray_menu;

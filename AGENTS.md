@@ -366,6 +366,8 @@ substitute for source inspection or a second roadmap.
   Hex, Paste last dictation, the downloaded-model picker, the update item,
   Enable / Disable Hex, Quit Hex) and the model entries the macOS menu bar
   lists too. Each tray maps a `TrayCommand` onto its own runtime.
+- `desktop/tray_icon`: the tray mark Linux and Windows share: the white Hex
+  mark, drawn black on a light panel or taskbar, where white would vanish.
 - `linux/login_item`: Launch at login on Linux, the managed XDG autostart
   entry the installer also writes; the file is the only state.
 - `net`: Hex's own HTTPS (model downloads, update checks, transformation
