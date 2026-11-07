@@ -162,11 +162,10 @@ const { transcript, durationMs } = await recording.finish()
 ```
 
 `connect()` finds the running Hex on macOS, Linux, and Windows. Desktop capture
-(`hex.dictation`) works on macOS and Linux while Hex is listening. On Windows
-`capabilities().serviceCapture` is `false` and its routes answer
-`service-capture-unavailable`, while model preparation, transcription, and live
-streams work. A recording never ends the user's shortcut dictation: starting
-one while the shortcut records is refused with `dictation-busy`, and the
+(`hex.dictation`) works on all three while Hex is listening, with the
+microphone the user chose in Hex. A recording never ends the user's shortcut
+dictation: starting one while the shortcut records is refused with
+`dictation-busy`, and the
 shortcut does nothing while yours records. Outside macOS there is no
 packaged helper yet; pass `command: ["hex", "service", "--embedded"]` to
 `create()` to run an installed Hex as the direct child.
@@ -174,8 +173,8 @@ packaged helper yet; pass `command: ["hex", "service", "--embedded"]` to
 Call `recording.cancel()` to discard; Escape doesn't cancel a recording, so the
 key stays with your app. If the microphone fails mid-recording, `finish()` on
 macOS still transcribes the audio captured before the failure, or rejects with
-remote code `microphone-lost` when there was none; on Linux it always rejects
-with `microphone-lost`. Subscribing to `recording.audio` enables a
+remote code `microphone-lost` when there was none; on Linux and Windows it
+always rejects with `microphone-lost`. Subscribing to `recording.audio` enables a
 bounded best-effort mono Float32 PCM tap at `recording.sampleRate`. Desktop capture
 returns raw text and never pastes. `capabilities().serviceCapture` distinguishes
 desktop capture from the transcription-only helper. The recording handle renews

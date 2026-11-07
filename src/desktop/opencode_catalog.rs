@@ -37,7 +37,7 @@ pub(crate) struct OpenCodeUnavailableCopy {
 #[derive(Clone, Copy)]
 pub(crate) enum OpenCodeFeature {
     Transformation,
-    /// Labs › Choose meeting summary model's picker.
+    /// Meetings › Settings › Summaries' model picker.
     MeetingSummary,
 }
 

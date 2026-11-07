@@ -436,12 +436,44 @@ impl PortalBus {
 
     /// The session signals that arrived since the last call.
     pub(crate) fn events(&mut self) -> Vec<(String, Event)> {
-        let mut queued = std::mem::take(&mut self.pending);
-        queued.extend(self.signals.try_iter().filter_map(|signal| match signal {
-            Signal::Session(session, event) => Some((session, event)),
-            Signal::Response(..) => None,
-        }));
-        queued.into()
+        self.wait_events(Duration::ZERO).0
+    }
+
+    /// [`Self::events`], waiting up to `timeout` for the next signal: the
+    /// bus's own thread queues it while the caller sleeps, so a portal event
+    /// wakes the caller at once instead of it checking every few
+    /// milliseconds. The flag is true when the bus's thread is gone.
+    pub(crate) fn wait_events(&mut self, timeout: Duration) -> (Vec<(String, Event)>, bool) {
+        wait_for_session_signals(&self.signals, &mut self.pending, timeout)
+    }
+}
+
+/// Drains the bus's session signals, waiting up to `timeout` for the first
+/// one so a caller with nothing else to do sleeps instead of polling. The
+/// flag reports that nothing will arrive again.
+fn wait_for_session_signals(
+    signals: &Receiver<Signal>,
+    pending: &mut VecDeque<(String, Event)>,
+    timeout: Duration,
+) -> (Vec<(String, Event)>, bool) {
+    let mut queued = std::mem::take(pending);
+    let mut disconnected = false;
+    if queued.is_empty() {
+        match signals.recv_timeout(timeout) {
+            Ok(signal) => queued.extend(session_event(signal)),
+            Err(RecvTimeoutError::Disconnected) => disconnected = true,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
+    queued.extend(signals.try_iter().filter_map(session_event));
+    (queued.into(), disconnected)
+}
+
+/// A session signal from the bus; a request's answer is not one.
+fn session_event(signal: Signal) -> Option<(String, Event)> {
+    match signal {
+        Signal::Session(session, event) => Some((session, event)),
+        Signal::Response(..) => None,
     }
 }
 
@@ -915,11 +947,16 @@ impl Portal {
         Ok(())
     }
 
-    /// The presses, releases, and changes that arrived since the last call.
-    pub(crate) fn events(&mut self) -> Vec<Event> {
+    /// The presses, releases, and changes that arrived since the last call,
+    /// waking as soon as the desktop sends a signal or `timeout` passes, so a
+    /// listener at rest sleeps instead of polling.
+    pub(crate) fn wait_events(&mut self, timeout: Duration) -> Vec<Event> {
         let shortcuts = self.session.as_ref().map(|session| session.as_str());
-        self.bus
-            .events()
+        let (events, disconnected) = self.bus.wait_events(timeout);
+        if disconnected {
+            return vec![Event::Closed];
+        }
+        events
             .into_iter()
             .filter_map(|(session, event)| (shortcuts == Some(session.as_str())).then_some(event))
             .collect()
@@ -1030,7 +1067,8 @@ fn superseded_kde_actions<'a>(
 }
 
 /// What the log says when the session has no shortcuts portal at startup.
-pub(crate) const MISSING_SHORTCUTS_PORTAL: &str = "no GlobalShortcuts portal; dictation follows the hex commands. \
+pub(crate) const MISSING_SHORTCUTS_PORTAL: &str = "no GlobalShortcuts portal; dictation follows the hex commands, \
+which reach the service listener (`hex start`) but not a foreground `hex dictate`. \
 If this desktop has one, xdg-desktop-portal may have started before the desktop session and picked the wrong \
 backend: restart it (systemctl --user restart xdg-desktop-portal) and Hex binds its shortcuts at its next check";
 
@@ -1443,6 +1481,46 @@ mod tests {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         }));
+    }
+
+    /// The listener sleeps on the bus's signal channel; a desktop click
+    /// arrives at once instead of waiting for the next 5 ms poll.
+    #[test]
+    fn waiting_for_a_shortcut_wakes_when_the_desktop_sends_it() {
+        let (signals, received) = channel();
+        let waiter = std::thread::spawn(move || {
+            let mut pending = VecDeque::new();
+            let started = Instant::now();
+            let (events, disconnected) =
+                wait_for_session_signals(&received, &mut pending, Duration::from_secs(5));
+            (events, disconnected, started.elapsed())
+        });
+        std::thread::sleep(Duration::from_millis(20));
+        signals
+            .send(Signal::Session(
+                "hex-session".into(),
+                Event::Pressed("dictation".into()),
+            ))
+            .unwrap();
+        let (events, disconnected, waited) = waiter.join().unwrap();
+        assert!(!disconnected);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "hex-session");
+        assert_eq!(events[0].1, Event::Pressed("dictation".into()));
+        assert!(waited < Duration::from_secs(1));
+    }
+
+    /// A bus whose thread is gone reports it once, so the listener stops
+    /// instead of sleeping on a channel that will never carry a signal.
+    #[test]
+    fn a_gone_portal_bus_reports_itself() {
+        let (signals, received) = channel::<Signal>();
+        drop(signals);
+        let mut pending = VecDeque::new();
+        let (events, disconnected) =
+            wait_for_session_signals(&received, &mut pending, Duration::from_secs(1));
+        assert!(events.is_empty());
+        assert!(disconnected);
     }
 
     /// A shortcut changed in Hex gets a new id; on KDE the old id keeps its

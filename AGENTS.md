@@ -39,8 +39,9 @@ Models; `labs::Feature::group`), plus Send feedback and Run setup again. Each fe
 dev-channel builds only; a stable build never lists, accepts, or runs it).
 A feature with its own pane joins the sidebar as a normal item while
 on and is hidden while off; a behaviour-only feature is just its toggle. Today:
-Meetings (beta), Voice Filter (locked on while its macOS driver is
-installed), Playground, Live text, Live chapters, Vocabulary biasing, Switch
+Meetings (beta), Voice Filter (Dev; locked on while its macOS driver is
+installed, and a stable build with the driver keeps its pane for Uninstall
+alone), Playground (Dev), Live text, Live chapters, Vocabulary biasing, Switch
 model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
 pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
 Unload model when idle (#442), and Terminal paste (Windows). Externally contributed features land there too.
@@ -202,10 +203,12 @@ substitute for source inspection or a second roadmap.
   app serves it on every OS, as does `hex service [--embedded]`; the discovery
   file is `local-api.json` in the data folder (mode 0600 on Unix, the per-user
   `%APPDATA%` ACL on Windows). `/dictations` (`local_api::dictation`) runs on
-  the macOS recognition loop and the Linux listener, sharing the protocol,
-  owner tokens, lease, and levels in `dictation::service`; on Windows and
-  `hex service` it answers `service-capture-unavailable`, and off macOS
-  `/profile/vitals` answers 503.
+  the macOS recognition loop and the Linux and Windows listeners, sharing the
+  protocol, owner tokens, lease, and levels in `dictation::service`; a start
+  with `"partials": true` also streams the live text on
+  `/dictations/{id}/partials` where the listener streams the recording
+  (Linux and Windows, `dictationPartials`). `hex service` answers
+  `service-capture-unavailable`, and off macOS `/profile/vitals` answers 503.
   `/control` carries the `hex` control commands on every OS (`control`).
 - `control`: the release `hex` control surface on every OS: the versioned
   `ControlRequest`/`ControlReply` protocol, the settings registry behind
@@ -255,7 +258,8 @@ substitute for source inspection or a second roadmap.
   macOS reads the front tab of a table of
   scriptable browsers (Safari and Chromium
   dictionaries) through AppleScript and any other app's focused AXWebArea
-  `AXURL`; `windows/context` reads any browser through UI Automation and
+  `AXURL`, and the front window's title only while a script
+  transformation is set up (`reads_window_title`); `windows/context` reads any browser through UI Automation and
   `linux/atspi` through AT-SPI.
 - `application_catalog`: cached installed-application discovery for the Modes
   picker, one module per OS: macOS bundles, Windows executables from Start menu
@@ -274,7 +278,8 @@ substitute for source inspection or a second roadmap.
   values only. Locked switches read off at load and keep their saved values on
   save; list-driven work checks the policy where it starts.
 - `app_paths`: the Application Support owner (`hex` on every OS) for runtime
-  logs and shared state.
+  logs and shared state. The logs folder and its files are owner-only on
+  Unix (0700/0600, tightened when an older Hex left them open).
 - `desktop/onboarding`, `desktop/permission_guide`: required permission health, the native
   floating System Settings guide, selected dictation-model installation, the
   release startup gate, and opt-in command-model setup.
@@ -291,11 +296,18 @@ substitute for source inspection or a second roadmap.
   capture-transcribe-paste loop with Paste Last,
   and paste.
 - `linux/service` also adopts the session's Wayland display at `hex service`
-  start when the unit has none (Hyprland imports nothing into systemd; #756):
-  the user manager's `WAYLAND_DISPLAY`, else the newest answering
-  `$XDG_RUNTIME_DIR/wayland-*` socket the user owns. `linux/rune_hud`'s
-  `limitation()` names the HUD's failure: no display, no layer-shell, or
-  Rune's overlay error.
+  start when the unit has none, or has only Xwayland's `DISPLAY` on a Wayland
+  login (Hyprland imports nothing into systemd; #756): with `DISPLAY` set, an
+  explicit `wayland` `XDG_SESSION_TYPE` (Hex's, else the user manager's) takes
+  the manager's live `WAYLAND_DISPLAY`, else the newest answering
+  `$XDG_RUNTIME_DIR/wayland-*` socket the user owns. Any other explicit type
+  (`x11`, `tty`, `mir`, …) keeps its X display even when the manager still
+  names a nested compositor or another login's display, and only an absent
+  type adopts the manager's live display. Launchers (`hex`, `hex start`'s app,
+  `hex restart`) make the same decision before they compute or write
+  `session.env`, so both sides agree on the session; an explicit non-Wayland
+  type skips the user-manager read entirely. `linux/rune_hud`'s `limitation()`
+  names the HUD's failure: no display, no layer-shell, or Rune's overlay error.
 - `linux/gnome_shortcuts`: on GNOME without a GlobalShortcuts portal
   (GNOME 46, #781), Hex's own custom keybindings under
   `…/media-keys/custom-keybindings/hex-*/` via `gsettings`
@@ -363,6 +375,8 @@ substitute for source inspection or a second roadmap.
   Hex, Paste last dictation, the downloaded-model picker, the update item,
   Enable / Disable Hex, Quit Hex) and the model entries the macOS menu bar
   lists too. Each tray maps a `TrayCommand` onto its own runtime.
+- `desktop/tray_icon`: the tray mark Linux and Windows share: the white Hex
+  mark, drawn black on a light panel or taskbar, where white would vanish.
 - `linux/login_item`: Launch at login on Linux, the managed XDG autostart
   entry the installer also writes; the file is the only state.
 - `net`: Hex's own HTTPS (model downloads, update checks, transformation
@@ -411,7 +425,9 @@ substitute for source inspection or a second roadmap.
 - `desktop/events`, `control/dashboard`: bounded asynchronous append-only NDJSON observations
   and bounded incremental reading; the debug `dashboard` TUI and the Activity
   pane are read-only projections. Context events name the foreground app,
-  never a page address.
+  written only when it changes, never a page address or window title, and no
+  event holds dictated or transcribed text: History is the only place Hex
+  keeps what was said.
 - `desktop/activity`: the shared listener, device, session, and latest-failure
   projection over `EventReader`. Transcript rows read retained events directly.
 - `desktop/host`: the in-process listener, transcription, shortcut, and update
@@ -597,10 +613,18 @@ CoreAudio formats, AppleScript details, or event serialization.
 
 - Settings errors never prevent launch. `app_settings/persistence` defaults
   only invalid fields in memory and logs each key and reason; unknown keys
-  are ignored. Invalid JSON or unreadable files use defaults without changing
-  the original. Before any save over invalid settings, preserve the exact
+  are ignored. Invalid JSON or a file that isn't a JSON object uses defaults
+  without changing the original, and launch reports the parse error. An
+  unreadable file also uses defaults without changing it, but reports no
+  launch note. Before any save over invalid fields, preserve the exact
   original beside it as `settings.json.unreadable-<sha256>` (owner-only;
-  identical originals share one backup). A failed backup blocks the save.
+  identical originals share one backup). A failed backup blocks the save. A
+  file that isn't a JSON object is never backed up or replaced: every save is
+  refused until a restart. A process that loaded such a file keeps refusing
+  saves even after the file is fixed, because its in-memory settings may be
+  stale defaults. On Linux only, the two-second poll also clears that refusal
+  when it adopts a valid or removed file. The refusal and launch note use the
+  same wording on every OS.
   Keep saved values readable by older builds: an unchosen
   `meetings.retention` is omitted, not `null`. Do not omit optional fields
   whose absence restores a nonempty default, such as `paste_last_hotkey`.
@@ -692,13 +716,16 @@ CoreAudio formats, AppleScript details, or event serialization.
   fences remain required. Never strip Fn globally from shortcut matching.
 - Hold the shortcut to dictate and release to transcribe. Captures shorter than
   300 ms discard. A 450 ms hotkey pre-roll
-  protects speech onset, except when "While dictating" mutes or pauses other
-  audio: that audio predates the mute and holds whatever was playing, so those
-  hotkey captures keep no pre-roll (#1309; `dictation::hotkey_pre_roll`, every
-  OS). Ducking keeps 450 ms. There is no separate pre-roll setting. Capture has
+  protects speech onset, except when "While dictating" mutes, pauses, or lowers
+  other audio: that audio predates the suppression and holds whatever was
+  playing, so those hotkey captures keep no pre-roll (#1309, #1468;
+  `dictation::hotkey_pre_roll`, every OS). Do nothing keeps 450 ms. There is no
+  separate pre-roll setting. Capture has
   no automatic duration limit; release or
   an explicit stop ends it.
-- Only Toggle mode has a cancel (#786, #1022): its cancel shortcut
+- Only Toggle mode has a cancel (#786, #1022), except a Labs › Caps Lock
+  dictation capture, which is hands-free in every shortcut mode and whose own
+  machine always cancels on Escape. Its cancel shortcut
   (`cancel_hotkey`, Escape by default, rebindable in General under Shortcut
   mode) discards the active recording with the cancel tone: nothing is
   transcribed, pasted, or saved to History, and jobs already transcribing
@@ -711,9 +738,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   on Wayland Hex binds nothing for it and Settings says to bind
   `hex dictation cancel` in the desktop. `hex dictation cancel` discards
   whatever records, in any mode. Hold mode has no cancel: Escape ends no
-  capture there, not even as a chord. Every other intentional dictation
-  finishes and pastes; only short taps, chords, and silent captures discard,
-  and Hex itself ends a capture only when its input or microphone is lost.
+  capture there, not even as a chord, except a Labs › Caps Lock dictation
+  capture, whose own machine always cancels on Escape. Every other intentional
+  dictation finishes and pastes; only short taps, chords, and silent captures
+  discard, and Hex itself ends a capture only when its input or microphone is
+  lost.
 - A dictation discarded for silence (level under the silence threshold, or no
   speech the detector hears) is discarded quietly on every OS: no error tone,
   no note, nothing in Settings. The log keeps the measured level and peak
@@ -787,7 +816,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   preserve submission-order output while capture remains immediately available.
 - Completing or pasting an older job must not reconcile or finish a newer
   capture. Shortcut boundaries come from delivered CGEvent timestamps; do not
-  fabricate a release timestamp from later physical state.
+  fabricate a release timestamp from later physical state. Caps Lock dictation
+  is the exception: its capture boundary is the HID device timestamp that its
+  AlphaShift edge confirms.
 - A programmatic dictation's owner cancels it through the API, and the lease
   ends an abandoned one. While one records, Hex claims no Escape at all.
 - Model switches activate only after the pinned artifact is checksum-verified,
@@ -1020,8 +1051,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   Summarize with OpenCode) run only after final publication, on a
   utility-QoS thread that yields to dictation, within a bounded chunk count and
   total deadline. Failures record `notes_error` and leave the Markdown
-  untouched. Notes never rename the file and rewrite only the heading Hex wrote
-  and the `<!-- hex:notes -->` block.
+  untouched. Notes rewrite only the heading Hex wrote and the
+  `<!-- hex:notes -->` block. With Labs › Descriptive meeting file names on,
+  notes or chapter refinement that change the title, and user renames, also
+  rename the exported Markdown to the new title, keeping its date and time
+  prefix and never overwriting.
 - Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
   every macOS, Linux, and Windows build and on by default in every build,
   stable included (`capture.enabled`, the pane's switch; the `annotate-on-by-default`
@@ -1094,7 +1128,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   they are shareable, since one non-shareable window blanks every Space's
   Mission Control thumbnail. A capture leaves out all of Hex's chrome, unless
   `capture.show_overlays_in_recordings` (default off; the pane's Show in
-  screen recordings or the menu bar's checkmark) is on; it applies at once
+  screen recordings) is on; it applies at once
   to open overlays and a recording capture, never recreating a window. A
   capture never opens a
   microphone, installs a tap of its own, or loads a model: it copies the dictation
@@ -1163,7 +1197,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   to the Trash (never `rm`), after a two-step confirmation, and is refused while
   it records, transcribes, or writes notes. Renaming rewrites the manifest and
   only a Markdown heading that still reads the previous title; files keep
-  their names.
+  their names unless Labs › Descriptive meeting file names is on, which renames
+  the exported Markdown to the new title, keeping its date and time prefix and
+  never overwriting.
 - Meeting data is a liability: until the user chooses a `meetings.retention`,
   meetings recorded since the default began (manifest `retention_applies`)
   are kept 24 hours and older ones stay; a chosen retention covers every
@@ -1253,7 +1289,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   `renamex_np(RENAME_SWAP)` at restart or quit, and the new version removes
   the old bundle at launch.
 - The Wayland beta requires compatible clipboard protocols, and layer-shell or
-  XWayland for the HUD.
+  XWayland for the HUD. Copy and paste need `wl-copy` from `wl-clipboard`,
+  which direct installs don't bring; while it's missing Hex warns in Settings
+  and `hex status`, and a paste fails naming the package.
   Paste sends its shortcut through `wtype` when the compositor advertises
   `zwp_virtual_keyboard_manager_v1`, and otherwise through the
   RemoteDesktop portal, the general injection path: one keyboard-only session
@@ -1726,8 +1764,9 @@ Tab to cycle, and `q`/Escape to quit.
   tracks, the rolling in-call transcript, and atomically published final
   transcripts.
 
-Windows uses `%APPDATA%\hex` and Linux `~/.local/share/hex` (or under
-`XDG_DATA_HOME`). Hex keeps no compatibility with earlier `voice-control`
+Windows uses `%APPDATA%\hex`, with logs and models in `%LOCALAPPDATA%\hex`
+(machine-local, so roaming profiles don't copy them), and Linux
+`~/.local/share/hex` (or under `XDG_DATA_HOME`). Hex keeps no compatibility with earlier `voice-control`
 folders or per-OS settings files.
 
 ## Future Direction

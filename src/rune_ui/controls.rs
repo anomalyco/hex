@@ -277,6 +277,12 @@ pub(super) fn described_row(
     )
 }
 
+/// A row that belongs to the [`icon_row`] above it: its title starts where
+/// that row's title does.
+pub(super) fn nested(row: El) -> El {
+    row.pl(METRICS.row_px + ICON_LEAD)
+}
+
 /// One numbered step of a how-to card: the number, the title with the
 /// step's keys beside it when it has any, and the description under them.
 #[cfg(hex_capture)]

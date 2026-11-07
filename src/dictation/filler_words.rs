@@ -1,13 +1,26 @@
-//! Labs › Remove filler words: the hesitations a model writes down
-//! verbatim ("um", "umm", "uh", "uhh", "erm", "er", "ah") leave a dictation,
-//! with no model involved. A filler matches as a whole word, lowercase or
-//! with only its first letter capitalised, so "umbrella", "ahead", "error",
-//! "Uhura", "uh-huh", and "ER" stay as they are. The comma or ellipsis that
-//! comes with a filler goes with it, the spaces around it close up, and a
-//! capitalised filler that started a sentence hands its capital to the next
-//! word. Line breaks are kept.
+//! Labs › Remove filler words: the English hesitations a model writes down
+//! verbatim ("um", "umm", "uh", "uhh", "erm", "er", "ah") leave an English
+//! dictation, with no model involved. A filler matches as a whole word,
+//! lowercase or with only its first letter capitalised, so "umbrella",
+//! "ahead", "error", "Uhura", "uh-huh", and "ER" stay as they are. The comma
+//! or ellipsis that comes with a filler goes with it, the spaces around it
+//! close up, and a capitalised filler that started a sentence hands its
+//! capital to the next word. Line breaks are kept.
 
 const FILLERS: &[&str] = &["um", "umm", "uh", "uhh", "erm", "er", "ah"];
+
+/// Whether a dictation in `language` loses its fillers. Only English does:
+/// "er" and "um" are ordinary German and Portuguese words, so "auto" and
+/// every other language keep their transcripts as heard.
+pub fn applies_to(language: &str) -> bool {
+    language == "en"
+}
+
+/// `transcript` without its filler words when the Labs switch is `enabled`
+/// and the dictation is English; `None` leaves the caller's text untouched.
+pub fn strip_if(transcript: &str, language: &str, enabled: bool) -> Option<String> {
+    (enabled && applies_to(language)).then(|| apply(transcript))
+}
 
 /// `transcript` without its filler words.
 pub fn apply(transcript: &str) -> String {
@@ -148,7 +161,36 @@ fn needs_space(out: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::apply;
+    use super::{applies_to, apply, strip_if};
+
+    #[test]
+    fn only_english_dictations_apply_the_filter() {
+        assert!(applies_to("en"));
+        for language in ["de", "pt", "auto", ""] {
+            assert!(!applies_to(language), "{language:?}");
+        }
+    }
+
+    #[test]
+    fn enabled_english_dictations_strip_their_fillers() {
+        assert_eq!(
+            strip_if("Um, please send the draft.", "en", true).as_deref(),
+            Some("Please send the draft.")
+        );
+    }
+
+    #[test]
+    fn every_other_language_or_a_disabled_switch_keeps_the_words() {
+        for (transcript, language) in [
+            ("Er kommt um acht Uhr.", "de"),
+            ("Eu quero um café.", "pt"),
+            ("Um, please send the draft.", "auto"),
+            ("Um, please send the draft.", ""),
+        ] {
+            assert_eq!(strip_if(transcript, language, true), None, "{language:?}");
+        }
+        assert_eq!(strip_if("Um, please send the draft.", "en", false), None);
+    }
 
     #[test]
     fn fillers_leave_with_their_commas_and_spaces() {

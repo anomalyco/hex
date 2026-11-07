@@ -132,7 +132,10 @@ impl Drop for ContextMonitor {
 impl ContextSnapshot {
     #[cfg(target_os = "macos")]
     pub fn capture() -> Result<Self> {
-        capture_macos(crate::dictation::config::reads_browser())
+        capture_macos(Reads {
+            page: crate::dictation::config::reads_browser(),
+            window_title: crate::dictation::config::reads_window_title(),
+        })
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -170,10 +173,13 @@ impl ContextSnapshot {
             // the app in front.
             if let Some(pid) = pid {
                 let pages = crate::accessibility::browser_pages(pid);
+                let more_call_apps = crate::labs::more_call_apps();
                 let (url, title) = crate::dictation::browser_page::choose(
                     &pages,
                     |url| {
-                        web_url(url).is_some_and(|url| crate::meeting::detection::names_call(&url))
+                        web_url(url).is_some_and(|url| {
+                            crate::meeting::detection::names_call(&url, more_call_apps)
+                        })
                     },
                     crate::meeting::detection::title_names_call,
                 );
@@ -181,10 +187,9 @@ impl ContextSnapshot {
                 let title_names_call = title
                     .as_deref()
                     .is_some_and(crate::meeting::detection::title_names_call);
-                let url = url
-                    .as_deref()
-                    .and_then(web_url)
-                    .filter(|url| crate::meeting::detection::names_call(url) || !title_names_call);
+                let url = url.as_deref().and_then(web_url).filter(|url| {
+                    crate::meeting::detection::names_call(url, more_call_apps) || !title_names_call
+                });
                 return Ok(Self {
                     application: Some(browser.name.into()),
                     browser_url: url,
@@ -193,7 +198,10 @@ impl ContextSnapshot {
                 });
             }
         }
-        capture_macos(true)
+        capture_macos(Reads {
+            page: true,
+            window_title: true,
+        })
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -226,10 +234,17 @@ impl ContextSnapshot {
     }
 }
 
+/// What `capture_macos` reads beyond the front app. Asking a browser for its
+/// page can show an Automation prompt, and a window title can hold an email
+/// subject or a document name, so only callers that use them ask.
 #[cfg(target_os = "macos")]
-/// `read_page` asks the front browser for its page, which can show an
-/// Automation prompt; only callers that use the page pass true.
-fn capture_macos(read_page: bool) -> Result<ContextSnapshot> {
+struct Reads {
+    page: bool,
+    window_title: bool,
+}
+
+#[cfg(target_os = "macos")]
+fn capture_macos(reads: Reads) -> Result<ContextSnapshot> {
     let (application, bundle_id, pid) = autoreleasepool(|_| {
         let application = NSWorkspace::sharedWorkspace()
             .frontmostApplication()
@@ -241,13 +256,18 @@ fn capture_macos(read_page: bool) -> Result<ContextSnapshot> {
         let bundle_id = application.bundleIdentifier().map(|id| id.to_string());
         Ok::<_, color_eyre::Report>((name, bundle_id, application.processIdentifier()))
     })?;
-    let browser_url = read_page
+    let browser_url = reads
+        .page
         .then(|| browser_url(bundle_id.as_deref(), pid))
+        .flatten();
+    let window_title = reads
+        .window_title
+        .then(|| crate::accessibility::focused_window_title(pid))
         .flatten();
     Ok(ContextSnapshot {
         application: Some(application),
         browser_url,
-        window_title: crate::accessibility::focused_window_title(pid),
+        window_title,
         input_revision: None,
     })
 }

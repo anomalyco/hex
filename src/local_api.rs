@@ -110,6 +110,8 @@ struct CapabilitiesResponse {
     audio_formats: [&'static str; 1],
     partial_transcripts: bool,
     service_capture: bool,
+    /// `/dictations/{id}/partials` for a start with `"partials": true`.
+    dictation_partials: bool,
     /// `/streams` (`docs/streams.md`).
     streams: bool,
     developer_control: bool,
@@ -123,7 +125,7 @@ pub struct LocalApiOptions {
     /// The `hex` control commands (`POST /control`).
     pub control: Option<SyncSender<crate::control::ControlCall>>,
     /// Running-app dictation (`/dictations`): the macOS recognition loop or
-    /// the Linux listener.
+    /// the Linux or Windows listener.
     pub dictation_control: Option<dictation::Control>,
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
@@ -683,6 +685,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             ("POST", "finish") => Some(DictationAction::Finish),
             ("POST", "cancel") => Some(DictationAction::Cancel),
             ("GET", "levels") => Some(DictationAction::Levels),
+            ("GET", "partials") => Some(DictationAction::Partials),
             ("GET", "audio") => Some(DictationAction::Audio),
             ("POST", "heartbeat") => Some(DictationAction::Heartbeat),
             _ => None,
@@ -705,6 +708,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 audio_formats: ["audio/wav"],
                 partial_transcripts: false,
                 service_capture: context.dictations.available(),
+                dictation_partials: context.dictations.partials_available(),
                 streams: true,
                 developer_control: context.developer_control.is_some(),
                 control: context.control.is_some(),
@@ -1393,6 +1397,7 @@ enum DictationAction {
     Finish,
     Cancel,
     Levels,
+    Partials,
     Audio,
     Heartbeat,
 }
@@ -1713,6 +1718,7 @@ mod tests {
                 owner_token,
                 levels,
                 reply,
+                ..
             } = next_dictation_control(&controls)
             else {
                 panic!("expected dictation start")

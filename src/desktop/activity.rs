@@ -31,6 +31,24 @@ impl DesktopActivity {
         })
     }
 
+    /// The newest failure at or after `started_at`, hidden once a later
+    /// dictation completed. Startup reads an event log that may still end in
+    /// the previous session, so its own start time filters that out.
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    pub(crate) fn visible_failure_since(
+        &self,
+        started_at: u64,
+        last_completed_at: Option<u64>,
+    ) -> Option<String> {
+        self.last_failure
+            .as_ref()
+            .filter(|(failed_at, _)| {
+                *failed_at >= started_at
+                    && last_completed_at.is_none_or(|completed| completed < *failed_at)
+            })
+            .map(|(_, message)| message.clone())
+    }
+
     fn from_events<'a>(events: impl Iterator<Item = &'a VoiceEvent>) -> Self {
         let mut activity = Self::default();
         for event in events {
@@ -57,6 +75,41 @@ impl DesktopActivity {
     }
 }
 
+/// When the current session's newest dictation completed. `events` is oldest
+/// first, as `EventReader` keeps them.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+pub(crate) fn last_completed_at<'a>(
+    events: impl DoubleEndedIterator<Item = &'a VoiceEvent>,
+) -> Option<u64> {
+    for event in events.rev() {
+        match event {
+            VoiceEvent::SessionStarted { .. } => return None,
+            VoiceEvent::Transcript {
+                timestamp_ms,
+                phase: TranscriptPhase::Completed,
+                ..
+            } => return Some(*timestamp_ms),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// A known reason a dictation failed, in words a person can act on. Unknown
+/// failures stay as they were logged.
+pub(crate) fn failure_explanation(message: &str) -> String {
+    if message.contains(crate::audio::LID_CLOSED_ERROR) {
+        crate::desktop::i18n::tr(
+            "Built-in mic is off with the lid closed. Open the lid or connect a mic.",
+        )
+        .to_owned()
+    } else if message.contains(crate::audio::NO_MICROPHONE_ERROR) {
+        crate::desktop::i18n::tr("No microphone is available. Connect a microphone.").to_owned()
+    } else {
+        message.to_owned()
+    }
+}
+
 /// One line describing `event` for the Activity pane.
 pub(crate) fn event_summary(event: &VoiceEvent) -> String {
     match event {
@@ -75,7 +128,11 @@ pub(crate) fn event_summary(event: &VoiceEvent) -> String {
             ..
         } => match phase {
             TranscriptPhase::Started => "Speech recognition started".into(),
+            TranscriptPhase::Updated if text.is_empty() => "Heard speech so far".into(),
             TranscriptPhase::Updated => format!("Heard \"{text}\" so far"),
+            TranscriptPhase::Completed if text.is_empty() => {
+                format!("Transcribed in {latency_ms} ms")
+            }
             TranscriptPhase::Completed => format!("Heard \"{text}\" in {latency_ms} ms"),
         },
         VoiceEvent::Command {
@@ -85,6 +142,7 @@ pub(crate) fn event_summary(event: &VoiceEvent) -> String {
             ..
         } => {
             let command = command.as_deref().unwrap_or("an unmatched command");
+            let heard = if heard.is_empty() { "speech" } else { heard };
             match outcome {
                 CommandOutcome::Ignored => format!("Ignored \"{heard}\""),
                 CommandOutcome::Woke => format!("\"{heard}\" woke Hex"),
@@ -235,6 +293,84 @@ mod tests {
             DesktopActivity::from_events(events.iter().rev())
                 .last_failure
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn newest_failure_shows_until_a_later_transcript_completes() {
+        let activity = DesktopActivity {
+            last_failure: Some((5, "OpenCode generation failed".into())),
+            ..DesktopActivity::default()
+        };
+        assert_eq!(
+            activity.visible_failure_since(0, Some(4)).as_deref(),
+            Some("OpenCode generation failed")
+        );
+        assert_eq!(activity.visible_failure_since(0, Some(6)), None);
+        assert_eq!(
+            activity.visible_failure_since(0, None).as_deref(),
+            Some("OpenCode generation failed")
+        );
+    }
+
+    #[test]
+    fn the_newest_completion_is_scoped_to_the_current_session() {
+        let transcript = |timestamp_ms, text| VoiceEvent::Transcript {
+            timestamp_ms,
+            phase: TranscriptPhase::Completed,
+            latency_ms: 10,
+            text,
+        };
+        let events = [
+            transcript(1, "Old session".into()),
+            VoiceEvent::SessionStarted { timestamp_ms: 2 },
+        ];
+        assert_eq!(last_completed_at(events.iter()), None);
+        let events = [
+            VoiceEvent::SessionStarted { timestamp_ms: 2 },
+            transcript(3, "First".into()),
+            transcript(4, "Second".into()),
+        ];
+        assert_eq!(last_completed_at(events.iter()), Some(4));
+    }
+
+    #[test]
+    fn a_startup_reader_ignores_the_previous_sessions_failure() {
+        let activity = DesktopActivity {
+            last_failure: Some((5, "Could not open microphone".into())),
+            ..DesktopActivity::default()
+        };
+        assert_eq!(
+            activity.visible_failure_since(6, None),
+            None,
+            "a failure before this runtime started is the previous session's"
+        );
+        assert_eq!(
+            activity.visible_failure_since(5, None).as_deref(),
+            Some("Could not open microphone")
+        );
+        assert_eq!(
+            activity.visible_failure_since(5, Some(7)),
+            None,
+            "a later completed dictation still clears it"
+        );
+    }
+
+    #[test]
+    fn known_microphone_failures_get_an_actionable_explanation() {
+        assert_eq!(
+            failure_explanation(
+                "Could not open microphone: the built-in microphone is off while the lid is closed"
+            ),
+            "Built-in mic is off with the lid closed. Open the lid or connect a mic."
+        );
+        assert_eq!(
+            failure_explanation("Could not open microphone: no microphone is available"),
+            "No microphone is available. Connect a microphone."
+        );
+        assert_eq!(
+            failure_explanation("OpenCode generation failed"),
+            "OpenCode generation failed"
         );
     }
 }

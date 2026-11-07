@@ -1,7 +1,7 @@
 use std::io::Cursor;
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -363,6 +363,69 @@ fn done_is_late(stopped: Option<Instant>, now: Instant) -> bool {
     stopped.is_none_or(|at| now.saturating_duration_since(at) >= DONE_MIN_AFTER_STOP)
 }
 
+/// Stop tones counted from release until their output is restored (Lower
+/// audio ramping back up, or a mute lifting) and so still unheard.
+static PENDING_STOPS: PendingStops = PendingStops::new();
+
+/// A done sound waits out any stop sound still waiting on its output: a
+/// dictation pasted before that stop gets the stop sound alone, never a done
+/// before it.
+fn done_plays(pending_stops: usize, stopped: Option<Instant>, now: Instant) -> bool {
+    pending_stops == 0 && done_is_late(stopped, now)
+}
+
+/// The stop tones counted until they play.
+struct PendingStops(AtomicUsize);
+
+// Windows restores a lowered output before the stop tone, so none ever waits.
+#[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
+impl PendingStops {
+    const fn new() -> Self {
+        Self(AtomicUsize::new(0))
+    }
+
+    /// Counts one stop tone now and returns the closure that plays it. The
+    /// guard ends the count whether the closure plays, finds sounds off, or is
+    /// dropped uncalled.
+    fn defer<'a>(
+        &'a self,
+        play_stop: impl FnOnce() + Send + Sync + 'a,
+    ) -> impl FnOnce() + Send + Sync + 'a {
+        let stop = self.begin();
+        move || {
+            play_stop();
+            drop(stop);
+        }
+    }
+
+    /// Counts one stop tone from now until its guard drops.
+    fn begin(&self) -> PendingStop<'_> {
+        self.0.fetch_add(1, Ordering::AcqRel);
+        PendingStop(self)
+    }
+
+    fn get(&self) -> usize {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+/// One counted stop tone, ended whether it plays or is dropped instead.
+struct PendingStop<'a>(&'a PendingStops);
+
+impl Drop for PendingStop<'_> {
+    fn drop(&mut self) {
+        self.0.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Counts a stop tone from now, before a lowered or muted output is restored,
+/// and returns what plays it once the output is back. Counting from now keeps
+/// a dictation pasted during the restore to the stop tone alone.
+#[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
+pub fn deferred_stop() -> impl FnOnce() + Send + Sync + 'static {
+    PENDING_STOPS.defer(|| play(Tone::DictationStop))
+}
+
 pub fn play(tone: Tone) {
     if !sounds_enabled() {
         return;
@@ -373,7 +436,7 @@ pub fn play(tone: Tone) {
         }
         Tone::DictationDone => {
             let stopped = *LAST_STOP.lock().unwrap_or_else(|e| e.into_inner());
-            if !done_is_late(stopped, Instant::now()) {
+            if !done_plays(PENDING_STOPS.get(), stopped, Instant::now()) {
                 return;
             }
         }
@@ -1793,6 +1856,30 @@ mod tests {
         ));
         assert!(done_is_late(Some(stop), stop + DONE_MIN_AFTER_STOP));
         assert!(done_is_late(None, stop));
+    }
+
+    /// A dictation pasted while its stop tone still waits on the output gets
+    /// the stop tone alone, so done never sounds before stop.
+    #[test]
+    fn done_never_plays_before_a_delayed_stop_tone() {
+        let stop = Instant::now();
+        assert!(done_plays(0, None, stop));
+        assert!(done_plays(0, Some(stop), stop + DONE_MIN_AFTER_STOP));
+        assert!(!done_plays(1, None, stop));
+        assert!(!done_plays(1, Some(stop), stop + DONE_MIN_AFTER_STOP));
+        assert!(!done_plays(2, None, stop));
+
+        // The count ends whether the deferred stop plays or is dropped uncalled.
+        let pending = PendingStops::new();
+        let played = AtomicBool::new(false);
+        pending.defer(|| played.store(true, Ordering::Release))();
+        assert!(played.load(Ordering::Acquire));
+        assert_eq!(pending.get(), 0);
+
+        let uncalled = pending.defer(|| panic!("must not play"));
+        assert_eq!(pending.get(), 1);
+        drop(uncalled);
+        assert_eq!(pending.get(), 0);
     }
 
     /// A dictation audition plays start, stop and done at their moments,

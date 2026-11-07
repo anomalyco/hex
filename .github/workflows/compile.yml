@@ -19,6 +19,7 @@ on:
       - "assets/**"
       - "nix/**"
       - "scripts/check-nix-git-pins.py"
+      - "scripts/test-check-nix-git-pins.py"
       - ".github/workflows/compile.yml"
   workflow_dispatch:
 
@@ -47,7 +48,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Check Nix Git pins
-        run: python3 scripts/check-nix-git-pins.py
+        run: |
+          python3 scripts/test-check-nix-git-pins.py
+          python3 scripts/check-nix-git-pins.py
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable

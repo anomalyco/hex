@@ -1,8 +1,10 @@
 //! Running-app dictation (`/dictations`): a host starts, finishes, cancels
 //! and observes a dictation the app records. The macOS recognition loop and
-//! the Linux listener drive it; without a capture loop (Windows, `hex
+//! the Linux and Windows listeners drive it; without a capture loop (`hex
 //! service`) the routes answer `service-capture-unavailable` and
-//! `/capabilities` reports `serviceCapture: false`.
+//! `/capabilities` reports `serviceCapture: false`. A start with
+//! `"partials": true` also streams the text so far (`/partials`) where the
+//! listener streams the recording (`dictationPartials`).
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -20,11 +22,12 @@ use super::{
     write_response, write_sse, write_sse_headers, write_stream_headers,
 };
 use crate::dictation::service::{DictationControl, DictationLevel};
+use crate::transcription::engine::Partial;
 
 const DICTATION_CONTROL_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Where the app's capture loop takes `/dictations` controls: the macOS
-/// recognition loop's own control queue, or the Linux listener's.
+/// recognition loop's own control queue, or the Linux or Windows listener's.
 #[cfg(target_os = "macos")]
 pub(crate) type Control = SyncSender<crate::recognition::RecognitionControl>;
 #[cfg(not(target_os = "macos"))]
@@ -32,30 +35,91 @@ pub(crate) type Control = SyncSender<DictationControl>;
 
 pub(in crate::local_api) struct Dictations {
     control: Option<Control>,
-    levels: Mutex<HashMap<u64, DictationLevels>>,
+    levels: Subscriptions<DictationLevel>,
+    partials: Subscriptions<Partial>,
 }
 
 impl Dictations {
     pub(in crate::local_api) fn new(control: Option<Control>) -> Self {
         Self {
             control,
-            levels: Mutex::default(),
+            levels: Subscriptions::default(),
+            partials: Subscriptions::default(),
         }
     }
 
     pub(in crate::local_api) fn available(&self) -> bool {
         self.control.is_some()
     }
+
+    /// Whether a dictation started with `"partials": true` streams its text
+    /// so far. The macOS recognition loop doesn't stream a client's
+    /// recording, so it has none.
+    pub(in crate::local_api) fn partials_available(&self) -> bool {
+        self.available() && cfg!(not(target_os = "macos"))
+    }
 }
 
-struct DictationLevels {
+/// Each dictation's observation channel, until its owner subscribes once.
+struct Subscriptions<T>(Mutex<HashMap<u64, Subscription<T>>>);
+
+impl<T> Default for Subscriptions<T> {
+    fn default() -> Self {
+        Self(Mutex::default())
+    }
+}
+
+struct Subscription<T> {
     owner_token: String,
-    receiver: Receiver<DictationLevel>,
+    receiver: Receiver<T>,
+}
+
+impl<T> Subscriptions<T> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Subscription<T>>> {
+        self.0.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn insert(&self, id: u64, owner_token: String, receiver: Receiver<T>) {
+        self.lock().insert(
+            id,
+            Subscription {
+                owner_token,
+                receiver,
+            },
+        );
+    }
+
+    /// Drops the channels of dictations that ended unobserved.
+    fn prune(&self) {
+        self.lock().retain(|_, subscription| {
+            !matches!(
+                subscription.receiver.try_recv(),
+                Err(TryRecvError::Disconnected)
+            )
+        });
+    }
+
+    fn remove(&self, id: u64) {
+        self.lock().remove(&id);
+    }
+
+    /// The channel of dictation `id`, for its owner alone.
+    fn take(&self, id: u64, owner_token: &str) -> Option<Receiver<T>> {
+        let mut subscriptions = self.lock();
+        subscriptions
+            .get(&id)
+            .is_some_and(|subscription| subscription.owner_token == owner_token)
+            .then(|| subscriptions.remove(&id))
+            .flatten()
+            .map(|subscription| subscription.receiver)
+    }
 }
 
 #[derive(Deserialize)]
 struct DictationStartRequest {
     source: String,
+    #[serde(default)]
+    partials: bool,
 }
 
 pub(in crate::local_api) fn start(
@@ -83,12 +147,8 @@ pub(in crate::local_api) fn start(
     let Some(controls) = &context.dictations.control else {
         return HttpResponse::code(404, "service-capture-unavailable");
     };
-    context
-        .dictations
-        .levels
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .retain(|_, levels| !matches!(levels.receiver.try_recv(), Err(TryRecvError::Disconnected)));
+    context.dictations.levels.prune();
+    context.dictations.partials.prune();
     let owner_token = match generate_token() {
         Ok(token) => token,
         Err(error) => {
@@ -97,6 +157,7 @@ pub(in crate::local_api) fn start(
         }
     };
     let (level_sender, levels) = mpsc::sync_channel(8);
+    let (partial_sender, partials) = request.partials.then(|| mpsc::sync_channel(8)).unzip();
     let started = match call_recognition(
         controls,
         DEVELOPER_CONTROL_TIMEOUT,
@@ -105,6 +166,7 @@ pub(in crate::local_api) fn start(
             source: request.source,
             owner_token: owner_token.clone(),
             levels: level_sender,
+            partials: partial_sender,
             reply,
         },
     ) {
@@ -114,15 +176,13 @@ pub(in crate::local_api) fn start(
     context
         .dictations
         .levels
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .insert(
-            started.id,
-            DictationLevels {
-                owner_token: owner_token.clone(),
-                receiver: levels,
-            },
-        );
+        .insert(started.id, owner_token.clone(), levels);
+    if let Some(partials) = partials {
+        context
+            .dictations
+            .partials
+            .insert(started.id, owner_token.clone(), partials);
+    }
     HttpResponse::json(
         201,
         &serde_json::json!({
@@ -169,7 +229,22 @@ pub(in crate::local_api) fn handle(
     };
     let response = match action {
         DictationAction::Levels => {
-            return stream_dictation_levels(stream, id, &owner_token, context);
+            let levels = context.dictations.levels.take(id, &owner_token);
+            return stream_observations(
+                stream,
+                levels,
+                context,
+                |level| serde_json::json!({ "rmsDb": level.rms_db, "peakDb": level.peak_db }),
+            );
+        }
+        DictationAction::Partials => {
+            let partials = context.dictations.partials.take(id, &owner_token);
+            return stream_observations(
+                stream,
+                partials,
+                context,
+                |partial| serde_json::json!({ "stable": partial.stable, "tentative": partial.tentative }),
+            );
         }
         DictationAction::Audio => {
             return stream_dictation_audio(stream, id, owner_token, controls, context);
@@ -222,12 +297,8 @@ fn dictation_cancel(
         },
     ) {
         Ok(()) => {
-            context
-                .dictations
-                .levels
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .remove(&id);
+            context.dictations.levels.remove(id);
+            context.dictations.partials.remove(id);
             HttpResponse::empty(204)
         }
         Err(response) => response,
@@ -250,29 +321,15 @@ fn dictation_heartbeat(id: u64, owner_token: String, controls: &Control) -> Http
     }
 }
 
-fn stream_dictation_levels(
+/// Streams one dictation's levels or partials as server-sent events until
+/// the dictation ends.
+fn stream_observations<T>(
     stream: &mut TcpStream,
-    id: u64,
-    owner_token: &str,
+    observations: Option<Receiver<T>>,
     context: &HttpContext,
+    event: impl Fn(T) -> serde_json::Value,
 ) {
-    let levels = {
-        let mut levels = context
-            .dictations
-            .levels
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        levels
-            .get(&id)
-            .is_some_and(|levels| levels.owner_token == owner_token)
-            .then(|| {
-                levels
-                    .remove(&id)
-                    .expect("dictation levels were checked")
-                    .receiver
-            })
-    };
-    let Some(levels) = levels else {
+    let Some(observations) = observations else {
         let _ = write_response(stream, HttpResponse::code(404, "dictation-not-found"));
         return;
     };
@@ -280,14 +337,9 @@ fn stream_dictation_levels(
         return;
     }
     while !context.shutdown.load(Ordering::Acquire) {
-        match levels.recv_timeout(Duration::from_millis(100)) {
-            Ok(level) => {
-                if write_sse(
-                    stream,
-                    &serde_json::json!({ "rmsDb": level.rms_db, "peakDb": level.peak_db }),
-                )
-                .is_err()
-                {
+        match observations.recv_timeout(Duration::from_millis(100)) {
+            Ok(observation) => {
+                if write_sse(stream, &event(observation)).is_err() {
                     break;
                 }
             }

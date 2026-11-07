@@ -25,6 +25,7 @@ const FLAGGED_PATHS: [RegExp, string][] = [
   [/^scripts\/(install|build|package|setup|prepare)/, "installer or build script"],
   [/(^|\/)Info\.plist$|\.plist$/, "plist"],
   [/^nix\/|^flake\.(nix|lock)$/, "nix packaging"],
+  [/^scripts\/(test-)?check-nix-git-pins\.py$/, "nix pin check"],
   [/(^|\/)(package\.json|bun\.lockb?|package-lock\.json)$/, "JavaScript dependencies"],
   [/^\.cloudflare\/|cloudflare\.config\.ts$|^site\/worker/, "deployment config"],
   [/(^|\/)(AGENTS|CLAUDE)\.md$|(^|\/)\.opencode\/|(^|\/)opencode\.jsonc?$/, "agent instructions or config"],

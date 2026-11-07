@@ -153,7 +153,11 @@ fn live_page(p: Paint, live: &Live, motion: Motion) -> El {
             tr("Turn on “Let desktop apps access your microphone” in Windows Settings.")
         }
         ItemStatus::Denied => tr("Switch on Hex in System Settings"),
-        _ => tr("Hears you only while you hold the shortcut"),
+        _ if live.release_microphone => tr("Opens only while you dictate"),
+        _ if windows => tr("Ready the moment you press the shortcut"),
+        _ => tr(
+            "Ready the moment you press the shortcut. macOS shows the mic in use while Hex runs; you can change that in Settings",
+        ),
     };
     let mut card = col()
         .key("setup-card")

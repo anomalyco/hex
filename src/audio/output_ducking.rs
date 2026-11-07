@@ -9,6 +9,14 @@ use std::time::{Duration, Instant};
 
 const TICK: Duration = Duration::from_millis(16);
 const EPSILON: f32 = 0.002;
+/// Lowering starts after the 300 ms hold threshold, so it must finish before
+/// the speech that follows; a full second left the start of a dictation loud.
+const LOWER: Duration = Duration::from_millis(120);
+/// Restoring eases back over the original second so playback never jumps.
+const RESTORE: Duration = Duration::from_secs(1);
+/// Bluetooth may acknowledge channels after the ramp ends; wait this much
+/// longer, then settle on whatever the output reports.
+const SETTLE: Duration = Duration::from_millis(500);
 
 /// A set of volumes lowered and restored together, such as an output's
 /// channels or a set of audio sessions.
@@ -137,11 +145,16 @@ impl<V: Volume> Ramp<V> {
         self.settled = false;
     }
 
+    fn duration(&self) -> Duration {
+        if self.restoring { RESTORE } else { LOWER }
+    }
+
     fn tick(&mut self, seconds: f32) {
         if self.finished || self.settled {
             return;
         }
-        let t = seconds.clamp(0.0, 1.0);
+        let duration = self.duration().as_secs_f32();
+        let t = (seconds / duration).clamp(0.0, 1.0);
         let eased = t * t * (3.0 - 2.0 * t);
         let values: Vec<_> = self
             .from
@@ -159,7 +172,9 @@ impl<V: Volume> Ramp<V> {
         };
         // Bluetooth may acknowledge channels late; use a bounded settling period.
         self.accepted = actual;
-        if t >= 1.0 && (close(&self.accepted, &self.target) || seconds >= 1.5) {
+        if t >= 1.0
+            && (close(&self.accepted, &self.target) || seconds >= duration + SETTLE.as_secs_f32())
+        {
             self.settled = true;
             self.finished = self.restoring;
         }
@@ -203,40 +218,59 @@ mod tests {
     }
     #[test]
     fn ducking_preserves_balance_silence_and_restores() {
+        let lower_midpoint = LOWER.as_secs_f32() / 2.0;
+        let restore_midpoint = RESTORE.as_secs_f32() / 2.0;
         for original in [&[0.3, 0.8][..], &[0.0, 0.8], &[0.5]] {
             for factor in [0.0, 0.2, 1.0] {
+                let midpoint = original
+                    .iter()
+                    .map(|v| v * (1.0 + factor) / 2.0)
+                    .collect::<Vec<_>>();
                 let mut r = ramp(original);
                 r.retarget(Some(factor));
-                r.tick(0.5);
-                assert!(close(
-                    &r.output.values,
-                    &original
-                        .iter()
-                        .map(|v| v * (1.0 + factor) / 2.0)
-                        .collect::<Vec<_>>()
-                ));
-                r.tick(1.0);
+                r.tick(lower_midpoint);
+                assert!(close(&r.output.values, &midpoint));
+                r.tick(LOWER.as_secs_f32());
                 r.retarget(None);
-                r.tick(1.0);
+                r.tick(restore_midpoint);
+                assert!(close(&r.output.values, &midpoint));
+                r.tick(RESTORE.as_secs_f32());
                 assert!(close(&r.output.values, original));
                 assert!(r.finished);
             }
         }
     }
     #[test]
+    fn lowering_finishes_at_its_own_duration_while_restoring_is_still_ramping() {
+        let elapsed = LOWER.as_secs_f32();
+        let mut lowered = ramp(&[0.3, 0.8]);
+        lowered.retarget(Some(0.2));
+        lowered.tick(elapsed);
+        assert!(close(&lowered.output.values, &[0.06, 0.16]));
+        assert!(lowered.settled);
+
+        let mut restoring = ramp(&[0.3, 0.8]);
+        restoring.retarget(Some(0.2));
+        restoring.tick(elapsed);
+        restoring.retarget(None);
+        restoring.tick(elapsed);
+        assert!(!close(&restoring.output.values, &[0.3, 0.8]));
+        assert!(restoring.output.values[0] < (0.06 + 0.3) / 2.0);
+    }
+    #[test]
     fn ducking_respects_manual_changes_and_restores_interrupted_ramps() {
         let mut r = ramp(&[0.3, 0.8]);
         r.retarget(Some(0.2));
-        r.tick(1.0);
+        r.tick(LOWER.as_secs_f32());
         r.output.values = vec![0.5, 0.5];
         r.retarget(None);
-        r.tick(1.0);
+        r.tick(RESTORE.as_secs_f32());
         assert_eq!(r.output.values, vec![0.5, 0.5]);
         let mut r = ramp(&[0.3, 0.8]);
         r.retarget(Some(0.0));
-        r.tick(0.1);
+        r.tick(LOWER.as_secs_f32() / 2.0);
         r.retarget(None);
-        r.tick(1.0);
+        r.tick(RESTORE.as_secs_f32());
         assert!(close(&r.output.values, &[0.3, 0.8]));
     }
     #[test]
@@ -244,7 +278,7 @@ mod tests {
         let mut r = ramp(&[0.3, 0.8]);
         r.output.fail = true;
         r.retarget(Some(0.2));
-        r.tick(0.5);
+        r.tick(LOWER.as_secs_f32() / 2.0);
         assert!(r.finished);
         assert!(close(&r.output.values, &[0.3, 0.8]));
     }

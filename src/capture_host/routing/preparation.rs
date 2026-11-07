@@ -1,11 +1,12 @@
 //! Recording-time preparation and nonblocking publication. Background answers
-//! belong to one bundle and cannot replace a choice or Undo made in the meantime.
+//! belong to one bundle and cannot replace a choice or Undo made in the meantime,
+//! or move a session row the capsule already lists.
 
 use super::*;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-struct Update {
+pub(super) struct Update {
     live: look::Live,
     judgement: smart::Judgement,
     evidence: smart::Evidence,
@@ -15,6 +16,29 @@ struct Update {
 pub(super) struct Pending {
     updates: Receiver<Update>,
     cancelled: Arc<AtomicBool>,
+}
+
+/// Preparation a test feeds by hand, one judgement at a time.
+#[cfg(test)]
+pub(super) fn fed() -> (mpsc::SyncSender<Update>, Pending) {
+    let (updates, receiver) = mpsc::sync_channel(2);
+    let pending = Pending {
+        updates: receiver,
+        cancelled: Arc::new(AtomicBool::new(false)),
+    };
+    (updates, pending)
+}
+
+#[cfg(test)]
+impl Update {
+    pub(super) fn judged(live: look::Live, judgement: smart::Judgement) -> Self {
+        Self {
+            live,
+            judgement,
+            evidence: smart::Evidence::default(),
+            model: None,
+        }
+    }
 }
 
 impl Drop for Pending {
@@ -303,20 +327,21 @@ impl Worker {
                 .flatten();
             // Once posted, an updated session list cannot change the destination shown.
             if current.route.delivery.is_none() {
-                current.route.answer = answered.answer;
+                current.route.answer = keep_rows(&current.route.answer, answered.answer);
             } else if let (
+                RouteAnswer::Rule { to, site, .. },
                 RouteAnswer::Rule {
                     suggested, recent, ..
                 },
-                RouteAnswer::Rule {
-                    suggested: next,
-                    recent: latest,
-                    ..
-                },
-            ) = (&mut current.route.answer, answered.answer)
+            ) = (&current.route.answer, answered.answer)
             {
-                *suggested = next;
-                *recent = latest;
+                let next = RouteAnswer::Rule {
+                    to: to.clone(),
+                    suggested,
+                    recent,
+                    site: site.clone(),
+                };
+                current.route.answer = keep_rows(&current.route.answer, next);
             }
             if let Err(error) = routing::write_record(
                 &current.bundle,
@@ -373,5 +398,74 @@ impl Worker {
             };
             self.publish();
         }
+    }
+}
+
+/// `next` with every row `shown` already listed kept where it was, since
+/// the pointer may be on it: a row takes its new name and reason (its old
+/// reason when the new one is blank), sessions new to the list come after
+/// it, and no row leaves. A rule's own session still leads.
+fn keep_rows(shown: &RouteAnswer, next: RouteAnswer) -> RouteAnswer {
+    let before = listed(shown);
+    if before.is_empty() {
+        return next;
+    }
+    let fresh: Vec<RouteDest> = listed(&next).into_iter().cloned().collect();
+    if fresh.is_empty() {
+        return shown.clone();
+    }
+    let latest = |old: &RouteDest| match fresh.iter().find(|d| d.session == old.session) {
+        Some(new) if new.why.is_empty() => RouteDest {
+            why: old.why.clone(),
+            ..new.clone()
+        },
+        Some(new) => new.clone(),
+        None => old.clone(),
+    };
+    let (above, below): (Vec<&RouteDest>, Vec<&RouteDest>) = match shown {
+        RouteAnswer::Rule {
+            to,
+            suggested,
+            recent,
+            ..
+        } => (
+            std::iter::once(to).chain(suggested).collect(),
+            recent.iter().collect(),
+        ),
+        RouteAnswer::Guess {
+            suggested, recent, ..
+        } => (suggested.iter().collect(), recent.iter().collect()),
+        _ => (Vec::new(), before.clone()),
+    };
+    let mut suggested: Vec<RouteDest> = above.into_iter().map(latest).collect();
+    let mut recent: Vec<RouteDest> = below.into_iter().map(latest).collect();
+    recent.extend(
+        fresh
+            .iter()
+            .filter(|new| !before.iter().any(|old| old.session == new.session))
+            .cloned(),
+    );
+    match next {
+        RouteAnswer::Rule { to, site, .. } => {
+            suggested.retain(|dest| dest.session != to.session);
+            recent.retain(|dest| dest.session != to.session);
+            RouteAnswer::Rule {
+                to,
+                suggested,
+                recent,
+                site,
+            }
+        }
+        RouteAnswer::Guess { site, .. } => RouteAnswer::Guess {
+            suggested,
+            recent,
+            site,
+        },
+        RouteAnswer::NoAnswer { .. } => RouteAnswer::NoAnswer {
+            recent: suggested.into_iter().chain(recent).collect(),
+        },
+        _ => RouteAnswer::Nothing {
+            recent: suggested.into_iter().chain(recent).collect(),
+        },
     }
 }

@@ -20,8 +20,8 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow};
 
 use crate::app_settings::AppSettings;
-use crate::desktop::activity::DesktopActivity;
-use crate::desktop::events::{EventReader, TranscriptPhase, VoiceEvent};
+use crate::desktop::activity::{DesktopActivity, last_completed_at};
+use crate::desktop::events::EventReader;
 use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcuts, DesktopTranscriptionSnapshot,
 };
@@ -59,6 +59,8 @@ pub(crate) struct WindowsDesktopHost {
     activity: DesktopActivity,
     /// When the current session's newest dictation completed.
     last_completed_at: Option<u64>,
+    /// When this host started, so a previous session's failure is ignored.
+    started_at: u64,
     listener: Option<RunningListener>,
     session_before_start: Option<u64>,
     awaiting_session_start: bool,
@@ -86,6 +88,8 @@ pub(crate) struct WindowsDesktopHost {
     /// The newest foreground window of another app, where the tray's Paste
     /// last dictation goes once its menu has taken the foreground.
     foreground: ForeignWindow,
+    /// The local API's `/dictations` controls, for whichever listener runs.
+    dictations: crate::dictation::service::DictationQueue,
 }
 
 /// Names the event that marks the running Hex app in this login session.
@@ -192,12 +196,14 @@ impl WindowsDesktopHost {
         settings_error: Option<String>,
         history: Option<History>,
         indicator: crate::rune_hud::HudSender,
+        dictations: crate::dictation::service::DictationQueue,
     ) -> Self {
         crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let mut event_reader = EventReader::open(&event_path);
         let mut activity = DesktopActivity::default();
         activity.refresh(&mut event_reader);
         let last_completed_at = last_completed_at(event_reader.events().iter());
+        let started_at = crate::desktop::events::now_ms();
         let mode_runtime = Arc::new(RwLock::new(
             crate::dictation::modes::ModeRuntime::from_settings(&settings),
         ));
@@ -216,6 +222,7 @@ impl WindowsDesktopHost {
             event_reader,
             activity,
             last_completed_at,
+            started_at,
             listener: None,
             session_before_start: None,
             awaiting_session_start: false,
@@ -237,6 +244,7 @@ impl WindowsDesktopHost {
             automatic_preparation: false,
             updater: crate::updater::Updater::start(),
             foreground: ForeignWindow::default(),
+            dictations,
         };
         crate::transcription::models::delete_set_aside();
         host.refresh_personal_commands_host();
@@ -414,6 +422,7 @@ impl WindowsDesktopHost {
         let config = crate::windows::dictation::WindowsDictationConfig {
             swap_failures: Some(swap_failure_sender),
             commands: Some(command_receiver),
+            dictations: self.dictations.clone(),
             history: self.history.clone(),
             last_dictation: self.last_dictation.clone(),
             indicator: Some(self.indicator.clone()),
@@ -692,8 +701,11 @@ impl WindowsDesktopHost {
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
-                warning: visible_failure(&self.activity, self.last_completed_at)
-                    .or_else(|| self.indicator.failure()),
+                warning: self.indicator.failure(),
+                last_failure: self
+                    .activity
+                    .visible_failure_since(self.started_at, self.last_completed_at),
+                notice: None,
                 shortcuts: DesktopShortcuts::Registered,
                 shortcuts_configurable: false,
             },
@@ -725,26 +737,6 @@ impl Drop for WindowsDesktopHost {
     }
 }
 
-/// When the current session's newest dictation completed. `events` is
-/// oldest first, as `EventReader` keeps them.
-fn last_completed_at<'a>(events: impl DoubleEndedIterator<Item = &'a VoiceEvent>) -> Option<u64> {
-    for event in events.rev() {
-        match event {
-            VoiceEvent::SessionStarted { .. } => return None,
-            VoiceEvent::Transcript {
-                timestamp_ms,
-                phase: TranscriptPhase::Completed,
-                text,
-                ..
-            } if !text.trim().is_empty() => return Some(*timestamp_ms),
-            _ => {}
-        }
-    }
-    None
-}
-
-/// The newest failure, hidden once a later dictation completed, so a silent
-/// failure still reaches the Settings window without sticking around.
 /// The newest foreground window another process owns, polled with the
 /// runtime's refresh.
 #[derive(Default)]
@@ -784,14 +776,6 @@ impl ForeignWindow {
     }
 }
 
-fn visible_failure(activity: &DesktopActivity, last_completed_at: Option<u64>) -> Option<String> {
-    activity
-        .last_failure
-        .as_ref()
-        .filter(|(failed_at, _)| last_completed_at.is_none_or(|completed| completed < *failed_at))
-        .map(|(_, message)| message.clone())
-}
-
 #[cfg(not(test))]
 fn save_listening(settings: &AppSettings) -> Result<()> {
     settings.save()
@@ -807,31 +791,6 @@ fn save_listening(_: &AppSettings) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn transcript(timestamp_ms: u64, text: &str) -> VoiceEvent {
-        VoiceEvent::Transcript {
-            timestamp_ms,
-            phase: TranscriptPhase::Completed,
-            latency_ms: 10,
-            text: text.into(),
-        }
-    }
-
-    #[test]
-    fn the_newest_completion_is_scoped_to_the_current_session() {
-        let events = [
-            transcript(1, "Old session"),
-            VoiceEvent::SessionStarted { timestamp_ms: 2 },
-        ];
-        assert_eq!(last_completed_at(events.iter()), None);
-        let events = [
-            VoiceEvent::SessionStarted { timestamp_ms: 2 },
-            transcript(3, "First"),
-            transcript(4, "Second"),
-            transcript(5, "  "),
-        ];
-        assert_eq!(last_completed_at(events.iter()), Some(4));
-    }
-
     #[test]
     fn an_isolated_data_root_has_its_own_instance_event() {
         assert_eq!(instance_event_name(None), APP_INSTANCE_EVENT);
@@ -846,18 +805,5 @@ mod tests {
             isolated,
             instance_event_name(Some(std::path::Path::new(r"C:\bench\other\hex")))
         );
-    }
-
-    #[test]
-    fn newest_failure_shows_until_a_later_transcript_completes() {
-        let activity = DesktopActivity {
-            last_failure: Some((5, "OpenCode generation failed".into())),
-            ..DesktopActivity::default()
-        };
-        assert_eq!(
-            visible_failure(&activity, Some(4)).as_deref(),
-            Some("OpenCode generation failed")
-        );
-        assert_eq!(visible_failure(&activity, Some(6)), None);
     }
 }
