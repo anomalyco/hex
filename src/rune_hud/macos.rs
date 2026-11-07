@@ -175,11 +175,14 @@ impl Hud {
         }
         let (width, height) = WINDOW;
         let content = content(tuning.island_spread);
-        // Labs' notch indicator takes the top position on a notched screen;
-        // anywhere else HUD Lab's placement stands.
-        let ears = (crate::labs::notch_indicator() && self.position == IndicatorPosition::Top)
-            .then(|| hud_placement::ears(&metrics, content))
-            .flatten();
+        // Labs' notch indicator takes any shown position on a notched screen;
+        // Hidden and flat screens leave HUD Lab's placement standing.
+        let ears = hud_placement::notch_placement(
+            crate::labs::notch_indicator(),
+            self.position,
+            &metrics,
+            content,
+        );
         let placed = ears.unwrap_or_else(|| {
             hud_placement::place(
                 tuning.placement,

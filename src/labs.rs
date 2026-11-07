@@ -1075,8 +1075,8 @@ pub fn meeting_notes_vocabulary() -> bool {
     on(MEETING_NOTES_VOCABULARY) && Feature::MeetingNotesVocabulary.on_this_os()
 }
 
-/// With the indicator at the top, the HUD grows out of the notch on a
-/// screen that has one (macOS; read each time the HUD is placed).
+/// At either visible indicator position, the HUD grows out of the notch on
+/// a screen that has one (macOS; read each time the HUD is placed).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn notch_indicator() -> bool {
     on(NOTCH_INDICATOR) && Feature::NotchIndicator.on_this_os()
