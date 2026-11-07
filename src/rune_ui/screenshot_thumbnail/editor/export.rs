@@ -151,8 +151,9 @@ fn encode(width: u32, height: u32, rgba: &[u8], _scale: f32) -> anyhow::Result<V
     Ok(bytes)
 }
 
+/// `png` to `out`; a send says `words`, or [`SEND_TEXT`] without any.
 #[cfg(target_os = "macos")]
-pub(super) fn deliver(out: &Out, png: &[u8]) -> anyhow::Result<()> {
+pub(super) fn deliver(out: &Out, png: &[u8], words: &str) -> anyhow::Result<()> {
     use crate::screenshots::save;
     match out {
         Out::Copy => save::copy(png, None),
@@ -163,13 +164,14 @@ pub(super) fn deliver(out: &Out, png: &[u8]) -> anyhow::Result<()> {
         Out::Send(dest) => {
             let folder = std::env::temp_dir().join("hex-screenshots");
             let path = save::write(&folder, png)?;
-            crate::capture_host::send_image(&dest.session, SEND_TEXT, &path)
+            let text = if words.is_empty() { SEND_TEXT } else { words };
+            crate::capture_host::send_image(&dest.session, text, &path)
         }
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn deliver(_: &Out, _: &[u8]) -> anyhow::Result<()> {
+pub(super) fn deliver(_: &Out, _: &[u8], _: &str) -> anyhow::Result<()> {
     anyhow::bail!("the screenshot editor exports on macOS only")
 }
 

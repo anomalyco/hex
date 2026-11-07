@@ -36,7 +36,10 @@ fn the_shot_fits_the_display_and_never_grows_past_its_points() {
     assert_eq!(layout.image[2..], [720.0, 450.0]);
     let [x, y, w, h] = layout.panel;
     assert_eq!(w, 736.0);
-    assert_eq!(h, PAD + CHIP_H + GAP + 450.0 + PAD);
+    assert_eq!(
+        h,
+        PAD + CHIP_H + GAP + 450.0 + GAP + words_height("", w - 2.0 * PAD) + PAD
+    );
     assert_eq!(
         [x, y],
         [
@@ -279,6 +282,101 @@ fn an_export_draws_the_marks_over_the_shot() {
     }
 }
 
+/// What the goldens and the frames say over the shot.
+const WORDS: &str = "The padding on the left of this dialog is tighter than on the right. \
+                     Match it to the capsule's, then check the dark theme too.";
+
+#[test]
+fn words_land_only_while_a_dictation_is_transcribed() {
+    let mut editor = Editor::still(shot([800, 600], 2.0), [1470.0, 956.0]);
+    let mut tx = Tx::default();
+    editor.heard(Some("stray".into()), &mut tx);
+    assert!(editor.words.is_empty(), "nothing was being transcribed");
+
+    editor.listen(Listen::Recording, &mut tx);
+    editor.listen(Listen::Transcribing, &mut tx);
+    editor.heard(Some(" Too tight. ".into()), &mut tx);
+    editor.listen(Listen::Transcribing, &mut tx);
+    editor.heard(Some("Match the capsule.".into()), &mut tx);
+    assert_eq!(editor.words, "Too tight. Match the capsule.");
+    assert_eq!(editor.listen, Listen::Idle);
+
+    editor.listen(Listen::Transcribing, &mut tx);
+    editor.heard(None, &mut tx);
+    assert_eq!(
+        editor.words, "Too tight. Match the capsule.",
+        "none keeps them"
+    );
+}
+
+#[test]
+fn escape_cancels_the_words_and_their_send_but_keeps_the_panel() {
+    let mut editor = Editor::still(shot([800, 600], 2.0), [1470.0, 956.0]);
+    let mut tx = Tx::default();
+    editor.listen(Listen::Recording, &mut tx);
+    let dest = Dest {
+        session: "ses_a".into(),
+        name: "Hex editor".into(),
+        folder: None,
+    };
+    editor.deliver(Out::Send(dest.clone()), &mut tx);
+    assert_eq!(editor.waiting, Some(dest), "the send waits for the words");
+
+    assert!(on_key(&mut editor, &key(Key::Escape), &mut tx));
+    assert!(editor.on, "the panel stays");
+    assert_eq!(editor.listen, Listen::Idle);
+    assert_eq!(editor.waiting, None, "and never sends");
+    editor.heard(Some("late".into()), &mut tx);
+    assert!(editor.words.is_empty(), "cancelled words never land");
+
+    on_key(&mut editor, &key(Key::Escape), &mut tx);
+    assert!(!editor.on, "the next Escape closes it");
+}
+
+#[test]
+fn a_waiting_send_goes_once_the_words_land() {
+    // No shot, so the send that goes stops before exporting anything.
+    let mut editor = Editor {
+        on: true,
+        ..Editor::default()
+    };
+    let mut tx = Tx::default();
+    editor.listen(Listen::Transcribing, &mut tx);
+    editor.deliver(
+        Out::Send(Dest {
+            session: "ses_a".into(),
+            name: "Hex editor".into(),
+            folder: None,
+        }),
+        &mut tx,
+    );
+    assert!(editor.waiting.is_some());
+    editor.heard(Some("Ship it.".into()), &mut tx);
+    assert_eq!(editor.waiting, None);
+    assert_eq!(editor.words, "Ship it.");
+}
+
+#[test]
+fn the_words_row_grows_to_three_lines() {
+    let one = words_height("", 700.0);
+    assert!(one >= CHIP_H);
+    assert_eq!(words_height("Too tight", 700.0), one);
+    let more = words_height(WORDS, 400.0);
+    assert!(more > one, "{more} > {one}");
+    let most = words_height(&WORDS.repeat(20), 400.0);
+    assert_eq!(
+        most,
+        words_height(&WORDS.repeat(40), 400.0),
+        "at most three"
+    );
+    let editor = Editor {
+        words: WORDS.repeat(20),
+        ..Editor::still(shot([1440, 900], 2.0), [1470.0, 956.0])
+    };
+    let [.., ph] = editor.layout().panel;
+    assert!(ph <= 956.0 - MARGIN, "{ph}: the panel still fits");
+}
+
 fn key(key: Key) -> KeyEvent {
     KeyEvent {
         key,
@@ -287,8 +385,8 @@ fn key(key: Key) -> KeyEvent {
 }
 
 /// The editor over a 960 × 640 display: a 1440 × 900 shot at 2× with an
-/// arrow, a box, text, and a crop, then with the Send to… list open,
-/// against `tests/golden/screenshot-editor-*.png`. `HEX_UPDATE_GOLDENS=1`
+/// arrow, a box, text, and a crop, then with the Send to… list open, then
+/// with words said over it while a dictation still records, against `tests/golden/screenshot-editor-*.png`. `HEX_UPDATE_GOLDENS=1`
 /// rewrites them and `HEX_GOLDEN_RENDERS` also writes them there. Without a
 /// GPU adapter it skips. Checked on Linux only, like every golden.
 #[test]
@@ -301,7 +399,11 @@ fn editor_goldens() {
     const SCREEN: [f32; 2] = [960.0, 640.0];
     let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
     let mut misses = Vec::new();
-    for (name, send) in [("marks", false), ("send", true)] {
+    for (name, send, words) in [
+        ("marks", false, false),
+        ("send", true, false),
+        ("words", false, true),
+    ] {
         for dark in [false, true] {
             let theme = if dark { "dark" } else { "light" };
             let name = format!("screenshot-editor-{name}-{theme}");
@@ -322,6 +424,10 @@ fn editor_goldens() {
                 },
             ];
             editor.crop = Some([160.0, 120.0, 1180.0, 720.0]);
+            if words {
+                editor.words = WORDS.into();
+                editor.listen = Listen::Recording;
+            }
             if send {
                 editor.send = Some(SendList {
                     query: "hex".into(),
@@ -392,7 +498,8 @@ fn editor_goldens() {
 }
 
 /// `HEX_SCREENSHOT_FRAMES=<folder>` writes the editor opening over a 960 ×
-/// 640 display, a box and an arrow drawn, then closing, at 60 fps, dark, to
+/// 640 display, a box and an arrow drawn, words said over it, then
+/// closing, at 60 fps, dark, to
 /// `<folder>/editor/`. Without the variable or a GPU adapter it does
 /// nothing.
 #[test]
@@ -436,7 +543,7 @@ fn editor_frames() {
     };
     let (box_from, box_to) = ([300.0, 260.0], [760.0, 520.0]);
     let (arrow_from, arrow_to) = ([1100.0, 770.0], [790.0, 540.0]);
-    for index in 0..=220usize {
+    for index in 0..=330usize {
         match index {
             10 => rt.update(|s: &mut Editor, tx| {
                 s.on = true;
@@ -460,7 +567,10 @@ fn editor_frames() {
                 lerp(arrow_from, arrow_to, (index - 115) as f32 / 25.0),
             ),
             141 => drag(&mut rt, Phase::Up, arrow_to),
-            190 => rt.update(|s: &mut Editor, tx| s.close(tx)),
+            160 => rt.update(|s: &mut Editor, tx| s.listen(Listen::Recording, tx)),
+            220 => rt.update(|s: &mut Editor, tx| s.listen(Listen::Transcribing, tx)),
+            240 => rt.update(|s: &mut Editor, tx| s.heard(Some(WORDS.into()), tx)),
+            300 => rt.update(|s: &mut Editor, tx| s.close(tx)),
             _ => {}
         }
         rt.frame(1.0 / 60.0);
