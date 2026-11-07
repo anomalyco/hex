@@ -203,10 +203,12 @@ substitute for source inspection or a second roadmap.
   app serves it on every OS, as does `hex service [--embedded]`; the discovery
   file is `local-api.json` in the data folder (mode 0600 on Unix, the per-user
   `%APPDATA%` ACL on Windows). `/dictations` (`local_api::dictation`) runs on
-  the macOS recognition loop and the Linux listener, sharing the protocol,
-  owner tokens, lease, and levels in `dictation::service`; on Windows and
-  `hex service` it answers `service-capture-unavailable`, and off macOS
-  `/profile/vitals` answers 503.
+  the macOS recognition loop and the Linux and Windows listeners, sharing the
+  protocol, owner tokens, lease, and levels in `dictation::service`; a start
+  with `"partials": true` also streams the live text on
+  `/dictations/{id}/partials` where the listener streams the recording
+  (Linux and Windows, `dictationPartials`). `hex service` answers
+  `service-capture-unavailable`, and off macOS `/profile/vitals` answers 503.
   `/control` carries the `hex` control commands on every OS (`control`).
 - `control`: the release `hex` control surface on every OS: the versioned
   `ControlRequest`/`ControlReply` protocol, the settings registry behind

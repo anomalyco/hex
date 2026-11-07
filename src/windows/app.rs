@@ -86,6 +86,8 @@ pub(crate) struct WindowsDesktopHost {
     /// The newest foreground window of another app, where the tray's Paste
     /// last dictation goes once its menu has taken the foreground.
     foreground: ForeignWindow,
+    /// The local API's `/dictations` controls, for whichever listener runs.
+    dictations: crate::dictation::service::DictationQueue,
 }
 
 /// Names the event that marks the running Hex app in this login session.
@@ -192,6 +194,7 @@ impl WindowsDesktopHost {
         settings_error: Option<String>,
         history: Option<History>,
         indicator: crate::rune_hud::HudSender,
+        dictations: crate::dictation::service::DictationQueue,
     ) -> Self {
         crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let mut event_reader = EventReader::open(&event_path);
@@ -237,6 +240,7 @@ impl WindowsDesktopHost {
             automatic_preparation: false,
             updater: crate::updater::Updater::start(),
             foreground: ForeignWindow::default(),
+            dictations,
         };
         crate::transcription::models::delete_set_aside();
         host.refresh_personal_commands_host();
@@ -414,6 +418,7 @@ impl WindowsDesktopHost {
         let config = crate::windows::dictation::WindowsDictationConfig {
             swap_failures: Some(swap_failure_sender),
             commands: Some(command_receiver),
+            dictations: self.dictations.clone(),
             history: self.history.clone(),
             last_dictation: self.last_dictation.clone(),
             indicator: Some(self.indicator.clone()),
