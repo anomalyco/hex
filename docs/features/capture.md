@@ -407,17 +407,23 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   it; nothing sends until Kit picks. Linux: closed,
 │   │   with Paste, Inspect, and Send to…, which opens them on a click
 │   │   ├── "Send to" over up to five rows, suggested then the newest
-│   │   │   sessions, with no numbers and no footer; "⇧ remembers" on the
-│   │   │   header's right when a pick can save a rule. The first
-│   │   │   carries its reason in the accent. A reason is a real one in plain
-│   │   │   words ("you were just in it", "same page", "mentioned", "recent")
-│   │   │   or nothing; never "guess"
-│   │   ├── Shift down (a guess or rule with a site or app) -> "⇧ remembers"
-│   │   │   lights, and the highlighted row reads "always"; in the search the
-│   │   │   footer reads "Always send [site] to [row]", the site and the row's
-│   │   │   name each in a rounded-rect badge with its kind's icon (a globe for
-│   │   │   a site, a window for an app, a bubble for the session). Shift+click
-│   │   │   (or ⇧⏎ in the search)
+│   │   │   sessions, with no numbers and no footer; "⇧-click to always send
+│   │   │   [site] here" on the header's right when a pick can save a rule.
+│   │   │   The first carries its reason in the accent. A reason is a real one
+│   │   │   in plain words ("you were just in it", "same page", "mentioned",
+│   │   │   "recent") or nothing; never "guess". No row moves once shown: a
+│   │   │   later answer gives a row its new reason in place and adds new
+│   │   │   sessions last (`routes::keep_rows`, as the router does)
+│   │   ├── Shift down (a guess or rule with a site or app) -> the row under
+│   │   │   the pointer reads "always" in the accent and the header reads
+│   │   │   "Always send [site] to [row]" (with the pointer off the rows,
+│   │   │   "Always send [site] to…" and no row is marked). In the search the
+│   │   │   target is the row under the pointer, else the highlighted one: the
+│   │   │   highlight follows the pointer as in a menu and the arrows go on
+│   │   │   from it. The footer reads "Always send [site] to [row]", the site
+│   │   │   and the row's name each in a rounded-rect badge with its kind's
+│   │   │   icon (a globe for a site, a window for an app, a bubble for the
+│   │   │   session). Shift+click (or ⇧⏎ in the search)
 │   │   │   sends and saves the rule: "Sent to X · always", and its Undo
 │   │   │   takes back the send and the rule (what the key held before, or
 │   │   │   nothing, comes back). The rule names that session (`ses_…`),
