@@ -172,12 +172,17 @@ pub(super) fn observation_mask() -> u64 {
     OBSERVATION_MASK
 }
 
+/// The callback-visible switches that decide what the tap keeps from the app.
+pub(super) struct TapFlags {
+    pub(super) takes_escape: Arc<AtomicBool>,
+    pub(super) takes_cancel: Arc<AtomicBool>,
+    pub(super) caps_lock_cancel: Arc<AtomicBool>,
+}
+
 pub(super) fn run_event_tap(
     sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
-    takes_escape: Arc<AtomicBool>,
-    takes_cancel: Arc<AtomicBool>,
-    caps_lock_cancel: Arc<AtomicBool>,
+    flags: TapFlags,
     pending: PendingInputEvents,
     run_loop: Arc<AtomicPtr<c_void>>,
     ready: SyncSender<Result<()>>,
@@ -185,9 +190,9 @@ pub(super) fn run_event_tap(
     let mut context = Box::new(EventTapContext {
         sender,
         activity,
-        takes_escape,
-        takes_cancel,
-        caps_lock_cancel,
+        takes_escape: flags.takes_escape,
+        takes_cancel: flags.takes_cancel,
+        caps_lock_cancel: flags.caps_lock_cancel,
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),

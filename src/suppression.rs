@@ -342,9 +342,11 @@ impl InputMonitor {
             run_event_tap(
                 sender,
                 tap_activity,
-                tap_takes_escape,
-                tap_takes_cancel,
-                tap_caps_lock_cancel,
+                TapFlags {
+                    takes_escape: tap_takes_escape,
+                    takes_cancel: tap_takes_cancel,
+                    caps_lock_cancel: tap_caps_lock_cancel,
+                },
                 tap_pending,
                 tap_run_loop,
                 ready_sender,
