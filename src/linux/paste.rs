@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::io::{ErrorKind, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
@@ -227,12 +228,55 @@ pub(crate) fn wayland_offers(interface: &str) -> bool {
 }
 
 fn on_path(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|dir| {
+    on_path_in(std::env::var_os("PATH").as_deref(), program)
+}
+
+fn on_path_in(path: Option<&OsStr>, program: &str) -> bool {
+    path.is_some_and(|path| {
+        std::env::split_paths(path).any(|dir| {
             std::fs::metadata(dir.join(program))
                 .is_ok_and(|file| file.is_file() && file.permissions().mode() & 0o111 != 0)
         })
     })
+}
+
+/// Every Wayland copy and paste runs `wl-copy`, from the `wl-clipboard`
+/// package that direct installs do not bring.
+const WL_COPY: &str = "wl-copy";
+
+/// How a paste explains a Wayland session without `wl-copy`: the spawn error
+/// alone ("No such file or directory") never named the package.
+const WL_COPY_MISSING: &str = "wl-copy is not installed. Install the wl-clipboard package (for example `sudo apt install wl-clipboard`), then try again.";
+
+/// What Settings and `hex status` warn with while this Wayland session can't
+/// copy or paste at all.
+pub(crate) fn missing_wayland_helper() -> Option<&'static str> {
+    if !LinuxSession::detect().is_wayland() {
+        return None;
+    }
+    missing_wl_copy(std::env::var_os("PATH").as_deref())
+}
+
+/// The listener warning Settings and `hex status` show while one runs.
+pub(crate) fn listener_warning(running: bool) -> Option<String> {
+    if !running {
+        return None;
+    }
+    missing_wayland_helper().map(str::to_owned)
+}
+
+/// `Some` when `path` has no executable `wl-copy`; split out so a test needn't
+/// change the process environment.
+fn missing_wl_copy(path: Option<&OsStr>) -> Option<&'static str> {
+    (!on_path_in(path, WL_COPY)).then_some(WL_COPY_MISSING)
+}
+
+/// Fails before spawning a helper that isn't there, naming what to install.
+fn require_wl_copy() -> Result<()> {
+    match missing_wayland_helper() {
+        Some(message) => Err(eyre!("{message}")),
+        None => Ok(()),
+    }
 }
 
 /// A Wayland paste that only reached the clipboard.
@@ -295,6 +339,7 @@ impl LinuxPaster {
                     .wrap_err("could not own the X11 clipboard")
             }
             Backend::Wayland(_) => {
+                require_wl_copy()?;
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", "text/plain;charset=utf-8"]);
                 run_helper(copy, text.as_bytes(), &self.stop, HELPER_TIMEOUT)
@@ -362,6 +407,7 @@ impl LinuxPaster {
                 paster.paste(mime, bytes, &self.stop, &self.keys, paste_with_shift)?
             }
             Backend::Wayland(wayland) => {
+                require_wl_copy()?;
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", mime.wayland()]);
                 run_helper(copy, bytes, &self.stop, HELPER_TIMEOUT)
@@ -636,6 +682,22 @@ mod tests {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", script]);
         command
+    }
+
+    #[test]
+    fn a_missing_wl_copy_names_the_package_to_install() {
+        let missing = missing_wl_copy(Some(OsStr::new("/hex-test-no-such-directory")));
+        assert_eq!(missing, Some(WL_COPY_MISSING));
+        assert!(missing.unwrap().contains("wl-clipboard"));
+
+        // A `wl-copy` on PATH that is executable is enough.
+        let directory = std::env::temp_dir().join(format!("hex-paste-path-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let helper = directory.join("wl-copy");
+        std::fs::write(&helper, b"").unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(missing_wl_copy(Some(directory.as_os_str())), None);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

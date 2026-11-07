@@ -190,6 +190,11 @@ sh install-linux.sh
 ~/.local/bin/hex
 ```
 
+On Debian or Ubuntu, install the Wayland helpers with `sudo apt install
+wl-clipboard wtype`; on Fedora, `sudo dnf install wl-clipboard wtype`. `wtype`
+is only needed on wlroots-style compositors (Sway, niri, Hyprland), where Hex
+uses it; GNOME and KDE paste through their RemoteDesktop portal.
+
 The installer verifies the signed release feed, exact artifact size, and
 SHA-256 before installing. It uses no root access. It creates the managed
 version layout, `~/.local/bin/hex`, a desktop launcher, and an XDG autostart
@@ -561,9 +566,10 @@ again from Hex until something else copies. It restores only if nothing newer
 replaced the transcript in the meantime: a later dictation, a copy, or another
 application. An empty clipboard stays empty. A larger or unreadable clipboard
 is left holding the transcript, and Hex's log says why. When automatic paste
-fails, the transcript stays on the clipboard for Ctrl+V. Nothing confirms the
-target read the paste, so a target stalled past the delay can paste the
-restored clipboard instead (see [#24](https://github.com/anomalyco/hex/issues/24)).
+fails after `wl-copy` has taken the transcript, it stays on the clipboard for
+Ctrl+V. Nothing confirms the target read the paste, so a target stalled past
+the delay can paste the restored clipboard instead (see
+[#24](https://github.com/anomalyco/hex/issues/24)).
 On Wayland, restoring needs the compositor's `ext-data-control` protocol
 (KDE Plasma 6, recent wlroots compositors) or `wlr-data-control` (wlroots
 compositors, niri, Hyprland); without either the transcript stays, and
@@ -587,9 +593,11 @@ approved, so you're asked only once.
 - Export the compositor's nonempty `WAYLAND_DISPLAY` in the launch environment.
   Hex and its window (winit) select the same native backend even when XWayland's
   `DISPLAY` is also present. `XDG_SESSION_TYPE` alone does not select Wayland.
-- Install `wl-clipboard`. Hex copies each transcript, then sends Ctrl+V (or
-  Ctrl+Shift+V with terminal paste) through one of two general paths, chosen at
-  the first paste:
+- Install `wl-clipboard`. Every Wayland copy and paste runs `wl-copy`; without
+  it, Settings and `hex status` warn while the listener runs, and a dictation
+  fails naming the package to install. Hex copies each transcript, then sends
+  Ctrl+V (or Ctrl+Shift+V with terminal paste) through one of two general
+  paths, chosen at the first paste:
   - `wtype`, when the compositor offers the virtual keyboard protocol
     (`zwp_virtual_keyboard_manager_v1`; wlroots compositors and niri) and
     `wtype` is installed.
@@ -599,7 +607,8 @@ approved, so you're asked only once.
     token (`remote-desktop-token` in Hex's data folder), so it asks once. Revoke
     it in the desktop's settings.
   - With neither, the dictation fails with "Copied to the clipboard; press
-    Ctrl+V to paste" and the transcript stays on the clipboard.
+    Ctrl+V to paste" and, with `wl-copy` installed, the transcript stays on the
+    clipboard.
 
   There is no silent XWayland, direct-typing, uinput, or privileged
   input-injection fallback; the only XWayland uses besides the HUD are the

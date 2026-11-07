@@ -516,6 +516,10 @@ listener worker fails -> reap worker -> show failure
   ├── Retry -> new managed listener -> fresh capture -> expected output
   └── Dismiss -> clear error                            // not evidence of recovery
 
+Wayland listener starts without wl-copy -> process.log warns once; Settings and
+`hex status` carry the warning
+  -> capture and transcription still run; copy and paste fail naming wl-clipboard
+
 close the window -> Hex keeps running
   └── uncommitted shortcut capture -> cancel edit -> restore prior listening
 

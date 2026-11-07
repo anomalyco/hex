@@ -1738,6 +1738,10 @@ Linux beta                               // not macOS feature parity
 │           // linux/clipboard.rs, gnome_desktops_point_to_the_clipboard_lab_until_it_is_on;
 │           // not run on GNOME
 │   └── Wayland: wl-copy, then the shortcut, chosen at the first paste  // linux.wayland-paste
+│       ├── wl-copy not on PATH (direct installs add no packages) -> Settings and
+│       │   `hex status` warn while the listener runs; every copy and paste fails
+│       │   naming wl-clipboard before a helper is spawned, so a dictation doesn't
+│       │   record only to fail on the missing helper
 │       ├── Asked by a modifier shortcut -> wait for its portal release + 250 ms
 │       │   (2 s cap without a release); after a hex command -> 250 ms
 │       │   // Hyprland merges held physical modifiers into virtual-keyboard keys (#353)
