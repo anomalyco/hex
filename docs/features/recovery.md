@@ -298,7 +298,7 @@ virtual input or iPhone Continuity microphone (macOS: ccwd/ccwl transport) // #1
   ├── lid closed, nothing else -> "the built-in microphone is off while the lid is closed"
   └── the default, the saved microphone, or --device -> used as named
 
-warm stream keeps running but delivers only exact zeros (macOS, #1122)
+warm stream keeps running but delivers only exact zeros (macOS and Linux, #1122)
   -> that dictation is discarded as near-silent, as before
   -> its finish reopens the microphone like a stream failure // logged once
   -> next dictation records from a fresh stream
@@ -335,6 +335,8 @@ values; no iPhone observed with the lid closed),
 `microphone_loss_with_only_pre_roll_keeps_nothing`,
 `finish_after_an_unread_microphone_loss_takes_the_kept_clip`,
 `a_dictation_of_digital_silence_reopens_the_microphone`;
+[linux/dictation.rs](../../src/linux/dictation.rs):
+`a_digital_silence_finish_asks_to_reopen_the_microphone`;
 [recognition.rs](../../src/recognition.rs):
 `microphone_loss_keeps_a_programmatic_clip_for_finish` (the hold, not a `/finish`
 through the running listener).
@@ -382,7 +384,12 @@ Checks in [dictation/audio.rs](../../src/dictation/audio.rs):
 `enabling_warm_microphone_preserves_pending_capture_and_recovers_after_cancellation`,
 `cold_stream_failure_before_hold_threshold_reopens_for_the_same_press`,
 `cold_stream_failure_after_hold_threshold_still_fails_the_capture`,
-`a_short_microphone_gap_is_filled_with_silence_instead_of_failing_the_capture`; in
+`a_short_microphone_gap_is_filled_with_silence_instead_of_failing_the_capture`;
+in [linux/dictation/gap.rs](../../src/linux/dictation/gap.rs):
+`a_short_microphone_gap_is_padded_with_silence`,
+`a_long_microphone_gap_is_not_stitched`; in
+[linux/dictation.rs](../../src/linux/dictation.rs):
+`a_short_microphone_gap_is_padded_into_a_finished_clip`; in
 [audio.rs](../../src/audio.rs): `overload_glitches_do_not_interrupt_the_stream`,
 `cold_open_retries_the_selected_microphone_before_falling_back`.
 
@@ -408,8 +415,11 @@ latency or the macOS microphone indicator.
 Bluetooth headset's stream skipped about 130–145 ms of audio soon after it
 started, and every gap over 50 ms failed the held capture with the error tone.
 Gaps up to 250 ms are now filled with silence on the timeline, so the capture
-(and its pre-roll ring) keeps going; longer gaps still fail it. The Annotate
-sink still records the gap itself. Not verified on the reporter's headset; the
+(and its pre-roll ring) keeps going; longer gaps still fail it. The Linux
+listener pads the same short gaps into its capture and timeline; a longer one
+ends the capture and starts a fresh one, so audio from either side is never
+stitched together. On macOS, the Annotate sink still records the gap itself.
+Not verified on the reporter's headset; the
 report that a Bluetooth device was used with `avoid_bluetooth_microphone` on
 was not reproduced (a saved Bluetooth microphone, or no other usable input,
 keeps it by design).
@@ -420,8 +430,10 @@ running without an error but delivered only exact zeros, so every dictation
 was discarded as near-silent (`zero_fraction` 1.0) until Hex restarted. A
 finished dictation whose audio through the release is exactly zero now
 reopens the stream the way a stream failure does; a cold microphone
-(release-while-idle) already opens fresh for each press. The first such
-dictation is still discarded. Not verified with a real WhatsApp call.
+(release-while-idle) already opens fresh for each press. The Linux listener
+does the same for a warm microphone; one released while idle opens fresh. The
+first such dictation is still discarded. Not verified with a real WhatsApp
+call.
 
 **Fixed after 3.3.0 ([#1206](https://github.com/anomalyco/hex/issues/1206)):**
 after a burst of overrun warnings while idle, a warm USB microphone's stream

@@ -27,6 +27,10 @@ use crate::transcription::local_transcriber::LocalTranscriber;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 
+mod gap;
+
+use gap::{ChunkStep, chunk_step};
+
 struct Job {
     transcript: PendingTranscript,
     audio_ms: u64,
@@ -500,6 +504,12 @@ pub(crate) fn run(
     // stream's first chunk; recording starts at that chunk.
     let mut start_pending = false;
     let mut clock = StreamClock::default();
+    // The end of the last chunk on this stream's timeline; reset whenever
+    // the stream is closed, replaced, or reopened.
+    let mut last_captured_through: Option<CaptureInstant> = None;
+    // A discontinuity ended the capture a release was finishing: its audio
+    // belongs to the old capture, so replace that once it is submitted.
+    let mut restart_capture = false;
     let mut finishing: Option<Finishing> = None;
     // The recording skips processing (Dictate without processing).
     let mut recording_raw = false;
@@ -560,6 +570,7 @@ pub(crate) fn run(
                 {
                     drop(input);
                     clock.reset();
+                    last_captured_through = None;
                     input = microphone_input(&next, device);
                     release_while_idle = next.release_microphone_while_idle;
                     audio_ready = input.is_open();
@@ -663,6 +674,7 @@ pub(crate) fn run(
             {
                 capture_holds_microphone = false;
                 input.close();
+                last_captured_through = None;
                 audio_ready = false;
             }
         }
@@ -687,7 +699,7 @@ pub(crate) fn run(
                 raw,
                 ..
             } = finishing.take().expect("a release is finishing");
-            submit_capture(
+            let silent = submit_capture(
                 &mut capture,
                 release.ended_at(),
                 tail,
@@ -699,9 +711,20 @@ pub(crate) fn run(
                 raw,
                 &mut active_typing,
             )?;
+            if silent {
+                reopen_silent_stream(&mut input, release_while_idle);
+            }
+            if std::mem::take(&mut restart_capture) {
+                capture = DictationCapture::new(if audio_ready {
+                    input.sample_rate()
+                } else {
+                    16_000
+                });
+            }
             suppressor.restore();
             if release_while_idle && !timeline.wants_audio() {
                 input.close();
+                last_captured_through = None;
                 audio_ready = false;
             }
             emit_state(
@@ -770,6 +793,7 @@ pub(crate) fn run(
             suppressor.restore();
             if release_while_idle && !timeline.wants_audio() {
                 input.close();
+                last_captured_through = None;
                 audio_ready = false;
             }
         }
@@ -848,6 +872,7 @@ pub(crate) fn run(
                     suppressor.restore();
                     if release_while_idle && !timeline.wants_audio() {
                         input.close();
+                        last_captured_through = None;
                         audio_ready = false;
                     }
                     events.dictation(
@@ -897,6 +922,7 @@ pub(crate) fn run(
                     suppressor.restore();
                     if release_while_idle && !timeline.wants_audio() {
                         input.close();
+                        last_captured_through = None;
                         audio_ready = false;
                     }
                     events.dictation(DictationPhase::Cancelled, "")?;
@@ -957,9 +983,69 @@ pub(crate) fn run(
                 samples,
                 captured_through,
             } => {
+                let sample_rate = input.sample_rate();
+                let step = chunk_step(
+                    last_captured_through,
+                    samples.len(),
+                    captured_through,
+                    sample_rate,
+                );
+                if let ChunkStep::Discontinuity(gap) = step {
+                    // A stall this long cannot be bridged: a recording is
+                    // ended as a stream interruption would end it, and audio
+                    // from the far side starts a fresh capture.
+                    tracing::warn!(
+                        gap_ms = gap.as_millis() as u64,
+                        recording = capture.is_recording(),
+                        "microphone audio skipped; discarded the capture"
+                    );
+                    timeline.restart();
+                    clock.reset();
+                    // Only a live service capture, an active recording, or a
+                    // release still finishing a capture loses audio here.
+                    let affected =
+                        service.is_active() || capture.is_recording() || finishing.is_some();
+                    // A release still in its tail finishes with the audio it
+                    // has, from the old capture.
+                    if let Some(finish) = &mut finishing {
+                        finish.release.stop_waiting();
+                    }
+                    if service.is_active() {
+                        capture.cancel();
+                        suppressor.restore();
+                        service.lost(MICROPHONE_LOST);
+                    } else if capture.is_recording() && finishing.is_none() {
+                        capture.cancel();
+                        cancel_typing(&mut active_typing);
+                        feedback::retract_start();
+                        suppressor.restore();
+                        events.dictation(DictationPhase::Cancelled, "")?;
+                    }
+                    if affected {
+                        events.dictation(
+                            DictationPhase::Failed(
+                                "microphone audio skipped; the capture was discarded".into(),
+                            ),
+                            "",
+                        )?;
+                    }
+                    emit_state(
+                        &mut events,
+                        active_state(capture.is_recording(), pending),
+                        &device_label,
+                    )?;
+                    last_captured_through = Some(captured_through);
+                    if finishing.is_some() {
+                        // The release submits the old capture next loop;
+                        // replace it before any later audio arrives.
+                        restart_capture = true;
+                        continue;
+                    }
+                    capture = DictationCapture::new(sample_rate);
+                }
                 clock.chunk(captured_through, Instant::now());
                 if !audio_ready {
-                    capture = DictationCapture::new(input.sample_rate());
+                    capture = DictationCapture::new(sample_rate);
                     audio_ready = true;
                     device_label = input.device_name().to_string();
                 }
@@ -977,15 +1063,34 @@ pub(crate) fn run(
                         &mut service,
                         &suppressor,
                         captured_through,
-                        input.sample_rate(),
+                        sample_rate,
                     );
                 }
-                crate::audio::input_level::record(&samples);
-                timeline.feed(&samples, input.sample_rate(), captured_through);
-                capture.ingest(&samples, captured_through);
+                let mut padding = Vec::new();
+                if let ChunkStep::Pad(frames) = step {
+                    // A short hiccup (often a Bluetooth stream starting) is
+                    // filled with silence on the timeline instead of failing
+                    // the capture.
+                    padding.resize(frames, 0.0);
+                    padding.extend_from_slice(&samples);
+                    tracing::warn!(
+                        gap_ms = (frames as f64 * 1_000.0 / f64::from(sample_rate)) as u64,
+                        recording = capture.is_recording(),
+                        "microphone audio skipped briefly; filled the gap with silence"
+                    );
+                }
+                let samples: &[f32] = if padding.is_empty() {
+                    &samples
+                } else {
+                    &padding
+                };
+                crate::audio::input_level::record(samples);
+                timeline.feed(samples, sample_rate, captured_through);
+                capture.ingest(samples, captured_through);
+                last_captured_through = Some(captured_through);
                 if capture.is_recording() {
-                    indicator.meter(&samples);
-                    service.audio(&samples, Instant::now());
+                    indicator.meter(samples);
+                    service.audio(samples, Instant::now());
                 }
                 if capture.become_intentional(captured_through) && finishing.is_none() {
                     // Ordinary shortcut chords and short taps never mute,
@@ -1015,6 +1120,7 @@ pub(crate) fn run(
             RecoveringAudioInputEvent::Interrupted => {
                 timeline.restart();
                 clock.reset();
+                last_captured_through = None;
                 // A release still in its tail finishes with the audio it has.
                 if let Some(finish) = &mut finishing {
                     finish.release.stop_waiting();
@@ -1044,6 +1150,7 @@ pub(crate) fn run(
             RecoveringAudioInputEvent::Reopened => {
                 timeline.restart();
                 clock.reset();
+                last_captured_through = None;
                 audio_ready = false;
                 device_label = input.device_name().to_string();
                 // A press waiting on the released microphone is already
@@ -1180,7 +1287,7 @@ fn submit_capture(
     print: Option<PrintReply>,
     raw: bool,
     typing: &mut Option<CaptureTyping>,
-) -> Result<()> {
+) -> Result<bool> {
     // A discarded capture drops this guard without starting or ending a
     // session; a transcribed one moves it into the job.
     let typing = typing.take();
@@ -1197,8 +1304,10 @@ fn submit_capture(
             events.dictation(DictationPhase::Discarded, "")?
         }
         Finish::Transcribe(clip) if clip.is_near_silent() => {
+            let silent = clip.is_digital_silence();
             no_speech(print);
-            events.dictation(DictationPhase::Discarded, "")?
+            events.dictation(DictationPhase::Discarded, "")?;
+            return Ok(silent);
         }
         Finish::Transcribe(mut clip) => {
             let audio_ms = clip.duration_ms();
@@ -1233,7 +1342,22 @@ fn submit_capture(
             }
         }
     }
-    Ok(())
+    Ok(false)
+}
+
+/// A warm microphone whose finished dictation was exactly zero: the stream
+/// runs but its device was handed to another app, and stays silent until
+/// reopened (#1122). Reopen it as after a stream failure. A microphone
+/// released while idle already opens fresh for the next press.
+fn reopen_silent_stream(input: &mut RecoveringAudioInput, release_while_idle: bool) {
+    if release_while_idle || !input.is_open() || input.is_recovering() {
+        return;
+    }
+    tracing::warn!(
+        device = %input.device_name(),
+        "dictation audio was digital silence; reopening the microphone"
+    );
+    input.request_recovery();
 }
 
 /// Starts Live typing at the hold threshold (or the Toggle press), before
@@ -1377,6 +1501,71 @@ mod tests {
             clock.at(received + Duration::from_secs(60)),
             Some(through + StreamClock::MAX_LAG)
         );
+    }
+
+    #[test]
+    fn a_short_microphone_gap_is_padded_into_a_finished_clip() {
+        let mut capture = DictationCapture::new(16_000);
+        let start = capture_time();
+        start_capture(&mut capture, start, PRE_ROLL, || {});
+        let first_through = start + Duration::from_secs(1);
+        capture.ingest(&[0.1; 16_000], first_through);
+        // This chunk starts 100 ms after the last one ended.
+        let second_from = first_through + Duration::from_millis(100);
+        let second_through = second_from + Duration::from_secs(1);
+        let ChunkStep::Pad(padding) =
+            chunk_step(Some(first_through), 16_000, second_through, 16_000)
+        else {
+            panic!("a 100 ms gap is padded");
+        };
+        assert_eq!(padding, 1_600);
+        let mut padded = vec![0.0; padding];
+        padded.extend_from_slice(&[0.2; 16_000]);
+        capture.ingest(&padded, second_through);
+
+        // Releasing 500 ms into the second chunk keeps 200 ms of tail: the
+        // clip runs to 1.8 s because the gap is on the timeline. Without the
+        // padding, truncation would drop 100 ms of real speech before it.
+        let released = second_from + Duration::from_millis(500);
+        let Finish::Transcribe(clip) = capture.finish_with_tail(released, POST_RELEASE_TAIL) else {
+            panic!("the release transcribes");
+        };
+        let samples = clip.into_transcription_samples();
+        assert_eq!(samples.len(), 1_800 * 16);
+        assert!(samples[16_000..17_600].iter().all(|sample| *sample == 0.0));
+        assert_eq!(samples[17_600], 0.2);
+        assert_eq!(samples[28_799], 0.2);
+    }
+
+    #[test]
+    fn a_digital_silence_finish_asks_to_reopen_the_microphone() {
+        let (engine, _commands) = TranscriptionEngine::for_test();
+        let (mut events, path) = event_log();
+        let (jobs, queued) = mpsc::sync_channel(2);
+        let mut capture = DictationCapture::new(16_000);
+        let start = capture_time();
+        start_capture(&mut capture, start, PRE_ROLL, || {});
+        let released = start + Duration::from_secs(1);
+        capture.ingest(&[0.0; 16_000], released);
+        let mut pending = 0;
+        let silent = submit_capture(
+            &mut capture,
+            released,
+            POST_RELEASE_TAIL,
+            &engine,
+            &jobs,
+            &mut events,
+            &mut pending,
+            None,
+            false,
+            &mut None,
+        )
+        .unwrap();
+        assert!(silent);
+        assert_eq!(pending, 0);
+        assert!(queued.try_recv().is_err());
+        drop(events);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
