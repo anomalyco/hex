@@ -2018,6 +2018,9 @@ Linux process                            // maintain.linux-service
 │   │       or Wayland socket discovery (unless HEX_SYSTEMD_UNIT explicitly opts in)
 │   └── Two racing launches -> One Hex; the other forwards and exits 0
 ├── hex start / desktop autostart / hex service -> Same, without the window
+│   └── No WAYLAND_DISPLAY (no display at all, or only Xwayland's DISPLAY on a Wayland
+│       login) -> Adopt the manager's live WAYLAND_DISPLAY, else the newest answering
+│       socket (#756); a pure X11 login keeps its X display, so paste keeps reaching X11 apps
 ├── hex dictation|paste-last -> Socket worker -> Listener queue (never the UI thread)
 ├── hex dictate -> Foreground listener; adopts the session's Wayland display like hex service;
 │   `hex` commands reach only the service listener, never it (#1506)

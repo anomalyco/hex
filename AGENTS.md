@@ -296,11 +296,13 @@ substitute for source inspection or a second roadmap.
   capture-transcribe-paste loop with Paste Last,
   and paste.
 - `linux/service` also adopts the session's Wayland display at `hex service`
-  start when the unit has none (Hyprland imports nothing into systemd; #756):
-  the user manager's `WAYLAND_DISPLAY`, else the newest answering
-  `$XDG_RUNTIME_DIR/wayland-*` socket the user owns. `linux/rune_hud`'s
-  `limitation()` names the HUD's failure: no display, no layer-shell, or
-  Rune's overlay error.
+  start when the unit has none, or has only Xwayland's `DISPLAY` on a Wayland
+  login (Hyprland imports nothing into systemd; #756): the user manager's live
+  `WAYLAND_DISPLAY`, else the newest answering `$XDG_RUNTIME_DIR/wayland-*`
+  socket the user owns. A `wayland` `XDG_SESSION_TYPE` (Hex's, else the user
+  manager's) allows the scan; a pure X11 login keeps its X display.
+  `linux/rune_hud`'s `limitation()` names the HUD's failure: no display, no
+  layer-shell, or Rune's overlay error.
 - `linux/gnome_shortcuts`: on GNOME without a GlobalShortcuts portal
   (GNOME 46, #781), Hex's own custom keybindings under
   `…/media-keys/custom-keybindings/hex-*/` via `gsettings`

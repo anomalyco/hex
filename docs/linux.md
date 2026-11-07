@@ -112,8 +112,15 @@ a reboot strands the old path) is replaced at startup by the user manager's
 current value, or dropped so Xlib uses `~/.Xauthority`. A unit started with no
 display at all (the desktop never imported its environment into systemd) adopts
 the user manager's `WAYLAND_DISPLAY`, else the newest Wayland socket of yours in
-`XDG_RUNTIME_DIR` that answers. Hyprland imports nothing by default; add this to
-its config so the service, its paste helpers, and the HUD get your session:
+`XDG_RUNTIME_DIR` that answers. One started with only Xwayland's `DISPLAY` does
+the same when the login is a Wayland session: the user manager names a live
+`WAYLAND_DISPLAY`, or `XDG_SESSION_TYPE` is `wayland` (from Hex's environment,
+else the user manager's). Otherwise a pure X11 login keeps its X display, so
+paste keeps reaching X11 apps. Without the adoption, a Wayland desktop's paste
+goes through XWayland, which native Wayland windows never see, and restoring
+the clipboard clears the compositor's. Hyprland imports nothing by default; add
+this to its config so the service, its paste helpers, and the HUD get your
+session:
 
 ```ini
 exec-once = dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
