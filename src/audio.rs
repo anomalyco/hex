@@ -232,7 +232,7 @@ pub struct AudioInput {
 /// A running stream delivers audio every few milliseconds, even silence. One
 /// that has delivered nothing for this long has stopped without reporting an
 /// error (seen after a burst of overruns, #1206) and is reopened.
-const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(4);
+pub(crate) const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(4);
 
 pub enum AudioInputEvent {
     Chunk {

@@ -12,7 +12,8 @@ use color_eyre::eyre::{Result, eyre};
 use crate::audio::recording_environment::{CaptureMarker, RecordingEnvironmentController};
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::dictation::{
-    ClipSource, DictationCapture, DictationClip, Finish, POST_RELEASE_TAIL, ReleaseTail,
+    CHUNK_GAP_TOLERANCE, ClipSource, DictationCapture, DictationClip, Finish, MAX_PADDED_GAP,
+    POST_RELEASE_TAIL, ReleaseTail,
 };
 use crate::feedback;
 use crate::suppression::PendingInputEvents;
@@ -22,11 +23,6 @@ const RECOGNITION_QUEUE_CAPACITY: usize = 64;
 const MAX_RECOGNITION_BACKLOG: Duration = Duration::from_millis(500);
 /// How long past the tail itself a finish waits for the stream to deliver it.
 const TAIL_DELIVERY_GRACE: Duration = Duration::from_millis(100);
-/// A step in the microphone timeline larger than this is a gap.
-const CHUNK_GAP_TOLERANCE: Duration = Duration::from_millis(50);
-/// Gaps up to this long (a Bluetooth stream's startup hiccup is ~140 ms) are
-/// filled with silence so the capture keeps going; longer ones fail it.
-const MAX_PADDED_GAP: Duration = Duration::from_millis(250);
 
 pub struct RecognitionAudio {
     pub samples: Vec<f32>,
