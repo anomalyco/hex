@@ -156,10 +156,13 @@ Track the remaining shortcut requests explicitly:
   filter, so a Right Control shortcut no longer starts from it while Either
   still does; the shortcut recorder applies the same normalization while the
   listener's input monitor is running. Hex never requests Input Monitoring:
-  the tracker needs already-granted HID listen access (Accessibility grants
-  the listen-event access the shortcut taps need), skips itself otherwise,
-  and gives up rather than delay listener startup. Needs a physical remap run
-  on hardware. CI covers constructed HID snapshots only.
+  the tracker runs only when Hex already has it (turn Hex on under System
+  Settings › Privacy & Security › Input Monitoring and restart Hex), skips
+  itself otherwise, and gives up rather than delay listener startup. Without
+  it, Right Control still starts from a remapped Caps Lock, and correctness
+  depends on the raw Caps Lock callback arriving before its flags event, which
+  is unproven. Needs a physical remap run on hardware. CI covers constructed
+  HID snapshots only.
 
 On-demand rewrite [PR #63](https://github.com/anomalyco/hex/pull/63) remains under
 review: publish the shared last transcript only after successful paste, require

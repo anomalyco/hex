@@ -719,6 +719,12 @@ Caps Lock remapped to Control
   -> side bit set, its physical key not held, Caps Lock held
      -> drop the side bit, keep the general flag -> matches as either side
   -> physical E4 held -> a genuine Right Control press is untouched
+  -> Caps Lock's flags event reaches the tap before the raw callback
+     marks Caps Lock held -> flags pass unchanged
+     -> Right Control still starts; correctness needs the raw callback first,
+        which is not guaranteed
+  -> raw callback lags a real side key while Caps Lock is held
+     -> that one event can lose the side until the next event
   -> IOHIDCheckAccess not granted, open fails, or start times out
      -> tracker inactive, CoreGraphics flags unchanged (today's behavior)
 ```
@@ -735,12 +741,13 @@ Checks: the normalization tests in `app_settings/hotkeys.rs`,
 `suppression/tests.rs` (constructed snapshots and events).
 Issue [#37](https://github.com/anomalyco/hex/issues/37).
 Missing evidence: a physical Caps Lock-to-Control remap has not been run in CI
-or on hardware. Hex never requests Input Monitoring; it uses HID listen access
-macOS may already grant (Accessibility grants the listen-event access the
-shortcut taps need), and skips the tracker when that access is not granted.
-The shortcut recorder normalizes only while the listener's input monitor is
-running; a start that takes too long is told to give up rather than delay the
-listener.
+or on hardware, and ordering the raw callback before the Caps Lock flags event
+is unproven. Hex never requests Input Monitoring, so the tracker runs only when
+Hex already has it (turn Hex on under System Settings › Privacy & Security ›
+Input Monitoring and restart Hex); otherwise it stays off and Right Control
+still starts from a remapped Caps Lock. The shortcut recorder normalizes only
+while the listener's input monitor is running; a start that takes too long is
+told to give up rather than delay the listener.
 
 ### Native Muting And Missed Holds
 

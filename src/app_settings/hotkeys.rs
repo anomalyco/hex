@@ -1164,10 +1164,12 @@ impl PhysicalModifierKeys {
 /// side-specific bit is set without that side's physical key held, its side
 /// bit is cleared and the general flag kept, which matches as either side.
 /// A release, a side press the tracker already sees held, or an inactive
-/// tracker (`None`) leaves `flags` untouched. When Caps Lock is already held
-/// and the raw callback for a real side key lags behind its CoreGraphics
-/// event, that one event can lose the side until the tracker catches up on
-/// the next event; without a held Caps Lock nothing is dropped.
+/// tracker (`None`) leaves `flags` untouched. Two lags limit correctness: if
+/// Caps Lock's own flags event reaches the tap before the raw callback marks
+/// Caps Lock held, the flags pass unchanged and a Right Control shortcut still
+/// starts; if the callback for a real side key lags while Caps Lock is held,
+/// that one event can lose the side until the next event. Without a held Caps
+/// Lock nothing is dropped.
 pub fn normalized_modifier_flags(flags: u64, physical: Option<PhysicalModifierKeys>) -> u64 {
     let Some(physical) = physical.filter(|keys| keys.is_held(CAPS_LOCK_USAGE)) else {
         return flags;

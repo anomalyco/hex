@@ -11,11 +11,12 @@
 //!
 //! The manager opens with `kIOHIDOptionsTypeNone` and never seizes a device,
 //! so every key still reaches the foreground application. Hex never requests
-//! Input Monitoring: it uses the HID listen access macOS may already grant
-//! (Accessibility grants the listen-event access Hex's shortcut taps need),
-//! checks it with `IOHIDCheckAccess` before opening, and stays inactive
-//! without opening or prompting when the check is not granted. Matching then
-//! keeps using CoreGraphics flags unchanged.
+//! Input Monitoring, so the tracker runs only when Hex already has it: a user
+//! can turn Hex on under System Settings › Privacy & Security › Input
+//! Monitoring and restart Hex. `IOHIDCheckAccess` gates the tracker before it
+//! opens; without that permission it stays inactive without opening or
+//! prompting, and matching keeps using CoreGraphics flags unchanged, including
+//! Right Control starting from a remapped Caps Lock.
 
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -263,22 +264,22 @@ impl PhysicalKeyMonitor {
             }
         };
         match ready_receiver.recv_timeout(START_TIMEOUT) {
-            Ok(true) => {
-                let owner = OWNER.load(Ordering::Acquire);
-                Some(Self {
-                    run_loop,
-                    stop,
-                    owner,
-                    worker: Some(worker),
-                })
-            }
-            Ok(false) => {
+            Ok(Some(owner)) => Some(Self {
+                run_loop,
+                stop,
+                owner,
+                worker: Some(worker),
+            }),
+            Ok(None) => {
                 let _ = worker.join();
                 None
             }
             Err(_) => {
                 // The thread may still be opening the manager. Tell it to
                 // give up and detach; it observes `stop` before it runs.
+                tracing::warn!(
+                    "raw HID keyboard tracker start timed out; shortcut sides fall back to Core Graphics flags"
+                );
                 stop.store(true, Ordering::Release);
                 None
             }
@@ -302,19 +303,23 @@ impl Drop for PhysicalKeyMonitor {
     }
 }
 
-fn run(run_loop_slot: Arc<AtomicPtr<c_void>>, stop: Arc<AtomicBool>, ready: SyncSender<bool>) {
+fn run(
+    run_loop_slot: Arc<AtomicPtr<c_void>>,
+    stop: Arc<AtomicBool>,
+    ready: SyncSender<Option<u64>>,
+) {
     // Hex never calls IOHIDRequestAccess: asking could prompt for Input
-    // Monitoring, which Hex's onboarding deliberately never requests.
-    // Without already-granted HID listen access (Accessibility grants the
-    // listen-event access its shortcut taps need), stay inactive.
+    // Monitoring, which Hex's onboarding deliberately never requests. The
+    // tracker runs only when Hex already has Input Monitoring; without it, a
+    // remapped Caps Lock keeps starting a Right Control shortcut.
     // SAFETY: a read-only access query.
     let access = unsafe { IOHIDCheckAccess(IOHID_REQUEST_TYPE_LISTEN_EVENT) };
     if access != IOHID_ACCESS_TYPE_GRANTED {
         tracing::warn!(
             access,
-            "raw HID keyboard tracker skipped: HID listen access is not granted; shortcut sides fall back to Core Graphics flags"
+            "raw HID keyboard tracker skipped: Input Monitoring is not granted; shortcut sides fall back to Core Graphics flags, so a remapped Caps Lock still starts a Right Control shortcut"
         );
-        let _ = ready.send(false);
+        let _ = ready.send(None);
         return;
     }
     let owner = NEXT_OWNER.fetch_add(1, Ordering::Relaxed);
@@ -323,7 +328,7 @@ fn run(run_loop_slot: Arc<AtomicPtr<c_void>>, stop: Arc<AtomicBool>, ready: Sync
     let manager = unsafe { IOHIDManagerCreate(ptr::null(), HID_OPTIONS_NONE) };
     if manager.is_null() {
         tracing::warn!("could not create the raw HID keyboard tracker");
-        let _ = ready.send(false);
+        let _ = ready.send(None);
         return;
     }
     let matching = matching_dictionary();
@@ -367,13 +372,13 @@ fn run(run_loop_slot: Arc<AtomicPtr<c_void>>, stop: Arc<AtomicBool>, ready: Sync
             }
             CFRelease(manager.cast_const());
         }
-        let _ = ready.send(false);
+        let _ = ready.send(None);
         return;
     }
     HELD.store(0, Ordering::Release);
     OWNER.store(owner, Ordering::Release);
     run_loop_slot.store(run_loop, Ordering::Release);
-    let _ = ready.send(true);
+    let _ = ready.send(Some(owner));
     while !stop.load(Ordering::Acquire) {
         // SAFETY: this dedicated thread exists solely to dispatch the HID
         // manager. The timeout observes `stop` even if it was set between
