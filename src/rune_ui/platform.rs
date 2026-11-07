@@ -239,6 +239,8 @@ pub(super) struct ScrawlView {
     pub(super) folder_error: Option<String>,
     /// Turning captures on or off failed (the pane sets it).
     pub(super) enable_error: Option<String>,
+    /// How it works is open (the pane sets it).
+    pub(super) how_it_works: bool,
 }
 
 #[cfg(hex_capture)]

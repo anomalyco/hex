@@ -202,20 +202,29 @@ On Windows                               // capture.windows
     a Windows machine
 
 Settings › Annotate                      // capture.pane
-├── Capture with Hex (capture.enabled, default off) -> off: no host, shortcut,
-│   input, retention, or folder
+├── Annotate (capture.enabled, default off) -> off: no host, shortcut,
+│   input, retention, or folder, and the pane shows only this card. On, its
+│   second line names the bound shortcut ("Tap ⌥⇧S, talk and draw; tap again
+│   and it's copied")
 │   └── On while the shortcut collides -> refused, the shortcut row says why
 ├── Shortcut (capture.hotkey, default ⌥⇧S, F9 on Linux and Windows) -> same keycap and recorder as dictation;
 │   a key is required; refused when it overlaps dictation or paste
-├── How it works (on) -> start (tap), draw (hold, no click; Shift too on
+├── How it works (on) -> a link under the top card, closed until pressed
+│   (not saved), then start (tap), draw (hold, no click; Shift too on
 │   macOS), the capsule's pen with Esc, stop (tap again), and send, each
-│   with its keys. Check: rune_ui::scrawl tests
-├── Screen Recording -> read once a second and again when the pane opens or
+│   with its keys. It never opens by itself: the pane reads no capture count.
+│   Check: rune_ui::scrawl tests
+├── After an annotation (on) -> Keep, then Folder (Reveal | Change…)
+├── Transcriber, demos and replay (on, macOS) -> a fold, closed until
+│   pressed (not saved): Transcriber, Show Hex in screen recordings, and the
+│   replay Lab row while that Lab is on
+├── Screen Recording (in the top card, between the switch and Shortcut,
+│   only while missing or waiting on a restart) -> read once a second and again when the pane opens or
 │   the window becomes key, never with a prompt (capture_host::screen_access):
 │   the preflight, which keeps its first answer for the life of the process,
 │   then, while it says no, a fresh `scrawl-helper permissions` at most every
 │   2 s on its own thread and a one-frame probe once that says granted
-│   ├── granted -> Allowed, no button
+│   ├── granted -> the row folds away
 │   ├── granted in System Settings but unusable until Hex relaunches ->
 │   │   "Turns on when Hex restarts" and Restart Hex, never Allow over a switch
 │   │   already on
@@ -225,10 +234,11 @@ Settings › Annotate                      // capture.pane
 │       guide over System Settings' list (PermissionKind::ScreenRecording); flips
 │       on the next read. Never part of onboarding (macOS also asks at the first
 │       capture). Check: rune_ui::scrawl tests
-├── Show in screen recordings (capture.show_overlays_in_recordings, default
+├── Show Hex in screen recordings (capture.show_overlays_in_recordings, default
 │   off) -> see capture.own-windows; applies at once, to open windows and a recording capture
 ├── Transcriber (capture.transcriber) -> Parakeet (default) | Apple
-├── Captures folder (capture.folder, default Scrawl's) -> Reveal | choose another
+├── Folder (capture.folder, default Scrawl's; its path is the row's second
+│   line) -> Reveal | Change…
 ├── Keep (capture.media_days / bundle_days) -> Scrawl's presets, or imported days
 ├── Scrawl.app running -> "Scrawl is running" card + Use Hex for captures
 │   └── Click -> asks Scrawl to quit (nothing else quits it); Hex takes the
@@ -1083,7 +1093,8 @@ Checks:
   scripted scenes, not a live capture.
 - Pane: `captures_default_off_and_refuse_a_shortcut_in_use` and
   `retention_names_presets_and_imported_days` in rune_ui/scrawl.rs; scenes
-  `mac-scrawl-off`, `mac-scrawl`, `mac-scrawl-running`, `mac-scrawl-permission`
+  `mac-scrawl-off`, `mac-scrawl`, `mac-scrawl-open` (both folds open, replay
+  Lab on), `mac-scrawl-running`, `mac-scrawl-permission`
   (feature builds only, so no goldens: those run on Linux).
 - Settings: every `capture.*` key in `hex settings`
   (`every_persisted_setting_has_a_cli_key`).

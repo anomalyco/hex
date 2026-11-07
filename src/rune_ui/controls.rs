@@ -403,6 +403,13 @@ pub(super) fn icon_described_row(
     )
 }
 
+/// `row` as part of the [`icon_row`] above it: its copy starts where that
+/// row's does.
+#[cfg(hex_capture)]
+pub(super) fn sub_row(row: El) -> El {
+    row.pl(METRICS.row_px + ICON_LEAD)
+}
+
 /// A [`select`]'s field showing its one choice, disabled.
 pub(super) fn fixed_select(p: Paint, key: &str, name: &str, label: &str) -> El {
     Select::new::<&str>(format!("{key}-field"), &[])
