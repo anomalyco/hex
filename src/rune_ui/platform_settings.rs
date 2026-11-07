@@ -509,6 +509,9 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
         ));
         after.extend(summaries_rows(ui, p, layer));
         after.push(retention_row(ui, p, layer).into());
+        if ui.settings.labs.expire_meeting_audio {
+            after.push(audio_retention_row(ui, p, layer).into());
+        }
         after.push(
             icon_row(
                 p,
@@ -592,6 +595,59 @@ fn retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             Some(MeetingRetention::Forever) => None,
             Some(_) => Some(tr(
                 "Audio, transcripts, notes, and Hex's Markdown copy move to the Trash",
+            )),
+        },
+        control,
+    )
+}
+
+/// How long finished meetings keep their audio, apart from their text
+/// (Labs › Expire meeting audio separately). Unchosen follows Keep meetings.
+fn audio_retention_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    let chosen = ui.settings.meetings.audio_retention;
+    let mut labels = vec![tr("Follow Keep meetings")];
+    labels.extend(
+        MeetingRetention::ALL
+            .iter()
+            .map(|retention| tr(retention.label())),
+    );
+    let selected = chosen
+        .and_then(|chosen| {
+            MeetingRetention::ALL
+                .iter()
+                .position(|choice| *choice == chosen)
+        })
+        .map(|index| index + 1)
+        .unwrap_or_default();
+    let control = super::general::quiet_select(
+        ui,
+        p,
+        Menu::Pick("meeting-audio-retention"),
+        "meeting-audio-retention-control".into(),
+        tr("Keep audio"),
+        labels,
+        selected,
+        |ui, index| {
+            ui.update(|settings| {
+                settings.meetings.audio_retention = index
+                    .checked_sub(1)
+                    .map(|index| MeetingRetention::ALL[index]);
+            });
+        },
+        layer,
+    );
+    icon_row(
+        p,
+        "meeting-audio-retention",
+        &icons::CLOCK,
+        tr("Keep audio"),
+        match chosen {
+            None => Some(tr(
+                "Audio follows Keep meetings. Choose a time to delete only meeting audio first",
+            )),
+            Some(MeetingRetention::Forever) => None,
+            Some(_) => Some(tr(
+                "Finished meetings keep their transcript, notes, summary, and Markdown after their audio moves to the Trash",
             )),
         },
         control,

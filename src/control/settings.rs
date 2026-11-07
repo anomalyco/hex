@@ -485,6 +485,11 @@ const KEYS: &[Key] = &[
         "Labs: Meetings offers Import audio…, so a local audio file is transcribed and kept as a meeting (macOS)",
     ),
     key(
+        "labs.expire_meeting_audio",
+        Kind::Bool,
+        "Labs: finished meetings drop their WAVs on meetings.audio_retention while their transcripts, notes, summary, and Markdown stay",
+    ),
+    key(
         "labs.output_fixes",
         Kind::Bool,
         "Labs: Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result",
@@ -538,6 +543,11 @@ const KEYS: &[Key] = &[
         "meetings.retention",
         Kind::Choice(&["day", "week", "month", "forever"]),
         "How long finished meetings are kept before they move to the Trash; none keeps new meetings 24 hours and older ones until you choose",
+    ),
+    optional(
+        "meetings.audio_retention",
+        Kind::Choice(&["day", "week", "month", "forever"]),
+        "How long finished meetings keep their audio with Labs › Expire meeting audio separately on; none follows meetings.retention",
     ),
     key(
         "meetings.providers",
@@ -1550,6 +1560,7 @@ mod tests {
             }],
             meetings: crate::app_settings::MeetingSettings {
                 retention: Some(crate::app_settings::MeetingRetention::Day),
+                audio_retention: Some(crate::app_settings::MeetingRetention::Day),
                 opencode_model: Some("anthropic/claude-haiku".into()),
                 ..Default::default()
             },
@@ -1812,9 +1823,22 @@ mod tests {
         saved.microphone = Some("USB Mic".into());
         let change = apply(&saved, "microphone", "system-default", &rules()).unwrap();
         assert_eq!(change.settings.microphone, None);
-        let change = apply(&settings, "history_retention", "month", &rules()).unwrap();
+        let history = apply(&settings, "history_retention", "month", &rules()).unwrap();
+        let change = apply(&settings, "meetings.audio_retention", "week", &rules()).unwrap();
         assert_eq!(
-            change.effects,
+            change.settings.meetings.audio_retention,
+            Some(crate::app_settings::MeetingRetention::Week)
+        );
+        let cleared = apply(
+            &change.settings,
+            "meetings.audio_retention",
+            "none",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(cleared.settings.meetings.audio_retention, None);
+        assert_eq!(
+            history.effects,
             vec![Effect::HistoryRetention(
                 crate::history::HistoryRetention::Month
             )]

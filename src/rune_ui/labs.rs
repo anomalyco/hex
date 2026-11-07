@@ -15,7 +15,7 @@ use rune::{El, Icon, TextEdit, Tx, row, text};
 
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
-use super::icons::{BOOK, CAMERA, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
+use super::icons::{BOOK, CAMERA, CLOCK, GLOBE, KEYBOARD, MOUSE, SPARKLES, TERMINAL, TIMER, WAVE};
 use super::list_detail::SEARCH_ICON;
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
 use super::{Pane, Ui};
@@ -421,6 +421,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Add an audio file to Meetings and transcribe it on this Mac"),
             ));
         }
+        rows.push(row(
+            Feature::ExpireMeetingAudio,
+            Some(&CLOCK),
+            tr("Expire meeting audio separately"),
+            tr("Choose how long to keep meeting audio. Transcripts, notes and summaries follow Keep meetings."),
+        ));
     }
     rows.push(row(
         Feature::VocabularyBiasing,
@@ -770,6 +776,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MoreCallApps => "lab-more-call-apps",
         Feature::AnnotateReplay => "lab-annotate-replay",
         Feature::MeetingImport => "lab-meeting-import",
+        Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
     }
 }
 

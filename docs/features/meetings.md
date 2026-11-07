@@ -26,7 +26,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   ├── Returned from System Settings still untrusted -> "Still grey? Fix it"
 │   │   │   (`AudioCapture` reset on running bundle + retired IDs, re-prompt / guide)
 │   │   └── Granted -> the Allow pill morphs into a green Allowed; moves to Advanced
-│   ├── After a meeting -> Summaries, Keep meetings, Transcript folder
+│   ├── After a meeting -> Summaries, Keep meetings, Keep audio
+│   │   (Labs › Expire meeting audio separately), Transcript folder
 │   │   (~/Documents/Hex Meetings; Reveal / choose; its error shows here)
 │   │   └── Summaries pop-up (meetings.summaries; one-time migration
 │   │       "meeting-summaries-choice" from the two retired switches)
@@ -1147,16 +1148,53 @@ Queries (`hex meetings`, `hex mcp`, the pane) -> leave out expired meetings
     reads `meetings.retention` from settings.json without writing it
 ```
 
-Sources: `retention_for`, `expired`, `expire`, and `trash_expired` in
-[meeting.rs](../../src/meeting.rs), `MeetingExpiry` in
+Labs › Expire meeting audio separately (`labs.expire_meeting_audio`, off by
+default; every OS with Meetings) adds a separate window for the WAVs:
+
+```ts
+Meetings › Settings -> Keep audio, right under Keep meetings
+│   Follow Keep meetings / 24 hours / 7 days / 30 days / Forever
+│   `meetings.audio_retention` day|week|month|forever, or omitted
+│   ├── Follow Keep meetings (default) -> audio follows `meetings.retention`
+│   ├── Chosen -> only that window applies to the WAVs
+│   └── Off -> no Keep audio row, and no separate audio pass
+Meeting controller, lab on and an audio retention chosen // labs.expire_meeting_audio
+├── Runs after the whole-meeting pass, at launch, hourly, and soon after
+│   either retention or the lab changes
+├── Only a Complete meeting (final transcript published) with no
+│   final.pending, no recorder lock, and no notes being written
+│   -> system.wav and microphone.wav move to the Trash (never `rm`);
+│      the transcript, rolling drafts, notes, summary, and exported
+│      Markdown stay; the manifest records `audio_removed_at_ms`
+├── Interrupted, failed, starting, recording, transcribing, and pending
+│   meetings keep their audio; a later pass retries them
+├── Forever or omitted -> nothing moves
+└── Nothing expires while Hex is not running
+Audio gone -> the meeting still lists, opens, searches, exports, and copies
+    its text; transcribing it again (debug `hex meeting transcribe` or
+    `hex meeting echo`) fails saying its audio was deleted, without
+    changing the meeting's status
+```
+
+Sources: `retention_for`, `expired`, `expire`, `trash_expired`,
+`audio_expired`, `expire_audio`, and `trash_audio_tracks` in
+[meeting/retention.rs](../../src/meeting/retention.rs), `MeetingExpiry` in
 [meeting/watcher.rs](../../src/meeting/watcher.rs), `Library::scan` in
-[meeting/query.rs](../../src/meeting/query.rs), the row in
+[meeting/query.rs](../../src/meeting/query.rs), `meeting_audio_retention` in
+[app_settings/meetings.rs](../../src/app_settings/meetings.rs), the rows in
 [rune_ui/platform_settings.rs](../../src/rune_ui/platform_settings.rs).
 Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
 `until_one_is_chosen_only_meetings_recorded_since_the_default_expire`,
-`expiry_leaves_a_markdown_copy_the_user_edited`, and
-`hex_rewriting_its_markdown_keeps_it_hexs_and_a_user_edit_does_not`. No
-live run of an expiry pass against a real Trash has been observed.
+`expiry_leaves_a_markdown_copy_the_user_edited`,
+`hex_rewriting_its_markdown_keeps_it_hexs_and_a_user_edit_does_not`,
+`separate_audio_expiry_covers_only_finished_meetings_older_than_it`,
+`audio_expiry_moves_only_the_wavs_and_records_it`, and
+`audio_expiry_leaves_unfinished_pending_locked_or_annotated_meetings`;
+`a_separate_audio_retention_needs_its_lab_and_a_choice` in
+[app_settings/meetings.rs](../../src/app_settings/meetings.rs), and
+`an_unreadable_setting_keeps_its_default_and_the_rest_loads` in
+[app_settings.rs](../../src/app_settings.rs). No live run of an expiry pass
+against a real Trash has been observed.
 
 ### Titles And Summary (Apple Intelligence)
 

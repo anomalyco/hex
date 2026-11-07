@@ -81,7 +81,8 @@ impl Feature {
             | Self::FollowLiveTranscript
             | Self::MoreCallApps
             | Self::GnomeMeetingCapsules
-            | Self::MeetingImport => Group::Meetings,
+            | Self::MeetingImport
+            | Self::ExpireMeetingAudio => Group::Meetings,
             Self::Screenshots | Self::AnnotateReplay => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut

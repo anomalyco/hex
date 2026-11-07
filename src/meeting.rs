@@ -11,7 +11,6 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
 
-use crate::app_settings::MeetingRetention;
 use crate::desktop::events::now_ms;
 use crate::durable::{sync_directory, sync_file};
 
@@ -55,6 +54,7 @@ pub(crate) mod import;
 pub(crate) mod mcp;
 mod notes;
 pub mod query;
+mod retention;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod runtime;
 pub(crate) mod sweep;
@@ -70,6 +70,9 @@ pub use delta::*;
 pub use notes::{MeetingNotes, display_title, notes_in_progress, notes_wanted, spawn_summary};
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub use notes::{summarize, summarize_file};
+#[cfg(test)]
+pub use retention::audio_expired;
+pub use retention::{expire, expire_audio, expired, retention_for};
 pub use transcript::TranscriptReader;
 
 /// What the recorder knows about a meeting when it starts.
@@ -195,7 +198,7 @@ pub struct MeetingManifest {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub chapters_refined: bool,
     /// Recorded since retention began: until the user chooses one, it is
-    /// kept [`MeetingRetention::DEFAULT`]. Older meetings stay until then.
+    /// kept 24 hours by default. Older meetings stay until then.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub retention_applies: bool,
     /// SHA-256 of the exported Markdown as Hex last wrote it. Expiry moves
@@ -203,6 +206,10 @@ pub struct MeetingManifest {
     /// user edited stays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_sha256: Option<String>,
+    /// When the meeting's WAV tracks moved to the Trash (Labs › Expire
+    /// meeting audio separately); the transcript, notes, and Markdown stay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_removed_at_ms: Option<u64>,
     /// Imported from an audio file rather than recorded: one speaker track,
     /// labelled Speaker.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -462,6 +469,7 @@ pub fn record(
         chapters_refined: false,
         retention_applies: true,
         export_sha256: None,
+        audio_removed_at_ms: None,
         imported: false,
     };
     set_title_source(&mut manifest, title_source);
@@ -722,6 +730,14 @@ fn persist_meeting_failure(directory: &Path, error: &color_eyre::Report) {
 
 fn has_recorded_audio(manifest: &MeetingManifest) -> bool {
     manifest.system.samples > 0 || manifest.microphone.samples > 0
+}
+
+/// Whether a meeting's WAV tracks are still on disk (Labs › Expire meeting
+/// audio separately may have moved them to the Trash).
+fn audio_tracks_exist(directory: &Path, manifest: &MeetingManifest) -> bool {
+    [&manifest.system.file, &manifest.microphone.file]
+        .iter()
+        .any(|file| directory.join(file).exists())
 }
 
 fn prepare_for_transcription(
@@ -1169,102 +1185,6 @@ fn trash_meeting(
     move_to_trash(directory)
 }
 
-/// How long `manifest` is kept: the retention the user chose, else
-/// [`MeetingRetention::DEFAULT`] for meetings recorded since it began, and
-/// older meetings for good.
-pub fn retention_for(
-    manifest: &MeetingManifest,
-    chosen: Option<MeetingRetention>,
-) -> MeetingRetention {
-    chosen.unwrap_or(if manifest.retention_applies {
-        MeetingRetention::DEFAULT
-    } else {
-        MeetingRetention::Forever
-    })
-}
-
-/// Whether a finished meeting outlived its retention, counted from when it
-/// ended (or, with no end, started). A meeting that records or transcribes
-/// never has.
-pub fn expired(
-    manifest: &MeetingManifest,
-    status: MeetingStatus,
-    chosen: Option<MeetingRetention>,
-    now_ms: u64,
-) -> bool {
-    !status.is_active()
-        && retention_for(manifest, chosen)
-            .max_age_ms()
-            .is_some_and(|max_age_ms| {
-                let ended = manifest.ended_at_ms.unwrap_or(manifest.created_at_ms);
-                now_ms.saturating_sub(ended) > max_age_ms
-            })
-}
-
-/// Moves every expired meeting to the Trash: its folder, and its exported
-/// Markdown while that is still the copy Hex wrote. One that is recording,
-/// transcribing, writing notes, or waiting for its final transcript stays
-/// for a later pass. Returns how many moved.
-pub fn expire(chosen: Option<MeetingRetention>) -> Result<usize> {
-    let meetings = list()?;
-    let pending = pending_final_transcripts();
-    let root = root()?;
-    let mut moved = 0;
-    for id in expired_meetings(&meetings, chosen, &pending, now_ms()) {
-        match trash_expired(&root.join(id), os::move_to_trash) {
-            Ok(()) => {
-                moved += 1;
-                tracing::info!(meeting = id, "moved an expired meeting to the Trash");
-            }
-            Err(error) => {
-                tracing::info!(%error, meeting = id, "kept an expired meeting for now");
-            }
-        }
-    }
-    Ok(moved)
-}
-
-/// The expired meetings in `meetings`, leaving out `pending` ones.
-fn expired_meetings<'a>(
-    meetings: &'a [MeetingManifest],
-    chosen: Option<MeetingRetention>,
-    pending: &[String],
-    now_ms: u64,
-) -> Vec<&'a str> {
-    meetings
-        .iter()
-        .filter(|meeting| !pending.contains(&meeting.id))
-        .filter(|meeting| expired(meeting, meeting.status, chosen, now_ms))
-        .map(|meeting| meeting.id.as_str())
-        .collect()
-}
-
-/// [`trash_meeting`] for expiry: an exported Markdown the user changed is
-/// left where it is.
-fn trash_expired(
-    directory: &Path,
-    mut move_to_trash: impl FnMut(&Path) -> Result<()>,
-) -> Result<()> {
-    let manifest = read_manifest(directory)?;
-    if meeting_is_active(directory) != Some(false) {
-        return Err(eyre!("the meeting is recording"));
-    }
-    if notes_in_progress(&manifest.id) {
-        return Err(eyre!("its notes are being written"));
-    }
-    if let Some(path) = exported_markdown(&manifest) {
-        if manifest.export_sha256.is_some() && file_sha256(&path) == manifest.export_sha256 {
-            move_to_trash(&path)?;
-        } else {
-            tracing::info!(
-                meeting = manifest.id,
-                "kept the meeting's Markdown, which changed since Hex wrote it"
-            );
-        }
-    }
-    move_to_trash(directory)
-}
-
 /// The lowercase hex SHA-256 of a file, `None` when it can't be read.
 fn file_sha256(path: &Path) -> Option<String> {
     fs::read(path).ok().map(|bytes| text_sha256(&bytes))
@@ -1328,6 +1248,9 @@ pub fn transcribe_meeting(id: &str) -> Result<MeetingManifest> {
         return Err(eyre!("Stop the recording before transcribing it"));
     }
     let mut manifest = read_manifest(&directory)?;
+    if manifest.audio_removed_at_ms.is_some() || !audio_tracks_exist(&directory, &manifest) {
+        return Err(eyre!("this meeting's audio was deleted"));
+    }
     if !has_recorded_audio(&manifest) {
         return Err(eyre!("meeting has no recorded audio"));
     }

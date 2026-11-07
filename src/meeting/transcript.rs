@@ -1894,6 +1894,12 @@ pub(super) fn echo_report(
     use std::fmt::Write as _;
 
     let manifest = super::read_manifest(directory).ok();
+    if manifest
+        .as_ref()
+        .is_some_and(|manifest| manifest.audio_removed_at_ms.is_some())
+    {
+        return Err(eyre!("this meeting's audio was deleted"));
+    }
     let offset_ms = microphone_offset_ms.unwrap_or_else(|| {
         manifest
             .as_ref()

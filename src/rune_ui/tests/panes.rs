@@ -471,6 +471,34 @@ fn on_this_mac_without_apple_intelligence_stays_chosen_with_the_fix() {
     assert!(rt.find("meeting-summary-model").is_none());
 }
 
+/// The separate Keep audio row follows its Labs toggle and saves the window.
+#[test]
+fn keep_audio_shows_with_its_lab_and_saves_its_window() {
+    use crate::app_settings::MeetingRetention;
+    let mut rt = runtime("portal", true, TALL_SIZE);
+    rt.state.settings.meetings.enabled = true;
+    rt.state.pane = Pane::Meetings;
+    rt.state.meetings.view = super::super::meetings::View::Settings;
+    refresh(&mut rt);
+    assert!(
+        rt.find("meeting-audio-retention").is_none(),
+        "hidden while the lab is off"
+    );
+
+    rt.state.settings.labs.expire_meeting_audio = true;
+    refresh(&mut rt);
+    assert!(rt.find("meeting-audio-retention").is_some());
+    assert_eq!(
+        a11y_value(&rt, "meeting-audio-retention-control-trigger").as_deref(),
+        Some("Follow Keep meetings")
+    );
+    pick(&mut rt, "meeting-audio-retention", 2);
+    assert_eq!(
+        rt.state.settings.meetings.audio_retention,
+        Some(MeetingRetention::Week)
+    );
+}
+
 /// Off a Mac, Summaries is a switch that turns OpenCode on.
 #[test]
 fn summaries_are_a_switch_off_a_mac() {
