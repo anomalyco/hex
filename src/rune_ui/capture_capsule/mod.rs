@@ -22,6 +22,8 @@ pub(crate) mod notch;
 pub(crate) mod picker;
 #[cfg(target_os = "macos")]
 pub(crate) mod playground;
+#[cfg(target_os = "macos")]
+pub(crate) mod quiet_states;
 pub(crate) mod surface;
 pub(crate) mod tuning;
 mod undo_ring;
