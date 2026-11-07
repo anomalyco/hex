@@ -85,9 +85,13 @@ pub(crate) struct LiveTyping {
     preedit: Arc<Mutex<Option<(u64, String)>>>,
     /// Whether a Wake is already queued for the preedit slot.
     wake: Arc<AtomicBool>,
-    /// Whether the owner thread is connected and usable.
-    alive: Arc<AtomicBool>,
-    /// Control commands sent but not yet received by the owner.
+    /// Whether the owner thread's channel is open. Only closing it stops a
+    /// session that already began from being finished or cancelled.
+    connected: Arc<AtomicBool>,
+    /// Whether new sessions and preedits may start. An abandoned Finish or a
+    /// full control queue turns this off without stranding begun sessions.
+    accepting: Arc<AtomicBool>,
+    /// Begin and Wake commands sent but not yet received by the owner.
     queued: Arc<AtomicUsize>,
 }
 
@@ -103,8 +107,8 @@ enum Command {
     Wake,
 }
 
-/// One capture's hold on the input method. It starts the session when the
-/// capture's stream opens, and dropping it without `finish` clears the
+/// One capture's hold on the input method. It starts at the hold threshold
+/// (or the Toggle press), and dropping it without `finish` clears the
 /// preedit: every failed job and dropped queue entry ends here.
 pub(crate) struct Session {
     live: Arc<LiveTyping>,
@@ -123,8 +127,8 @@ impl Session {
         }
     }
 
-    /// Begins only once the capture is streaming, so short taps and chords
-    /// never create an input method.
+    /// Begins the session. Callers start it at the hold threshold or the
+    /// Toggle press, so short taps and chords never create an input method.
     pub(crate) fn start(&mut self) {
         if !self.started {
             self.started = true;
@@ -164,16 +168,18 @@ impl Drop for Session {
 
 impl LiveTyping {
     /// Starts the owner thread without connecting: the connection opens when
-    /// the thread starts, and `is_alive` turns false if it cannot.
+    /// the thread starts, and both flags turn false if it cannot.
     pub(crate) fn start() -> Arc<Self> {
         let (commands, receiver) = mpsc::channel();
         let preedit = Arc::new(Mutex::new(None));
         let wake = Arc::new(AtomicBool::new(false));
-        let alive = Arc::new(AtomicBool::new(true));
+        let connected = Arc::new(AtomicBool::new(true));
+        let accepting = Arc::new(AtomicBool::new(true));
         let queued = Arc::new(AtomicUsize::new(0));
         let thread_preedit = preedit.clone();
         let thread_wake = wake.clone();
-        let thread_alive = alive.clone();
+        let thread_connected = connected.clone();
+        let thread_accepting = accepting.clone();
         let thread_queued = queued.clone();
         if let Err(error) = thread::Builder::new()
             .name("hex-live-typing".into())
@@ -182,34 +188,44 @@ impl LiveTyping {
                     receiver,
                     thread_preedit,
                     thread_wake,
-                    thread_alive,
+                    thread_connected,
+                    thread_accepting,
                     thread_queued,
                 )
             })
         {
             tracing::info!(%error, "live typing is unavailable; dictations paste normally");
-            alive.store(false, Ordering::Release);
+            connected.store(false, Ordering::Release);
+            accepting.store(false, Ordering::Release);
         }
         Arc::new(Self {
             commands,
             preedit,
             wake,
-            alive,
+            connected,
+            accepting,
             queued,
         })
     }
 
-    pub(crate) fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::Acquire)
+    /// Whether new captures may start Live typing. An existing session
+    /// still finishes and cancels while only this is off.
+    pub(crate) fn is_accepting(&self) -> bool {
+        self.accepting.load(Ordering::Acquire)
+    }
+
+    fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
     }
 
     pub(crate) fn begin(&self, id: u64) {
-        *preedit_lock(&self.preedit) = None;
-        self.send(Command::Begin(id));
+        if self.enqueue_new(Command::Begin(id)) {
+            *preedit_lock(&self.preedit) = None;
+        }
     }
 
     pub(crate) fn preedit(&self, id: u64, stable: &str, tentative: &str) {
-        if !self.is_alive() {
+        if !self.is_accepting() {
             return;
         }
         let Some(text) = preedit_text(stable, tentative) else {
@@ -217,13 +233,13 @@ impl LiveTyping {
         };
         *preedit_lock(&self.preedit) = Some((id, text));
         if !self.wake.swap(true, Ordering::AcqRel) {
-            self.send(Command::Wake);
+            self.enqueue_new(Command::Wake);
         }
     }
 
     pub(crate) fn cancel(&self, id: u64) {
         clear_slot(&self.preedit, id);
-        self.send(Command::Cancel(id));
+        self.send_control(Command::Cancel(id));
     }
 
     /// Commits `text` through the input method when its session is active,
@@ -232,7 +248,7 @@ impl LiveTyping {
         clear_slot(&self.preedit, id);
         let claim = Arc::new(AtomicU8::new(PENDING));
         let (reply, answer) = mpsc::sync_channel(1);
-        if !self.send(Command::Finish {
+        if !self.send_control(Command::Finish {
             id,
             text: text.to_owned(),
             claim: claim.clone(),
@@ -245,10 +261,11 @@ impl LiveTyping {
             Err(RecvTimeoutError::Disconnected) => false,
             Err(RecvTimeoutError::Timeout) => {
                 if caller_abandons(&claim) {
-                    // The owner did not decide in time: stop paying its
-                    // timeouts, and wait briefly so the preedit is gone
-                    // before this caller pastes.
-                    self.alive.store(false, Ordering::Release);
+                    // The owner did not decide in time: stop starting new
+                    // sessions, and wait briefly so the preedit is gone
+                    // before this caller pastes. A session that already
+                    // began still cancels and finishes below.
+                    self.accepting.store(false, Ordering::Release);
                     answer.recv_timeout(CLEAR_WAIT).unwrap_or(false)
                 } else {
                     // The owner owns the commit: never paste over it.
@@ -258,18 +275,36 @@ impl LiveTyping {
         }
     }
 
-    fn send(&self, command: Command) -> bool {
-        if !self.is_alive() {
+    /// Sends a command for a session that already began. The channel's
+    /// closure is the only gate, so an abandoned or full queue never strands
+    /// a shown preedit.
+    fn send_control(&self, command: Command) -> bool {
+        if !self.is_connected() {
+            return false;
+        }
+        if self.commands.send(command).is_err() {
+            self.connected.store(false, Ordering::Release);
+            self.accepting.store(false, Ordering::Release);
+            return false;
+        }
+        true
+    }
+
+    /// Sends a Begin or Wake: new work, gated by `accepting` and the queue
+    /// limit.
+    fn enqueue_new(&self, command: Command) -> bool {
+        if !self.is_accepting() || !self.is_connected() {
             return false;
         }
         if self.queued.fetch_add(1, Ordering::AcqRel) >= CONTROL_QUEUE_LIMIT {
             self.queued.fetch_sub(1, Ordering::AcqRel);
-            self.alive.store(false, Ordering::Release);
+            self.accepting.store(false, Ordering::Release);
             return false;
         }
         if self.commands.send(command).is_err() {
             self.queued.fetch_sub(1, Ordering::AcqRel);
-            self.alive.store(false, Ordering::Release);
+            self.connected.store(false, Ordering::Release);
+            self.accepting.store(false, Ordering::Release);
             return false;
         }
         true
@@ -283,7 +318,8 @@ impl LiveTyping {
                 commands,
                 preedit: Arc::new(Mutex::new(None)),
                 wake: Arc::new(AtomicBool::new(false)),
-                alive: Arc::new(AtomicBool::new(true)),
+                connected: Arc::new(AtomicBool::new(true)),
+                accepting: Arc::new(AtomicBool::new(true)),
                 queued: Arc::new(AtomicUsize::new(0)),
             }),
             receiver,
@@ -295,10 +331,11 @@ fn run(
     commands: Receiver<Command>,
     preedit: Arc<Mutex<Option<(u64, String)>>>,
     wake: Arc<AtomicBool>,
-    alive: Arc<AtomicBool>,
+    connected: Arc<AtomicBool>,
+    accepting: Arc<AtomicBool>,
     queued: Arc<AtomicUsize>,
 ) {
-    let _alive = Alive(alive);
+    let _alive = Alive(connected, accepting);
     let mut owner = match Owner::connect() {
         Ok(owner) => owner,
         Err(error) => {
@@ -307,9 +344,11 @@ fn run(
         }
     };
     while let Ok(command) = commands.recv() {
-        queued.fetch_sub(1, Ordering::AcqRel);
         match command {
-            Command::Begin(id) => owner.begin(id),
+            Command::Begin(id) => {
+                queued.fetch_sub(1, Ordering::AcqRel);
+                owner.begin(id);
+            }
             Command::Finish {
                 id,
                 text,
@@ -318,6 +357,7 @@ fn run(
             } => owner.finish(id, &text, &claim, &reply),
             Command::Cancel(id) => owner.cancel(id),
             Command::Wake => {
+                queued.fetch_sub(1, Ordering::AcqRel);
                 wake.store(false, Ordering::Release);
                 if let Some((id, text)) = take_preedit(&preedit) {
                     owner.preedit(id, &text);
@@ -333,11 +373,12 @@ fn run(
 }
 
 /// Marks the owner unavailable however the thread ends, panics included.
-struct Alive(Arc<AtomicBool>);
+struct Alive(Arc<AtomicBool>, Arc<AtomicBool>);
 
 impl Drop for Alive {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
+        self.1.store(false, Ordering::Release);
     }
 }
 
@@ -821,12 +862,40 @@ mod tests {
     }
 
     #[test]
-    fn a_full_control_queue_makes_the_owner_inert() {
+    fn a_full_control_queue_stops_new_sessions_but_not_old_ones() {
         let (live, commands) = LiveTyping::for_test();
         live.queued.store(CONTROL_QUEUE_LIMIT, Ordering::Release);
-        live.cancel(1);
-        assert!(!live.is_alive(), "an overfull queue is inert");
-        assert!(commands.try_recv().is_err(), "nothing queued");
+        live.begin(1);
+        assert!(!live.is_accepting(), "an overfull queue stops new sessions");
+        assert!(commands.try_recv().is_err(), "begin was not queued");
+        live.cancel(2);
+        assert!(
+            matches!(commands.try_recv(), Ok(Command::Cancel(2))),
+            "a begun session still cancels"
+        );
+    }
+
+    #[test]
+    fn a_stopped_owner_still_finishes_and_cancels_a_session_that_began() {
+        let (live, commands) = LiveTyping::for_test();
+        let mut cancel = Session::new(live.clone(), 7);
+        cancel.start();
+        let mut finish = Session::new(live.clone(), 8);
+        finish.start();
+        assert!(matches!(commands.try_recv(), Ok(Command::Begin(7))));
+        assert!(matches!(commands.try_recv(), Ok(Command::Begin(8))));
+        live.accepting.store(false, Ordering::Release);
+        drop(cancel);
+        assert!(matches!(commands.try_recv(), Ok(Command::Cancel(7))));
+        let responder = thread::spawn(move || {
+            let Ok(Command::Finish { claim, reply, .. }) = commands.recv() else {
+                panic!("a finish");
+            };
+            assert!(owner_claims(&claim));
+            let _ = reply.send(true);
+        });
+        assert!(finish.finish("hello"));
+        responder.join().unwrap();
     }
 
     #[test]

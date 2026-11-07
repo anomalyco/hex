@@ -987,14 +987,18 @@ pub(crate) fn run(
                     // lower, or pause audio.
                     suppressor.suppress();
                 }
-                begin_live_typing(
-                    &capture,
-                    toggle,
-                    wayland,
-                    &mut live_typing,
-                    &mut next_capture_id,
-                    &mut active_typing,
-                );
+                // A release in its tail never starts an input method: a
+                // short tap must stay inert even while its last audio lands.
+                if finishing.is_none() {
+                    begin_live_typing(
+                        &capture,
+                        toggle,
+                        wayland,
+                        &mut live_typing,
+                        &mut next_capture_id,
+                        &mut active_typing,
+                    );
+                }
                 stream_when_due(&mut capture, &engine, toggle);
                 if let Some(partial) = capture.report_live_text()
                     && let Some(typing) = &active_typing
@@ -1247,7 +1251,7 @@ fn begin_live_typing(
     {
         return;
     }
-    if !live_typing.as_ref().is_none_or(|live| live.is_alive()) {
+    if !live_typing.as_ref().is_none_or(|live| live.is_accepting()) {
         return;
     }
     let live = live_typing

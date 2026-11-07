@@ -449,7 +449,9 @@ Committing before it queues any commit request, and a waiting caller changes
 Pending → Abandoned when it gives up. Only one can win. If the caller wins,
 it waits up to 250 ms for the owner's clear; after that it pastes anyway, so
 a wedged compositor can leave a preedit visible until it tears the input
-method down. A residual protocol race remains: a `done` event can arrive
+method down. After an abandoned Finish, Live typing starts no new captures
+and pastes instead until Hex restarts; a session that had already begun
+still finishes and cancels. A residual protocol race remains: a `done` event can arrive
 after `dispatch_pending` and before `commit(serial)`, so a commit can use a
 serial one behind; the affected preedit or commit is then ignored by the
 compositor. A commit ignored for a stale serial has already returned
@@ -465,8 +467,9 @@ enforce the serial today). Checks (unit tests only):
 `a_started_session_cancels_when_dropped`,
 `a_session_that_never_started_sends_nothing`,
 `finishing_a_session_never_sends_cancel`,
-`only_the_newest_preedit_waits_and_it_wakes_once`, and
-`a_full_control_queue_makes_the_owner_inert` in
+`only_the_newest_preedit_waits_and_it_wakes_once`,
+`a_full_control_queue_stops_new_sessions_but_not_old_ones`, and
+`a_stopped_owner_still_finishes_and_cancels_a_session_that_began` in
 [linux/live_typing.rs](../../src/linux/live_typing.rs);
 `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
 [dictation/live_text.rs](../../src/dictation/live_text.rs); and

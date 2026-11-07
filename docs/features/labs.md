@@ -167,8 +167,8 @@ plate turned on after launch never flashes the last dictation's words,
 #1075; elsewhere only when Live text is on at launch);
 the window always attaches the playground with Rune's own ⇧⌘D off, and its
 sidebar item, ⇧⌘D, the macOS View menu, and story links open it only while
-the toggle is on. Live typing is read as each hotkey capture starts. Live
-chapters are read when a recording starts. Nothing
+the toggle is on. Live typing is read at the hold threshold (or the Toggle
+press). Live chapters are read when a recording starts. Nothing
 starts at launch for a feature that is off. Limit: the macOS window's fixed
 size is chosen when it is created, so it becomes resizable for the
 playground only after Hex restarts.
@@ -1359,8 +1359,8 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   text field, replaced on each update, and its final text is committed
   through `zwp_input_method_v2` instead of the clipboard paste
   (`labs.live-typing`; the toggle is `labs.live_typing`, off by default, Linux
-  only, and its card is hidden in an X11 session). It is read as each hotkey
-  capture starts, never for a Local API
+  only, and its card is hidden in an X11 session). It is read at the hold
+  threshold, or at the Toggle press, never for a Local API
   dictation, `/streams`, or Voice Action; the final text still goes through
   Output's processing, and History and Paste Last update as they do for a
   paste. Hex creates the input method when the capture becomes intentional
@@ -1379,8 +1379,10 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   bytes, or the 350 ms decision passes without a commit: a caller that wins
   the abandonment waits up to 250 ms for the preedit to clear and then
   pastes even if the compositor never answered, while a commit the owner
-  already claimed is given up to 750 ms and is never pasted over. The claim
-  is one atomic Pending → Committing or
+  already claimed is given up to 750 ms and is never pasted over. After an
+  abandoned Finish, Live typing starts no new captures and pastes instead
+  until Hex restarts; a session that had already begun still finishes and
+  cancels. The claim is one atomic Pending → Committing or
   Pending → Abandoned change, so only one side wins. A residual Wayland race
   can still let a `done` event arrive after the serial is read; that
   preedit or commit is then ignored by the compositor. A commit ignored for
@@ -1401,8 +1403,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `a_started_session_cancels_when_dropped`,
   `a_session_that_never_started_sends_nothing`,
   `finishing_a_session_never_sends_cancel`,
-  `only_the_newest_preedit_waits_and_it_wakes_once`, and
-  `a_full_control_queue_makes_the_owner_inert`;
+  `only_the_newest_preedit_waits_and_it_wakes_once`,
+  `a_full_control_queue_stops_new_sessions_but_not_old_ones`, and
+  `a_stopped_owner_still_finishes_and_cancels_a_session_that_began`;
   `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
   [dictation/live_text.rs](../../src/dictation/live_text.rs); and
   `the_plate_follows_the_decision_made_when_the_stream_opened` in
