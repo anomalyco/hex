@@ -1173,6 +1173,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Search settings", "Rechercher dans les réglages"),
     ("No settings match", "Aucun réglage ne correspond"),
     ("Try another search", "Essayez une autre recherche"),
+    ("Descriptive meeting file names", "Noms de fichiers de réunion descriptifs"),
+    ("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time", "Renomme le Markdown exporté d'une réunion avec son titre dès que les notes ou un renommage en fournissent un, en gardant la date et l'heure"),
 ];
 
 #[cfg(test)]

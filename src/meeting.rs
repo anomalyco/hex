@@ -46,6 +46,7 @@ pub(crate) use os::{
 };
 mod delta;
 mod echo;
+mod export_name;
 mod finish;
 pub(crate) mod finished_events;
 pub(crate) mod generator;
@@ -1191,12 +1192,25 @@ fn text_sha256(bytes: &[u8]) -> String {
 }
 
 /// Renames a meeting. The Markdown heading follows only while it still reads
-/// the previous title, and the file keeps its name, as with generated titles.
+/// the previous title. The file keeps its name unless Labs › Descriptive
+/// meeting file names is on, which renames it to the new title.
 pub fn rename(id: &str, title: &str) -> Result<MeetingManifest> {
     rename_meeting(&root()?.join(id), title)
 }
 
 fn rename_meeting(directory: &Path, title: &str) -> Result<MeetingManifest> {
+    rename_meeting_with(
+        directory,
+        title,
+        crate::labs::meeting_descriptive_filenames(),
+    )
+}
+
+fn rename_meeting_with(
+    directory: &Path,
+    title: &str,
+    descriptive_filenames: bool,
+) -> Result<MeetingManifest> {
     let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
     if title.is_empty() {
         return Err(eyre!("The title is empty"));
@@ -1218,6 +1232,11 @@ fn rename_meeting(directory: &Path, title: &str) -> Result<MeetingManifest> {
     {
         tracing::warn!(%error, meeting = id, "could not retitle meeting Markdown");
         markdown_error = Some(error);
+    }
+    // The notes writer applies its own title and renames the file; leaving
+    // the name alone here keeps it from racing that in-place rewrite.
+    if !notes_in_progress(&manifest.id) {
+        export_name::rename_to_title(&mut manifest, &next, descriptive_filenames);
     }
     write_manifest(directory, &manifest)?;
     match markdown_error {

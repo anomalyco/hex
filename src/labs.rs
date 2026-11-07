@@ -22,14 +22,12 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use clap::Subcommand;
-use color_eyre::Result;
-use color_eyre::eyre::eyre;
-
 use crate::app_settings::{AppSettings, LabsSettings};
 
+mod cli;
 mod group;
 
+pub use self::cli::{LabsCommand, run, run_retired_experiments};
 pub use self::group::Group;
 
 /// Where people send feedback on Labs features.
@@ -115,12 +113,13 @@ pub enum Feature {
     MoreCallApps,
     AnnotateReplay,
     MeetingImport,
+    MeetingDescriptiveFilenames,
     QuitClosesWindow,
     ExpireMeetingAudio,
 }
 
 impl Feature {
-    pub const ALL: [Self; 53] = [
+    pub const ALL: [Self; 54] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -172,6 +171,7 @@ impl Feature {
         Self::MoreCallApps,
         Self::AnnotateReplay,
         Self::MeetingImport,
+        Self::MeetingDescriptiveFilenames,
         Self::QuitClosesWindow,
         Self::ExpireMeetingAudio,
     ];
@@ -249,6 +249,7 @@ impl Feature {
             | Self::MoreCallApps
             | Self::AnnotateReplay
             | Self::MeetingImport
+            | Self::MeetingDescriptiveFilenames
             | Self::ExpireMeetingAudio
             | Self::NotchIndicator
             | Self::QuitClosesWindow => Audience::Everyone,
@@ -306,7 +307,10 @@ impl Feature {
             | Self::FollowLiveTranscript
             | Self::AnnotateReplay => 20261104,
             Self::MoreCallApps | Self::SettingsSearch | Self::MeetingImport => 20261106,
-            Self::LiveTyping | Self::QuitClosesWindow | Self::ExpireMeetingAudio => 20261107,
+            Self::LiveTyping
+            | Self::MeetingDescriptiveFilenames
+            | Self::QuitClosesWindow
+            | Self::ExpireMeetingAudio => 20261107,
         }
     }
 
@@ -395,6 +399,7 @@ impl Feature {
             | Self::KeepRecordings
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
+            | Self::MeetingDescriptiveFilenames
             | Self::FollowLiveTranscript
             | Self::MoreCallApps
             | Self::ExpireMeetingAudio
@@ -457,6 +462,7 @@ impl Feature {
             Self::MoreCallApps => "more-call-apps",
             Self::AnnotateReplay => "annotate-replay",
             Self::MeetingImport => "meeting-import",
+            Self::MeetingDescriptiveFilenames => "meeting-descriptive-filenames",
             Self::QuitClosesWindow => "quit-closes-window",
             Self::ExpireMeetingAudio => "expire-meeting-audio",
         }
@@ -516,6 +522,7 @@ impl Feature {
             Self::MoreCallApps => "labs.more_call_apps",
             Self::AnnotateReplay => "labs.annotate_replay",
             Self::MeetingImport => "labs.meeting_import",
+            Self::MeetingDescriptiveFilenames => "labs.meeting_descriptive_filenames",
             Self::QuitClosesWindow => "labs.quit_closes_window",
             Self::ExpireMeetingAudio => "labs.expire_meeting_audio",
         }
@@ -657,6 +664,9 @@ impl Feature {
             Self::MeetingImport => {
                 "Import an audio file into Meetings and transcribe it on this Mac"
             }
+            Self::MeetingDescriptiveFilenames => {
+                "Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time"
+            }
             Self::QuitClosesWindow => {
                 "⌘Q closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits"
             }
@@ -724,6 +734,7 @@ impl Feature {
             Self::MoreCallApps => settings.labs.more_call_apps,
             Self::AnnotateReplay => settings.labs.annotate_replay,
             Self::MeetingImport => settings.labs.meeting_import,
+            Self::MeetingDescriptiveFilenames => settings.labs.meeting_descriptive_filenames,
             Self::QuitClosesWindow => settings.labs.quit_closes_window,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
         }
@@ -785,6 +796,7 @@ impl Feature {
             &mut labs.more_call_apps,
             &mut labs.annotate_replay,
             &mut labs.meeting_import,
+            &mut labs.meeting_descriptive_filenames,
             &mut labs.quit_closes_window,
             &mut labs.expire_meeting_audio,
         ]
@@ -846,6 +858,7 @@ impl Feature {
             Self::MoreCallApps => settings.labs.more_call_apps = on,
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
             Self::MeetingImport => settings.labs.meeting_import = on,
+            Self::MeetingDescriptiveFilenames => settings.labs.meeting_descriptive_filenames = on,
             Self::QuitClosesWindow => settings.labs.quit_closes_window = on,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
             // Off, no shortcut keeps a key only the feature allows.
@@ -907,6 +920,8 @@ const QUIT_CLOSES_WINDOW: u64 = MEETING_IMPORT << 1;
 /// The next bit above Quit closes Settings, also clear of the minutes below.
 const EXPIRE_MEETING_AUDIO: u64 = QUIT_CLOSES_WINDOW << 1;
 const LIVE_TYPING: u64 = EXPIRE_MEETING_AUDIO << 1;
+/// The next bit above Live typing's switch.
+const MEETING_DESCRIPTIVE_FILENAMES: u64 = LIVE_TYPING << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1147,6 +1162,13 @@ pub fn meeting_import() -> bool {
     on(MEETING_IMPORT) && Feature::MeetingImport.on_this_os()
 }
 
+/// Notes or a user rename rename an exported meeting's Markdown to the
+/// meeting's title, keeping its date and time (read when notes are applied
+/// and when a meeting is renamed).
+pub fn meeting_descriptive_filenames() -> bool {
+    on(MEETING_DESCRIPTIVE_FILENAMES) && Feature::MeetingDescriptiveFilenames.on_this_os()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).
@@ -1291,6 +1313,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             MEETING_IMPORT,
         ),
         (
+            Feature::MeetingDescriptiveFilenames,
+            settings.meeting_descriptive_filenames,
+            MEETING_DESCRIPTIVE_FILENAMES,
+        ),
+        (
             Feature::QuitClosesWindow,
             settings.quit_closes_window,
             QUIT_CLOSES_WINDOW,
@@ -1332,155 +1359,9 @@ pub fn log_launch() {
     );
 }
 
-#[derive(Debug, Subcommand)]
-pub enum LabsCommand {
-    /// List every Labs feature and whether it is on (the default).
-    List,
-    /// Turn a Labs feature on.
-    On { feature: String },
-    /// Turn a Labs feature off.
-    Off { feature: String },
-    /// Print the link that opens Hex's Labs page at a feature's row (macOS).
-    #[cfg(target_os = "macos")]
-    Link { feature: String },
-}
-
-/// `hex labs`: edits `settings.json`; a running Hex applies most changes
-/// when it next starts.
-pub fn run(command: Option<&LabsCommand>) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    if let Some(LabsCommand::Link { feature }) = command {
-        println!(
-            "{}",
-            crate::rune_ui::deep_link::labs_link(
-                crate::rune_ui::story_link::scheme(),
-                resolve(feature, Feature::shipped)?
-            )
-        );
-        return Ok(());
-    }
-    // Listing, or handing the change to a running Hex, never writes the file.
-    let settings = AppSettings::read()?;
-    let (name, on) = match command {
-        None | Some(LabsCommand::List) => {
-            print!("{}", list(&settings));
-            return Ok(());
-        }
-        #[cfg(target_os = "macos")]
-        Some(LabsCommand::Link { .. }) => unreachable!("handled above"),
-        Some(LabsCommand::On { feature }) => (feature, true),
-        Some(LabsCommand::Off { feature }) => (feature, false),
-    };
-    if let Some((_, note)) = GRADUATED.iter().find(|(graduated, _)| *graduated == name) {
-        println!("{note}");
-        return Ok(());
-    }
-    let feature = resolve(name, Feature::shipped)?;
-    if let Some(lock) = feature.managed() {
-        return Err(eyre!(lock.refusal()));
-    }
-    if feature == Feature::VoiceFilter
-        && !on
-        && crate::audio::hex_microphone::driver_bundle_installed()
-    {
-        return Err(eyre!(
-            "voice-filter stays on while the Hex Microphone driver is installed; uninstall the driver in its pane to turn it off"
-        ));
-    }
-    if !on && let Some(why) = feature.off_refusal(&settings) {
-        return Err(eyre!(why));
-    }
-    let state = if on { "on" } else { "off" };
-    // A running Hex saves and applies it at once, as its Labs row would.
-    if let Some(reply) = crate::control::cli::set_in_running_hex(
-        feature.settings_key(),
-        if on { "true" } else { "false" },
-    ) {
-        return match reply {
-            crate::control::ControlReply::Error { message, .. } => Err(eyre!("{message}")),
-            _ => {
-                println!("Turned {} {state}.", feature.name());
-                Ok(())
-            }
-        };
-    }
-    let mut settings = AppSettings::load()?;
-    if feature.on(&settings) == on {
-        println!("{} is already {state}.", feature.name());
-        return Ok(());
-    }
-    feature.set(&mut settings, on);
-    settings.save()?;
-    println!("Turned {} {state}.", feature.name());
-    Ok(())
-}
-
-/// The feature `name` names, if this OS has it and `reaches` admits it.
-/// Features that left Labs: `hex labs` still knows their names.
-const GRADUATED: [(&str, &str); 2] = [
-    (
-        "custom-models",
-        "custom-models graduated: adding a model file and models found on this computer are always on now",
-    ),
-    (
-        "meeting-platform-icons",
-        "meeting-platform-icons graduated: the Meetings list always shows each recording's call app icon now",
-    ),
-];
-
-fn resolve(name: &str, reaches: impl Fn(Feature) -> bool + Copy) -> Result<Feature> {
-    if let Some((_, note)) = GRADUATED.iter().find(|(graduated, _)| *graduated == name) {
-        return Err(eyre!("{note}"));
-    }
-    Feature::from_name(name)
-        .filter(|feature| feature.on_this_os() && reaches(*feature))
-        .ok_or_else(|| {
-            eyre!(
-                "unknown Labs feature {name:?}; this Hex has: {}",
-                Feature::available_where(reaches)
-                    .map(Feature::name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })
-}
-
-fn list(settings: &AppSettings) -> String {
-    let width = Feature::available()
-        .map(|feature| feature.name().len())
-        .max()
-        .unwrap_or_default();
-    let mut out = String::new();
-    for feature in Feature::available() {
-        let on = feature.on(settings)
-            || (feature == Feature::VoiceFilter
-                && crate::audio::hex_microphone::driver_bundle_installed());
-        out.push_str(&format!(
-            "{:<width$}  {:<7}  {:<8}  {} (hex settings {})\n",
-            feature.name(),
-            if feature.managed().is_some() {
-                "managed"
-            } else if on {
-                "on"
-            } else {
-                "off"
-            },
-            feature.audience().name(),
-            feature.description(),
-            feature.settings_key(),
-        ));
-    }
-    out
-}
-
-/// `hex experiments …`, from before Labs.
-pub fn run_retired_experiments() -> Result<()> {
-    println!("Experiments are now Labs: hex labs, hex labs on|off <feature>");
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
+    use super::cli::resolve;
     use super::*;
 
     #[test]
@@ -1877,6 +1758,21 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & MEETING_IMPORT, 0);
         assert_eq!(state & ANNOTATE_REPLAY, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+    }
+
+    #[test]
+    fn meeting_descriptive_filenames_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(
+            encode_where(&labs, |_| true) & MEETING_DESCRIPTIVE_FILENAMES,
+            0
+        );
+        labs.meeting_descriptive_filenames = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & MEETING_DESCRIPTIVE_FILENAMES, 0);
+        assert_eq!(state & LIVE_TYPING, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
     }
 

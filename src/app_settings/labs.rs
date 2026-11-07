@@ -90,6 +90,8 @@ pub struct LabsSettings {
     pub follow_live_transcript: bool,
     /// Meetings offers Import audio…: a local audio file becomes a meeting (macOS).
     pub meeting_import: bool,
+    /// Notes or a rename rename an exported meeting's Markdown to the meeting's title, keeping its date and time.
+    pub meeting_descriptive_filenames: bool,
     /// Finished meetings drop their WAV tracks on `meetings.audio_retention`,
     /// keeping their transcripts, notes, and summary.
     pub expire_meeting_audio: bool,
@@ -156,6 +158,7 @@ impl Default for LabsSettings {
             screenshots: false,
             follow_live_transcript: false,
             meeting_import: false,
+            meeting_descriptive_filenames: false,
             expire_meeting_audio: false,
             groups: std::collections::BTreeMap::new(),
         }

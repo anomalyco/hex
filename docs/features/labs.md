@@ -82,6 +82,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
 │                                        file is decoded locally, transcribed with the selected model, saved as a normal
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
+├── Descriptive meeting file names no labs.meeting_descriptive_filenames (every OS with Meetings)
+│                                        once notes or a rename give a meeting a title, its exported Markdown is renamed
+│                                        in place to <date> <time> <title>.md; a taken name adds " (2)", and the
+│                                        manifest follows so Reveal, Trash, and retention see the new path
 ├── Expire meeting audio separately no labs.expire_meeting_audio (every OS with Meetings)
 │                                        Meetings › Settings adds Keep audio under Keep meetings: finished meetings drop
 │                                        their WAVs on their own schedule (at or beyond Keep meetings it has no effect),
@@ -1292,6 +1296,38 @@ in [tests/panes.rs](../../src/rune_ui/tests/panes.rs);
 [control/settings.rs](../../src/control/settings.rs). Not yet observed: a real
 pass moving WAVs to a real Trash. The Labs page goldens (`mac-labs`,
 `windows-labs`, `linux-labs`) show the new card.
+
+Descriptive meeting file names (`meeting-descriptive-filenames`, every OS
+with Meetings; its row shows wherever Meetings does): an exported meeting
+Markdown is named `<YYYY-MM-DD HHMM> <title>.md` in the user's meeting folder.
+By default that name is written once at export and kept. While on, after the
+notes are applied to the file (final title and summary) and after a user
+rename, Hex renames it in place to the same date and time prefix and the new
+display title, sanitized exactly as export does. It renames only the file the
+manifest's `export_path` names, only while it exists, and only when the name
+differs; its own current path never counts as a collision, so a taken name
+gets the first free `" (2)"` … with no copy or overwrite. `std::fs::rename`
+in the same folder is atomic, then the manifest is written as usual, so
+Reveal, Delete to Trash, and retention follow the new path.
+`export_sha256` stays as it was: a rename does not change the bytes, so
+retention still recognizes Hex's copy and still protects one the user edited.
+A missing file, an unchanged name, or a failed rename logs and keeps the old
+path; notes and rename never fail because of it. A user rename while notes
+are being written leaves the file name to the notes writer, which renames it
+with the title it applies. Checks:
+`the_file_name_follows_the_title_and_keeps_the_date_and_time`,
+`a_taken_name_gets_the_next_number_without_overwriting`,
+`a_missing_or_unchanged_name_renames_nothing`, and
+`the_lab_gate_off_leaves_the_file_alone` in
+[meeting/export_name.rs](../../src/meeting/export_name.rs);
+`a_rename_follows_the_title_when_descriptive_file_names_are_on` in
+[tests.rs](../../src/meeting/tests.rs);
+`notes_rename_the_export_only_with_descriptive_file_names` in
+[meeting/notes.rs](../../src/meeting/notes.rs); and
+`meeting_descriptive_filenames_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real notes run renaming a
+real meeting folder, and the Labs page goldens (`mac-labs`, `windows-labs`,
+`linux-labs`) show the new card.
 
 Meeting platform icons (`meeting-platform-icons`, issue 1290) graduated:
 each recording in the Meetings list always shows its call service's icon, or

@@ -404,6 +404,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"),
         ));
         rows.push(row(
+            Feature::MeetingDescriptiveFilenames,
+            None,
+            tr("Descriptive meeting file names"),
+            tr("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time"),
+        ));
+        rows.push(row(
             Feature::MeetingFinishedEvent,
             Some(&GLOBE),
             tr("Meeting finished event"),
@@ -785,6 +791,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MoreCallApps => "lab-more-call-apps",
         Feature::AnnotateReplay => "lab-annotate-replay",
         Feature::MeetingImport => "lab-meeting-import",
+        Feature::MeetingDescriptiveFilenames => "lab-meeting-descriptive-filenames",
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
     }
 }
