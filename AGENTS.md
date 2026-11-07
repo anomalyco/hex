@@ -1036,8 +1036,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   Summarize with OpenCode) run only after final publication, on a
   utility-QoS thread that yields to dictation, within a bounded chunk count and
   total deadline. Failures record `notes_error` and leave the Markdown
-  untouched. Notes never rename the file and rewrite only the heading Hex wrote
-  and the `<!-- hex:notes -->` block.
+  untouched. Notes rewrite only the heading Hex wrote and the
+  `<!-- hex:notes -->` block. With Labs › Descriptive meeting file names on,
+  notes or chapter refinement that change the title, and user renames, also
+  rename the exported Markdown to the new title, keeping its date and time
+  prefix and never overwriting.
 - Annotate (captures; `hex annotate`, alias `hex capture`) is compiled into
   every macOS, Linux, and Windows build and on by default in every build,
   stable included (`capture.enabled`, the pane's switch; the `annotate-on-by-default`
@@ -1179,7 +1182,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   to the Trash (never `rm`), after a two-step confirmation, and is refused while
   it records, transcribes, or writes notes. Renaming rewrites the manifest and
   only a Markdown heading that still reads the previous title; files keep
-  their names.
+  their names unless Labs › Descriptive meeting file names is on, which renames
+  the exported Markdown to the new title, keeping its date and time prefix and
+  never overwriting.
 - Meeting data is a liability: until the user chooses a `meetings.retention`,
   meetings recorded since the default began (manifest `retention_applies`)
   are kept 24 hours and older ones stay; a chosen retention covers every

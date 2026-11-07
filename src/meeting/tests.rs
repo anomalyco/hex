@@ -342,7 +342,7 @@ fn finished_meeting(name: &str, title: &str) -> (PathBuf, PathBuf) {
 fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
     let (base, directory) = finished_meeting("rename", "Meeting — 2:18 PM");
     let export = read_manifest(&directory).unwrap().export_path.unwrap();
-    let renamed = rename_meeting(&directory, "  Arcade   planning ").unwrap();
+    let renamed = rename_meeting_with(&directory, "  Arcade   planning ", false).unwrap();
     assert_eq!(renamed.title, "Arcade planning");
     assert_eq!(read_manifest(&directory).unwrap().title, "Arcade planning");
     // Only live chapters read the title's source; with the experiment off
@@ -362,13 +362,45 @@ fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
 
     // A heading the user changed is theirs; only the manifest follows.
     fs::write(&export, "# My own heading\n\nNotes.\n").unwrap();
-    rename_meeting(&directory, "Arcade sync").unwrap();
+    rename_meeting_with(&directory, "Arcade sync", false).unwrap();
     assert_eq!(read_manifest(&directory).unwrap().title, "Arcade sync");
     assert_eq!(
         fs::read_to_string(&export).unwrap(),
         "# My own heading\n\nNotes.\n"
     );
-    assert!(rename_meeting(&directory, "   ").is_err());
+    assert!(rename_meeting_with(&directory, "   ", false).is_err());
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_rename_follows_the_title_when_descriptive_file_names_are_on() {
+    let (base, directory) = finished_meeting("rename-file-name", "Meeting — 2:18 PM");
+    let export = read_manifest(&directory).unwrap().export_path.unwrap();
+    let renamed = rename_meeting_with(&directory, "Arcade planning", true).unwrap();
+    let path = renamed.export_path.clone().unwrap();
+    assert_ne!(path, export);
+    assert!(!export.exists());
+    // The rename keeps the file's own date and time prefix, not one
+    // recomputed from `created_at_ms`.
+    assert_eq!(
+        path.file_name().unwrap().to_string_lossy(),
+        "2026-10-15 1418 Arcade planning.md"
+    );
+    assert!(
+        fs::read_to_string(&path)
+            .unwrap()
+            .starts_with("# Arcade planning\n")
+    );
+
+    // With the switch off the next rename keeps the file name.
+    let kept = rename_meeting_with(&directory, "Arcade sync", false).unwrap();
+    assert_eq!(kept.export_path, Some(path.clone()));
+    assert!(path.exists());
+    assert!(
+        fs::read_to_string(&path)
+            .unwrap()
+            .starts_with("# Arcade sync\n")
+    );
     fs::remove_dir_all(base).unwrap();
 }
 

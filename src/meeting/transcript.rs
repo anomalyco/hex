@@ -2111,7 +2111,7 @@ impl LocalTime {
         )
     }
 
-    fn file_stamp(&self) -> String {
+    pub(super) fn file_stamp(&self) -> String {
         format!(
             "{:04}-{:02}-{:02} {:02}{:02}",
             self.year, self.month, self.day, self.hour, self.minute
@@ -2163,25 +2163,6 @@ pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptE
     markdown
 }
 
-fn file_title(title: &str) -> String {
-    let cleaned = title
-        .chars()
-        .map(|character| match character {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
-            character if character.is_control() => ' ',
-            character => character,
-        })
-        .collect::<String>();
-    let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    let cleaned = cleaned.trim_matches(|character| character == '.' || character == '-');
-    let truncated = cleaned.chars().take(80).collect::<String>();
-    if truncated.trim().is_empty() {
-        "Meeting".into()
-    } else {
-        truncated.trim().into()
-    }
-}
-
 /// Writes the user-facing Markdown copy without replacing an existing file.
 pub(super) fn export_markdown(
     folder: &Path,
@@ -2190,21 +2171,8 @@ pub(super) fn export_markdown(
 ) -> Result<PathBuf> {
     fs::create_dir_all(folder)
         .wrap_err_with(|| format!("could not create {}", folder.display()))?;
-    let stem = format!(
-        "{} {}",
-        LocalTime::from_ms(manifest.created_at_ms).file_stamp(),
-        file_title(&super::display_title(manifest))
-    );
-    let path = (1..=100)
-        .map(|attempt| {
-            folder.join(if attempt == 1 {
-                format!("{stem}.md")
-            } else {
-                format!("{stem} ({attempt}).md")
-            })
-        })
-        .find(|path| !path.exists())
-        .ok_or_else(|| eyre!("too many meeting files named {stem}"))?;
+    let stem = super::export_name::file_stem(manifest, &super::display_title(manifest));
+    let path = super::export_name::path_without_collision(folder, &stem, None)?;
     let temporary = folder.join(format!(".{stem}.md.tmp"));
     let mut file = File::create(&temporary)?;
     file.write_all(render_markdown(manifest, entries).as_bytes())?;

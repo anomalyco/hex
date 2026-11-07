@@ -1042,6 +1042,11 @@ Final publication                                   // meetings.output
 └── Markdown copy -> <folder>/<YYYY-MM-DD HHMM> <title>.md
     ├── Title, date, duration, app, You / Them turns
     ├── Never overwrites; adds " (2)"
+    ├── Labs › Descriptive meeting file names on (off by default) ->
+    │   applying notes, refining chapters, or a rename renames it in place to
+    │   the new title, keeping the date and time prefix; a taken name adds
+    │   " (2)" without overwriting (manifest export_path follows; Reveal,
+    │   Trash, and retention read it)
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
@@ -1091,7 +1096,10 @@ searching
 
 Rename -> inline field; Enter or Save          // meetings.rename
   -> manifest title; Markdown heading only while it reads the old title
-  -> file name unchanged; empty title refused
+  -> file name unchanged by default; with Labs › Descriptive meeting file
+     names on it follows a changed title only when the heading did too,
+     keeping the date and time prefix
+  -> empty title refused
 Delete… (overflow menu) -> "Trash recording & Markdown" (or "Trash recording")
   / Cancel, under the title in place of the icons until answered
   -> exported Markdown, then Application Support/meetings/<id>, to the Trash
@@ -1105,6 +1113,8 @@ both stay recoverable from the Trash. Sources:
 `trash` / `rename` in [meeting.rs](../../src/meeting.rs). Checks:
 `deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording`,
 `renaming_updates_the_manifest_and_an_unedited_markdown_heading`,
+`a_rename_follows_the_title_when_descriptive_file_names_are_on`,
+`notes_rename_the_export_only_with_descriptive_file_names`,
 `retitling_replaces_only_a_matching_first_heading`,
 `the_exported_markdown_is_the_reveal_target_only_while_it_exists`, and the Rune
 pane tests `meetings_select_search_and_copy_a_transcript`,
@@ -1117,7 +1127,12 @@ Scenes: `meetings`, `meetings-recording`, `meetings-actions`,
 `meetings-delete`, `meetings-rename`, `meetings-failed`, `meetings-empty`.
 
 Checks: `markdown_lists_metadata_and_labeled_turns` and
-`export_never_overwrites_and_uses_safe_names`.
+`export_never_overwrites_and_uses_safe_names`; the rename helper in
+[meeting/export_name.rs](../../src/meeting/export_name.rs) is covered by
+`the_file_name_follows_the_title_and_keeps_the_date_and_time`,
+`a_taken_name_gets_the_next_number_without_overwriting`,
+`a_missing_or_unchanged_name_renames_nothing`, and
+`the_lab_gate_off_leaves_the_file_alone`.
 
 ### Retention
 
@@ -1212,7 +1227,9 @@ While recording, setting on, model available           // meetings.title.provisi
      -> menu bar "Recording · <title>", Meetings pane list and detail
   -> Refreshed once when speech reaches 10 minutes; a failure retries a minute
      later; at most 3 calls per meeting; Stop discards a call in flight
-  -> The exported Markdown file name and heading use it when it arrived first
+  -> The exported Markdown file name and heading use it when it arrived first;
+     a later final notes title renames the file only with Labs › Descriptive
+     meeting file names on
 
 Final publication complete                               // meetings.notes
   -> meeting-notes thread, utility QoS; waits (≤30 s) while dictation is busy
@@ -1232,7 +1249,10 @@ Final publication complete                               // meetings.notes
      └── written_by: {"writer": "apple_intelligence"} or {"writer": "opencode",
          "model": "provider/model"} (no model when OpenCode's default answered);
          absent on notes written before #1125
-  -> Markdown copy, same file name, atomic replace
+  -> Markdown copy, same file name by default, atomic replace
+     ├── Labs › Descriptive meeting file names on (off by default) -> after
+     │   the block is written, the file is renamed to the final title,
+     │   keeping its date and time prefix; a taken name adds " (2)"
      ├── Heading -> final title, only while it still reads Hex's last title
      ├── <!-- hex:notes --> ## Summary (one paragraph) above ## Transcript
      │   └── Footer names the writer: "Written on this Mac by Apple
@@ -1259,7 +1279,17 @@ Transcript ready capsule -> "Ready · <title>" once a provisional or final title
 Title rule: the shown title is the user's title unless it is still the default
 `<App> call — 2:30 PM` / `Meeting — 2:30 PM`; then the final notes title, else
 the provisional title, else the default. Named or renamed meetings keep their
-name. The file is never renamed, so links, open editors, and Reveal keep working.
+name. By default the exported file keeps its name when the title changes, so
+links, open editors, and Reveal keep working. With Labs › Descriptive meeting
+file names on (off by default), applying notes, refining chapters that change
+the title, or renaming the meeting renames the file in place to
+`<YYYY-MM-DD HHMM> <new title>.md`, keeping the original date and time prefix;
+its own file is never a collision, a taken name gets `" (2)"`, no copy is made,
+and Reveal, Trash, and retention follow the manifest's new `export_path`. A
+failed rename leaves the old path and never fails the notes or the rename. If
+Hex stops between the file rename and the manifest write, the manifest keeps
+the old path: Reveal falls back to the recording folder and the Markdown stays
+in the folder untouched.
 
 Action items and decisions are gone: other agents read the transcript for
 details (MCP). Older manifests still decode: a list summary is joined into one
@@ -1353,7 +1383,9 @@ plus up to three of the longest chapters in meeting order, once there are two:
 would pass that is left out). While recording, the last chapter runs until now.
 A title the user typed, including a rename while recording or transcribing, is
 never extended. Manifests without the field read as `user` when their title is
-not the default.
+not the default. A boundary pass that changes the title also renames the
+exported Markdown with Labs › Descriptive meeting file names on, under the
+same date and time prefix and collision rules as notes.
 
 Read surfaces: `hex meetings chapters <id> [--json]`, `hex meetings show <id>
 --chapter N`, a `## Chapters` list in `show`, `chapters` in `show --json`

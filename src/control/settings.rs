@@ -490,6 +490,11 @@ const KEYS: &[Key] = &[
         "Labs: Meetings offers Import audio…, so a local audio file is transcribed and kept as a meeting (macOS)",
     ),
     key(
+        "labs.meeting_descriptive_filenames",
+        Kind::Bool,
+        "Labs: an exported meeting's Markdown follows its title once notes or a rename provide one, keeping the date and time",
+    ),
+    key(
         "labs.expire_meeting_audio",
         Kind::Bool,
         "Labs: finished meetings drop their WAVs on meetings.audio_retention while their transcripts, notes, summary, and Markdown stay",
@@ -744,6 +749,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.movable_meeting_capsules", "meetings"),
     ("labs.meeting_notes_vocabulary", "meetings"),
     ("labs.meeting_finished_event", "meetings"),
+    ("labs.meeting_descriptive_filenames", "meetings"),
     ("labs.follow_live_transcript", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
