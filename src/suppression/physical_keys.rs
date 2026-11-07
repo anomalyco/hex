@@ -10,18 +10,21 @@
 //! blocking.
 //!
 //! The manager opens with `kIOHIDOptionsTypeNone` and never seizes a device,
-//! so every key still reaches the foreground application. Input Monitoring
-//! permission is already required; without it the open or the callbacks
-//! fail, the tracker logs once, stays inactive, and matching keeps using
-//! CoreGraphics flags unchanged.
+//! so every key still reaches the foreground application. Hex never requests
+//! Input Monitoring: it uses the HID listen access macOS may already grant
+//! (Accessibility grants the listen-event access Hex's shortcut taps need),
+//! checks it with `IOHIDCheckAccess` before opening, and stays inactive
+//! without opening or prompting when the check is not granted. Matching then
+//! keeps using CoreGraphics flags unchanged.
 
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString};
 
@@ -32,6 +35,18 @@ const GENERIC_DESKTOP_USAGE_PAGE: i32 = 0x01;
 const KEYBOARD_USAGE: i32 = 0x06;
 /// `kIOHIDOptionsTypeNone`: open the device without seizing it.
 const HID_OPTIONS_NONE: u32 = 0;
+/// `kIOHIDRequestTypeListenEvent` for `IOHIDCheckAccess`.
+const IOHID_REQUEST_TYPE_LISTEN_EVENT: u32 = 1;
+/// `kIOHIDAccessTypeGranted`.
+const IOHID_ACCESS_TYPE_GRANTED: u32 = 0;
+/// How long opening the manager may take before the input monitor gives up
+/// rather than block dictation startup.
+const START_TIMEOUT: Duration = Duration::from_secs(2);
+/// The run loop wakes at least this often to observe the stop flag, closing
+/// the race between checking it and entering the run loop.
+const STOP_POLL_SECONDS: f64 = 0.5;
+/// `kCFRunLoopRunFinished`: the run loop has no sources or timers.
+const CFRUN_LOOP_RUN_FINISHED: i32 = 1;
 
 type IohidValueCallback = unsafe extern "C" fn(
     context: *mut c_void,
@@ -72,7 +87,9 @@ unsafe extern "C" {
     );
     fn IOHIDManagerOpen(manager: *mut c_void, options: u32) -> i32;
     fn IOHIDManagerClose(manager: *mut c_void, options: u32) -> i32;
+    fn IOHIDCheckAccess(request_type: u32) -> u32;
     fn IOHIDValueGetElement(value: *mut c_void) -> *mut c_void;
+    fn IOHIDElementGetDevice(element: *mut c_void) -> *mut c_void;
     fn IOHIDElementGetUsagePage(element: *mut c_void) -> u32;
     fn IOHIDElementGetUsage(element: *mut c_void) -> u32;
     fn IOHIDValueGetIntegerValue(value: *mut c_void) -> isize;
@@ -81,49 +98,68 @@ unsafe extern "C" {
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
     fn CFRunLoopGetCurrent() -> *mut c_void;
-    fn CFRunLoopRun();
+    fn CFRunLoopRunInMode(
+        mode: *const c_void,
+        seconds: f64,
+        return_after_source_handled: u8,
+    ) -> i32;
     fn CFRunLoopStop(run_loop: *mut c_void);
     fn CFRelease(value: *const c_void);
     static kCFRunLoopCommonModes: *const c_void;
+    static kCFRunLoopDefaultMode: *const c_void;
 }
 
 /// The tracked usages every matched keyboard holds right now, unioned.
 static HELD: AtomicU16 = AtomicU16::new(0);
-static TRACKING: AtomicBool = AtomicBool::new(false);
+/// The generation that owns [`HELD`], or zero while no tracker is active.
+/// A tracker that timed out while starting must not clear a newer one.
+static OWNER: AtomicU64 = AtomicU64::new(0);
+static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
 
 /// The physical keys held right now, or `None` while the tracker is
-/// inactive (permission denied, the open failed, or it is stopping).
+/// inactive (access not granted, the open failed, or it is stopping).
 pub(crate) fn snapshot() -> Option<PhysicalModifierKeys> {
-    TRACKING
-        .load(Ordering::Acquire)
+    (OWNER.load(Ordering::Acquire) != 0)
         .then(|| PhysicalModifierKeys::from_bits(HELD.load(Ordering::Acquire)))
 }
 
 /// Tracks one keyboard's held keys so two keyboards cannot clear each
 /// other's state. The union is published to [`HELD`] after every change.
-#[derive(Default)]
 struct TrackerContext {
+    owner: u64,
     devices: Mutex<HashMap<usize, u16>>,
 }
 
 impl TrackerContext {
     fn publish(&self, devices: &HashMap<usize, u16>) {
+        if OWNER.load(Ordering::Acquire) != self.owner {
+            return;
+        }
         let union = devices.values().fold(0, |union, held| union | held);
         HELD.store(union, Ordering::Release);
     }
 }
 
+/// Leaves the tracker inactive, unless a newer generation already owns it.
+fn deactivate(owner: u64) {
+    if OWNER
+        .compare_exchange(owner, 0, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        HELD.store(0, Ordering::Release);
+    }
+}
+
 // SAFETY: `context` is the `TrackerContext` registered below; it outlives
 // the manager, whose callbacks run only on the tracker thread's run loop.
-// `sender` is the device the value came from and `value` is a live IOHID
-// value for the duration of the callback.
+// `value` is a live IOHID value for the duration of the callback.
 unsafe extern "C" fn value_changed(
     context: *mut c_void,
     _result: i32,
-    sender: *mut c_void,
+    _sender: *mut c_void,
     value: *mut c_void,
 ) {
-    if context.is_null() || sender.is_null() || value.is_null() {
+    if context.is_null() || value.is_null() {
         return;
     }
     // SAFETY: see the callback contract above.
@@ -144,13 +180,18 @@ unsafe extern "C" fn value_changed(
     let Some(bit) = physical_key_bit(usage) else {
         return;
     };
+    // SAFETY: as above; the element's device is the keyboard it belongs to.
+    let device = unsafe { IOHIDElementGetDevice(element) };
+    if device.is_null() {
+        return;
+    }
     // SAFETY: as above; a key element's value is 1 while held, 0 on release.
     let down = unsafe { IOHIDValueGetIntegerValue(value) } != 0;
     let mut devices = context
         .devices
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let held = devices.entry(sender as usize).or_default();
+    let held = devices.entry(device as usize).or_default();
     if down {
         *held |= 1 << bit;
     } else {
@@ -195,20 +236,25 @@ fn matching_dictionary() -> CFRetained<CFDictionary<CFString, CFNumber>> {
 /// loop, closes the manager, and leaves [`snapshot`] inactive.
 pub(crate) struct PhysicalKeyMonitor {
     run_loop: Arc<AtomicPtr<c_void>>,
+    stop: Arc<AtomicBool>,
+    owner: u64,
     worker: Option<JoinHandle<()>>,
 }
 
 impl PhysicalKeyMonitor {
     /// Opens the raw HID keyboards and reads them on a dedicated run loop.
     /// A failure is logged once and leaves the tracker inactive rather than
-    /// failing the input monitor.
+    /// failing the input monitor. A start that takes longer than
+    /// [`START_TIMEOUT`] is told to give up instead of blocking the listener.
     pub(crate) fn start() -> Option<Self> {
         let run_loop = Arc::new(AtomicPtr::new(ptr::null_mut()));
+        let stop = Arc::new(AtomicBool::new(false));
         let thread_run_loop = run_loop.clone();
+        let thread_stop = stop.clone();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("hex-physical-keys".into())
-            .spawn(move || run(thread_run_loop, ready_sender));
+            .spawn(move || run(thread_run_loop, thread_stop, ready_sender));
         let worker = match worker {
             Ok(worker) => worker,
             Err(error) => {
@@ -216,20 +262,33 @@ impl PhysicalKeyMonitor {
                 return None;
             }
         };
-        if ready_receiver.recv().unwrap_or(false) {
-            Some(Self {
-                run_loop,
-                worker: Some(worker),
-            })
-        } else {
-            let _ = worker.join();
-            None
+        match ready_receiver.recv_timeout(START_TIMEOUT) {
+            Ok(true) => {
+                let owner = OWNER.load(Ordering::Acquire);
+                Some(Self {
+                    run_loop,
+                    stop,
+                    owner,
+                    worker: Some(worker),
+                })
+            }
+            Ok(false) => {
+                let _ = worker.join();
+                None
+            }
+            Err(_) => {
+                // The thread may still be opening the manager. Tell it to
+                // give up and detach; it observes `stop` before it runs.
+                stop.store(true, Ordering::Release);
+                None
+            }
         }
     }
 }
 
 impl Drop for PhysicalKeyMonitor {
     fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
         let run_loop = self.run_loop.load(Ordering::Acquire);
         if !run_loop.is_null() {
             // SAFETY: Core Foundation run loops may be stopped from any
@@ -239,12 +298,26 @@ impl Drop for PhysicalKeyMonitor {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
-        TRACKING.store(false, Ordering::Release);
-        HELD.store(0, Ordering::Release);
+        deactivate(self.owner);
     }
 }
 
-fn run(run_loop_slot: Arc<AtomicPtr<c_void>>, ready: SyncSender<bool>) {
+fn run(run_loop_slot: Arc<AtomicPtr<c_void>>, stop: Arc<AtomicBool>, ready: SyncSender<bool>) {
+    // Hex never calls IOHIDRequestAccess: asking could prompt for Input
+    // Monitoring, which Hex's onboarding deliberately never requests.
+    // Without already-granted HID listen access (Accessibility grants the
+    // listen-event access its shortcut taps need), stay inactive.
+    // SAFETY: a read-only access query.
+    let access = unsafe { IOHIDCheckAccess(IOHID_REQUEST_TYPE_LISTEN_EVENT) };
+    if access != IOHID_ACCESS_TYPE_GRANTED {
+        tracing::warn!(
+            access,
+            "raw HID keyboard tracker skipped: HID listen access is not granted; shortcut sides fall back to Core Graphics flags"
+        );
+        let _ = ready.send(false);
+        return;
+    }
+    let owner = NEXT_OWNER.fetch_add(1, Ordering::Relaxed);
     // SAFETY: IOKit returns an owned manager; every use below stays on this
     // thread, and it is released exactly once after the run loop returns.
     let manager = unsafe { IOHIDManagerCreate(ptr::null(), HID_OPTIONS_NONE) };
@@ -262,7 +335,10 @@ fn run(run_loop_slot: Arc<AtomicPtr<c_void>>, ready: SyncSender<bool>) {
             (&*matching as *const CFDictionary<CFString, CFNumber>).cast(),
         );
     }
-    let mut context = Box::new(TrackerContext::default());
+    let mut context = Box::new(TrackerContext {
+        owner,
+        devices: Mutex::new(HashMap::new()),
+    });
     // SAFETY: `context` lives until after the manager closes on this thread.
     let context_ptr = (&raw mut *context).cast::<c_void>();
     // SAFETY: this is the tracker thread's current run loop, used only here.
@@ -275,28 +351,40 @@ fn run(run_loop_slot: Arc<AtomicPtr<c_void>>, ready: SyncSender<bool>) {
         IOHIDManagerScheduleWithRunLoop(manager, run_loop, kCFRunLoopCommonModes);
         IOHIDManagerOpen(manager, HID_OPTIONS_NONE)
     };
-    if status != 0 {
-        tracing::warn!(
-            status = format_args!("0x{:08x}", status as u32),
-            "could not open the raw HID keyboard tracker; shortcut sides fall back to Core Graphics flags"
-        );
-        // SAFETY: the manager was created here, is not open, and is released
-        // exactly once.
+    if status != 0 || stop.load(Ordering::Acquire) {
+        if status != 0 {
+            tracing::warn!(
+                status = format_args!("0x{:08x}", status as u32),
+                "could not open the raw HID keyboard tracker; shortcut sides fall back to Core Graphics flags"
+            );
+        }
+        // SAFETY: the manager was created here and is released exactly once;
+        // close only if the open succeeded.
         unsafe {
             IOHIDManagerUnscheduleFromRunLoop(manager, run_loop, kCFRunLoopCommonModes);
+            if status == 0 {
+                IOHIDManagerClose(manager, HID_OPTIONS_NONE);
+            }
             CFRelease(manager.cast_const());
         }
         let _ = ready.send(false);
         return;
     }
-    TRACKING.store(true, Ordering::Release);
+    HELD.store(0, Ordering::Release);
+    OWNER.store(owner, Ordering::Release);
     run_loop_slot.store(run_loop, Ordering::Release);
     let _ = ready.send(true);
-    // SAFETY: this dedicated thread exists solely to dispatch the HID
-    // manager until `PhysicalKeyMonitor` stops it.
-    unsafe { CFRunLoopRun() };
-    TRACKING.store(false, Ordering::Release);
-    HELD.store(0, Ordering::Release);
+    while !stop.load(Ordering::Acquire) {
+        // SAFETY: this dedicated thread exists solely to dispatch the HID
+        // manager. The timeout observes `stop` even if it was set between
+        // the check above and entering this call.
+        let result = unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, STOP_POLL_SECONDS, 0) };
+        if result == CFRUN_LOOP_RUN_FINISHED {
+            // Nothing can arrive; stop rather than spin on a finished loop.
+            break;
+        }
+    }
+    deactivate(owner);
     run_loop_slot.store(ptr::null_mut(), Ordering::Release);
     // SAFETY: the run loop returned, so no callback is running; the manager
     // and matching dictionary are owned here and released once.

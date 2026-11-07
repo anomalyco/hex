@@ -154,10 +154,12 @@ Track the remaining shortcut requests explicitly:
 - [#37](https://github.com/anomalyco/hex/issues/37): Caps Lock remapped to
   Control is read through a raw HID modifier tracker below macOS's keyboard
   filter, so a Right Control shortcut no longer starts from it while Either
-  still does; the shortcut recorder applies the same normalization. Needs a
-  physical remap run on hardware. CI covers constructed HID snapshots only,
-  and the tracker falls back to unchanged CoreGraphics flags if it cannot
-  open.
+  still does; the shortcut recorder applies the same normalization while the
+  listener's input monitor is running. Hex never requests Input Monitoring:
+  the tracker needs already-granted HID listen access (Accessibility grants
+  the listen-event access the shortcut taps need), skips itself otherwise,
+  and gives up rather than delay listener startup. Needs a physical remap run
+  on hardware. CI covers constructed HID snapshots only.
 
 On-demand rewrite [PR #63](https://github.com/anomalyco/hex/pull/63) remains under
 review: publish the shared last transcript only after successful paste, require
