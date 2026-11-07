@@ -1,4 +1,4 @@
-//! How the macOS app process ends.
+//! How a desktop app process ends.
 //!
 //! `exit` (what `-[NSApplication terminate:]` and returning from `main` call)
 //! runs C++ static destructors and `atexit` handlers while threads Hex does
@@ -16,14 +16,26 @@
 //! Dropping the transcription engine cancels its job and normally returns at
 //! once; only a wedged native run reaches either bound, and `_exit` is what
 //! makes leaving it running safe.
+//!
+//! Linux's service stop has the same shape with a longer bound: the host arms
+//! [`arm_deadline`] when stopping begins, and a drain still running after
+//! [`STOP_DEADLINE`] ends with the same `_exit`, logging what was pending.
 
 use std::io::Write;
 use std::sync::Mutex;
+#[cfg(target_os = "linux")]
+use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// How long quitting waits for the drain before ending the process anyway.
 const DEADLINE: Duration = Duration::from_secs(5);
+
+/// How long a Linux stop may drain before the process ends anyway. Shorter
+/// than the unit's `TimeoutStopSec=30`, with room for a CPU transcription to
+/// finish.
+#[cfg(target_os = "linux")]
+const STOP_DEADLINE: Duration = Duration::from_secs(20);
 
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
@@ -97,6 +109,75 @@ fn end_process() -> ! {
     let _ = std::io::stderr().flush();
     // SAFETY: `_exit` ends the process immediately; nothing runs after it.
     unsafe { libc::_exit(0) }
+}
+
+/// What a stopping Linux process is still waiting on, named in the deadline's
+/// log so a stuck stop shows its last stage.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+pub(crate) enum PendingWork {
+    /// The host still drains the listener, an uncommitted shortcut edit, or
+    /// model preparation; the window and meetings may also be stopping.
+    Draining = 1,
+    /// The listener drained; the socket server, window, meetings, local API,
+    /// or tray are still stopping.
+    Teardown = 2,
+}
+
+#[cfg(target_os = "linux")]
+static PENDING_WORK: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Records what a stopping Linux process is doing, for the deadline's log.
+#[cfg(target_os = "linux")]
+pub(crate) fn set_pending_work(work: PendingWork) {
+    PENDING_WORK.store(work as u8, Ordering::Release);
+}
+
+#[cfg(target_os = "linux")]
+fn pending_work() -> &'static str {
+    match PENDING_WORK.load(Ordering::Acquire) {
+        1 => {
+            "the listener, a shortcut edit, or model preparation (the window and meetings may also be stopping)"
+        }
+        2 => {
+            "the listener drained; the socket server, window, meetings, local API, or tray are still stopping"
+        }
+        _ => "the host had not noticed the stop yet",
+    }
+}
+
+/// Ends a stopping Linux process even if its orderly shutdown wedges, naming
+/// what was still pending. Only the first call arms it, so every shutdown
+/// trigger can call it.
+#[cfg(target_os = "linux")]
+pub(crate) fn arm_deadline() {
+    static ARMED: Once = Once::new();
+    ARMED.call_once(|| {
+        if let Err(error) = run_deadline(STOP_DEADLINE, pending_work, || end_process()) {
+            tracing::warn!(%error, "could not arm Hex's exit deadline");
+        }
+    });
+}
+
+/// Starts the detached named thread that runs `exit` after `deadline`; the
+/// result reports whether it started.
+#[cfg(target_os = "linux")]
+fn run_deadline(
+    deadline: Duration,
+    pending: impl Fn() -> &'static str + Send + 'static,
+    exit: impl FnOnce() + Send + 'static,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("hex-exit-deadline".into())
+        .spawn(move || {
+            std::thread::sleep(deadline);
+            tracing::warn!(
+                pending = pending(),
+                "Hex's shutdown did not finish before its exit deadline"
+            );
+            exit();
+        })
+        .map(|_| ())
 }
 
 #[cfg(test)]
@@ -199,5 +280,26 @@ mod tests {
     #[test]
     fn a_stuck_drain_still_ends_the_process() {
         assert!(run_child("stuck_child").status.success());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn exit_deadline_fires_only_after_its_deadline() {
+        let (fired, received) = std::sync::mpsc::channel();
+        run_deadline(
+            Duration::from_millis(100),
+            || "test",
+            move || {
+                let _ = fired.send(());
+            },
+        )
+        .unwrap();
+        assert!(
+            received.recv_timeout(Duration::from_millis(20)).is_err(),
+            "the exit deadline fired before its deadline"
+        );
+        received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the exit deadline did not fire");
     }
 }
