@@ -1072,7 +1072,11 @@ Checks:
   its "Saved rule" toggle plays a rule's send, sent at once, instead.
   `--snap --scene suggestions|shift|sent-rule|search|typed|picked|rule|recording`
   renders it. The tones were checked by waveform and level only, never on
-  speakers.
+  speakers. Its "Pill motion (t1379)" section (scenes `motion-entrance`,
+  `motion-silence`, `motion-finish`; [motion.rs](../../src/rune_ui/capture_capsule/playground/motion.rs))
+  draws the recording pill's candidate entrances, silences, and finishes side
+  by side over the real Dot scope simulation and a scripted voice. Prototype
+  only: the capsule itself is unchanged.
 - Picker, in capture_capsule/picker.rs and tests.rs: geometry, label, and
   target tests, `the_picker_records_what_it_shows_and_comes_to_rest`, and
   `picker_stills_and_motion`, which scripts window hover, an area drag, and
