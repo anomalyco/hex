@@ -470,6 +470,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Record mouse buttons as shortcuts"),
         ));
         rows.push(row(
+            Feature::CapsLockDictation,
+            Some(&KEYBOARD),
+            tr("Caps Lock dictation"),
+            tr("Press Caps Lock to start dictation and again to finish. Hex keeps Caps Lock off and uses its light while it records and transcribes"),
+        ));
+        rows.push(row(
             Feature::PauseBrowser,
             Some(&GLOBE),
             tr("Also pause the browser"),
@@ -787,6 +793,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::SettingsSearch => "lab-settings-search",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
+        Feature::CapsLockDictation => "lab-caps-lock-dictation",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
         Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",

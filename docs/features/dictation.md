@@ -4,7 +4,9 @@ Hold the configured shortcut, speak, and release. Hex transcribes locally and
 inserts the result at the current focus. New captures do not cancel accepted
 work. Only Toggle mode has a cancel: its cancel shortcut, Escape by default,
 discards the recording (#786, #1022); every other intentional dictation
-finishes and pastes.
+finishes and pastes. The exception is a Labs › Caps Lock dictation capture on
+macOS: it is hands-free in every shortcut mode, so its own Escape binding
+cancels it even in Hold.
 
 This map covers the macOS release path. Linux shares the basic journey, not
 every timing, input, or recovery guarantee; see the
@@ -43,6 +45,25 @@ Linux/X11 maps Mouse 4/5 to native buttons 8/9, skipping wheel events; the
 recorder temporarily grabs the pointer while its window has focus and releases
 it on save, cancellation, focus loss or window close. Windows waits for the
 click that opened the recorder to be released before accepting a mouse button.
+
+macOS with Labs › Caps Lock dictation on (`labs.caps_lock_dictation`, off by
+default): a physical Caps Lock press toggles a hands-free dictation instead of
+typing. From idle it starts a capture that stays recording without a hold; the
+next press finishes it through the same transcription, processing, and paste
+path as Toggle's lock. A hold capture, a pending double tap, or another
+shortcut's recording is left alone, the normal shortcut keeps working when
+nothing records and stands down while a Caps Lock capture runs, and Escape
+cancels the Caps Lock capture in every shortcut mode (in Toggle mode, Toggle's
+other cancel shortcut does not; only Escape does). A Caps Lock remapped to
+Control or Escape never changes AlphaShift, so it never toggles dictation. Each
+press also clears the system Caps Lock state, so following keys stay
+lowercase, and the key's light is solid while any capture records (including a
+normal-shortcut or Annotate capture), blinks while Hex transcribes or
+processes, and is off otherwise. Turning the lab off or quitting Hex clears the
+light and restores normal Caps Lock behaviour. The light needs Input Monitoring
+(which Hex already asks for); without it dictation still works and the light
+stays under macOS's control. Implemented November 7, 2026, not verified on
+hardware; details and checks in [labs.md](labs.md).
 
 Wayland's XDG shortcut syntax has no mouse-button trigger. Use the desktop's
 mouse bindings to run `hex dictation start`/`stop` (hold) or `hex dictation toggle`

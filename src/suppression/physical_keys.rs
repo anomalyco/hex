@@ -29,7 +29,8 @@ use std::time::Duration;
 
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString};
 
-use crate::app_settings::{PhysicalModifierKeys, physical_key_bit};
+use crate::app_settings::{CAPS_LOCK_USAGE, PhysicalModifierKeys, physical_key_bit};
+use crate::audio::CaptureInstant;
 
 const KEYBOARD_USAGE_PAGE: u32 = 0x07;
 const GENERIC_DESKTOP_USAGE_PAGE: i32 = 0x01;
@@ -93,6 +94,7 @@ unsafe extern "C" {
     fn IOHIDElementGetDevice(element: *mut c_void) -> *mut c_void;
     fn IOHIDElementGetUsagePage(element: *mut c_void) -> u32;
     fn IOHIDElementGetUsage(element: *mut c_void) -> u32;
+    fn IOHIDValueGetTimeStamp(value: *mut c_void) -> u64;
     fn IOHIDValueGetIntegerValue(value: *mut c_void) -> isize;
 }
 
@@ -116,6 +118,19 @@ static HELD: AtomicU16 = AtomicU16::new(0);
 /// A tracker that timed out while starting must not clear a newer one.
 static OWNER: AtomicU64 = AtomicU64::new(0);
 static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
+
+/// Labs › Caps Lock dictation's listener, called on the tracker thread for
+/// each physical Caps Lock key-down with its press timestamp.
+static CAPS_LOCK_PRESSED: Mutex<Option<fn(CaptureInstant)>> = Mutex::new(None);
+
+/// Registers or clears the one Caps Lock press listener. The tracker stays
+/// independent of the feature: with no listener it records held keys as
+/// before.
+pub(crate) fn watch_caps_lock(pressed: Option<fn(CaptureInstant)>) {
+    *CAPS_LOCK_PRESSED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = pressed;
+}
 
 /// The physical keys held right now, or `None` while the tracker is
 /// inactive (access not granted, the open failed, or it is stopping).
@@ -193,12 +208,29 @@ unsafe extern "C" fn value_changed(
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let held = devices.entry(device as usize).or_default();
+    let newly_pressed = down && usage == CAPS_LOCK_USAGE && *held & (1_u16 << bit) == 0;
     if down {
         *held |= 1 << bit;
     } else {
         *held &= !(1 << bit);
     }
     context.publish(&devices);
+    drop(devices);
+    if newly_pressed {
+        // The device's own timestamp, which is earlier than this callback and
+        // shared with the tap's CGEvent clock once scaled. No IOKit runs here.
+        // SAFETY: `value` is live for this callback; its timestamp is a plain
+        // read.
+        let raw = unsafe { IOHIDValueGetTimeStamp(value) };
+        let received_at = CaptureInstant::now();
+        let (pressed_at, _) = super::physical_event_instant(raw, received_at);
+        let listener = *CAPS_LOCK_PRESSED
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(listener) = listener {
+            listener(pressed_at);
+        }
+    }
 }
 
 // SAFETY: `context` is the `TrackerContext` registered below and `device`

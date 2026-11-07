@@ -20,6 +20,8 @@ mod application_catalog;
 mod audio;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod calendar;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod caps_lock_dictation;
 #[cfg(hex_capture)]
 mod capture_host;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]

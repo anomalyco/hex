@@ -118,10 +118,11 @@ pub enum Feature {
     MeetingDescriptiveFilenames,
     QuitClosesWindow,
     ExpireMeetingAudio,
+    CapsLockDictation,
 }
 
 impl Feature {
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 56] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -177,6 +178,7 @@ impl Feature {
         Self::MeetingDescriptiveFilenames,
         Self::QuitClosesWindow,
         Self::ExpireMeetingAudio,
+        Self::CapsLockDictation,
     ];
 
     /// The features this OS and build have.
@@ -256,7 +258,8 @@ impl Feature {
             | Self::MeetingDescriptiveFilenames
             | Self::ExpireMeetingAudio
             | Self::NotchIndicator
-            | Self::QuitClosesWindow => Audience::Everyone,
+            | Self::QuitClosesWindow
+            | Self::CapsLockDictation => Audience::Everyone,
         }
     }
 
@@ -314,6 +317,7 @@ impl Feature {
             Self::LiveTyping
             | Self::MeetingDescriptiveFilenames
             | Self::QuitClosesWindow
+            | Self::CapsLockDictation
             | Self::ExpireMeetingAudio
             | Self::FailureNotices => 20261107,
         }
@@ -373,7 +377,8 @@ impl Feature {
             | Self::HideMenuBarIcon
             | Self::QuitClosesWindow
             | Self::NotchIndicator
-            | Self::Screenshots => cfg!(target_os = "macos"),
+            | Self::Screenshots
+            | Self::CapsLockDictation => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::AnnotateReplay => {
@@ -472,6 +477,7 @@ impl Feature {
             Self::MeetingDescriptiveFilenames => "meeting-descriptive-filenames",
             Self::QuitClosesWindow => "quit-closes-window",
             Self::ExpireMeetingAudio => "expire-meeting-audio",
+            Self::CapsLockDictation => "caps-lock-dictation",
         }
     }
 
@@ -533,6 +539,7 @@ impl Feature {
             Self::MeetingDescriptiveFilenames => "labs.meeting_descriptive_filenames",
             Self::QuitClosesWindow => "labs.quit_closes_window",
             Self::ExpireMeetingAudio => "labs.expire_meeting_audio",
+            Self::CapsLockDictation => "labs.caps_lock_dictation",
         }
     }
 
@@ -598,6 +605,7 @@ impl Feature {
             Self::MeetingDescriptiveFilenames => settings.labs.meeting_descriptive_filenames,
             Self::QuitClosesWindow => settings.labs.quit_closes_window,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
+            Self::CapsLockDictation => settings.labs.caps_lock_dictation,
         }
     }
 
@@ -661,6 +669,7 @@ impl Feature {
             &mut labs.meeting_descriptive_filenames,
             &mut labs.quit_closes_window,
             &mut labs.expire_meeting_audio,
+            &mut labs.caps_lock_dictation,
         ]
     }
 
@@ -724,6 +733,7 @@ impl Feature {
             Self::MeetingDescriptiveFilenames => settings.labs.meeting_descriptive_filenames = on,
             Self::QuitClosesWindow => settings.labs.quit_closes_window = on,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
+            Self::CapsLockDictation => settings.labs.caps_lock_dictation = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -787,6 +797,8 @@ const LIVE_TYPING: u64 = EXPIRE_MEETING_AUDIO << 1;
 const MEETING_DESCRIPTIVE_FILENAMES: u64 = LIVE_TYPING << 1;
 /// The next bit above descriptive meeting file names.
 const FAILURE_NOTICES: u64 = MEETING_DESCRIPTIVE_FILENAMES << 1;
+/// The next bit above Failure notices' switch.
+const CAPS_LOCK_DICTATION: u64 = FAILURE_NOTICES << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1040,6 +1052,14 @@ pub fn meeting_descriptive_filenames() -> bool {
     on(MEETING_DESCRIPTIVE_FILENAMES) && Feature::MeetingDescriptiveFilenames.on_this_os()
 }
 
+/// A physical Caps Lock press starts and stops dictation, and its light
+/// follows Hex's recording and processing (macOS; read by the listener on
+/// every pass and by the event tap and HID tracker through their own flag).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn caps_lock_dictation() -> bool {
+    on(CAPS_LOCK_DICTATION) && Feature::CapsLockDictation.on_this_os()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).
@@ -1192,6 +1212,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::MeetingDescriptiveFilenames,
             settings.meeting_descriptive_filenames,
             MEETING_DESCRIPTIVE_FILENAMES,
+        ),
+        (
+            Feature::CapsLockDictation,
+            settings.caps_lock_dictation,
+            CAPS_LOCK_DICTATION,
         ),
         (
             Feature::QuitClosesWindow,
@@ -1677,6 +1702,22 @@ mod tests {
         assert_eq!(state & MEETING_IMPORT, 0);
         assert_eq!(state & QUIT_CLOSES_WINDOW, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+    }
+
+    #[test]
+    fn caps_lock_dictation_is_its_own_bit_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & CAPS_LOCK_DICTATION, 0);
+        labs.caps_lock_dictation = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & CAPS_LOCK_DICTATION, 0);
+        assert_eq!(state & MEETING_DESCRIPTIVE_FILENAMES, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::CapsLockDictation.on_this_os(),
+            cfg!(target_os = "macos")
+        );
     }
 
     #[test]

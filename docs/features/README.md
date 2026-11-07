@@ -667,6 +667,17 @@ Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
 
+Labs > Caps Lock dictation (macOS, off)   // labs.md
+  -> a Caps Lock press starts a hands-free capture; the next press finishes it
+  -> needs both the HID Caps Lock key and its AlphaShift edge; remapped to
+     Control or Escape changes no AlphaShift, so it never toggles dictation
+  -> Caps Lock stays off so typing is unchanged; its light is solid while any
+     capture records (normal-shortcut and Annotate too), blinks while Hex
+     transcribes or processes, off when done
+  -> Escape cancels in any mode; in Toggle mode only Escape cancels a Caps
+     Lock capture; the normal shortcut stands down while one runs; off or
+     quit clears the light and restores Caps Lock
+
 Labs > Unload model when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription/engine
   -> nothing used the model that long and nothing records -> the model unloads
   -> next press, meeting chunk, or API request -> reloads first; audio waits, nothing lost

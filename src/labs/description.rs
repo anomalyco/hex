@@ -150,6 +150,9 @@ impl Feature {
             Self::ExpireMeetingAudio => {
                 "Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings."
             }
+            Self::CapsLockDictation => {
+                "Press Caps Lock to start and stop dictation; its light shows when Hex records and transcribes"
+            }
         }
     }
 }
