@@ -979,10 +979,9 @@ quit Apple event, logout, the Dock's Quit), `hex quit`, and `hex restart` still
 quit and drain as before, and with the lab off ⌘Q quits exactly as it did.
 Checks: `quit_closes_window_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs); the existing menu, close, and drain tests are
-unchanged. Not yet observed: ⌘Q with the lab on in a real macOS build (this
-change was built and tested on Linux, where the row and the handler don't
-exist, so the handler's branch has no compiled check yet); the row renders only
-in macOS builds, so no golden changes.
+unchanged. The handler is compiled, clippy-linted, and covered by the macOS test
+build in CI (the Check macOS run for #1480), but it is not yet observed on a
+real Mac; the row renders only in macOS builds, so no golden changes.
 
 Notch indicator (`notch-indicator`, macOS only): for MacBooks with a
 notch, a recording indicator in the Dynamic Island's compact style that

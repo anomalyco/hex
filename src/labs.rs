@@ -878,8 +878,8 @@ const MINUTES_BITS: u32 = 11;
 const MINUTES_MASK: u64 = (1 << MINUTES_BITS) - 1;
 /// Bits 1..31 are full, so this switch sits above the minutes.
 const MEETING_IMPORT: u64 = 1 << (MINUTES_SHIFT + MINUTES_BITS as u64);
-/// The next free bit above Unload model when idle's minutes.
-const QUIT_CLOSES_WINDOW: u64 = 1 << 44;
+/// The next bit above Import audio's switch, clear of the minutes below it.
+const QUIT_CLOSES_WINDOW: u64 = MEETING_IMPORT << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
