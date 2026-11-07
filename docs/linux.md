@@ -190,10 +190,11 @@ sh install-linux.sh
 ~/.local/bin/hex
 ```
 
-On Debian or Ubuntu, install the Wayland helpers with `sudo apt install
-wl-clipboard wtype`; on Fedora, `sudo dnf install wl-clipboard wtype`. `wtype`
-is only needed on wlroots-style compositors (Sway, niri, Hyprland), where Hex
-uses it; GNOME and KDE paste through their RemoteDesktop portal.
+When `wl-copy` is missing, the installer prints the commands to install the
+Wayland helpers: on Debian or Ubuntu, `sudo apt install wl-clipboard wtype`; on
+Fedora, `sudo dnf install wl-clipboard wtype`; on Arch, `sudo pacman -S --needed
+wl-clipboard wtype`. `wtype` is only needed on wlroots compositors and niri,
+where Hex uses it; GNOME and KDE paste through their RemoteDesktop portal.
 
 The installer verifies the signed release feed, exact artifact size, and
 SHA-256 before installing. It uses no root access. It creates the managed

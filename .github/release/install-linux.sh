@@ -330,7 +330,7 @@ explain_unrunnable() {
     fail "Hex needs libraries that are not installed. Install them, then run this installer again:
   sudo pacman -S --needed$packages"
   fi
-  fail "Hex could not run. Install its missing runtime libraries (the package names above are Arch's)."
+  fail "Hex could not run. Install the required Arch runtime libraries."
 }
 
 # The pipeline's status is awk's, so an executable that cannot start shows up
@@ -521,10 +521,11 @@ printf 'Installed Hex %s to %s\n' "$version" "$binary"
 # Wayland paste runs wl-copy, from the wl-clipboard package this installer
 # does not bring. Say so now, not after the first dictation fails.
 if ! command -v wl-copy >/dev/null 2>&1; then
-  printf '\nWayland paste needs wl-copy from the wl-clipboard package, and wtype on wlroots compositors (Sway, niri, Hyprland):\n'
+  printf '\nWayland paste needs wl-copy from the wl-clipboard package, and wtype on wlroots compositors and niri:\n'
   printf '  Debian/Ubuntu: sudo apt install wl-clipboard wtype\n'
   printf '  Fedora: sudo dnf install wl-clipboard wtype\n'
   printf '  Arch: sudo pacman -S --needed wl-clipboard wtype\n'
+  printf '\n'
 fi
 printf 'Install a model: %s model install\n' "$binary"
 printf 'Launch Hex: %s\n' "$binary"

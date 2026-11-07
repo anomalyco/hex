@@ -246,7 +246,8 @@ const WL_COPY: &str = "wl-copy";
 
 /// How a paste explains a Wayland session without `wl-copy`: the spawn error
 /// alone ("No such file or directory") never named the package.
-const WL_COPY_MISSING: &str = "wl-copy is not installed. Install the wl-clipboard package (for example `sudo apt install wl-clipboard`), then try again.";
+const WL_COPY_MISSING: &str =
+    "wl-copy is not installed. Install the wl-clipboard package, then try again.";
 
 /// What Settings and `hex status` warn with while this Wayland session can't
 /// copy or paste at all.
@@ -273,7 +274,7 @@ fn missing_wl_copy(path: Option<&OsStr>) -> Option<&'static str> {
 
 /// Fails before spawning a helper that isn't there, naming what to install.
 fn require_wl_copy() -> Result<()> {
-    match missing_wayland_helper() {
+    match missing_wl_copy(std::env::var_os("PATH").as_deref()) {
         Some(message) => Err(eyre!("{message}")),
         None => Ok(()),
     }
@@ -688,7 +689,6 @@ mod tests {
     fn a_missing_wl_copy_names_the_package_to_install() {
         let missing = missing_wl_copy(Some(OsStr::new("/hex-test-no-such-directory")));
         assert_eq!(missing, Some(WL_COPY_MISSING));
-        assert!(missing.unwrap().contains("wl-clipboard"));
 
         // A `wl-copy` on PATH that is executable is enough.
         let directory = std::env::temp_dir().join(format!("hex-paste-path-{}", std::process::id()));
@@ -697,6 +697,13 @@ mod tests {
         std::fs::write(&helper, b"").unwrap();
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(missing_wl_copy(Some(directory.as_os_str())), None);
+
+        // A file that cannot run is no better than no helper at all.
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            missing_wl_copy(Some(directory.as_os_str())),
+            Some(WL_COPY_MISSING)
+        );
         let _ = std::fs::remove_dir_all(directory);
     }
 

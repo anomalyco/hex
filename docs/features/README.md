@@ -88,7 +88,8 @@ Install on Windows                        // setup.windows-installer
 
 Install on Linux                          // setup.linux-installer
 └── curl … | sh -> signed feed -> verified artifact -> launcher + hex.service
-    └── cannot start -> name the glibc floor or the missing Arch packages
+    ├── cannot start -> name the glibc floor or the missing Arch packages
+    └── finish without wl-copy -> print apt/dnf/pacman commands for wl-clipboard and wtype
 
 Prepare local models                      // separate network dependency
 └── Dictation -> huggingface.co and its download CDN
@@ -1699,7 +1700,7 @@ Linux beta                               // not macOS feature parity
 │       │   `hex status` reports the window and HUD stopped, with the reason (#979)
 │       ├── Neither (Rune refused it, or no layer-shell and no XWayland)
 │       │   -> process.log warns once; `hex status` reports `hud_limitation`
-│       │   and the listener warning
+│       │   and the listener warning (a missing wl-copy outranks it)
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
 ├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, desktop/tray_icon, rune::Tray)
 │   ├── Mark -> white; black when the desktop's color scheme prefers light (portal Settings color-scheme)
@@ -1739,9 +1740,9 @@ Linux beta                               // not macOS feature parity
 │           // not run on GNOME
 │   └── Wayland: wl-copy, then the shortcut, chosen at the first paste  // linux.wayland-paste
 │       ├── wl-copy not on PATH (direct installs add no packages) -> Settings and
-│       │   `hex status` warn while the listener runs; every copy and paste fails
-│       │   naming wl-clipboard before a helper is spawned, so a dictation doesn't
-│       │   record only to fail on the missing helper
+│       │   `hex status` warn while the listener runs; capture and transcription
+│       │   still run, and the paste fails naming wl-clipboard before a helper
+│       │   is spawned
 │       ├── Asked by a modifier shortcut -> wait for its portal release + 250 ms
 │       │   (2 s cap without a release); after a hex command -> 250 ms
 │       │   // Hyprland merges held physical modifiers into virtual-keyboard keys (#353)
