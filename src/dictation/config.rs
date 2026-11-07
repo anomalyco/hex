@@ -129,7 +129,7 @@ mod tests {
                 ..ContextSnapshot::default()
             };
             profiles
-                .process_cancellable("I like open code", &context, &AtomicBool::new(false))
+                .process_cancellable("I like open code", "en", &context, &AtomicBool::new(false))
                 .text
         };
 

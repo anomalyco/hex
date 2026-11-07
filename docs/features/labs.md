@@ -43,7 +43,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Copy dictation only no labs.copy_only (macOS)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote", "quote … unquote" become line breaks and quotation marks; Spanish "nuevo párrafo", "nueva línea", "abre/cierra comillas", … too (#630, #1040)
 ├── Spoken symbols  no    labs.spoken_symbols          spoken "hashtag", "underscore", "comma", … become symbols joined to their words: "#release", "my_variable", "done, thanks"; Spanish "arroba", "guion bajo", "coma", … too (#678, #1040)
-├── Remove filler words no labs.filler_words          um, umm, uh, uhh, erm, er, ah leave dictations, with no model (#631)
+├── Remove filler words no labs.filler_words          English dictations lose um, umm, uh, uhh, erm, er, ah, with no model (#631)
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
@@ -352,7 +352,12 @@ Remove filler words (`filler-words`, issue 631, every OS): while on,
 [dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::filler_words()` as each dictation's processing starts and runs
 `dictation::filler_words::apply` right after spoken formatting and before the mode's
-corrections, OpenCode rewriting, and transformations. It is rule-based, with
+corrections, OpenCode rewriting, and transformations. It applies only when
+that dictation's language is exactly English (`filler_words::applies_to`):
+Auto and every other language are left untouched, because "er" and "um" are
+ordinary German and Portuguese words. The language is the one selected when
+the dictation was captured, not the setting in force while it is processed.
+It is rule-based, with
 no model and no added latency. The English fillers "um", "umm", "uh", "uhh",
 "erm", "er", and "ah" are removed as whole words, lowercase or capitalised
 only, so "umbrella", "ahead", "error", "Uhura", "uh-huh", and "ER" stay. The

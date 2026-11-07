@@ -1,13 +1,20 @@
-//! Labs › Remove filler words: the hesitations a model writes down
-//! verbatim ("um", "umm", "uh", "uhh", "erm", "er", "ah") leave a dictation,
-//! with no model involved. A filler matches as a whole word, lowercase or
-//! with only its first letter capitalised, so "umbrella", "ahead", "error",
-//! "Uhura", "uh-huh", and "ER" stay as they are. The comma or ellipsis that
-//! comes with a filler goes with it, the spaces around it close up, and a
-//! capitalised filler that started a sentence hands its capital to the next
-//! word. Line breaks are kept.
+//! Labs › Remove filler words: the English hesitations a model writes down
+//! verbatim ("um", "umm", "uh", "uhh", "erm", "er", "ah") leave an English
+//! dictation, with no model involved. A filler matches as a whole word,
+//! lowercase or with only its first letter capitalised, so "umbrella",
+//! "ahead", "error", "Uhura", "uh-huh", and "ER" stay as they are. The comma
+//! or ellipsis that comes with a filler goes with it, the spaces around it
+//! close up, and a capitalised filler that started a sentence hands its
+//! capital to the next word. Line breaks are kept.
 
 const FILLERS: &[&str] = &["um", "umm", "uh", "uhh", "erm", "er", "ah"];
+
+/// Whether a dictation in `language` loses its fillers. Only English does:
+/// "er" and "um" are ordinary German and Portuguese words, so "auto" and
+/// every other language keep their transcripts as heard.
+pub fn applies_to(language: &str) -> bool {
+    language == "en"
+}
 
 /// `transcript` without its filler words.
 pub fn apply(transcript: &str) -> String {
@@ -148,7 +155,15 @@ fn needs_space(out: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::apply;
+    use super::{applies_to, apply};
+
+    #[test]
+    fn only_english_dictations_apply_the_filter() {
+        assert!(applies_to("en"));
+        for language in ["de", "pt", "auto", ""] {
+            assert!(!applies_to(language), "{language:?}");
+        }
+    }
 
     #[test]
     fn fillers_leave_with_their_commas_and_spaces() {
