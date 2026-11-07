@@ -903,7 +903,9 @@ HEX snapshots the volumes and applies a smooth ramp in
 [linux/audio_control.rs](../../src/linux/audio_control.rs), and the session
 adapter in [windows/audio_control.rs](../../src/windows/audio_control.rs). The worker runs inside the app and cannot restore volume after a
 hard process crash or SIGKILL. Changes during the ramp itself cannot be
-distinguished from delayed Bluetooth acknowledgements.
+distinguished from delayed Bluetooth acknowledgements. With the shorter
+lowering ramp, a Bluetooth output that acknowledges an earlier ramp step late
+could look like a manual change and stay lowered; not observed on a device.
 Fake-device tests cover relative volume, balance, silence, interrupted ramps,
 manual changes after settling, and partial-write rollback; settings/UI tests
 cover defaults, bounds, persistence, conditional visibility and platform gating.
@@ -916,7 +918,7 @@ effect. It now reaches the ducked volume in about 120 ms (`LOWER` in
 pre-roll like Mute and Pause media, and still eases back over one second when
 restored. Checks: `ducking_preserves_balance_silence_and_restores` and
 `lowering_finishes_at_its_own_duration_while_restoring_is_still_ramping` in
-that module, and `muting_or_pausing_while_dictating_keeps_no_pre_roll` in
+that module, and `suppressing_audio_while_dictating_keeps_no_pre_roll` in
 [dictation.rs](../../src/dictation.rs) (constructed audio; not run on a device
 or physical output).
 

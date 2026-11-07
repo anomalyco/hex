@@ -1560,7 +1560,7 @@ mod tests {
     }
 
     #[test]
-    fn muting_or_pausing_while_dictating_keeps_no_pre_roll() {
+    fn suppressing_audio_while_dictating_keeps_no_pre_roll() {
         use crate::app_settings::RecordingAudioBehavior::{DoNothing, Duck, Mute, PauseMedia};
         for (behavior, kept) in [(Mute, 0), (PauseMedia, 0), (Duck, 0), (DoNothing, 7_200)] {
             let pre_roll = hotkey_pre_roll(behavior);

@@ -438,7 +438,7 @@ set to Mute or Pause media, the pre-roll came from before the mute took
 effect and picked up whatever was playing. On every OS, those hotkey captures
 now keep no pre-roll (`dictation::hotkey_pre_roll`); Do nothing keeps 450 ms
 (Duck kept it until issue 1468, below). There is no separate setting. Check:
-`muting_or_pausing_while_dictating_keeps_no_pre_roll` in
+`suppressing_audio_while_dictating_keeps_no_pre_roll` in
 [dictation.rs](../../src/dictation.rs) (constructed audio; not run on a
 device).
 
@@ -453,7 +453,7 @@ second. Checks:
 `ducking_preserves_balance_silence_and_restores` and
 `lowering_finishes_at_its_own_duration_while_restoring_is_still_ramping` in
 audio/output_ducking.rs, and
-`muting_or_pausing_while_dictating_keeps_no_pre_roll` in
+`suppressing_audio_while_dictating_keeps_no_pre_roll` in
 [dictation.rs](../../src/dictation.rs) (constructed audio; not run on a device
 or physical output).
 
