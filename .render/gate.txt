@@ -1,1 +1,0 @@
-motion gate: 33 cells, 8949 frames, 0 findings (144 allowed, 0 unused allow rows) in 34.7 s
