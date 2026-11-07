@@ -83,6 +83,17 @@ enum Command {
     Devices,
 }
 
+/// The service and the foreground `hex dictate` listener adopt the session's
+/// Wayland display when their unit or shell has none (#756, #1506). The
+/// window, commands that only forward or read, and the embedded service keep
+/// whatever display their parent gave them.
+fn adopts_wayland_display(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Service { embedded: false } | Command::Dictate { .. }
+    )
+}
+
 pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
     let activation = crate::linux::service::Activation::take_from_environment();
     crate::linux::service::refresh_x_authority();
@@ -101,9 +112,9 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         )),
         command => command,
     };
-    // Before the log, which starts a thread: the service may need the
-    // session's Wayland display (#756).
-    let adopted = matches!(command, Command::Service { embedded: false })
+    // Before the log, which starts a thread: the service and the foreground
+    // listener may need the session's Wayland display (#756, #1506).
+    let adopted = adopts_wayland_display(&command)
         .then(crate::linux::service::adopt_wayland_display)
         .flatten();
     // Rune reads its own flags (`--snap`, `--scene`, …) from the process
@@ -156,8 +167,9 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 ),
                 None,
                 Default::default(),
-                // Only shortcuts drive a foreground listener.
-                std::sync::mpsc::channel().1.into(),
+                // Only shortcuts drive a foreground listener: the service's
+                // `hex` commands can't reach it.
+                crate::linux::input::CommandQueue::disconnected(),
                 Default::default(),
                 std::sync::mpsc::channel().1,
             )
@@ -200,7 +212,23 @@ fn launch(
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, Command, ControlCli};
+    use super::{Cli, Command, ControlCli, adopts_wayland_display};
+
+    #[test]
+    fn the_service_and_foreground_dictation_adopt_the_sessions_wayland_display() {
+        assert!(adopts_wayland_display(&Command::Service {
+            embedded: false
+        }));
+        assert!(adopts_wayland_display(&Command::Dictate { device: None }));
+        assert!(!adopts_wayland_display(&Command::Service {
+            embedded: true
+        }));
+        assert!(!adopts_wayland_display(&Command::App {
+            hidden: true,
+            rune_args: Vec::new(),
+        }));
+        assert!(!adopts_wayland_display(&Command::Devices));
+    }
 
     #[test]
     fn the_shared_control_commands_parse_beside_linuxs_own() {

@@ -1067,7 +1067,8 @@ fn superseded_kde_actions<'a>(
 }
 
 /// What the log says when the session has no shortcuts portal at startup.
-pub(crate) const MISSING_SHORTCUTS_PORTAL: &str = "no GlobalShortcuts portal; dictation follows the hex commands. \
+pub(crate) const MISSING_SHORTCUTS_PORTAL: &str = "no GlobalShortcuts portal; dictation follows the hex commands, \
+which reach the service listener (`hex start`) but not a foreground `hex dictate`. \
 If this desktop has one, xdg-desktop-portal may have started before the desktop session and picked the wrong \
 backend: restart it (systemctl --user restart xdg-desktop-portal) and Hex binds its shortcuts at its next check";
 
