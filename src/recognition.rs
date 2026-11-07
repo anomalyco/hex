@@ -1587,9 +1587,11 @@ fn fail_capture(
     indicator: Option<&DictationIndicatorSender>,
 ) -> Result<()> {
     feedback::play(Tone::Error);
-    events.dictation(DictationPhase::Failed(message), "")?;
+    events.dictation(DictationPhase::Failed(message.clone()), "")?;
     if let Some(indicator) = indicator {
-        indicator.send(DictationIndicatorEvent::Failed);
+        indicator.send(DictationIndicatorEvent::Failed {
+            message: Some(message),
+        });
     }
     emit_engine_state(events, false, worker, device)
 }
@@ -1735,7 +1737,9 @@ fn finish_dictation_with(
             feedback::play(Tone::Error);
             events.dictation(DictationPhase::Failed(error.into()), "")?;
             if let Some(indicator) = indicator {
-                indicator.send(DictationIndicatorEvent::Failed);
+                indicator.send(DictationIndicatorEvent::Failed {
+                    message: Some(error.into()),
+                });
             }
             Ok(FinishResult::Rejected(error.into()))
         }
@@ -1790,10 +1794,11 @@ fn handle_dictation_event(
         } => {
             tracing::error!(%error, "dictation failed");
             feedback::play(Tone::Error);
-            events.dictation(DictationPhase::Failed(error), "")?;
+            events.dictation(DictationPhase::Failed(error.clone()), "")?;
             if let Some(indicator) = indicator {
                 indicator.send(DictationIndicatorEvent::JobFailed {
                     job_id: job_id.value(),
+                    message: Some(error),
                 });
             }
         }
@@ -1813,9 +1818,11 @@ fn handle_dictation_event(
         WorkerEvent::ModelFailed(error) => {
             tracing::error!(%error, "dictation failed");
             feedback::play(Tone::Error);
-            events.dictation(DictationPhase::Failed(error), "")?;
+            events.dictation(DictationPhase::Failed(error.clone()), "")?;
             if let Some(indicator) = indicator {
-                indicator.send(DictationIndicatorEvent::Failed);
+                indicator.send(DictationIndicatorEvent::Failed {
+                    message: Some(error),
+                });
             }
         }
         WorkerEvent::Pasted {

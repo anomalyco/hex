@@ -43,6 +43,8 @@ use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use objc2_foundation::{MainThreadMarker, NSAppleEventManager, NSObject, NSString, NSTimer};
 
 use crate::app_settings::AppSettings;
+use crate::desktop::activity::{DesktopActivity, last_completed_at};
+use crate::desktop::events::EventReader;
 use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopShortcuts,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
@@ -159,6 +161,17 @@ type Wake = Arc<dyn Fn() + Send + Sync>;
 struct Shared {
     published: Mutex<Option<Arc<Published>>>,
     wakers: Mutex<Vec<Wake>>,
+    /// The listener's event log, which the runtime reads and the tour shares.
+    event_path: PathBuf,
+    /// When this run began, in the event log's wall-clock ms, captured before
+    /// the listener thread starts.
+    started_at: u64,
+}
+
+impl Shared {
+    fn event_path(&self) -> &Path {
+        &self.event_path
+    }
 }
 
 /// The window's and the menu bar's connection to the runtime.
@@ -169,14 +182,13 @@ pub(crate) struct RuntimeHandle {
     meeting_requests: SyncSender<MeetingRequest>,
     recognition_controls: SyncSender<RecognitionControl>,
     history: Option<crate::history::History>,
-    event_path: PathBuf,
     indicator: crate::dictation::indicator::DictationIndicatorSender,
 }
 
 impl RuntimeHandle {
     /// The listener's event log, which the tour reads for practice dictations.
     pub(crate) fn event_path(&self) -> &Path {
-        &self.event_path
+        self.shared.event_path()
     }
 
     pub(crate) fn history(&self) -> Option<crate::history::History> {
@@ -401,6 +413,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let (recognition_start, start_receiver) = mpsc::sync_channel(1);
     let recognition_indicator = indicator.clone();
     let recognition_history = history.clone();
+    let started_at = crate::desktop::events::now_ms();
     let listener_failure = Arc::new(Mutex::new(None::<String>));
     let recognition_failure = listener_failure.clone();
     let recognition = thread::Builder::new()
@@ -443,18 +456,21 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                 Err(payload) => panic_message(payload.as_ref()),
             };
             *lock(&recognition_failure) = Some(failure);
-            recognition_indicator.send(DictationIndicatorEvent::Failed);
+            recognition_indicator.send(DictationIndicatorEvent::Failed { message: None });
         })?;
 
     let (requests, request_receiver) = mpsc::channel();
-    let shared = Arc::new(Shared::default());
+    let shared = Arc::new(Shared {
+        event_path: event_path.clone(),
+        started_at,
+        ..Shared::default()
+    });
     let handle = RuntimeHandle {
         requests: requests.clone(),
         shared: shared.clone(),
         meeting_requests: meeting_requests.clone(),
         recognition_controls: recognition_controls.clone(),
         history: history.clone(),
-        event_path,
         indicator: indicator.clone(),
     };
     RUNTIME
@@ -661,6 +677,10 @@ fn run_runtime(
     recognition_start: Option<SyncSender<()>>,
     listener_failure: Arc<Mutex<Option<String>>>,
 ) {
+    let mut event_reader = EventReader::open(shared.event_path().to_path_buf());
+    let mut activity = DesktopActivity::default();
+    activity.refresh(&mut event_reader);
+    let last_completed_at = last_completed_at(event_reader.events().iter());
     let mut runtime = Runtime {
         keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
             settings.keyboard_model_switching.clone(),
@@ -671,6 +691,10 @@ fn run_runtime(
         preparation: TranscriptionPreparation::default(),
         recognition_start,
         listener_failure,
+        event_reader,
+        activity,
+        last_completed_at,
+        started_at: shared.started_at,
     };
     loop {
         let mut next = match requests.recv_timeout(RUNTIME_TICK) {
@@ -686,6 +710,7 @@ fn run_runtime(
             break;
         }
         runtime.tick();
+        runtime.refresh_activity();
         let published = Arc::new(runtime.publish());
         let changed = {
             let mut current = lock(&shared.published);
@@ -718,6 +743,15 @@ struct Runtime {
     recognition_start: Option<SyncSender<()>>,
     /// Why the listener stopped, once it has.
     listener_failure: Arc<Mutex<Option<String>>>,
+    /// The listener's event log, read on this thread so the window can show a
+    /// failed dictation without another polling thread.
+    event_reader: EventReader,
+    activity: DesktopActivity,
+    /// When the current session's newest dictation completed.
+    last_completed_at: Option<u64>,
+    /// When this runtime started, in the event log's wall-clock ms. Failures
+    /// older than this belong to the previous session.
+    started_at: u64,
 }
 
 impl Runtime {
@@ -798,6 +832,13 @@ impl Runtime {
         self.tick_at(Instant::now());
     }
 
+    /// Reads the listener's newest events, bounded by `EventReader`'s
+    /// retention, so the window's warning follows failed dictations.
+    fn refresh_activity(&mut self) {
+        self.activity.refresh(&mut self.event_reader);
+        self.last_completed_at = last_completed_at(self.event_reader.events().iter());
+    }
+
     fn tick_at(&mut self, now: Instant) {
         if let Some(choice) = self.keyboard_switcher.take_due(now) {
             let selection = TranscriptionSelection {
@@ -858,6 +899,9 @@ impl Runtime {
                 .into(),
                 warning: failure,
                 notice: None,
+                last_failure: self
+                    .activity
+                    .visible_failure_since(self.started_at, self.last_completed_at),
                 shortcuts: DesktopShortcuts::Registered,
                 shortcuts_configurable: false,
             },

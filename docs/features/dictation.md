@@ -1401,6 +1401,11 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Stop tone still waiting on Lower audio -> Stop only, never done first
      -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
   Failure -> Error tone; wake/sleep keep macOS Pop/Tink      // dictate.error-tone
+     -> Settings listener card: "Last dictation failed: …"   // macOS, Windows
+        -> clears once a later dictation completes
+        -> a known microphone cause explains itself; other failures keep their wording
+     -> Labs › Failure notices: why beside the HUD for ~6 s  // dictate.failure-notice, off by default
+        -> a new capture dismisses it; no old failure is replayed at launch
      -> Classic has none: macOS Basso, Signature's error on Windows and Linux
      -> A lost microphone or input -> No tone; the capture ends
   Tone requested -> Playback worker opens the default output, then plays
@@ -1412,6 +1417,41 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Cold audio stack exceeds preload admission -> Warn once; recognition continues
      -> Loader keeps running; later tones play once the output opens
 ```
+
+A failed dictation also stays visible in Settings' listener card as "Last
+dictation failed: …" until a later dictation completes. macOS now reads the
+listener's own event log on its runtime thread, as Windows already did. The
+listener's own stopped warning and a dictation failure are separate fields, so
+`hex status` keeps treating only the former as a stopped listener; the card
+shows the stopped warning first. A failure whose timestamp predates this run's
+start is ignored. Known
+microphone causes say what to do in every interface language — a built-in
+microphone switched off by a closed lid, or no microphone available; other
+failures keep their logged wording. Sources and checks:
+`DesktopActivity::visible_failure_since`, `last_completed_at`, and
+`failure_explanation` in [desktop/activity.rs](../../src/desktop/activity.rs),
+`newest_failure_shows_until_a_later_transcript_completes`,
+`a_startup_reader_ignores_the_previous_sessions_failure`, and
+`known_microphone_failures_get_an_actionable_explanation`, and the listener
+card in [rune_ui/settings.rs](../../src/rune_ui/settings.rs). Proof limit: the
+projection and wording are unit-tested; the macOS event-log wiring and listener
+card are not natively verified.
+
+With Labs › Failure notices on (`labs.failure_notices`, off by default), the
+same explanation also appears for about six seconds as one click-through line
+beside the HUD, reusing the Live text plate and placement. A new capture hides
+it at once, and the message travels with the HUD's failure event, so a launch
+never replays an old failure. The HUD's coral flash, its 600 ms, tones, and
+capture behavior are unchanged. A job failure that arrives while a newer
+capture records is skipped. Checks:
+`a_failure_notice_lasts_six_seconds`,
+`a_new_capture_dismisses_a_failure_notice_at_once`,
+`only_a_notices_own_deadline_dismisses_it`,
+`a_failure_arriving_after_a_queued_words_end_stays_visible`, and
+`a_failure_notice_takes_the_plate_from_the_live_words` in
+[rune_ui/live_text.rs](../../src/rune_ui/live_text.rs) cover the timing and
+plate; the overlay itself is not natively verified on macOS or Windows. See
+[Labs](labs.md) for its per-OS scope.
 
 **Fixed November 1, 2026 (issue 873):** on macOS the HUD remembered its last
 placement and skipped sending it to Rune again when it matched, so a HUD Rune

@@ -27,6 +27,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
+├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
@@ -1416,6 +1417,29 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs). The line has no golden
   and no `--snap` scene (overlays have none), and nothing headless checks
   how it appears and hides on screen.
+- Failure notices: when a dictation fails, the same click-through plate that
+  carries Live text shows why for about 6 seconds, or until the next capture
+  starts. It reuses the Live text overlay's window, placement
+  (`rune_hud::live_text_place`), and plate styling; the HUD's own coral failure
+  flash and its 600 ms stay exactly as they were. The reason travels with the
+  HUD's failure event, so no old failure is replayed from the event log at
+  launch. Known microphone causes use the same actionable wording as Settings'
+  listener card; any other failure keeps its logged message, truncated to one
+  line. The gate is `labs::failure_notices()` (toggle
+  `labs.failure_notices`, off by default), read when each failure reaches the
+  HUD; with it off, no notice is drawn. Every OS shows a notice for a failed
+  accepted job. Windows and macOS also show one when the microphone fails to
+  open. On Linux, notices cover failed transcriptions only: a microphone-open
+  failure never reaches its HUD today. A job failure that arrives while a newer
+  capture records is skipped. Checks: `a_failure_notice_lasts_six_seconds`,
+  `a_new_capture_dismisses_a_failure_notice_at_once`,
+  `only_a_notices_own_deadline_dismisses_it`,
+  `a_failure_arriving_after_a_queued_words_end_stays_visible`, and
+  `a_failure_notice_takes_the_plate_from_the_live_words` in
+  [rune_ui/live_text.rs](../../src/rune_ui/live_text.rs), and
+  `failure_notices_is_its_own_bit_and_off_by_default` in
+  [labs.rs](../../src/labs.rs). Proof limit: the timing and Labs gate are
+  unit-tested; the overlay was not observed on screen on macOS or Windows.
 - Live typing: on a wlroots-family Wayland session, a hotkey dictation's
   provisional words are an underlined input-method preedit in the focused
   text field, replaced on each update, and its final text is committed
