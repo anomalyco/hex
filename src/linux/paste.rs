@@ -512,20 +512,57 @@ impl X11Paster {
             .store(atoms.clipboard, target, bytes)
             .wrap_err("could not own the X11 clipboard")?;
         thread::sleep(Duration::from_millis(60));
-        for (type_, key) in [
-            (KEY_PRESS, self.control),
-            (KEY_PRESS, self.shift),
-            (KEY_PRESS, self.v),
-            (KEY_RELEASE, self.v),
-            (KEY_RELEASE, self.shift),
-            (KEY_RELEASE, self.control),
-        ] {
-            if key == self.shift && !paste_with_shift {
-                continue;
+        let mut pressed = Vec::new();
+        let result = (|| -> Result<()> {
+            for (type_, key) in [
+                (KEY_PRESS, self.control),
+                (KEY_PRESS, self.shift),
+                (KEY_PRESS, self.v),
+                (KEY_RELEASE, self.v),
+                (KEY_RELEASE, self.shift),
+                (KEY_RELEASE, self.control),
+            ] {
+                if key == self.shift && !paste_with_shift {
+                    continue;
+                }
+                if type_ == KEY_PRESS {
+                    // A failed call may still reach the server, so release it too.
+                    pressed.push(key);
+                }
+                xtest::fake_input(&self.connection, type_, key, 0, self.root, 0, 0, 0)?.check()?;
+                // A failed release stays recorded: the key may still be down,
+                // and releasing one already up is harmless.
+                if type_ == KEY_RELEASE
+                    && let Some(index) = pressed.iter().rposition(|held| *held == key)
+                {
+                    pressed.remove(index);
+                }
             }
-            xtest::fake_input(&self.connection, type_, key, 0, self.root, 0, 0, 0)?.check()?;
+            self.connection.flush()?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            tracing::warn!(
+                error = format!("{error:#}"),
+                "could not send the X11 paste shortcut"
+            );
+            for key in pressed.into_iter().rev() {
+                let released = (|| -> Result<()> {
+                    xtest::fake_input(&self.connection, KEY_RELEASE, key, 0, self.root, 0, 0, 0)?
+                        .check()?;
+                    Ok(())
+                })();
+                if let Err(error) = released {
+                    tracing::warn!(
+                        key,
+                        error = format!("{error:#}"),
+                        "could not release an X11 paste key"
+                    );
+                }
+            }
+            let _ = self.connection.flush();
+            return Err(error);
         }
-        self.connection.flush()?;
         Ok(())
     }
 
