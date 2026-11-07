@@ -1136,6 +1136,7 @@ impl PhysicalModifierKeys {
         Self(bits & Self::TRACKED_MASK)
     }
 
+    #[cfg(test)]
     pub fn from_usages(usages: impl IntoIterator<Item = u16>) -> Self {
         let mut bits = 0;
         for usage in usages {
@@ -1144,10 +1145,6 @@ impl PhysicalModifierKeys {
             }
         }
         Self(bits)
-    }
-
-    pub const fn bits(self) -> u16 {
-        self.0
     }
 
     pub const fn is_held(self, usage: u16) -> bool {

@@ -282,7 +282,8 @@ pub struct InputMonitor {
     takes_cancel: Arc<AtomicBool>,
     run_loop: Arc<AtomicPtr<c_void>>,
     worker: Option<JoinHandle<()>>,
-    physical_keys: Option<physical_keys::PhysicalKeyMonitor>,
+    /// Held only so dropping the input monitor stops the HID tracker.
+    _physical_keys: Option<physical_keys::PhysicalKeyMonitor>,
 }
 
 pub struct PendingInputAcknowledgement<'a> {
@@ -360,7 +361,7 @@ impl InputMonitor {
             takes_cancel,
             run_loop,
             worker: Some(worker),
-            physical_keys,
+            _physical_keys: physical_keys,
         })
     }
 
