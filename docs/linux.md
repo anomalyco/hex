@@ -28,14 +28,16 @@ focused text field and the final text is committed through
 `zwp_input_method_v2`, so it lands without the clipboard and Ctrl-V.
 `zwp_input_method_manager_v2` is a wlroots-family protocol (Sway, Hyprland,
 and other wlroots compositors); KWin and Mutter do not offer it, so KDE and
-GNOME use the paste above. Hex takes the input method when the capture's
-stream opens and gives the seat back at Finish or Cancel, including
-post-release processing; short taps and chords create none. It falls back to
-the paste above when the compositor does not offer the protocol, another
-input method (fcitx, ibus) holds the seat, the focused field has no active
-text input, the final text is multi-line, or the compositor does not answer
-in time. It has **not** been verified on a real compositor yet; only its unit
-tests and the build ran.
+GNOME use the paste above. Hex takes the input method when the capture
+becomes intentional (the hold threshold, or at once in Toggle) and gives the
+seat back at Finish or Cancel, including post-release processing; short taps
+and chords create none. It falls back to the paste above when the compositor
+does not offer the protocol, another input method (fcitx, ibus) holds the
+seat, the focused field has no active text input, the final text is
+multi-line, or the compositor does not answer in time. A CPU engine or a
+model that cannot stream shows no provisional words while speaking, but the
+final text still goes in through the input method. It has **not** been
+verified on a real compositor yet; only its unit tests and the build ran.
 
 For Nix/NixOS, use the [Nix guide](nix.md). Nix owns updates to that installation;
 Hex's signed updater owns only the direct-install layout below.

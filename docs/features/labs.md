@@ -1363,12 +1363,16 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   capture starts, never for a Local API
   dictation, `/streams`, or Voice Action; the final text still goes through
   Output's processing, and History and Paste Last update as they do for a
-  paste. Hex creates the input method when the capture's stream opens (the
-  hold threshold, or at once in Toggle) and destroys it at Finish or Cancel,
-  including post-release processing, so short taps and chords create none
-  and another input method keeps the seat while Hex is idle. A newer
-  capture's Begin takes over from an older job, which then pastes. It falls
-  back to today's paste when the compositor has no
+  paste. Hex creates the input method when the capture becomes intentional
+  (the hold threshold, or at once in Toggle) and destroys it at Finish or
+  Cancel, including post-release processing, so short taps and chords create
+  none and another input method keeps the seat while Hex is idle. A newer
+  capture's Begin takes over from an older job, which then pastes. A CPU
+  engine or a model that cannot stream shows no provisional words while
+  speaking; the final text still commits through the input method. Hex's own
+  first-run practice field on Linux is an ordinary focused field, so it
+  receives the preedit and commit too while Live typing is on. It falls back
+  to today's paste when the compositor has no
   `zwp_input_method_manager_v2` (KWin and Mutter do not offer it, so KDE and
   GNOME paste), another input method holds the seat (`unavailable`), the
   field has no active text input, the final text is multi-line or over 4000
@@ -1379,11 +1383,13 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   is one atomic Pending → Committing or
   Pending → Abandoned change, so only one side wins. A residual Wayland race
   can still let a `done` event arrive after the serial is read; that
-  preedit or commit is then ignored by the compositor. The
+  preedit or commit is then ignored by the compositor. A commit ignored for
+  a stale serial has already returned “inserted”, so that dictation is lost
+  rather than pasted (wlroots does not enforce the serial today). The
   plate stays off unless Labs › Live text itself is on: a Live typing capture
-  holds `dictation::live_text::TypingDemand`, which the engine sees but the
-  plate does not, and the plate decision is stored once when the stream
-  opens. Checks in
+  takes `dictation::live_text::TypingDemand` at that same intentional start,
+  before the stream opens, so the engine sees it but the plate does not, and
+  the plate decision is stored once when the stream opens. Checks in
   [linux/live_typing.rs](../../src/linux/live_typing.rs):
   `provisional_words_become_one_preedit_line`,
   `a_preedit_stops_at_a_character_boundary`,
@@ -1394,8 +1400,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `a_waiting_caller_wins_abandonment_before_the_owner_claims`,
   `a_started_session_cancels_when_dropped`,
   `a_session_that_never_started_sends_nothing`,
-  `finishing_a_session_never_sends_cancel`, and
-  `only_the_newest_preedit_waits_and_it_wakes_once`;
+  `finishing_a_session_never_sends_cancel`,
+  `only_the_newest_preedit_waits_and_it_wakes_once`, and
+  `a_full_control_queue_makes_the_owner_inert`;
   `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
   [dictation/live_text.rs](../../src/dictation/live_text.rs); and
   `the_plate_follows_the_decision_made_when_the_stream_opened` in

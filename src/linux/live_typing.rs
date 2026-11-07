@@ -8,10 +8,12 @@
 //! it, so Hex never holds the seat's input method while idle and another
 //! input method keeps working. Everything is bounded: capture sends never
 //! wait, preedits coalesce, and a Finish uses one shared claim so a caller
-//! that gives up never pastes over a commit the owner already owns. Any
-//! failure is inert and silent apart from one log line.
+//! that gives up never pastes over a commit the owner already owns. Control
+//! commands are capped at [`CONTROL_QUEUE_LIMIT`] outstanding; past that the
+//! owner is treated as inert. Any failure is inert and silent apart from one
+//! log line.
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -66,6 +68,9 @@ const COMMIT_WAIT: Duration = Duration::from_millis(750);
 /// How long a caller that won the abandonment waits for the preedit to clear
 /// before pasting.
 const CLEAR_WAIT: Duration = Duration::from_millis(250);
+/// Control commands allowed while the owner has not taken one. Past this the
+/// owner is treated as inert rather than growing memory unboundedly.
+const CONTROL_QUEUE_LIMIT: usize = 64;
 
 /// A Finish's hand-off: whoever changes Pending first decides it.
 const PENDING: u8 = 0;
@@ -82,6 +87,8 @@ pub(crate) struct LiveTyping {
     wake: Arc<AtomicBool>,
     /// Whether the owner thread is connected and usable.
     alive: Arc<AtomicBool>,
+    /// Control commands sent but not yet received by the owner.
+    queued: Arc<AtomicUsize>,
 }
 
 enum Command {
@@ -163,12 +170,22 @@ impl LiveTyping {
         let preedit = Arc::new(Mutex::new(None));
         let wake = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(true));
+        let queued = Arc::new(AtomicUsize::new(0));
         let thread_preedit = preedit.clone();
         let thread_wake = wake.clone();
         let thread_alive = alive.clone();
+        let thread_queued = queued.clone();
         if let Err(error) = thread::Builder::new()
             .name("hex-live-typing".into())
-            .spawn(move || run(receiver, thread_preedit, thread_wake, thread_alive))
+            .spawn(move || {
+                run(
+                    receiver,
+                    thread_preedit,
+                    thread_wake,
+                    thread_alive,
+                    thread_queued,
+                )
+            })
         {
             tracing::info!(%error, "live typing is unavailable; dictations paste normally");
             alive.store(false, Ordering::Release);
@@ -178,6 +195,7 @@ impl LiveTyping {
             preedit,
             wake,
             alive,
+            queued,
         })
     }
 
@@ -214,17 +232,12 @@ impl LiveTyping {
         clear_slot(&self.preedit, id);
         let claim = Arc::new(AtomicU8::new(PENDING));
         let (reply, answer) = mpsc::sync_channel(1);
-        if self
-            .commands
-            .send(Command::Finish {
-                id,
-                text: text.to_owned(),
-                claim: claim.clone(),
-                reply,
-            })
-            .is_err()
-        {
-            self.alive.store(false, Ordering::Release);
+        if !self.send(Command::Finish {
+            id,
+            text: text.to_owned(),
+            claim: claim.clone(),
+            reply,
+        }) {
             return false;
         }
         match answer.recv_timeout(FINISH_TIMEOUT) {
@@ -232,8 +245,10 @@ impl LiveTyping {
             Err(RecvTimeoutError::Disconnected) => false,
             Err(RecvTimeoutError::Timeout) => {
                 if caller_abandons(&claim) {
-                    // The owner will only clear; wait briefly so the preedit
-                    // is gone before this caller pastes.
+                    // The owner did not decide in time: stop paying its
+                    // timeouts, and wait briefly so the preedit is gone
+                    // before this caller pastes.
+                    self.alive.store(false, Ordering::Release);
                     answer.recv_timeout(CLEAR_WAIT).unwrap_or(false)
                 } else {
                     // The owner owns the commit: never paste over it.
@@ -243,10 +258,21 @@ impl LiveTyping {
         }
     }
 
-    fn send(&self, command: Command) {
-        if self.commands.send(command).is_err() {
-            self.alive.store(false, Ordering::Release);
+    fn send(&self, command: Command) -> bool {
+        if !self.is_alive() {
+            return false;
         }
+        if self.queued.fetch_add(1, Ordering::AcqRel) >= CONTROL_QUEUE_LIMIT {
+            self.queued.fetch_sub(1, Ordering::AcqRel);
+            self.alive.store(false, Ordering::Release);
+            return false;
+        }
+        if self.commands.send(command).is_err() {
+            self.queued.fetch_sub(1, Ordering::AcqRel);
+            self.alive.store(false, Ordering::Release);
+            return false;
+        }
+        true
     }
 
     #[cfg(test)]
@@ -258,6 +284,7 @@ impl LiveTyping {
                 preedit: Arc::new(Mutex::new(None)),
                 wake: Arc::new(AtomicBool::new(false)),
                 alive: Arc::new(AtomicBool::new(true)),
+                queued: Arc::new(AtomicUsize::new(0)),
             }),
             receiver,
         )
@@ -269,6 +296,7 @@ fn run(
     preedit: Arc<Mutex<Option<(u64, String)>>>,
     wake: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
+    queued: Arc<AtomicUsize>,
 ) {
     let _alive = Alive(alive);
     let mut owner = match Owner::connect() {
@@ -279,6 +307,7 @@ fn run(
         }
     };
     while let Ok(command) = commands.recv() {
+        queued.fetch_sub(1, Ordering::AcqRel);
         match command {
             Command::Begin(id) => owner.begin(id),
             Command::Finish {
@@ -789,6 +818,15 @@ mod tests {
         assert!(session.finish("hello"));
         let commands = responder.join().unwrap();
         assert!(commands.try_recv().is_err(), "finish replaced cancel");
+    }
+
+    #[test]
+    fn a_full_control_queue_makes_the_owner_inert() {
+        let (live, commands) = LiveTyping::for_test();
+        live.queued.store(CONTROL_QUEUE_LIMIT, Ordering::Release);
+        live.cancel(1);
+        assert!(!live.is_alive(), "an overfull queue is inert");
+        assert!(commands.try_recv().is_err(), "nothing queued");
     }
 
     #[test]

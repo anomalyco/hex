@@ -800,22 +800,10 @@ pub(crate) fn run(
                         .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
                 HotkeyEvent::Start { raw } if !capture.is_recording() && !start_pending => {
                     recording_raw = raw;
-                    // The demand must exist before the stream opens, but the
-                    // session itself starts only once the capture streams.
+                    // A short tap or chord must never create an input method;
+                    // Live typing starts at the hold threshold (or the Toggle
+                    // press), before the stream opens so it can demand text.
                     cancel_typing(&mut active_typing);
-                    if wayland
-                        && crate::labs::live_typing()
-                        && live_typing.as_ref().is_none_or(|live| live.is_alive())
-                    {
-                        let live = live_typing
-                            .get_or_insert_with(crate::linux::live_typing::LiveTyping::start)
-                            .clone();
-                        next_capture_id += 1;
-                        active_typing = Some(CaptureTyping {
-                            session: crate::linux::live_typing::Session::new(live, next_capture_id),
-                            _demand: crate::dictation::live_text::typing_demand(),
-                        });
-                    }
                     let pressed_at = clock.at(Instant::now()).filter(|_| audio_ready);
                     if let Some(pressed_at) = pressed_at {
                         let pre_roll =
@@ -823,8 +811,15 @@ pub(crate) fn run(
                         start_capture(&mut capture, pressed_at, pre_roll, || {
                             feedback::play_provisional_start();
                         });
+                        begin_live_typing(
+                            &capture,
+                            toggle,
+                            wayland,
+                            &mut live_typing,
+                            &mut next_capture_id,
+                            &mut active_typing,
+                        );
                         stream_when_due(&mut capture, &engine, toggle);
-                        begin_live_typing(&capture, &mut active_typing);
                     } else if audio_ready || release_while_idle {
                         start_pending = true;
                         if !audio_ready {
@@ -992,8 +987,15 @@ pub(crate) fn run(
                     // lower, or pause audio.
                     suppressor.suppress();
                 }
+                begin_live_typing(
+                    &capture,
+                    toggle,
+                    wayland,
+                    &mut live_typing,
+                    &mut next_capture_id,
+                    &mut active_typing,
+                );
                 stream_when_due(&mut capture, &engine, toggle);
-                begin_live_typing(&capture, &mut active_typing);
                 if let Some(partial) = capture.report_live_text()
                     && let Some(typing) = &active_typing
                 {
@@ -1220,14 +1222,44 @@ fn submit_capture(
     Ok(())
 }
 
-/// Starts the input method once the capture's stream opens, so short taps
-/// and chords never create one.
-fn begin_live_typing(capture: &DictationCapture, typing: &mut Option<CaptureTyping>) {
-    if let Some(typing) = typing
-        && capture.is_streaming()
+/// Starts Live typing at the hold threshold (or the Toggle press), before
+/// the stream opens so the engine sees the demand. It does not wait for a
+/// stream: a CPU or non-streaming model still commits its final text through
+/// the input method, with no preedit words. Short taps and chords never get
+/// here, so they create no input method.
+fn live_typing_due(recording: bool, intentional: bool, toggle: bool) -> bool {
+    recording && (toggle || intentional)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn begin_live_typing(
+    capture: &DictationCapture,
+    toggle: bool,
+    wayland: bool,
+    live_typing: &mut Option<Arc<crate::linux::live_typing::LiveTyping>>,
+    next_capture_id: &mut u64,
+    typing: &mut Option<CaptureTyping>,
+) {
+    if typing.is_some()
+        || !wayland
+        || !crate::labs::live_typing()
+        || !live_typing_due(capture.is_recording(), capture.is_intentional(), toggle)
     {
-        typing.session.start();
+        return;
     }
+    if !live_typing.as_ref().is_none_or(|live| live.is_alive()) {
+        return;
+    }
+    let live = live_typing
+        .get_or_insert_with(crate::linux::live_typing::LiveTyping::start)
+        .clone();
+    *next_capture_id += 1;
+    let mut started = CaptureTyping {
+        session: crate::linux::live_typing::Session::new(live, *next_capture_id),
+        _demand: crate::dictation::live_text::typing_demand(),
+    };
+    started.session.start();
+    *typing = Some(started);
 }
 
 /// Ends a capture's Live typing session without committing anything; the
@@ -1621,5 +1653,19 @@ mod tests {
         assert!(result.is_err());
         assert!(stopped.load(Ordering::Acquire));
         assert!(finished.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn live_typing_waits_for_a_recording_and_the_hold_or_toggle() {
+        assert!(
+            !live_typing_due(false, false, true),
+            "idle Toggle chunks start nothing"
+        );
+        assert!(
+            !live_typing_due(true, false, false),
+            "a Hold press waits for the threshold"
+        );
+        assert!(live_typing_due(true, true, false));
+        assert!(live_typing_due(true, false, true), "Toggle starts at once");
     }
 }

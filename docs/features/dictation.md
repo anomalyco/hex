@@ -409,32 +409,40 @@ not run on GNOME).
 
 ```ts
 Labs › Live typing on (labs.live_typing, off by default, Wayland only)  // labs.live-typing
-Hotkey capture starts -> Holds a dictation::live_text::TypingDemand, so its stream publishes text
-  -> Stream opens at the hold threshold (or at once in Toggle) -> Begin: get_input_method(seat)
+Capture becomes intentional (hold threshold, or the Toggle press)
+  -> Takes a dictation::live_text::TypingDemand, then Begin: get_input_method(seat)
+  -> The stream opens afterwards, so the engine sees the demand and publishes partials
   -> Each stable + tentative change -> The newest preedit is sent (older ones coalesce), underlined in the focused field
   -> Escape, a short tap, silence, a lost microphone, a failed job, or the listener quitting -> Cancel: clear, destroy
 Release -> Process the final text -> Finish
   ├── Active text input and one line within 4000 bytes -> The owner claims the commit first,
   │     then clear preedit, commit_string, destroy -> inserted, clipboard untouched
   ├── A caller that gives up first -> abandoned; owner only clears (up to 250 ms), then LinuxPaster.paste
-  └── No decision in 350 ms and the owner already claimed -> wait up to 750 ms and do not paste
+  ├── No decision in 350 ms and the owner already claimed -> wait up to 750 ms and do not paste
+  └── CPU engine or non-streaming model -> No words while speaking; the final text still commits here
 ```
 
-The input method exists from the capture's stream opening until Finish or
-Cancel, which includes post-release processing; a short tap or chord whose
-stream never opens creates none. A newer capture's Begin takes over from an
-older job, whose Finish then returns false and pastes. `zwp_input_method_manager_v2`
-is a wlroots-family protocol (Sway, Hyprland, and other wlroots compositors);
-KWin and Mutter do not offer it, so KDE and GNOME paste through the
-RemoteDesktop portal or `wtype` instead. A compositor with another input
-method (fcitx, ibus) reports `unavailable` and Live typing stays inert.
+The input method exists from that intentional start until Finish or Cancel,
+which includes post-release processing; a short tap or chord that never
+becomes intentional creates none. It does not need a stream: a CPU engine or
+a model that cannot stream shows no provisional words, but the finished text
+still goes in through the input method instead of the clipboard. Hex's own
+first-run practice field on Linux is an ordinary focused field, so it takes
+the preedit and the final commit too while Live typing is on. A newer
+capture's Begin takes over from an older job, whose Finish then returns false
+and pastes. `zwp_input_method_manager_v2` is a wlroots-family protocol (Sway,
+Hyprland, and other wlroots compositors); KWin and Mutter do not offer it, so
+KDE and GNOME paste through the RemoteDesktop portal or `wtype` instead. A
+compositor with another input method (fcitx, ibus) reports `unavailable` and
+Live typing stays inert.
 
 History, last dictation, tones, and Output are unchanged: a committed
 dictation counts as pasted. Live text off does **not** disable Live typing:
-the capture holds its own `TypingDemand`, which the engine sees and the plate
-does not. The plate itself is decided once when the stream opens, so toggling
-Labs › Live text mid-capture changes nothing. On X11 or with the toggle off,
-nothing starts and the capture behaves exactly as before.
+the capture takes its own `TypingDemand` at that same intentional start
+before the stream opens, which the engine sees and the plate does not. The
+plate itself is decided once when the stream opens, so toggling Labs › Live
+text mid-capture changes nothing. On X11 or with the toggle off, nothing
+starts and the capture behaves exactly as before.
 
 The commit claim is one shared atomic state: the owner changes Pending →
 Committing before it queues any commit request, and a waiting caller changes
@@ -444,8 +452,10 @@ a wedged compositor can leave a preedit visible until it tears the input
 method down. A residual protocol race remains: a `done` event can arrive
 after `dispatch_pending` and before `commit(serial)`, so a commit can use a
 serial one behind; the affected preedit or commit is then ignored by the
-compositor. Checks (unit tests
-only): `provisional_words_become_one_preedit_line`,
+compositor. A commit ignored for a stale serial has already returned
+“inserted”, so that dictation is lost rather than pasted (wlroots does not
+enforce the serial today). Checks (unit tests only):
+`provisional_words_become_one_preedit_line`,
 `a_preedit_stops_at_a_character_boundary`,
 `only_one_line_text_within_the_limit_commits_through_the_input_method`,
 `the_cursor_sits_after_the_preedit`,
@@ -454,8 +464,9 @@ only): `provisional_words_become_one_preedit_line`,
 `a_waiting_caller_wins_abandonment_before_the_owner_claims`,
 `a_started_session_cancels_when_dropped`,
 `a_session_that_never_started_sends_nothing`,
-`finishing_a_session_never_sends_cancel`, and
-`only_the_newest_preedit_waits_and_it_wakes_once` in
+`finishing_a_session_never_sends_cancel`,
+`only_the_newest_preedit_waits_and_it_wakes_once`, and
+`a_full_control_queue_makes_the_owner_inert` in
 [linux/live_typing.rs](../../src/linux/live_typing.rs);
 `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
 [dictation/live_text.rs](../../src/dictation/live_text.rs); and
@@ -879,7 +890,8 @@ Model advertises streaming, GPU device             // dictate.streaming
   ├── A failed or interrupted stream clears the text while the capture goes on
   └── process.log: `partials` on "finished live stream"; per change at debug (no words)
   Labs + labs.live_typing (Linux Wayland) -> The same text is the focused field's preedit  // labs.live-typing
-  ├── Begin when the stream opens; destroyed at Finish or Cancel, so another input method keeps the seat
+  ├── Begin at the intentional start, before the stream opens; destroyed at Finish or Cancel, so another input method keeps the seat
+  ├── Non-streaming model -> No words while speaking, but the final text still commits through the input method
   ├── Finish -> The owner wins the commit claim, clears the preedit, commits the processed text, no clipboard
   ├── Caller gives up first (350 ms) -> Owner only clears (up to 250 ms), then Paste
   └── Owner already claimed the commit -> Wait up to 750 ms; never paste over it

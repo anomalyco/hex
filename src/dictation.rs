@@ -1114,7 +1114,7 @@ impl DictationCapture {
             .is_some_and(|recording| recording.intentional)
     }
 
-    #[cfg(any(target_os = "linux", test))]
+    #[cfg(test)]
     pub fn is_streaming(&self) -> bool {
         self.recording
             .as_ref()
