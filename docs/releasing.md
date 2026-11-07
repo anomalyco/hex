@@ -35,7 +35,7 @@ Release (push to dev: dev channel; workflow_dispatch: ref + channel check | dev 
 ├─ build-macos              Hex.app as anomaly.hex, ad-hoc signed (HEX_RELEASE_UNSIGNED)             [build]
 ├─ sign-macos               Developer ID inside-out, notarize + staple, ZIP + DMG (sign-macos.sh)     [release]
 ├─ verify-macos             validate-app.sh, Gatekeeper, updater requirement, launch                 [build]
-├─ sign-windows             Azure Artifact Signing of both hex.exe, Authenticode check                [release]
+├─ sign-windows             Azure Artifact Signing of both Windows executables, Authenticode check  [release]
 ├─ installers               windows-installers.yml: Setup.exe around them, tested on x64 + ARM64      [build]
 ├─ sign-windows-installers  Azure Artifact Signing of both Setup.exe                                  [release]
 ├─ check-linux, -macos,     stable, check: the full suites on the candidate (check-<os>.yml, called   [build]

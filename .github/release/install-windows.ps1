@@ -1,10 +1,12 @@
 # Install Hex as a managed, self-updating Windows application for the
 # current user, mirroring install-linux.sh: the app lands in
-# %APPDATA%\hex\versions\<version>\hex.exe with its console entry point
-# hex.com beside it, a Start Menu shortcut points at hex.exe, %APPDATA%\hex\bin
-# (a copy of hex.com) goes on PATH, install.json marks the install as direct,
-# and the app then keeps itself current from the Anomaly release service
-# (docs/plans/release-service.md).
+# %APPDATA%\hex\versions\<version>\hex-voice.exe with its console entry point
+# hex.com beside it, a Start Menu shortcut points at hex-voice.exe,
+# %APPDATA%\hex\bin (a copy of hex.com) goes on PATH, install.json marks the
+# install as direct, and the app then keeps itself current from the Anomaly
+# release service (docs/plans/release-service.md). The GUI executable is not
+# hex.exe, which Discord's game detection matches to HEX: Shards of Fate
+# (#445); releases before the rename are moved to hex-voice.exe on launch.
 #
 # Trust: HTTPS to the release service, the manifest's size and SHA-256 for
 # the download, and the executable's Authenticode signature, which the app
@@ -49,7 +51,7 @@ function Remove-ManagedShortcut {
 }
 
 # The user's PATH without (or with, once) bin, so a terminal runs `hex` as
-# hex.com, the console program that waits for hex.exe.
+# hex.com, the console program that waits for the app.
 function Set-BinOnPath([bool]$present) {
     $environment = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
     $current = [string]$environment.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
@@ -154,7 +156,7 @@ $consoleFile = $manifest.release.targets."$target-cli"
 $consoleUrl = if ($consoleFile) { Resolve-Download $consoleFile "$target-cli" }
 
 $versionDir = Join-Path $versions $version
-$executable = Join-Path $versionDir 'hex.exe'
+$executable = Join-Path $versionDir 'hex-voice.exe'
 New-Item -ItemType Directory -Force $versionDir | Out-Null
 
 $console = Join-Path $versionDir 'hex.com'
@@ -162,7 +164,7 @@ Write-Output "Downloading Hex $version..."
 Save-Download $file $fileUrl $executable
 if ($consoleUrl) { Save-Download $consoleFile $consoleUrl $console }
 # The version probe runs the staged files and removes them again on a
-# mismatch. hex.com waits for hex.exe, a GUI program PowerShell wouldn't.
+# mismatch. hex.com waits for the GUI executable, which PowerShell wouldn't.
 if ($consoleUrl) {
     $reported = (& $console --version) -split '\s+' | Select-Object -Last 1
 } else {

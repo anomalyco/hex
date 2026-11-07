@@ -69,29 +69,24 @@ powershell -ExecutionPolicy Bypass -Command "iwr https://anoma.ly/hex/files/inst
 
 Uninstall a script install with `install-windows.ps1 -Uninstall`.
 
-The managed layout is `%APPDATA%\hex\versions\<version>\` holding `hex.exe`,
-the app, a GUI program so launching Hex opens no console window, and
-`hex.com`, its console entry point, which runs `hex.exe` with the same
-arguments, waits for it, and returns its exit code (`hex` and `hex app` only
-start the app and return). Shortcuts, Launch at login,
-and the Start menu open `hex.exe`. `%APPDATA%\hex\bin\hex.com`, a copy that
-runs the version `current-version` names, is on the user's PATH, and a
-terminal resolves `hex` to it before any `hex.exe` because PATHEXT lists
-`.COM` first. Terminals opened before the install need reopening to see PATH.
+The managed layout is `%APPDATA%\hex\versions\<version>\` holding
+`hex-voice.exe`, the app, a GUI program so launching Hex opens no console
+window, and `hex.com`, its console entry point, which runs `hex-voice.exe` with
+the same arguments, waits for it, and returns its exit code (`hex` and
+`hex app` only start the app and return). The GUI executable is not `hex.exe`
+because Discord's game detection matches a running process with that name to
+the Steam game *HEX: Shards of Fate*
+([#445](https://github.com/anomalyco/hex/issues/445)), so Discord no longer
+shows that game while Hex runs. Shortcuts, Launch at login, and the Start menu
+open `hex-voice.exe`. `%APPDATA%\hex\bin\hex.com`, a copy that runs the version
+`current-version` names, is on the user's PATH, and a terminal resolves `hex`
+to it before any executable because PATHEXT lists `.COM` first. Terminals
+opened before the install need reopening to see PATH.
 
-## Known Issues
-
-**Discord shows "Playing HEX: Shards of Fate"**
-([#445](https://github.com/anomalyco/hex/issues/445)). With game activity
-detection on, Discord Desktop matches the running `hex.exe` to the verified game
-*HEX: Shards of Fate*. It then shows that game on your profile for as long as
-Hex runs. The reporter's local test suggests Discord matches on the executable
-name. Hex keeps the name `hex.exe` because the installer, updater, Start Menu
-shortcut, and Launch at login all use the managed
-`%APPDATA%\hex\versions\<version>\hex.exe` path. The problem has been reported
-to Discord. Until Discord fixes its game list, open Discord's
-**Settings › Registered Games** (or **Activity Privacy**) and hide the detected
-entry, or turn off activity sharing there. Hex works the same either way.
+A release before the rename installed and launched `hex.exe`; on its first
+launch Hex moves such an install to `hex-voice.exe`, points the Start menu and
+Launch at login at it, and relaunches, and updates write only the new name
+after that.
 
 ## Streaming Dictation
 
@@ -191,7 +186,7 @@ hundreds of megabytes of models would slow down. An older Hex's `logs` and
 holds them, the Roaming copy stays in use. Observations are in
 `logs\live.ndjson`, and native/runtime diagnostics are in `logs\process.log`,
 including every panic with its thread and backtrace. A worker that stops
-unexpectedly leaves its cause there. `hex.exe` is a GUI program, so a launch
+unexpectedly leaves its cause there. `hex-voice.exe` is a GUI program, so a launch
 from Explorer, the Start menu, or login opens no console window. Run from a
 terminal, it prints startup errors there, then the app leaves the terminal and
 has no stdout or stderr.
