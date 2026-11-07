@@ -19,6 +19,7 @@ fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<Obse
         activity: InputActivity::default(),
         takes_escape: Arc::new(AtomicBool::new(takes_escape)),
         takes_cancel: Arc::new(AtomicBool::new(false)),
+        caps_lock_cancel: Arc::new(AtomicBool::new(false)),
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
@@ -4197,4 +4198,34 @@ fn one_sided_options_never_start_with_both_held_but_either_side_does() {
         ),
         Some(HotkeyAction::Discard(DiscardCause::ExtraModifier))
     );
+}
+
+#[test]
+fn caps_lock_press_starts_and_finishes_its_own_hands_free_capture() {
+    let now = capture_time();
+    let mut hotkey =
+        DictationHotkey::new(now, false, crate::app_settings::RuntimeHotkey::default());
+    assert_eq!(hotkey.caps_lock_toggle(), Some(HotkeyAction::Start));
+    assert!(hotkey.is_locked());
+    assert_eq!(hotkey.caps_lock_toggle(), Some(HotkeyAction::Finish));
+    assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn caps_lock_leaves_a_hold_capture_alone() {
+    let now = capture_time();
+    let mut hotkey = DictationHotkey::new(
+        now,
+        false,
+        RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers::option(),
+            key_code: None,
+        },
+    );
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+        Some(HotkeyAction::Start)
+    );
+    assert_eq!(hotkey.caps_lock_toggle(), None);
+    assert!(hotkey.is_recording());
 }

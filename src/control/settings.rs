@@ -430,6 +430,11 @@ const KEYS: &[Key] = &[
         "Labs: the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits (macOS)",
     ),
     key(
+        "labs.caps_lock_dictation",
+        Kind::Bool,
+        "Labs: a Caps Lock press starts and stops dictation hands-free, and its light shows when Hex records and transcribes; Caps Lock stays off so typing is unchanged (macOS)",
+    ),
+    key(
         "labs.notch_indicator",
         Kind::Bool,
         "Labs: on a screen with a notch, the recording indicator grows out of the notch at either visible position; Hidden still hides it, and flat screens keep the Top or Bottom setting (macOS)",

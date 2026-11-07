@@ -3,6 +3,8 @@
 
 use super::*;
 
+use crate::caps_lock_dictation::{CapsAction, CapsState, press_action};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HotkeyAction {
     Start,
@@ -275,6 +277,27 @@ impl DictationHotkey {
         self.stale_keys_neutral_since = None;
         self.chord_break_at = None;
         true
+    }
+
+    /// A physical Caps Lock press (Labs › Caps Lock dictation). From Idle it
+    /// locks a hands-free capture; from a lock it finishes it. A hold
+    /// capture, a pending double tap, or another recording is left alone.
+    pub fn caps_lock_toggle(&mut self) -> Option<HotkeyAction> {
+        let state = match &self.state {
+            State::Idle { .. } => CapsState::Idle,
+            State::Locked => CapsState::Recording,
+            _ => CapsState::Busy,
+        };
+        match press_action(state) {
+            CapsAction::Start => self.lock().then_some(HotkeyAction::Start),
+            CapsAction::Finish => {
+                self.state = State::IDLE;
+                self.stale_keys_neutral_since = None;
+                self.chord_break_at = None;
+                Some(HotkeyAction::Finish)
+            }
+            CapsAction::Ignore => None,
+        }
     }
 
     pub fn disarm_pending_gesture(&mut self) {

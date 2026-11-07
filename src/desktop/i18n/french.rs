@@ -1179,6 +1179,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Try another search", "Essayez une autre recherche"),
     ("Descriptive meeting file names", "Noms de fichiers de réunion descriptifs"),
     ("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time", "Renomme le Markdown exporté d'une réunion avec son titre dès que les notes ou un renommage en fournissent un, en gardant la date et l'heure"),
+    ("Caps Lock dictation", "Dictée avec Verr. Maj"),
+    ("Press Caps Lock to start dictation and again to finish. Hex keeps Caps Lock off and uses its light while it records and transcribes", "Appuyez sur Verr. Maj pour commencer la dictée et de nouveau pour terminer. Hex garde Verr. Maj désactivé et utilise son voyant pendant l'enregistrement et la transcription"),
 ];
 
 #[cfg(test)]

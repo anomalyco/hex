@@ -48,6 +48,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
+├── Caps Lock dictation no labs.caps_lock_dictation       (macOS)   a Caps Lock press starts and stops hands-free dictation; its light shows recording, processing, and off
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
@@ -429,6 +430,65 @@ suppressed, or checked for it, and Hex is unchanged. Checks:
 [recognition.rs](../../src/recognition.rs) (macOS only). Not yet observed: a
 real Mac with an external keyboard, or the recorder row's rendering (macOS
 builds only; no golden).
+
+Caps Lock dictation (`caps-lock-dictation`, macOS): while on, a physical Caps
+Lock press toggles a hands-free dictation. From idle it starts a capture that
+stays recording without a hold; the next Caps Lock press finishes it and hands
+it to the normal transcription, processing, and paste flow. A hold capture,
+a pending double tap, or another shortcut's recording is left alone. Escape
+cancels the Caps Lock capture in every shortcut mode, and the normal dictation
+shortcut keeps working when nothing records (while a Caps Lock capture runs it
+stands down, as a second shortcut does). Turning the lab off mid-capture
+cancels that capture.
+
+Caps Lock never changes typing: every press also resets the system Caps Lock
+state off through `IOHIDSetModifierLockState`, so the next keys stay
+lowercase. The key's light follows Hex's dictation state through the
+keyboard's HID LED output element (usage page 0x08, usage 0x02): on while a
+capture records, blinking while an accepted job transcribes or processes, and
+off when nothing is left or the capture is discarded, cancelled, or failed.
+Turning the lab off or quitting Hex clears the light and stops forcing the
+lock off, so Caps Lock behaves normally again.
+
+```ts
+Labs › Caps Lock dictation on                        // labs.caps_lock_dictation
+├── Caps Lock press, idle -> hands-free capture starts (no hold, no short-tap discard)
+├── Caps Lock press, that capture running -> finishes and pastes normally
+├── Hold capture / pending double tap / another shortcut recording -> ignored
+├── Escape while it records -> cancels (the tap keeps Escape from the app)
+├── software Caps Lock -> off after every press; typing is unchanged
+├── light -> solid recording, blink transcribing/processing, off done/cancelled/failed
+├── Labs off mid-capture -> cancels it, light off, normal Caps Lock returns
+└── Hex quits -> light off, lock released
+```
+
+The gate is `labs::caps_lock_dictation()` in the listener
+([recognition.rs](../../src/recognition.rs)), which starts and stops the
+feature's worker each pass. Detection comes from the raw HID tracker's Caps
+Lock usage 0x39 ([suppression/physical_keys.rs](../../src/suppression/physical_keys.rs))
+and the event tap's AlphaShift flag change
+([suppression.rs](../../src/suppression.rs)); the two are deduplicated so a
+press registers once. The worker
+([caps_lock_dictation/macos.rs](../../src/caps_lock_dictation/macos.rs))
+owns every IOKit call, the LED element cache, and the blink timer; no IOKit
+work runs on the event-tap or audio threads. The pure press decision and light
+model live in
+[caps_lock_dictation.rs](../../src/caps_lock_dictation.rs). The LED needs
+Input Monitoring, which Hex already asks for; without it, dictation still
+works and the light stays under macOS's control. Checks:
+`a_press_starts_when_idle_and_finishes_its_own_recording`,
+`the_light_is_solid_recording_blinking_working_and_off_after`,
+`the_light_waits_for_every_accepted_job`,
+`cancelling_or_failing_a_capture_turns_the_light_off`, and
+`both_press_paths_report_one_press` in
+[caps_lock_dictation.rs](../../src/caps_lock_dictation.rs);
+`caps_lock_dictation_is_its_own_bit_and_macos_only` in
+[labs.rs](../../src/labs.rs);
+`contributed_options_are_labs_toggles_off_by_default` in
+[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real Mac
+with the lab on — no hardware run of the Caps Lock LED, the lock reset, the
+blink, Escape cancellation, or the off/quit cleanup. The `mac-labs` and
+`mac-labs-link` goldens were regenerated on Linux with the new row.
 
 Smart spacing (`smart-spacing`, issue 632, macOS): while on, a dictation
 pasted right after typed text gets one leading space, so words don't merge
