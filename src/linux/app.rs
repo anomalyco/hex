@@ -32,6 +32,7 @@ use crate::linux::service::{
 };
 
 mod control;
+mod host;
 
 /// The host's refresh while it starts, stops, or prepares something.
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
@@ -475,7 +476,7 @@ pub(crate) fn run(
         std::thread::Builder::new()
             .name("hex-host".into())
             .spawn(move || {
-                run_host(
+                host::run_host(
                     host,
                     published,
                     server,
@@ -505,77 +506,6 @@ fn publish_if_changed<T: PartialEq>(slot: &Mutex<Option<T>>, value: T) -> bool {
     }
     *slot = Some(value);
     true
-}
-
-/// The host thread: refreshes the host, publishes what the socket answers
-/// with, wakes the window on changes, and drains accepted work on quit.
-fn run_host(
-    host: HostHandle,
-    published: Arc<Published>,
-    server: linux_service::Server,
-    control: mpsc::SyncSender<Control>,
-    session: linux_service::Session,
-    tray: Option<&rune::Tray>,
-    shutdown: &'static AtomicBool,
-) {
-    let mut stopping = false;
-    let mut shown: Option<HostSnapshot> = None;
-    let mut tray_view = None;
-    let mut tray_meetings = None;
-    loop {
-        let seen = host.refreshed();
-        let (done, route, snapshot, interval) = {
-            let mut guard = host.lock();
-            if shutdown.load(Ordering::Acquire) && !stopping {
-                stopping = true;
-                linux_service::notify("STOPPING=1");
-                guard.stop();
-                guard.cancel_transcription_preparation();
-                // The main thread may be waiting for the next window request.
-                let _ = control.try_send(Control::Quit);
-            }
-            guard.refresh();
-            let interval = if stopping
-                || guard.shortcut_edit.is_some()
-                || guard.transcription_preparation.is_some()
-                || guard.listener.as_ref().is_some_and(|listener| {
-                    matches!(listener.startup, ListenerStartup::Awaiting { .. })
-                        || listener.worker.is_finished()
-                }) {
-                REFRESH_INTERVAL
-            } else {
-                IDLE_REFRESH_INTERVAL
-            };
-            (
-                stopping && !guard.has_pending_work(),
-                guard.shortcut_route(),
-                guard.host_snapshot(),
-                interval,
-            )
-        };
-        *published.shortcuts.lock().unwrap() = route;
-        let status = host.status(snapshot.clone(), session.clone());
-        publish_if_changed(&published.status, status);
-        let meetings = crate::meeting::runtime::tray_state();
-        if shown.as_ref() != Some(&snapshot) || tray_meetings != meetings {
-            tray_meetings = meetings;
-            if let Some(tray) = tray {
-                let view = crate::linux::tray::view(&snapshot);
-                if tray_view.as_ref() != Some(&view) {
-                    crate::linux::tray::show(tray, &view);
-                    tray_view = Some(view);
-                }
-            }
-            shown = Some(snapshot);
-            host.wake();
-        }
-        if done {
-            break;
-        }
-        host.wait_for_refresh(seen, interval);
-    }
-    *published.shortcuts.lock().unwrap() = None;
-    drop(server);
 }
 
 /// The one seam between the process and its window, on the main thread

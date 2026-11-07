@@ -41,6 +41,9 @@ const UNIT: &str = "hex.service";
 /// units are ready when `systemctl start` returns; units an older installer
 /// wrote are `Type=simple` and need the wait.
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
+/// The last-resort shutdown bound. It is shorter than the unit's
+/// `TimeoutStopSec=30`, so Hex exits on its own instead of being killed.
+const EXIT_DEADLINE: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) enum Request {
@@ -797,6 +800,33 @@ pub(crate) fn notify(state: &str) {
     }
 }
 
+/// Ends a stopping process even if its orderly shutdown wedges. Only the
+/// first call arms it, so every shutdown trigger can call it.
+pub(crate) fn arm_exit_deadline() {
+    static ARMED: std::sync::Once = std::sync::Once::new();
+    ARMED.call_once(|| {
+        if let Err(error) = run_exit_deadline(EXIT_DEADLINE, || std::process::exit(0)) {
+            tracing::warn!(%error, "could not arm Hex's exit deadline");
+        }
+    });
+}
+
+/// Starts the detached named thread that runs `exit` after `deadline`; the
+/// result reports whether it started.
+fn run_exit_deadline(
+    deadline: Duration,
+    exit: impl FnOnce() + Send + 'static,
+) -> std::io::Result<()> {
+    thread::Builder::new()
+        .name("hex-exit-deadline".into())
+        .spawn(move || {
+            thread::sleep(deadline);
+            tracing::warn!("Hex's shutdown did not finish before its exit deadline");
+            exit();
+        })
+        .map(|_| ())
+}
+
 fn unit() -> String {
     std::env::var("HEX_SYSTEMD_UNIT")
         .ok()
@@ -1164,6 +1194,22 @@ mod tests {
         ));
         assert!(!default_root(Path::new("/tmp/hex-test"), Some(data)));
         assert!(!default_root(Path::new("/home/kit/.local/share/hex"), None));
+    }
+
+    #[test]
+    fn exit_deadline_fires_only_after_its_deadline() {
+        let (fired, received) = mpsc::channel();
+        run_exit_deadline(Duration::from_millis(100), move || {
+            let _ = fired.send(());
+        })
+        .unwrap();
+        assert!(
+            received.recv_timeout(Duration::from_millis(20)).is_err(),
+            "the exit deadline fired before its deadline"
+        );
+        received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the exit deadline did not fire");
     }
 
     #[test]
