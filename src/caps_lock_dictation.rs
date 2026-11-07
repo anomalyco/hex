@@ -127,12 +127,12 @@ impl LedModel {
             }
             DictationIndicatorEvent::JobCompleted { job_id }
             | DictationIndicatorEvent::JobCancelled { job_id }
-            | DictationIndicatorEvent::JobFailed { job_id } => {
+            | DictationIndicatorEvent::JobFailed { job_id, .. } => {
                 self.jobs.remove(&job_id);
             }
             DictationIndicatorEvent::Discarded
             | DictationIndicatorEvent::Cancelled
-            | DictationIndicatorEvent::Failed => self.recording = false,
+            | DictationIndicatorEvent::Failed { .. } => self.recording = false,
             DictationIndicatorEvent::ConfigureDotScope(_)
             | DictationIndicatorEvent::DemoVoice
             | DictationIndicatorEvent::Transcribing { .. }
@@ -368,7 +368,10 @@ mod tests {
         model.handle(DictationIndicatorEvent::Submitted { job_id: 2 });
         model.handle(DictationIndicatorEvent::JobCompleted { job_id: 1 });
         assert_eq!(model.pattern(), LedPattern::Blink);
-        model.handle(DictationIndicatorEvent::JobFailed { job_id: 2 });
+        model.handle(DictationIndicatorEvent::JobFailed {
+            job_id: 2,
+            message: None,
+        });
         assert_eq!(model.pattern(), LedPattern::Off);
     }
 
@@ -410,11 +413,11 @@ mod tests {
         for event in [
             DictationIndicatorEvent::Discarded,
             DictationIndicatorEvent::Cancelled,
-            DictationIndicatorEvent::Failed,
+            DictationIndicatorEvent::Failed { message: None },
         ] {
             let mut model = LedModel::default();
             model.handle(DictationIndicatorEvent::Started);
-            model.handle(event);
+            model.handle(event.clone());
             assert_eq!(model.pattern(), LedPattern::Off, "{event:?}");
         }
     }
