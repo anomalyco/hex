@@ -1727,7 +1727,6 @@ Linux beta                               // not macOS feature parity
 │   └── Released while idle, on-demand open fails -> Failed entry; stays released
 │   └── Overload (Xrun) glitch -> Logged; not a failure
 ├── Paste -> Restore the previous clipboard 500 ms after the shortcut  // linux.clipboard-restore
-│   ├── Shortcut fails partway -> releases every key it already pressed  // unit-test only
 │   ├── Before the transcript -> snapshot every format (32 MiB, 1 s); empty -> cleared again
 │   ├── Later paste, copy, or another client replaced the transcript -> left alone
 │   ├── Over the cap or unreadable -> transcript stays; the log says why
@@ -1747,6 +1746,8 @@ Linux beta                               // not macOS feature parity
 │       ├── Asked by a modifier shortcut -> wait for its portal release + 250 ms
 │       │   (2 s cap without a release); after a hex command -> 250 ms
 │       │   // Hyprland merges held physical modifiers into virtual-keyboard keys (#353)
+│       ├── Shortcut fails partway -> releases the keys it still holds
+│       │   // portal path unit-tested; X11 untested
 │       ├── Compositor offers zwp_virtual_keyboard_manager_v1 and wtype is installed -> wtype
 │       │   └── V sent on evdev KEY_V (placeholder releases first), so Hyprland's
 │       │       binds read Ctrl(+Shift)+V, not Ctrl(+Shift)+Escape (#444)

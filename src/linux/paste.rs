@@ -530,6 +530,13 @@ impl X11Paster {
                     pressed.push(key);
                 }
                 xtest::fake_input(&self.connection, type_, key, 0, self.root, 0, 0, 0)?.check()?;
+                // A failed release stays recorded: the key may still be down,
+                // and releasing one already up is harmless.
+                if type_ == KEY_RELEASE
+                    && let Some(index) = pressed.iter().rposition(|held| *held == key)
+                {
+                    pressed.remove(index);
+                }
             }
             self.connection.flush()?;
             Ok(())

@@ -166,7 +166,7 @@ impl RemoteDesktop {
 }
 
 /// Sends each key in order. A call that fails may still have reached the
-/// desktop, so every key pressed so far is released before the error returns.
+/// desktop, so every key still held is released before the error returns.
 fn send_keys(keys: &[(i32, u32)], mut notify: impl FnMut(i32, u32) -> Result<()>) -> Result<()> {
     let mut pressed = Vec::new();
     for &(keysym, state) in keys {
@@ -192,6 +192,13 @@ fn send_keys(keys: &[(i32, u32)], mut notify: impl FnMut(i32, u32) -> Result<()>
             }
             return Err(error)
                 .wrap_err_with(|| format!("could not send keysym {keysym:#x} in state {state}"));
+        }
+        // A failed release stays recorded: the key may still be down, and
+        // releasing one already up is harmless.
+        if state == RELEASED
+            && let Some(index) = pressed.iter().rposition(|held| *held == keysym)
+        {
+            pressed.remove(index);
         }
     }
     Ok(())
@@ -293,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_paste_releases_every_key_it_pressed() {
+    fn a_failed_paste_releases_the_keys_it_still_holds() {
         for with_shift in [false, true] {
             let keys = paste_keys(with_shift);
             for fail_at in 0..keys.len() {
@@ -306,13 +313,24 @@ mod tests {
                     Ok(())
                 });
                 assert!(result.is_err());
-                // A press that timed out may still have reached the desktop,
-                // so it is released too.
-                let mut expected: Vec<_> = sent[..=fail_at]
+                // Cleanup releases every key still held: each press up to and
+                // including the failed call, minus keys whose release already
+                // succeeded before it. A failed release stays in, since it may
+                // not have reached the desktop.
+                let mut held: Vec<_> = keys[..=fail_at]
                     .iter()
                     .filter(|(_, state)| *state == PRESSED)
-                    .map(|(keysym, _)| (*keysym, RELEASED))
+                    .map(|(keysym, _)| *keysym)
                     .collect();
+                for (keysym, state) in &keys[..fail_at] {
+                    if *state == RELEASED
+                        && let Some(index) = held.iter().rposition(|held| held == keysym)
+                    {
+                        held.remove(index);
+                    }
+                }
+                let mut expected: Vec<_> =
+                    held.into_iter().map(|keysym| (keysym, RELEASED)).collect();
                 expected.reverse();
                 assert_eq!(&sent[fail_at + 1..], expected, "failed at {fail_at}");
             }
