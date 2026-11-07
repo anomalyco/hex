@@ -91,9 +91,12 @@ pub(super) struct Meeting {
     pub(super) app: Option<String>,
     pub(super) summary: Option<String>,
     pub(super) notes_running: bool,
-    /// What the overflow menu reveals: the exported Markdown while it still
-    /// exists, else the recording folder. Trash takes the Markdown too.
+    /// The exported Markdown while it still exists, which `Reveal Markdown`
+    /// selects and Trash takes too; otherwise the recording folder, which
+    /// only labels Trash.
     pub(super) reveal: crate::meeting::RevealTarget,
+    /// The meeting's recording folder, which `Reveal files` always opens.
+    pub(super) folder: std::path::PathBuf,
     pub(super) error: Option<String>,
     pub(super) export_error: Option<String>,
     pub(super) notes_error: Option<String>,
@@ -345,6 +348,9 @@ impl MeetingsPane {
             ),
         ];
         conversation[8].pause_before_ms = Some(55_000);
+        fn preview_folder(id: &str) -> std::path::PathBuf {
+            format!("/Users/kit/Library/Application Support/hex/meetings/{id}").into()
+        }
         let meeting =
             |id: &str, title: &str, status, day: &str, clock: &str, minutes: u64| Meeting {
                 id: id.into(),
@@ -356,9 +362,8 @@ impl MeetingsPane {
                 app: None,
                 summary: None,
                 notes_running: false,
-                reveal: crate::meeting::RevealTarget::Folder(
-                    format!("/Users/kit/Library/Application Support/hex/meetings/{id}").into(),
-                ),
+                reveal: crate::meeting::RevealTarget::Folder(preview_folder(id)),
+                folder: preview_folder(id),
                 error: None,
                 export_error: None,
                 notes_error: None,
@@ -1249,18 +1254,26 @@ fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> Option
         items += 1;
     }
     if !active {
-        // The label and the file it reveals are one value, so they can't
-        // disagree.
-        let reveal = meeting.reveal.clone();
+        // Reveal Markdown appears only while the export exists; the
+        // recording folder stays one item away either way.
+        if meeting.reveal.is_markdown() {
+            let reveal = meeting.reveal.clone();
+            menu = menu.item(
+                MenuItem::new(tr("Reveal Markdown")).on_select(move |ui: &mut Ui| {
+                    ui.open = None;
+                    ask(ui, MeetingRequest::Reveal(reveal.clone()));
+                }),
+            );
+            items += 1;
+        }
+        let folder = meeting.folder.clone();
         menu = menu.item(
-            MenuItem::new(if reveal.is_markdown() {
-                tr("Reveal Markdown")
-            } else {
-                tr("Reveal files")
-            })
-            .on_select(move |ui: &mut Ui| {
+            MenuItem::new(tr("Reveal files")).on_select(move |ui: &mut Ui| {
                 ui.open = None;
-                ask(ui, MeetingRequest::Reveal(reveal.clone()));
+                ask(
+                    ui,
+                    MeetingRequest::Reveal(crate::meeting::RevealTarget::Folder(folder.clone())),
+                );
             }),
         );
         items += 1;

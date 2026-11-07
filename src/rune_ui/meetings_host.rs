@@ -145,6 +145,7 @@ fn pane_meeting(
     } else {
         Transcript::Loaded(turns(&meeting.entries))
     };
+    let folder = root.join(&meeting.id);
     Meeting {
         id: meeting.id.clone(),
         title: meeting.title(),
@@ -166,7 +167,8 @@ fn pane_meeting(
             .map(|notes| notes.summary.clone())
             .filter(|summary| !summary.is_empty()),
         notes_running: crate::meeting::notes_in_progress(&meeting.id),
-        reveal: crate::meeting::RevealTarget::for_meeting(manifest, &root.join(&meeting.id)),
+        reveal: crate::meeting::RevealTarget::for_meeting(manifest, &folder),
+        folder,
         error: manifest.error.clone(),
         export_error: manifest.export_error.clone(),
         notes_error: manifest.notes_error.clone(),
