@@ -712,16 +712,42 @@ These five known gaps still limit recovery claims; they are not proposed feature
 ### Remapped Control
 
 ```ts
-remapped keyboard -> Quartz modifier event -> InputEvent::Flags
-                                              └── keycode discarded
-side-less Control fixture -> does not prove remapped-key identity
-listen-only native metadata -> establish distinguishability before choosing a fix
+Caps Lock remapped to Control
+  -> IOHIDKeyboardFilter rewrites usage 0x39 to Right Control (0xE4)
+  -> Quartz flags carry Right Control; the event keycode cannot tell them apart
+  -> raw IOHIDManager below the filter reads Caps Lock 0x39 and E0-E7
+  -> side bit set, its physical key not held, Caps Lock held
+     -> drop the side bit, keep the general flag -> matches as either side
+  -> physical E4 held -> a genuine Right Control press is untouched
+  -> Caps Lock's flags event reaches the tap before the raw callback
+     marks Caps Lock held -> flags pass unchanged
+     -> Right Control still starts; correctness needs the raw callback first,
+        which is not guaranteed
+  -> raw callback lags a real side key while Caps Lock is held
+     -> that one event can lose the side until the next event
+  -> IOHIDCheckAccess not granted, open fails, or start times out
+     -> tracker inactive, CoreGraphics flags unchanged (today's behavior)
 ```
-Source/check: [suppression.rs](../../src/suppression.rs),
-`remapped_control_does_not_start_or_hold_right_control_dictation`;
-issue [#37](https://github.com/anomalyco/hex/issues/37).
-Missing evidence: affected-keyboard metadata showing whether Quartz preserves
-enough identity to distinguish the remapped key.
+Source: [suppression/physical_keys.rs](../../src/suppression/physical_keys.rs)
+(IOHIDManager on its own run loop, one `PhysicalKeyMonitor` per input monitor,
+started only when `IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)` is granted),
+[app_settings/hotkeys.rs](../../src/app_settings/hotkeys.rs) (`PhysicalModifierKeys`
+and `normalized_modifier_flags`), [suppression.rs](../../src/suppression.rs)
+(flags-changed and key-event flags), and
+[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs) (the shortcut recorder).
+Checks: the normalization tests in `app_settings/hotkeys.rs`,
+`normalized_remapped_caps_lock_starts_only_a_side_less_control_binding`, and
+`a_remapped_caps_lock_does_not_hold_a_real_right_control_capture` in
+`suppression/tests.rs` (constructed snapshots and events).
+Issue [#37](https://github.com/anomalyco/hex/issues/37).
+Missing evidence: a physical Caps Lock-to-Control remap has not been run in CI
+or on hardware, and ordering the raw callback before the Caps Lock flags event
+is unproven. Hex never requests Input Monitoring, so the tracker runs only when
+Hex already has it (turn Hex on under System Settings › Privacy & Security ›
+Input Monitoring and restart Hex); otherwise it stays off and Right Control
+still starts from a remapped Caps Lock. The shortcut recorder normalizes only
+while the listener's input monitor is running; a start that takes too long is
+told to give up rather than delay the listener.
 
 ### Native Muting And Missed Holds
 

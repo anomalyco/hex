@@ -2752,6 +2752,144 @@ fn remapped_control_does_not_start_or_hold_right_control_dictation() {
     );
 }
 
+/// macOS's HID keyboard filter rewrites a Caps Lock remapped to Control as
+/// Right Control. The raw HID snapshot clears that invented side, so a Right
+/// Control binding ignores the remapped key while Either still starts; a
+/// keyboard actually holding Right Control keeps its side.
+#[test]
+fn normalized_remapped_caps_lock_starts_only_a_side_less_control_binding() {
+    use crate::app_settings::{
+        CAPS_LOCK_USAGE, HotkeyModifiers, ModifierSide, PhysicalModifierKeys, RIGHT_CONTROL_MASK,
+        RIGHT_CONTROL_USAGE, normalized_modifier_flags,
+    };
+
+    let now = capture_time();
+    let right = RuntimeHotkey {
+        modifiers: HotkeyModifiers {
+            control: Some(ModifierSide::Right),
+            ..Default::default()
+        },
+        key_code: None,
+    };
+    let either = RuntimeHotkey {
+        modifiers: HotkeyModifiers {
+            control: Some(ModifierSide::Either),
+            ..Default::default()
+        },
+        key_code: None,
+    };
+    let caps_lock = Some(PhysicalModifierKeys::from_usages([CAPS_LOCK_USAGE]));
+    let remapped = normalized_modifier_flags(CONTROL_KEY_MASK | RIGHT_CONTROL_MASK, caps_lock);
+    assert_eq!(remapped, CONTROL_KEY_MASK);
+
+    let mut sided = DictationHotkey::with_binding(false, now, false, right);
+    assert_eq!(sided.process(InputEvent::Flags(remapped), now), None);
+    assert!(!sided.is_recording());
+    assert_eq!(
+        sided.process(InputEvent::Flags(0), now + Duration::from_millis(100)),
+        None
+    );
+
+    let mut any_side = DictationHotkey::with_binding(false, now, false, either);
+    assert_eq!(
+        any_side.process(InputEvent::Flags(remapped), now),
+        Some(HotkeyAction::Start)
+    );
+    assert_eq!(
+        any_side.process(InputEvent::Flags(0), now + Duration::from_secs(1)),
+        Some(HotkeyAction::Finish)
+    );
+
+    let real_right = normalized_modifier_flags(
+        CONTROL_KEY_MASK | RIGHT_CONTROL_MASK,
+        Some(PhysicalModifierKeys::from_usages([
+            CAPS_LOCK_USAGE,
+            RIGHT_CONTROL_USAGE,
+        ])),
+    );
+    assert_eq!(real_right, CONTROL_KEY_MASK | RIGHT_CONTROL_MASK);
+    assert_eq!(
+        sided.process(InputEvent::Flags(real_right), now + Duration::from_secs(2)),
+        Some(HotkeyAction::Start)
+    );
+    assert_eq!(
+        sided.process(InputEvent::Flags(0), now + Duration::from_secs(3)),
+        Some(HotkeyAction::Finish)
+    );
+}
+
+/// A real Right Control starts a capture. Pressing a remapped Caps Lock makes
+/// CoreGraphics keep reporting Right Control, but releasing the physical
+/// Right Control must still finish: the remapped Caps Lock cannot hold the
+/// capture open.
+#[test]
+fn a_remapped_caps_lock_does_not_hold_a_real_right_control_capture() {
+    use crate::app_settings::{
+        CAPS_LOCK_USAGE, HotkeyModifiers, ModifierSide, PhysicalModifierKeys, RIGHT_CONTROL_MASK,
+        RIGHT_CONTROL_USAGE, normalized_modifier_flags,
+    };
+
+    let now = capture_time();
+    let mut hotkey = DictationHotkey::with_binding(
+        false,
+        now,
+        false,
+        RuntimeHotkey {
+            modifiers: HotkeyModifiers {
+                control: Some(ModifierSide::Right),
+                ..Default::default()
+            },
+            key_code: None,
+        },
+    );
+    let both = [CAPS_LOCK_USAGE, RIGHT_CONTROL_USAGE];
+
+    let right_down = normalized_modifier_flags(
+        CONTROL_KEY_MASK | RIGHT_CONTROL_MASK,
+        Some(PhysicalModifierKeys::from_usages([RIGHT_CONTROL_USAGE])),
+    );
+    assert_eq!(right_down, CONTROL_KEY_MASK | RIGHT_CONTROL_MASK);
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(right_down), now),
+        Some(HotkeyAction::Start)
+    );
+
+    // Caps Lock (remapped to Control) goes down while Right Control is held.
+    let with_caps = normalized_modifier_flags(
+        CONTROL_KEY_MASK | RIGHT_CONTROL_MASK,
+        Some(PhysicalModifierKeys::from_usages(both)),
+    );
+    assert_eq!(with_caps, CONTROL_KEY_MASK | RIGHT_CONTROL_MASK);
+    assert_eq!(
+        hotkey.process(
+            InputEvent::Flags(with_caps),
+            now + Duration::from_millis(200)
+        ),
+        None
+    );
+    assert!(hotkey.is_recording());
+
+    // The physical Right Control lets go; Caps Lock still reports Control.
+    let released = normalized_modifier_flags(
+        CONTROL_KEY_MASK | RIGHT_CONTROL_MASK,
+        Some(PhysicalModifierKeys::from_usages([CAPS_LOCK_USAGE])),
+    );
+    assert_eq!(released, CONTROL_KEY_MASK);
+    assert_eq!(
+        hotkey.process(
+            InputEvent::Flags(released),
+            now + Duration::from_millis(400)
+        ),
+        Some(HotkeyAction::Finish)
+    );
+    assert!(!hotkey.is_recording());
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(0), now + Duration::from_millis(600)),
+        None
+    );
+    assert!(!hotkey.is_recording());
+}
+
 #[test]
 fn tap_failure_cancels_recording_after_live_opt_in() {
     let now = capture_time();

@@ -176,7 +176,12 @@ impl ChordWatch {
         let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             // SAFETY: AppKit passes a live event for the handler's duration.
             let event_ref = unsafe { event.as_ref() };
-            let flags = event_ref.modifierFlags().bits() as u64;
+            // NSEvent's flags carry the same device-dependent side bits, and
+            // macOS's filter can rewrite a remapped Caps Lock there too.
+            let flags = crate::app_settings::normalized_modifier_flags(
+                event_ref.modifierFlags().bits() as u64,
+                crate::suppression::physical_keys::snapshot(),
+            );
             let chord = match event_ref.r#type() {
                 NSEventType::KeyDown => {
                     let characters = event_ref

@@ -133,6 +133,28 @@ chord evidence; any other key still is. Check:
 `globe_key_events_are_not_a_chord_with_the_function_shortcut` in
 `suppression/tests.rs` (constructed events; no physical-keyboard run).
 
+**Implemented November 7, 2026 (issue 37), unverified:** remapping Caps Lock to
+Control makes macOS's HID keyboard filter rewrite its usage (0x39) to Right
+Control (0xE4) before CoreGraphics sees it, so a Right Control shortcut also
+started from Caps Lock. Hex now reads the raw HID modifier state below that
+filter (`IOHIDManager`, opened without seizing the keyboards), and when Caps
+Lock is physically held while a side-specific modifier bit has no matching
+physical key, it drops the side and keeps the general modifier flag, which
+matches as either side. A real Right Control press (physical usage 0xE4) is
+untouched. Hex never requests Input Monitoring, so the tracker runs only when
+Hex already has it: turn Hex on under System Settings › Privacy & Security ›
+Input Monitoring and restart Hex. `IOHIDCheckAccess` gates the tracker; without
+that permission it stays off (logged once), the flags are unchanged, and Right
+Control still starts from a remapped Caps Lock. The shortcut recorder applies
+the same normalization only while the listener's input monitor is running, so
+recording a remapped Caps Lock saves a side-less Control. This is implemented
+but not verified on physical hardware; see the missing-evidence note in
+[recovery.md](recovery.md#remapped-control).
+Check: `normalized_remapped_caps_lock_starts_only_a_side_less_control_binding`
+and `a_remapped_caps_lock_does_not_hold_a_real_right_control_capture` in
+`suppression/tests.rs`, plus the normalization tests in
+`app_settings/hotkeys.rs` (constructed snapshots; no physical remap run in CI).
+
 ### Chord Shortcuts
 
 **Added October 29, 2026 (issue 394):** every shortcut (dictation, Voice

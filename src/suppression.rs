@@ -16,6 +16,7 @@ use crate::audio::CaptureInstant;
 use crate::dictation::{BOTH_SIDES_WINDOW, MINIMUM_HOLD_DURATION};
 
 mod hotkey;
+pub(crate) mod physical_keys;
 mod tap;
 pub use hotkey::{DictationHotkey, HotkeyAction};
 use tap::*;
@@ -281,6 +282,8 @@ pub struct InputMonitor {
     takes_cancel: Arc<AtomicBool>,
     run_loop: Arc<AtomicPtr<c_void>>,
     worker: Option<JoinHandle<()>>,
+    /// Held only so dropping the input monitor stops the HID tracker.
+    _physical_keys: Option<physical_keys::PhysicalKeyMonitor>,
 }
 
 pub struct PendingInputAcknowledgement<'a> {
@@ -346,6 +349,10 @@ impl InputMonitor {
         ready_receiver
             .recv_timeout(Duration::from_secs(2))
             .map_err(|_| eyre!("timed out starting the keyboard event tap"))??;
+        // Raw HID values sit below macOS's keyboard filter, which rewrites a
+        // Caps Lock remapped to Control as Right Control. A failure only
+        // leaves the tracker inactive; the tap keeps working.
+        let physical_keys = physical_keys::PhysicalKeyMonitor::start();
         Ok(Self {
             events,
             activity,
@@ -354,6 +361,7 @@ impl InputMonitor {
             takes_cancel,
             run_loop,
             worker: Some(worker),
+            _physical_keys: physical_keys,
         })
     }
 
@@ -437,6 +445,7 @@ unsafe extern "C" fn physical_event_callback(
     let code = unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) as u16 };
     // SAFETY: CoreGraphics supplied a valid event.
     let flags = unsafe { CGEventGetFlags(event) };
+    let flags = crate::app_settings::normalized_modifier_flags(flags, physical_keys::snapshot());
     if !is_chord_evidence(code, flags, crate::app_settings::runtime_hotkeys()) {
         return event;
     }
@@ -597,14 +606,21 @@ unsafe extern "C" fn event_callback(
     let input = match event_type {
         EVENT_FLAGS_CHANGED => {
             // SAFETY: CoreGraphics supplied a valid event to this callback.
-            InputEvent::Flags(unsafe { CGEventGetFlags(event) })
+            let flags = unsafe { CGEventGetFlags(event) };
+            InputEvent::Flags(crate::app_settings::normalized_modifier_flags(
+                flags,
+                physical_keys::snapshot(),
+            ))
         }
         EVENT_KEY_DOWN | EVENT_KEY_UP => InputEvent::Key {
             // SAFETY: CoreGraphics supplied a valid keyboard event.
             code: unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) as u16 },
             down: event_type == EVENT_KEY_DOWN,
             // SAFETY: CoreGraphics supplied a valid event.
-            flags: unsafe { CGEventGetFlags(event) },
+            flags: crate::app_settings::normalized_modifier_flags(
+                unsafe { CGEventGetFlags(event) },
+                physical_keys::snapshot(),
+            ),
         },
         EVENT_LEFT_MOUSE_DOWN
         | EVENT_RIGHT_MOUSE_DOWN
