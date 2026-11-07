@@ -933,7 +933,8 @@ pub(crate) fn run(
                     service.audio(&samples, Instant::now());
                 }
                 if capture.become_intentional(captured_through) && finishing.is_none() {
-                    // Ordinary shortcut chords and short taps never mute or pause.
+                    // Ordinary shortcut chords and short taps never mute,
+                    // lower, or pause audio.
                     suppressor.suppress();
                 }
                 stream_when_due(&mut capture, &engine, toggle);

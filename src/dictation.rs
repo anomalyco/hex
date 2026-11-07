@@ -39,15 +39,16 @@ use crate::audio::recording_environment::{
 const TIMELINE_BUFFER_DURATION: Duration = Duration::from_secs(10);
 const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
 
-/// How much audio a shortcut capture keeps from before its press. Muting or
-/// pausing other audio while dictating takes effect only after the press, so
-/// the audio before it holds whatever was playing (#1309): those captures
-/// keep none. Ducking and doing nothing keep [`PRE_ROLL_DURATION`].
+/// How much audio a shortcut capture keeps from before its press. Muting,
+/// pausing, or lowering other audio while dictating takes effect only after
+/// the press, so the audio before it holds whatever was playing (#1309,
+/// #1468): those captures keep none. Doing nothing keeps
+/// [`PRE_ROLL_DURATION`].
 pub fn hotkey_pre_roll(behavior: crate::app_settings::RecordingAudioBehavior) -> Duration {
     use crate::app_settings::RecordingAudioBehavior::{DoNothing, Duck, Mute, PauseMedia};
     match behavior {
-        Mute | PauseMedia => Duration::ZERO,
-        Duck | DoNothing => PRE_ROLL_DURATION,
+        Mute | PauseMedia | Duck => Duration::ZERO,
+        DoNothing => PRE_ROLL_DURATION,
     }
 }
 pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
@@ -1561,12 +1562,7 @@ mod tests {
     #[test]
     fn muting_or_pausing_while_dictating_keeps_no_pre_roll() {
         use crate::app_settings::RecordingAudioBehavior::{DoNothing, Duck, Mute, PauseMedia};
-        for (behavior, kept) in [
-            (Mute, 0),
-            (PauseMedia, 0),
-            (Duck, 7_200),
-            (DoNothing, 7_200),
-        ] {
+        for (behavior, kept) in [(Mute, 0), (PauseMedia, 0), (Duck, 0), (DoNothing, 7_200)] {
             let pre_roll = hotkey_pre_roll(behavior);
             let origin = capture_time();
             let mut warm = DictationCapture::new(16_000);

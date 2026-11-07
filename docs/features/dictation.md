@@ -436,11 +436,26 @@ chunks; not run against PipeWire or a physical microphone).
 **Changed November 4, 2026 (issue 1309 follow-up):** with "While dictating"
 set to Mute or Pause media, the pre-roll came from before the mute took
 effect and picked up whatever was playing. On every OS, those hotkey captures
-now keep no pre-roll (`dictation::hotkey_pre_roll`); Duck and Do nothing keep
-450 ms. There is no separate setting. Check:
+now keep no pre-roll (`dictation::hotkey_pre_roll`); Do nothing keeps 450 ms
+(Duck kept it until issue 1468, below). There is no separate setting. Check:
 `muting_or_pausing_while_dictating_keeps_no_pre_roll` in
 [dictation.rs](../../src/dictation.rs) (constructed audio; not run on a
 device).
+
+**Changed November 7, 2026 (issue 1468):** with "While dictating" set to
+Lower audio, lowering ramped over a full second after the 300 ms hold
+threshold, and the 450 ms pre-roll came from before the lower took effect, so
+the start of every dictation stayed loud. Lowering now reaches its target in
+about 120 ms (`LOWER` in
+[audio/output_ducking.rs](../../src/audio/output_ducking.rs)), Duck keeps no
+pre-roll like Mute and Pause media, and restoring still eases back over one
+second. Checks:
+`ducking_preserves_balance_silence_and_restores` and
+`lowering_finishes_at_its_own_duration_while_restoring_is_still_ramping` in
+audio/output_ducking.rs, and
+`muting_or_pausing_while_dictating_keeps_no_pre_roll` in
+[dictation.rs](../../src/dictation.rs) (constructed audio; not run on a device
+or physical output).
 
 **Fixed November 2, 2026 (issue 978):** a Windows paste refused to run when
 the clipboard held only a format Hex can't snapshot (an app's private
@@ -648,7 +663,7 @@ These cover gesture decisions, not hardware keyboard-layout or remapping equival
 ```ts
 Keep ready -> Press shortcut                          // dictate.boundaries
   -> Include up to 450 ms of available pre-roll
-     └── "While dictating" mutes or pauses -> No pre-roll (it predates the mute)
+     └── "While dictating" mutes, pauses, or lowers -> No pre-roll (it predates it)
   -> Linux: press and release placed on the stream clock (newest chunk's end
      plus the time since it arrived), so large chunks add no pre-press audio
   -> Delayed handling still uses original event boundaries
