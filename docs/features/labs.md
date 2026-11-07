@@ -678,8 +678,9 @@ retention (`History::stats`, `history/stats.rs`), not the pane's 200-entry
 search, so it ends with what retention removes; the rollup that outlives
 retention, streak notifications, and per-replacement counts are not built. The
 gates are `labs::history_stats()`, read when the pane reloads (off, it reads
-nothing for stats, and sums again only when the entries or the toggle change)
-and where `hex history stats` starts (off, it fails naming `hex labs on
+nothing for stats, and sums again when the entries or the toggle change, or
+once when the dialog closes because the stats emptied) and where
+`hex history stats` starts (off, it fails naming `hex labs on
 history-stats` before History is read), and the window's own setting for the
 button and dialog. Turning the switch off, emptying retained history, or
 leaving History closes the dialog. Off, History is exactly as before. Checks:

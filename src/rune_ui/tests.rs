@@ -1326,6 +1326,36 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     assert!(rt.find("history-stats-dialog").is_none());
 
     tap(&mut rt, "history-stats-open");
+    let pane = rt.state.pane;
+    key(
+        &mut rt,
+        Key::Command('1'),
+        Mods {
+            cmd: true,
+            ..Mods::default()
+        },
+    );
+    assert!(rt.state.history.stats_open);
+    assert_eq!(
+        rt.state.pane, pane,
+        "Command-1 waits while the stats dialog is open"
+    );
+    rt.update(on_close);
+    settle(&mut rt);
+    assert!(
+        !rt.state.history.stats_open,
+        "closing the window closes the dialog"
+    );
+
+    tap(&mut rt, "history-stats-open");
+    rt.update(|ui, tx| show(ui, Destination::History, tx));
+    settle(&mut rt);
+    assert!(
+        !rt.state.history.stats_open,
+        "showing History again closes the dialog"
+    );
+
+    tap(&mut rt, "history-stats-open");
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
     assert!(!rt.state.history.stats_open, "Escape closes the dialog");

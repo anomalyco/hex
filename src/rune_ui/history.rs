@@ -141,7 +141,8 @@ impl HistoryPane {
 
     /// While the pane shows, picks up new dictations and search edits. It
     /// searches again only when the query or the store's revision changed,
-    /// and sums the stats again only when the entries or the toggle changed.
+    /// and sums the stats again when the entries or the toggle changed, or
+    /// once when the dialog closes because the stats emptied.
     pub(super) fn poll(&mut self, visible: bool) -> bool {
         let answered = self.poll_again();
         let mut changed = false;
