@@ -24,6 +24,7 @@ mod meeting_folder;
 mod meetings;
 mod persistence;
 mod screenshots;
+pub(crate) use persistence::{LaunchLoad, LaunchNote};
 mod shortcut_repair;
 
 #[cfg(hex_capture)]

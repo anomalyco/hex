@@ -43,6 +43,15 @@ impl Drop for SettingsFile {
     }
 }
 
+/// The note `load_for_launch` builds for `path`, without using the real
+/// settings folder.
+fn launch_note(path: &Path) -> Option<String> {
+    match AppSettings::load_checked_from(path).unwrap().1 {
+        Some(LoadIssue::Unparseable(reason)) => Some(reason.launch_note()),
+        Some(LoadIssue::Unreadable) | None => None,
+    }
+}
+
 #[test]
 fn unset_retention_saves_a_shape_older_hex_can_read() {
     // The meeting field in 46c3c762 was non-optional, defaulting to Forever.
@@ -200,13 +209,65 @@ fn malformed_json_uses_defaults_and_refuses_to_be_replaced() {
     let message = format!("{error:#}");
     assert!(message.contains("isn't valid JSON"), "{message}");
     assert!(message.contains("line 4 column 1"), "{message}");
-    assert!(message.contains("fix or remove it"), "{message}");
+    assert!(
+        message.contains("Fix or remove it, then restart Hex"),
+        "{message}"
+    );
+    assert!(message.contains("Nothing was saved"), "{message}");
     assert_eq!(fs::read(&file.path).unwrap(), original);
     assert!(file.backups().is_empty());
 
-    // Once fixed, the same settings save normally.
+    // The process still remembers the broken load: a fixed file is not
+    // replaced by the defaults that load used.
     fs::write(&file.path, b"{}").unwrap();
+    let error = modified.write_to(&file.path).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("couldn't be read when Hex loaded it"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Restart Hex to load the fixed file"),
+        "{message}"
+    );
+    assert_eq!(fs::read(&file.path).unwrap(), b"{}");
+    assert!(file.backups().is_empty());
+
+    // A fresh load clears that, and the same settings save normally.
+    AppSettings::load_from(&file.path).unwrap();
     modified.write_to(&file.path).unwrap();
+    assert!(file.backups().is_empty());
+}
+
+#[test]
+fn stale_defaults_cannot_replace_a_file_fixed_while_the_process_runs() {
+    let broken = b"{\n    \"sound_effects\": true,\n    \"not json\":\n}";
+    let file = SettingsFile::new(broken);
+    let stale = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(stale, AppSettings::default());
+
+    let fixed = br#"{"sound_effect_volume":0.37}"#;
+    fs::write(&file.path, fixed).unwrap();
+    let error = stale.write_to(&file.path).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("couldn't be read when Hex loaded it"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Restart Hex to load the fixed file"),
+        "{message}"
+    );
+    assert_eq!(fs::read(&file.path).unwrap(), fixed);
+    assert!(file.backups().is_empty());
+
+    // Reading the fixed file clears the refusal; the stale settings then save
+    // over it as any save would.
+    let loaded = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(loaded.sound_effect_volume, 0.37);
+    stale.write_to(&file.path).unwrap();
+    let saved: Value = serde_json::from_slice(&fs::read(&file.path).unwrap()).unwrap();
+    assert_eq!(saved["sound_effect_volume"], json!(0.5));
     assert!(file.backups().is_empty());
 }
 
@@ -219,7 +280,10 @@ fn non_object_json_uses_defaults_and_refuses_to_be_replaced() {
         let error = AppSettings::default().write_to(&file.path).unwrap_err();
         let message = format!("{error:#}");
         assert!(message.contains("must be a JSON object"), "{message}");
-        assert!(message.contains("fix or remove it"), "{message}");
+        assert!(
+            message.contains("Fix or remove it, then restart Hex"),
+            "{message}"
+        );
         assert_eq!(fs::read(&file.path).unwrap(), original);
         assert!(file.backups().is_empty());
     }
@@ -228,19 +292,21 @@ fn non_object_json_uses_defaults_and_refuses_to_be_replaced() {
 #[test]
 fn a_broken_settings_file_is_named_at_launch_with_its_parse_error() {
     let file = SettingsFile::new(b"{\n    \"sound_effects\": true,\n    \"not json\":\n}");
-    let note = unparseable_note(&file.path).unwrap();
-    assert!(note.contains("using defaults until it's fixed"), "{note}");
+    let note = launch_note(&file.path).unwrap();
+    assert!(note.contains("started with defaults"), "{note}");
+    assert!(note.contains("Your file wasn't changed"), "{note}");
+    assert!(note.contains("then restart Hex"), "{note}");
     assert!(note.contains("line 4 column 1"), "{note}");
 
     let file = SettingsFile::new(b"[]");
     assert!(
-        unparseable_note(&file.path)
+        launch_note(&file.path)
             .unwrap()
             .contains("must be a JSON object")
     );
 
     let file = SettingsFile::new(b"{}");
-    assert!(unparseable_note(&file.path).is_none());
+    assert!(launch_note(&file.path).is_none());
 }
 
 #[test]
@@ -299,6 +365,12 @@ fn unreadable_file_does_not_block_load_or_get_overwritten() {
         AppSettings::load_from(&file.path).unwrap(),
         AppSettings::default()
     );
+    // An unreadable file is not a parse error, so launch has no note for it.
+    assert!(!matches!(
+        AppSettings::load_checked_from(&file.path).unwrap().1,
+        Some(LoadIssue::Unparseable(_))
+    ));
+    assert!(launch_note(&file.path).is_none());
     assert!(AppSettings::default().write_to(&file.path).is_err());
     assert!(file.path.is_dir());
 }

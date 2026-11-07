@@ -429,8 +429,8 @@ pub(crate) fn run(
         .spawn(crate::linux::login_item::announce_background);
     crate::labs::log_launch();
     crate::audio::hex_microphone::host_service();
-    let (settings, error) = AppSettings::load_for_launch();
-    crate::linux::dictation::initialize_feedback(&settings);
+    let launch = AppSettings::load_for_launch();
+    crate::linux::dictation::initialize_feedback(&launch.settings);
     // Before any thread can load a model or the window can create its GPU.
     crate::transcription::local_transcriber::initialize_backends();
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
@@ -440,13 +440,8 @@ pub(crate) fn run(
         control_calls,
         Some(dictation_controls),
     );
-    let enable_on_launch = settings.enable_on_launch;
-    let mut host = LinuxDesktopHost::new(
-        event_path,
-        settings,
-        error,
-        crate::updater::Updater::start(),
-    );
+    let enable_on_launch = launch.settings.enable_on_launch;
+    let mut host = LinuxDesktopHost::new(event_path, launch, crate::updater::Updater::start());
     host.dictations = dictations.into();
     if enable_on_launch {
         host.start();
@@ -646,10 +641,12 @@ fn take_reopen_marker() -> bool {
 impl LinuxDesktopHost {
     fn new(
         event_path: PathBuf,
-        settings: AppSettings,
-        error: Option<String>,
+        launch: crate::app_settings::LaunchLoad,
         updater: crate::updater::Updater,
     ) -> Self {
+        let crate::app_settings::LaunchLoad { settings, note } = launch;
+        let failed = matches!(note, Some(crate::app_settings::LaunchNote::Failed(_)));
+        let note = note.map(crate::app_settings::LaunchNote::into_message);
         let mut event_reader = EventReader::open(&event_path);
         let mut activity = DesktopActivity::default();
         activity.refresh(&mut event_reader);
@@ -682,8 +679,10 @@ impl LinuxDesktopHost {
             error: None,
             dismissed_failure_at: None,
             gnome_shortcuts: None,
-            settings_valid: error.is_none(),
-            settings_error: error,
+            // A file that isn't a JSON object starts with defaults and says
+            // so, but still dictates; only a failed load blocks recording.
+            settings_valid: !failed,
+            settings_error: note,
             settings,
             shortcut_edit: None,
             prepared_transcriber: None,
@@ -736,12 +735,22 @@ impl LinuxDesktopHost {
             return;
         }
         self.settings_modified = modified;
-        match AppSettings::load() {
-            Ok(settings) if settings != self.settings => {
-                tracing::info!("settings.json changed outside Hex; applying it");
+        let Ok(path) = crate::app_settings::path() else {
+            return;
+        };
+        // The poll runs only on an mtime change, so a broken file is reported
+        // once per edit instead of every two seconds. Its defaults are never
+        // adopted; a later valid or removed file is.
+        match AppSettings::load_checked_from(&path) {
+            Ok((_, Some(issue))) => {
+                self.settings_error = Some(issue.reload_error());
+            }
+            Ok((settings, None)) => {
+                if settings != self.settings {
+                    tracing::info!("settings.json changed outside Hex; applying it");
+                }
                 self.adopt_settings(settings);
             }
-            Ok(_) => {}
             Err(error) => tracing::warn!(error = format!("{error:#}"), "could not reload settings"),
         }
     }
@@ -1046,6 +1055,9 @@ impl LinuxDesktopHost {
     /// Adopts settings the window saved. A running listener applies them in
     /// place, so listening never stops for a settings change.
     fn adopt_settings(&mut self, settings: AppSettings) {
+        // A valid file clears the parse error even when it loads the settings
+        // already running (a fixed file equal to what Hex had in memory).
+        self.settings_error = None;
         if self.settings_valid && settings == self.settings {
             return;
         }
@@ -1058,7 +1070,6 @@ impl LinuxDesktopHost {
         let was_valid = self.settings_valid;
         self.settings = settings;
         self.settings_valid = true;
-        self.settings_error = None;
         self.apply_output_settings();
         if let Some(listener) = &self.listener {
             listener.update(ListenerUpdate::Settings(Box::new(self.settings.clone())));
@@ -1504,8 +1515,10 @@ mod tests {
         };
         let mut host = LinuxDesktopHost::new(
             PathBuf::new(),
-            settings,
-            None,
+            crate::app_settings::LaunchLoad {
+                settings,
+                note: None,
+            },
             crate::updater::Updater::idle(),
         );
         if running {
@@ -1574,13 +1587,39 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_parse_note_does_not_block_capture() {
+        let mut host = LinuxDesktopHost::new(
+            PathBuf::new(),
+            // A model never installed on Linux keeps `start` from opening a
+            // real microphone while still proving the validity gate passed.
+            crate::app_settings::LaunchLoad {
+                settings: host_for_edit(false).settings.clone(),
+                note: Some(crate::app_settings::LaunchNote::Unparseable(
+                    "Hex couldn't read settings.json and started with defaults.".into(),
+                )),
+            },
+            crate::updater::Updater::idle(),
+        );
+        assert!(host.settings_valid);
+        assert!(host.settings_error.is_some());
+        host.start();
+        assert!(host.listen_when_ready);
+        assert_eq!(host.status, "Model required");
+        assert!(!host.is_running());
+    }
+
+    #[test]
     fn malformed_settings_cannot_start_even_after_dismissing_the_error() {
         let mut host = LinuxDesktopHost::new(
             PathBuf::new(),
             // A model never installed on Linux, so the resumed start below
             // cannot open the microphone where the real model is installed.
-            host_for_edit(false).settings.clone(),
-            Some("Could not load Linux settings: invalid JSON".into()),
+            crate::app_settings::LaunchLoad {
+                settings: host_for_edit(false).settings.clone(),
+                note: Some(crate::app_settings::LaunchNote::Failed(
+                    "Could not load Linux settings: invalid JSON".into(),
+                )),
+            },
             crate::updater::Updater::idle(),
         );
         host.start();
@@ -1923,8 +1962,10 @@ mod tests {
         };
         let mut host = LinuxDesktopHost::new(
             PathBuf::new(),
-            settings,
-            None,
+            crate::app_settings::LaunchLoad {
+                settings,
+                note: None,
+            },
             crate::updater::Updater::idle(),
         );
         host.transcription_preparation = Some(TranscriptionPreparation {

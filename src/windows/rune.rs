@@ -163,7 +163,11 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     name_ui_thread();
     crate::labs::log_launch();
     shutdown.store(false, Ordering::Relaxed);
-    let (settings, settings_error) = AppSettings::load_for_launch();
+    let launch = AppSettings::load_for_launch();
+    let settings_error = launch
+        .note
+        .map(crate::app_settings::LaunchNote::into_message);
+    let settings = launch.settings;
     let history = History::open_default(settings.history_retention)
         .inspect_err(|error| tracing::warn!(%error, "could not open retained history"))
         .ok();

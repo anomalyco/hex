@@ -51,9 +51,13 @@ Launch -> read settings.json
 │   └── Valid siblings and unrelated sections stay
 ├── Invalid JSON / not a JSON object -> log why -> defaults in memory
 │   └── launch says so; invalid JSON names serde's line and column
+├── Unreadable file -> log why -> defaults in memory
+│   └── no launch note; a save fails rather than overwrite it
 └── Save
-    ├── Invalid JSON / not an object -> save refused
+    ├── Invalid JSON / not an object on disk -> save refused
     │   └── fix or remove the file; original stays exactly as it was
+    ├── This process loaded a file that wasn't an object -> save refused
+    │   └── even after the file is fixed; a fresh load or restart clears it
     └── Invalid fields -> preserve exact original first
         ├── settings.json.unreadable-<sha256>, owner-only; same bytes backed up once
         └── Backup fails / original cannot be read -> save fails, original stays
@@ -62,22 +66,35 @@ Launch -> read settings.json
 Loading repaired settings does not itself rewrite the file. A later settings
 save (including a migration save) takes the backup before replacing invalid
 fields. A file that is not valid JSON, or is valid JSON but not an object, is
-never backed up or replaced: every save is refused until it's fixed or removed,
-and launch keeps running with defaults in memory while naming the parse error.
+never backed up or replaced: every save is refused until a fresh read sees a
+fixed file, and launch keeps running with defaults in memory while naming the
+parse error. A process that loaded such a file keeps refusing saves even after
+the file is fixed, because its in-memory settings may be stale defaults; the
+refusal says to restart. `hex settings set` and `hex vocabulary` load the file
+before saving, so on any OS they clear that refusal after a fix and the running
+app adopts their save.
 Backups are never automatically removed. On Linux, the running Hex checks
 `settings.json` every two seconds and adopts an edit made outside the window
 (by hand or by an agent), so its modes reach the listener and the next save
-keeps it (#970); macOS and Windows still read it only at launch or through
-`hex settings set`. Unchosen `meetings.retention` is
+keeps it (#970). The check runs only when the file's mtime changes. A file that
+isn't a JSON object is never adopted: the running settings stay, the parse
+error appears in the settings error surface, and the message is not logged on
+every tick. A later check that reads a valid file, or finds the file removed,
+adopts it (even when it equals the running settings), clears that error, and
+clears the process's refusal marker, so the window's next save works without a
+restart. macOS and Windows still read the file only at launch, through
+`hex settings set`, or through their own save-and-reload path. Unchosen
+`meetings.retention` is
 written as an absent key, so older builds with a non-optional retention still
 read the file; existing `null` values also load in the current build.
 
 Source and checks: [settings persistence](../../src/app_settings/persistence.rs)
 and its [tests](../../src/app_settings/persistence/tests.rs): old-shape retention,
 invalid enums, nested types, list entries, unknown keys, invalid JSON and
-non-object documents (defaults, refused saves, no backup), exactly-once private
-backups, interrupted saves, and backup failure. These checks use temporary
-files; they do not exercise a real app launch.
+non-object documents (defaults, refused saves, no backup), a file fixed while
+the process still holds stale settings (refused until a fresh load), exactly-once
+private backups, interrupted saves, and backup failure. These checks use
+temporary files; they do not exercise a real app launch or the Linux poll.
 
 ### Finish Without Losing Other Work
 
