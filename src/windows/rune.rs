@@ -36,16 +36,13 @@ use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
+use crate::desktop::tray_icon;
 use crate::desktop::tray_menu::{TrayCommand, TrayView};
 use crate::history::History;
 use crate::rune_ui::Ui;
 use crate::transcription::models::TranscriptionModelId;
 use crate::windows::app::WindowsDesktopHost;
 
-/// The tray icon: the white Hex mark as raw 32×32 RGBA, recolored black for
-/// a light taskbar ([`tray_icon_pixels`]).
-const TRAY_ICON_SIZE: u32 = 32;
-const TRAY_ICON_RGBA: &[u8] = include_bytes!("../../resources/windows/tray-32.rgba");
 /// How often the runtime refreshes the listener while nothing is asked.
 const RUNTIME_TICK: Duration = Duration::from_millis(250);
 
@@ -663,23 +660,11 @@ fn taskbar_is_light() -> bool {
         .is_ok_and(|light| light != 0)
 }
 
-/// The tray mark for the taskbar's theme: the white mark on a dark taskbar,
-/// the same shape in black on a light one, where white would vanish.
-fn tray_icon_pixels(light_taskbar: bool) -> Vec<u8> {
-    let mut pixels = TRAY_ICON_RGBA.to_vec();
-    if light_taskbar {
-        for pixel in pixels.as_chunks_mut::<4>().0 {
-            pixel[..3].fill(0);
-        }
-    }
-    pixels
-}
-
 fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
     let icon = rune::TrayIcon::rgba(
-        TRAY_ICON_SIZE,
-        TRAY_ICON_SIZE,
-        tray_icon_pixels(taskbar_is_light()),
+        tray_icon::SIZE,
+        tray_icon::SIZE,
+        tray_icon::pixels(taskbar_is_light()),
     );
     let view = TrayView::default();
     let spec = rune::TraySpec::new("hex", "Hex", icon)
@@ -744,21 +729,4 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<rune::Tray> {
         _ => {}
     })?;
     Ok(tray)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn light_taskbar_gets_a_dark_mark_with_the_same_shape() {
-        let dark = tray_icon_pixels(false);
-        let light = tray_icon_pixels(true);
-        assert_eq!(dark, TRAY_ICON_RGBA);
-        assert_eq!(light.len(), (TRAY_ICON_SIZE * TRAY_ICON_SIZE * 4) as usize);
-        for (shown, mark) in light.as_chunks::<4>().0.iter().zip(dark.as_chunks::<4>().0) {
-            assert_eq!(&shown[..3], &[0, 0, 0]);
-            assert_eq!(shown[3], mark[3]);
-        }
-    }
 }

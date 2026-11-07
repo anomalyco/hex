@@ -36,8 +36,13 @@ StatusNotifierItem host, such as Waybar, KDE, or Omarchy's bar), Hex shows a
 tray icon: click it to open the window, or use its menu: **Show Hex**,
 **Paste last dictation**, the downloaded speech models, the update once one
 is ready (**Restart to update**), **Enable / Disable Hex**, and **Quit Hex**;
-while Hex records or transcribes, the menu and tooltip say so. Without a
-tray, quit with **Quit Hex** at the bottom of the window's sidebar, the launcher's **Quit Hex** action, or `hex quit`.
+while Hex records or transcribes, the menu and tooltip say so. The mark is white,
+and black when the desktop's color scheme prefers light; Hex reads that setting
+when it creates the tray, so a later switch applies at the next launch. KDE's
+portal takes the scheme from the window palette, so a mixed theme with light
+windows and a dark panel (such as Breeze Twilight) gets a black mark on a dark
+panel. Without a tray, quit with **Quit Hex** at the bottom of the window's
+sidebar, the launcher's **Quit Hex** action, or `hex quit`.
 
 The window opens at 980×760 logical pixels and floats on tiling window
 managers with no window rule: it maps with its minimum size equal to its
