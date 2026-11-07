@@ -173,8 +173,8 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     └── not observed on a real GNOME session; no automated check
 Files -> Reveal files opens the recording folder (selected in Explorer,
     opened by xdg-open); Reveal Markdown additionally appears while the
-    exported .md exists and selects it; Delete moves to the freedesktop Trash
-    or the Recycle Bin
+    exported .md exists and selects it (Explorer) or opens the folder holding
+    it (xdg-open); Delete moves to the freedesktop Trash or the Recycle Bin
 ```
 
 The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and
