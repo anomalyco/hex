@@ -1828,17 +1828,25 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   the lowest-power adapter that drives a display (an unused integrated GPU
 │   beside the monitors' card would present every surface across adapters);
 │   a GPU whose device fails hands the window to the next adapter (#662)
-│   ├── Tray at rest -> no GPU device until something shows: the capture
+│   ├── Hidden startup -> no Direct3D device and no DX12 adapter enumeration:
+│   │   Rune makes its DX12-or-Vulkan choice on the first real GPU use (rune
+│   │   53c7f60, rune#200), so a tray launch no longer initialises Direct3D
+│   │   on every GPU, which NVIDIA's App can take as a game launch (#1308;
+│   │   not yet observed with NVIDIA's App, and the x64 speech model's Vulkan
+│   │   device on the same GPU may still trigger it)
+│   ├── Tray at rest -> no Rune GPU device until something shows: the capture
 │   │   capsule, picker, and ink keep their windows from launch but make their
 │   │   GPU surfaces at each show and drop them at each hide (Rune
 │   │   release_gpu_when_hidden); the HUD keeps its surface for 5 minutes
 │   │   after its last hide (release_gpu_after), then gives the device back
 │   │   ├── Dictation shortcut's modifiers down (Ctrl of Ctrl+Space) -> Rune
 │   │   │   makes the device and the HUD's pipeline on a thread (warm_gpu_with,
-│   │   │   unclaimed for 30 s they go), so the HUD shows without them
+│   │   │   unclaimed for 30 s they go), so the HUD shows without them; this
+│   │   │   first call also makes the DX12-or-Vulkan choice
 │   │   └── A show with no device and no warm-up waits for one (about 200 ms
 │   │       plus the HUD pipeline's 75 to 115 ms on an RTX 5070 Ti; Rune's
-│   │       overlay_gpu_lifecycle measures the device part)
+│   │       overlay_gpu_lifecycle measures the device part); a cold first show
+│   │       pays the adapter check too, roughly 150 ms
 │   └── A launch that crashed drawing (gpu-draw.pending, written when Rune
 │       starts the launch's first GPU device, left in the data folder, same
 │       version; cleared by the first frame on any surface or a clean quit; a
@@ -2239,7 +2247,9 @@ macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 ├── Runtime thread owns WindowsDesktopHost (listener, model preparation, OpenCode, transformations, updater)
 ├── Named event: a second launch shows the window; tray Show / Enable-Disable / Quit
-├── rune::App: --hidden starts windowless, close hides (keep_running); Quit or no tray ends it
+├── rune::App: --hidden starts windowless and makes no Direct3D device (on x64
+│   the speech model still loads on the GPU through Vulkan), close hides
+│   (keep_running); Quit or no tray ends it
 ├── General adds Launch at login; no terminal paste; chord capture polls
 ├── HUD: shared indicator model + CPU shader in a Rune overlay
 ├── Modes: "Choose a file…" opens rune::FileDialogs (file_dialog) on its own thread
