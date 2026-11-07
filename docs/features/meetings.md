@@ -171,10 +171,10 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     │   focus; if Rune still can't open them, the pane path above
     │   // checks: linux/meeting_capsules.rs gating tests; not run on GNOME
     └── not observed on a real GNOME session; no automated check
-Files -> Reveal Markdown selects the exported .md (Explorer) or opens the folder
-    holding it (xdg-open); Reveal files shows the recording folder (selected in
-    Explorer, opened by xdg-open); Delete moves to the freedesktop Trash or the
-    Recycle Bin
+Files -> Reveal files opens the recording folder (selected in Explorer,
+    opened by xdg-open); Reveal Markdown additionally appears while the
+    exported .md exists and selects it (Explorer) or opens the folder holding
+    it (xdg-open); Delete moves to the freedesktop Trash or the Recycle Bin
 ```
 
 The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and
@@ -1046,8 +1046,8 @@ Final publication                                   // meetings.output
 
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
 Meetings pane -> Copy icon on a completed row's hover, the card's Copy
-    transcript icon, Reveal Markdown (selects the exported .md; Reveal files
-    opens the recording folder when none)
+    transcript icon, Reveal files (opens the recording folder), and Reveal
+    Markdown (selects the exported .md) while the export exists
 Menu bar (idle) -> Copy Last Meeting Transcript
 Option-Control-V -> `MeetingPasteCursor` in `meeting/delta.rs` over the transcript
 │   through the press (meetings.copy-through-now)
@@ -1076,8 +1076,8 @@ Detail (a raised card beside the list)
 ├── Title, status chip (not when Ready), date · time · duration · app
 ├── Ghost icons top right: Copy transcript, Rename (finished only), "…" menu
 │   └── Copy summary (stays open to show "Copied"), Reveal Markdown (Finder
-│       selects the exported .md; Reveal files opens the recording folder
-│       when there is none), Summarize / Regenerate summary ("Summarizing…"
+│       selects the exported .md, when there is one), Reveal files (opens
+│       the recording folder), Summarize / Regenerate summary ("Summarizing…"
 │       disabled while running), separator, Delete… (finished meetings only
 │       for the last three)
 ├── Errors at the top of the scroll area
