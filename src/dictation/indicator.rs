@@ -26,7 +26,7 @@ const EARS_COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(700);
 const FAILED_VISIBLE_DURATION: Duration = Duration::from_millis(600);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum DictationIndicatorEvent {
     Reset,
     /// HUD Lab's or a playground story's tuning.
@@ -61,8 +61,13 @@ pub enum DictationIndicatorEvent {
     },
     JobFailed {
         job_id: u64,
+        /// Why it failed, for Labs › Failure notices; the HUD ignores it.
+        message: Option<String>,
     },
-    Failed,
+    Failed {
+        /// Why it failed, for Labs › Failure notices; the HUD ignores it.
+        message: Option<String>,
+    },
 }
 
 impl DictationIndicatorEvent {
@@ -358,10 +363,10 @@ impl IndicatorModel {
             DictationIndicatorEvent::JobCancelled { job_id } => {
                 self.finish_job(job_id, now, Phase::Cancelled);
             }
-            DictationIndicatorEvent::JobFailed { job_id } => {
+            DictationIndicatorEvent::JobFailed { job_id, .. } => {
                 self.finish_job(job_id, now, Phase::Failed);
             }
-            DictationIndicatorEvent::Failed => {
+            DictationIndicatorEvent::Failed { .. } => {
                 self.finish_capture(now, Phase::Failed);
             }
         }
@@ -525,7 +530,10 @@ mod tests {
         );
         assert_eq!(model.status(), Some("Transcribing"));
         model.handle(
-            DictationIndicatorEvent::JobFailed { job_id: 1 },
+            DictationIndicatorEvent::JobFailed {
+                job_id: 1,
+                message: None,
+            },
             start,
             false,
         );
@@ -679,7 +687,11 @@ mod tests {
         let mut model = IndicatorModel::new(Tuning::default(), start);
         model.handle(DictationIndicatorEvent::Started, start, false);
         run(&mut model, start, 0.0, 0.5);
-        model.handle(DictationIndicatorEvent::Failed, at(start, 0.5), false);
+        model.handle(
+            DictationIndicatorEvent::Failed { message: None },
+            at(start, 0.5),
+            false,
+        );
         let failed = run(&mut model, start, 0.5, 0.5);
         assert!(failed.last().unwrap().pose.fail > 0.9);
         run(&mut model, start, 1.0, 1.5);

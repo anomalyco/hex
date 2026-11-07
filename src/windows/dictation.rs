@@ -679,10 +679,18 @@ pub fn run(
             let job_id = job_ids.pop_front();
             if let (Some(indicator), Some(job_id)) = (&indicator, job_id) {
                 // Repaste ids were never announced, so the HUD ignores them.
-                indicator.send(if result.result.is_ok() {
-                    crate::rune_hud::HudEvent::JobCompleted { job_id }
+                // A failed Paste last dictation is not a failed capture, so it
+                // gets no notice either.
+                let failure = (result.kind != OutputKind::Repaste)
+                    .then(|| result.result.as_ref().err().cloned())
+                    .flatten();
+                indicator.send(if let Some(message) = failure {
+                    crate::rune_hud::HudEvent::JobFailed {
+                        job_id,
+                        message: Some(message),
+                    }
                 } else {
-                    crate::rune_hud::HudEvent::JobFailed { job_id }
+                    crate::rune_hud::HudEvent::JobCompleted { job_id }
                 });
             }
             match result.result {
@@ -841,9 +849,12 @@ pub fn run(
                 // and stay released rather than killing the listener.
                 start_pending = false;
                 audio_suppressor.restore();
-                fail(&events, format!("could not open microphone: {error}"))?;
+                let error = format!("could not open microphone: {error}");
+                fail(&events, error.clone())?;
                 if let Some(indicator) = &indicator {
-                    indicator.send(crate::rune_hud::HudEvent::Failed);
+                    indicator.send(crate::rune_hud::HudEvent::Failed {
+                        message: Some(error),
+                    });
                 }
                 emit_current_state(&mut events, recording, pending, &device_label)?;
             }

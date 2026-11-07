@@ -353,6 +353,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Live text"),
         tr("Show provisional words beside the HUD while dictating"),
     ));
+    rows.push(row(
+        Feature::FailureNotices,
+        None,
+        tr("Failure notices"),
+        tr("When a dictation fails, show why next to the recording indicator"),
+    ));
     if caps.os == super::platform::Os::Linux && ui.platform.wayland {
         rows.push(row(
             Feature::LiveTyping,
@@ -743,6 +749,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::VoiceFilter => "lab-voice-filter",
         Feature::Playground => "lab-playground",
         Feature::LiveText => "lab-live-text",
+        Feature::FailureNotices => "lab-failure-notices",
         Feature::LiveTyping => "lab-live-typing",
         Feature::LiveChapters => "lab-live-chapters",
         Feature::VocabularyBiasing => "lab-vocabulary-biasing",

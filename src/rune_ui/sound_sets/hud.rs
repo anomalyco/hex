@@ -128,10 +128,13 @@ impl Hud {
                 Event::Transcribing { job_id: JOB },
             ],
             Beat::Done => &[Event::JobCompleted { job_id: JOB }],
-            Beat::Fail => &[Event::JobFailed { job_id: JOB }],
+            Beat::Fail => &[Event::JobFailed {
+                job_id: JOB,
+                message: None,
+            }],
             Beat::Leave => &[Event::Cancelled, Event::JobCancelled { job_id: JOB }],
         };
-        for &event in events {
+        for event in events.iter().cloned() {
             self.model.handle(event, now, false);
         }
     }

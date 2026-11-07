@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicU8, Ordering};
 
+mod failures;
 mod french;
 mod meetings;
 mod portuguese;
@@ -337,10 +338,13 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
     })
 }
 
-/// Every translated string: the main table and the Meetings rows beside it.
+/// Every translated string: the main, Meetings, and failure and microphone rows.
 pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str, [&'static str; 6])>
 {
-    TRANSLATIONS.iter().chain(meetings::TRANSLATIONS)
+    TRANSLATIONS
+        .iter()
+        .chain(meetings::TRANSLATIONS)
+        .chain(failures::TRANSLATIONS)
 }
 
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.
@@ -448,6 +452,8 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Hex Microphone virtual input and real-time voice filters", ["Wirtualne wejście Hex Microphone i filtry głosu na żywo", "Hex Microphone 虚拟输入与实时声音滤镜", "Hex Microphone 仮想入力とリアルタイムのボイスフィルター", "Virtueller Eingang Hex Microphone und Echtzeit-Stimmfilter", "Entrada virtual Hex Microphone y filtros de voz en tiempo real", "Віртуальний вхід Hex Microphone та голосові фільтри наживо"]),
     ("Live text", ["Tekst na żywo", "实时文字", "ライブテキスト", "Live-Text", "Texto en vivo", "Текст наживо"]),
     ("Show provisional words beside the HUD while dictating", ["Pokazuj robocze słowa obok HUD-u podczas dyktowania", "听写时在 HUD 旁显示临时词语", "音声入力中に HUD の横に仮の語句を表示します", "Vorläufige Wörter beim Diktieren neben dem HUD zeigen", "Muestra palabras provisionales junto al HUD al dictar", "Показувати проміжні слова поруч із HUD під час диктування"]),
+    ("Failure notices", ["Powiadomienia o błędach", "失败通知", "失敗のお知らせ", "Fehlerhinweise", "Avisos de fallo", "Сповіщення про збої"]),
+    ("When a dictation fails, show why next to the recording indicator", ["Gdy dyktowanie się nie powiedzie, pokaż przyczynę obok wskaźnika nagrywania", "听写失败时，在录音指示器旁显示原因", "音声入力に失敗したとき、録音インジケーターの横に理由を表示します", "Zeigt bei einem fehlgeschlagenen Diktat den Grund neben der Aufnahmeanzeige", "Cuando falla un dictado, muestra el motivo junto al indicador de grabación", "Коли диктування не вдається, покажіть причину поруч з індикатором запису"]),
     ("Live typing", ["Pisanie na żywo", "实时输入", "ライブ入力", "Live-Tippen", "Escritura en vivo", "Живе введення"]),
     ("Show provisional words in the focused text field while dictating on Wayland, then type the final text there", ["Pokazuj robocze słowa w aktywnym polu tekstowym podczas dyktowania na Waylandzie, a na końcu wpisz tam gotowy tekst", "在 Wayland 上听写时，将临时词语显示在焦点文本框中，最后把最终文本输入到那里", "Wayland での音声入力中、仮の語句をフォーカス中のテキスト欄に表示し、最後に確定したテキストをそこへ入力します", "Zeigt beim Diktieren unter Wayland vorläufige Wörter im fokussierten Textfeld und tippt am Ende den fertigen Text dort ein", "Muestra palabras provisionales en el campo de texto enfocado al dictar en Wayland y escribe allí el texto final", "Показує проміжні слова в полі введення під час диктування у Wayland і вписує туди остаточний текст"]),
     ("Live chapters", ["Rozdziały na żywo", "实时章节", "ライブチャプター", "Live-Kapitel", "Capítulos en vivo", "Розділи наживо"]),
@@ -827,7 +833,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Shortcut", ["Skrót", "快捷键", "ショートカット", "Kürzel", "Atajo", "Комбінація клавіш"]),
     ("OpenCode", ["OpenCode", "OpenCode", "OpenCode", "OpenCode", "OpenCode", "OpenCode"]),
     ("Default", ["Domyślny", "默认", "既定", "Standard", "Predeterminado", "Типово"]),
-    ("Last dictation failed: {}", ["Ostatnie dyktowanie nie powiodło się: {}", "上次听写失败：{}", "前回の音声入力に失敗しました: {}", "Letztes Diktat fehlgeschlagen: {}", "El último dictado falló: {}", "Не вдалося виконати останнє диктування: {}"]),
     ("Version {}", ["Wersja {}", "版本 {}", "バージョン {}", "Version {}", "Versión {}", "Версія {}"]),
     ("Hold", ["Przytrzymaj", "按住", "押しながら", "Halte", "Mantén", "Утримувати"]),
     ("Activity", ["Aktywność", "活动", "アクティビティ", "Aktivität", "Actividad", "Активність"]),
@@ -893,7 +898,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Behavior", ["Zachowanie", "行为", "動作", "Verhalten", "Comportamiento", "Поведінка"]),
     ("Change shortcut", ["Zmień skrót", "更改快捷键", "ショートカットを変更", "Kürzel ändern", "Cambiar atajo", "Змінити"]),
     ("Check again", ["Sprawdź ponownie", "再次检查", "再確認", "Erneut prüfen", "Comprobar de nuevo", "Перевірити ще раз"]),
-    ("Check failed; retrying later", ["Sprawdzanie nie powiodło się; ponowimy później", "检查失败；稍后重试", "確認に失敗しました。後で再試行します", "Prüfung fehlgeschlagen; später erneut", "La comprobación falló; se reintentará más tarde", "Не вдалося перевірити; повторна спроба пізніше"]),
     ("Checking for OpenCode", ["Szukanie OpenCode", "正在查找 OpenCode", "OpenCode を確認中", "Suche nach OpenCode", "Buscando OpenCode", "Перевірка OpenCode"]),
     ("Checking…", ["Sprawdzanie…", "正在检查…", "確認中…", "Wird geprüft…", "Comprobando…", "Перевірка…"]),
     ("Choose how much reasoning the model should use", ["Wybierz, ile rozumowania ma użyć model", "选择模型应使用多少推理", "モデルが使う推論量を選択", "Lege fest, wie viel der Modell nachdenken soll", "Elige cuánto razonamiento debe usar el modelo", "Виберіть рівень міркування моделі"]),
@@ -1104,7 +1108,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Ready · {}", ["Gotowe · {}", "已就绪 · {}", "完了 · {}", "Fertig · {}", "Lista · {}", "Готово · {}"]),
     ("Open", ["Otwórz", "打开", "開く", "Öffnen", "Abrir", "Відкрити"]),
     ("Finalizing…", ["Kończenie…", "正在完成…", "仕上げ中…", "Wird abgeschlossen…", "Finalizando…", "Завершення…"]),
-    ("Failed", ["Niepowodzenie", "失败", "失敗", "Fehlgeschlagen", "Fallido", "Не вдалося"]),
     ("Interrupted", ["Przerwano", "已中断", "中断", "Unterbrochen", "Interrumpido", "Перервано"]),
     ("Search meetings", ["Szukaj spotkań", "搜索会议", "会議を検索", "Besprechungen suchen", "Buscar reuniones", "Пошук зустрічей"]),
     ("No meetings match.", ["Brak pasujących spotkań.", "没有匹配的会议。", "一致する会議はありません。", "Keine passenden Besprechungen.", "No hay reuniones que coincidan.", "Відповідних зустрічей немає."]),
@@ -1118,7 +1121,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Speaker", ["Mówca", "说话人", "話者", "Sprecher", "Interlocutor", "Спікер"]),
     ("Meeting could not be recorded.", ["Nie udało się nagrać spotkania.", "无法录制会议。", "会議を録音できませんでした。", "Die Besprechung konnte nicht aufgenommen werden.", "No se pudo grabar la reunión.", "Не вдалося записати зустріч."]),
     ("Meeting could not be updated.", ["Nie udało się zaktualizować spotkania.", "无法更新会议。", "会議を更新できませんでした。", "Die Besprechung konnte nicht aktualisiert werden.", "No se pudo actualizar la reunión.", "Не вдалося оновити зустріч."]),
-    ("Recording failed.", ["Nagrywanie nie powiodło się.", "录音失败。", "録音に失敗しました。", "Aufnahme fehlgeschlagen.", "La grabación falló.", "Не вдалося записати аудіо."]),
     ("Markdown not saved.", ["Nie zapisano pliku Markdown.", "未保存 Markdown。", "Markdown を保存できませんでした。", "Markdown nicht gespeichert.", "No se guardó el Markdown.", "Файл Markdown не збережено."]),
     ("Notes could not be written.", ["Nie udało się zapisać notatek.", "无法写入笔记。", "メモを書き込めませんでした。", "Notizen konnten nicht geschrieben werden.", "No se pudieron escribir las notas.", "Не вдалося зберегти нотатки."]),
     ("Live transcript unavailable.", ["Bieżąca transkrypcja jest niedostępna.", "实时转写不可用。", "ライブ文字起こしを利用できません。", "Live-Transkript nicht verfügbar.", "La transcripción en vivo no está disponible.", "Поточний транскрипт недоступний."]),
@@ -1653,6 +1655,7 @@ mod tests {
 
     /// Every source that translates, on every OS.
     const SOURCES: &[&str] = &[
+        include_str!("activity.rs"),
         include_str!("opencode_catalog.rs"),
         include_str!("../rune_ui.rs"),
         include_str!("../rune_ui/activity.rs"),
