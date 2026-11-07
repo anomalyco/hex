@@ -532,7 +532,7 @@ impl Feature {
             Self::Playground => "Scene and story browser in the window",
             Self::LiveText => "Show provisional words beside the HUD while dictating",
             Self::LiveTyping => {
-                "Show provisional words in the focused text field on Wayland and type the final text there (Linux)"
+                "Show provisional words in the focused text field while dictating on Wayland, then type the final text there"
             }
             Self::LiveChapters => "Break meeting transcripts into chapters while recording",
             Self::VocabularyBiasing => {

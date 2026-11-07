@@ -7,13 +7,15 @@
 //! creates `zwp_input_method_v2` for the seat, and Finish or Cancel destroys
 //! it, so Hex never holds the seat's input method while idle and another
 //! input method keeps working. Everything is bounded: capture sends never
-//! wait, and Finish waits briefly for the commit before falling back to the
-//! clipboard paste. Any failure is inert and silent apart from one log line.
+//! wait, preedits coalesce, and a Finish uses one shared claim so a caller
+//! that gives up never pastes over a commit the owner already owns. Any
+//! failure is inert and silent apart from one log line.
 
-use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use color_eyre::eyre::{Result, WrapErr};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
@@ -56,100 +58,219 @@ mod protocol {
 /// The largest string the protocol carries: a Wayland message's text is
 /// limited to 4000 bytes.
 const MAX_TEXT: usize = 4_000;
-/// A capture's commands may queue while the owner is busy; preedits beyond
-/// this are dropped rather than waited on.
-const BACKLOG: usize = 32;
-/// How long Finish waits to hand its command over and for the reply.
-const SEND_TIMEOUT: Duration = Duration::from_millis(100);
+/// How long Finish waits for the owner's decision.
 const FINISH_TIMEOUT: Duration = Duration::from_millis(350);
+/// How long a caller waits once the owner has won the commit, so it never
+/// pastes over it.
+const COMMIT_WAIT: Duration = Duration::from_millis(750);
+/// How long a caller that won the abandonment waits for the preedit to clear
+/// before pasting.
+const CLEAR_WAIT: Duration = Duration::from_millis(250);
+
+/// A Finish's hand-off: whoever changes Pending first decides it.
+const PENDING: u8 = 0;
+const COMMITTING: u8 = 1;
+const ABANDONED: u8 = 2;
 
 /// One capture's live-typing session.
 pub(crate) struct LiveTyping {
-    commands: SyncSender<Command>,
+    /// Control commands only; preedits use `preedit` and a wake.
+    commands: Sender<Command>,
+    /// The newest preedit, replaced by each change.
+    preedit: Arc<Mutex<Option<(u64, String)>>>,
+    /// Whether a Wake is already queued for the preedit slot.
+    wake: Arc<AtomicBool>,
+    /// Whether the owner thread is connected and usable.
+    alive: Arc<AtomicBool>,
 }
 
 enum Command {
     Begin(u64),
-    Preedit {
-        id: u64,
-        text: String,
-    },
     Finish {
         id: u64,
         text: String,
-        /// The caller stops waiting here, so a slow compositor never gets a
-        /// commit after the caller has pasted.
-        deadline: Instant,
+        claim: Arc<AtomicU8>,
         reply: SyncSender<bool>,
     },
     Cancel(u64),
+    Wake,
+}
+
+/// One capture's hold on the input method. It starts the session when the
+/// capture's stream opens, and dropping it without `finish` clears the
+/// preedit: every failed job and dropped queue entry ends here.
+pub(crate) struct Session {
+    live: Arc<LiveTyping>,
+    id: u64,
+    started: bool,
+    committed: bool,
+}
+
+impl Session {
+    pub(crate) fn new(live: Arc<LiveTyping>, id: u64) -> Self {
+        Self {
+            live,
+            id,
+            started: false,
+            committed: false,
+        }
+    }
+
+    /// Begins only once the capture is streaming, so short taps and chords
+    /// never create an input method.
+    pub(crate) fn start(&mut self) {
+        if !self.started {
+            self.started = true;
+            self.live.begin(self.id);
+        }
+    }
+
+    pub(crate) fn preedit(&self, stable: &str, tentative: &str) {
+        if self.started && !self.committed {
+            self.live.preedit(self.id, stable, tentative);
+        }
+    }
+
+    /// Commits `text` through the input method. The guard is consumed so
+    /// its drop never cancels a finished session.
+    pub(crate) fn finish(mut self, text: &str) -> bool {
+        self.committed = true;
+        self.started && self.live.finish(self.id, text)
+    }
+
+    /// Clears the preedit now, when the caller needs it gone before a paste.
+    pub(crate) fn cancel(mut self) {
+        self.committed = true;
+        if self.started {
+            self.live.cancel(self.id);
+        }
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if !self.committed && self.started {
+            self.live.cancel(self.id);
+        }
+    }
 }
 
 impl LiveTyping {
-    /// Starts the owner thread without connecting: the connection opens on
-    /// the first Begin.
+    /// Starts the owner thread without connecting: the connection opens when
+    /// the thread starts, and `is_alive` turns false if it cannot.
     pub(crate) fn start() -> Arc<Self> {
-        let (commands, receiver) = mpsc::sync_channel(BACKLOG);
+        let (commands, receiver) = mpsc::channel();
+        let preedit = Arc::new(Mutex::new(None));
+        let wake = Arc::new(AtomicBool::new(false));
+        let alive = Arc::new(AtomicBool::new(true));
+        let thread_preedit = preedit.clone();
+        let thread_wake = wake.clone();
+        let thread_alive = alive.clone();
         if let Err(error) = thread::Builder::new()
             .name("hex-live-typing".into())
-            .spawn(move || run(receiver))
+            .spawn(move || run(receiver, thread_preedit, thread_wake, thread_alive))
         {
             tracing::info!(%error, "live typing is unavailable; dictations paste normally");
+            alive.store(false, Ordering::Release);
         }
-        Arc::new(Self { commands })
+        Arc::new(Self {
+            commands,
+            preedit,
+            wake,
+            alive,
+        })
+    }
+
+    pub(crate) fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Acquire)
     }
 
     pub(crate) fn begin(&self, id: u64) {
+        *preedit_lock(&self.preedit) = None;
         self.send(Command::Begin(id));
     }
 
     pub(crate) fn preedit(&self, id: u64, stable: &str, tentative: &str) {
+        if !self.is_alive() {
+            return;
+        }
         let Some(text) = preedit_text(stable, tentative) else {
             return;
         };
-        let _ = self.commands.try_send(Command::Preedit { id, text });
+        *preedit_lock(&self.preedit) = Some((id, text));
+        if !self.wake.swap(true, Ordering::AcqRel) {
+            self.send(Command::Wake);
+        }
     }
 
     pub(crate) fn cancel(&self, id: u64) {
+        clear_slot(&self.preedit, id);
         self.send(Command::Cancel(id));
     }
 
     /// Commits `text` through the input method when its session is active,
     /// and says whether it did. False means the caller pastes as usual.
     pub(crate) fn finish(&self, id: u64, text: &str) -> bool {
+        clear_slot(&self.preedit, id);
+        let claim = Arc::new(AtomicU8::new(PENDING));
         let (reply, answer) = mpsc::sync_channel(1);
-        let commit_by = Instant::now() + FINISH_TIMEOUT;
-        let mut command = Command::Finish {
-            id,
-            text: text.to_owned(),
-            deadline: commit_by,
-            reply,
-        };
-        let send_by = Instant::now() + SEND_TIMEOUT;
-        loop {
-            match self.commands.try_send(command) {
-                Ok(()) => break,
-                Err(TrySendError::Full(returned)) => {
-                    if Instant::now() >= send_by {
-                        return false;
-                    }
-                    command = returned;
-                    thread::sleep(Duration::from_millis(2));
+        if self
+            .commands
+            .send(Command::Finish {
+                id,
+                text: text.to_owned(),
+                claim: claim.clone(),
+                reply,
+            })
+            .is_err()
+        {
+            self.alive.store(false, Ordering::Release);
+            return false;
+        }
+        match answer.recv_timeout(FINISH_TIMEOUT) {
+            Ok(inserted) => inserted,
+            Err(RecvTimeoutError::Disconnected) => false,
+            Err(RecvTimeoutError::Timeout) => {
+                if caller_abandons(&claim) {
+                    // The owner will only clear; wait briefly so the preedit
+                    // is gone before this caller pastes.
+                    answer.recv_timeout(CLEAR_WAIT).unwrap_or(false)
+                } else {
+                    // The owner owns the commit: never paste over it.
+                    answer.recv_timeout(COMMIT_WAIT).unwrap_or(true)
                 }
-                Err(TrySendError::Disconnected(_)) => return false,
             }
         }
-        answer.recv_timeout(FINISH_TIMEOUT).unwrap_or_default()
     }
 
     fn send(&self, command: Command) {
-        if let Err(TrySendError::Disconnected(_)) = self.commands.try_send(command) {
-            tracing::debug!("live typing's owner thread is gone");
+        if self.commands.send(command).is_err() {
+            self.alive.store(false, Ordering::Release);
         }
+    }
+
+    #[cfg(test)]
+    fn for_test() -> (Arc<Self>, Receiver<Command>) {
+        let (commands, receiver) = mpsc::channel();
+        (
+            Arc::new(Self {
+                commands,
+                preedit: Arc::new(Mutex::new(None)),
+                wake: Arc::new(AtomicBool::new(false)),
+                alive: Arc::new(AtomicBool::new(true)),
+            }),
+            receiver,
+        )
     }
 }
 
-fn run(commands: Receiver<Command>) {
+fn run(
+    commands: Receiver<Command>,
+    preedit: Arc<Mutex<Option<(u64, String)>>>,
+    wake: Arc<AtomicBool>,
+    alive: Arc<AtomicBool>,
+) {
+    let _alive = Alive(alive);
     let mut owner = match Owner::connect() {
         Ok(owner) => owner,
         Err(error) => {
@@ -160,17 +281,64 @@ fn run(commands: Receiver<Command>) {
     while let Ok(command) = commands.recv() {
         match command {
             Command::Begin(id) => owner.begin(id),
-            Command::Preedit { id, text } => owner.preedit(id, &text),
             Command::Finish {
                 id,
                 text,
-                deadline,
+                claim,
                 reply,
-            } => owner.finish(id, &text, deadline, &reply),
+            } => owner.finish(id, &text, &claim, &reply),
             Command::Cancel(id) => owner.cancel(id),
+            Command::Wake => {
+                wake.store(false, Ordering::Release);
+                if let Some((id, text)) = take_preedit(&preedit) {
+                    owner.preedit(id, &text);
+                }
+            }
+        }
+        if owner.broken {
+            // `Alive` reports false once the thread ends too.
+            return;
         }
     }
     owner.shutdown();
+}
+
+/// Marks the owner unavailable however the thread ends, panics included.
+struct Alive(Arc<AtomicBool>);
+
+impl Drop for Alive {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+fn preedit_lock(slot: &Mutex<Option<(u64, String)>>) -> MutexGuard<'_, Option<(u64, String)>> {
+    slot.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn take_preedit(slot: &Mutex<Option<(u64, String)>>) -> Option<(u64, String)> {
+    preedit_lock(slot).take()
+}
+
+fn clear_slot(slot: &Mutex<Option<(u64, String)>>, id: u64) {
+    let mut slot = preedit_lock(slot);
+    if slot.as_ref().is_some_and(|(slot_id, _)| *slot_id == id) {
+        *slot = None;
+    }
+}
+
+/// The owner wins a commit before queueing any request.
+fn owner_claims(claim: &AtomicU8) -> bool {
+    claim
+        .compare_exchange(PENDING, COMMITTING, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+/// A waiting caller gives up; false when the owner already owns the commit.
+fn caller_abandons(claim: &AtomicU8) -> bool {
+    claim
+        .compare_exchange(PENDING, ABANDONED, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
 }
 
 /// The compositor's double-buffered state, applied on `done`.
@@ -194,7 +362,7 @@ impl Live {
     }
 }
 
-struct Session {
+struct Bound {
     id: u64,
     method: ZwpInputMethodV2,
     /// Whether this capture set a preedit that is still on screen.
@@ -207,7 +375,7 @@ struct Owner {
     seat: wl_seat::WlSeat,
     manager: ZwpInputMethodManagerV2,
     live: Live,
-    session: Option<Session>,
+    session: Option<Bound>,
     broken: bool,
 }
 
@@ -245,7 +413,7 @@ impl Owner {
         let method = self
             .manager
             .get_input_method(&self.seat, &self.queue.handle(), ());
-        self.session = Some(Session {
+        self.session = Some(Bound {
             id,
             method,
             shown: false,
@@ -271,18 +439,20 @@ impl Owner {
         if !self.live.active || self.live.unavailable {
             return;
         }
+        let _ = self.queue.dispatch_pending(&mut self.live);
+        let serial = self.live.done;
         let cursor = cursor_position(text);
         if let Some(session) = &mut self.session {
             session
                 .method
                 .set_preedit_string(text.to_owned(), cursor, cursor);
-            session.method.commit(self.live.done);
+            session.method.commit(serial);
             session.shown = true;
         }
         let _ = self.connection.flush();
     }
 
-    fn finish(&mut self, id: u64, text: &str, deadline: Instant, reply: &SyncSender<bool>) {
+    fn finish(&mut self, id: u64, text: &str, claim: &AtomicU8, reply: &SyncSender<bool>) {
         if self.broken
             || !self
                 .session
@@ -297,20 +467,27 @@ impl Owner {
             let _ = reply.send(false);
             return;
         }
-        let inserted = self.live.active
-            && !self.live.unavailable
-            && commits_through_input_method(text)
-            && Instant::now() <= deadline;
-        if inserted {
+        let commit =
+            self.live.active && !self.live.unavailable && commits_through_input_method(text);
+        if commit && !owner_claims(claim) {
+            // The caller gave up while this roundtrip ran: clear, never
+            // commit after its paste.
+            self.clear_preedit();
+            let _ = reply.send(false);
+            self.end();
+            return;
+        }
+        if commit {
+            let _ = self.queue.dispatch_pending(&mut self.live);
+            let serial = self.live.done;
             if let Some(session) = &mut self.session {
                 session.method.set_preedit_string(String::new(), 0, 0);
                 session.method.commit_string(text.to_owned());
-                session.method.commit(self.live.done);
+                session.method.commit(serial);
                 session.shown = false;
             }
-            // The caller stops waiting at `deadline`: a flush that failed
-            // leaves nothing to insert, and the caller pastes. Never flush
-            // the abandoned requests later.
+            // A failed flush leaves the requests unflushed while the
+            // connection is marked broken, so the caller may paste safely.
             if self.connection.flush().is_err() {
                 tracing::info!("live typing lost its compositor connection");
                 self.broken = true;
@@ -342,15 +519,20 @@ impl Owner {
     }
 
     fn clear_preedit(&mut self) {
-        let done = self.live.done;
         let Some(session) = &mut self.session else {
             return;
         };
         if !session.shown {
             return;
         }
+        if self.live.unavailable {
+            session.shown = false;
+            return;
+        }
+        let _ = self.queue.dispatch_pending(&mut self.live);
+        let serial = self.live.done;
         session.method.set_preedit_string(String::new(), 0, 0);
-        session.method.commit(done);
+        session.method.commit(serial);
         session.shown = false;
         let _ = self.connection.flush();
     }
@@ -551,5 +733,76 @@ mod tests {
         live.done();
         assert_eq!(live.done, 2);
         assert!(!live.active);
+    }
+
+    #[test]
+    fn the_owner_wins_the_commit_before_queueing_it() {
+        let claim = AtomicU8::new(PENDING);
+        assert!(owner_claims(&claim));
+        assert!(!caller_abandons(&claim));
+        assert_eq!(claim.load(Ordering::Acquire), COMMITTING);
+    }
+
+    #[test]
+    fn a_waiting_caller_wins_abandonment_before_the_owner_claims() {
+        let claim = AtomicU8::new(PENDING);
+        assert!(caller_abandons(&claim));
+        assert!(!owner_claims(&claim));
+        assert_eq!(claim.load(Ordering::Acquire), ABANDONED);
+    }
+
+    #[test]
+    fn a_started_session_cancels_when_dropped() {
+        let (live, commands) = LiveTyping::for_test();
+        let mut session = Session::new(live, 7);
+        session.start();
+        assert!(matches!(commands.try_recv(), Ok(Command::Begin(7))));
+        drop(session);
+        assert!(matches!(commands.try_recv(), Ok(Command::Cancel(7))));
+        assert!(commands.try_recv().is_err(), "one cancel");
+    }
+
+    #[test]
+    fn a_session_that_never_started_sends_nothing() {
+        let (live, commands) = LiveTyping::for_test();
+        let session = Session::new(live.clone(), 8);
+        session.preedit("never", "shown");
+        assert!(live.preedit.lock().unwrap().is_none());
+        drop(session);
+        assert!(commands.try_recv().is_err());
+    }
+
+    #[test]
+    fn finishing_a_session_never_sends_cancel() {
+        let (live, commands) = LiveTyping::for_test();
+        let mut session = Session::new(live, 9);
+        session.start();
+        assert!(matches!(commands.try_recv(), Ok(Command::Begin(9))));
+        let responder = thread::spawn(move || {
+            let Ok(Command::Finish { claim, reply, .. }) = commands.recv() else {
+                panic!("a finish");
+            };
+            assert!(owner_claims(&claim));
+            let _ = reply.send(true);
+            commands
+        });
+        assert!(session.finish("hello"));
+        let commands = responder.join().unwrap();
+        assert!(commands.try_recv().is_err(), "finish replaced cancel");
+    }
+
+    #[test]
+    fn only_the_newest_preedit_waits_and_it_wakes_once() {
+        let (live, commands) = LiveTyping::for_test();
+        live.preedit(1, "so", "");
+        live.preedit(1, "so the", " plan");
+        assert!(matches!(commands.try_recv(), Ok(Command::Wake)));
+        assert!(commands.try_recv().is_err(), "one wake");
+        assert_eq!(take_preedit(&live.preedit), Some((1, "so the plan".into())));
+        live.cancel(1);
+        assert!(
+            matches!(commands.try_recv(), Ok(Command::Cancel(1))),
+            "a control command is never crowded out by preedits"
+        );
     }
 }

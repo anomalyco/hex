@@ -796,7 +796,7 @@ pub fn run(
                     if recording_feedback_started {
                         capture.begin_stream(&engine);
                     }
-                    let _ = capture.report_live_text();
+                    capture.report_live_text();
                 }
             }
             RecoveringAudioInputEvent::Timeout => {}

@@ -353,7 +353,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Live text"),
         tr("Show provisional words beside the HUD while dictating"),
     ));
-    if caps.os == super::platform::Os::Linux {
+    if caps.os == super::platform::Os::Linux && ui.platform.wayland {
         rows.push(row(
             Feature::LiveTyping,
             Some(&KEYBOARD),

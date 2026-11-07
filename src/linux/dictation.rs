@@ -37,14 +37,14 @@ struct Job {
     /// Dictate without processing: paste the transcript as heard.
     raw: bool,
     /// Labs › Live typing: the capture's input-method session, so its final
-    /// text is committed instead of pasted.
-    typing: Option<(Arc<crate::linux::live_typing::LiveTyping>, u64)>,
+    /// text is committed instead of pasted. Dropping an unfinished job
+    /// cancels it.
+    typing: Option<crate::linux::live_typing::Session>,
 }
 
 /// A hotkey capture whose provisional words go into the focused text field.
 struct CaptureTyping {
-    live: Arc<crate::linux::live_typing::LiveTyping>,
-    id: u64,
+    session: crate::linux::live_typing::Session,
     /// Keeps the dictation stream publishing its text without the HUD plate.
     _demand: crate::dictation::live_text::TypingDemand,
 }
@@ -237,7 +237,7 @@ impl DictationOutput {
         inference_ms: u64,
         started: Instant,
         recording: Option<crate::history::Recording>,
-        typing: Option<(Arc<crate::linux::live_typing::LiveTyping>, u64)>,
+        typing: Option<crate::linux::live_typing::Session>,
     ) -> Result<String> {
         let modes = self
             .modes
@@ -255,11 +255,11 @@ impl DictationOutput {
         // printed or copy-only dictation clears its preedit and takes the
         // usual path instead.
         let inserted = match typing {
-            Some((typing, id)) if !printed && !crate::labs::copy_only() => {
-                typing.finish(id, &processed.text)
+            Some(session) if !printed && !crate::labs::copy_only() => {
+                session.finish(&processed.text)
             }
-            Some((typing, id)) => {
-                typing.cancel(id);
+            Some(session) => {
+                session.cancel();
                 false
             }
             None => false,
@@ -800,18 +800,19 @@ pub(crate) fn run(
                         .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
                 HotkeyEvent::Start { raw } if !capture.is_recording() && !start_pending => {
                     recording_raw = raw;
-                    // Live typing needs the stream's partial text and the
-                    // input method before the capture's first feed.
+                    // The demand must exist before the stream opens, but the
+                    // session itself starts only once the capture streams.
                     cancel_typing(&mut active_typing);
-                    if wayland && crate::labs::live_typing() {
+                    if wayland
+                        && crate::labs::live_typing()
+                        && live_typing.as_ref().is_none_or(|live| live.is_alive())
+                    {
                         let live = live_typing
                             .get_or_insert_with(crate::linux::live_typing::LiveTyping::start)
                             .clone();
                         next_capture_id += 1;
-                        live.begin(next_capture_id);
                         active_typing = Some(CaptureTyping {
-                            live,
-                            id: next_capture_id,
+                            session: crate::linux::live_typing::Session::new(live, next_capture_id),
                             _demand: crate::dictation::live_text::typing_demand(),
                         });
                     }
@@ -823,6 +824,7 @@ pub(crate) fn run(
                             feedback::play_provisional_start();
                         });
                         stream_when_due(&mut capture, &engine, toggle);
+                        begin_live_typing(&capture, &mut active_typing);
                     } else if audio_ready || release_while_idle {
                         start_pending = true;
                         if !audio_ready {
@@ -991,12 +993,11 @@ pub(crate) fn run(
                     suppressor.suppress();
                 }
                 stream_when_due(&mut capture, &engine, toggle);
+                begin_live_typing(&capture, &mut active_typing);
                 if let Some(partial) = capture.report_live_text()
                     && let Some(typing) = &active_typing
                 {
-                    typing
-                        .live
-                        .preedit(typing.id, &partial.stable, &partial.tentative);
+                    typing.session.preedit(&partial.stable, &partial.tentative);
                 }
             }
             RecoveringAudioInputEvent::Timeout => {}
@@ -1169,6 +1170,9 @@ fn submit_capture(
     raw: bool,
     typing: &mut Option<CaptureTyping>,
 ) -> Result<()> {
+    // A discarded capture drops this guard without starting or ending a
+    // session; a transcribed one moves it into the job.
+    let typing = typing.take();
     let no_speech = |print: Option<PrintReply>| {
         if let Some(print) = print {
             print.send(PrintedTranscript::NoSpeech);
@@ -1178,12 +1182,10 @@ fn submit_capture(
         Finish::Discard => {
             // A short tap or chord withdraws the start tone of its press.
             feedback::retract_start();
-            cancel_typing(typing);
             no_speech(print);
             events.dictation(DictationPhase::Discarded, "")?
         }
         Finish::Transcribe(clip) if clip.is_near_silent() => {
-            cancel_typing(typing);
             no_speech(print);
             events.dictation(DictationPhase::Discarded, "")?
         }
@@ -1198,21 +1200,15 @@ fn submit_capture(
                 recording,
                 print,
                 raw,
-                typing: typing
-                    .take()
-                    .map(|CaptureTyping { live, id, .. }| (live, id)),
+                typing: typing.map(|CaptureTyping { session, .. }| session),
             });
             match jobs.try_send(job) {
                 Ok(()) => {
                     *pending += 1;
                     events.dictation(DictationPhase::Transcribing, "")?;
                 }
-                Err(TrySendError::Full(job)) => {
-                    if let OutputJob::Dictation(job) = job
-                        && let Some((live, id)) = job.typing
-                    {
-                        live.cancel(id);
-                    }
+                Err(TrySendError::Full(_)) => {
+                    // The dropped job's session guard cancels its preedit.
                     fail(events, "dictation queue is full")?;
                 }
                 Err(TrySendError::Disconnected(_)) => {
@@ -1224,12 +1220,20 @@ fn submit_capture(
     Ok(())
 }
 
-/// Ends a capture's Live typing session without committing anything, which
-/// clears its preedit.
-fn cancel_typing(typing: &mut Option<CaptureTyping>) {
-    if let Some(typing) = typing.take() {
-        typing.live.cancel(typing.id);
+/// Starts the input method once the capture's stream opens, so short taps
+/// and chords never create one.
+fn begin_live_typing(capture: &DictationCapture, typing: &mut Option<CaptureTyping>) {
+    if let Some(typing) = typing
+        && capture.is_streaming()
+    {
+        typing.session.start();
     }
+}
+
+/// Ends a capture's Live typing session without committing anything; the
+/// session guard clears the preedit.
+fn cancel_typing(typing: &mut Option<CaptureTyping>) {
+    typing.take();
 }
 
 fn active_state(recording: bool, pending: usize) -> VoiceState {

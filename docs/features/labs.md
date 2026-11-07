@@ -1354,32 +1354,52 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs). The line has no golden
   and no `--snap` scene (overlays have none), and nothing headless checks
   how it appears and hides on screen.
-- Live typing: on a Wayland session, a hotkey dictation's provisional words
-  are an underlined input-method preedit in the focused text field, replaced
-  on each update, and its final text is committed through
-  `zwp_input_method_v2` instead of the clipboard paste (`labs.live-typing`;
-  the toggle is `labs.live_typing`, off by default, Linux only). It is read
-  as each hotkey capture starts, never for a Local API dictation, `/streams`,
-  or Voice Action; the final text still goes through Output's processing, and
-  History and Paste Last update as they do for a paste. Hex creates the
-  input method only for a capture and
-  destroys it at Finish or Cancel, so another input method keeps the seat
-  while Hex is idle; a newer capture's Begin takes over from an older job,
-  which then pastes. It falls back to today's paste when the compositor has
-  no `zwp_input_method_manager_v2`, another input method holds the seat
-  (`unavailable`), the field has no active text input, the final text is
-  multi-line or over 4000 bytes, or Finish does not answer within 350 ms. The
+- Live typing: on a wlroots-family Wayland session, a hotkey dictation's
+  provisional words are an underlined input-method preedit in the focused
+  text field, replaced on each update, and its final text is committed
+  through `zwp_input_method_v2` instead of the clipboard paste
+  (`labs.live-typing`; the toggle is `labs.live_typing`, off by default, Linux
+  only, and its card is hidden in an X11 session). It is read as each hotkey
+  capture starts, never for a Local API
+  dictation, `/streams`, or Voice Action; the final text still goes through
+  Output's processing, and History and Paste Last update as they do for a
+  paste. Hex creates the input method when the capture's stream opens (the
+  hold threshold, or at once in Toggle) and destroys it at Finish or Cancel,
+  including post-release processing, so short taps and chords create none
+  and another input method keeps the seat while Hex is idle. A newer
+  capture's Begin takes over from an older job, which then pastes. It falls
+  back to today's paste when the compositor has no
+  `zwp_input_method_manager_v2` (KWin and Mutter do not offer it, so KDE and
+  GNOME paste), another input method holds the seat (`unavailable`), the
+  field has no active text input, the final text is multi-line or over 4000
+  bytes, or the 350 ms decision passes without a commit: a caller that wins
+  the abandonment waits up to 250 ms for the preedit to clear and then
+  pastes even if the compositor never answered, while a commit the owner
+  already claimed is given up to 750 ms and is never pasted over. The claim
+  is one atomic Pending → Committing or
+  Pending → Abandoned change, so only one side wins. A residual Wayland race
+  can still let a `done` event arrive after the serial is read; that
+  preedit or commit is then ignored by the compositor. The
   plate stays off unless Labs › Live text itself is on: a Live typing capture
   holds `dictation::live_text::TypingDemand`, which the engine sees but the
-  plate does not. Checks in
+  plate does not, and the plate decision is stored once when the stream
+  opens. Checks in
   [linux/live_typing.rs](../../src/linux/live_typing.rs):
   `provisional_words_become_one_preedit_line`,
   `a_preedit_stops_at_a_character_boundary`,
   `only_one_line_text_within_the_limit_commits_through_the_input_method`,
-  `the_cursor_sits_after_the_preedit`, and
-  `done_events_number_the_commit_serial_and_apply_activation`; and
+  `the_cursor_sits_after_the_preedit`,
+  `done_events_number_the_commit_serial_and_apply_activation`,
+  `the_owner_wins_the_commit_before_queueing_it`,
+  `a_waiting_caller_wins_abandonment_before_the_owner_claims`,
+  `a_started_session_cancels_when_dropped`,
+  `a_session_that_never_started_sends_nothing`,
+  `finishing_a_session_never_sends_cancel`, and
+  `only_the_newest_preedit_waits_and_it_wakes_once`;
   `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
-  [dictation/live_text.rs](../../src/dictation/live_text.rs). **Not verified
+  [dictation/live_text.rs](../../src/dictation/live_text.rs); and
+  `the_plate_follows_the_decision_made_when_the_stream_opened` in
+  [dictation.rs](../../src/dictation.rs). **Not verified
   on a real compositor**: only unit tests and the build, plus the Linux Labs
   golden's new card.
 - Playground: Rune's playground in the window (every OS), `labs.playground`

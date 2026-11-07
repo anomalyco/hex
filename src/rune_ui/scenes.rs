@@ -919,6 +919,7 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         ..AppSettings::default()
     };
     let mut ui = Ui::with(settings, Service::Fixture(Vec::new()));
+    ui.platform.wayland = true;
     ui.models = models::Models::fixture();
     ui.picker.installed = Some(vec![TranscriptionModelId::ParakeetUnifiedEnglish]);
     ui.view = Some(ServiceView {
