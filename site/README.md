@@ -63,7 +63,7 @@ HEX_SITE_URL=http://127.0.0.1:5531 bun run generate:poster
 
 ## Performance
 
-`perf/hex.bench.ts` is a [strobe](https://github.com/Hona/strobe) bench: load to
+`perf/hex.bench.ts` is a [strobe](https://github.com/anomalyco/strobe) bench: load to
 the live head, the idle head for 8 s, and the first 20 s of the show after a click
 on the key. `strobe.json` builds the site and serves the Build Output under `/hex/`
 with `perf/serve.ts`. strobe builds and serves both variants with this checkout's
