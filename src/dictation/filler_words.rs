@@ -16,6 +16,12 @@ pub fn applies_to(language: &str) -> bool {
     language == "en"
 }
 
+/// `transcript` without its filler words when the Labs switch is `enabled`
+/// and the dictation is English; `None` leaves the caller's text untouched.
+pub fn strip_if(transcript: &str, language: &str, enabled: bool) -> Option<String> {
+    (enabled && applies_to(language)).then(|| apply(transcript))
+}
+
 /// `transcript` without its filler words.
 pub fn apply(transcript: &str) -> String {
     let chars: Vec<char> = transcript.chars().collect();
@@ -155,7 +161,7 @@ fn needs_space(out: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{applies_to, apply};
+    use super::{applies_to, apply, strip_if};
 
     #[test]
     fn only_english_dictations_apply_the_filter() {
@@ -163,6 +169,27 @@ mod tests {
         for language in ["de", "pt", "auto", ""] {
             assert!(!applies_to(language), "{language:?}");
         }
+    }
+
+    #[test]
+    fn enabled_english_dictations_strip_their_fillers() {
+        assert_eq!(
+            strip_if("Um, please send the draft.", "en", true).as_deref(),
+            Some("Please send the draft.")
+        );
+    }
+
+    #[test]
+    fn every_other_language_or_a_disabled_switch_keeps_the_words() {
+        for (transcript, language) in [
+            ("Er kommt um acht Uhr.", "de"),
+            ("Eu quero um café.", "pt"),
+            ("Um, please send the draft.", "auto"),
+            ("Um, please send the draft.", ""),
+        ] {
+            assert_eq!(strip_if(transcript, language, true), None, "{language:?}");
+        }
+        assert_eq!(strip_if("Um, please send the draft.", "en", false), None);
     }
 
     #[test]

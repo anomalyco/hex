@@ -1189,18 +1189,6 @@ pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
 }
 
-/// Turns only Labs › Remove filler words on or off, for a test that needs the
-/// gate without replacing this process's other switches.
-#[cfg(test)]
-pub(crate) fn set_filler_words_for_test(on: bool) {
-    let _ = state();
-    if on {
-        STATE.fetch_or(FILLER_WORDS, Ordering::AcqRel);
-    } else {
-        STATE.fetch_and(!FILLER_WORDS, Ordering::AcqRel);
-    }
-}
-
 fn encode(settings: &LabsSettings) -> u64 {
     let policy = crate::policy::Policy::current();
     encode_where(settings, |feature| {

@@ -344,13 +344,16 @@ impl Profiles {
         // Only English dictations run it: "er" and "um" are ordinary words
         // in other languages, and "auto" says nothing about the language.
         let unfilled;
-        let transcript = if crate::labs::filler_words()
-            && crate::dictation::filler_words::applies_to(language)
-        {
-            unfilled = crate::dictation::filler_words::apply(transcript);
-            unfilled.as_str()
-        } else {
-            transcript
+        let transcript = match crate::dictation::filler_words::strip_if(
+            transcript,
+            language,
+            crate::labs::filler_words(),
+        ) {
+            Some(stripped) => {
+                unfilled = stripped;
+                unfilled.as_str()
+            }
+            None => transcript,
         };
         let corrected = profile
             .replacements
@@ -1461,37 +1464,6 @@ mod tests {
         assert_eq!(processed.text, "Use OpenCode.");
         assert_eq!(processed.transformations, ["lowercase"]);
         assert!(processed.observation.is_none());
-    }
-
-    #[test]
-    fn filler_words_leave_only_english_dictations() {
-        struct Restore(bool);
-
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                crate::labs::set_filler_words_for_test(self.0);
-            }
-        }
-
-        let _restore = Restore(crate::labs::filler_words());
-        crate::labs::set_filler_words_for_test(true);
-        let profiles = Profiles::new(Profile::new("Global", ""));
-
-        let english = profiles.process_cancellable(
-            "Um, please send the draft.",
-            "en",
-            &context("Zed", None),
-            &AtomicBool::new(false),
-        );
-        assert_eq!(english.text, "Please send the draft.");
-
-        let german = profiles.process_cancellable(
-            "Er kommt um acht Uhr.",
-            "de",
-            &context("Zed", None),
-            &AtomicBool::new(false),
-        );
-        assert_eq!(german.text, "Er kommt um acht Uhr.");
     }
 
     #[test]

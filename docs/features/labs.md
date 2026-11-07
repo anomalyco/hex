@@ -351,13 +351,17 @@ Remove filler words (`filler-words`, issue 631, every OS): while on,
 `Profiles::process_cancellable` in
 [dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::filler_words()` as each dictation's processing starts and runs
-`dictation::filler_words::apply` right after spoken formatting and before the mode's
-corrections, OpenCode rewriting, and transformations. It applies only when
-that dictation's language is exactly English (`filler_words::applies_to`):
-Auto and every other language are left untouched, because "er" and "um" are
-ordinary German and Portuguese words. The language is the one selected when
-the dictation was captured, not the setting in force while it is processed.
-It is rule-based, with
+`dictation::filler_words::strip_if` right after spoken formatting and before
+the mode's corrections, OpenCode rewriting, and transformations. It applies
+only when that dictation's language is exactly English
+(`filler_words::applies_to`): Auto and every other language are left
+untouched, because "er" and "um" are ordinary German and Portuguese words.
+The language comes from the submission, not the setting in force while the
+text is processed: macOS reads the saved transcription selection when the
+dictation is submitted, while Linux and Windows read the selection the
+transcription engine holds at submission (including a reload already sent,
+whose transcriptions queue behind it), falling back to the saved selection
+when none is held. It is rule-based, with
 no model and no added latency. The English fillers "um", "umm", "uh", "uhh",
 "erm", "er", and "ah" are removed as whole words, lowercase or capitalised
 only, so "umbrella", "ahead", "error", "Uhura", "uh-huh", and "ER" stay. The
@@ -366,7 +370,12 @@ close up, no space is left before punctuation, a capitalised filler that
 started a sentence passes its capital to the next word ("Um, so I think"
 becomes "So I think"), and line breaks stay. Dictate without processing,
 meetings, and live text are unchanged, and with the toggle off processing is
-exactly as before. Checks: the tests in
+exactly as before. Checks: `only_english_dictations_apply_the_filter`,
+`enabled_english_dictations_strip_their_fillers`,
+`every_other_language_or_a_disabled_switch_keeps_the_words`,
+`fillers_leave_with_their_commas_and_spaces`,
+`a_filler_that_started_a_sentence_hands_on_its_capital`,
+`line_breaks_are_kept`, and `other_words_are_left_alone` in
 [dictation/filler_words.rs](../../src/dictation/filler_words.rs);
 `filler_words_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs);
