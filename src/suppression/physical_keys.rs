@@ -94,6 +94,7 @@ unsafe extern "C" {
     fn IOHIDElementGetDevice(element: *mut c_void) -> *mut c_void;
     fn IOHIDElementGetUsagePage(element: *mut c_void) -> u32;
     fn IOHIDElementGetUsage(element: *mut c_void) -> u32;
+    fn IOHIDValueGetTimeStamp(value: *mut c_void) -> u64;
     fn IOHIDValueGetIntegerValue(value: *mut c_void) -> isize;
 }
 
@@ -216,8 +217,13 @@ unsafe extern "C" fn value_changed(
     context.publish(&devices);
     drop(devices);
     if newly_pressed {
-        // The hook only records the press and timestamp; no IOKit runs here.
-        let pressed_at = CaptureInstant::now();
+        // The device's own timestamp, which is earlier than this callback and
+        // shared with the tap's CGEvent clock once scaled. No IOKit runs here.
+        // SAFETY: `value` is live for this callback; its timestamp is a plain
+        // read.
+        let raw = unsafe { IOHIDValueGetTimeStamp(value) };
+        let received_at = CaptureInstant::now();
+        let (pressed_at, _) = super::physical_event_instant(raw, received_at);
         let listener = *CAPS_LOCK_PRESSED
             .lock()
             .unwrap_or_else(|error| error.into_inner());

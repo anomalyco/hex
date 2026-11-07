@@ -152,48 +152,73 @@ impl LedModel {
     }
 }
 
-/// The raw HID press waiting for the AlphaShift edge that confirms it.
+/// The raw HID press and AlphaShift edge waiting to be matched.
 ///
 /// A HID key-down alone is not a press: a Caps Lock remapped to Control or
 /// Escape still reports usage 0x39 but never changes AlphaShift. Conversely,
-/// Hex's own lock reset changes AlphaShift with nothing pending. The first
-/// edge after a HID press consumes it, whether the system toggled on or off.
+/// Hex's own lock reset changes AlphaShift with nothing pending. The two
+/// observations may arrive in either order and their timestamps may be a few
+/// milliseconds apart, so each side is kept until a matching one arrives.
 #[derive(Debug, Default)]
 pub(crate) struct PressGate {
-    pending: Option<CaptureInstant>,
+    press: Option<CaptureInstant>,
+    edge: Option<CaptureInstant>,
 }
 
 impl PressGate {
     pub(crate) const fn new() -> Self {
-        Self { pending: None }
+        Self {
+            press: None,
+            edge: None,
+        }
     }
 
-    /// A physical Caps Lock key-down from the HID tracker, with its press
-    /// timestamp.
-    pub(crate) fn hid_press(&mut self, at: CaptureInstant) {
-        self.pending = Some(at);
+    /// A physical Caps Lock key-down, stamped from `IOHIDValueGetTimeStamp`
+    /// when the device reports it. An edge that already arrived matches now.
+    pub(crate) fn hid_press(&mut self, at: CaptureInstant) -> Option<CaptureInstant> {
+        self.press = Some(at);
+        self.matched()
     }
 
-    /// Drops an unconfirmed press, as a lab toggle or shutdown does.
-    pub(crate) fn clear(&mut self) {
-        self.pending = None;
-    }
-
-    /// An AlphaShift change edge. With a recent pending HID press it confirms
-    /// that press; without one, only the fallback (no HID tracker) treats an
-    /// on edge as a press.
+    /// An AlphaShift change edge, stamped from the event tap's original event.
+    /// A HID press that already arrived matches now.
     pub(crate) fn alpha_shift(
         &mut self,
         tracker_active: bool,
         shift: bool,
         at: CaptureInstant,
     ) -> Option<CaptureInstant> {
-        let Some(pressed) = self.pending.take() else {
-            return (!tracker_active && shift).then_some(at);
+        if !tracker_active {
+            self.press = None;
+            self.edge = None;
+            return shift.then_some(at);
+        }
+        self.edge = Some(at);
+        self.matched()
+    }
+
+    /// Drops unconfirmed evidence, as a lab toggle or shutdown does.
+    pub(crate) fn clear(&mut self) {
+        self.press = None;
+        self.edge = None;
+    }
+
+    /// Consumes both sides only when their timestamps are within the window;
+    /// otherwise keeps them for the other side's delayed arrival.
+    fn matched(&mut self) -> Option<CaptureInstant> {
+        let press = self.press?;
+        let edge = self.edge?;
+        let gap = if press <= edge {
+            edge.checked_duration_since(press)
+        } else {
+            press.checked_duration_since(edge)
         };
-        at.checked_duration_since(pressed)
-            .filter(|elapsed| *elapsed <= PRESS_CONFIRM_WINDOW)
-            .map(|_| pressed)
+        if !gap.is_some_and(|gap| gap <= PRESS_CONFIRM_WINDOW) {
+            return None;
+        }
+        self.press = None;
+        self.edge = None;
+        Some(press)
     }
 }
 
@@ -201,6 +226,29 @@ impl PressGate {
 /// the event tap and HID threads, which cannot read settings.
 #[cfg(target_os = "macos")]
 pub(crate) static ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// The AlphaShift bit last observed by the tap, seeded when the lab turns on.
+#[cfg(target_os = "macos")]
+static LAST_ALPHA_SHIFT: AtomicBool = AtomicBool::new(false);
+
+/// Set while the worker is clearing Hex's own Caps Lock state, so the edge
+/// that reset produces is never fed to the press gate.
+#[cfg(target_os = "macos")]
+static RESETTING: AtomicBool = AtomicBool::new(false);
+
+/// Seeds the tap's last AlphaShift state from the keyboard it is turning on
+/// with, so the first edge after enabling is a real change.
+#[cfg(target_os = "macos")]
+pub(crate) fn seed_alpha_shift(shift: bool) {
+    LAST_ALPHA_SHIFT.store(shift, Ordering::Release);
+    RESETTING.store(false, Ordering::Release);
+}
+
+/// Records an AlphaShift observation and says whether it actually changed.
+#[cfg(target_os = "macos")]
+pub(crate) fn alpha_shift_changed(shift: bool) -> bool {
+    ENABLED.load(Ordering::Acquire) && LAST_ALPHA_SHIFT.swap(shift, Ordering::AcqRel) != shift
+}
 
 /// The light pattern the listener wants, read by the worker.
 #[cfg(target_os = "macos")]
@@ -246,11 +294,15 @@ fn wake_worker(command: macos::WorkerCommand) {
 /// AlphaShift edge confirms it.
 #[cfg(target_os = "macos")]
 pub(crate) fn physical_press(at: CaptureInstant) {
-    if ENABLED.load(Ordering::Acquire) {
-        HID_GATE
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .hid_press(at);
+    if !ENABLED.load(Ordering::Acquire) {
+        return;
+    }
+    let matched = HID_GATE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .hid_press(at);
+    if let Some(pressed) = matched {
+        send_press(pressed);
     }
 }
 
@@ -261,6 +313,14 @@ pub(crate) fn physical_press(at: CaptureInstant) {
 pub(crate) fn alpha_shift(shift: bool, at: CaptureInstant) {
     if !ENABLED.load(Ordering::Acquire) {
         return;
+    }
+    // Hex's own lock reset produces an off edge; it must never become a
+    // press, even when a remapped HID press happens to be pending nearby.
+    if !shift && RESETTING.swap(false, Ordering::AcqRel) {
+        return;
+    }
+    if shift {
+        RESETTING.store(false, Ordering::Release);
     }
     let tracker_active = crate::suppression::physical_keys::snapshot().is_some();
     let pressed = HID_GATE
@@ -360,36 +420,70 @@ mod tests {
     }
 
     #[test]
-    fn a_delayed_alpha_shift_edge_confirms_one_hid_press() {
-        let pressed = CaptureInstant::from_nanos(1_000_000);
+    fn a_hid_press_matches_an_edge_timestamp_from_before_the_callback() {
+        let pressed = CaptureInstant::from_nanos(1_000_000_000);
+        let edge = CaptureInstant::from_nanos(995_000_000);
         let mut gate = PressGate::new();
-        gate.hid_press(pressed);
+        assert_eq!(gate.hid_press(pressed), None);
         assert_eq!(
-            gate.alpha_shift(true, true, pressed + Duration::from_millis(150)),
+            gate.alpha_shift(true, true, edge),
             Some(pressed),
-            "the press keeps its HID timestamp, not the edge's"
+            "the device timestamp is earlier than the callback, and the press keeps it"
         );
         assert_eq!(
-            gate.alpha_shift(true, false, pressed + Duration::from_millis(180)),
+            gate.alpha_shift(true, false, edge + Duration::from_millis(40)),
             None,
-            "the reset's own edge has no pending press"
+            "the reset edge after a confirmed press must not press again"
+        );
+    }
+
+    #[test]
+    fn an_edge_that_arrives_before_the_hid_press_still_matches() {
+        let pressed = CaptureInstant::from_nanos(2_000_000_000);
+        let edge = CaptureInstant::from_nanos(1_997_000_000);
+        let mut gate = PressGate::new();
+        assert_eq!(gate.alpha_shift(true, true, edge), None);
+        assert_eq!(gate.hid_press(pressed), Some(pressed));
+    }
+
+    #[test]
+    fn a_fast_double_press_yields_two_presses() {
+        let base = CaptureInstant::from_nanos(3_000_000_000);
+        let first_press = base + Duration::from_millis(100);
+        let first_edge = first_press + Duration::from_millis(2);
+        let second_press = base + Duration::from_millis(220);
+        let second_edge = second_press + Duration::from_millis(2);
+        let mut gate = PressGate::new();
+
+        assert_eq!(gate.hid_press(first_press), None);
+        assert_eq!(gate.alpha_shift(true, true, first_edge), Some(first_press));
+        assert_eq!(gate.hid_press(second_press), None);
+        assert_eq!(
+            gate.alpha_shift(true, true, second_edge),
+            Some(second_press)
         );
     }
 
     #[test]
     fn a_hid_press_without_an_alpha_shift_edge_never_presses() {
-        let pressed = CaptureInstant::from_nanos(2_000_000);
+        let pressed = CaptureInstant::from_nanos(4_000_000_000);
         let mut gate = PressGate::new();
-        gate.hid_press(pressed);
-        // A remapped Caps Lock never changes AlphaShift. A much later edge is
-        // a different press; the stale pending press is discarded, not used.
-        let stale_edge = pressed + PRESS_CONFIRM_WINDOW + Duration::from_millis(1);
-        assert_eq!(gate.alpha_shift(true, true, stale_edge), None);
+        assert_eq!(gate.hid_press(pressed), None);
+        // A remapped Caps Lock never changes AlphaShift, so nothing confirms
+        // this press. No call to the gate can turn it into one.
+        assert_eq!(
+            gate.alpha_shift(
+                true,
+                true,
+                pressed + PRESS_CONFIRM_WINDOW + Duration::from_millis(1)
+            ),
+            None
+        );
     }
 
     #[test]
     fn without_the_hid_tracker_an_on_edge_is_the_fallback_press() {
-        let at = CaptureInstant::from_nanos(3_000_000);
+        let at = CaptureInstant::from_nanos(5_000_000_000);
         let mut gate = PressGate::new();
         assert_eq!(gate.alpha_shift(false, false, at), None);
         assert_eq!(gate.alpha_shift(false, true, at), Some(at));

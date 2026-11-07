@@ -473,8 +473,9 @@ the raw HID tracker records Caps Lock usage 0x39 with its press timestamp
 the event tap confirms it with an AlphaShift change edge within 300 ms
 ([suppression.rs](../../src/suppression.rs)). A key remapped to Control or
 Escape never changes AlphaShift, so it never toggles dictation. Hex's own
-lock-reset edge has no pending HID press and is ignored. Without Input
-Monitoring the HID tracker is inactive, so an AlphaShift on edge is the
+lock-reset edge has no pending HID press and is ignored. A Caps Lock activation
+delay configured above 300 ms would make those presses invisible; the default
+has no delay. Without Input Monitoring the HID tracker is inactive, so an AlphaShift on edge is the
 fallback press and off edges remain resets. Confirmed presses reach the
 listener with the HID timestamp, before any IOKit work. The light model stays
 on the listener and publishes its pattern through an atomic; the worker
@@ -490,7 +491,9 @@ works and the light stays under macOS's control. Checks:
 `the_light_is_solid_recording_blinking_working_and_off_after`,
 `the_light_waits_for_every_accepted_job`,
 `cancelling_or_failing_a_capture_turns_the_light_off`,
-`a_delayed_alpha_shift_edge_confirms_one_hid_press`,
+`a_hid_press_matches_an_edge_timestamp_from_before_the_callback`,
+`an_edge_that_arrives_before_the_hid_press_still_matches`,
+`a_fast_double_press_yields_two_presses`,
 `a_hid_press_without_an_alpha_shift_edge_never_presses`,
 `without_the_hid_tracker_an_on_edge_is_the_fallback_press`, and
 `the_light_pattern_codes_round_trip` in

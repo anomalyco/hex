@@ -20,7 +20,6 @@ fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<Obse
         takes_escape: Arc::new(AtomicBool::new(takes_escape)),
         takes_cancel: Arc::new(AtomicBool::new(false)),
         caps_lock_cancel: Arc::new(AtomicBool::new(false)),
-        caps_lock_shift: AtomicBool::new(false),
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),

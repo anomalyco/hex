@@ -9,9 +9,9 @@
 //! state, so Hex can use the light while typing stays lowercase. The lock
 //! state is separately reset through `IOHIDSetModifierLockState`.
 //!
-//! The LED manager is recreated at each bounded refresh rather than kept
-//! unscheduled: that picks up keyboards plugged in later instead of trusting
-//! a device list that never updates.
+//! The LED manager is not scheduled on a run loop. It is recreated at each
+//! bounded refresh instead, so keyboards plugged in later are discovered
+//! rather than trusting a device list that never updates.
 
 use std::ffi::{c_char, c_void};
 use std::ptr;
@@ -118,6 +118,17 @@ struct LedElement {
     element: *mut c_void,
 }
 
+impl Drop for LedElement {
+    fn drop(&mut self) {
+        // SAFETY: this element retains exactly one device reference and one
+        // element reference, both taken when it was cached.
+        unsafe {
+            CFRelease(self.element.cast_const());
+            CFRelease(self.device.cast_const());
+        }
+    }
+}
+
 /// The keyboard LED elements and the `IOHIDSystem` connection. Created and
 /// used only on the worker thread.
 struct LedOutput {
@@ -132,6 +143,11 @@ struct LedOutput {
 impl LedOutput {
     fn open() -> Self {
         let system = system_connection();
+        if system.is_none() {
+            tracing::warn!(
+                "Caps Lock dictation could not open IOHIDSystem; Caps Lock will not be cleared after a press"
+            );
+        }
         let mut output = Self {
             manager: ptr::null_mut(),
             system,
@@ -151,13 +167,7 @@ impl LedOutput {
     /// discovered here; this runs at most every [`REFRESH_INTERVAL`], never
     /// on each blink.
     fn refresh(&mut self) {
-        for element in self.elements.drain(..) {
-            // SAFETY: both were retained when discovered.
-            unsafe {
-                CFRelease(element.element.cast_const());
-                CFRelease(element.device.cast_const());
-            }
-        }
+        self.elements.clear();
         if !self.manager.is_null() {
             // SAFETY: the manager was created on this worker thread.
             unsafe {
@@ -235,10 +245,6 @@ impl LedOutput {
                 if device.is_null() {
                     continue;
                 }
-                // SAFETY: `device` belongs to `devices`, which lives through
-                // the loop; retain it for as long as its LED element is
-                // remembered.
-                unsafe { CFRetain(device) };
                 // SAFETY: the LED matching dictionary copies only Caps Lock
                 // LED output elements; it is live through the call.
                 let elements = unsafe {
@@ -249,13 +255,10 @@ impl LedOutput {
                     )
                 };
                 if elements.is_null() {
-                    // SAFETY: the retain above is ours to release.
-                    unsafe { CFRelease(device) };
                     continue;
                 }
                 // SAFETY: `elements` is a live CFArray.
                 let element_count = unsafe { CFArrayGetCount(elements) };
-                let mut found = false;
                 for index in 0..element_count.max(0) {
                     // SAFETY: the index is inside the array.
                     let element = unsafe { CFArrayGetValueAtIndex(elements, index) };
@@ -273,21 +276,20 @@ impl LedOutput {
                     {
                         continue;
                     }
-                    // SAFETY: the element belongs to `elements`; retain it
-                    // and the device for the cache.
-                    unsafe { CFRetain(element) };
+                    // Each cached element owns one retain of its element and
+                    // one of its device; `LedElement`'s Drop releases them.
+                    // SAFETY: both are live members of `elements`/`devices`.
+                    unsafe {
+                        CFRetain(element);
+                        CFRetain(device);
+                    }
                     self.elements.push(LedElement {
                         device: device.cast_mut(),
                         element: element.cast_mut(),
                     });
-                    found = true;
                 }
                 // SAFETY: the array was returned owned above.
                 unsafe { CFRelease(elements.cast_const()) };
-                if !found {
-                    // SAFETY: the device retain above is ours to release.
-                    unsafe { CFRelease(device) };
-                }
             }
         }
         // SAFETY: `devices` was returned owned by CopyDevices.
@@ -314,6 +316,7 @@ impl LedOutput {
         let Some(connection) = self.system else {
             return;
         };
+        super::RESETTING.store(true, Ordering::Release);
         // SAFETY: `connection` is an open IOHIDParam user client for the
         // process's lifetime.
         let status = unsafe { IOHIDSetModifierLockState(connection, CAPS_LOCK_LOCK_STATE, false) };
@@ -374,13 +377,7 @@ impl Drop for LedOutput {
         // A quit or a turned-off lab leaves the light off even if the run
         // loop broke early. Do not refresh here: shutdown stays bounded.
         self.write_now(false);
-        for element in self.elements.drain(..) {
-            // SAFETY: both were retained by refresh.
-            unsafe {
-                CFRelease(element.element.cast_const());
-                CFRelease(element.device.cast_const());
-            }
-        }
+        self.elements.clear();
         if !self.manager.is_null() {
             // SAFETY: the manager was created and opened on this thread.
             unsafe {
@@ -502,6 +499,7 @@ impl CapsLockDictation {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .clear();
+            super::seed_alpha_shift(crate::suppression::alpha_shift_now());
             inner.model = LedModel::default();
             inner.pattern = LedPattern::Off;
             LED_PATTERN.store(LedPattern::Off.code(), Ordering::Release);
@@ -545,6 +543,7 @@ impl CapsLockDictation {
         } else {
             ENABLED.store(false, Ordering::Release);
             crate::suppression::physical_keys::watch_caps_lock(None);
+            super::RESETTING.store(false, Ordering::Release);
             super::HID_GATE
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())

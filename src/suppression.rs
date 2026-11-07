@@ -411,15 +411,21 @@ impl Drop for InputMonitor {
     }
 }
 
+/// The current AlphaShift bit, used to seed Caps Lock dictation's tap state
+/// when its lab turns on.
+pub(crate) fn alpha_shift_now() -> bool {
+    // SAFETY: a read-only CoreGraphics state query.
+    (unsafe { CGEventSourceFlagsState(COMBINED_SESSION_STATE) }
+        & crate::caps_lock_dictation::ALPHA_SHIFT_MASK)
+        != 0
+}
+
 struct EventTapContext {
     sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
     takes_escape: Arc<AtomicBool>,
     takes_cancel: Arc<AtomicBool>,
     caps_lock_cancel: Arc<AtomicBool>,
-    /// The AlphaShift bit last observed, so only actual changes reach the
-    /// Caps Lock gate.
-    caps_lock_shift: AtomicBool,
     key_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
     physical_tap: AtomicPtr<c_void>,
@@ -572,8 +578,7 @@ unsafe extern "C" fn event_callback(
         // SAFETY: CoreGraphics supplied a valid event to this callback.
         let flags = unsafe { CGEventGetFlags(event) };
         let shift = flags & crate::caps_lock_dictation::ALPHA_SHIFT_MASK != 0;
-        let was_shift = context.caps_lock_shift.swap(shift, Ordering::AcqRel);
-        if shift != was_shift {
+        if crate::caps_lock_dictation::alpha_shift_changed(shift) {
             // SAFETY: CoreGraphics supplied a valid event.
             let at = CaptureInstant::from_nanos(unsafe { CGEventGetTimestamp(event) });
             crate::caps_lock_dictation::alpha_shift(shift, at);
