@@ -43,6 +43,8 @@ use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use objc2_foundation::{MainThreadMarker, NSAppleEventManager, NSObject, NSString, NSTimer};
 
 use crate::app_settings::AppSettings;
+use crate::desktop::activity::{DesktopActivity, last_completed_at, warning_with_listener_failure};
+use crate::desktop::events::EventReader;
 use crate::desktop::host::{
     DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopShortcuts,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
@@ -443,7 +445,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                 Err(payload) => panic_message(payload.as_ref()),
             };
             *lock(&recognition_failure) = Some(failure);
-            recognition_indicator.send(DictationIndicatorEvent::Failed);
+            recognition_indicator.send(DictationIndicatorEvent::Failed { message: None });
         })?;
 
     let (requests, request_receiver) = mpsc::channel();
@@ -454,7 +456,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
         meeting_requests: meeting_requests.clone(),
         recognition_controls: recognition_controls.clone(),
         history: history.clone(),
-        event_path,
+        event_path: event_path.clone(),
         indicator: indicator.clone(),
     };
     RUNTIME
@@ -472,6 +474,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                 shutdown,
                 (!setup_ready).then_some(recognition_start),
                 listener_failure,
+                event_path,
             )
         })?;
     // A closed window is only ordered out, and AppKit keeps it on the Space
@@ -660,7 +663,12 @@ fn run_runtime(
     shutdown: &AtomicBool,
     recognition_start: Option<SyncSender<()>>,
     listener_failure: Arc<Mutex<Option<String>>>,
+    event_path: PathBuf,
 ) {
+    let mut event_reader = EventReader::open(event_path);
+    let mut activity = DesktopActivity::default();
+    activity.refresh(&mut event_reader);
+    let last_completed_at = last_completed_at(event_reader.events().iter());
     let mut runtime = Runtime {
         keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
             settings.keyboard_model_switching.clone(),
@@ -671,6 +679,9 @@ fn run_runtime(
         preparation: TranscriptionPreparation::default(),
         recognition_start,
         listener_failure,
+        event_reader,
+        activity,
+        last_completed_at,
     };
     loop {
         let mut next = match requests.recv_timeout(RUNTIME_TICK) {
@@ -686,6 +697,7 @@ fn run_runtime(
             break;
         }
         runtime.tick();
+        runtime.refresh_activity();
         let published = Arc::new(runtime.publish());
         let changed = {
             let mut current = lock(&shared.published);
@@ -718,6 +730,12 @@ struct Runtime {
     recognition_start: Option<SyncSender<()>>,
     /// Why the listener stopped, once it has.
     listener_failure: Arc<Mutex<Option<String>>>,
+    /// The listener's event log, read on this thread so the window can show a
+    /// failed dictation without another polling thread.
+    event_reader: EventReader,
+    activity: DesktopActivity,
+    /// When the current session's newest dictation completed.
+    last_completed_at: Option<u64>,
 }
 
 impl Runtime {
@@ -798,6 +816,13 @@ impl Runtime {
         self.tick_at(Instant::now());
     }
 
+    /// Reads the listener's newest events, bounded by `EventReader`'s
+    /// retention, so the window's warning follows failed dictations.
+    fn refresh_activity(&mut self) {
+        self.activity.refresh(&mut self.event_reader);
+        self.last_completed_at = last_completed_at(self.event_reader.events().iter());
+    }
+
     fn tick_at(&mut self, now: Instant) {
         if let Some(choice) = self.keyboard_switcher.take_due(now) {
             let selection = TranscriptionSelection {
@@ -856,7 +881,11 @@ impl Runtime {
                     "Waiting for setup"
                 }
                 .into(),
-                warning: failure,
+                warning: warning_with_listener_failure(
+                    &self.activity,
+                    self.last_completed_at,
+                    failure,
+                ),
                 notice: None,
                 shortcuts: DesktopShortcuts::Registered,
                 shortcuts_configurable: false,

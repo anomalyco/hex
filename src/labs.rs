@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::app_settings::{AppSettings, LabsSettings};
 
 mod cli;
+mod description;
 mod group;
 
 pub use self::cli::{LabsCommand, run, run_retired_experiments};
@@ -66,6 +67,7 @@ pub enum Feature {
     VoiceFilter,
     Playground,
     LiveText,
+    FailureNotices,
     LiveTyping,
     LiveChapters,
     VocabularyBiasing,
@@ -119,11 +121,12 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 54] = [
+    pub const ALL: [Self; 55] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
         Self::LiveText,
+        Self::FailureNotices,
         Self::LiveTyping,
         Self::LiveChapters,
         Self::VocabularyBiasing,
@@ -203,6 +206,7 @@ impl Feature {
             Self::VoiceFilter | Self::Playground => Audience::Dev,
             Self::Meetings
             | Self::LiveText
+            | Self::FailureNotices
             | Self::LiveTyping
             | Self::LiveChapters
             | Self::VocabularyBiasing
@@ -310,7 +314,8 @@ impl Feature {
             Self::LiveTyping
             | Self::MeetingDescriptiveFilenames
             | Self::QuitClosesWindow
-            | Self::ExpireMeetingAudio => 20261107,
+            | Self::ExpireMeetingAudio
+            | Self::FailureNotices => 20261107,
         }
     }
 
@@ -383,6 +388,7 @@ impl Feature {
             }
             Self::Playground
             | Self::LiveText
+            | Self::FailureNotices
             | Self::VocabularyBiasing
             | Self::UnloadIdle
             | Self::RestoreShortcutDefault
@@ -415,6 +421,7 @@ impl Feature {
             Self::VoiceFilter => "voice-filter",
             Self::Playground => "playground",
             Self::LiveText => "live-text",
+            Self::FailureNotices => "failure-notices",
             Self::LiveTyping => "live-typing",
             Self::LiveChapters => "live-chapters",
             Self::VocabularyBiasing => "vocabulary-biasing",
@@ -475,6 +482,7 @@ impl Feature {
             Self::VoiceFilter => "experimental.hex_microphone",
             Self::Playground => "labs.playground",
             Self::LiveText => "labs.live_text",
+            Self::FailureNotices => "labs.failure_notices",
             Self::LiveTyping => "labs.live_typing",
             Self::LiveChapters => "labs.live_chapters",
             Self::VocabularyBiasing => "labs.vocabulary_biasing",
@@ -528,154 +536,6 @@ impl Feature {
         }
     }
 
-    /// The English one-line description the CLI prints; the window shows
-    /// its translated row.
-    pub const fn description(self) -> &'static str {
-        match self {
-            Self::Meetings => "Record calls and keep transcripts (its own pane)",
-            Self::VoiceFilter => {
-                "Hex Microphone virtual input and real-time voice filters (its own pane)"
-            }
-            Self::Playground => "Scene and story browser in the window",
-            Self::LiveText => "Show provisional words beside the HUD while dictating",
-            Self::LiveTyping => {
-                "Show provisional words in the focused text field while dictating on Wayland, then type the final text there"
-            }
-            Self::LiveChapters => "Break meeting transcripts into chapters while recording",
-            Self::VocabularyBiasing => {
-                "Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"
-            }
-            Self::TerminalPaste => "Paste with Ctrl+Shift+V, for apps that ignore Ctrl+V",
-            Self::KeyboardModelSwitching => {
-                "Changing the keyboard language switches the speech model and language"
-            }
-            Self::MouseShortcuts => "Record mouse buttons as shortcuts",
-            Self::PauseBrowser => "Also pause the browser while dictating, with Pause media",
-            Self::ShareShortcut => "Let apps such as Discord see the dictation shortcut too",
-            Self::UnloadIdle => {
-                "Free the speech model's memory after a while unused (labs.unload_idle_minutes); the next dictation reloads it"
-            }
-            Self::RestoreShortcutDefault => {
-                "Offer Restore default next to Paste last dictation's shortcut"
-            }
-            Self::KeepOnClipboard => {
-                "Leave the dictation on the clipboard after pasting instead of restoring what was there"
-            }
-            Self::CopyOnly => "Put the dictation on the clipboard instead of pasting it",
-            Self::SpokenFormatting => {
-                "Turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks"
-            }
-            Self::FillerWords => {
-                "Remove filler words such as um and uh from dictations, without an AI model"
-            }
-            Self::SubtitleExport => {
-                "Export meeting transcripts as SRT or VTT subtitles with hex meetings show"
-            }
-            Self::SecondDictationShortcut => {
-                "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
-            }
-            Self::SmartSpacing => "Add a space before a dictation pasted right after a word",
-            Self::SpokenSymbols => {
-                "Turn spoken \"comma\", \"colon\", \"hashtag\", \"underscore\", and similar words into symbols joined to their words"
-            }
-            Self::PickerSortFilter => {
-                "Sort the Local transcription picker by size or name and show only models for the saved language"
-            }
-            Self::SidedChords => {
-                "Record which side each modifier of a shortcut is on, such as Right Command + Right Option"
-            }
-            Self::TapOrHold => {
-                "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
-            }
-            Self::BenchmarkDetails => {
-                "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
-            }
-            Self::ParakeetUltra => {
-                "Offer Parakeet Ultra, Moondream's post-trained Parakeet v3, in the Local transcription picker"
-            }
-            Self::StandaloneSpecialKeys if cfg!(target_os = "windows") => {
-                "Use Insert, Home, End, Page Up, or Page Down alone as a shortcut"
-            }
-            Self::StandaloneSpecialKeys => {
-                "Use Menu, Pause, or Scroll Lock alone as a shortcut, such as Caps Lock remapped to Menu"
-            }
-            Self::HistoryStats => {
-                "Add a Stats button to History that shows a summary of your retained dictations, with hex history stats"
-            }
-            Self::RecentDictations => {
-                "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
-            }
-            Self::SkipPauses => {
-                "Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner"
-            }
-            Self::StopWhenCallEnds => {
-                "Stop a meeting recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet"
-            }
-            Self::OutputFixes => {
-                "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
-            }
-            Self::PickerActiveFirst => "The speech model picker lists the model you're using first",
-            Self::ModelInPlace => {
-                "Add a speech model file and use it where it is, without copying it, so several accounts can share one file"
-            }
-            Self::PickerDownloaded => {
-                "Show only downloaded speech models in the picker, with the space they take"
-            }
-            Self::SectionKeyAlone => {
-                "Use the § key, left of 1 on ISO keyboards, alone as a shortcut; Hex takes § from every app while it's bound"
-            }
-            Self::KeepRecordings => {
-                "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
-            }
-            Self::SettingsSearch => "Find any setting in General with a search field",
-            Self::HideMenuBarIcon => {
-                "Hide Hex's menu bar icon; shortcuts keep working, and opening Hex again shows Settings"
-            }
-            Self::MovableMeetingCapsules => {
-                "Drag meeting capsules such as Meeting transcript ready out of the way; they come back in the corner you left them"
-            }
-            Self::GnomeClipboardRestore => {
-                "Put the previous clipboard back after a paste on GNOME Wayland, through the XWayland clipboard while XWayland is running"
-            }
-            Self::MeetingNotesVocabulary => {
-                "Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"
-            }
-            Self::NotchIndicator => {
-                "On a screen with a notch, the recording indicator grows out of the notch instead of sitting below the menu bar"
-            }
-            Self::MeetingFinishedEvent => {
-                "Tell apps on this computer when a meeting's transcript is ready, through the local API's GET /meetings/events (the meeting's id only)"
-            }
-            Self::GnomeMeetingCapsules => {
-                "Show the meeting capsules (recording offer, recording indicator) floating over your call on GNOME Wayland, through XWayland while XWayland is running"
-            }
-            Self::Screenshots => {
-                "Take a screenshot of an area or a window with a shortcut (Command-Shift-4 by default): copied, saved, and shown in the corner"
-            }
-            Self::FollowLiveTranscript => {
-                "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
-            }
-            Self::MoreCallApps => {
-                "Offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on more websites."
-            }
-            Self::AnnotateReplay => {
-                "Save the last 15 seconds of your screen with hex capture replay or capture.replay_hotkey; macOS shows the screen-recording dot the whole time it's on (macOS 27+)"
-            }
-            Self::MeetingImport => {
-                "Import an audio file into Meetings and transcribe it on this Mac"
-            }
-            Self::MeetingDescriptiveFilenames => {
-                "Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time"
-            }
-            Self::QuitClosesWindow => {
-                "⌘Q closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits"
-            }
-            Self::ExpireMeetingAudio => {
-                "Choose how long to keep meeting audio. Transcripts, notes, and summaries follow Keep meetings."
-            }
-        }
-    }
-
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|feature| feature.name() == name)
     }
@@ -687,6 +547,7 @@ impl Feature {
             Self::VoiceFilter => settings.experimental.hex_microphone,
             Self::Playground => settings.labs.playground,
             Self::LiveText => settings.labs.live_text,
+            Self::FailureNotices => settings.labs.failure_notices,
             Self::LiveTyping => settings.labs.live_typing,
             Self::LiveChapters => settings.labs.live_chapters,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing,
@@ -753,6 +614,7 @@ impl Feature {
             &mut settings.share_dictation_shortcut,
             &mut labs.playground,
             &mut labs.live_text,
+            &mut labs.failure_notices,
             &mut labs.live_typing,
             &mut labs.live_chapters,
             &mut labs.vocabulary_biasing,
@@ -813,6 +675,7 @@ impl Feature {
             Self::VoiceFilter => settings.experimental.hex_microphone = on,
             Self::Playground => settings.labs.playground = on,
             Self::LiveText => settings.labs.live_text = on,
+            Self::FailureNotices => settings.labs.failure_notices = on,
             Self::LiveTyping => settings.labs.live_typing = on,
             Self::LiveChapters => settings.labs.live_chapters = on,
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing = on,
@@ -922,6 +785,8 @@ const EXPIRE_MEETING_AUDIO: u64 = QUIT_CLOSES_WINDOW << 1;
 const LIVE_TYPING: u64 = EXPIRE_MEETING_AUDIO << 1;
 /// The next bit above Live typing's switch.
 const MEETING_DESCRIPTIVE_FILENAMES: u64 = LIVE_TYPING << 1;
+/// The next bit above descriptive meeting file names.
+const FAILURE_NOTICES: u64 = MEETING_DESCRIPTIVE_FILENAMES << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -945,6 +810,12 @@ fn state() -> u64 {
 /// Live text: provisional words beside the HUD (read as each dictation starts).
 pub fn live_text() -> bool {
     on(LIVE_TEXT)
+}
+
+/// A failed dictation's explanation beside the HUD (read as each failure
+/// reaches the HUD).
+pub fn failure_notices() -> bool {
+    on(FAILURE_NOTICES) && Feature::FailureNotices.on_this_os()
 }
 
 /// Live typing: provisional words in the focused text field as an
@@ -1202,6 +1073,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
     let minutes = u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60)) << MINUTES_SHIFT;
     [
         (Feature::LiveText, settings.live_text, LIVE_TEXT),
+        (
+            Feature::FailureNotices,
+            settings.failure_notices,
+            FAILURE_NOTICES,
+        ),
         (Feature::LiveTyping, settings.live_typing, LIVE_TYPING),
         (Feature::LiveChapters, settings.live_chapters, LIVE_CHAPTERS),
         (Feature::Playground, settings.playground, PLAYGROUND),
@@ -1772,6 +1648,19 @@ mod tests {
         labs.unload_idle_minutes = 24 * 60;
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & MEETING_DESCRIPTIVE_FILENAMES, 0);
+        assert_eq!(state & LIVE_TYPING, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+    }
+
+    #[test]
+    fn failure_notices_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & FAILURE_NOTICES, 0);
+        labs.failure_notices = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & FAILURE_NOTICES, 0);
+        assert_eq!(state & MEETING_DESCRIPTIVE_FILENAMES, 0);
         assert_eq!(state & LIVE_TYPING, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
     }

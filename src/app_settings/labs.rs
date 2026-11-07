@@ -8,6 +8,8 @@ use super::*;
 pub struct LabsSettings {
     /// Live text beside the HUD while dictating.
     pub live_text: bool,
+    /// A failed dictation's explanation beside the HUD for a few seconds.
+    pub failure_notices: bool,
     /// Provisional words in the focused text field as a Wayland input-method
     /// preedit, with the final text committed there (Linux Wayland).
     pub live_typing: bool,
@@ -112,6 +114,7 @@ impl Default for LabsSettings {
     fn default() -> Self {
         Self {
             live_text: false,
+            failure_notices: false,
             live_typing: false,
             live_chapters: false,
             playground: false,

@@ -31,6 +31,19 @@ impl DesktopActivity {
         })
     }
 
+    /// The newest failure, hidden once a later dictation completed, so a
+    /// silent failure still reaches the Settings window without sticking
+    /// around.
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    pub(crate) fn visible_failure(&self, last_completed_at: Option<u64>) -> Option<String> {
+        self.last_failure
+            .as_ref()
+            .filter(|(failed_at, _)| {
+                last_completed_at.is_none_or(|completed| completed < *failed_at)
+            })
+            .map(|(_, message)| message.clone())
+    }
+
     fn from_events<'a>(events: impl Iterator<Item = &'a VoiceEvent>) -> Self {
         let mut activity = Self::default();
         for event in events {
@@ -54,6 +67,52 @@ impl DesktopActivity {
             }
         }
         activity
+    }
+}
+
+/// When the current session's newest dictation completed. `events` is oldest
+/// first, as `EventReader` keeps them.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+pub(crate) fn last_completed_at<'a>(
+    events: impl DoubleEndedIterator<Item = &'a VoiceEvent>,
+) -> Option<u64> {
+    for event in events.rev() {
+        match event {
+            VoiceEvent::SessionStarted { .. } => return None,
+            VoiceEvent::Transcript {
+                timestamp_ms,
+                phase: TranscriptPhase::Completed,
+                ..
+            } => return Some(*timestamp_ms),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The listener card's warning on macOS: a listener that stopped keeps
+/// priority; otherwise the newest dictation failure.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn warning_with_listener_failure(
+    activity: &DesktopActivity,
+    last_completed_at: Option<u64>,
+    listener_failure: Option<String>,
+) -> Option<String> {
+    listener_failure.or_else(|| activity.visible_failure(last_completed_at))
+}
+
+/// A known reason a dictation failed, in words a person can act on. Unknown
+/// failures stay as they were logged.
+pub(crate) fn failure_explanation(message: &str) -> String {
+    if message.contains(crate::audio::LID_CLOSED_ERROR) {
+        crate::desktop::i18n::tr(
+            "The built-in microphone is off while the lid is closed. Open the lid or connect a microphone.",
+        )
+        .to_owned()
+    } else if message.contains(crate::audio::NO_MICROPHONE_ERROR) {
+        crate::desktop::i18n::tr("No microphone is available. Connect a microphone.").to_owned()
+    } else {
+        message.to_owned()
     }
 }
 
@@ -240,6 +299,83 @@ mod tests {
             DesktopActivity::from_events(events.iter().rev())
                 .last_failure
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn newest_failure_shows_until_a_later_transcript_completes() {
+        let activity = DesktopActivity {
+            last_failure: Some((5, "OpenCode generation failed".into())),
+            ..DesktopActivity::default()
+        };
+        assert_eq!(
+            activity.visible_failure(Some(4)).as_deref(),
+            Some("OpenCode generation failed")
+        );
+        assert_eq!(activity.visible_failure(Some(6)), None);
+        assert_eq!(
+            activity.visible_failure(None).as_deref(),
+            Some("OpenCode generation failed")
+        );
+    }
+
+    #[test]
+    fn the_newest_completion_is_scoped_to_the_current_session() {
+        let transcript = |timestamp_ms, text| VoiceEvent::Transcript {
+            timestamp_ms,
+            phase: TranscriptPhase::Completed,
+            latency_ms: 10,
+            text,
+        };
+        let events = [
+            transcript(1, "Old session".into()),
+            VoiceEvent::SessionStarted { timestamp_ms: 2 },
+        ];
+        assert_eq!(last_completed_at(events.iter()), None);
+        let events = [
+            VoiceEvent::SessionStarted { timestamp_ms: 2 },
+            transcript(3, "First".into()),
+            transcript(4, "Second".into()),
+        ];
+        assert_eq!(last_completed_at(events.iter()), Some(4));
+    }
+
+    #[test]
+    fn a_stopped_listener_explains_itself_before_a_dictation_failure() {
+        let activity = DesktopActivity {
+            last_failure: Some((5, "Could not open microphone".into())),
+            ..DesktopActivity::default()
+        };
+        assert_eq!(
+            warning_with_listener_failure(&activity, None, Some("listener stopped".into()))
+                .as_deref(),
+            Some("listener stopped")
+        );
+        assert_eq!(
+            warning_with_listener_failure(&activity, Some(4), None).as_deref(),
+            Some("Could not open microphone")
+        );
+        assert_eq!(
+            warning_with_listener_failure(&activity, Some(6), None),
+            None
+        );
+    }
+
+    #[test]
+    fn known_microphone_failures_get_an_actionable_explanation() {
+        assert_eq!(
+            failure_explanation(
+                "Could not open microphone: the built-in microphone is off while the lid is closed"
+            ),
+            "The built-in microphone is off while the lid is closed. Open the lid or connect a microphone."
+        );
+        assert_eq!(
+            failure_explanation("Could not open microphone: no microphone is available"),
+            "No microphone is available. Connect a microphone."
+        );
+        assert_eq!(
+            failure_explanation("OpenCode generation failed"),
+            "OpenCode generation failed"
         );
     }
 }
