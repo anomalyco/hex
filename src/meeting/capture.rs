@@ -447,6 +447,14 @@ impl LiveSource for MicrophoneSource {
                         );
                         return Err("microphone delivered digital silence".into());
                     }
+                    SilenceAction::Gated => {
+                        tracing::info!(
+                            device = %self.input.device_name,
+                            device_uid = ?self.opened_uid,
+                            call_app_inputs = ?self.call_inputs,
+                            "meeting microphone is digitally silent but the call app does not report recording from it; not reopening or warning"
+                        );
+                    }
                     SilenceAction::Warn => {
                         if self.warnings.warn() {
                             self.silence.applied(SilenceAction::Warn);

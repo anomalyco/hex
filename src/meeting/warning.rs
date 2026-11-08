@@ -100,6 +100,9 @@ impl TrackWarnings {
 pub(super) enum SilenceAction {
     /// The chunk changes nothing.
     Nothing,
+    /// The stream is digitally silent but the call app does not report
+    /// recording from this input; logged once per episode, never acted on.
+    Gated,
     /// The stream is digitally silent and this recording has a reopen left.
     Reopen,
     /// The stream is digitally silent and every reopen is spent: warn.
@@ -153,6 +156,8 @@ pub(super) struct SilencePolicy {
     reopens: Arc<AtomicU8>,
     /// The live warning is showing; cached so no chunk locks the mutex.
     warning: bool,
+    /// This silent episode was already reported as gated by the call app.
+    gated: bool,
 }
 
 impl SilencePolicy {
@@ -163,6 +168,7 @@ impl SilencePolicy {
             watch: SilenceWatch::new(rate),
             reopens,
             warning,
+            gated: false,
         }
     }
 
@@ -183,6 +189,7 @@ impl SilencePolicy {
     ) -> SilenceAction {
         let silent = self.watch.observe(samples);
         if !silent {
+            self.gated = false;
             let audible = samples.iter().any(|&sample| sample != 0.0);
             return if audible && self.warning {
                 SilenceAction::Clear
@@ -190,7 +197,14 @@ impl SilencePolicy {
                 SilenceAction::Nothing
             };
         }
-        if !call_app_holds_device || self.warning {
+        if !call_app_holds_device {
+            if self.gated {
+                return SilenceAction::Nothing;
+            }
+            self.gated = true;
+            return SilenceAction::Gated;
+        }
+        if self.warning {
             return SilenceAction::Nothing;
         }
         if claim_silence_reopen(&self.reopens) {
@@ -206,7 +220,7 @@ impl SilencePolicy {
         match action {
             SilenceAction::Warn => self.warning = true,
             SilenceAction::Clear => self.warning = false,
-            SilenceAction::Nothing | SilenceAction::Reopen => {}
+            SilenceAction::Nothing | SilenceAction::Gated | SilenceAction::Reopen => {}
         }
     }
 }
@@ -279,8 +293,12 @@ mod tests {
     #[test]
     fn a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned() {
         let mut policy = SilencePolicy::new(1_000, Arc::new(AtomicU8::new(0)), false);
+        // Reported once per episode for field logs, never reopened or warned.
+        assert_eq!(policy.observe(&[0.0; 3_000], false), SilenceAction::Gated);
         assert_eq!(policy.observe(&[0.0; 3_000], false), SilenceAction::Nothing);
-        assert_eq!(policy.observe(&[0.0; 3_000], false), SilenceAction::Nothing);
+        // Audio returning starts a new episode, so a later one is reported.
+        assert_eq!(policy.observe(&[0.25], false), SilenceAction::Nothing);
+        assert_eq!(policy.observe(&[0.0; 3_000], false), SilenceAction::Gated);
     }
 
     #[test]

@@ -306,6 +306,8 @@ warm stream keeps running but delivers only exact zeros (macOS and Linux hotkey 
 meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
   -> only while the call app records from that same input, by device UID,
      checked once a second; a manual recording never reopens or warns
+  -> a gated or noise-suppressed microphone the call app also uses still
+     counts as held, so it can trigger the reopens and warning
   -> reopen the microphone source, at most twice in one recording, the budget
      shared across reopened streams
   ├── still silent -> keep recording; the recording capsule says
@@ -315,9 +317,9 @@ meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
   ├── nonzero audio returns -> clear the live warning, including in a stream
   │     reopened after a supervisor restart; the persisted warning stays,
   │     because the recording means "silent at some point"
-  └── the call app leaves the input -> no further reopens or warnings;
-        the finished meeting's panel still says the microphone was silent
-        for part of the call
+  └── the call app leaves the input -> no further reopens or warnings, but a
+        live warning stays until nonzero audio returns; the finished meeting's
+        panel still says the microphone was silent for part of the call
   // not verified on a live device or call app
 
 open stream stops delivering audio without an error (any OS, #1206)
@@ -360,8 +362,12 @@ values; no iPhone observed with the lid closed),
 `audible_audio_clears_a_warning_a_reopened_stream_inherited`,
 `a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned`,
 `a_sticky_warning_survives_its_live_one_clearing`,
-`a_warning_is_written_to_the_manifest_as_soon_as_it_is_raised`;
+`a_dropped_warning_update_is_not_committed_and_is_retried`,
+`a_warning_is_written_to_the_manifest_as_soon_as_it_is_raised`,
+`a_device_switch_restarts_the_zero_count_without_clearing_the_warning`;
 [meeting/capture.rs](../../src/meeting/capture.rs):
+`a_meeting_follows_the_input_its_call_app_records_from`,
+`a_microphone_that_would_not_open_is_tried_a_bounded_number_of_times`,
 `only_an_input_the_call_app_reports_counts_as_held`;
 [meeting/tests.rs](../../src/meeting/tests.rs):
 `a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none`
@@ -476,16 +482,22 @@ so the existing stall watchdog never fired and the user's side was missing.
 A microphone stream that delivers 3 s of exact zeros now reopens like a
 failed source, at most twice in one recording, but only while the call app
 still reports recording from the same input; a manual recording, or an app
-that reports no input, never reopens or warns. If it is still silent, Hex
-keeps recording and warns in the recording capsule, the menu bar, and the
-finished meeting's detail. The manifest records `microphone.warning:
+that reports no input, never reopens or warns, and a gated or
+noise-suppressed microphone the call app also uses still counts as held so
+it can trigger the reopens and warning. If it is still silent, Hex keeps
+recording and warns in the recording capsule, the menu bar, and the finished
+meeting's detail. The manifest records `microphone.warning:
 digital_silence` as soon as it is raised, so a crash keeps it, and it means
 the microphone was silent at some point during the recording. Nonzero audio
 clears the live warning, including in a stream reopened after a supervisor
-restart; a later episode warns again without another reopen. The 3 s watch,
-its shared reopen budget, and its gating are unit-checked; none of it was
-observed on a live device or a call app holding the microphone with voice
-processing.
+restart; if the call app leaves the input while zeros continue, no further
+reopens or warnings happen but a live warning stays until nonzero audio
+returns. A later episode warns again without another reopen. Each gated
+episode is also logged once at info level with the opened device and the
+call app's reported inputs, so field logs can confirm the gate. The 3 s
+watch, its shared reopen budget, and its gating are unit-checked; none of it
+was observed on a live device or a call app holding the microphone with
+voice processing.
 
 **Fixed after 3.3.0 ([#1206](https://github.com/anomalyco/hex/issues/1206)):**
 after a burst of overrun warnings while idle, a warm USB microphone's stream

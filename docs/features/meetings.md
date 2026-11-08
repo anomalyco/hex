@@ -703,6 +703,8 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │       -> checked only while the call app records from the same input, by
 │          device UID, looked at once a second; a manual recording never
 │          reopens or warns, and neither does an app that reports no input
+│       -> a gated or noise-suppressed microphone the call app also uses
+│          still counts as held, so it can trigger the reopens and warning
 │       -> Reopened like a failed source, at most twice in one recording,
 │          the budget shared by every reopened stream
 │       ├── Still silent -> keep recording; the capsule says
@@ -712,7 +714,8 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │       ├── Nonzero audio returns -> the live warning clears, including in a
 │       │   stream reopened after a supervisor restart; the persisted warning
 │       │   stays
-│       ├── The call app leaves the input -> no further reopens or warnings
+│       ├── The call app leaves the input -> no further reopens or warnings;
+│       │   a live warning stays until nonzero audio returns
 │       ├── Another episode after audio returns -> warns again, never reopens
 │       └── Finished meeting -> its panel says the microphone was silent for
 │           part of the call; the manifest means "silent at some point", not
@@ -761,16 +764,21 @@ call, a muted call, and Zoom or Teams helpers),
 [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs), and
 `mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded`,
 `writer_fills_a_capture_gap_with_silence_and_records_it`,
-`a_source_that_resumes_after_an_outage_is_padded_back_onto_the_timeline`,
+`a_source_that_resumes_after_an_outage_is_padded_back_onto_the_timeline`, and
+`a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none` in
+[meeting/tests.rs](../../src/meeting/tests.rs);
+`a_meeting_follows_the_input_its_call_app_records_from`,
+`a_microphone_that_would_not_open_is_tried_a_bounded_number_of_times`, and
+`only_an_input_the_call_app_reports_counts_as_held` in
+[meeting/capture.rs](../../src/meeting/capture.rs); and
 `a_silence_budget_is_shared_across_reopened_streams`,
 `audible_audio_clears_a_warning_a_reopened_stream_inherited`,
 `a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned`,
 `a_sticky_warning_survives_its_live_one_clearing`,
-`only_an_input_the_call_app_reports_counts_as_held` in
-[meeting/capture.rs](../../src/meeting/capture.rs),
-[meeting/warning.rs](../../src/meeting/warning.rs), and
-`a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none` in
-[meeting/tests.rs](../../src/meeting/tests.rs). Menu-bar Record Meeting and
+`a_dropped_warning_update_is_not_committed_and_is_retried`,
+`a_warning_is_written_to_the_manifest_as_soon_as_it_is_raised`, and
+`a_device_switch_restarts_the_zero_count_without_clearing_the_warning` in
+[meeting/warning.rs](../../src/meeting/warning.rs). Menu-bar Record Meeting and
 Stop & Transcribe, and the recording and ready capsule buttons, were clicked
 on a real Mac on 2026-10-22; no automated test covers them. The digital
 silence watch is not verified on a live device or call app that holds the
