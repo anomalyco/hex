@@ -56,6 +56,9 @@ fn visible(source: &InkSource) -> bool {
 
 /// Whether Escape belongs to Annotate: drawing, or persistent ink it would
 /// clear. Escape stays with the app when neither is true.
+// Its callers are macOS's capture shortcut and the Linux input monitor;
+// Windows takes Escape for Annotate from `exit_drawing` alone.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) fn escape_wanted() -> bool {
     drawing() || (crate::labs::persistent_ink() && source().is_some_and(|source| visible(&source)))
 }
