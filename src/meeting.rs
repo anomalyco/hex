@@ -286,7 +286,9 @@ pub struct TrackManifest {
     /// recording, filled with silence so the track stays on the timeline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gaps: Vec<TrackGap>,
-    /// A problem with this track that the user should know about.
+    /// A problem with this track that the user should know about. For the
+    /// microphone, `digital_silence` means the stream was digitally silent
+    /// at some point during the recording, even if its audio returned later.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warning: Option<TrackWarning>,
 }
@@ -517,7 +519,7 @@ pub fn record(
         };
         // Each source recovers on its own: losing system audio (for example
         // when ScreenCaptureKit loses its display) never stops the microphone.
-        let microphone_warnings = capture::TrackWarnings::new(updates.clone());
+        let microphone_warnings = warning::TrackWarnings::new(updates.clone());
         let microphone_capture = capture::SourceSupervisor::microphone(
             sink(MeetingSource::Microphone, &microphone_drops),
             start.application.clone(),
@@ -551,6 +553,9 @@ pub fn record(
             if let Some(chapters) = live_chapters.as_ref().and_then(|live| live.take()) {
                 record_chapters(&meeting_dir, manifest, chapters, updates.as_ref());
             }
+            // Written as soon as the microphone is warned about, so a crash
+            // while recording still says it was digitally silent.
+            warning::persist_warning(&meeting_dir, manifest, &microphone_warnings);
         };
         while !shutdown.load(Ordering::Relaxed) && !writer.is_finished() {
             take_updates(&mut manifest);
@@ -576,7 +581,7 @@ pub fn record(
         stats.microphone.dropped_packets = microphone_drops.load(Ordering::Relaxed);
         manifest.system = stats.system;
         manifest.microphone = stats.microphone;
-        manifest.microphone.warning = microphone_warnings.current();
+        manifest.microphone.warning = microphone_warnings.persisted();
         if crate::desktop::process_exit::quitting() && has_recorded_audio(&manifest) {
             // Final transcription would outlast quitting's drain.
             drop(rolling.finish());

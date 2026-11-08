@@ -8,7 +8,6 @@
 //! Linux, and WASAPI loopback on Windows.
 
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
@@ -16,7 +15,8 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
-use super::{AudioPacket, MeetingSource, RecordingUpdate, SAMPLE_RATE, TrackWarning};
+use super::warning::{SilenceAction, SilencePolicy, TrackWarnings};
+use super::{AudioPacket, MeetingSource, SAMPLE_RATE};
 use crate::dictation::StreamingResampler;
 
 const RETRY_INITIAL: Duration = Duration::from_millis(500);
@@ -25,12 +25,6 @@ pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Core Audio delivers silence continuously; this long without a buffer
 /// means the device or tap stopped.
 pub(super) const STALL_TIMEOUT: Duration = Duration::from_secs(3);
-/// Exact-zero samples that mean the microphone stream is digitally silent
-/// rather than a quiet room.
-const SILENCE_TIMEOUT: Duration = Duration::from_secs(3);
-/// How many times one recording reopens a digitally silent microphone before
-/// keeping the stream open and warning instead.
-const SILENCE_REOPENS: u8 = 2;
 
 /// Delivers one source's 16 kHz audio to the track writer, stamped on the
 /// meeting's shared capture clock.
@@ -59,111 +53,6 @@ impl PacketSink {
             self.drops.fetch_add(1, Ordering::Relaxed);
         }
     }
-}
-
-/// The microphone's user-facing warning, shared by each reopened source with
-/// the recorder that persists the final one.
-#[derive(Clone)]
-pub(super) struct TrackWarnings {
-    current: Arc<Mutex<Option<TrackWarning>>>,
-    updates: Option<SyncSender<RecordingUpdate>>,
-}
-
-impl TrackWarnings {
-    pub(super) fn new(updates: Option<SyncSender<RecordingUpdate>>) -> Self {
-        Self {
-            current: Arc::default(),
-            updates,
-        }
-    }
-
-    /// Sets the warning, reporting a change to the controller.
-    fn set(&self, warning: Option<TrackWarning>) {
-        let mut current = self
-            .current
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if *current == warning {
-            return;
-        }
-        *current = warning;
-        drop(current);
-        if let Some(updates) = &self.updates {
-            let _ = updates.try_send(RecordingUpdate::SourceWarning { warning });
-        }
-    }
-
-    /// The warning as of the last source change, for the final manifest.
-    pub(super) fn current(&self) -> Option<TrackWarning> {
-        *self
-            .current
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-    }
-}
-
-/// What a microphone chunk's silence count crossed into.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SilenceEdge {
-    /// The stream reached [`SILENCE_TIMEOUT`] of exact zeros.
-    Silent,
-    /// Nonzero audio ended a digitally silent episode.
-    Audible,
-    /// Neither the start nor the end of an episode.
-    Unchanged,
-}
-
-/// Counts consecutive exact-zero samples from the microphone so a stream
-/// that keeps delivering digital silence while its chunks keep arriving, as
-/// a call app holding the device with voice processing does, is noticed.
-#[derive(Clone, Debug)]
-struct SilenceWatch {
-    rate: u32,
-    zeros: u64,
-}
-
-impl SilenceWatch {
-    fn new(rate: u32) -> Self {
-        Self { rate, zeros: 0 }
-    }
-
-    /// Starts a fresh count for a newly opened input device or sample rate.
-    fn reset(&mut self, rate: u32) {
-        self.rate = rate;
-        self.zeros = 0;
-    }
-
-    /// Counts `samples`, reporting only the edges of an episode.
-    fn observe(&mut self, samples: &[f32]) -> SilenceEdge {
-        let was_silent = self.is_silent();
-        for &sample in samples {
-            if sample == 0.0 {
-                self.zeros += 1;
-            } else {
-                self.zeros = 0;
-            }
-        }
-        match (was_silent, self.is_silent()) {
-            (false, true) => SilenceEdge::Silent,
-            (true, false) => SilenceEdge::Audible,
-            _ => SilenceEdge::Unchanged,
-        }
-    }
-
-    fn is_silent(&self) -> bool {
-        self.rate > 0
-            && self.zeros >= u64::from(self.rate).saturating_mul(SILENCE_TIMEOUT.as_secs())
-    }
-}
-
-/// Claims one of the recording's silence reopens; false once they are spent.
-fn claim_silence_reopen(reopens: &AtomicU8) -> bool {
-    let used = reopens.load(Ordering::Relaxed);
-    if used >= SILENCE_REOPENS {
-        return false;
-    }
-    reopens.store(used + 1, Ordering::Relaxed);
-    true
 }
 
 /// An open source that the supervisor polls until it fails.
@@ -359,6 +248,12 @@ fn follow_call_input(current: Option<String>, reported: Vec<String>) -> Option<S
     }
 }
 
+/// Whether `opened`, the input a meeting records from, is one the call app
+/// reports recording from.
+fn call_app_reports_input(opened: Option<&str>, reported: &[String]) -> bool {
+    opened.is_some_and(|opened| reported.iter().any(|reported| reported == opened))
+}
+
 /// The UIDs of the inputs the call app records from; none where the OS
 /// does not report them.
 fn call_app_inputs(application: &str) -> Vec<String> {
@@ -376,19 +271,13 @@ fn call_app_inputs(application: &str) -> Vec<String> {
     }
 }
 
-/// The input the call app `application` records from, following `current`.
-fn current_call_input(application: Option<&str>, current: Option<String>) -> Option<String> {
-    application.and_then(|application| follow_call_input(current, call_app_inputs(application)))
-}
-
 struct MicrophoneSource {
     input: crate::audio::AudioInput,
     resample: To16k,
     last_audio: Instant,
-    /// Exact-zero samples from the current input.
-    silence: SilenceWatch,
-    /// Silence reopens this recording has already spent.
-    silence_reopens: Arc<AtomicU8>,
+    /// The per-chunk digital silence decision, sharing this recording's
+    /// reopen budget with every reopened stream.
+    silence: SilencePolicy,
     /// The controller-visible warning, shared across reopened streams.
     warnings: TrackWarnings,
     selected: Option<String>,
@@ -401,6 +290,10 @@ struct MicrophoneSource {
     application: Option<String>,
     /// The UID of the input the call app records from.
     call_input: Option<String>,
+    /// The input UIDs the call app last reported recording from.
+    call_inputs: Vec<String>,
+    /// The UID of this stream's input.
+    opened_uid: Option<String>,
     call_input_checked: Instant,
 }
 
@@ -412,13 +305,18 @@ impl MicrophoneSource {
         warnings: TrackWarnings,
     ) -> Result<Self> {
         let route_generation = crate::audio::input_route_generation();
-        let call_input = current_call_input(application.as_deref(), None);
+        let call_inputs = application
+            .as_deref()
+            .map(call_app_inputs)
+            .unwrap_or_default();
+        let call_input = follow_call_input(None, call_inputs.clone());
         let crate::audio::Opened::Input(input) =
             crate::audio::open_meeting_input(selected.as_deref(), call_input.as_deref(), None)?
         else {
             unreachable!("nothing to keep");
         };
         let input = *input;
+        let opened_uid = input.uid.clone();
         let resample = To16k::new(input.sample_rate)?;
         tracing::info!(
             device = input.device_name,
@@ -428,10 +326,10 @@ impl MicrophoneSource {
         );
         let mut retry = UnopenableRetry::default();
         retry.resolved(input.selection, Instant::now());
+        let warning = warnings.live().is_some();
         Ok(Self {
             input,
-            silence: SilenceWatch::new(resample.rate),
-            silence_reopens,
+            silence: SilencePolicy::new(resample.rate, silence_reopens, warning),
             warnings,
             resample,
             last_audio: Instant::now(),
@@ -441,8 +339,17 @@ impl MicrophoneSource {
             retry,
             application,
             call_input,
+            call_inputs,
+            opened_uid,
             call_input_checked: Instant::now(),
         })
+    }
+
+    /// Whether the call app records from the input this stream opened, which
+    /// is when another app's voice processing can leave it digitally silent.
+    /// A manual recording has no call app and never holds the device.
+    fn call_app_holds_device(&self) -> bool {
+        call_app_reports_input(self.opened_uid.as_deref(), &self.call_inputs)
     }
 
     /// Follows a change of the input the call app records from, of the
@@ -457,8 +364,12 @@ impl MicrophoneSource {
             && now.duration_since(self.call_input_checked) >= CALL_INPUT_INTERVAL
         {
             self.call_input_checked = now;
-            let call_input =
-                current_call_input(self.application.as_deref(), self.call_input.clone());
+            self.call_inputs = self
+                .application
+                .as_deref()
+                .map(call_app_inputs)
+                .unwrap_or_default();
+            let call_input = follow_call_input(self.call_input.clone(), self.call_inputs.clone());
             call_input_changed = call_input != self.call_input;
             self.call_input = call_input;
         }
@@ -511,8 +422,10 @@ impl MicrophoneSource {
             "meeting microphone switched"
         );
         self.retry.resolved(input.selection, now);
+        // A new device starts a fresh zero count, but a warning raised by the
+        // old one stays until real audio clears it.
         self.silence.reset(input.sample_rate);
-        self.warnings.set(None);
+        self.opened_uid = input.uid.clone();
         self.input = input;
         self.last_audio = Instant::now();
     }
@@ -524,31 +437,35 @@ impl LiveSource for MicrophoneSource {
         match self.input.recv_timeout(POLL_INTERVAL) {
             crate::audio::AudioInputEvent::Chunk { samples, .. } => {
                 self.last_audio = Instant::now();
-                let edge = self.silence.observe(&samples);
+                let action = self.silence.observe(&samples, self.call_app_holds_device());
                 sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
-                match edge {
-                    SilenceEdge::Silent if claim_silence_reopen(&self.silence_reopens) => {
+                match action {
+                    SilenceAction::Reopen => {
                         tracing::warn!(
                             device = %self.input.device_name,
                             "meeting microphone delivered digital silence; reopening it"
                         );
                         return Err("microphone delivered digital silence".into());
                     }
-                    SilenceEdge::Silent => {
-                        tracing::warn!(
-                            device = %self.input.device_name,
-                            "meeting microphone is still digitally silent; keeping the stream open"
-                        );
-                        self.warnings.set(Some(TrackWarning::DigitalSilence));
+                    SilenceAction::Warn => {
+                        if self.warnings.warn() {
+                            self.silence.applied(SilenceAction::Warn);
+                            tracing::warn!(
+                                device = %self.input.device_name,
+                                "meeting microphone is still digitally silent; keeping the stream open"
+                            );
+                        }
                     }
-                    SilenceEdge::Audible => {
-                        tracing::info!(
-                            device = %self.input.device_name,
-                            "meeting microphone audio returned"
-                        );
-                        self.warnings.set(None);
+                    SilenceAction::Clear => {
+                        if self.warnings.clear() {
+                            self.silence.applied(SilenceAction::Clear);
+                            tracing::info!(
+                                device = %self.input.device_name,
+                                "meeting microphone audio returned"
+                            );
+                        }
                     }
-                    SilenceEdge::Unchanged => {}
+                    SilenceAction::Nothing => {}
                 }
                 Ok(())
             }
@@ -622,37 +539,12 @@ mod tests {
     }
 
     #[test]
-    fn a_digital_silence_watch_needs_three_seconds_of_exact_zeros() {
-        let mut watch = SilenceWatch::new(1_000);
-        assert_eq!(watch.observe(&[0.0; 2_999]), SilenceEdge::Unchanged);
-        assert_eq!(watch.observe(&[0.0]), SilenceEdge::Silent);
-        assert_eq!(watch.observe(&[0.0; 500]), SilenceEdge::Unchanged);
-    }
-
-    #[test]
-    fn a_nonzero_sample_ends_a_digital_silence_episode() {
-        let mut watch = SilenceWatch::new(1_000);
-        assert_eq!(watch.observe(&[0.0; 3_000]), SilenceEdge::Silent);
-        assert_eq!(watch.observe(&[0.0, 0.25]), SilenceEdge::Audible);
-        assert_eq!(watch.observe(&[0.0; 2_999]), SilenceEdge::Unchanged);
-        assert_eq!(watch.observe(&[0.0]), SilenceEdge::Silent);
-    }
-
-    #[test]
-    fn a_route_change_restarts_the_digital_silence_watch() {
-        let mut watch = SilenceWatch::new(1_000);
-        assert_eq!(watch.observe(&[0.0; 3_000]), SilenceEdge::Silent);
-        watch.reset(2_000);
-        assert_eq!(watch.observe(&[0.0; 1_000]), SilenceEdge::Unchanged);
-        assert_eq!(watch.observe(&[0.0; 5_000]), SilenceEdge::Silent);
-    }
-
-    #[test]
-    fn a_digitally_silent_microphone_is_reopened_twice_before_warning() {
-        let reopens = AtomicU8::new(0);
-        assert!(claim_silence_reopen(&reopens));
-        assert!(claim_silence_reopen(&reopens));
-        assert!(!claim_silence_reopen(&reopens));
-        assert_eq!(reopens.load(Ordering::Relaxed), SILENCE_REOPENS);
+    fn only_an_input_the_call_app_reports_counts_as_held() {
+        let reported = ["BuiltIn".to_owned()];
+        assert!(call_app_reports_input(Some("BuiltIn"), &reported));
+        assert!(!call_app_reports_input(Some("Jabra"), &reported));
+        // A manual recording, or an app macOS reports no inputs for.
+        assert!(!call_app_reports_input(None, &reported));
+        assert!(!call_app_reports_input(Some("BuiltIn"), &[]));
     }
 }

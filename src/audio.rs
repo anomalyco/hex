@@ -215,6 +215,9 @@ pub struct AudioInput {
     chunks: Receiver<(Vec<f32>, CaptureInstant)>,
     pub sample_rate: u32,
     pub device_name: String,
+    /// The device's stable OS identifier, when it has one, which is what a
+    /// call app's reported inputs are compared by.
+    pub uid: Option<String>,
     /// Whether this input stands in for the saved microphone until it can
     /// be opened again.
     pub selection: Selection,
@@ -452,6 +455,7 @@ impl AudioInput {
                 stream_errors,
                 sample_rate: 48_000,
                 device_name: "Test microphone".into(),
+                uid: None,
                 selection: Selection::InUse,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
@@ -513,6 +517,7 @@ impl AudioInput {
     fn open_device(device: Device, device_name: String, follows_default: bool) -> Result<Self> {
         #[cfg(target_os = "macos")]
         watch_input_devices();
+        let uid = device.id().ok().map(|id| id.id().to_owned());
         let restart_generation = audio_service_restart_generation();
         let started = input_format::start_stream_with_fallback(
             &device,
@@ -525,6 +530,7 @@ impl AudioInput {
             chunks: started.chunks,
             sample_rate: started.sample_rate,
             device_name,
+            uid,
             selection: Selection::InUse,
             stream_errors: started.stream_errors,
             watch_service_restarts: true,

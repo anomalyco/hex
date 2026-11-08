@@ -1104,7 +1104,7 @@ fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automat
         })
     );
     let subtitle = if silent {
-        tr("Microphone is silent").to_owned()
+        tr_fill("Microphone is silent · {}", &elapsed)
     } else if automatic && started.elapsed() < AUTOMATIC_LABEL {
         tr_fill("Started automatically · {}", &elapsed)
     } else {
@@ -1456,7 +1456,9 @@ mod tests {
         *warning = Some(crate::meeting::TrackWarning::DigitalSilence);
         let (rt, _, _) = runtime(kind, false, true, RECORDING);
         assert!(
-            texts(&rt).iter().any(|text| text == "Microphone is silent"),
+            texts(&rt)
+                .iter()
+                .any(|text| text.starts_with("Microphone is silent · ")),
             "{:?}",
             texts(&rt)
         );

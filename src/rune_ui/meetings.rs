@@ -18,9 +18,7 @@ use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, card, page, pulsing_dot, segmented_tx,
 };
 use super::list_detail::{self as ld, Item};
-use super::lists::{
-    Tone, dismissible_error_panel, error_panel, section_label, tone_tag, warning_panel,
-};
+use super::lists::{Tone, dismissible_error_panel, error_panel, section_label, tone_tag};
 use super::platform::MeetingRequest;
 use super::{Menu, Ui};
 use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
@@ -649,6 +647,7 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
             "meetings-error",
             tr("Meetings could not be loaded."),
             error,
+            Tone::Danger,
         ));
     }
     if let Some(error) = &pane.runtime_error {
@@ -888,14 +887,15 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     ];
     let mut body = col().key("detail-body").gap(24.0).pb(8.0);
     for (key, title, error) in errors.into_iter().flatten() {
-        body = body.child(error_panel(p, key, title, error));
+        body = body.child(error_panel(p, key, title, error, Tone::Danger));
     }
     if !active && meeting.microphone_warning == Some(crate::meeting::TrackWarning::DigitalSilence) {
-        body = body.child(warning_panel(
+        body = body.child(error_panel(
             p,
             "microphone-silence",
             tr("Microphone is silent"),
             tr("Your microphone was silent for part of this call. Another app may have been using it with voice processing, so your side may be missing."),
+            Tone::Warning,
         ));
     }
     if let Some(summary) = &meeting.summary {
@@ -1145,7 +1145,13 @@ fn transcript(p: Paint, meeting: &Meeting, stop_pending: bool) -> El {
     };
     let turns = match &meeting.transcript {
         Transcript::Unavailable(error) => {
-            return error_panel(p, "transcript-error", tr("Transcript unavailable."), error);
+            return error_panel(
+                p,
+                "transcript-error",
+                tr("Transcript unavailable."),
+                error,
+                Tone::Danger,
+            );
         }
         Transcript::Loaded(turns) => turns,
     };
