@@ -350,12 +350,12 @@ const KEYS: &[Key] = &[
     key(
         "labs.keep_on_clipboard",
         Kind::Bool,
-        "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there (macOS)",
+        "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there (macOS and Windows)",
     ),
     key(
         "labs.copy_only",
         Kind::Bool,
-        "Labs: put the dictation on the clipboard instead of pasting it (macOS)",
+        "Labs: put the dictation on the clipboard instead of pasting it (macOS and Windows)",
     ),
     key(
         "labs.spoken_formatting",

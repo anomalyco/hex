@@ -709,8 +709,9 @@ Completed output                         // output
 ├── Paste -> Current focus, in submission order
 │   ├── Previous clipboard restored 500 ms later, unless something newer replaced it
 │   ├── Windows -> the transcript is marked out of clipboard history (Win+V) and cloud sync (#851)
-│   ├── Labs > Keep dictation on clipboard (macOS, off) -> the dictation stays on the clipboard (labs.md)
-│   └── Labs > Copy dictation only (macOS, off) -> clipboard only: no paste, typing, or restore (labs.md)
+│   ├── Labs > Keep dictation on clipboard (macOS, Windows, off) -> the dictation stays on the clipboard (labs.md)
+│   │   └── Windows -> kept as an ordinary entry, in history too
+│   └── Labs > Copy dictation only (macOS, Windows, off) -> clipboard only: no paste, typing, or restore (labs.md)
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
 │   ├── Last completed dictation
 │   └── macOS menu item shows the saved binding (⌥⇧V by default); unbound,

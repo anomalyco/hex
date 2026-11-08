@@ -1094,11 +1094,18 @@ fn process_dictation_job(
         }
         // A printed dictation is never pasted, and Paste Last skips it.
         if !printed {
-            paster
-                .as_mut()
-                .map_err(|error| format!("{error:#}"))?
-                .paste(&text, job.flavour.terminal_paste())
-                .map_err(|error| format!("{error:#}"))?;
+            let paster = paster.as_mut().map_err(|error| format!("{error:#}"))?;
+            // Labs › Copy dictation only, read as the output commits:
+            // dictations go to the clipboard unpasted; Paste Last still pastes.
+            if crate::labs::copy_only() {
+                paster
+                    .copy_only(&text)
+                    .map_err(|error| format!("{error:#}"))?;
+            } else {
+                paster
+                    .paste(&text, job.flavour.terminal_paste())
+                    .map_err(|error| format!("{error:#}"))?;
+            }
             *last_dictation
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()) = Some(text.clone());

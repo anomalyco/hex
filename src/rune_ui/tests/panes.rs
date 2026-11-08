@@ -445,11 +445,20 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("share-dictation-shortcut").is_none());
     open_labs(&mut rt);
     assert!(rt.find("lab-mouse-shortcuts").is_none(), "macOS only");
-    assert!(rt.find("lab-keep-on-clipboard").is_none(), "macOS only");
-    assert!(rt.find("lab-copy-only").is_none(), "macOS only");
+    assert!(
+        rt.find("lab-keep-on-clipboard").is_some(),
+        "macOS and Windows"
+    );
+    assert!(rt.find("lab-copy-only").is_some(), "macOS and Windows");
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
     assert!(rt.find("lab-spoken-symbols").is_some(), "every OS");
+    assert!(!rt.state.settings.labs.keep_on_clipboard);
+    tap(&mut rt, "lab-keep-on-clipboard");
+    assert!(rt.state.settings.labs.keep_on_clipboard);
+    assert!(!rt.state.settings.labs.copy_only);
+    tap(&mut rt, "lab-copy-only");
+    assert!(rt.state.settings.labs.copy_only);
     assert!(!rt.state.settings.share_dictation_shortcut);
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);
