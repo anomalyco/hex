@@ -37,6 +37,9 @@ mod os;
 #[cfg(target_os = "windows")]
 #[path = "meeting/windows.rs"]
 mod os;
+/// Linux's Trash, for capture retention too: distros ship no `trash` command.
+#[cfg(target_os = "linux")]
+pub(crate) use os::move_to_trash;
 pub(crate) use os::reveal;
 #[cfg(target_os = "macos")]
 pub(crate) use os::{
