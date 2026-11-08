@@ -49,7 +49,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
-├── Caps Lock dictation no labs.caps_lock_dictation       (macOS)   a Caps Lock press starts and stops hands-free dictation; its light shows recording, processing, and off
+├── Caps Lock dictation no labs.caps_lock_dictation + labs.caps_lock_light (macOS)   a Caps Lock press starts and stops hands-free dictation; its light waits for the microphone, then shows recording (steady or slow blink), processing, and off
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
@@ -473,12 +473,17 @@ mid-capture cancels that capture.
 Caps Lock never changes typing: every press also resets the system Caps Lock
 state off through `IOHIDSetModifierLockState`, so the next keys stay
 lowercase. The key's light follows Hex's dictation state through the
-keyboard's HID LED output element (usage page 0x08, usage 0x02). It is on
-while any capture records, including a normal-shortcut or Annotate capture,
-blinking while an accepted job transcribes or processes, and off when nothing
-is left or the capture is discarded, cancelled, or failed. Turning the lab off
-or quitting Hex clears the light and stops forcing the lock off, so Caps Lock
-behaves normally again.
+keyboard's HID LED output element (usage page 0x08, usage 0x02). It comes on
+only after the capture's microphone delivers its first audio, so a press whose
+microphone is still opening (with Release microphone while idle, or a device
+switch) leaves the light as it was. Once live, it is on while any capture
+records, including a normal-shortcut or Annotate capture, blinking while an
+accepted job transcribes or processes, and off when nothing is left or the
+capture is discarded, cancelled, or failed. The recording light is steady by
+default; its Recording light option, Slow blink, blinks at 700 ms on and off
+while recording, while transcribing keeps its 350 ms blink. Turning the lab
+off or quitting Hex clears the light and stops forcing the lock off, so Caps
+Lock behaves normally again.
 
 ```ts
 Labs › Caps Lock dictation on                        // labs.caps_lock_dictation
@@ -488,7 +493,9 @@ Labs › Caps Lock dictation on                        // labs.caps_lock_dictati
 ├── Escape while it records -> cancels (the tap keeps Escape from the app)
 ├── Toggle mode's other cancel shortcut -> does not touch a Caps Lock capture
 ├── software Caps Lock -> off after every press; typing is unchanged
-├── light -> solid recording, blink transcribing/processing, off done/cancelled/failed
+├── light -> stays off, or keeps blinking a pending job, until the microphone delivers audio
+├── Recording light -> steady (default) solid recording, or slow blink at 700 ms on/off; transcribing always blinks at 350 ms
+├── light -> off done/cancelled/failed
 ├── Labs off mid-capture -> cancels it, light off, normal Caps Lock returns
 └── Hex quits -> light off, lock released
 ```
@@ -520,6 +527,11 @@ lock reset. Checks:
 `an_older_jobs_stage_event_never_interrupts_a_newer_capture`,
 `a_stage_event_for_an_unknown_job_changes_nothing`,
 `the_light_is_solid_recording_blinking_working_and_off_after`,
+`the_light_waits_for_the_captures_first_audio`,
+`a_meter_without_a_capture_turns_nothing_on`,
+`ending_a_waiting_capture_clears_the_wait`,
+`a_waiting_capture_keeps_earlier_jobs_blinking`,
+`the_slow_blink_setting_only_changes_the_recording_light`,
 `the_light_waits_for_every_accepted_job`,
 `cancelling_or_failing_a_capture_turns_the_light_off`,
 `a_hid_press_matches_an_edge_timestamp_from_before_the_callback`,
@@ -537,9 +549,11 @@ lock reset. Checks:
 `a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode` in
 [recognition.rs](../../src/recognition.rs) and
 [suppression/tests.rs](../../src/suppression/tests.rs);
-`caps_lock_dictation_is_its_own_bit_and_macos_only` in
+`caps_lock_dictation_is_its_own_bit_and_macos_only` and
+`caps_lock_light_carries_its_slow_blink_choice` in
 [labs.rs](../../src/labs.rs);
-`contributed_options_are_labs_toggles_off_by_default` in
+`contributed_options_are_labs_toggles_off_by_default` and
+`caps_lock_light_shows_its_choices_on_its_card_while_on` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real Mac
 with the lab on — no hardware run of the Caps Lock LED, the lock reset, the
 blink, Escape cancellation, or the off/quit cleanup. The `mac-labs` and

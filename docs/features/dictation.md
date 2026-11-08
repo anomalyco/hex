@@ -57,9 +57,11 @@ cancels the Caps Lock capture in every shortcut mode (in Toggle mode, Toggle's
 other cancel shortcut does not; only Escape does). A Caps Lock remapped to
 Control or Escape never changes AlphaShift, so it never toggles dictation. Each
 press also clears the system Caps Lock state, so following keys stay
-lowercase, and the key's light is solid while any capture records (including a
-normal-shortcut or Annotate capture), blinks while Hex transcribes or
-processes, and is off otherwise. Turning the lab off or quitting Hex clears the
+lowercase, and the key's light comes on once the capture's microphone delivers
+audio, solid while any capture records (including a normal-shortcut or Annotate
+capture), blinks at 350 ms while Hex transcribes or processes, and is off
+otherwise. Its Labs › Recording light option can make recording blink slowly at
+700 ms instead of staying solid. Turning the lab off or quitting Hex clears the
 light and restores normal Caps Lock behaviour. The light needs Input Monitoring
 (which Hex already asks for); without it dictation still works and the light
 stays under macOS's control. Implemented November 7, 2026, not verified on

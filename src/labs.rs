@@ -22,7 +22,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::app_settings::{AppSettings, LabsSettings};
+use crate::app_settings::{AppSettings, CapsLockLight, LabsSettings};
 
 mod cli;
 mod description;
@@ -347,6 +347,9 @@ impl Feature {
     pub fn for_settings_key(key: &str) -> Option<Self> {
         if key == "labs.unload_idle_minutes" {
             return Some(Self::UnloadIdle);
+        }
+        if key == "labs.caps_lock_light" {
+            return Some(Self::CapsLockDictation);
         }
         if key == "capture.replay_hotkey" {
             return Some(Self::AnnotateReplay);
@@ -823,6 +826,9 @@ const CAPS_LOCK_DICTATION: u64 = FAILURE_NOTICES << 1;
 const GNOME_ANNOTATE: u64 = CAPS_LOCK_DICTATION << 1;
 /// The next bit above Annotate on GNOME's switch.
 const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
+/// The next bit above Typed text's switch: Caps Lock dictation's recording
+/// light blinks slowly instead of staying solid.
+const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1100,6 +1106,13 @@ pub fn caps_lock_dictation() -> bool {
     on(CAPS_LOCK_DICTATION) && Feature::CapsLockDictation.on_this_os()
 }
 
+/// Whether the Caps Lock light blinks slowly while recording instead of
+/// staying solid (macOS; read by the light model for each pattern).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn caps_lock_slow_blink() -> bool {
+    on(CAPS_LOCK_SLOW_BLINK) && Feature::CapsLockDictation.on_this_os()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).
@@ -1260,6 +1273,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             CAPS_LOCK_DICTATION,
         ),
         (
+            Feature::CapsLockDictation,
+            settings.caps_lock_light == CapsLockLight::SlowBlink,
+            CAPS_LOCK_SLOW_BLINK,
+        ),
+        (
             Feature::QuitClosesWindow,
             settings.quit_closes_window,
             QUIT_CLOSES_WINDOW,
@@ -1414,6 +1432,10 @@ mod tests {
         assert_eq!(
             Feature::for_settings_key("labs.unload_idle_minutes"),
             Some(Feature::UnloadIdle)
+        );
+        assert_eq!(
+            Feature::for_settings_key("labs.caps_lock_light"),
+            Some(Feature::CapsLockDictation)
         );
         assert_eq!(Feature::for_settings_key("dictation_hotkey"), None);
     }
@@ -1791,6 +1813,20 @@ mod tests {
             Feature::CapsLockDictation.on_this_os(),
             cfg!(target_os = "macos")
         );
+    }
+
+    #[test]
+    fn caps_lock_light_carries_its_slow_blink_choice() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(labs.caps_lock_light, CapsLockLight::Steady);
+        labs.caps_lock_dictation = true;
+        assert_eq!(encode_where(&labs, |_| true) & CAPS_LOCK_SLOW_BLINK, 0);
+        labs.caps_lock_light = CapsLockLight::SlowBlink;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & CAPS_LOCK_SLOW_BLINK, 0);
+        assert_ne!(state & CAPS_LOCK_DICTATION, 0);
+        assert_eq!(state & GNOME_ANNOTATE, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 15);
     }
 
     #[test]

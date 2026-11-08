@@ -446,6 +446,11 @@ const KEYS: &[Key] = &[
         "Labs: a Caps Lock press starts and stops dictation hands-free, and its light shows when Hex records and transcribes; Caps Lock stays off so typing is unchanged (macOS)",
     ),
     key(
+        "labs.caps_lock_light",
+        Kind::Choice(&["steady", "slow-blink"]),
+        "Labs: whether the Caps Lock light stays solid or blinks slowly while recording (macOS)",
+    ),
+    key(
         "labs.notch_indicator",
         Kind::Bool,
         "Labs: on a screen with a notch, the recording indicator grows out of the notch at either visible position; Hidden still hides it, and flat screens keep the Top or Bottom setting (macOS)",
@@ -1632,6 +1637,7 @@ mod tests {
             ("shortcut_mode", "tap"),
             ("meetings.calendar.lead_minutes", "3"),
             ("meetings.output_folder", "relative/path"),
+            ("labs.caps_lock_light", "fast"),
             ("dictation_processing.modes", "[{"),
         ] {
             assert_eq!(
@@ -1657,6 +1663,15 @@ mod tests {
         );
         let change = apply(&settings, "meetings.calendar.lead_minutes", "5", &rules()).unwrap();
         assert_eq!(change.settings.meetings.calendar.lead_minutes, 5);
+        let change = apply(&settings, "labs.caps_lock_light", "slow-blink", &rules()).unwrap();
+        assert_eq!(
+            change.settings.labs.caps_lock_light,
+            crate::app_settings::CapsLockLight::SlowBlink
+        );
+        assert_eq!(
+            get(&change.settings, "labs.caps_lock_light").unwrap()[0].value,
+            Value::String("slow-blink".into())
+        );
         let change = apply(&settings, "ui_language", "none", &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);
         let change = apply(
