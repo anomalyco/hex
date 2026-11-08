@@ -1359,7 +1359,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {
-        _ if ui.labs_open => (vec![labs::tabs(ui, p)], labs::page(ui, p)),
+        _ if ui.labs_open => (labs::actions(ui, p), labs::page(ui, p)),
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
@@ -1393,7 +1393,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
                 ui.pane.title()
             },
             if ui.labs_open {
-                Some(labs::search_field(ui, p))
+                labs::title_accessory(ui, p)
             } else {
                 (ui.pane == Pane::Meetings)
                     .then(|| meetings::view_switch(ui, p))

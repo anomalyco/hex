@@ -378,10 +378,24 @@ pub(super) fn icon_row_tagged(
     description: Option<&str>,
     control: El,
 ) -> El {
+    tagged_row(p, key, Some(glyph), title, tag, description, control)
+}
+
+/// A [`setting_row`] with an optional leading icon and a small tag after
+/// its title.
+pub(super) fn tagged_row(
+    p: Paint,
+    key: &str,
+    glyph: Option<&'static rune::Icon>,
+    title: &str,
+    tag: Option<El>,
+    description: Option<&str>,
+    control: El,
+) -> El {
     let said = description.map(str::to_owned);
     let description = description.map(|copy| described_copy(copy, p.muted()));
     described(
-        copy_row_tagged(p, key, Some(glyph), title, tag, description, control, false),
+        copy_row_tagged(p, key, glyph, title, tag, description, control, false),
         said,
     )
 }
