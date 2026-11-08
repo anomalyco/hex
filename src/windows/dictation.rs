@@ -198,7 +198,13 @@ pub fn run(
     updates: mpsc::Receiver<Box<crate::app_settings::AppSettings>>,
     shutdown: &AtomicBool,
 ) -> Result<()> {
-    let transcriber = LocalTranscriber::load(selection)?;
+    // Labs › Unload model when idle: a launch stays parked until the first
+    // dictation, as after an idle unload.
+    let transcriber = if crate::labs::unload_idle().is_some() {
+        None
+    } else {
+        Some(LocalTranscriber::load(selection)?)
+    };
     let WindowsDictationConfig {
         device,
         hotkey,
@@ -291,7 +297,10 @@ pub fn run(
     let mut audio_suppressor =
         crate::windows::audio_control::AudioSuppressor::start(while_dictating);
     let mut model = crate::transcription::local_transcriber::ModelSwap::new(selection);
-    let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
+    let mut engine = match transcriber {
+        Some(transcriber) => Arc::new(TranscriptionEngine::start(transcriber)?),
+        None => Arc::new(TranscriptionEngine::start_parked(selection.clone())?),
+    };
     // The local API transcribes host audio on this engine's model.
     engine.share();
     // The `capture` experiment: its host, the audio it copies from this

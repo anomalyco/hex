@@ -309,18 +309,31 @@ pub(crate) fn run(
     updates: mpsc::Receiver<ListenerUpdate>,
 ) -> Result<()> {
     let mut settings = settings.clone();
-    let transcriber = transcriber.map_or_else(
-        || {
-            LocalTranscriber::load(&crate::transcription::custom_models::runnable(
-                &settings.transcription,
-            ))
-        },
-        Ok,
-    )?;
+    // Labs › Unload model when idle: a launch stays parked until the first
+    // dictation, as after an idle unload; drop a model Settings prepared for
+    // this listener.
+    let transcriber = if crate::labs::unload_idle().is_some() {
+        drop(transcriber);
+        None
+    } else {
+        Some(transcriber.map_or_else(
+            || {
+                LocalTranscriber::load(&crate::transcription::custom_models::runnable(
+                    &settings.transcription,
+                ))
+            },
+            Ok,
+        )?)
+    };
     crate::transcription::speech_detector::prewarm();
     // The engine outlives the output worker, which waits on its transcripts.
     // Captures transcribe on it too, holding it weakly.
-    let mut engine = Arc::new(TranscriptionEngine::start(transcriber)?);
+    let mut engine = match transcriber {
+        Some(transcriber) => Arc::new(TranscriptionEngine::start(transcriber)?),
+        None => Arc::new(TranscriptionEngine::start_parked(
+            crate::transcription::custom_models::runnable(&settings.transcription),
+        )?),
+    };
     // The local API transcribes host audio on this engine's model.
     engine.share();
     // Drop audio/hotkeys and close the job queue before joining slow output on
