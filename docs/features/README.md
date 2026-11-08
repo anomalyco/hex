@@ -795,6 +795,7 @@ General                                  // settings
 ├── Microphone -> Value names the input in use, with live level bars // settings.microphone
 │   ├── "System default · Kit Pods", or a saved device
 │   ├── Level bars -> peak of the audio Hex receives, ~30 fps while General shows them above rest // input_level
+│   │   ├── Peak measured around each chunk's mean, so a microphone's DC offset never lights them
 │   │   ├── Read from one atomic the audio owner stores per chunk; never opens or blocks the mic
 │   │   ├── Quiet room (bars at rest) -> no 30 fps frames; the window's 250 ms tick notices a rise.
 │   │   │   An open General window with a warm mic woke 34.5 times a second in a quiet room before
