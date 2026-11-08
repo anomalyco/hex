@@ -19,6 +19,9 @@ use crate::model::{
 mod platform;
 pub use platform::*;
 
+// Ink queries on the telemetry; a child module keeps `capture.rs` under the code-shape cap.
+mod ink_state;
+
 pub const FRAME_SAMPLE_INTERVAL: Duration = Duration::from_millis(220);
 /// Candidate frames only feed scene diffs and keyframe selection; the keyframes themselves are
 /// decoded from `recording.mp4` at full size afterwards.
@@ -1959,27 +1962,6 @@ impl SharedCaptureTelemetry {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         )
-    }
-
-    /// The end time of the newest lifted ink stroke, without copying the
-    /// strokes (no laser).
-    pub fn newest_ink_end_ms(&self) -> Option<u64> {
-        self.strokes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .rev()
-            .find(|stroke| !stroke.laser)
-            .map(|stroke| stroke.t1)
-    }
-
-    /// Whether a stroke is still being drawn, without copying it.
-    pub fn has_live_ink(&self) -> bool {
-        self.live_ink
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .is_some_and(|stroke| !stroke.pts.is_empty())
     }
 
     pub fn ink_snapshot(&self) -> InkSnapshot {
