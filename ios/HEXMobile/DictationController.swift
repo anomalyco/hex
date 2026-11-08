@@ -49,6 +49,7 @@ final class DictationController {
         let keyboardJobID: String?
         let style: DictationStyle
         let usesCleanup: Bool
+        let vocabularyTerms: [String]
         let copyToPasteboard: Bool
     }
 
@@ -63,6 +64,7 @@ final class DictationController {
     private let transcriberFactory: () async -> any LocalTranscribing
     private let cleaner: (any TranscriptCleaning)?
     private let cleanupSettings: AppleIntelligenceCleanupSettings
+    private let customVocabularySettings: CustomVocabularySettings
     private let audio: any AudioManaging
     private let keyboardBridge: KeyboardBridge
     private let fileManager: FileManager
@@ -146,7 +148,8 @@ final class DictationController {
         autoPrepareOnInit: Bool = true,
         urlOpener: (@MainActor (URL) async -> Bool)? = nil,
         cleaner: (any TranscriptCleaning)? = nil,
-        cleanupSettings: AppleIntelligenceCleanupSettings = AppleIntelligenceCleanupSettings()
+        cleanupSettings: AppleIntelligenceCleanupSettings = AppleIntelligenceCleanupSettings(),
+        customVocabularySettings: CustomVocabularySettings = CustomVocabularySettings()
     ) {
         let resolvedBridge = keyboardBridge ?? KeyboardBridge()
         let resolvedAudio = audio ?? SystemAudioManager()
@@ -158,6 +161,7 @@ final class DictationController {
         self.transcriberFactory = transcriberFactory ?? Self.defaultTranscriber
         self.cleaner = cleaner
         self.cleanupSettings = cleanupSettings
+        self.customVocabularySettings = customVocabularySettings
         self.fileManager = fileManager
         self.now = now
         self.warmDuration = resolvedBridge.warmDuration
@@ -707,6 +711,7 @@ final class DictationController {
         transcriptionTask = nil
         let effectiveStyle = styleOverride ?? style
         let usesCleanup = cleanupSettings.isEnabled
+        let vocabularyTerms = customVocabularySettings.activeTerms
 
         phase = .requestingPermission
         copied = false
@@ -747,6 +752,7 @@ final class DictationController {
                     keyboardJobID: keyboardJobID,
                     style: effectiveStyle,
                     usesCleanup: usesCleanup,
+                    vocabularyTerms: vocabularyTerms,
                     copyToPasteboard: copyToPasteboard
                 )
                 refreshWarmExpiry()
@@ -812,15 +818,25 @@ final class DictationController {
             }
 
             do {
-                let rawText = try await activeTranscriber.transcribe(captureURL)
+                let rawText = try await activeTranscriber.transcribe(
+                    captureURL,
+                    vocabulary: session.vocabularyTerms
+                )
                 guard let self, self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                let text = await self.cleanedTranscriptIfEnabled(rawText, session: session)
+                // Spelling runs before optional cleanup so cleanup sees the preferred
+                // words, then again after formatting because a style can lowercase a
+                // term or capitalize a sentence start ("iPhone" -> "IPhone").
+                let spelled = VocabularySpelling.apply(session.vocabularyTerms, to: rawText)
+                let text = await self.cleanedTranscriptIfEnabled(spelled, session: session)
                 guard self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                let formatted = TranscriptFormatter.format(text, style: session.style)
+                let formatted = VocabularySpelling.apply(
+                    session.vocabularyTerms,
+                    to: TranscriptFormatter.format(text, style: session.style)
+                )
                 self.recordingDuration = 0
                 self.transcript = formatted
                 if session.copyToPasteboard && !formatted.isEmpty {
