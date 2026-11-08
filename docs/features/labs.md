@@ -296,17 +296,20 @@ light), and Linux (`linux-labs`, light).
 
 Release notes link (`release-notes-link`, every OS): while on, the sidebar
 footer shows a small Release notes link under the version and update status.
-It opens this build's notes, chosen from `crate::VERSION` by
-`updater::notes::release_notes_url`: a dev version (`0.0.0-dev-N`) opens
-`https://anoma.ly/hex/dev#<version>`, a plain `major.minor.patch` opens
-`https://github.com/anomalyco/hex/releases/tag/v<version>`, and a local,
-test, or odd version shows no link. The gate is the footer row
+Only a release build shows it, and that exclusion is by build kind, not
+version string: local and test builds (`HEX_LOCAL_BUILD=1`,
+`HEX_TEST_BUILD=1`) get no link even when their version is plain. Then
+`updater::notes::release_notes_url` chooses from `crate::VERSION`: a dev
+version (`0.0.0-dev-N`) opens `https://anoma.ly/hex/dev#<version>`, a plain
+`major.minor.patch` opens
+`https://github.com/anomalyco/hex/releases/tag/v<version>`, and an odd
+version shows no link. The gate is the footer row
 ([sidebar.rs](../../src/rune_ui/sidebar.rs) reads
 `labs::Feature::ReleaseNotesLink`), so off, the footer is exactly as before
 and What's new keeps its place under a staged update. Checks:
 `a_dev_build_opens_the_changelog_at_itself`,
 `a_stable_build_opens_its_github_release`, and
-`a_local_test_or_odd_build_has_no_release_notes` in
+`an_odd_version_has_no_release_notes` in
 [notes.rs](../../src/updater/notes.rs), and
 `release_notes_link_shows_only_with_its_lab` in
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed in a

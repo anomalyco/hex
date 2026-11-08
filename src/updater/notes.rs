@@ -54,9 +54,10 @@ fn is_stable_version(version: &str) -> bool {
     digits(parts.next()) && digits(parts.next()) && digits(parts.next()) && parts.next().is_none()
 }
 
-/// Where the running build's release notes are: the dev changelog for a dev
-/// build, GitHub's release for a stable version, and nothing for a local,
-/// test, or odd one.
+/// Where the release notes for a running version are: the dev changelog for a
+/// dev version, GitHub's release for a stable one, and nothing for an odd one.
+/// The sidebar asks only on a release build, so a local or test build with a
+/// plain version still shows no link.
 pub fn release_notes_url(running: &str) -> Option<String> {
     if is_dev_version(running) {
         Some(format!("{PAGE}#{running}"))
@@ -164,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn a_local_test_or_odd_build_has_no_release_notes() {
+    fn an_odd_version_has_no_release_notes() {
         for version in [
             "0.0.0-dev-local-abc1234",
             "0.0.0-local-abc1234-dirty",

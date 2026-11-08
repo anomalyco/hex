@@ -349,7 +349,17 @@ fn release_notes_link(ui: &Ui, p: Paint) -> Option<El> {
     if !crate::labs::Feature::ReleaseNotesLink.on(&ui.settings) {
         return None;
     }
-    let url = crate::updater::notes::release_notes_url(crate::VERSION)?;
+    // A source or test build has no published notes for its code.
+    if ui.build_preview.unwrap_or_else(build_kind) != BuildKind::Release {
+        return None;
+    }
+    // Goldens pin the version, as the version label does.
+    let version = if cfg!(test) {
+        "0.0.0-dev-12"
+    } else {
+        crate::VERSION
+    };
+    let url = crate::updater::notes::release_notes_url(version)?;
     let c = &p.k.c;
     Some(
         row()
