@@ -378,6 +378,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Settings search"),
         tr("Find any setting in General with a search field"),
     ));
+    rows.push(row(
+        Feature::ReleaseNotesLink,
+        None,
+        tr("Release notes link"),
+        tr("Show a link to this build's release notes in the sidebar footer"),
+    ));
     if caps.meetings {
         rows.push(row(
             Feature::LiveChapters,
@@ -823,6 +829,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::SectionKeyAlone => "lab-section-key",
         Feature::KeepRecordings => "lab-keep-recordings",
         Feature::SettingsSearch => "lab-settings-search",
+        Feature::ReleaseNotesLink => "lab-release-notes-link",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",

@@ -340,6 +340,46 @@ fn footer(ui: &Ui, p: Paint) -> El {
             line("version", &version_label(), p.faint()),
         ))
         .children(status)
+        .children(release_notes_link(ui, p))
+}
+
+/// This build's release notes, under the version and status while Labs ›
+/// Release notes link is on. Unlike What's new, it needs no staged update.
+fn release_notes_link(ui: &Ui, p: Paint) -> Option<El> {
+    if !crate::labs::Feature::ReleaseNotesLink.on(&ui.settings) {
+        return None;
+    }
+    let url = crate::updater::notes::release_notes_url(crate::VERSION)?;
+    let c = &p.k.c;
+    Some(
+        row()
+            .key("release-notes")
+            .h(FOOTER_LINE)
+            .px(6.0)
+            .center_y()
+            .self_start()
+            .radius(p.k.radius.sm)
+            .role("link")
+            .label(tr("Release notes"))
+            .hover(c.hover)
+            .press(c.pressed)
+            .focusable(true)
+            .focus_ring(2.0, -2.0, c.border_focus)
+            .on_press(move |ui: &mut Ui| {
+                if ui.live()
+                    && let Err(error) = crate::desktop::opencode_catalog::open_url(&url)
+                {
+                    ui.error = Some(format!("{error:#}"));
+                }
+            })
+            .child(
+                text(tr("Release notes"))
+                    .key("label")
+                    .font(p.k.ty.small)
+                    .color(c.text_muted)
+                    .truncate(),
+            ),
+    )
 }
 
 /// A local or test build marks itself beside the version, quietly: an outline

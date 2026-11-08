@@ -100,6 +100,8 @@ pub struct LabsSettings {
     pub keep_recordings: bool,
     /// General's pane starts with a search field that filters its rows.
     pub settings_search: bool,
+    /// The sidebar footer links this build's release notes.
+    pub release_notes_link: bool,
     pub hide_menu_bar_icon: bool,
     /// ⌘Q closes the Settings window instead of quitting Hex (macOS).
     pub quit_closes_window: bool,
@@ -189,6 +191,7 @@ impl Default for LabsSettings {
             section_key_alone: false,
             keep_recordings: false,
             settings_search: false,
+            release_notes_link: false,
             hide_menu_bar_icon: false,
             quit_closes_window: false,
             caps_lock_dictation: false,

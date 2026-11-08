@@ -39,7 +39,9 @@ models toggle (off by default) adds a sort and a saved-language filter to the
 Local transcription picker (#645); its Benchmark details toggle (off by
 default) shows each model's raw WER or CER with its language, dataset, source,
 and conditions (#647); its Settings search toggle (off by default) puts a
-search field at the top of General that filters its rows.
+search field at the top of General that filters its rows; its Release notes
+link toggle (off by default) puts a link to this build's release notes in the
+sidebar footer.
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
 used for any French system language (#892), and Русский, used for any
@@ -1506,7 +1508,9 @@ Hex checks the release service            // maintain.updates
 │       first changes and What's new (https://anoma.ly/hex/dev) under it (updater/notes.rs)
 │       ├── One more check first (manifest within 15 s) -> Checking / Downloading -> newest staged
 │       │   └── A release published after the relaunch -> the next launch's check
-│       └── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
+│       ├── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
+│       └── Labs › Release notes link -> the footer carries this build's notes any time:
+│           anoma.ly/hex/dev#<version> for a dev build, github.com/anomalyco/hex/releases/tag/v<version> for a stable one
 ├── macOS location not replaceable (read-only, translocated, root-owned) -> Download update (DMG)
 ├── Package manager (pacman, Nix) -> its command, once it serves another version
 ├── Source build, test build -> never checks

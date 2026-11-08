@@ -313,6 +313,11 @@ const KEYS: &[Key] = &[
         "Labs: a search field at the top of General that filters its rows",
     ),
     key(
+        "labs.release_notes_link",
+        Kind::Bool,
+        "Labs: a link to this build's release notes in the sidebar footer",
+    ),
+    key(
         "labs.live_chapters",
         Kind::Bool,
         "Labs: chapter meeting transcripts while recording",
