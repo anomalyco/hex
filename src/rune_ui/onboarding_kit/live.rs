@@ -172,8 +172,8 @@ fn granted(status: SetupStatus, paste: Option<PasteAccess>) -> bool {
         && paste.is_none_or(PasteAccess::settled)
 }
 
-fn english(selection: &TranscriptionSelection) -> bool {
-    selection.model == TranscriptionModelId::ParakeetUnifiedEnglish
+fn english_language(selection: &TranscriptionSelection) -> bool {
+    selection.language == "en"
 }
 
 fn english_selection() -> TranscriptionSelection {
@@ -191,9 +191,9 @@ fn alternate_selection(
     current: &TranscriptionSelection,
     preferred: &str,
 ) -> Option<TranscriptionSelection> {
-    if english(current) {
+    if english_language(current) {
         let recommended = transcription_models::recommended_selection(preferred);
-        (!english(&recommended)).then_some(recommended)
+        (!english_language(&recommended)).then_some(recommended)
     } else {
         Some(english_selection())
     }
@@ -214,13 +214,13 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         return;
     }
     let choice = ui.settings.transcription.clone();
-    let wants = if english(&choice) {
+    let wants = if english_language(&choice) {
         Language::English
     } else {
         Language::Other
     };
     let alternate = alternate_selection(&choice, &crate::desktop::i18n::preferred_language());
-    let other = if english(&choice) {
+    let other = if english_language(&choice) {
         alternate.as_ref()
     } else {
         Some(&choice)
@@ -788,6 +788,13 @@ pub(super) fn hint(p: Paint, live: &Live) -> Option<El> {
 mod tests {
     use super::*;
 
+    fn selection(model: TranscriptionModelId, language: &str) -> TranscriptionSelection {
+        TranscriptionSelection {
+            model,
+            language: language.into(),
+        }
+    }
+
     #[test]
     fn the_language_switch_follows_the_system_language() {
         let english = english_selection();
@@ -796,6 +803,24 @@ mod tests {
             None,
             "an English system has no other language"
         );
+
+        for model in [
+            TranscriptionModelId::CohereTranscribe,
+            TranscriptionModelId::WhisperLargeV3Turbo,
+            TranscriptionModelId::ParakeetV3,
+        ] {
+            let current = selection(model, "en");
+            assert_eq!(
+                alternate_selection(&current, "en"),
+                None,
+                "{model:?} is English on an English system"
+            );
+            assert_eq!(
+                alternate_selection(&current, "fr"),
+                Some(transcription_models::recommended_selection("fr")),
+                "{model:?} still switches to the system's French recommendation"
+            );
+        }
 
         for language in ["fr", "de"] {
             let alternate =
@@ -816,11 +841,7 @@ mod tests {
             "Japanese gets its own recommendation, not French"
         );
         assert_eq!(japanese.language, "ja");
-        assert_ne!(
-            japanese.model,
-            TranscriptionModelId::ParakeetV3,
-            "Japanese is not a French Parakeet v3 selection"
-        );
+        assert_eq!(japanese.model, TranscriptionModelId::WhisperLargeV3Turbo);
 
         assert_eq!(
             alternate_selection(&japanese, "ja"),

@@ -6,6 +6,7 @@
 
 use crate::desktop::i18n::{tr, tr_named};
 use rune::{Align, El, Spring, Transition, el, icon, row, text};
+use std::sync::Mutex;
 
 use super::super::controls::Paint;
 use super::fixture::{Download, Language};
@@ -21,17 +22,34 @@ pub(crate) const CAPSULE: &str = "download-capsule";
 pub(crate) const FLY: Spring = Spring::new(0.42, 0.0);
 const HEIGHT: f32 = 30.0;
 
-/// What the real first run calls [`Language::Other`]: the Mac's language.
-static OTHER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+/// What the real first run calls [`Language::Other`]: the language it
+/// downloads. Each run replaces it, so a later setup never shows the
+/// language of an earlier one.
+static OTHER: Mutex<String> = Mutex::new(String::new());
+/// The story fixture's own other language, until a real run sets one.
+const OTHER_FALLBACK: &str = "French";
 
 pub(crate) fn set_other_label(label: &str) {
-    let _ = OTHER.set(label.to_owned());
+    let mut other = OTHER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *other = label.to_owned();
 }
 
-pub(crate) fn language_label(language: Language) -> &'static str {
+pub(crate) fn language_label(language: Language) -> String {
     match language {
-        Language::English => "English",
-        Language::Other => OTHER.get().map_or("French", String::as_str),
+        Language::English => "English".into(),
+        Language::Other => {
+            let label = OTHER.lock().map_or_else(
+                |poisoned| poisoned.into_inner().clone(),
+                |label| label.clone(),
+            );
+            if label.is_empty() {
+                OTHER_FALLBACK.into()
+            } else {
+                label
+            }
+        }
     }
 }
 
@@ -123,11 +141,13 @@ pub(crate) fn language_capsule<S: 'static>(
             Language::English => Language::Other,
             Language::Other => Language::English,
         };
+        let next_label = language_label(next);
         cap = cap
             .role("button")
-            .label(tr_named(
+            .label(tr("Language"))
+            .description(tr_named(
                 "Choosing it switches the language to {language}",
-                &[("language", language_label(next))],
+                &[("language", &next_label)],
             ))
             .a11y_value(language_label(language))
             .focusable(true)
