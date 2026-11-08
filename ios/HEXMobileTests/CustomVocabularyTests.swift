@@ -68,6 +68,39 @@ final class VocabularySpellingTests: XCTestCase {
         )
     }
 
+    func testMatchesSpacedTermsThatIncludeAOneLetterWord() {
+        XCTAssertEqual(
+            VocabularySpelling.apply(["iPhone 7"], to: "my iphone 7 broke"),
+            "my iPhone 7 broke"
+        )
+        XCTAssertEqual(
+            VocabularySpelling.apply(["Plan B"], to: "go with plan b"),
+            "go with Plan B"
+        )
+        XCTAssertEqual(
+            VocabularySpelling.apply(["Formula 1"], to: "the formula 1 race"),
+            "the Formula 1 race"
+        )
+    }
+
+    func testMatchesAHyphenatedTermAcrossAHyphenOrASpace() {
+        XCTAssertEqual(
+            VocabularySpelling.apply(["X-ray"], to: "an x-ray today"),
+            "an X-ray today"
+        )
+        XCTAssertEqual(
+            VocabularySpelling.apply(["X-ray"], to: "an x ray"),
+            "an X-ray"
+        )
+    }
+
+    func testMatchesACompoundTermAcrossThePlainPhrase() {
+        XCTAssertEqual(
+            VocabularySpelling.apply(["WeChat"], to: "message me on we chat"),
+            "message me on WeChat"
+        )
+    }
+
     func testPrefersTheLongestWindow() {
         XCTAssertEqual(
             VocabularySpelling.apply(["Open", "OpenCode"], to: "open code"),

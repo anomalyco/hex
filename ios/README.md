@@ -69,11 +69,15 @@ it never accesses the microphone, speech model, or network.
     A local list of up to 100 names and phrases, applied to every engine. After
     transcription, matching words are rewritten to the listed spelling across
     case, spaces, tabs, a single hyphen, and possessive apostrophes, before
-    cleanup and again after formatting, so a style cannot undo a spelling. A
-    word that carries its own apostrophe only matches a term that has one, and
-    several transcript words are joined only when the term reads as a compound.
-    On iOS 26 Apple Speech the list is also sent as a best-effort recognition
-    hint; Parakeet's batch path gets no hint.
+    cleanup and again after formatting, so a style cannot undo a spelling. The
+    listed spelling is kept exactly, even at a sentence start (an all-lowercase
+    term stays lowercase), and a term that spells its own boundaries ("iPhone 7",
+    "X-ray") matches those boundaries exactly. A word that carries its own
+    apostrophe only matches a term that has one, several transcript words are
+    joined only when the term reads as a compound, and compound terms like
+    "WeChat" can also match the plain phrase ("we chat"). On iOS 26 Apple Speech
+    the list is also sent as a best-effort recognition hint; Parakeet's batch
+    path gets no hint.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an

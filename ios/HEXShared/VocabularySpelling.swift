@@ -2,11 +2,12 @@ import Foundation
 
 /// Rewrites words a transcript likely misheard so they use the vocabulary's spelling.
 ///
-/// Matching ignores case, whitespace, a single hyphen, and apostrophes. It never
-/// changes words outside a matched span, so the surrounding transcript stays exactly
-/// as transcribed. A word that carries an apostrophe of its own only matches a
-/// term that also has one, and several transcript words are joined only when the
-/// term reads as a compound, which keeps ordinary speech from matching by accident.
+/// Matching works across case, spaces, tabs, a single hyphen, and possessive
+/// apostrophes, and never changes anything outside a matched span. The listed
+/// spelling is kept exactly, even at a sentence start. A term that spells its own
+/// boundaries ("iPhone 7", "X-ray") matches those boundaries exactly, and a
+/// compound term ("WeChat") can also match the plain phrase ("we chat"). A word
+/// that carries its own apostrophe only matches a term that has one.
 nonisolated enum VocabularySpelling {
     private static let maxWindowLength = 4
     private static let quoteMarks: Set<Character> = ["'", "’", "‘", "\"", "“", "”", "`"]
@@ -26,12 +27,6 @@ nonisolated enum VocabularySpelling {
         let stemHasApostrophe: Bool
     }
 
-    private struct Candidate {
-        let key: String
-        let hasApostrophe: Bool
-        let possessive: String?
-    }
-
     private struct Match {
         let wordCount: Int
         let spelling: String
@@ -45,17 +40,24 @@ nonisolated enum VocabularySpelling {
     }
 
     static func apply(_ terms: [String], to text: String) -> String {
-        var spellings: [String: Spelling] = [:]
+        var glued: [String: Spelling] = [:]
+        var phrases: [[String]: Spelling] = [:]
         for term in terms {
             let key = normalize(term)
-            guard key.count >= 2, spellings[key] == nil else { continue }
-            spellings[key] = Spelling(
+            guard key.count >= 2, glued[key] == nil else { continue }
+            let spelling = Spelling(
                 text: term,
                 hasApostrophe: term.contains(where: isApostrophe),
                 isCompound: looksCompound(term)
             )
+            glued[key] = spelling
+
+            let wordKeys = termWordKeys(term)
+            if wordKeys.count > 1 {
+                phrases[wordKeys] = spelling
+            }
         }
-        guard !spellings.isEmpty, !text.isEmpty else { return text }
+        guard !glued.isEmpty, !text.isEmpty else { return text }
 
         let tokens = words(in: text)
         guard !tokens.isEmpty else { return text }
@@ -70,7 +72,8 @@ nonisolated enum VocabularySpelling {
                 startingAt: index,
                 words: tokens,
                 text: text,
-                spellings: spellings
+                glued: glued,
+                phrases: phrases
             ) else {
                 index += 1
                 continue
@@ -94,7 +97,8 @@ nonisolated enum VocabularySpelling {
         startingAt index: Int,
         words: [Word],
         text: String,
-        spellings: [String: Spelling]
+        glued: [String: Spelling],
+        phrases: [[String]: Spelling]
     ) -> Match? {
         let longest = min(maxWindowLength, words.count - index)
         for wordCount in stride(from: longest, through: 1, by: -1) {
@@ -102,72 +106,96 @@ nonisolated enum VocabularySpelling {
                 continue
             }
 
-            for candidate in candidates(at: index, count: wordCount, words: words) {
-                guard let spelling = spellings[candidate.key],
-                      accepts(spelling, for: candidate, wordCount: wordCount) else {
-                    continue
-                }
+            let window = words[index..<(index + wordCount)]
+            let keys = window.map(\.key)
+            let hasApostrophe = window.contains(where: \.hasApostrophe)
+            let lastWord = words[index + wordCount - 1]
+
+            var stemKeys: [String]?
+            var stemHasApostrophe = false
+            if let stemKey = lastWord.stemKey {
+                var candidate = keys
+                candidate[candidate.count - 1] = stemKey
+                stemKeys = candidate
+                stemHasApostrophe = window.dropLast().contains(where: \.hasApostrophe)
+                    || lastWord.stemHasApostrophe
+            }
+
+            // A term that spells its own boundaries ("iPhone 7", "X-ray") matches
+            // them exactly, even when one of them is a single letter.
+            if wordCount > 1,
+               let spelling = phrases[keys],
+               accepts(spelling, hasApostrophe: hasApostrophe, needsCompound: false) {
+                return Match(wordCount: wordCount, spelling: spelling.text, possessive: nil)
+            }
+
+            if wordCount > 1,
+               let stemKeys,
+               let possessive = lastWord.possessive,
+               let spelling = phrases[stemKeys],
+               accepts(
+                   spelling,
+                   hasApostrophe: stemHasApostrophe,
+                   needsCompound: false
+               ) {
                 return Match(
                     wordCount: wordCount,
                     spelling: spelling.text,
-                    possessive: candidate.possessive
+                    possessive: possessive
+                )
+            }
+
+            // Only a glued match remains, and that never spans a one-letter word
+            // because ordinary speech would match by accident.
+            guard wordCount == 1 || !keys.contains(where: { $0.count < 2 }) else {
+                continue
+            }
+
+            if let spelling = glued[keys.joined()],
+               accepts(
+                   spelling,
+                   hasApostrophe: hasApostrophe,
+                   needsCompound: wordCount > 1
+               ) {
+                return Match(wordCount: wordCount, spelling: spelling.text, possessive: nil)
+            }
+
+            if let stemKeys,
+               let possessive = lastWord.possessive,
+               let spelling = glued[stemKeys.joined()],
+               accepts(
+                   spelling,
+                   hasApostrophe: stemHasApostrophe,
+                   needsCompound: wordCount > 1
+               ) {
+                return Match(
+                    wordCount: wordCount,
+                    spelling: spelling.text,
+                    possessive: possessive
                 )
             }
         }
         return nil
     }
 
-    /// The whole window key, plus the same key with a trailing possessive folded
-    /// back onto its stem so "claude's" can still match "Claude".
-    private static func candidates(at index: Int, count: Int, words: [Word]) -> [Candidate] {
-        var key = ""
-        var hasApostrophe = false
-        for wordIndex in index..<(index + count) {
-            key += words[wordIndex].key
-            hasApostrophe = hasApostrophe || words[wordIndex].hasApostrophe
-        }
-
-        var result = [Candidate(key: key, hasApostrophe: hasApostrophe, possessive: nil)]
-
-        let lastWord = words[index + count - 1]
-        if let stemKey = lastWord.stemKey, let possessive = lastWord.possessive {
-            var stemWindowKey = ""
-            var stemHasApostrophe = lastWord.stemHasApostrophe
-            for wordIndex in index..<(index + count - 1) {
-                stemWindowKey += words[wordIndex].key
-                stemHasApostrophe = stemHasApostrophe || words[wordIndex].hasApostrophe
-            }
-            stemWindowKey += stemKey
-            result.append(
-                Candidate(
-                    key: stemWindowKey,
-                    hasApostrophe: stemHasApostrophe,
-                    possessive: possessive
-                )
-            )
-        }
-        return result
-    }
-
     private static func accepts(
         _ spelling: Spelling,
-        for candidate: Candidate,
-        wordCount: Int
+        hasApostrophe: Bool,
+        needsCompound: Bool
     ) -> Bool {
         // "she'll" must never match "Shell"; a possessive is handled by its stem
         // candidate, which carries the apostrophe separately.
-        if candidate.hasApostrophe && !spelling.hasApostrophe {
+        if hasApostrophe && !spelling.hasApostrophe {
             return false
         }
-        // Joining words is only safe when the term itself reads as one word.
-        if wordCount > 1 && !spelling.isCompound {
+        // Gluing ordinary words together is only safe for a compound term.
+        if needsCompound && !spelling.isCompound {
             return false
         }
         return true
     }
 
-    /// A window of several words only spans spaces, tabs, or a single hyphen, and
-    /// never includes a one-letter word that could glue ordinary speech together.
+    /// A window of several words only spans spaces, tabs, or a single hyphen.
     private static func canJoinWindow(
         from index: Int,
         count: Int,
@@ -175,10 +203,6 @@ nonisolated enum VocabularySpelling {
         text: String
     ) -> Bool {
         guard count > 1 else { return true }
-
-        for wordIndex in index..<(index + count) where words[wordIndex].key.count < 2 {
-            return false
-        }
 
         for wordIndex in (index + 1)..<(index + count) {
             let separator = text[
@@ -261,6 +285,28 @@ nonisolated enum VocabularySpelling {
 
     private static func isApostrophe(_ character: Character) -> Bool {
         character == "'" || character == "’"
+    }
+
+    /// Splits a term on its own spaces and hyphens so each word keeps its key.
+    /// This lets "iPhone 7", "Plan B", and "X-ray" match one-letter words exactly
+    /// where the term puts them, without letting glued matches span one-letter words.
+    private static func termWordKeys(_ term: String) -> [String] {
+        var keys: [String] = []
+        var current = ""
+        for character in term {
+            guard character.isWhitespace || character == "-" else {
+                current.append(character)
+                continue
+            }
+            if !current.isEmpty {
+                keys.append(normalize(current))
+                current = ""
+            }
+        }
+        if !current.isEmpty {
+            keys.append(normalize(current))
+        }
+        return keys.filter { !$0.isEmpty }
     }
 
     /// A compound is a term people say as one word: it has a space, a hyphen, a

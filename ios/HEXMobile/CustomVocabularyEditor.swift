@@ -54,6 +54,9 @@ struct CustomVocabularyEditor: View {
                 .autocorrectionDisabled()
                 .submitLabel(.done)
                 .onSubmit(add)
+                .onChange(of: draft) { _, _ in
+                    notice = nil
+                }
                 .disabled(isAtLimit)
                 .padding(.horizontal, 12)
                 .frame(minHeight: 38)
@@ -116,8 +119,6 @@ struct CustomVocabularyEditor: View {
         }
 
         let updated = CustomVocabularySettings.sanitize(terms + [candidate])
-        guard updated.count > terms.count else { return }
-
         terms = updated
         settings.terms = updated
         draft = ""
@@ -127,5 +128,6 @@ struct CustomVocabularyEditor: View {
     private func remove(_ term: String) {
         terms.removeAll { $0 == term }
         settings.terms = terms
+        notice = nil
     }
 }
