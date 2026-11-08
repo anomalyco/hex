@@ -68,7 +68,13 @@ pub(crate) fn validate_gguf_artifact(
             artifact.variant
         ));
     }
-    if selection.language == AUTO_LANGUAGE && !supports_language_detect {
+    // Auto gates a hint, so it needs detection only from a model that takes
+    // one: a no-hint head (Parakeet v3, Granite) hears the language itself,
+    // whatever its file's lang_detect metadata says.
+    if selection.language == AUTO_LANGUAGE
+        && definition.accepts_language_hint
+        && !supports_language_detect
+    {
         return Err(eyre!(
             "{} does not advertise automatic language detection",
             definition.name
@@ -745,6 +751,50 @@ mod tests {
         let mut silence = transcribe_cpp::Transcript::default();
         drop_prompt_echo(&mut silence, "  ");
         assert_eq!(silence, transcribe_cpp::Transcript::default());
+    }
+
+    fn validate_auto(
+        model: crate::transcription::models::TranscriptionModelId,
+        supports_language_detect: bool,
+    ) -> Result<Option<String>> {
+        let definition = crate::transcription::models::definition(model);
+        let ModelRuntime::Gguf(artifact) = definition.runtime else {
+            panic!("{} is not a GGUF model", definition.name);
+        };
+        validate_gguf_artifact(
+            Path::new("catalog.gguf"),
+            definition,
+            artifact.architecture,
+            artifact.variant,
+            &TranscriptionSelection {
+                model,
+                language: AUTO_LANGUAGE.into(),
+            },
+            supports_language_detect,
+        )
+    }
+
+    #[test]
+    fn auto_needs_detection_only_from_models_that_take_a_language_hint() {
+        use crate::transcription::models::TranscriptionModelId;
+
+        // Parakeet v2 takes the language as a hint and its file detects none.
+        assert!(validate_auto(TranscriptionModelId::ParakeetV2, false).is_err());
+        // A no-hint model never receives Auto as a hint, so the file's
+        // lang_detect metadata does not gate it (Granite's pinned file says 0).
+        for model in [
+            TranscriptionModelId::ParakeetV3,
+            TranscriptionModelId::ParakeetUltra,
+            TranscriptionModelId::Orukeet,
+            TranscriptionModelId::GraniteSpeech5,
+        ] {
+            assert_eq!(validate_auto(model, false).unwrap(), None, "{model:?}");
+        }
+        // A hint-taking model that detects still runs Auto with no hint.
+        assert_eq!(
+            validate_auto(TranscriptionModelId::WhisperLargeV3Turbo, true).unwrap(),
+            None
+        );
     }
 
     #[test]
