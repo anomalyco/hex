@@ -612,7 +612,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
             Feature::GnomeAnnotate,
             None,
             tr("Annotate on GNOME"),
-            tr("Show Annotate's recording capsule and ink over your screen, through XWayland. Works only while XWayland is already running; the pen button or the Annotate key stops drawing, since Esc can't reach the ink there"),
+            tr("Show Annotate's recording capsule and ink over your screen, through XWayland. Works only while XWayland is already running; Esc can't stop drawing there, so use the capsule's pen button or let go of a held Annotate key"),
         ));
     }
     // Linux's and Windows' engines transcribe a whole clip on the CPU.

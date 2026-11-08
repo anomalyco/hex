@@ -492,7 +492,7 @@ const KEYS: &[Key] = &[
     key(
         "labs.gnome_annotate",
         Kind::Bool,
-        "Labs: on Wayland desktops without layer-shell, such as GNOME, Annotate's capsule and ink float over the screen through XWayland while it is already running; the pen button or the Annotate key stops drawing, since Esc can't reach the ink there (Linux)",
+        "Labs: on Wayland desktops without layer-shell, such as GNOME, Annotate's capsule and ink float over the screen through XWayland while it is already running; Esc can't stop drawing there, so use the capsule's pen button or let go of a held Annotate key (Linux)",
     ),
     key(
         "labs.follow_live_transcript",

@@ -106,7 +106,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        The ink is made with pointer regions and no keys (Rune refuses KeyPolicy::OnDemand on XWayland) and keeps its
 │                                        regions while not drawing, since an XWayland window made click-through can't take the pointer later. Off, a
 │                                        capture records but shows no capsule or ink. Decided at each show, only while this user's Xwayland already runs;
-│                                        never starts it. Esc can't reach the ink there, so the capsule's pen button or the Annotate key stops drawing
+│                                        never starts it. Esc can't stop drawing there, so the capsule's pen button does, as does letting go of a
+│                                        held Annotate key (a tap of it stops the recording)
 │                                        // checks: gnome_annotate_is_its_own_bit_* (labs.rs), meeting capsule xwayland decision reused
 │                                        // (linux/meeting_capsules.rs); Rune's xwayland tests; not run on a GNOME session
 ├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)

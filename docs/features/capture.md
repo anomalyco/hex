@@ -180,10 +180,11 @@ On Linux                                 // capture.linux
 │   made with pointer regions and `KeyPolicy::None`, since Rune refuses an
 │   OnDemand overlay on XWayland, and keeps regions with no hit area while not
 │   drawing because a click-through XWayland window can't take the pointer
-│   later. Esc can't reach it there: the capsule's pen button or the Annotate
-│   key stops drawing. The in-app picker shows on Linux only in the edge
-│   states that return to Selecting (Window starts the portal's picker, Area
-│   isn't offered), and takes the same opt-in whenever it does. Check: labs
+│   later. Esc can't stop drawing there: the capsule's pen button does, or
+│   letting go of a held Annotate key (a tap of it stops the recording). The
+│   in-app picker shows on Linux only in the edge states that return to
+│   Selecting (Window starts the portal's picker, Area isn't offered), and
+│   takes the same opt-in whenever it does. Check: labs
 │   gnome_annotate_is_its_own_bit_*; not run on a GNOME session
 ├── While it records, dictation starts nothing (the portal
 │   or grab already took their keys, so nothing reaches the app)

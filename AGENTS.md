@@ -1073,8 +1073,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   again and draws only while the mouse button is down (drag to draw,
   move freely otherwise), and Esc stops drawing, never the recording; on
   GNOME Wayland with Labs › Annotate on GNOME the ink can't take keys, so the
-  capsule's pen button or the Annotate key stops drawing instead. Shift still
-  draws on the Mac. While drawing, the ink overlay takes the pointer with
+  capsule's pen button stops drawing, as does letting go of a held Annotate
+  key (a tap of it stops the recording instead). Shift still draws on the
+  Mac. While drawing, the ink overlay takes the pointer with
   a pen cursor (Linux leaves a hole over the capsule's pill), so clicks
   reach neither the app nor anything but the capsule. Ink has no pins and
   no undo. There is no separate draw shortcut and no send-to list
@@ -1329,10 +1330,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   XWayland, so on such a session the ink takes `KeyPolicy::None` and pointer
   regions from the start, keeping regions with no hit area while not drawing
   (an XWayland window made click-through can never take the pointer later);
-  Esc can't stop drawing there, and the capsule's pen button or the Annotate
-  key does. Everything else stays on Wayland. The desktop may grant a different
-  trigger, keep an older one, or refuse one; Settings shows what it granted,
-  follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
+  Esc can't stop drawing there, so the capsule's pen button ends it, as does
+  letting go of a held Annotate key (a tap stops the recording). Everything
+  else stays on Wayland. The desktop may grant a different trigger, keep an
+  older one, or refuse one; Settings shows what it granted, follows
+  ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
   Hex's app id is `anomaly.hex`: every install (direct, AUR, deb/rpm, Nix)
   ships `anomaly.hex.desktop` with `StartupWMClass=anomaly.hex`, and the
   windows report that id, so there is one launcher entry. Every entry says

@@ -644,10 +644,11 @@ approved, so you're asked only once.
   already running; Hex never starts it. Annotate's capsule and ink take
   clicks too, so a capture records with no capsule unless you opt in to Labs ›
   Annotate on GNOME (`hex labs on gnome-annotate`, off by default): the
-  capsule and ink then float on XWayland the same way, and the capsule's pen
-  button or the Annotate key stops drawing, since Esc can't reach the ink
-  there. With neither, Settings reports that the HUD is unavailable rather than
-  presenting a normal focus-taking window as an overlay.
+  capsule and ink then float on XWayland the same way. Esc can't stop drawing
+  there, so use the capsule's pen button or let go of a held Annotate key (a
+  tap of it stops the recording). With neither, Settings reports that the HUD
+  is unavailable rather than presenting a normal focus-taking window as an
+  overlay.
 - Shortcuts come from the GlobalShortcuts portal or from your own keybindings
   for the `hex` commands ([Shortcuts](#shortcuts)). Hex reads no input devices
   and needs no `input` group membership or other device permission. If the

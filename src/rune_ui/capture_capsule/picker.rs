@@ -978,17 +978,19 @@ impl PickerOverlay {
 
     /// Shows the picker for `mode`, or closes it; safe from any thread.
     pub(crate) fn set(&self, mode: Option<Mode>) {
-        // On Wayland without layer-shell (GNOME) the picker takes clicks, so
-        // it floats on XWayland only by Labs › Annotate on GNOME, decided at
-        // each show like the capsule's.
-        #[cfg(target_os = "linux")]
-        self.overlay
-            .set_xwayland_input(crate::linux::annotate_overlays::on_xwayland());
         // Wayland lists no windows to pick from: the portal's picker does.
         #[cfg(target_os = "linux")]
         if mode == Some(Mode::Window) {
             (self.act)(Action::Start(CaptureTarget::Window { id: 0 }));
             return;
+        }
+        // On Wayland without layer-shell (GNOME) the picker takes clicks, so
+        // it floats on XWayland only by Labs › Annotate on GNOME, decided at
+        // each show like the capsule's.
+        #[cfg(target_os = "linux")]
+        if mode.is_some() {
+            self.overlay
+                .set_xwayland_input(crate::linux::annotate_overlays::on_xwayland());
         }
         self.overlay.update(move |s, tx| {
             s.want = mode;

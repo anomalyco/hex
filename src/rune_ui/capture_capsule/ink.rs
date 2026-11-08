@@ -421,24 +421,25 @@ impl InkOverlay {
             DisplayTarget, OverlayInput, OverlayLevel, OverlayOptions, OverlayPlacement,
             OverlaySpec,
         };
+        // On Wayland without layer-shell the overlay can only show on
+        // XWayland, which needs pointer regions when it is made and never
+        // gives an `OnDemand` overlay the keyboard. Everywhere else it stays
+        // click-through until drawing.
+        let xwayland = takes_xwayland_pointer();
         let spec = OverlaySpec::new("Hex ink", (1440.0, 900.0), view)
             .options(OverlayOptions {
                 placement: Some(OverlayPlacement::FullScreen),
                 display: DisplayTarget::Primary,
                 level: OverlayLevel::AboveStatus,
                 exclude_from_capture: !crate::capture_host::own_windows_recorded(),
-                // On Wayland without layer-shell the overlay can only show on
-                // XWayland, which needs pointer regions when it is made and
-                // never gives an `OnDemand` overlay the keyboard. Everywhere
-                // else it stays click-through until drawing.
-                input: if takes_xwayland_pointer() {
+                input: if xwayland {
                     OverlayInput::Regions
                 } else {
                     OverlayInput::None
                 },
                 prewarm: true,
                 // Escape while drawing, asked for only then.
-                keys: if takes_xwayland_pointer() {
+                keys: if xwayland {
                     rune::KeyPolicy::None
                 } else {
                     rune::KeyPolicy::OnDemand
@@ -457,7 +458,7 @@ impl InkOverlay {
             });
         let mut state = InkState::still(Scene::default());
         state.shown = false;
-        state.xwayland = takes_xwayland_pointer();
+        state.xwayland = xwayland;
         let overlay = app.overlay(spec, state);
         let handle = overlay.clone();
         overlay.update(move |s, _| s.overlay = Some(handle));
