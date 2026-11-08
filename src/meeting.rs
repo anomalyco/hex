@@ -1177,10 +1177,15 @@ impl RevealTarget {
 ///
 /// The path is quoted on its own because Explorer reads the switch only while
 /// the comma is outside the quotes. `Command` would quote the whole argument
-/// once a folder name has a space, which Explorer ignores.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn explorer_select(path: &Path) -> String {
-    format!("/select,\"{}\"", path.to_string_lossy().replace('/', "\\"))
+/// once a folder name has a space, which Explorer ignores. Its bytes are kept
+/// as they are: the path is already absolute by the time the Windows caller
+/// passes it, so `GetFullPathNameW` has normalized any forward slashes.
+#[cfg(any(windows, test))]
+fn explorer_select(path: &Path) -> std::ffi::OsString {
+    let mut select = std::ffi::OsString::from("/select,\"");
+    select.push(path.as_os_str());
+    select.push("\"");
+    select
 }
 
 /// Moves a finished meeting to the Trash: its exported Markdown first, then

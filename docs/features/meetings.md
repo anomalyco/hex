@@ -173,10 +173,10 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     └── not observed on a real GNOME session; no automated check
 Files -> Reveal files opens the recording folder (selected in Explorer,
     opened by xdg-open); Reveal Markdown additionally appears while the
-    exported .md exists and selects it (Explorer, with `/select,"<path>"`
-    passed raw so a folder such as `Hex Meetings` reaches Explorer as one
-    argument) or opens the folder holding it (xdg-open); Delete moves to the
-    freedesktop Trash or the Recycle Bin
+    exported .md exists and selects it (Explorer gets `/select,"<path>"`,
+    with the switch outside the quotes so a folder such as `Hex Meetings`
+    stays one path) or opens the folder holding it (xdg-open); Delete moves
+    to the freedesktop Trash or the Recycle Bin
 ```
 
 The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and
@@ -1095,6 +1095,9 @@ Final publication                                   // meetings.output
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
+    // Reveal on Windows selects the exported Markdown in Explorer; only the
+    // explorer_select argument unit test checks it, not observed on a real
+    // Windows machine
 Meetings pane -> Copy icon on a completed row's hover, the card's Copy
     transcript icon, Reveal files (opens the recording folder), and Reveal
     Markdown (selects the exported .md) while the export exists
