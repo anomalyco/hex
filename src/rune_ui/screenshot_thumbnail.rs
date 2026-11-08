@@ -9,7 +9,7 @@
 pub(crate) mod editor;
 
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use rune::{
@@ -18,8 +18,7 @@ use rune::{
 };
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
-use self::editor::Listen;
-use super::controls::{Paint, status_dot};
+use super::controls::Paint;
 use crate::desktop::i18n::tr;
 
 /// The overlay: room for the largest card and its shadow.
@@ -52,13 +51,7 @@ const REDUCED: Spring =
 const TRAVEL_SCALE: f32 = 0.94;
 /// How long leaving takes, before the overlay hides.
 const LEAVE_S: f64 = 0.4;
-/// The listening pill's height, inside the card's bottom-left corner.
-const LISTEN_H: f32 = 24.0;
-
 static CLOSE: &rune::Icon = &rune_theme_opencode::icons::CLOSE;
-/// The card's overlay, and the file of the shot it shows, for the
-/// listener's thread.
-static CARD: OnceLock<OverlayHandle<Card>> = OnceLock::new();
 static SHOWN: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 fn shown() -> std::sync::MutexGuard<'static, Option<PathBuf>> {
@@ -80,8 +73,6 @@ pub(crate) struct Card {
     shot: Option<Shot>,
     on: bool,
     hovered: bool,
-    /// A dictation talking over the shot holds the card.
-    listen: Listen,
     /// Animation seconds it last appeared, or the pointer last left it.
     since: Option<f64>,
     /// Animation seconds it began to fade.
@@ -144,7 +135,7 @@ fn poll(s: &mut Card, now: f64, tx: &mut Tx) -> bool {
         tx.wake_after(Duration::from_secs_f64(at + LEAVE_S - now));
         return false;
     }
-    if !s.on || s.hovered || s.listen != Listen::Idle {
+    if !s.on || s.hovered {
         return false;
     }
     let since = *s.since.get_or_insert(now);
@@ -189,7 +180,6 @@ impl Thumbnail {
         let overlay = app.overlay(spec, Card::default());
         let handle = overlay.clone();
         overlay.update(move |s, _| s.overlay = Some(handle));
-        let _ = CARD.set(overlay.clone());
         Self { overlay }
     }
 
@@ -205,7 +195,6 @@ impl Thumbnail {
         let handle = self.overlay.clone();
         self.overlay.update(move |s, tx| {
             *shown() = Some(path.clone());
-            s.listen = Listen::Idle;
             s.shot = Some(Shot {
                 path,
                 image,
@@ -220,43 +209,6 @@ impl Thumbnail {
             tx.wake_after(Duration::ZERO);
         });
     }
-}
-
-/// The file of the shot the card shows, if it shows one. Safe from any
-/// thread.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn showing() -> Option<PathBuf> {
-    shown().clone()
-}
-
-/// A dictation over the card's shot is now `listen`; once idle, the card
-/// waits its usual few seconds again. Safe from any thread.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn listen(listen: Listen) {
-    if let Some(overlay) = CARD.get() {
-        overlay.update(move |s, tx| {
-            s.listen = listen;
-            s.since = Some(s.now);
-            tx.animated();
-            tx.wake_after(Duration::ZERO);
-        });
-    }
-}
-
-/// The words said over the card's shot at `path` open it in the editor, if
-/// the card still shows it; the card goes. Safe from any thread.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn heard(path: PathBuf, words: String) {
-    let Some(overlay) = CARD.get() else {
-        return;
-    };
-    overlay.update(move |s, tx| {
-        s.listen = Listen::Idle;
-        if s.on && s.shot.as_ref().is_some_and(|shot| shot.path == path) {
-            editor::open_with(path, words);
-            s.close(tx);
-        }
-    });
 }
 
 pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
@@ -308,10 +260,6 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .opacity_motion(FADE);
     // In from past the display's right edge, leaning back about the corner
     // it rests in, and out the same way; Reduce Motion only fades.
-    let listening = listening(p, s.listen).map(|pill| {
-        pill.key("listening")
-            .absolute(PAD + CLOSE_INSET, PAD + h - CLOSE_INSET - LISTEN_H)
-    });
     let travel = if cx.is_reduced_motion() {
         Transition::opacity().springs(SpringPair::new(REDUCED, REDUCED))
     } else {
@@ -338,42 +286,7 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .transition(travel)
         .child(card)
         .child(close);
-    root.child(match listening {
-        Some(pill) => group.child(pill),
-        None => group,
-    })
-}
-
-/// The pill on the card while someone talks over it: the recording dot and
-/// "Listening…", then "Processing…".
-fn listening(p: Paint, listen: Listen) -> Option<El> {
-    let k = p.k;
-    let (dot, label) = match listen {
-        Listen::Idle => return None,
-        Listen::Recording => (Some(p.danger()), tr("Listening…")),
-        Listen::Transcribing => (None, super::capture_capsule::surface::processing()),
-    };
-    let mut pill = rune::row()
-        .h(LISTEN_H)
-        .px(8.0)
-        .gap(6.0)
-        .center_y()
-        .radius(CLOSE_RADIUS)
-        .fill(k.c.bg_base);
-    for shadow in &k.elevation.floating {
-        pill = pill.box_shadow(*shadow);
-    }
-    if let Some(dot) = dot {
-        pill = pill.child(status_dot(dot));
-    }
-    Some(
-        pill.child(
-            rune::text(label)
-                .font(super::capture_capsule::surface::small())
-                .color(p.text())
-                .single_line(),
-        ),
-    )
+    root.child(group)
 }
 
 #[cfg(test)]
@@ -454,8 +367,7 @@ mod tests {
         (w, h, target.read(&gpu.device))
     }
 
-    /// The card at rest, under the pointer, and held while someone talks
-    /// over it, against
+    /// The card at rest and under the pointer, against
     /// `tests/golden/screenshot-thumbnail-*.png`; `HEX_UPDATE_GOLDENS=1`
     /// rewrites them and `HEX_GOLDEN_RENDERS` also writes them there.
     /// Without a GPU adapter it skips. Checked on Linux only, like every
@@ -469,18 +381,11 @@ mod tests {
         };
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
         let mut misses = Vec::new();
-        for (name, hovered, listen) in [
-            ("rest", false, Listen::Idle),
-            ("hover", true, Listen::Idle),
-            ("listening", false, Listen::Recording),
-        ] {
+        for (name, hovered) in [("rest", false), ("hover", true)] {
             for dark in [false, true] {
                 let theme = if dark { "dark" } else { "light" };
                 let name = format!("screenshot-thumbnail-{name}-{theme}");
-                let card = Card {
-                    listen,
-                    ..Card::still(desktop([1440, 900]), hovered)
-                };
+                let card = Card::still(desktop([1440, 900]), hovered);
                 let (w, h, pixels) = render(&gpu, card, dark);
                 if let Some(renders) = std::env::var_os("HEX_GOLDEN_RENDERS") {
                     let renders = std::path::PathBuf::from(renders);
@@ -593,26 +498,5 @@ mod tests {
         poll(&mut card, 0.0, &mut tx);
         poll(&mut card, 60.0, &mut tx);
         assert!(card.on);
-    }
-
-    #[test]
-    fn talking_over_it_holds_it_until_the_words_are_in() {
-        let mut card = Card {
-            listen: Listen::Recording,
-            ..Card::still(shot([800, 600]), false)
-        };
-        let mut tx = Tx::default();
-        poll(&mut card, 0.0, &mut tx);
-        poll(&mut card, 30.0, &mut tx);
-        assert!(card.on, "held while recording");
-        card.listen = Listen::Transcribing;
-        poll(&mut card, 60.0, &mut tx);
-        assert!(card.on, "and while transcribing");
-        card.listen = Listen::Idle;
-        card.since = Some(60.0);
-        poll(&mut card, 64.9, &mut tx);
-        assert!(card.on, "then its usual few seconds again");
-        poll(&mut card, 65.0, &mut tx);
-        assert!(!card.on);
     }
 }
