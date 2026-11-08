@@ -453,7 +453,7 @@ impl LinuxPaster {
         self.selection.current().text()
     }
 
-    /// Whether Terminal paste shortcut is on. It turns every paste's Ctrl+V
+    /// Whether Terminal paste is on. It turns every paste's Ctrl+V
     /// into Ctrl+Shift+V, so a typed-text replacement cannot use it.
     pub(crate) fn pastes_with_shift(&self) -> bool {
         self.paste_with_shift.load(Ordering::Relaxed)
@@ -475,11 +475,11 @@ impl LinuxPaster {
         }
     }
 
-    pub(crate) fn paste(&mut self, text: &str) -> Result<()> {
+    pub(crate) fn paste(&mut self, text: &str, shift: bool) -> Result<()> {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
-        self.paste_as(Mime::Text, text.as_bytes(), None)
+        self.paste_as(Mime::Text, text.as_bytes(), None, shift)
     }
 
     /// Pastes over a typed-text selection, then puts `original` back: the
@@ -488,19 +488,27 @@ impl LinuxPaster {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transformation"));
         }
-        self.paste_as(Mime::Text, text.as_bytes(), Some(original))
+        self.paste_as(Mime::Text, text.as_bytes(), Some(original), false)
     }
 
     /// Pastes a PNG (a capture's contact sheet) where the focus is, as the
     /// Mac's capture Paste does before its summary.
     pub(crate) fn paste_png(&mut self, png: &[u8]) -> Result<()> {
-        self.paste_as(Mime::Png, png, None)
+        self.paste_as(Mime::Png, png, None, false)
     }
 
     /// Pastes through the clipboard, then puts the previous clipboard back
     /// unless something newer replaced the paste first. `original` is the
     /// clipboard a typed-text job saved before it copied the selection.
-    fn paste_as(&mut self, mime: Mime, bytes: &[u8], original: Option<Snapshot>) -> Result<()> {
+    /// `shift` asks for Ctrl+Shift+V whatever the saved Terminal paste
+    /// setting says.
+    fn paste_as(
+        &mut self,
+        mime: Mime,
+        bytes: &[u8],
+        original: Option<Snapshot>,
+        shift: bool,
+    ) -> Result<()> {
         let restore = self.restore.clone();
         let selection = self.selection.current();
         let mut state = restore.lock().unwrap_or_else(PoisonError::into_inner);
@@ -524,7 +532,7 @@ impl LinuxPaster {
                 }
             };
         }
-        let result = self.send_paste(mime, bytes);
+        let result = self.send_paste(mime, bytes, shift);
         if result.is_ok() {
             state.inserted = Some((mime, bytes.to_vec()));
             schedule_restore(restore.clone(), state.generation, selection);
@@ -540,8 +548,8 @@ impl LinuxPaster {
         result
     }
 
-    fn send_paste(&mut self, mime: Mime, bytes: &[u8]) -> Result<()> {
-        let paste_with_shift = self.paste_with_shift.load(Ordering::Relaxed);
+    fn send_paste(&mut self, mime: Mime, bytes: &[u8], shift: bool) -> Result<()> {
+        let paste_with_shift = shift || self.paste_with_shift.load(Ordering::Relaxed);
         match &mut self.backend {
             Backend::X11(paster) => {
                 paster.paste(mime, bytes, &self.stop, &self.keys, paste_with_shift)?
@@ -1212,7 +1220,7 @@ mod tests {
             Default::default(),
         )
         .unwrap();
-        paster.paste(expected).unwrap();
+        paster.paste(expected, false).unwrap();
         wait_for("GTK to receive the transcript", &mut || {
             std::fs::read_to_string(&path).unwrap_or_default() == expected
         });
@@ -1235,7 +1243,7 @@ mod tests {
         wait_for("the clipboard to clear", &mut || {
             !wl_paste(&["--list-types"]).status.success()
         });
-        paster.paste(expected).unwrap();
+        paster.paste(expected, false).unwrap();
         let twice = expected.repeat(2);
         wait_for("GTK to receive the second transcript", &mut || {
             std::fs::read_to_string(&path).unwrap_or_default() == twice

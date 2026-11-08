@@ -741,6 +741,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Paste with Ctrl+Shift+V so terminals accept it"),
         ));
     }
+    if caps.os != super::platform::Os::Macos {
+        rows.push(row(
+            Feature::TerminalPasteShortcut,
+            Some(&TERMINAL),
+            tr("Terminal paste shortcut"),
+            tr("Another dictation shortcut that always pastes with Ctrl+Shift+V"),
+        ));
+    }
     #[cfg(hex_capture)]
     if ui.platform.scrawl.is_some() {
         let locked = crate::policy::Policy::current().locks(crate::policy::Lock::Annotate);
@@ -789,6 +797,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::FillerWords => "lab-filler-words",
         Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
+        Feature::TerminalPasteShortcut => "lab-terminal-paste-shortcut",
         Feature::SmartSpacing => "lab-smart-spacing",
         Feature::SpokenSymbols => "lab-spoken-symbols",
         Feature::PickerSortFilter => "lab-picker-sort-filter",

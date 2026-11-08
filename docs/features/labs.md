@@ -49,6 +49,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
+├── Terminal paste shortcut no labs.terminal_paste_shortcut + terminal_paste_hotkey (Windows, Linux)
+│                                        another shortcut dictates like the main one and always pastes with Ctrl+Shift+V; General shows its recorder while on
 ├── Caps Lock dictation no labs.caps_lock_dictation + labs.caps_lock_light (macOS)   a Caps Lock press starts and stops hands-free dictation; its light waits for the microphone, then shows recording (steady or slow blink), processing, and off
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
@@ -103,7 +105,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        replaced it. A failed paste restores it too. Select-all replaces the whole field; on GNOME text is read
 │                                        through wl-paste and cleared through wl-copy --clear. A clear that leaves text behind aborts.
 │                                        It sends Ctrl+A/Ctrl+C, so it is not meant for terminals, and refuses before any key while
-│                                        Terminal paste shortcut is on, because its Ctrl+V would become Ctrl+Shift+V.
+│                                        Terminal paste is on, because its Ctrl+V would become Ctrl+Shift+V.
 │                                        // checks: typed_text_is_its_own_bit_and_off_by_default (labs.rs), the shortcut's rules
 │                                        // (app_settings.rs), typed_text_fires_only_while_idle_and_changes_no_capture_state (linux/input.rs),
 │                                        // typed_text_skips_the_dictation_only_labs (dictation/processor.rs),
@@ -458,6 +460,39 @@ suppressed, or checked for it, and Hex is unchanged. Checks:
 [recognition.rs](../../src/recognition.rs) (macOS only). Not yet observed: a
 real Mac with an external keyboard, or the recorder row's rendering (macOS
 builds only; no golden).
+
+Terminal paste shortcut (`terminal-paste-shortcut`, Windows and Linux):
+another dictation shortcut whose paste is always Ctrl+Shift+V, for a terminal
+window that needs it, while the main dictation shortcut keeps following the
+global Terminal paste setting. While on, General shows a "Terminal paste
+shortcut" recorder under Shortcut, unbound by default and clearable
+(`terminal_paste_hotkey`, also `hex settings set terminal_paste_hotkey
+ctrl+shift+t`). It is refused when it shares a key with another Hex shortcut,
+and the others' checks count it while the toggle is on. The gate is
+`AppSettings::active_terminal_paste_hotkey`: only on Windows and Linux, with
+the toggle on, a binding saved, and no overlap is it handed to the listener,
+so X11 grabs or the shortcuts portal register it (id `terminal-paste`), and
+the Windows hook matches it. Linux has no `hex` command for it, unlike
+Dictate without processing's `hex dictation start|toggle --raw`, so without
+X11 grabs or the portal it stays unregistered. Off, nothing is registered,
+matched, or checked for it, and the saved binding stays. A capture it starts
+is a normal dictation in every other way: the same Hold/Toggle and double-tap
+lock, modes processing, History kind Dictation, last-dictation update, and
+Escape, cancel, and short-tap discards. The shortcut that starts a capture
+owns it:
+the main dictation and Dictate without processing shortcuts neither finish it
+nor pair a double tap with it, and its flavour survives the post-release tail
+to the paste. Paste last dictation keeps the global Terminal paste setting.
+On Windows, `javaw`/`java` still get plain Ctrl+V, as Terminal paste does.
+Checks: `the_terminal_paste_shortcut_needs_its_lab_and_its_own_keys` in
+[app_settings.rs](../../src/app_settings.rs),
+`terminal_paste_shortcut_owns_the_capture_it_starts` in
+[linux/input.rs](../../src/linux/input.rs), and the Windows
+`a_second_dictation_shortcut_owns_the_capture_it_starts` in
+[windows/input.rs](../../src/windows/input.rs) (cross-compiled only). Not yet
+observed: a real terminal on either OS; the Windows tests have not run on a
+Windows PC. The Labs page goldens (`windows-labs`, `linux-labs`) show the new
+card.
 
 Caps Lock dictation (`caps-lock-dictation`, macOS): while on, a physical Caps
 Lock press toggles a hands-free dictation. From idle it starts a capture that
@@ -1765,6 +1800,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 - Terminal paste (Windows): paste with Ctrl+Shift+V instead of Ctrl+V for
   apps that ignore a synthetic Ctrl+V (issue 477 / PR 478). Its toggle is the
   shared `paste_with_shift`; Linux keeps it as a General › Advanced row.
+- Terminal paste shortcut (Windows, Linux): another dictation shortcut whose
+  paste is always Ctrl+Shift+V, whatever Terminal paste says. Its own switch
+  is `labs.terminal_paste_shortcut`, and General shows its recorder while on.
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,

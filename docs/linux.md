@@ -53,7 +53,7 @@ Hex could not snapshot the clipboard, the result stays on it. Without
 data-control on GNOME, text is read through `wl-paste`, the clipboard is
 cleared through `wl-copy --clear`, and a result Hex could not snapshot stays
 on the clipboard. Because it sends Ctrl+A and Ctrl+C, it is not meant for
-terminals. With **Terminal paste shortcut** on, it refuses before sending any
+terminals. With **Terminal paste** on, it refuses before sending any
 key: its Ctrl+V would become Ctrl+Shift+V. Select-all replaces the whole
 field, so mixed formatting is not preserved, and on GNOME `wl-paste` may
 briefly take focus. With the lab off, Output and the listener are unchanged
@@ -484,8 +484,10 @@ dictation rules:
   (#1023). Hex still logs the
   paste as sent. Ctrl+Space or a key without modifiers works.
   Hyprland names each shortcut `anomaly.hex:<shortcut>`: `anomaly.hex:dictation`,
-  `anomaly.hex:paste-last`, `anomaly.hex:capture` (Annotate), and
-  `anomaly.hex:raw-dictation` (Dictate without processing). The names stay the
+  `anomaly.hex:paste-last`, `anomaly.hex:capture` (Annotate),
+  `anomaly.hex:raw-dictation` (Dictate without processing), and
+  `anomaly.hex:terminal-paste` (Labs › Terminal paste shortcut, while on).
+  The names stay the
   same when you record another key in Settings (#1376), so a bind keeps
   working; `hyprctl globalshortcuts` lists them while Hex runs. For example:
 
@@ -508,7 +510,7 @@ hl.bind("F10", hl.dsp.global("anomaly.hex:paste-last"))
   `bind = , End, exec, hex dictation start` with
   `bindr = , End, exec, hex dictation stop`, or one
   `bind = , End, exec, hex dictation toggle`. Pasting into a terminal needs
-  **Terminal paste shortcut** (Ctrl+Shift+V) unless the terminal accepts
+  **Terminal paste** (Ctrl+Shift+V) unless the terminal accepts
   Ctrl+V.
 - **Wayland without the portal** (for example Sway): nothing registers global
   shortcuts. Settings lists these commands; bind them in your desktop's own
@@ -597,7 +599,13 @@ and in `hex dictate`. **Recording indicator** places it at the top or bottom of 
 screen, or turns it off.
 
 Insertion uses the clipboard and **Ctrl-V** for new installations. Enable
-**Terminal paste shortcut** in Settings for targets that require **Ctrl-Shift-V**.
+**Terminal paste** in Settings for targets that require **Ctrl-Shift-V**.
+Labs › Terminal paste shortcut (`hex labs on terminal-paste-shortcut`, off by
+default) adds a second dictation shortcut whose paste is always Ctrl-Shift-V,
+while the main shortcut keeps this setting. On X11 Hex grabs it like the other
+dictation shortcuts; on Wayland it needs the desktop's shortcuts portal (Hex
+asks for `anomaly.hex:terminal-paste`). There is no `hex` command for it, so
+without X11 grabs or the portal the shortcut cannot be registered.
 Existing X11 settings retain their previous Ctrl-Shift-V behavior until changed.
 The target application must accept the selected binding.
 

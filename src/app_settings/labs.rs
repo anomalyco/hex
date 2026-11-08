@@ -62,6 +62,9 @@ pub struct LabsSettings {
     pub subtitle_export: bool,
     /// `second_dictation_hotkey` dictates like the dictation shortcut (macOS, issue 627).
     pub second_dictation_shortcut: bool,
+    /// `terminal_paste_hotkey` dictates like the dictation shortcut and always pastes
+    /// with Ctrl+Shift+V (Windows, Linux).
+    pub terminal_paste_shortcut: bool,
     /// A paste gets a leading space when the character before the cursor wants one (macOS, issue 632).
     pub smart_spacing: bool,
     /// Spoken symbol words ("comma", "hashtag", "underscore") become characters joined to their words (issue 678).
@@ -166,6 +169,7 @@ impl Default for LabsSettings {
             filler_words: false,
             subtitle_export: false,
             second_dictation_shortcut: false,
+            terminal_paste_shortcut: false,
             smart_spacing: false,
             spoken_symbols: false,
             picker_sort_filter: false,

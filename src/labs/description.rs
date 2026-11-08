@@ -51,6 +51,9 @@ impl Feature {
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
             }
+            Self::TerminalPasteShortcut => {
+                "Another dictation shortcut that always pastes with Ctrl+Shift+V (terminal_paste_hotkey)"
+            }
             Self::SmartSpacing => "Add a space before a dictation pasted right after a word",
             Self::SpokenSymbols => {
                 "Turn spoken \"comma\", \"colon\", \"hashtag\", \"underscore\", and similar words into symbols joined to their words"

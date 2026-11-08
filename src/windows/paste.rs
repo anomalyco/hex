@@ -39,6 +39,12 @@ fn paste_with_shift_into(stem: Option<&str>, terminal_paste: bool) -> bool {
     terminal_paste && !stem.is_some_and(|stem| PLAIN_PASTE_STEMS.contains(&stem))
 }
 
+/// A paste with Ctrl+Shift+V when this capture asks for it (Labs › Terminal
+/// paste shortcut) or the saved Terminal paste setting is on.
+fn shift_paste(for_this_capture: bool, terminal_paste: bool) -> bool {
+    for_this_capture || terminal_paste
+}
+
 enum ClipboardSnapshot {
     Empty,
     Files(Vec<PathBuf>),
@@ -127,7 +133,9 @@ impl WindowsPaster {
         })
     }
 
-    pub fn paste(&mut self, text: &str) -> Result<()> {
+    /// Pastes `text`, with Ctrl+Shift+V when `shift` asks for it or the
+    /// saved Terminal paste setting is on. Java games still take Ctrl+V.
+    pub fn paste(&mut self, text: &str, shift: bool) -> Result<()> {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
@@ -171,7 +179,7 @@ impl WindowsPaster {
         }
         let shift = paste_with_shift_into(
             stem.as_deref(),
-            self.paste_with_shift.load(Ordering::Relaxed),
+            shift_paste(shift, self.paste_with_shift.load(Ordering::Relaxed)),
         );
         if let Err(error) = send_paste_shortcut(shift) {
             restore_clipboard_generation(&self.clipboard_restore, generation);
@@ -368,6 +376,14 @@ mod tests {
         assert!(!paste_with_shift_into(Some("javaw"), true));
         assert!(!paste_with_shift_into(Some("java"), true));
         assert!(!paste_with_shift_into(Some("notepad"), false));
+    }
+
+    #[test]
+    fn a_terminal_paste_capture_overrides_the_saved_setting() {
+        assert!(shift_paste(true, false));
+        assert!(shift_paste(false, true));
+        assert!(shift_paste(true, true));
+        assert!(!shift_paste(false, false));
     }
 
     /// US-layout scan codes for the chord's keys.

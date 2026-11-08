@@ -165,6 +165,10 @@ impl AppSettings {
             self.second_dictation_hotkey = None;
             reset = true;
         }
+        if self.terminal_paste_hotkey.as_ref().is_some_and(&matches) {
+            self.terminal_paste_hotkey = None;
+            reset = true;
+        }
         #[cfg(hex_capture)]
         if matches(&self.capture.hotkey) {
             self.capture.hotkey = HotkeyBinding::capture_default();

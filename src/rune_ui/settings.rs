@@ -403,6 +403,8 @@ pub(super) fn conflicts(
         ShortcutTarget::CaptureReplay => HotkeySlot::CaptureReplay,
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => HotkeySlot::SecondDictation,
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => HotkeySlot::TerminalPaste,
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => HotkeySlot::Screenshot,
     };
@@ -439,6 +441,8 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey.as_ref(),
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey.as_ref(),
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey.as_ref(),
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => Some(&settings.screenshots.hotkey),
     }
@@ -462,6 +466,8 @@ pub(super) fn set_binding(
         ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey = Some(binding),
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey = Some(binding),
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey = Some(binding),
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => settings.screenshots.hotkey = binding,
     }
@@ -775,6 +781,8 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::RawDictation => "Dictate without processing",
         #[cfg(target_os = "linux")]
         ShortcutTarget::TypedText => "Transform typed text",
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => "Terminal paste shortcut",
         // The portal never holds the cancel key.
         ShortcutTarget::Cancel => return None,
         // The portal lists Annotate's shortcut under that name.
@@ -1228,6 +1236,8 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
         ShortcutTarget::RawDictation => "raw-dictation-hotkey",
         #[cfg(target_os = "linux")]
         ShortcutTarget::TypedText => "typed-text-hotkey",
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => "terminal-paste-hotkey",
         ShortcutTarget::Cancel => "cancel-hotkey",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "capture-hotkey",

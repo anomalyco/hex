@@ -115,7 +115,7 @@ impl crate::control::host::Host for LinuxControl {
         if settings.paste_with_shift {
             return Err(ControlError::new(
                 "disabled",
-                "Terminal paste shortcut is on, so typed text would send Ctrl+Shift+V; turn it \
+                "Terminal paste is on, so typed text would send Ctrl+Shift+V; turn it \
                  off in Settings › General first",
             ));
         }

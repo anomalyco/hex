@@ -671,6 +671,11 @@ Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
 
+Labs > Terminal paste shortcut (Windows, Linux; off)   // labs.md
+  -> General shows "Terminal paste shortcut" under Shortcut (unbound, clearable)
+  -> it dictates like the shortcut and always pastes with Ctrl+Shift+V
+  -> Paste last dictation keeps the global Terminal paste setting
+
 Labs > Caps Lock dictation (macOS, off)   // labs.md
   -> a Caps Lock press starts a hands-free capture; the next press finishes it
   -> needs both the HID Caps Lock key and its AlphaShift edge; remapped to
@@ -829,6 +834,9 @@ General                                  // settings
 │   └── On -> the hook passes the shortcut's key-down/up on instead of consuming it
 ├── Terminal paste (Advanced on Linux, Labs on Windows; off)
 │   └── On -> paste sends Ctrl+Shift+V instead of Ctrl+V; applies to the next paste
+├── Labs > Terminal paste shortcut (Windows, Linux; off)
+│   └── On -> General shows its recorder; a capture it starts pastes with
+│       Ctrl+Shift+V whatever Terminal paste says
 ├── Turn off the mic when not dictating (General, under Microphone; off)   // release_microphone_while_idle
 │   ├── One switch, no confirmation; its line says what the state means (issue 61), on every OS
 │   ├── Off (default) -> "The mic stays ready so dictation starts instantly; your system shows it in use"
@@ -2329,7 +2337,7 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 ├── rune::App: --hidden starts windowless and makes no Direct3D device (on x64
 │   the speech model still loads on the GPU through Vulkan), close hides
 │   (keep_running); Quit or no tray ends it
-├── General adds Launch at login; no terminal paste; chord capture polls
+├── General adds Launch at login; Terminal paste in Labs; chord capture polls
 ├── HUD: shared indicator model + CPU shader in a Rune overlay
 ├── Modes: "Choose a file…" opens rune::FileDialogs (file_dialog) on its own thread
 ├── Modes app icons: the executable's first icon (PrivateExtractIconsW)

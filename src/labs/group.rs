@@ -90,6 +90,7 @@ impl Feature {
             Self::Screenshots | Self::AnnotateReplay | Self::GnomeAnnotate => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
+            | Self::TerminalPasteShortcut
             | Self::SidedChords
             | Self::TapOrHold
             | Self::RestoreShortcutDefault

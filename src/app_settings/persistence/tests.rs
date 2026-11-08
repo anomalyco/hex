@@ -109,6 +109,7 @@ fn unbound_optional_shortcuts_stay_unbound_after_saving() {
         raw_dictation_hotkey: None,
         typed_text_hotkey: None,
         second_dictation_hotkey: None,
+        terminal_paste_hotkey: None,
         ..Default::default()
     };
     let value = serde_json::to_value(&settings).unwrap();
@@ -119,6 +120,7 @@ fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     assert!(loaded.raw_dictation_hotkey.is_none());
     assert!(loaded.typed_text_hotkey.is_none());
     assert!(loaded.second_dictation_hotkey.is_none());
+    assert!(loaded.terminal_paste_hotkey.is_none());
 }
 
 #[test]
