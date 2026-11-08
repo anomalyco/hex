@@ -627,6 +627,7 @@ mod tests {
                 settings: AppSettings::default(),
                 listener: DesktopListenerSnapshot {
                     running: true,
+                    warming: false,
                     status: "Enabled".into(),
                     warning: None,
                     notice: None,

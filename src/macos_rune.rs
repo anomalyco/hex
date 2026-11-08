@@ -889,6 +889,7 @@ impl Runtime {
         Published {
             listener: DesktopListenerSnapshot {
                 running,
+                warming: false,
                 status: if failure.is_some() {
                     "Stopped"
                 } else if running {

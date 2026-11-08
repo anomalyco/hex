@@ -235,6 +235,10 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   Hex's own dictation (macOS listener, Linux and Windows event log) holds
 │   │   the keys, flies the live words, and lightning burns the answered card
 │   ├── A short, silent, or failed try -> a hint under the field
+│   ├── Listener running but still loading its model, microphone, or shortcuts
+│   │   -> "Getting Hex ready to listen…" in place of the hold prompt until its
+│   │   first session starts (desktop/host.rs `warming`)
+│   │   // setup.warming; Check: `the_practice_page_waits_for_the_listener`
 │   └── Done at any time -> Hex is ready  // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
 │   ├── First time -> Hex records a marker, reopens itself, resumes at the practice
