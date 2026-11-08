@@ -49,9 +49,11 @@ impl DictationSink<'_> {
         self.caps_lock.observe(event);
     }
 
+    /// One chunk's loudness reaches both consumers: the light even when no
+    /// HUD listens, and the HUD exactly as it would have received it.
     fn meter(&self, samples: &[f32]) {
-        if let Some(hud) = self.hud {
-            hud.meter(samples);
+        if let Some(event) = DictationIndicatorEvent::meter(samples) {
+            self.send(event);
         }
     }
 
@@ -1307,6 +1309,16 @@ pub fn listen(
             {
                 indicator.meter(&audio.samples);
             }
+            // Annotate's narration feeds only the Caps Lock light, never the
+            // dictation HUD; without this its recording light never leaves
+            // Waiting.
+            #[cfg(hex_capture)]
+            if capture_was_recording
+                && audio.is_current(input.recognition_generation())
+                && let Some(event) = DictationIndicatorEvent::meter(&audio.samples)
+            {
+                indicator.caps_only(event);
+            }
         }
     }
 
@@ -2291,5 +2303,39 @@ mod tests {
         // Nothing was recording programmatically: nothing changes.
         programmatic_microphone_lost(None, None, "mic-gap", &mut lost, &mut completions);
         assert_eq!(completions.len(), 2);
+    }
+
+    /// The light follows the microphone even when no HUD listens: a chunk's
+    /// meter reaches the Caps Lock model through the sink, and a silent
+    /// chunk leaves it waiting.
+    #[test]
+    fn a_meter_reaches_the_light_without_a_hud() {
+        use crate::caps_lock_dictation::LedPattern;
+
+        let caps_lock = crate::caps_lock_dictation::CapsLockDictation::for_test();
+        let indicator = DictationSink {
+            hud: None,
+            caps_lock: &caps_lock,
+        };
+        indicator.send(DictationIndicatorEvent::Started);
+        assert_eq!(
+            caps_lock.pattern_for_test(),
+            LedPattern::Off,
+            "the light waits for the capture's first audio"
+        );
+
+        indicator.meter(&[0.5, -0.5]);
+        assert_ne!(
+            caps_lock.pattern_for_test(),
+            LedPattern::Off,
+            "the light takes the meter even with no HUD listening"
+        );
+
+        indicator.meter(&[]);
+        assert_ne!(
+            caps_lock.pattern_for_test(),
+            LedPattern::Off,
+            "a silent chunk turns nothing off"
+        );
     }
 }

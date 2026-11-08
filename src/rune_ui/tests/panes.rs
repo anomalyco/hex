@@ -2159,6 +2159,21 @@ fn unload_when_idle_shows_its_minutes_on_its_card_while_on() {
 }
 
 #[test]
+fn caps_lock_light_shows_its_choices_on_its_card_while_on() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(crate::labs::Feature::CapsLockDictation.group()));
+    settle(&mut rt);
+    assert!(rt.find("caps-lock-light").is_none(), "hidden while off");
+    assert_eq!(
+        rt.state.settings.labs.caps_lock_light,
+        crate::app_settings::CapsLockLight::Steady
+    );
+    tap(&mut rt, "lab-caps-lock-dictation");
+    assert!(rt.state.settings.labs.caps_lock_dictation);
+    assert!(rt.find("caps-lock-light").is_some());
+}
+
+#[test]
 fn the_labs_store_filters_by_tab_chip_and_search() {
     let mut rt = runtime("mac-labs-on", true, (980.0, 2000.0));
     assert!(rt.find("lab-card-live-text").is_some());

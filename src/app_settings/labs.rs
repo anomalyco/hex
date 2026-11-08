@@ -2,6 +2,32 @@
 
 use super::*;
 
+/// How the Caps Lock light shows while a capture records (Labs › Caps Lock
+/// dictation, macOS).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapsLockLight {
+    /// On for the whole recording.
+    #[default]
+    Steady,
+    /// On and off every 700 ms while recording, slower than the
+    /// transcribing blink.
+    SlowBlink,
+}
+
+impl CapsLockLight {
+    /// Every choice, in the order the window shows them.
+    pub const ALL: [Self; 2] = [Self::Steady, Self::SlowBlink];
+
+    /// The English label the window shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Steady => "Steady",
+            Self::SlowBlink => "Slow blink",
+        }
+    }
+}
+
 /// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`) are ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
@@ -77,6 +103,9 @@ pub struct LabsSettings {
     /// A Caps Lock press starts and stops dictation, and its light follows
     /// Hex's recording and processing (macOS).
     pub caps_lock_dictation: bool,
+    /// Whether that light stays solid or blinks slowly while recording
+    /// (macOS).
+    pub caps_lock_light: CapsLockLight,
     pub movable_meeting_capsules: bool,
     /// A paste restores the clipboard through a running XWayland on Wayland desktops without data-control, such as GNOME (Linux, issue 1111).
     pub gnome_clipboard_restore: bool,
@@ -159,6 +188,7 @@ impl Default for LabsSettings {
             hide_menu_bar_icon: false,
             quit_closes_window: false,
             caps_lock_dictation: false,
+            caps_lock_light: CapsLockLight::Steady,
             movable_meeting_capsules: false,
             gnome_clipboard_restore: false,
             typed_text: false,

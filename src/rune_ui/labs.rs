@@ -888,6 +888,20 @@ fn extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
                 )
                 .child(unload_after(ui, p)),
         ),
+        Lab::Feature(Feature::CapsLockDictation) => Some(
+            row()
+                .key("caps-lock-light-row")
+                .gap(8.0)
+                .center_y()
+                .flex_wrap()
+                .child(
+                    text(tr("Recording light"))
+                        .key("label")
+                        .font(controls::DESCRIPTION)
+                        .color(p.muted()),
+                )
+                .child(caps_lock_light(ui, p)),
+        ),
         #[cfg(all(target_os = "macos", hex_capture))]
         Lab::Feature(Feature::Screenshots) => Some(screenshots::body(
             ui,
@@ -896,6 +910,23 @@ fn extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
         )),
         _ => None,
     }
+}
+
+/// Whether the Caps Lock light stays solid or blinks slowly while recording.
+fn caps_lock_light(ui: &Ui, p: Paint) -> El {
+    use crate::app_settings::CapsLockLight;
+    let labels: Vec<&str> = CapsLockLight::ALL
+        .iter()
+        .map(|light| tr(light.name()))
+        .collect();
+    let selected = CapsLockLight::ALL
+        .iter()
+        .position(|light| *light == ui.settings.labs.caps_lock_light)
+        .unwrap_or(0);
+    controls::segmented(p, "caps-lock-light", &labels, selected, |ui, index| {
+        let light = CapsLockLight::ALL[index];
+        ui.update(|settings| settings.labs.caps_lock_light = light);
+    })
 }
 
 /// How long the model sits unused before it unloads.

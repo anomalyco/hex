@@ -21,4 +21,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Typed text", ["Wpisany tekst", "输入的文本", "入力したテキスト", "Eingegebener Text", "Texto escrito", "Введений текст"]),
     ("Runs Output on what you typed", ["Uruchamia Wyjście na wpisanym tekście", "对输入的文本运行输出步骤", "入力したテキストに出力を実行", "Wendet Ausgabe auf eingegebenen Text an", "Aplica Salida a lo que escribiste", "Застосовує Вивід до введеного тексту"]),
     ("Replaces what you typed where it is", ["Zastępuje wpisany tekst na miejscu", "就地替换已输入的文本", "入力したテキストをその場で置き換えます", "Ersetzt den eingegebenen Text an Ort und Stelle", "Reemplaza lo que escribiste en el mismo lugar", "Замінює введений текст на місці"]),
+    ("Recording light", ["Światło nagrywania", "录制指示灯", "録音ライト", "Aufnahmelicht", "Luz de grabación", "Світло запису"]),
+    ("Steady", ["Stałe", "常亮", "常時点灯", "Dauerlicht", "Fijo", "Постійно"]),
+    ("Slow blink", ["Wolne miganie", "慢闪", "ゆっくり点滅", "Langsames Blinken", "Parpadeo lento", "Повільне блимання"]),
 ];

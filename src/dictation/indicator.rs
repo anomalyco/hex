@@ -111,33 +111,11 @@ mod macos {
                 crate::macos_rune::wake_pump();
             }
         }
-
-        pub fn meter(&self, samples: &[f32]) {
-            if let Some(event) = DictationIndicatorEvent::meter(samples) {
-                self.send(event);
-            }
-        }
     }
 
     pub fn channel() -> (DictationIndicatorSender, Receiver<DictationIndicatorEvent>) {
         let (sender, receiver) = mpsc::channel();
         (DictationIndicatorSender(sender), receiver)
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn meter_reports_rms_and_peak() {
-            let (sender, receiver) = channel();
-            sender.meter(&[-0.5, 0.5]);
-            let DictationIndicatorEvent::Meter { average, peak } = receiver.recv().unwrap() else {
-                panic!("expected meter event");
-            };
-            assert!((average - 0.5).abs() < f32::EPSILON);
-            assert!((peak - 0.5).abs() < f32::EPSILON);
-        }
     }
 }
 
@@ -476,6 +454,18 @@ impl IndicatorModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meter_reports_rms_and_peak() {
+        let Some(DictationIndicatorEvent::Meter { average, peak }) =
+            DictationIndicatorEvent::meter(&[-0.5, 0.5])
+        else {
+            panic!("expected a meter event");
+        };
+        assert!((average - 0.5).abs() < f32::EPSILON);
+        assert!((peak - 0.5).abs() < f32::EPSILON);
+        assert!(DictationIndicatorEvent::meter(&[]).is_none());
+    }
 
     #[test]
     fn an_island_spreads_the_field_across_it_at_the_same_spacing() {

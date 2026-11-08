@@ -49,8 +49,6 @@ const CAPS_LOCK_LOCK_STATE: i32 = 1;
 const MAIN_PORT_DEFAULT: u32 = 0;
 /// `kIOReturnSuccess`.
 const IO_RETURN_SUCCESS: i32 = 0;
-/// On and off are each this long, a visible but calm blink.
-const BLINK_INTERVAL: Duration = Duration::from_millis(350);
 /// Wakes the worker at least this often while the light is steady.
 const IDLE_WAIT: Duration = Duration::from_secs(5);
 /// Re-read the keyboards this often, so a keyboard plugged in later joins.
@@ -591,12 +589,13 @@ impl CapsLockDictation {
     /// Mirrors one HUD event into the light model and publishes the pattern
     /// the worker should show.
     pub(crate) fn observe(&self, event: DictationIndicatorEvent) {
+        let slow_blink = crate::labs::caps_lock_slow_blink();
         let mut inner = self.lock();
         if !inner.enabled {
             return;
         }
         inner.model.handle(event);
-        let pattern = inner.model.pattern();
+        let pattern = inner.model.pattern(slow_blink);
         if pattern != inner.pattern {
             inner.pattern = pattern;
             LED_PATTERN.store(pattern.code(), Ordering::Release);
@@ -608,6 +607,31 @@ impl CapsLockDictation {
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|error| error.into_inner())
+    }
+}
+
+#[cfg(test)]
+impl CapsLockDictation {
+    /// A handle with the lab on and no worker, so a test can drive the
+    /// listener's sink and read the model without touching IOKit.
+    pub(crate) fn for_test() -> Self {
+        let (presses, press_receiver) = mpsc::channel();
+        Self {
+            inner: Mutex::new(Inner {
+                enabled: true,
+                spawn_failed: false,
+                worker: None,
+                presses: press_receiver,
+                model: LedModel::default(),
+                pattern: LedPattern::Off,
+            }),
+            presses,
+        }
+    }
+
+    /// The pattern the light model last decided.
+    pub(crate) fn pattern_for_test(&self) -> LedPattern {
+        self.lock().pattern
     }
 }
 
@@ -627,16 +651,9 @@ fn run(commands: Receiver<WorkerCommand>, done: SyncSender<()>) {
         let desired = LedPattern::from_code(LED_PATTERN.load(Ordering::Acquire));
         if desired != current {
             current = desired;
-            match current {
-                LedPattern::Off | LedPattern::Solid => {
-                    blink_on = false;
-                    blink_at = None;
-                }
-                LedPattern::Blink => {
-                    blink_on = true;
-                    blink_at = Some(Instant::now() + BLINK_INTERVAL);
-                }
-            }
+            let interval = current.interval();
+            blink_on = interval.is_some();
+            blink_at = interval.map(|interval| Instant::now() + interval);
             apply(&mut output, current, blink_on);
         }
         let now = Instant::now();
@@ -652,9 +669,11 @@ fn run(commands: Receiver<WorkerCommand>, done: SyncSender<()>) {
             Ok(WorkerCommand::Wake) => {}
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
-        if current == LedPattern::Blink && blink_at.is_some_and(|at| Instant::now() >= at) {
+        if let Some(interval) = current.interval()
+            && blink_at.is_some_and(|at| Instant::now() >= at)
+        {
             blink_on = !blink_on;
-            blink_at = Some(Instant::now() + BLINK_INTERVAL);
+            blink_at = Some(Instant::now() + interval);
             apply(&mut output, current, blink_on);
         }
     }
@@ -666,5 +685,5 @@ fn run(commands: Receiver<WorkerCommand>, done: SyncSender<()>) {
 
 fn apply(output: &mut LedOutput, pattern: LedPattern, blink_on: bool) {
     output
-        .write(matches!(pattern, LedPattern::Solid) || (pattern == LedPattern::Blink && blink_on));
+        .write(matches!(pattern, LedPattern::Solid) || (blink_on && pattern.interval().is_some()));
 }
