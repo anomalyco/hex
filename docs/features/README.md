@@ -186,8 +186,12 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 ├── Setting up Hex -> speech model download starts at once  // setup.background-download
 │   ├── Model -> the selection recommended for the system's first preferred
 │   │            language (English -> Parakeet Unified English; e.g. French ->
-│   │            Parakeet v3, Japanese -> Qwen3-ASR); the language capsule
-│   │            switches between English and that language
+│   │            Parakeet v3, Japanese -> Whisper large-v3-turbo); when that
+│   │            language isn't English, the language capsule switches between
+│   │            English and its recommended model with one press, with no
+│   │            dropdown chevron; with English as the system language there is
+│   │            nothing to switch to, so the capsule just shows English,
+│   │            whatever English model is selected
 │   ├── The download is held while the Hugging Face scan runs (headers only)
 │   ├── Models found here -> the model step instead      // setup.found-choice
 │   │   ├── "Choose a speech model": one list, ours first and selected, then the
