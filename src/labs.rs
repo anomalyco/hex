@@ -105,6 +105,7 @@ pub enum Feature {
     SectionKeyAlone,
     KeepRecordings,
     SettingsSearch,
+    ReleaseNotesLink,
     HideMenuBarIcon,
     MovableMeetingCapsules,
     GnomeClipboardRestore,
@@ -126,7 +127,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 59] = [
+    pub const ALL: [Self; 60] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -168,6 +169,7 @@ impl Feature {
         Self::SectionKeyAlone,
         Self::KeepRecordings,
         Self::SettingsSearch,
+        Self::ReleaseNotesLink,
         Self::HideMenuBarIcon,
         Self::MovableMeetingCapsules,
         Self::GnomeClipboardRestore,
@@ -252,6 +254,7 @@ impl Feature {
             | Self::SectionKeyAlone
             | Self::KeepRecordings
             | Self::SettingsSearch
+            | Self::ReleaseNotesLink
             | Self::HideMenuBarIcon
             | Self::MovableMeetingCapsules
             | Self::GnomeClipboardRestore
@@ -331,7 +334,7 @@ impl Feature {
             | Self::ExpireMeetingAudio
             | Self::FailureNotices
             | Self::TypedText => 20261107,
-            Self::GnomeAnnotate | Self::TerminalPasteShortcut => 20261108,
+            Self::GnomeAnnotate | Self::TerminalPasteShortcut | Self::ReleaseNotesLink => 20261108,
         }
     }
 
@@ -433,6 +436,7 @@ impl Feature {
             | Self::MoreCallApps
             | Self::ExpireMeetingAudio
             | Self::SettingsSearch
+            | Self::ReleaseNotesLink
             | Self::FillerWords => true,
         }
     }
@@ -481,6 +485,7 @@ impl Feature {
             Self::SectionKeyAlone => "section-key",
             Self::KeepRecordings => "keep-recordings",
             Self::SettingsSearch => "settings-search",
+            Self::ReleaseNotesLink => "release-notes-link",
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
             Self::MovableMeetingCapsules => "movable-meeting-capsules",
             Self::GnomeClipboardRestore => "gnome-clipboard-restore",
@@ -546,6 +551,7 @@ impl Feature {
             Self::SectionKeyAlone => "labs.section_key_alone",
             Self::KeepRecordings => "labs.keep_recordings",
             Self::SettingsSearch => "labs.settings_search",
+            Self::ReleaseNotesLink => "labs.release_notes_link",
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
             Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
             Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
@@ -615,6 +621,7 @@ impl Feature {
             Self::SectionKeyAlone => settings.labs.section_key_alone,
             Self::KeepRecordings => settings.labs.keep_recordings,
             Self::SettingsSearch => settings.labs.settings_search,
+            Self::ReleaseNotesLink => settings.labs.release_notes_link,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
@@ -682,6 +689,7 @@ impl Feature {
             &mut labs.section_key_alone,
             &mut labs.keep_recordings,
             &mut labs.settings_search,
+            &mut labs.release_notes_link,
             &mut labs.hide_menu_bar_icon,
             &mut labs.movable_meeting_capsules,
             &mut labs.gnome_clipboard_restore,
@@ -749,6 +757,7 @@ impl Feature {
             Self::PickerDownloaded => settings.labs.picker_downloaded = on,
             Self::KeepRecordings => settings.labs.keep_recordings = on,
             Self::SettingsSearch => settings.labs.settings_search = on,
+            Self::ReleaseNotesLink => settings.labs.release_notes_link = on,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
