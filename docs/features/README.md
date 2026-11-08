@@ -1043,7 +1043,7 @@ the GPUI occlusion regression went with GPUI and has no Rune counterpart.
 
 ```ts
 A pane, detail card or dropdown longer than its space    // ui.scroll-bar (#1209)
-├── Scroll bar -> a thin thumb on the right edge, only while the content overflows
+├── Scroll bar -> a wider, clearly visible thumb on the right edge, only while the content overflows
 │   ├── Drag the thumb -> the content follows it
 │   └── Press above or below it -> jumps there
 ├── Page Up / Page Down, Home / End -> page the pane around focus or the pointer
@@ -1054,8 +1054,10 @@ A pane, detail card or dropdown longer than its space    // ui.scroll-bar (#1209
 ```
 
 The bar is Rune's `rune_kit::scroll_bar`, used by `scroll_body`, `faded_body`
-and every kit `Menu`, `Select` and `Combobox`. Checks:
-`a_long_transcript_scrolls_by_dragging_its_scroll_bar`, and in Rune the
+and every kit `Menu`, `Select` and `Combobox`; Hex's pane bodies draw a wider
+`text_faint` thumb that turns `text_muted` under the pointer. Checks:
+`a_long_transcript_scrolls_by_dragging_its_scroll_bar`,
+`a_long_labs_store_scrolls_by_dragging_its_scroll_bar`, and in Rune the
 `scroll_bar` tests and `page_keys_move_a_scrolling_listbox_highlight_by_what_it_shows`.
 A touchscreen (Wayland, X11, Windows; a pen where the system reports it as a
 touch) acts as the primary button (#1337): a tap clicks, dragging a slider or
