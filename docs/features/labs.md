@@ -472,13 +472,14 @@ and the others' checks count it while the toggle is on. The gate is
 `AppSettings::active_terminal_paste_hotkey`: only on Windows and Linux, with
 the toggle on, a binding saved, and no overlap is it handed to the listener,
 so X11 grabs or the shortcuts portal register it (id `terminal-paste`), and
-the Windows hook matches it. Linux has no `hex` command for it, so without
-X11 grabs or the portal it stays unregistered, as raw dictation does. Off,
-nothing is registered, matched, or checked
-for it, and the saved binding stays. A capture it starts is a normal
-dictation in every other way: the same Hold/Toggle and double-tap lock,
-modes processing, History kind Dictation, last-dictation update, and Escape,
-cancel, and short-tap discards. The shortcut that starts a capture owns it:
+the Windows hook matches it. Linux has no `hex` command for it, unlike
+Dictate without processing's `hex dictation start|toggle --raw`, so without
+X11 grabs or the portal it stays unregistered. Off, nothing is registered,
+matched, or checked for it, and the saved binding stays. A capture it starts
+is a normal dictation in every other way: the same Hold/Toggle and double-tap
+lock, modes processing, History kind Dictation, last-dictation update, and
+Escape, cancel, and short-tap discards. The shortcut that starts a capture
+owns it:
 the main dictation and Dictate without processing shortcuts neither finish it
 nor pair a double tap with it, and its flavour survives the post-release tail
 to the paste. Paste last dictation keeps the global Terminal paste setting.
