@@ -173,8 +173,10 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     └── not observed on a real GNOME session; no automated check
 Files -> Reveal files opens the recording folder (selected in Explorer,
     opened by xdg-open); Reveal Markdown additionally appears while the
-    exported .md exists and selects it (Explorer) or opens the folder holding
-    it (xdg-open); Delete moves to the freedesktop Trash or the Recycle Bin
+    exported .md exists and selects it (Explorer, with `/select,"<path>"`
+    passed raw so a folder such as `Hex Meetings` reaches Explorer as one
+    argument) or opens the folder holding it (xdg-open); Delete moves to the
+    freedesktop Trash or the Recycle Bin
 ```
 
 The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and
@@ -1159,8 +1161,9 @@ both stay recoverable from the Trash. Sources:
 `a_rename_follows_the_title_when_descriptive_file_names_are_on`,
 `notes_rename_the_export_only_with_descriptive_file_names`,
 `retitling_replaces_only_a_matching_first_heading`,
-`the_exported_markdown_is_the_reveal_target_only_while_it_exists`, and the Rune
-pane tests `meetings_select_search_and_copy_a_transcript`,
+`the_exported_markdown_is_the_reveal_target_only_while_it_exists`,
+`explorer_selects_the_meeting_file_with_the_switch_outside_the_quotes`, and the
+Rune pane tests `meetings_select_search_and_copy_a_transcript`,
 `meetings_rename_from_the_title_field`,
 `deleting_a_meeting_takes_the_menu_then_a_confirmation`,
 `the_overflow_menu_copies_the_summary_and_asks_for_new_notes`, and

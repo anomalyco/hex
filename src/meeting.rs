@@ -1173,6 +1173,16 @@ impl RevealTarget {
     }
 }
 
+/// Explorer's argument that selects `path`: `/select,"C:\…\file.md"`.
+///
+/// The path is quoted on its own because Explorer reads the switch only while
+/// the comma is outside the quotes. `Command` would quote the whole argument
+/// once a folder name has a space, which Explorer ignores.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn explorer_select(path: &Path) -> String {
+    format!("/select,\"{}\"", path.to_string_lossy().replace('/', "\\"))
+}
+
 /// Moves a finished meeting to the Trash: its exported Markdown first, then
 /// its recording folder. Refuses while it records, transcribes, or writes
 /// notes. A missing Markdown file is skipped.
