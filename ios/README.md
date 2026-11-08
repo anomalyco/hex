@@ -59,6 +59,12 @@ it never accesses the microphone, speech model, or network.
     to** menu; releasing over a row picks it, and releasing elsewhere leaves
     the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
     and the **Dictation styles** action opens the menu.
+  - **Apple Intelligence cleanup (Experiments › Clean up with Apple
+    Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
+    one on-device FoundationModels pass before formatting fixes clearly
+    misheard words and spoken self-corrections, within a 2 s budget. A
+    timeout, error, empty or implausible output keeps the raw transcript, and
+    the toggle is disabled with a reason when Apple Intelligence is unusable.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an

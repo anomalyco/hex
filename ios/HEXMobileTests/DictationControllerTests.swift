@@ -120,6 +120,18 @@ private actor ControlledTranscriber: LocalTranscribing {
 }
 
 @MainActor
+private final class RecordingCleaner: TranscriptCleaning {
+    var isAvailable = true
+    var output: String?
+    private(set) var cleanedInputs: [String] = []
+
+    func clean(_ text: String) async -> String? {
+        cleanedInputs.append(text)
+        return output
+    }
+}
+
+@MainActor
 final class DictationControllerTests: XCTestCase {
     private var suiteName = ""
     private var defaults: UserDefaults!
@@ -455,6 +467,82 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(controller.transcript, "Ship the build.")
         XCTAssertEqual(controller.audioLevel, 0)
         XCTAssertEqual(bridge.snapshot().audioLevel, 0)
+    }
+
+    func testCleanupRunsBeforeFormattingOnlyWhenCapturedAndSkipsVerbatim() async throws {
+        let now = 40_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("we should use cloud code for this")
+        let bridge = KeyboardBridge(defaults: defaults)
+        let settings = AppleIntelligenceCleanupSettings(defaults: defaults)
+        let cleaner = RecordingCleaner()
+        cleaner.output = "We should use Claude Code for this."
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false,
+            cleaner: cleaner,
+            cleanupSettings: settings
+        )
+        controller.prepareModel()
+        try await settle()
+
+        // Off: the transcript is formatted exactly as before.
+        settings.isEnabled = false
+        controller.startRecording(keyboardJobID: "cleanup-off")
+        try await settle()
+        settings.isEnabled = true // A mid-capture toggle must not affect this session.
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs, [])
+        XCTAssertEqual(controller.transcript, "We should use cloud code for this.")
+
+        // On: the setting is captured at start, and cleanup runs before formatting.
+        controller.clearTranscript()
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "cleanup-on")
+        try await settle()
+        settings.isEnabled = false
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs, ["we should use cloud code for this"])
+        XCTAssertEqual(controller.transcript, "We should use Claude Code for this.")
+
+        // Verbatim skips cleanup even with the experiment on.
+        controller.clearTranscript()
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "cleanup-verbatim", styleOverride: .verbatim)
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs.count, 1)
+        XCTAssertEqual(controller.transcript, "we should use cloud code for this")
+
+        // A cleaner that declines leaves the raw transcript for the formatter.
+        controller.clearTranscript()
+        cleaner.output = nil
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "cleanup-fallback")
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs.count, 2)
+        XCTAssertEqual(controller.transcript, "We should use cloud code for this.")
+
+        // Empty transcripts skip cleanup too.
+        controller.clearTranscript()
+        await transcriber.setCannedOutput("   ")
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "cleanup-empty")
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs.count, 2)
+        XCTAssertEqual(controller.transcript, "")
     }
 
     private func settle() async throws {
