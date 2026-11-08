@@ -333,7 +333,7 @@ fn gnome_desktops_point_to_the_clipboard_lab_until_it_is_on() {
     open_labs(&mut rt);
     tap(&mut rt, "lab-gnome-clipboard-restore");
     assert!(rt.state.settings.labs.gnome_clipboard_restore);
-    tap(&mut rt, "nav-labs");
+    tap(&mut rt, "nav-general");
     assert!(rt.find("terminal-paste").is_some(), "back on General");
     assert!(rt.find("clipboard-restore-note").is_none());
 }
@@ -2311,7 +2311,17 @@ fn the_sidebar_moves_with_arrows_and_command_numbers() {
         command,
     );
     key(&mut rt, Key::Down, Mods::default());
-    assert_eq!(rt.state.pane, last, "Down stops at the last pane");
+    assert!(rt.state.labs_open, "Down from the last pane opens Labs");
+    assert!(
+        focused(&rt).ends_with("nav-labs"),
+        "focus follows to the Labs item: {}",
+        focused(&rt)
+    );
+    key(&mut rt, Key::Down, Mods::default());
+    assert!(rt.state.labs_open, "a second Down keeps Labs open");
+    key(&mut rt, Key::Up, Mods::default());
+    assert_eq!(rt.state.pane, last, "Up returns to the last pane");
+    assert!(!rt.state.labs_open);
 }
 
 #[test]

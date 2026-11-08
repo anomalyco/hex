@@ -21,6 +21,7 @@ Settings window                               // a11y.window
 ├── Sidebar -> a list; each pane a list item named by its title    // a11y.sidebar
 │   ├── The pane that shows -> selected; the others unselected
 │   ├── Labs and Playground -> list items too; Labs selected while its page shows
+│   │   └── Up and Down reach Labs from the last pane
 │   └── Select through accessibility (Invoke) -> the same switch as a click
 ├── Pane -> main; its title a level 1 heading, each card's label a level 2 heading
 ├── Setting rows                                                    // a11y.rows

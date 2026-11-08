@@ -48,13 +48,15 @@ pub(super) fn order(ui: &Ui) -> Vec<Pane> {
 
 /// A sidebar item that isn't a pane: Labs, or the playground. Its slot
 /// takes presses in the gaps around it too; assistive technology sees the
-/// item alone, selected while `on`.
+/// item alone, selected while `on`. A focusable item joins the navigation
+/// list's arrows.
 fn nav_row(
     p: Paint,
     key: &'static str,
     icon: &'static Icon,
     label: &'static str,
     on: bool,
+    focusable: bool,
     press: impl Fn(&mut Ui, &mut Tx) + 'static,
 ) -> El {
     let c = &p.k.c;
@@ -86,6 +88,9 @@ fn nav_row(
                 .color(if on { c.text_base } else { c.text_muted })
                 .a11y_hidden(),
         );
+    if focusable {
+        item = item.focusable(true);
+    }
     if on {
         item = item.fill(c.layer_02);
     }
@@ -108,12 +113,13 @@ pub(super) fn playground_nav(ui: &Ui, p: Paint) -> Option<El> {
             &SPARKLES,
             "Playground",
             false,
+            false,
             |_: &mut Ui, tx: &mut Tx| tx.open_playground(),
         )
     })
 }
 
-/// The Labs item: opens the Labs page, or goes back to General.
+/// The Labs item: opens the Labs page.
 pub(super) fn nav(ui: &Ui, p: Paint) -> El {
     let on = ui.labs_open;
     nav_row(
@@ -122,10 +128,9 @@ pub(super) fn nav(ui: &Ui, p: Paint) -> El {
         &LABS_ICON,
         tr("Labs"),
         on,
-        move |ui: &mut Ui, tx: &mut Tx| {
-            if on {
-                ui.select_pane(Pane::General, tx);
-            } else {
+        true,
+        |ui: &mut Ui, tx: &mut Tx| {
+            if !ui.labs_open {
                 open(ui, tx);
             }
         },
