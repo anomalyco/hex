@@ -629,7 +629,7 @@ impl Worker {
         request: &TransformationRequest,
         stop: &AtomicBool,
     ) -> std::result::Result<String, String> {
-        let context = json(&invocation_context(&request.context));
+        let context = json(&invocation_context(&request.context, request.source));
         let allowed = self.allowed(&loaded.script);
         let mut text = request.text.clone();
         for id in &request.ids {
@@ -770,6 +770,7 @@ struct TransformationRequest {
     ids: Vec<String>,
     text: String,
     context: ContextSnapshot,
+    source: crate::dictation::processor::Source,
     response: SyncSender<std::result::Result<String, String>>,
 }
 
@@ -780,6 +781,7 @@ impl TransformationClient {
         text: &str,
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
+        source: crate::dictation::processor::Source,
     ) -> std::result::Result<String, String> {
         if ids.is_empty() {
             return Ok(text.into());
@@ -795,7 +797,7 @@ impl TransformationClient {
         for id in ids {
             if let Some(builtin) = builtin_transformation(id) {
                 if !custom.is_empty() {
-                    output = self.transform_custom(&custom, &output, context, cancelled)?;
+                    output = self.transform_custom(&custom, &output, context, cancelled, source)?;
                     custom.clear();
                 }
                 output = (builtin.apply)(&output);
@@ -804,7 +806,7 @@ impl TransformationClient {
             }
         }
         if !custom.is_empty() {
-            output = self.transform_custom(&custom, &output, context, cancelled)?;
+            output = self.transform_custom(&custom, &output, context, cancelled, source)?;
         }
         Ok(output)
     }
@@ -815,6 +817,7 @@ impl TransformationClient {
         text: &str,
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
+        source: crate::dictation::processor::Source,
     ) -> std::result::Result<String, String> {
         let active = self
             .active
@@ -838,6 +841,7 @@ impl TransformationClient {
                 ids: ids.to_vec(),
                 text: text.into(),
                 context: context.clone(),
+                source,
                 response: sender,
             })))
             .map_err(|error| match error {
@@ -925,6 +929,8 @@ fn remove_trailing_punctuation(text: &str) -> String {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InvocationContext {
+    /// Where the text came from: a dictation or typed text.
+    source: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     application: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -935,8 +941,12 @@ struct InvocationContext {
     window_title: Option<String>,
 }
 
-fn invocation_context(context: &ContextSnapshot) -> InvocationContext {
+fn invocation_context(
+    context: &ContextSnapshot,
+    source: crate::dictation::processor::Source,
+) -> InvocationContext {
     InvocationContext {
+        source: source.as_str(),
         application: context.application.clone(),
         browser_host: context.browser_host().map(Into::into),
         browser_url: context.browser_url.as_ref().map(ToString::to_string),
@@ -1025,6 +1035,39 @@ mod tests {
     mod host_apis;
 
     #[test]
+    fn transformation_context_names_its_source() {
+        use crate::dictation::processor::Source;
+        let context = ContextSnapshot::default();
+        let read = |source| -> serde_json::Value {
+            serde_json::from_str(&json(&invocation_context(&context, source))).unwrap()
+        };
+        assert_eq!(read(Source::Dictation)["source"], "dictation");
+        assert_eq!(read(Source::TypedText)["source"], "typed-text");
+        assert!(read(Source::Dictation).get("application").is_none());
+    }
+
+    #[test]
+    fn transformations_see_the_source_that_produced_the_text() {
+        let harness = Harness::new(
+            r#"export default { transformations: { source: { name: "Source", transform: (text, context) => `${text}:${context.source}` } } }"#,
+        );
+        assert_eq!(
+            harness.transform(&["source"], "hi").unwrap(),
+            "hi:dictation"
+        );
+        assert_eq!(
+            harness
+                .transform_with(
+                    crate::dictation::processor::Source::TypedText,
+                    &["source"],
+                    "hi",
+                )
+                .unwrap(),
+            "hi:typed-text"
+        );
+    }
+
+    #[test]
     fn transformation_client_dispatches_only_registered_ids() {
         let (requests, receiver) = mpsc::sync_channel(1);
         let client = TransformationClient::default();
@@ -1054,6 +1097,7 @@ mod tests {
                 "HELLO",
                 &ContextSnapshot::default(),
                 &AtomicBool::new(false),
+                crate::dictation::processor::Source::Dictation,
             )
             .unwrap();
 
@@ -1065,6 +1109,7 @@ mod tests {
                     "HELLO",
                     &ContextSnapshot::default(),
                     &AtomicBool::new(false),
+                    crate::dictation::processor::Source::Dictation,
                 )
                 .is_err()
         );
@@ -1084,6 +1129,7 @@ mod tests {
                     "Hello, WORLD!",
                     &context,
                     &cancelled,
+                    crate::dictation::processor::Source::Dictation,
                 )
                 .unwrap(),
             "hello, world!"
@@ -1095,6 +1141,7 @@ mod tests {
                     "Sponge Bob!",
                     &context,
                     &cancelled,
+                    crate::dictation::processor::Source::Dictation,
                 )
                 .unwrap(),
             "sPoNgE bOb!"
@@ -1140,6 +1187,7 @@ mod tests {
                     "abcd",
                     &context,
                     &cancelled,
+                    crate::dictation::processor::Source::Dictation,
                 )
                 .unwrap()
         };
@@ -1159,6 +1207,7 @@ mod tests {
                     "abcd.",
                     &context,
                     &cancelled,
+                    crate::dictation::processor::Source::Dictation,
                 )
                 .unwrap(),
             "abcd"
@@ -1330,6 +1379,15 @@ mod tests {
         }
 
         fn transform(&self, ids: &[&str], text: &str) -> std::result::Result<String, String> {
+            self.transform_with(crate::dictation::processor::Source::Dictation, ids, text)
+        }
+
+        fn transform_with(
+            &self,
+            source: crate::dictation::processor::Source,
+            ids: &[&str],
+            text: &str,
+        ) -> std::result::Result<String, String> {
             let (response, result) = mpsc::sync_channel(1);
             self.worker.transform(
                 TransformationRequest {
@@ -1337,6 +1395,7 @@ mod tests {
                     ids: ids.iter().map(ToString::to_string).collect(),
                     text: text.into(),
                     context: ContextSnapshot::default(),
+                    source,
                     response,
                 },
                 &AtomicBool::new(false),
@@ -1556,6 +1615,7 @@ export default defineHexConfig({
                 ids: vec!["echo".into()],
                 text: "a".into(),
                 context: ContextSnapshot::default(),
+                source: crate::dictation::processor::Source::Dictation,
                 response,
             },
             &AtomicBool::new(false),

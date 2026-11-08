@@ -25,6 +25,7 @@ pub(crate) mod rune_hud;
 pub(crate) mod service;
 pub(crate) mod session;
 pub(crate) mod tray;
+pub(crate) mod typed_text;
 
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -293,6 +294,7 @@ mod tests {
             &["hex", "status", "--json"][..],
             &["hex", "dictation", "stop", "--print"],
             &["hex", "paste-last"],
+            &["hex", "typed-text"],
             &["hex", "settings", "set", "sound_effects", "off"],
             &["hex", "model", "use", "parakeet_v3", "--language", "pl"],
             &["hex", "model", "install"],

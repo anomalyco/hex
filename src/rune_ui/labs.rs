@@ -603,6 +603,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running"),
         ));
         rows.push(row(
+            Feature::TypedText,
+            Some(&KEYBOARD),
+            tr("Transform typed text"),
+            tr("Adds a shortcut that runs your Output steps on text you typed and replaces it."),
+        ));
+        rows.push(row(
             Feature::GnomeMeetingCapsules,
             None,
             tr("Floating meeting capsules on GNOME"),
@@ -807,6 +813,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
+        Feature::TypedText => "lab-typed-text",
         Feature::MeetingNotesVocabulary => "lab-meeting-notes-vocabulary",
         Feature::NotchIndicator => "lab-notch-indicator",
         Feature::MeetingFinishedEvent => "lab-meeting-finished-event",

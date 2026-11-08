@@ -247,7 +247,12 @@ pub(super) fn shortcut_rows(
     let second = target == ShortcutTarget::SecondDictation;
     #[cfg(not(target_os = "macos"))]
     let second = false;
+    #[cfg(target_os = "linux")]
+    let typed_text = target == ShortcutTarget::TypedText;
+    #[cfg(not(target_os = "linux"))]
+    let typed_text = false;
     let optional = second
+        || typed_text
         || matches!(
             target,
             ShortcutTarget::PasteLast | ShortcutTarget::RawDictation
@@ -261,6 +266,8 @@ pub(super) fn shortcut_rows(
             move |ui: &mut Ui| {
                 ui.update(|settings| match target {
                     ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = None,
+                    #[cfg(target_os = "linux")]
+                    ShortcutTarget::TypedText => settings.typed_text_hotkey = None,
                     _ if second => settings.second_dictation_hotkey = None,
                     _ => settings.paste_last_hotkey = None,
                 });

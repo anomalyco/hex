@@ -586,7 +586,12 @@ fn run_processor_worker(
                     stage: DictationJobStage::Processing,
                 });
             });
-        processed.apply_transformations(transformations, &job.context, &job.control.cancelled);
+        processed.apply_transformations(
+            transformations,
+            &job.context,
+            &job.control.cancelled,
+            crate::dictation::processor::Source::Dictation,
+        );
         if job.control.is_cancelled() {
             let _ = output.send(OutputJob::Cancelled { job_id: job.job_id });
             continue;
@@ -636,6 +641,7 @@ fn process_job_text(
         &job.language,
         &job.context,
         &job.control.cancelled,
+        crate::dictation::processor::Source::Dictation,
     )
 }
 

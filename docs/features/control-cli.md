@@ -37,6 +37,12 @@ Agent or terminal                                  // control.cli; every OS
 ├── hex paste-last -> pastes the last dictation
 │   ├── Setup gates the listener -> not-ready
 │   └── Recording or shortcut gesture in progress -> busy (menu bar: nothing)
+├── hex typed-text (Linux) -> the Transform typed text shortcut's one job
+│   ├── Labs › Transform typed text off -> disabled
+│   ├── Terminal paste shortcut on -> disabled (it would send Ctrl+Shift+V)
+│   ├── Setup gates the listener -> not-ready
+│   └── Recording, a pending start, or a capture still finishing -> done,
+│       but the listener drops the job: no keys are sent and no state changes
 ├── hex meetings record [--title] | stop | copy-last
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
@@ -77,9 +83,10 @@ explicit settings: no command turns Meetings on as a side effect.
 
 On Linux and Windows `control::host::answer` carries every command out through
 the OS's adapter (`linux::app::LinuxControl`, `windows::rune::WindowsControl`):
-dictation and paste-last go to the listener's own queue (Windows: the same
-hotkey loop, as a toggle press would), settings save and reload as the
-window's do, and `settings set` refuses a key whose capability the OS lacks
+dictation, paste-last, and Linux's typed-text go to the listener's own queue
+(Windows: the same hotkey loop, as a toggle press would), settings save and
+reload as the window's do, and `settings set` refuses a key whose capability
+the OS lacks
 (`settings list` marks it "not on this OS"). `meetings record|stop|copy-last`
 go to the meeting recorder (`meeting/runtime`) as the tray's items do;
 `window story` answers `unsupported`; Windows sends every `annotate`

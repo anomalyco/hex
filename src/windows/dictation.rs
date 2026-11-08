@@ -1060,7 +1060,13 @@ fn process_dictation_job(
                 .read()
                 .unwrap_or_else(|error| error.into_inner())
                 .clone();
-            mode_runtime.process(&raw_text, &job.language, &context, transformations)
+            mode_runtime.process(
+                &raw_text,
+                &job.language,
+                &context,
+                transformations,
+                crate::dictation::processor::Source::Dictation,
+            )
         };
         let text = processed.text.clone();
         if text.trim().is_empty() {

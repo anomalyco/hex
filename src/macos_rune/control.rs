@@ -169,6 +169,10 @@ impl Pump {
             ControlCommand::Dictation { .. } | ControlCommand::PasteLast => {
                 unreachable!("listener_command answers it")
             }
+            ControlCommand::TypedText => Some(ControlReply::error(
+                "unsupported",
+                "Transform typed text is Linux only",
+            )),
             ControlCommand::Screenshot { pick } => screenshot(pick, reply),
             ControlCommand::MeetingRecord { title } => self.meeting(false, title, reply),
             ControlCommand::MeetingStop => self.meeting(true, None, reply),

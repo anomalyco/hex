@@ -107,6 +107,7 @@ fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     let settings = AppSettings {
         paste_last_hotkey: None,
         raw_dictation_hotkey: None,
+        typed_text_hotkey: None,
         second_dictation_hotkey: None,
         ..Default::default()
     };
@@ -116,6 +117,7 @@ fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     let loaded: AppSettings = serde_json::from_value(value).unwrap();
     assert!(loaded.paste_last_hotkey.is_none());
     assert!(loaded.raw_dictation_hotkey.is_none());
+    assert!(loaded.typed_text_hotkey.is_none());
     assert!(loaded.second_dictation_hotkey.is_none());
 }
 

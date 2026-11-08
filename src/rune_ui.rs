@@ -58,6 +58,7 @@ mod scrawl;
 pub(crate) mod screenshot_thumbnail;
 mod settings;
 mod shortcut_mode;
+mod shortcut_rule;
 mod sidebar;
 mod sidebar_update;
 mod sound_sets;
@@ -85,6 +86,7 @@ use host::{Backend, Request, ShortcutTarget};
 use onboarding_kit::live::Page;
 use scenes::{SCENES, Scene, fixture, mac_fixture, portal_fixture};
 use settings::Capture;
+pub(crate) use shortcut_rule::shortcut_rule;
 use sidebar::{BuildKind, Pane, pane_header, sidebar};
 
 /// How long typing pauses before a text field's edit is saved.
@@ -452,36 +454,6 @@ pub(crate) fn current_pane(ui: &Ui) -> &'static str {
         Pane::General => "settings",
         pane => pane.key().trim_start_matches("nav-"),
     }
-}
-
-/// The OS's rules for a shortcut, the ones Settings applies when recording
-/// one; shared with `hex settings set`.
-pub(crate) fn shortcut_rule(
-    slot: crate::app_settings::HotkeySlot,
-    binding: &HotkeyBinding,
-) -> Result<(), &'static str> {
-    use crate::app_settings::HotkeySlot;
-    let target = match slot {
-        HotkeySlot::Dictation => ShortcutTarget::Dictation,
-        HotkeySlot::PasteLast => ShortcutTarget::PasteLast,
-        HotkeySlot::RawDictation => ShortcutTarget::RawDictation,
-        HotkeySlot::Cancel => ShortcutTarget::Cancel,
-        #[cfg(hex_capture)]
-        HotkeySlot::Capture => ShortcutTarget::Capture,
-        #[cfg(all(hex_capture, target_os = "macos"))]
-        HotkeySlot::CaptureReplay => ShortcutTarget::CaptureReplay,
-        #[cfg(all(hex_capture, not(target_os = "macos")))]
-        HotkeySlot::CaptureReplay => ShortcutTarget::Capture,
-        #[cfg(target_os = "macos")]
-        HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
-        #[cfg(target_os = "macos")]
-        HotkeySlot::Screenshot => ShortcutTarget::Screenshot,
-        // Labs › Second dictation shortcut and Screenshots are macOS's;
-        // elsewhere a saved one meets the dictation shortcut's rules.
-        #[cfg(not(target_os = "macos"))]
-        HotkeySlot::SecondDictation | HotkeySlot::Screenshot => ShortcutTarget::Dictation,
-    };
-    host::validate_hotkey(target, binding)
 }
 
 /// The key `name` names on the active keyboard layout ("v", "space", "f5").

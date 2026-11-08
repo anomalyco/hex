@@ -60,6 +60,9 @@ enum OutputJob {
     Dictation(Job),
     /// Pastes the newest completed dictation again.
     PasteLast,
+    /// Runs the focused field's text through its Output steps and replaces
+    /// it (Labs › Transform typed text).
+    TypedText,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -68,6 +71,7 @@ enum OutputKind {
     /// A dictation printed by `hex dictation stop --print`.
     Printed,
     PasteLast,
+    TypedText,
 }
 
 /// A release whose capture is still collecting its post-release tail.
@@ -158,6 +162,8 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
             .raw_dictation_hotkey
             .as_ref()
             .map(LinuxHotkey::from),
+        // Only while Labs › Transform typed text is on: off registers nothing.
+        typed_text: settings.active_typed_text_hotkey().map(LinuxHotkey::from),
         capture: settings
             .capture
             .enabled
@@ -227,7 +233,13 @@ impl DictationOutput {
         let processed = if raw {
             crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
-            modes.process(&raw_text, language, &context, &self.transformations)
+            modes.process(
+                &raw_text,
+                language,
+                &context,
+                &self.transformations,
+                crate::dictation::processor::Source::Dictation,
+            )
         };
         let printed = paster.is_none();
         // Live typing inserts the final text through the input method; a
@@ -386,6 +398,25 @@ pub(crate) fn run(
                         .map(|()| String::new())
                         .map_err(|error| format!("{error:#}"));
                     if result_sender.send((OutputKind::PasteLast, result)).is_err() {
+                        break;
+                    }
+                    continue;
+                }
+                OutputJob::TypedText => {
+                    let result = paster
+                        .as_mut()
+                        .map_err(|error| eyre!("{error:#}"))
+                        .and_then(|paster| {
+                            crate::linux::typed_text::run_job(
+                                paster,
+                                &output_settings.modes,
+                                &output_settings.transformations,
+                                &worker_stop,
+                            )
+                        })
+                        .map(|()| String::new())
+                        .map_err(|error| format!("{error:#}"));
+                    if result_sender.send((OutputKind::TypedText, result)).is_err() {
                         break;
                     }
                     continue;
@@ -923,6 +954,19 @@ pub(crate) fn run(
                         }
                     }
                 }
+                HotkeyEvent::TypedText
+                    if !capture.is_recording()
+                        && !start_pending
+                        && finishing.is_none()
+                        && !service.is_active() =>
+                {
+                    match jobs.try_send(OutputJob::TypedText) {
+                        Ok(()) | Err(TrySendError::Full(_)) => {}
+                        Err(TrySendError::Disconnected(_)) => {
+                            return Err(eyre!("dictation worker is unavailable"));
+                        }
+                    }
+                }
                 HotkeyEvent::Cancel if capture.is_recording() => {
                     capture.cancel();
                     cancel_typing(&mut active_typing);
@@ -952,6 +996,13 @@ pub(crate) fn run(
             };
             // A repeated paste has no transcript and is not pending work.
             if kind == OutputKind::PasteLast {
+                if let Err(error) = result {
+                    fail(&events, error)?;
+                }
+                continue;
+            }
+            // Typed text never touches History, Paste Last, or pending work.
+            if kind == OutputKind::TypedText {
                 if let Err(error) = result {
                     fail(&events, error)?;
                 }
@@ -1892,6 +1943,33 @@ mod tests {
         ));
         drop(events);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn typed_text_is_registered_only_while_its_lab_is_on() {
+        use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers};
+        let binding = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: Some(HotkeyKey::named("f8")),
+        };
+        let mut settings = AppSettings {
+            typed_text_hotkey: Some(binding.clone()),
+            ..AppSettings::default()
+        };
+        let (_, options) = shortcuts(&settings);
+        assert!(
+            options.typed_text.is_none(),
+            "the lab off registers nothing"
+        );
+
+        settings.labs.typed_text = true;
+        assert_eq!(
+            shortcuts(&settings).1.typed_text,
+            Some(LinuxHotkey::from(&binding))
+        );
+
+        settings.typed_text_hotkey = None;
+        assert!(shortcuts(&settings).1.typed_text.is_none());
     }
 
     #[test]

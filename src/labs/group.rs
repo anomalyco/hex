@@ -70,6 +70,7 @@ impl Feature {
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::GnomeClipboardRestore
+            | Self::TypedText
             | Self::TerminalPaste
             | Self::OutputFixes => Group::Output,
             Self::KeepRecordings | Self::HistoryStats | Self::RecentDictations => Group::History,

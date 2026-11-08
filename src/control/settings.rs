@@ -7,9 +7,13 @@ use serde_json::Value;
 
 use super::ControlError;
 use crate::app_settings::{
-    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, HotkeyKey, HotkeyModifiers, HotkeySlot,
-    ModifierSide,
+    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, HotkeyKey, HotkeySlot,
 };
+
+mod hotkeys;
+
+use hotkeys::special_key_refusal;
+pub use hotkeys::{format_hotkey, parse_hotkey};
 
 /// One setting as `hex settings get` reports it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -219,6 +223,13 @@ const KEYS: &[Key] = &[
         "Labs: another shortcut that dictates like dictation_hotkey, such as a key on an \
          external keyboard (macOS, with labs.second_dictation_shortcut); none (the default) \
          turns it off",
+    ),
+    optional(
+        "typed_text_hotkey",
+        Kind::Shortcut(HotkeySlot::TypedText),
+        "Labs: the shortcut that runs the focused app's Output steps on the text already \
+         typed in the focused field and replaces it (Linux, with labs.typed_text); none \
+         (the default) turns it off",
     ),
     key(
         "screenshots.hotkey",
@@ -483,6 +494,11 @@ const KEYS: &[Key] = &[
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
+    ),
+    key(
+        "labs.typed_text",
+        Kind::Bool,
+        "Labs: Output shows a Typed text section whose shortcut runs the focused app's Output steps on the text already typed in the focused field and replaces it (Linux)",
     ),
     key(
         "labs.gnome_meeting_capsules",
@@ -767,6 +783,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.meeting_descriptive_filenames", "meetings"),
     ("labs.follow_live_transcript", "meetings"),
     ("experimental.hex_microphone", "fun"),
+    ("typed_text_hotkey", "typed_text"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),
     ("labs.quit_closes_window", "dock_icon"),
@@ -1054,6 +1071,7 @@ pub fn apply(
         "dictation_hotkey"
         | "paste_last_hotkey"
         | "raw_dictation_hotkey"
+        | "typed_text_hotkey"
         | "second_dictation_hotkey"
         | "cancel_hotkey"
         | "screenshots.hotkey"
@@ -1066,6 +1084,7 @@ pub fn apply(
                 HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
+                HotkeySlot::TypedText => candidate.typed_text_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
                 HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
@@ -1329,170 +1348,10 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
     }
 }
 
-/// Reads a shortcut such as `option`, `right-command`, `fn`, `f5`,
-/// `left-option+right-option` (both Options), or `control+option+space`:
-/// modifiers, then at most one key.
-pub fn parse_hotkey(
-    text: &str,
-    key_named: fn(&str) -> Result<HotkeyKey, String>,
-) -> Result<HotkeyBinding, String> {
-    let mut modifiers = HotkeyModifiers::default();
-    let mut key = None;
-    let mut sided = false;
-    let parts: Vec<&str> = text.split('+').map(str::trim).collect();
-    if parts.iter().any(|part| part.is_empty()) {
-        return Err("expected modifiers and a key joined by +, such as option+space".into());
-    }
-    for part in parts {
-        let lower = part.to_ascii_lowercase();
-        let (side, name) = if let Some(rest) =
-            lower.strip_prefix("left-").or(lower.strip_prefix("left"))
-        {
-            (Some(ModifierSide::Left), rest.to_string())
-        } else if let Some(rest) = lower.strip_prefix("right-").or(lower.strip_prefix("right")) {
-            (Some(ModifierSide::Right), rest.to_string())
-        } else {
-            (None, lower.clone())
-        };
-        let slot = match name.as_str() {
-            "control" | "ctrl" => Some(&mut modifiers.control),
-            "option" | "opt" | "alt" => Some(&mut modifiers.option),
-            "shift" => Some(&mut modifiers.shift),
-            "command" | "cmd" | "super" | "win" | "meta" => Some(&mut modifiers.command),
-            _ => None,
-        };
-        match slot {
-            Some(slot) => {
-                sided |= side.is_some();
-                *slot = Some(match (*slot, side) {
-                    (None, side) => side.unwrap_or(ModifierSide::Either),
-                    (Some(ModifierSide::Left), Some(ModifierSide::Right))
-                    | (Some(ModifierSide::Right), Some(ModifierSide::Left)) => ModifierSide::Both,
-                    _ => return Err(format!("{part} appears twice")),
-                });
-            }
-            None if side.is_none() && matches!(name.as_str(), "fn" | "function" | "globe") => {
-                if modifiers.function {
-                    return Err(format!("{part} appears twice"));
-                }
-                modifiers.function = true;
-            }
-            None if side.is_some() && name.is_empty() => {
-                // "left" or "right" alone is the arrow key.
-                if key.is_some() {
-                    return Err("a shortcut has at most one key".into());
-                }
-                key = Some(key_named(&lower)?);
-            }
-            None => {
-                if key.is_some() {
-                    return Err("a shortcut has at most one key".into());
-                }
-                key = Some(key_named(part)?);
-            }
-        }
-    }
-    let binding = HotkeyBinding { modifiers, key };
-    if let Some(key) = &binding.key {
-        if sided {
-            return Err("left- and right- apply only to shortcuts without a key".into());
-        }
-        if modifiers.function {
-            return Err("fn can't be combined with a key".into());
-        }
-        if binding.is_bare_primary_click() {
-            return Err("mouse1 (left click) needs a modifier, such as option+mouse1".into());
-        }
-        // Menu, Pause, and Scroll Lock alone, and on Windows the navigation
-        // keys alone, are checked against their Labs toggle when set
-        // (`special_key_refusal`).
-        if modifiers.is_empty()
-            && !is_function_key(&key.label)
-            && !key.is_mouse()
-            && !HotkeyKey::special_name(&key.label)
-            && !(cfg!(target_os = "windows") && HotkeyKey::navigation_name(&key.label))
-            && !(cfg!(target_os = "linux") && HotkeyKey::section_name(&key.label))
-        {
-            return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
-        }
-    } else if modifiers.is_empty() {
-        return Err("expected at least one modifier or key".into());
-    }
-    Ok(binding)
-}
-
-/// Why `binding` can't be saved for its Menu, Pause, or Scroll Lock key: on
-/// Linux they need Labs › Special keys alone; Windows takes them alone, and
-/// a navigation key alone needs the toggle there; elsewhere one alone still
-/// needs a modifier.
-fn special_key_refusal(settings: &AppSettings, binding: &HotkeyBinding) -> Option<String> {
-    // The § key alone needs Labs › Section key alone (Linux).
-    if cfg!(target_os = "linux") && binding.is_lone_section_key() && !settings.section_key_allowed()
-    {
-        return Some("section needs Labs › Section key alone: hex labs on section-key".into());
-    }
-    if cfg!(target_os = "windows") {
-        let key = binding.key.as_ref()?;
-        return (binding.is_lone_navigation_key() && !settings.special_keys_allowed()).then(|| {
-            format!(
-                "{} alone needs Labs › Special keys alone: hex labs on special-keys",
-                key.label.to_lowercase().replace(' ', "")
-            )
-        });
-    }
-    let key = binding.key.as_ref().filter(|key| key.is_special())?;
-    if settings.special_keys_allowed() {
-        return None;
-    }
-    let name = key.label.to_lowercase().replace(' ', "");
-    if cfg!(target_os = "linux") {
-        return Some(format!(
-            "{name} needs Labs › Special keys alone: hex labs on special-keys"
-        ));
-    }
-    binding
-        .modifiers
-        .is_empty()
-        .then(|| format!("add a modifier, such as option+{name}"))
-}
-
-fn is_function_key(label: &str) -> bool {
-    label
-        .strip_prefix(['F', 'f'])
-        .and_then(|number| number.parse::<u8>().ok())
-        .is_some_and(|number| (1..=20).contains(&number))
-}
-
-/// The text `parse_hotkey` reads back: `left-option`, `option+shift+v`,
-/// `left-option+right-option`.
-pub fn format_hotkey(binding: &HotkeyBinding) -> String {
-    let modifiers = binding.modifiers;
-    let side = |side: Option<ModifierSide>, name: &str| match side {
-        Some(ModifierSide::Left) => Some(format!("left-{name}")),
-        Some(ModifierSide::Right) => Some(format!("right-{name}")),
-        Some(ModifierSide::Either) => Some(name.to_string()),
-        Some(ModifierSide::Both) => Some(format!("left-{name}+right-{name}")),
-        None => None,
-    };
-    let mut parts: Vec<String> = [
-        modifiers.function.then(|| "fn".to_string()),
-        side(modifiers.control, "control"),
-        side(modifiers.option, "option"),
-        side(modifiers.shift, "shift"),
-        side(modifiers.command, "command"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    if let Some(key) = &binding.key {
-        parts.push(key.label.to_lowercase().replace(' ', ""));
-    }
-    parts.join("+")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_settings::ModifierSide;
 
     #[test]
     fn a_managed_setting_is_refused() {
