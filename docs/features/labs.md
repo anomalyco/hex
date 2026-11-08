@@ -479,11 +479,13 @@ microphone is still opening (with Release microphone while idle, or a device
 switch) leaves the light as it was. Once live, it is on while any capture
 records, including a normal-shortcut or Annotate capture, blinking while an
 accepted job transcribes or processes, and off when nothing is left or the
-capture is discarded, cancelled, or failed. The recording light is steady by
-default; its Recording light option, Slow blink, blinks at 700 ms on and off
-while recording, while transcribing keeps its 350 ms blink. Turning the lab
-off or quitting Hex clears the light and stops forcing the lock off, so Caps
-Lock behaves normally again.
+capture is discarded, cancelled, or failed. The listener builds each chunk's
+meter once and feeds both the HUD (when one exists) and the light, so the light
+never depends on a HUD; an Annotate capture feeds the light alone. The
+recording light is steady by default; its Recording light option, Slow blink,
+blinks at 700 ms on and off while recording, while transcribing keeps its
+350 ms blink. Turning the lab off or quitting Hex clears the light and stops
+forcing the lock off, so Caps Lock behaves normally again.
 
 ```ts
 Labs › Caps Lock dictation on                        // labs.caps_lock_dictation
@@ -541,6 +543,9 @@ lock reset. Checks:
 `without_the_hid_tracker_an_on_edge_is_the_fallback_press`, and
 `the_light_pattern_codes_round_trip` in
 [caps_lock_dictation.rs](../../src/caps_lock_dictation.rs);
+`meter_reports_rms_and_peak` in
+[indicator.rs](../../src/dictation/indicator.rs);
+`a_meter_reaches_the_light_without_a_hud`,
 `escape_cancels_a_caps_lock_capture_in_hold_mode`,
 `caps_lock_does_not_start_over_an_annotate_recording`,
 `the_dictation_shortcut_stands_down_while_caps_lock_records`,

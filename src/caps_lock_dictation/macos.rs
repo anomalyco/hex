@@ -610,6 +610,31 @@ impl CapsLockDictation {
     }
 }
 
+#[cfg(test)]
+impl CapsLockDictation {
+    /// A handle with the lab on and no worker, so a test can drive the
+    /// listener's sink and read the model without touching IOKit.
+    pub(crate) fn for_test() -> Self {
+        let (presses, press_receiver) = mpsc::channel();
+        Self {
+            inner: Mutex::new(Inner {
+                enabled: true,
+                spawn_failed: false,
+                worker: None,
+                presses: press_receiver,
+                model: LedModel::default(),
+                pattern: LedPattern::Off,
+            }),
+            presses,
+        }
+    }
+
+    /// The pattern the light model last decided.
+    pub(crate) fn pattern_for_test(&self) -> LedPattern {
+        self.lock().pattern
+    }
+}
+
 impl Drop for CapsLockDictation {
     fn drop(&mut self) {
         self.set_enabled(false);

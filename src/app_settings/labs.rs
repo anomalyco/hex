@@ -5,7 +5,7 @@ use super::*;
 /// How the Caps Lock light shows while a capture records (Labs › Caps Lock
 /// dictation, macOS).
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum CapsLockLight {
     /// On for the whole recording.
     #[default]

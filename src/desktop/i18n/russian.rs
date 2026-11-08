@@ -257,7 +257,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Restore default shortcut", "Восстановить стандартное сочетание"),
     ("Default shortcut: {}", "Стандартное сочетание: {}"),
     ("Unload after", "Выгружать через"),
-    ("Recording light", "Светло записи"),
+    ("Recording light", "Индикатор записи"),
     ("Steady", "Постоянно"),
     ("Slow blink", "Медленное мигание"),
     ("Send feedback", "Отправить отзыв"),

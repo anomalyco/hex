@@ -447,7 +447,7 @@ const KEYS: &[Key] = &[
     ),
     key(
         "labs.caps_lock_light",
-        Kind::Choice(&["steady", "slow-blink"]),
+        Kind::Choice(&["steady", "slow_blink"]),
         "Labs: whether the Caps Lock light stays solid or blinks slowly while recording (macOS)",
     ),
     key(
@@ -1663,14 +1663,14 @@ mod tests {
         );
         let change = apply(&settings, "meetings.calendar.lead_minutes", "5", &rules()).unwrap();
         assert_eq!(change.settings.meetings.calendar.lead_minutes, 5);
-        let change = apply(&settings, "labs.caps_lock_light", "slow-blink", &rules()).unwrap();
+        let change = apply(&settings, "labs.caps_lock_light", "slow_blink", &rules()).unwrap();
         assert_eq!(
             change.settings.labs.caps_lock_light,
             crate::app_settings::CapsLockLight::SlowBlink
         );
         assert_eq!(
             get(&change.settings, "labs.caps_lock_light").unwrap()[0].value,
-            Value::String("slow-blink".into())
+            Value::String("slow_blink".into())
         );
         let change = apply(&settings, "ui_language", "none", &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);
