@@ -67,10 +67,13 @@ it never accesses the microphone, speech model, or network.
     the toggle is disabled with a reason when Apple Intelligence is unusable.
   - **Custom vocabulary (Experiments › Custom vocabulary):** Off by default.
     A local list of up to 100 names and phrases, applied to every engine. After
-    transcription, matching words are rewritten to the listed spelling, across
-    case, spaces, a single hyphen, and possessive apostrophes, before cleanup
-    and formatting. On iOS 26 Apple Speech the list is also a best-effort
-    recognition hint; Parakeet gets no hint.
+    transcription, matching words are rewritten to the listed spelling across
+    case, spaces, tabs, a single hyphen, and possessive apostrophes, before
+    cleanup and again after formatting, so a style cannot undo a spelling. A
+    word that carries its own apostrophe only matches a term that has one, and
+    several transcript words are joined only when the term reads as a compound.
+    On iOS 26 Apple Speech the list is also sent as a best-effort recognition
+    hint; Parakeet's batch path gets no hint.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
@@ -116,7 +119,9 @@ xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=
   changes have not been reproduced on hardware; the meter recovery tests inject
   that condition through `ActiveAudioCapture`.
 - **Apple Speech hint:** Custom vocabulary's contextual strings are best effort
-  and unverified on a physical iPhone; Parakeet does not use them.
+  and unverified on a physical iPhone. Apple documents contextual strings only
+  for `DictationTranscriber`, Hex sets them on `SpeechTranscriber`, and
+  Parakeet's batch path gets no hint.
 - **No iOS CI:** Custom vocabulary is covered by unit tests only. No CI job
   compiles or tests the iOS targets, so these checks run only in a local
   `xcodebuild test`.

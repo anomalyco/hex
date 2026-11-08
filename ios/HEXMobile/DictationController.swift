@@ -825,13 +825,18 @@ final class DictationController {
                 guard let self, self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                // Spelling runs before optional cleanup so cleanup sees the preferred words.
+                // Spelling runs before optional cleanup so cleanup sees the preferred
+                // words, then again after formatting because a style can lowercase a
+                // term or capitalize a sentence start ("iPhone" -> "IPhone").
                 let spelled = VocabularySpelling.apply(session.vocabularyTerms, to: rawText)
                 let text = await self.cleanedTranscriptIfEnabled(spelled, session: session)
                 guard self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                let formatted = TranscriptFormatter.format(text, style: session.style)
+                let formatted = VocabularySpelling.apply(
+                    session.vocabularyTerms,
+                    to: TranscriptFormatter.format(text, style: session.style)
+                )
                 self.recordingDuration = 0
                 self.transcript = formatted
                 if session.copyToPasteboard && !formatted.isEmpty {

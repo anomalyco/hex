@@ -6,6 +6,7 @@ struct CustomVocabularyEditor: View {
 
     @State private var terms: [String] = []
     @State private var draft = ""
+    @State private var notice: String?
 
     private var isAtLimit: Bool {
         terms.count >= CustomVocabularySettings.maxTermCount
@@ -71,9 +72,17 @@ struct CustomVocabularyEditor: View {
                     .foregroundStyle(HexTheme.textMuted)
             }
 
+            if let notice {
+                Text(notice)
+                    .font(.system(size: 12))
+                    .foregroundStyle(HexTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text(
                 "Hex fixes the spelling of listed words when it hears them. "
-                    + "On Apple Speech, the list also guides recognition."
+                    + "It can't teach the speech engine new sounds, so a word heard "
+                    + "as something different stays as it is."
             )
             .font(.system(size: 12))
             .foregroundStyle(HexTheme.textMuted)
@@ -89,12 +98,30 @@ struct CustomVocabularyEditor: View {
         let candidate = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !candidate.isEmpty else { return }
 
+        guard candidate.count <= CustomVocabularySettings.maxTermLength else {
+            notice = "Too long"
+            return
+        }
+        let key = VocabularySpelling.normalizedKey(candidate)
+        guard key.count >= 2 else {
+            notice = "Needs at least two letters or digits"
+            return
+        }
+        let isDuplicate = terms.contains {
+            VocabularySpelling.normalizedKey($0) == key
+        }
+        guard !isDuplicate else {
+            notice = "Already in the list"
+            return
+        }
+
         let updated = CustomVocabularySettings.sanitize(terms + [candidate])
-        draft = ""
         guard updated.count > terms.count else { return }
 
         terms = updated
         settings.terms = updated
+        draft = ""
+        notice = nil
     }
 
     private func remove(_ term: String) {

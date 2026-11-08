@@ -74,6 +74,50 @@ final class VocabularySpellingTests: XCTestCase {
             "OpenCode"
         )
     }
+
+    func testDoesNotGlueOrdinaryWordsIntoAName() {
+        XCTAssertEqual(
+            VocabularySpelling.apply(["Ina"], to: "live in a house"),
+            "live in a house"
+        )
+        XCTAssertEqual(
+            VocabularySpelling.apply(["Isa"], to: "this is a test"),
+            "this is a test"
+        )
+        XCTAssertEqual(
+            VocabularySpelling.apply(["Arun"], to: "go for a run"),
+            "go for a run"
+        )
+    }
+
+    func testDoesNotMatchAcrossAnApostrophe() {
+        XCTAssertEqual(
+            VocabularySpelling.apply(["Shell"], to: "she'll come"),
+            "she'll come"
+        )
+        XCTAssertEqual(
+            VocabularySpelling.apply(["Well"], to: "we'll go"),
+            "we'll go"
+        )
+    }
+
+    func testDoesNotJoinWordsAcrossNewlines() {
+        XCTAssertEqual(
+            VocabularySpelling.apply(["OpenCode"], to: "open\n\ncode"),
+            "open\n\ncode"
+        )
+    }
+
+    func testKeepsQuotesOutsideTheMatchedRange() {
+        XCTAssertEqual(
+            VocabularySpelling.apply(["Claude"], to: "'claude'"),
+            "'Claude'"
+        )
+        XCTAssertEqual(
+            VocabularySpelling.apply(["Claude"], to: "‘claude’"),
+            "‘Claude’"
+        )
+    }
 }
 
 final class CustomVocabularySettingsTests: XCTestCase {
@@ -102,7 +146,10 @@ final class CustomVocabularySettingsTests: XCTestCase {
         let settings = CustomVocabularySettings(defaults: defaults)
         let tooLong = String(repeating: "x", count: CustomVocabularySettings.maxTermLength + 1)
         let longestAllowed = String(repeating: "y", count: CustomVocabularySettings.maxTermLength)
-        var rawTerms = ["  Claude  ", "", "   ", "claude", "OpenCode", tooLong, longestAllowed]
+        var rawTerms = [
+            "  Claude  ", "", "   ", "claude", "OpenCode", "open code",
+            "C++", "C#", "a", tooLong, longestAllowed,
+        ]
         rawTerms += (1...105).map { "Term \($0)" }
 
         settings.terms = rawTerms
@@ -114,6 +161,10 @@ final class CustomVocabularySettingsTests: XCTestCase {
         XCTAssertEqual(saved[2], longestAllowed)
         XCTAssertFalse(saved.contains(tooLong))
         XCTAssertFalse(saved.contains(""))
+        XCTAssertFalse(saved.contains("C++"))
+        XCTAssertFalse(saved.contains("C#"))
+        XCTAssertFalse(saved.contains("a"))
+        XCTAssertFalse(saved.contains("open code"))
         XCTAssertEqual(saved.last, "Term 97")
     }
 }

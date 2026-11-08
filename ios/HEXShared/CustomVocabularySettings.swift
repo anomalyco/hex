@@ -33,7 +33,8 @@ nonisolated struct CustomVocabularySettings {
         isEnabled ? terms : []
     }
 
-    /// Trims each term, drops blanks, case-insensitive duplicates, terms longer than
+    /// Trims each term, drops blanks, terms whose letters and digits are shorter
+    /// than two characters, duplicates of the same spelling key, terms longer than
     /// 64 characters, and anything past Apple's 100 contextual-string limit.
     static func sanitize(_ rawTerms: [String]) -> [String] {
         var seen = Set<String>()
@@ -43,8 +44,8 @@ nonisolated struct CustomVocabularySettings {
             let term = rawTerm.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !term.isEmpty, term.count <= maxTermLength else { continue }
 
-            let duplicateKey = term.lowercased()
-            guard seen.insert(duplicateKey).inserted else { continue }
+            let key = VocabularySpelling.normalizedKey(term)
+            guard key.count >= 2, seen.insert(key).inserted else { continue }
 
             result.append(term)
             if result.count == maxTermCount {
