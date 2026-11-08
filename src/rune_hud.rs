@@ -240,6 +240,10 @@ pub(crate) struct Hud {
     /// display; a capture's start or a hide picks the display again.
     #[cfg(not(target_os = "macos"))]
     edge_placed: Option<IndicatorPosition>,
+    /// The compositor's painter, so a hide that Rune never draws again still
+    /// lets go of it (`release_painter`).
+    #[cfg(not(target_os = "macos"))]
+    gpu: Arc<Mutex<GpuSlot>>,
     /// When the HUD last checked which display the pointer is on.
     #[cfg(not(target_os = "macos"))]
     followed: Option<Instant>,
@@ -347,22 +351,26 @@ impl Hud {
     /// (#1359).
     fn fade_out(&mut self) {
         self.unplace();
-        if std::mem::take(&mut self.shown)
-            && let Some(overlay) = &self.this
-        {
-            #[cfg(target_os = "windows")]
-            overlay.fade_out(EXIT_FADE);
-            #[cfg(not(target_os = "windows"))]
-            overlay.hide();
+        if std::mem::take(&mut self.shown) {
+            if let Some(overlay) = &self.this {
+                #[cfg(target_os = "windows")]
+                overlay.fade_out(EXIT_FADE);
+                #[cfg(not(target_os = "windows"))]
+                overlay.hide();
+            }
+            #[cfg(not(target_os = "macos"))]
+            release_painter(&self.gpu);
         }
     }
 
     fn hide(&mut self) {
         self.unplace();
-        if std::mem::take(&mut self.shown)
-            && let Some(overlay) = &self.this
-        {
-            overlay.hide();
+        if std::mem::take(&mut self.shown) {
+            if let Some(overlay) = &self.this {
+                overlay.hide();
+            }
+            #[cfg(not(target_os = "macos"))]
+            release_painter(&self.gpu);
         }
     }
 
@@ -389,19 +397,21 @@ const EXIT_FADE: Duration = Duration::from_millis(120);
 /// topmost window that presented with DXGI let NVIDIA's Instant Replay take
 /// Hex for the running game (#1308). The device itself waits five minutes for
 /// the next show either way, so dictations reuse one device (#1268). The
-/// painter goes apart, after `PAINTER_IDLE` hidden on Windows and Linux
-/// (#1431); macOS keeps it.
+/// painter goes once Rune's parked device would also have gone, which is this
+/// plus the five minutes Rune parks a device (`PAINTER_IDLE`, #1431); macOS
+/// keeps it.
 #[cfg(not(target_os = "windows"))]
 const GPU_IDLE: Duration = Duration::from_secs(5 * 60);
 #[cfg(target_os = "windows")]
 const GPU_IDLE: Duration = Duration::ZERO;
 
 /// How long the hidden HUD keeps its painter on Windows and Linux, and with it
-/// its own hold on the GPU device: the five minutes Rune parks a device, so a
-/// burst of dictations reuses one painter and the device still frees once Rune
-/// lets go (#1431).
+/// its own hold on the GPU device: Rune holds the surface for `GPU_IDLE` and
+/// then parks the device for five more minutes, so the painter goes once that
+/// parked device would also have gone and the device actually frees. A burst
+/// of dictations within that time reuses one painter (#1431).
 #[cfg(not(target_os = "macos"))]
-const PAINTER_IDLE: Duration = Duration::from_secs(5 * 60);
+const PAINTER_IDLE: Duration = Duration::from_secs(GPU_IDLE.as_secs() + 5 * 60);
 
 /// The format the HUD draws in on Windows and Linux (Rune drops the
 /// surface's sRGB suffix for `srgb_blend`).
@@ -449,6 +459,10 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
     let animating = Arc::new(AtomicBool::new(false));
     let now = Instant::now();
     let model = IndicatorModel::new(dot_scope::lab(), now);
+    // The painter the compositor draws with and the HUD lets go of when it
+    // hides.
+    #[cfg(not(target_os = "macos"))]
+    let gpu: Arc<Mutex<GpuSlot>> = Arc::default();
     let overlay = app.overlay(
         OverlaySpec {
             name: "hex-hud",
@@ -476,7 +490,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
         .release_gpu_after(GPU_IDLE)
         .compositor(HudCompositor {
             #[cfg(not(target_os = "macos"))]
-            gpu: Arc::default(),
+            gpu: gpu.clone(),
             #[cfg(target_os = "macos")]
             gpu: None,
             animating: animating.clone(),
@@ -496,6 +510,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             edge_placed: None,
             #[cfg(not(target_os = "macos"))]
             followed: None,
+            #[cfg(not(target_os = "macos"))]
+            gpu,
         },
     );
     let this = overlay.clone();
@@ -787,34 +803,35 @@ impl HudCompositor {
         let painter = painter(&mut gpu.painter, f);
         paint(painter, f, drawn, layout, target);
     }
+}
 
-    /// Lets go of the painter, and with its buffers, bind group and pipeline
-    /// the GPU device they hold (#1431): Windows and Linux keep it for
-    /// `PAINTER_IDLE` hidden, the time Rune keeps a parked device, so a burst
-    /// of dictations reuses one painter.
-    #[cfg(not(target_os = "macos"))]
-    fn release(&self) {
-        let mut gpu = self.gpu.lock().unwrap_or_else(|error| error.into_inner());
-        let generation = gpu.generation;
-        if gpu.painter.is_none() || gpu.releasing == Some(generation) {
-            return;
-        }
-        gpu.releasing = Some(generation);
-        drop(gpu);
-        let gpu = self.gpu.clone();
-        let _ = std::thread::Builder::new()
-            .name("hud-release".into())
-            .spawn(move || {
-                std::thread::sleep(PAINTER_IDLE);
-                let mut gpu = gpu.lock().unwrap_or_else(|error| error.into_inner());
-                if gpu.generation == generation {
-                    gpu.painter = None;
-                }
-                if gpu.releasing == Some(generation) {
-                    gpu.releasing = None;
-                }
-            });
+/// Lets go of the painter, and with its buffers, bind group and pipeline the
+/// GPU device they hold (#1431): Windows and Linux keep it for `PAINTER_IDLE`
+/// hidden, so the device frees once Rune's parked device also goes and a burst
+/// of dictations within that time reuses one painter. Both the compositor when
+/// the HUD stops drawing and a hide Rune never draws again call it.
+#[cfg(not(target_os = "macos"))]
+fn release_painter(gpu: &Arc<Mutex<GpuSlot>>) {
+    let mut slot = gpu.lock().unwrap_or_else(|error| error.into_inner());
+    let generation = slot.generation;
+    if slot.painter.is_none() || slot.releasing == Some(generation) {
+        return;
     }
+    slot.releasing = Some(generation);
+    drop(slot);
+    let slot = gpu.clone();
+    let _ = std::thread::Builder::new()
+        .name("hud-release".into())
+        .spawn(move || {
+            std::thread::sleep(PAINTER_IDLE);
+            let mut slot = slot.lock().unwrap_or_else(|error| error.into_inner());
+            if slot.generation == generation {
+                slot.painter = None;
+            }
+            if slot.releasing == Some(generation) {
+                slot.releasing = None;
+            }
+        });
 }
 
 /// Writes the frame's dots through `painter` and draws them.
@@ -859,8 +876,6 @@ impl Compositor<Hud> for HudCompositor {
         if !active {
             hud.fade_out();
             drop(clear_pass(f.encoder, f.target));
-            #[cfg(not(target_os = "macos"))]
-            self.release();
             return;
         }
         let (Some(drawn), layout) = (hud.drawn.take(), hud.layout) else {
