@@ -1682,14 +1682,20 @@ output for the first tone, keeps it through an idle grace so bursts of
 dictation share a warm device, and releases it after that grace or on the next
 observation after sounds turn Off. On macOS the grace is ten seconds: an open
 output is a live CoreAudio IO client that coreaudiod services and holds an
-idle-sleep assertion for, and holding one idle for minutes is what let a
-stalled client block system audio (#1531). Ten seconds still covers a quick
-start-tone to stop-tone dictation. Windows keeps five minutes; Linux releases
-after one second because an open output is a listed stream in its sound
-controls (#720). A per-sink flag records a stream error from the audio thread;
-the worker drops that sink, logs one warning, and lets the next tone open a
-fresh one. macOS idle-sleep timers count from the last user input, and a tone
-implies recent input, so the grace never delays sleep by itself. A device open
+idle-sleep assertion for. coreaudiod logged client timeouts against Hex's open
+idle output (#1531), and a shorter grace reduces how long such a client exists.
+Ten seconds still covers a quick start-tone to stop-tone dictation, though a
+dictation held past about ten seconds pays a cold output open for its stop
+tone; the tone is delayed, not dropped. Cold-open time on Bluetooth outputs is
+unmeasured. Windows keeps five minutes; Linux releases after one second because
+an open output is a listed stream in its sound controls (#720). A per-sink flag
+records a fatal stream error (the output became unavailable); overload glitches
+and default-output changes do not set it. The stream error callback may run on
+a CoreAudio thread, so it only flips the flag; the worker drops a flagged sink
+on its next 250 ms observation or next tone, logs one warning, and lets the
+next tone open a fresh one. macOS idle-sleep timers count from the last user
+input, and a tone implies recent input, so the grace never delays sleep by
+itself. A device open
 already in progress must return before the worker can observe that change.
 Output-open failures retry at most once per two seconds, and a released device
 reopens without that backoff. Bundled samples remain decoded in memory. A tone

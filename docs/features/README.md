@@ -889,9 +889,11 @@ On Linux, where an open output stays listed in the desktop's sound controls,
 it closes about a second after the last tone ends
 ([#720](https://github.com/anomalyco/hex/issues/720)); the existing
 `output_opens_for_a_tone_and_releases_after_the_idle_grace` check covers the
-grace logic, not a real PipeWire stream list. A stream error sets a per-sink
-flag from the audio thread; the worker drops that sink and the next tone opens
-a fresh one
+grace logic, not a real PipeWire stream list. A fatal stream error (the output
+became unavailable) sets a per-sink flag from the stream error callback, which
+may run on a CoreAudio thread; overload glitches and default-output changes do
+not. The worker drops a flagged sink on its next 250 ms observation or next
+tone, and the next tone opens a fresh one
 (`an_errored_sink_is_dropped_and_reopened_on_the_next_tone`). On macOS the
 CoreAudio listeners on the default output, the device list, and an audio service
 restart advance an output route generation; the next tone drops an output opened

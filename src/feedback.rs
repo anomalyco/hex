@@ -140,11 +140,13 @@ fn sounds_enabled() -> bool {
 /// bursts of dictation the cold device reopen.
 ///
 /// On macOS an open output is a live CoreAudio IO client: coreaudiod services
-/// its render callbacks and keeps an idle-sleep assertion for it. Holding one
-/// idle for minutes is what let a stalled client block all system audio
-/// (#1531), so macOS releases the output about ten seconds after the last
-/// tone. Ten seconds still covers a quick start-tone to stop-tone dictation
-/// without a cold reopen.
+/// its render callbacks and keeps an idle-sleep assertion for it. coreaudiod
+/// logged client timeouts against Hex's open idle output (#1531), and a
+/// shorter grace reduces how long such a client exists, so macOS releases the
+/// output about ten seconds after the last tone. Ten seconds still covers a
+/// quick start-tone to stop-tone dictation, though a dictation held past about
+/// ten seconds pays a cold output open for its stop tone; the tone is delayed,
+/// not dropped. Cold-open time on Bluetooth outputs is unmeasured.
 ///
 /// On Linux an open output is a listed stream in the desktop's sound controls
 /// (PipeWire, PulseAudio), so it closes about a second after the last tone
@@ -158,8 +160,9 @@ const IDLE_RELEASE_GRACE: Duration = Duration::from_secs(1);
 const IDLE_RELEASE_GRACE: Duration = Duration::from_secs(5 * 60);
 const OPEN_RETRY_BACKOFF: Duration = Duration::from_secs(2);
 
-/// One opened output and the flag its stream error callback sets. The flag is
-/// per sink: a late error from a dropped sink must never close a newer one.
+/// One opened output and the flag its stream error callback sets. The callback
+/// may run on a CoreAudio thread, so it only flips this flag. The flag is per
+/// sink: a late error from a dropped sink must never close a newer one.
 struct Opened<S> {
     sink: S,
     failed: Arc<AtomicBool>,
@@ -217,10 +220,11 @@ impl<S> FeedbackOutput<S> {
         self.playing_until = Some(self.playing_until.unwrap_or(until).max(until));
     }
 
-    /// Drops a sink whose stream reported an error so the next tone opens a
-    /// fresh one. The audio callback only sets the per-sink flag; this worker
-    /// thread clears it and logs the one warning.
-    fn drop_failed(&mut self, now: Instant) -> bool {
+    /// Drops a sink whose stream reported a fatal error so the next tone opens
+    /// a fresh one. The stream error callback may run on a CoreAudio thread and
+    /// only sets the per-sink flag; this worker thread clears it and logs the
+    /// one warning.
+    fn drop_failed(&mut self, now: Instant) {
         let failed = self
             .sink
             .as_ref()
@@ -233,7 +237,6 @@ impl<S> FeedbackOutput<S> {
             self.retry_at = now;
             tracing::warn!("feedback output stream failed; dropped it for the next tone");
         }
-        failed
     }
 
     /// Releases the device when sounds are off or nothing has played within the
@@ -1114,16 +1117,32 @@ impl<S: Source> Source for Retractable<S> {
     }
 }
 
+/// Whether a stream error leaves the output unusable. An underrun or overrun
+/// is a glitch on a stream that keeps running, and a default-output change has
+/// already rerouted the stream; neither should drop the sink. Every other kind
+/// reports an output Hex can no longer rely on.
+fn stream_error_is_fatal(kind: rodio::cpal::ErrorKind) -> bool {
+    !matches!(
+        kind,
+        rodio::cpal::ErrorKind::Xrun | rodio::cpal::ErrorKind::DeviceChanged
+    )
+}
+
 fn open_output() -> Result<Opened<MixerDeviceSink>> {
-    // The stream error callback runs on a real-time audio thread, so it only
-    // flips this flag: no logging, allocation, or locks. The playback worker
-    // reads it, drops the sink, and logs once from its own thread.
+    // The stream error callback may run on a CoreAudio thread, so it only
+    // flips this flag on a fatal error: no logging, allocation, or locks. The
+    // playback worker reads it, drops the sink, and logs once from its own
+    // thread.
     let failed = Arc::new(AtomicBool::new(false));
     let callback = {
         let failed = failed.clone();
-        move |_: rodio::cpal::Error| failed.store(true, Ordering::Release)
+        move |error: rodio::cpal::Error| {
+            if stream_error_is_fatal(error.kind()) {
+                failed.store(true, Ordering::Release);
+            }
+        }
     };
-    let opened = DeviceSinkBuilder::from_default_device()
+    let mut opened = DeviceSinkBuilder::from_default_device()
         .and_then(|builder| {
             builder
                 .with_buffer_size(BufferSize::Fixed(OUTPUT_BUFFER_FRAMES))
@@ -1131,9 +1150,9 @@ fn open_output() -> Result<Opened<MixerDeviceSink>> {
                 .open_stream()
                 .map(|sink| Opened { sink, failed })
         })
-        // rodio's all-device fallback cannot carry a custom error callback, so
-        // a sink opened there keeps rodio's default (which prints) and cannot
-        // report a stream error to the worker.
+        // rodio's all-device fallback (`open_default_sink`) takes no error
+        // callback, so a sink opened there keeps rodio's default callback and
+        // never flags a failure.
         .or_else(|_| {
             DeviceSinkBuilder::open_default_sink().map(|sink| Opened {
                 sink,
@@ -1141,7 +1160,6 @@ fn open_output() -> Result<Opened<MixerDeviceSink>> {
             })
         })
         .wrap_err("could not open the audio output")?;
-    let mut opened = opened;
     opened.sink.log_on_drop(false);
     Ok(opened)
 }
@@ -1672,6 +1690,17 @@ mod tests {
         assert!(!output.is_open());
         drop(output);
         assert_eq!(live.get(), 0);
+    }
+
+    /// Only an output that became unavailable drops the sink. A glitch on a
+    /// stream that keeps running, or a default-output change the stream already
+    /// followed, must not.
+    #[test]
+    fn only_an_unavailable_output_is_a_fatal_stream_error() {
+        use rodio::cpal::ErrorKind;
+        assert!(!stream_error_is_fatal(ErrorKind::Xrun));
+        assert!(!stream_error_is_fatal(ErrorKind::DeviceChanged));
+        assert!(stream_error_is_fatal(ErrorKind::DeviceNotAvailable));
     }
 
     /// A stream error is recorded in its sink's own flag; the worker drops
