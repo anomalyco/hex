@@ -69,7 +69,7 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   the bundle (keyframes, contact sheet, scrawl.json)
 ├── Linux: strokes are placed on the recorded screen in its logical points.
 │   A monitor pick whose portal names the output (`mapping_id`, as
-│   xdg-desktop-portal-hyprland 1.4.1+ does, e.g. `DP-3`) opens the pen on
+│   xdg-desktop-portal-hyprland 1.4.0+ does, e.g. `DP-3`) opens the pen on
 │   that output with its logical size from xdg-output (linux::output::find),
 │   so strokes land on the recorded monitor even when the overlay had opened
 │   on another one. Otherwise it uses the ScreenCast portal's stream size
@@ -109,7 +109,7 @@ On Linux                                 // capture.linux
 ├── Wayland -> the ScreenCast portal (zbus): Screen asks the desktop once and
 │   keeps its restore token (<support>/screencast-token), so later captures
 │   start without a dialog and record the remembered monitor; a monitor pick
-│   the portal names (`mapping_id`: xdg-desktop-portal-hyprland 1.4.1+) moves
+│   the portal names (`mapping_id`: xdg-desktop-portal-hyprland 1.4.0+) moves
 │   the pen to that output (see the pen bullet above). Window shows the
 │   desktop's picker every time (the capsule's Window chip goes straight to
 │   it) and names no output, so the pen keeps its old placement; the cursor

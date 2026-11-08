@@ -59,7 +59,7 @@ pub struct Cast {
     pub node: u32,
     pub size: Option<(i32, i32)>,
     pub position: Option<(i32, i32)>,
-    /// The picked monitor's connector name, such as `DP-3` (Hyprland's portal, 1.4.1+, sets
+    /// The picked monitor's connector name, such as `DP-3` (Hyprland's portal, 1.4.0+, sets
     /// it for monitor picks). Window picks carry none.
     pub mapping_id: Option<String>,
     runtime: tokio::runtime::Runtime,

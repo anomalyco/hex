@@ -1,5 +1,5 @@
 //! The Wayland output a screen recording picked: the ScreenCast portal's
-//! `mapping_id` connector name (Hyprland's portal, 1.4.1+, names a monitor
+//! `mapping_id` connector name (Hyprland's portal, 1.4.0+, names a monitor
 //! pick) to that output's `wl_output` registry global and its logical size
 //! from xdg-output. The ink overlay opens on that output, and the pen draws
 //! its strokes in the output's logical points rather than the stream's
