@@ -1071,7 +1071,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   Activated/Deactivated). The recording capsule is `● 0:07 │ ✎ │ ■ ✕`,
   icons only, with no target chips; its pen stays on until clicked
   again and draws only while the mouse button is down (drag to draw,
-  move freely otherwise), and Esc stops drawing, never the recording. Shift still
+  move freely otherwise), and Esc stops drawing, never the recording; on
+  GNOME Wayland with Labs › Annotate on GNOME the ink can't take keys, so the
+  capsule's pen button or the Annotate key stops drawing instead. Shift still
   draws on the Mac. While drawing, the ink overlay takes the pointer with
   a pen cursor (Linux leaves a hole over the capsule's pill), so clicks
   reach neither the app nor anything but the capsule. Ink has no pins and
@@ -1321,7 +1323,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   session without layer-shell and only while this user's XWayland process
   already runs; Hex decides at each show and never starts XWayland. Off, or
   when the overlay still can't open, an offer opens the Meetings pane (#1271).
-  Everything else stays on Wayland. The desktop may grant a different
+  A third: Labs › Annotate on GNOME (`gnome-annotate`, off by default) does the
+  same for Annotate's recording capsule, ink, and picker, with the same
+  conditions and per-show decision. Rune never shows an `OnDemand` overlay on
+  XWayland, so on such a session the ink takes `KeyPolicy::None` and pointer
+  regions from the start, keeping regions with no hit area while not drawing
+  (an XWayland window made click-through can never take the pointer later);
+  Esc can't stop drawing there, and the capsule's pen button or the Annotate
+  key does. Everything else stays on Wayland. The desktop may grant a different
   trigger, keep an older one, or refuse one; Settings shows what it granted,
   follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
   Hex's app id is `anomaly.hex`: every install (direct, AUR, deb/rpm, Nix)

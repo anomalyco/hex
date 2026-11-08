@@ -490,6 +490,11 @@ const KEYS: &[Key] = &[
         "Labs: on Wayland desktops without layer-shell, such as GNOME, the meeting capsules float over the call through XWayland while it is already running (Linux)",
     ),
     key(
+        "labs.gnome_annotate",
+        Kind::Bool,
+        "Labs: on Wayland desktops without layer-shell, such as GNOME, Annotate's capsule and ink float over the screen through XWayland while it is already running; the pen button or the Annotate key stops drawing, since Esc can't reach the ink there (Linux)",
+    ),
+    key(
         "labs.follow_live_transcript",
         Kind::Bool,
         "Labs: while a meeting records, its transcript in Meetings scrolls to the newest line; scroll up to read earlier text, back to the bottom to follow again",

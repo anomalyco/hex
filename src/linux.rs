@@ -1,3 +1,4 @@
+pub(crate) mod annotate_overlays;
 pub(crate) mod app;
 pub(crate) mod atspi;
 pub(crate) mod audio_control;

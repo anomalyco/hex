@@ -126,6 +126,9 @@ impl Feature {
             Self::GnomeMeetingCapsules => {
                 "Show the meeting capsules (recording offer, recording indicator) floating over your call on GNOME Wayland, through XWayland while XWayland is running"
             }
+            Self::GnomeAnnotate => {
+                "Show Annotate's recording capsule and ink over your screen on GNOME Wayland, through XWayland while XWayland is running; the capsule's pen button and the Annotate key stop drawing, since Esc can't reach the ink there"
+            }
             Self::Screenshots => {
                 "Take a screenshot of an area or a window with a shortcut (Command-Shift-4 by default): copied, saved, and shown in the corner"
             }

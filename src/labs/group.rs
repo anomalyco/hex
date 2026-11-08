@@ -86,7 +86,7 @@ impl Feature {
             | Self::MeetingImport
             | Self::MeetingDescriptiveFilenames
             | Self::ExpireMeetingAudio => Group::Meetings,
-            Self::Screenshots | Self::AnnotateReplay => Group::Annotate,
+            Self::Screenshots | Self::AnnotateReplay | Self::GnomeAnnotate => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
             | Self::SidedChords
