@@ -1869,7 +1869,9 @@ HUD's surface (backend, adapter, alpha mode) once, and treats a dictation
 start whose HUD presents no frame within 1.5 s as a failure too. Each
 failure is logged as an error in process.log once per reason, and Settings
 shows it as the listener's warning (`HudSender::failure`). Every OS takes dark or light and Reduce Motion
-from Rune, and loads `dot-scope.json` at launch.
+from Rune, and loads `dot-scope.json` at launch. A hidden HUD lets go of its
+painter, and with its buffers, bind group and pipeline the GPU device they
+hold: Windows as it hides, Linux after five minutes hidden, macOS never (#1431).
 
 ```ts
 Dot scope                                    // dot_scope

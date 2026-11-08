@@ -388,7 +388,9 @@ const EXIT_FADE: Duration = Duration::from_millis(120);
 /// Windows gives it back, window included, once the HUD's exit fade ends: a hidden
 /// topmost window that presented with DXGI let NVIDIA's Instant Replay take
 /// Hex for the running game (#1308). The device itself waits five minutes for
-/// the next show either way, so dictations reuse one device (#1268).
+/// the next show either way, so dictations reuse one device (#1268). On Linux
+/// the HUD's painter, and its own hold on that device, goes with the surface
+/// after the same idle (#1431); macOS keeps both.
 #[cfg(not(target_os = "windows"))]
 const GPU_IDLE: Duration = Duration::from_secs(5 * 60);
 #[cfg(target_os = "windows")]
@@ -466,6 +468,9 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
         // shows at once; a Hex at rest gives the GPU device back.
         .release_gpu_after(GPU_IDLE)
         .compositor(HudCompositor {
+            #[cfg(not(target_os = "macos"))]
+            gpu: Arc::default(),
+            #[cfg(target_os = "macos")]
             gpu: None,
             animating: animating.clone(),
         }),
@@ -723,8 +728,113 @@ struct HudCompositor {
     /// The painter and the device its buffers live on: an overlay shown
     /// again can draw on another device (#982). Keyed by Rune's device key,
     /// since wgpu compares a new Rune GPU's device equal to the old one.
+    ///
+    /// Windows and Linux let go of it once the HUD has hidden, and with it the
+    /// GPU device its buffers hold (#1431).
+    #[cfg(not(target_os = "macos"))]
+    gpu: Arc<Mutex<GpuSlot>>,
+    #[cfg(target_os = "macos")]
     gpu: Option<(rune::compose::DeviceKey, Painter)>,
     animating: Arc<AtomicBool>,
+}
+
+/// What the HUD draws with, shared so it can be let go of while the HUD is
+/// hidden (#1431).
+#[cfg(not(target_os = "macos"))]
+#[derive(Default)]
+struct GpuSlot {
+    painter: Option<(rune::compose::DeviceKey, Painter)>,
+    /// Bumped by every frame the painter draws, so a release thread drops it
+    /// only when the HUD drew nothing since it started.
+    generation: u64,
+    /// The generation a release thread already waits on.
+    releasing: Option<u64>,
+}
+
+impl HudCompositor {
+    /// The painter that draws `f`, made on its device and format when the HUD
+    /// has none for them.
+    #[cfg(target_os = "macos")]
+    fn painter(&mut self, f: &Frame<'_, Hud>) -> &Painter {
+        if self
+            .gpu
+            .as_ref()
+            .is_none_or(|(device, painter)| *device != f.device_key() || painter.format != f.format)
+        {
+            tracing::info!(gpu = %rune::describe_gpu(f.device), "HUD draws");
+            let painter =
+                prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
+            self.gpu = Some((f.device_key(), painter));
+        }
+        &self.gpu.as_ref().expect("created above").1
+    }
+
+    /// Writes and draws the frame's dots; the lock keeps a pending release
+    /// from dropping the painter mid-frame.
+    #[cfg(not(target_os = "macos"))]
+    fn draw(&self, f: &mut Frame<'_, Hud>, drawn: &DotFrame, layout: Layout, target: Target) {
+        let mut gpu = self.gpu.lock().unwrap_or_else(|error| error.into_inner());
+        gpu.generation = gpu.generation.wrapping_add(1);
+        if gpu
+            .painter
+            .as_ref()
+            .is_none_or(|(device, painter)| *device != f.device_key() || painter.format != f.format)
+        {
+            tracing::info!(gpu = %rune::describe_gpu(f.device), "HUD draws");
+            let painter =
+                prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
+            gpu.painter = Some((f.device_key(), painter));
+        }
+        let painter = &gpu.painter.as_ref().expect("created above").1;
+        paint(painter, f, drawn, layout, target);
+    }
+
+    /// Lets go of the painter, and with its buffers, bind group and pipeline
+    /// the GPU device they hold (#1431). Windows drops it at once: its next
+    /// show prebuilds one on the shortcut's first key. Linux keeps it for
+    /// `GPU_IDLE`, the time Rune keeps the HUD's surface, so a burst of
+    /// dictations draws without making a pipeline for each.
+    #[cfg(not(target_os = "macos"))]
+    fn release(&self) {
+        let mut gpu = self.gpu.lock().unwrap_or_else(|error| error.into_inner());
+        if GPU_IDLE.is_zero() {
+            gpu.painter = None;
+            return;
+        }
+        let generation = gpu.generation;
+        if gpu.painter.is_none() || gpu.releasing == Some(generation) {
+            return;
+        }
+        gpu.releasing = Some(generation);
+        drop(gpu);
+        let gpu = self.gpu.clone();
+        let _ = std::thread::Builder::new()
+            .name("hud-release".into())
+            .spawn(move || {
+                std::thread::sleep(GPU_IDLE);
+                let mut gpu = gpu.lock().unwrap_or_else(|error| error.into_inner());
+                if gpu.generation == generation {
+                    gpu.painter = None;
+                }
+                if gpu.releasing == Some(generation) {
+                    gpu.releasing = None;
+                }
+            });
+    }
+}
+
+/// Writes the frame's dots through `painter` and draws them.
+fn paint(
+    painter: &Painter,
+    f: &mut Frame<'_, Hud>,
+    drawn: &DotFrame,
+    layout: Layout,
+    target: Target,
+) {
+    let uniforms = painter.write(drawn, layout, target, |buffer, data| {
+        f.write_buffer(buffer, 0, data)
+    });
+    painter.draw(f.encoder, f.target, &uniforms);
 }
 
 impl Compositor<Hud> for HudCompositor {
@@ -755,27 +865,18 @@ impl Compositor<Hud> for HudCompositor {
         if !active {
             hud.fade_out();
             drop(clear_pass(f.encoder, f.target));
+            #[cfg(not(target_os = "macos"))]
+            self.release();
             return;
         }
         let (Some(drawn), layout) = (hud.drawn.take(), hud.layout) else {
             drop(clear_pass(f.encoder, f.target));
             return;
         };
-        if self
-            .gpu
-            .as_ref()
-            .is_none_or(|(device, gpu)| *device != f.device_key() || gpu.format != f.format)
-        {
-            tracing::info!(gpu = %rune::describe_gpu(f.device), "HUD draws");
-            let painter =
-                prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
-            self.gpu = Some((f.device_key(), painter));
-        }
-        let (_, gpu) = self.gpu.as_ref().expect("created above");
-        let uniforms = gpu.write(&drawn, layout, target, |buffer, data| {
-            f.write_buffer(buffer, 0, data)
-        });
-        gpu.draw(f.encoder, f.target, &uniforms);
+        #[cfg(target_os = "macos")]
+        paint(self.painter(f), f, &drawn, layout, target);
+        #[cfg(not(target_os = "macos"))]
+        self.draw(f, &drawn, layout, target);
         f.rt.state.drawn = Some(drawn);
     }
 }
