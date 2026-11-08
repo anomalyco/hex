@@ -44,8 +44,8 @@ const DOWNLOAD_SECS: f64 = 9.0;
 const FIRST_RUN_SECS: f64 = 23.0;
 const SLOW_SECS: f64 = 31.0;
 /// Long enough that `"Almost ready"` waits and a sketch plays before the
-/// model lands.
-const SKETCH_DOWNLOAD_SECS: f64 = 66.0;
+/// model lands, mid-sketch.
+const SKETCH_DOWNLOAD_SECS: f64 = 59.2;
 const DOWNLOAD_HOLD: f64 = 2.8;
 /// How long the first run's `"Setting up Hex"` holds before its download
 /// flies up and `"Without Hex"` opens.

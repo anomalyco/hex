@@ -20,7 +20,7 @@ use super::live;
 use super::pill::{CAPSULE, FLY, after_flight};
 use super::scene_script::{Script, parse_sketch};
 use super::stories::{Onboard, Step};
-use super::typing::Scene;
+use super::typing::{Scene, Timing};
 use super::versus;
 
 const SKETCHES: [(&str, &str); 3] = [
@@ -110,7 +110,12 @@ pub(crate) fn watch(s: &mut Onboard) {
         return;
     }
     let index = s.sketches.played;
-    let scene = Scene::play(&s.timing, script(index));
+    // A sketch keeps its own opening; the first run's is the demo's.
+    let timing = Timing {
+        opening: Timing::default().opening,
+        ..s.timing
+    };
+    let scene = Scene::play(&timing, script(index));
     let from = s.now + LEAD_IN;
     s.sfx.on_without_hex(from, &scene);
     s.sketches.playing = Some(Playing { index, scene, from });
@@ -298,7 +303,7 @@ fn left(samples: &VecDeque<(f64, u64)>, d: Download) -> Option<f64> {
 mod tests {
     use super::super::fixture::{Language, Speech};
     use super::super::stories::Flow;
-    use super::super::typing::Timing;
+
     use super::*;
 
     #[test]
