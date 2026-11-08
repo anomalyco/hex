@@ -2489,10 +2489,12 @@ pub fn draw(x: f32, y: f32, scale: f32) {
         && scale > 0.0
         && let Some(source) = ink_source()
     {
-        let area = scrawl_capture::capture::recorded_screen_points().map_or(
-            [width as f32 / scale, height as f32 / scale],
-            |(width, height)| [width as f32, height as f32],
-        );
+        let area = crate::linux::output::pen_points()
+            .or_else(scrawl_capture::capture::recorded_screen_points)
+            .map_or(
+                [width as f32 / scale, height as f32 / scale],
+                |(width, height)| [width as f32, height as f32],
+            );
         let mut frame = source
             .telemetry
             .target_frame
