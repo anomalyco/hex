@@ -1171,8 +1171,7 @@ shortcut uses) opens a second copy of Annotate's capture picker
                       slides in from past the right edge on the HUD's spring and out the same way
                       (Reduce Motion: a fade); ✕ shows inside its top-left corner on hover;
                       click -> opens it in the editor, drag -> the file, ✕ -> closes
-                      a dictation while it shows -> held, "Listening…" then "Processing…" on it;
-                        the words open the shot in the editor with them, never pasted
+                      a dictation while it shows -> pastes as usual, being no shot's talk-over
                       a failure -> the error tone; there is no success sound (Hex has no shutter cue)
 ```
 
@@ -1208,11 +1207,12 @@ Talking over a shot
 ([screenshots/narration.rs](../../src/screenshots/narration.rs)) is the
 shortcut's own dictation, on the loaded model and through the mode's
 processing; only where its text lands changes. The listener asks at a
-dictation's start whether the editor (first) or the thumbnail shows, and
-at its finish hands the transcript to that shot instead of pasting it, as
-`hex dictation stop --print` does. A short, silent, cancelled, or failed
-clip lands nothing. Dictation never takes Escape, so the editor's Escape
-cancels it through the listener.
+dictation's start whether the shot's editor is open, and at its finish hands
+the transcript to that shot instead of pasting it, as
+`hex dictation stop --print` does. The corner card never takes words: while
+only it shows, a dictation pastes as usual. A short, silent, cancelled, or
+failed clip lands nothing. Dictation never takes Escape, so the editor's
+Escape cancels it through the listener.
 
 The edited shot is drawn on the GPU at the shot's own pixels, the marks
 as the editor draws them (an offscreen Rune view), then cropped; without
@@ -1303,8 +1303,9 @@ and `a_large_shot_shrinks_for_its_thumbnail` in
 file in one second, and the PNG's density in
 [screenshots/save.rs](../../src/screenshots/save.rs); the system shortcut
 read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
-`thumbnail_goldens` (rest, hover, and listening, light and dark) and the
-thumbnail's timer, held while someone talks over it, in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
+`thumbnail_goldens` (rest, hover, and a recording's length, light and dark)
+and the thumbnail's timer in
+[screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
 `editor_goldens` (marks, the Send to… list, and words while a dictation
 records, light and dark), the layout and the words row's height, words
 landing only while transcribed, Escape dropping them and a waiting send, a
