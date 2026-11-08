@@ -50,9 +50,9 @@ pub struct LabsSettings {
     pub unload_idle_minutes: u32,
     /// Paste last dictation's row offers its default shortcut back (issue 613).
     pub restore_shortcut_default: bool,
-    /// A pasted dictation stays on the clipboard, not the previous one (macOS, issue 200).
+    /// A pasted dictation stays on the clipboard, not the previous one (macOS and Windows, issue 200).
     pub keep_on_clipboard: bool,
-    /// A dictation is put on the clipboard and never pasted (macOS, issue 629).
+    /// A dictation is put on the clipboard and never pasted (macOS and Windows, issue 629).
     pub copy_only: bool,
     /// Spoken "new line", "new paragraph", and "open/close quote" become line breaks and quotes (issue 630).
     pub spoken_formatting: bool,

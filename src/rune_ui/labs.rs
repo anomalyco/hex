@@ -467,6 +467,24 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Changing input source selects its mapped model and language; manual choices still work"),
         ));
     }
+    // macOS's and Windows' pasters can leave a dictation on the clipboard.
+    if matches!(
+        caps.os,
+        super::platform::Os::Macos | super::platform::Os::Windows
+    ) {
+        rows.push(row(
+            Feature::KeepOnClipboard,
+            None,
+            tr("Keep dictation on clipboard"),
+            tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
+        ));
+        rows.push(row(
+            Feature::CopyOnly,
+            None,
+            tr("Copy dictation only"),
+            tr("Put the dictation on the clipboard instead of pasting it"),
+        ));
+    }
     if caps.os == super::platform::Os::Macos {
         rows.push(row(
             Feature::MouseShortcuts,
@@ -485,18 +503,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
             Some(&GLOBE),
             tr("Also pause the browser"),
             tr("While dictating with Pause media: YouTube and other tabs, resumed only if Hex paused them"),
-        ));
-        rows.push(row(
-            Feature::KeepOnClipboard,
-            None,
-            tr("Keep dictation on clipboard"),
-            tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
-        ));
-        rows.push(row(
-            Feature::CopyOnly,
-            None,
-            tr("Copy dictation only"),
-            tr("Put the dictation on the clipboard instead of pasting it"),
         ));
         // macOS's listener only, so Linux renders of macOS scenes leave it out.
         if cfg!(target_os = "macos") {

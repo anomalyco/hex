@@ -385,8 +385,6 @@ impl Feature {
             }
             Self::MouseShortcuts
             | Self::PauseBrowser
-            | Self::KeepOnClipboard
-            | Self::CopyOnly
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SidedChords
@@ -396,6 +394,9 @@ impl Feature {
             | Self::NotchIndicator
             | Self::Screenshots
             | Self::CapsLockDictation => cfg!(target_os = "macos"),
+            Self::KeepOnClipboard | Self::CopyOnly => {
+                cfg!(any(target_os = "macos", target_os = "windows"))
+            }
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::AnnotateReplay => {
@@ -899,15 +900,15 @@ pub fn mouse_shortcuts() -> bool {
 }
 
 /// A pasted dictation stays on the clipboard rather than the previous
-/// clipboard being restored (macOS; read as each paste commits).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// clipboard being restored (macOS and Windows; read as each paste commits).
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn keep_on_clipboard() -> bool {
     on(KEEP_ON_CLIPBOARD)
 }
 
-/// A dictation goes to the clipboard and is never pasted (macOS; read as
-/// each dictation's output commits).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// A dictation goes to the clipboard and is never pasted (macOS and
+/// Windows; read as each dictation's output commits).
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn copy_only() -> bool {
     on(COPY_ONLY)
 }
@@ -1836,6 +1837,18 @@ mod tests {
         assert_ne!(state & CAPS_LOCK_DICTATION, 0);
         assert_eq!(state & GNOME_ANNOTATE, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 15);
+    }
+
+    #[test]
+    fn clipboard_labs_are_macos_or_windows_only() {
+        assert_eq!(
+            Feature::KeepOnClipboard.on_this_os(),
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
+        assert_eq!(
+            Feature::CopyOnly.on_this_os(),
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
     }
 
     #[test]
