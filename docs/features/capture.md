@@ -702,9 +702,11 @@ Retention                                // capture.retention
 │   layout, no `trash` command; macOS uses /usr/bin/trash, Windows the
 │   Recycle Bin), so file managers can restore it
 ├── `.media-cleaned` is written only after the media reaches the Trash; a
-│   failed trash leaves the media in the bundle, and staging left by an
-│   earlier version is put back on the next pass
-└── Whole bundles and old media go to the Trash; the prompt stays
+│   failed trash leaves the media in the bundle. Staging left by an earlier
+│   version or an interrupted pass is put back on the next pass, and staging
+│   whose bundle is gone goes to the Trash
+└── Old media goes to the Trash and the prompt stays; after bundleDays the
+    whole bundle goes
 
 hex capture stop                         // capture.stop
 ├── Closes the sink (≤ 100 ms wait) -> reply: idle + the bundle path, at once
