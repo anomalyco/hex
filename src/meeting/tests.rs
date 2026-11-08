@@ -568,6 +568,26 @@ fn the_exported_markdown_is_the_reveal_target_only_while_it_exists() {
 }
 
 #[test]
+fn explorer_selects_the_meeting_file_with_the_switch_outside_the_quotes() {
+    assert_eq!(
+        explorer_select(Path::new(
+            r"C:\Users\dax\Documents\Hex Meetings\Design sync.md"
+        ))
+        .as_os_str(),
+        std::ffi::OsStr::new(r#"/select,"C:\Users\dax\Documents\Hex Meetings\Design sync.md""#)
+    );
+    assert_eq!(
+        explorer_select(Path::new(
+            r"C:\Users\dax\Documents\Hex Meetings\Design sync, notes.md"
+        ))
+        .as_os_str(),
+        std::ffi::OsStr::new(
+            r#"/select,"C:\Users\dax\Documents\Hex Meetings\Design sync, notes.md""#
+        )
+    );
+}
+
+#[test]
 fn separate_audio_expiry_covers_only_finished_meetings_older_than_it() {
     use crate::app_settings::MeetingRetention;
     let day = MeetingRetention::Day.max_age_ms().unwrap();
