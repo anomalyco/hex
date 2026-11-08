@@ -431,9 +431,10 @@ pub const MODELS: &[ModelDefinition] = &[
         streams: false,
         runtime: ModelRuntime::Gguf(&PARAKEET_V3_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
-        // The pinned v3 artifact detects language from audio and has no prompt input.
+        // The pinned v3 artifact detects the language from audio and has no
+        // prompt input, so it is offered under Auto.
         accepts_language_hint: false,
-        supports_language_detection: false,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::Orukeet,
@@ -449,9 +450,9 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&ORUKEET_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
         // Like v3, its base: it detects the language from the audio and has
-        // no language input.
+        // no language input, so it is offered under Auto.
         accepts_language_hint: false,
-        supports_language_detection: false,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::WhisperLargeV3Turbo,
@@ -561,9 +562,9 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&PARAKEET_ULTRA_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
         // Like v3, its base: it detects the language from the audio and has
-        // no language input.
+        // no language input, so it is offered under Auto.
         accepts_language_hint: false,
-        supports_language_detection: false,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::Nemotron35Asr,
@@ -629,9 +630,10 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&GRANITE_SPEECH_5_ARTIFACT),
         languages: GRANITE_SPEECH_5_LANGUAGES,
         // A CTC head with no language input: it transcribes whichever of
-        // its seven languages it hears.
+        // its seven languages it hears, so it is offered under Auto even
+        // though its pinned file leaves stt.capability.lang_detect off.
         accepts_language_hint: false,
-        supports_language_detection: false,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
@@ -1446,7 +1448,7 @@ mod tests {
         assert_eq!(orukeet.language_choices(), v3.language_choices());
         assert!(!orukeet.streams);
         assert!(!orukeet.accepts_language_hint);
-        assert!(!orukeet.supports_language_detection);
+        assert!(orukeet.supports_language_detection);
         assert!(!orukeet.id.is_labs_gated());
         assert!(orukeet.available());
         assert!(super::super::model_details::details(orukeet.id).is_some());
@@ -1826,6 +1828,24 @@ mod tests {
             })
             .is_ok()
         );
+    }
+
+    #[test]
+    fn models_that_detect_language_without_a_hint_offer_auto() {
+        for model in [
+            TranscriptionModelId::ParakeetV3,
+            TranscriptionModelId::GraniteSpeech5,
+        ] {
+            let definition = definition(model);
+            assert!(!definition.accepts_language_hint, "{model:?}");
+            assert!(definition.supports_language_detection, "{model:?}");
+            assert!(definition.language_choices().contains(&AUTO_LANGUAGE));
+            assert_eq!(definition.language_for(AUTO_LANGUAGE), AUTO_LANGUAGE);
+        }
+        let v2 = definition(TranscriptionModelId::ParakeetV2);
+        assert!(!v2.supports_language_detection);
+        assert!(!v2.language_choices().contains(&AUTO_LANGUAGE));
+        assert_eq!(v2.language_for(AUTO_LANGUAGE), "en");
     }
 
     #[test]

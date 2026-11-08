@@ -301,7 +301,8 @@ General > Dictation > Speech model, then Language below it   // setup.language-s
 │       └── Saved -> Language row: "<Model> doesn't support Japanese, so the
 │           language changed to English" until the next choice
 ├── Language -> Select of the saved model's languages (catalog order, Auto first
-│   when it detects); one language -> the field shows it, disabled
+│   when it detects, including a model that takes no language input); one
+│   language -> the field shows it, disabled
 │   └── Choose -> ChooseModel(same model, language): the same preparation as a
 │       model choice, so per-language assets (Apple Speech locales) install
 └── The saved TranscriptionSelection is always a pair the model supports
@@ -324,9 +325,10 @@ Language row is unexercised.
 
 ```ts
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
-├── Parakeet v3 and Orukeet -> Detect language from audio; selected language does not constrain output
+├── Parakeet v3, Orukeet, and Parakeet Ultra -> Detect language from audio;
+│   also offered under Auto; the selected language does not constrain output
 ├── Granite Speech 5.0 -> No language input; transcribes whichever of en, fr,
-│   de, es, pt, it, ja it hears (#1252)
+│   de, es, pt, it, ja it hears, so it is offered under Auto too (#1252)
 ├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
 ├── Whisper (ivrit.ai's and NB-Whisper too), Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Vocabulary ->
 │   context prompt (vocabulary.md); output that only repeats it is dropped
@@ -433,8 +435,10 @@ macOS (Metal), Windows, and Japanese, Korean, Chinese, or Vietnamese audio.
 
 Parakeet v3 remains available for Portuguese and its other existing language
 choices. Its card explains the limitation and suggests Whisper for
-language-guided transcription. This does not change saved selections or expand
-the Auto picker choices. Multilingual audio support is not language conditioning:
+language-guided transcription. It is also offered under Auto: it detects the
+language from the audio and takes no hint, as do Orukeet, Parakeet Ultra, and
+Granite Speech 5.0. A hint-taking model without `stt.capability.lang_detect`
+stays out of Auto. Multilingual audio support is not language conditioning:
 the pinned v3 GGUF has no `stt.parakeet.prompt.num_prompts` metadata, which gates
 language prompting in `transcribe-cpp-sys` 0.1.3.
 
