@@ -280,9 +280,9 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
                 show.streaks.push(Streak {
                     from: local(pos),
                     to: local(pos),
-                    color: scaled(gold, 1.1 * left * left),
-                    half: 0.5,
-                    glow: 1.8,
+                    color: scaled(gold, 0.55 * left * left),
+                    half: 0.4,
+                    glow: 1.4,
                     tail: 1.0,
                 });
             }
@@ -302,7 +302,7 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
             show.lights.push(Light {
                 at: local(burst),
                 color: mix3(hue, white, 0.35),
-                strength: 2.1 * flash,
+                strength: 2.6 * flash,
                 reach: 340.0,
             });
         }
@@ -338,11 +338,14 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
             let tail = thrown(burst, v, (age - trail).max(0.0));
             let u = age / life;
             // White-hot, then the shell's colour, then a dying ember.
-            let heat = (-age / 0.11).exp();
+            let heat = (-age / 0.07).exp();
             let colour = mix3(hue, second, 0.35 * h(5));
             let colour = mix3(colour, white, heat);
             let colour = mix3(colour, ember, smooth(0.55, 1.0, u));
-            let mut bright = (1.0 - u).powf(1.3) * (1.0 + 1.5 * heat);
+            // Stars light as they leave the break, so the pile of them at
+            // its centre is the bang's flash, not a white disc.
+            let lit = 0.15 + 0.85 * smooth(0.0, 0.12, age);
+            let mut bright = (1.0 - u).powf(1.3) * (1.0 + 0.5 * heat) * lit;
             // The last third crackles: stars strobe and pop out.
             let crackles = matches!(shell.kind, Kind::Chrysanthemum) || h(6) < 0.35;
             if crackles && u > 0.62 {
@@ -361,7 +364,7 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
                 to: local(head),
                 color: scaled(colour, 1.1 * bright),
                 half: 0.35 + 0.5 * (1.0 - u).sqrt(),
-                glow: 1.4 + 1.2 * heat,
+                glow: 1.4 + 0.5 * heat,
                 tail: match shell.kind {
                     Kind::Peony => 0.5,
                     Kind::Chrysanthemum => 0.0,

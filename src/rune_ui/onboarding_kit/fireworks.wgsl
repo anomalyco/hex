@@ -133,8 +133,10 @@ fn light_at(at: vec2f) -> vec3f {
         let l = slot.lights[i * 2u];
         let c = slot.lights[i * 2u + 1u].rgb;
         let r = length(at - l.xy) / max(l.z, 1.0);
-        // Close in, it's strong; far off, it fades smoothly to nothing.
-        let fall = 1.0 / (1.0 + 2.5 * r * r) * (1.0 - smoothstep(0.8, 1.6, r));
+        // Close in, it's strong; far off, it fades smoothly to nothing,
+        // with no edge to see.
+        let near = 1.0 / (1.0 + 2.0 * r * r);
+        let fall = near * near;
         sum += c * l.w * fall;
     }
     return sum;
