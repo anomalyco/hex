@@ -391,7 +391,9 @@ Settings picker > Every model row          // fixed height; scrolls
 │   published benchmarks "not measured in Hex" (labs.md)
 ├── Orukeet -> ordinary row with Details: languages, the CC BY-SA 4.0 credit  // setup.orukeet
 │   and notice, Source/License links, folded published FLEURS benchmarks
-│   "not measured in Hex"; never recommended or badged
+│   "not measured in Hex"; never recommended or badged. Checks:
+│   `orukeet_is_offered_for_exactly_parakeet_v3s_languages_and_never_badged`,
+│   `orukeets_details_credit_its_base_and_cover_its_languages_once`
 ├── "Add model file…" in the header -> imported cards after the catalog:  // setup.custom-models
 │   Imported · family · languages · Not benchmarked · file · licence · SHA-256
 │   prefix; Rename, Remove (not the active

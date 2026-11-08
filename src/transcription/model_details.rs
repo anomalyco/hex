@@ -81,13 +81,15 @@ const ORUKEET: ModelDetails = ModelDetails {
              under CC BY 4.0 (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3). Oruk \
              AI's changes comprise multilingual/accent continuation training, parameter \
              blending, fitted and frozen Gabor-kernel replacement and recovery, native \
-             and ONNX export, application integration and evaluation. The r3 NeMo, ONNX \
-             INT8, Q8 GGUF and F16 GGUF weights, and their fitted Gabor kernels, are \
-             designated CC BY-SA 4.0. Modifications: handy-computer converted \
-             https://huggingface.co/oruk/orukeet at commit b59c13a to GGUF for \
-             transcribe.cpp (https://github.com/handy-computer/transcribe.cpp). Conversion \
-             repackages the weights, renaming and re-laying-out tensors; the quantized \
-             files (Q8_0, Q6_K, Q5_K_M, Q4_K_M) also store them at reduced numeric \
+             and ONNX export, application integration and evaluation. Model stages \
+             (https://github.com/Oruk-AI/orukeet/blob/main/release/model-stages.json) \
+             identifies r3 as the source of every current Orukeet download and records its \
+             ancestry. The r3 NeMo, ONNX INT8, Q8 GGUF and F16 GGUF weights, and their \
+             fitted Gabor kernels, are designated CC BY-SA 4.0. Modifications: \
+             handy-computer converted https://huggingface.co/oruk/orukeet at commit b59c13a \
+             to GGUF for transcribe.cpp (https://github.com/handy-computer/transcribe.cpp). \
+             Conversion repackages the weights, renaming and re-laying-out tensors; the \
+             quantized files (Q8_0, Q6_K, Q5_K_M, Q4_K_M) also store them at reduced numeric \
              precision. The weights were not retrained or fine-tuned.",
     peak_memory: None,
     // transcribe.cpp 2778ae4's catalog/orukeet.json, Q8_0 FLEURS test records.

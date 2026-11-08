@@ -51,8 +51,8 @@ Notice supplied with the files:
 >
 > The r3 NeMo, ONNX INT8, Q8 GGUF and F16 GGUF weights, and their fitted Gabor
 > kernels, are designated **CC BY-SA 4.0**. The complete license is in
-> [LICENSE-WEIGHTS](LICENSE-WEIGHTS). This permits commercial use and
-> modification, with attribution and applicable ShareAlike requirements.
+> LICENSE-WEIGHTS. This permits commercial use and modification, with
+> attribution and applicable ShareAlike requirements.
 > Earlier checkpoints retain their source notices and are not silently
 > relicensed by this file. Orukeet v0.1.0 distributes the final r3 checkpoint in
 > all four formats.
@@ -60,7 +60,9 @@ Notice supplied with the files:
 > Python and integration code in this repository is MIT unless a file specifies
 > otherwise. The native bindings, audio windowing and worker transport derive
 > from OpenWhisper by Knuckles92 and its Oruk AI integration; their MIT notice
-> is retained in [LICENSE](LICENSE). The downloaded NVIDIA NeMo-Speech.cpp SDK
+> is retained in
+> [LICENSE](https://huggingface.co/handy-computer/orukeet-gguf/blob/c5511a3850fce1cbbfa5d94ef815966e1d99275f/LICENSE).
+> The downloaded NVIDIA NeMo-Speech.cpp SDK
 > and its bundled dependencies retain their own notices, including Apache-2.0
 > and MIT components. Keep the SDK's license files when redistributing it. The
 > [pinned source](https://github.com/NVIDIA/NeMo-Speech.cpp/tree/4f9676226f667d14608487df744f375db87127f8)
