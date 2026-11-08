@@ -31,6 +31,8 @@ pub const PINNED: &str = ".pinned";
 pub const MEDIA_SENDING: &str = ".media-sending";
 /// Written when the heavy media went to the Trash: when, and after how many days.
 pub const MEDIA_CLEANED: &str = ".media-cleaned";
+/// Where media waits, beside the bundles, while it moves to the Trash.
+const STAGING: &str = ".trash-staging";
 
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 /// A sync marker older than this belongs to a copy that died.
@@ -431,7 +433,9 @@ pub struct Report {
 }
 
 /// Puts a bundle's heavy media in the Trash as one folder named after the bundle, so it reads
-/// (and restores) as a unit, then notes the cleanup in the bundle.
+/// (and restores) as a unit, then notes the cleanup in the bundle. The note is written only
+/// once the folder reaches the Trash; anything that doesn't gets back to the bundle, so a
+/// missing or failing trasher can't lose it.
 fn trash_media(bundle: &Path, items: &[PathBuf], days: u32, trasher: Trasher) -> Result<u64> {
     let name = bundle
         .file_stem()
@@ -440,20 +444,47 @@ fn trash_media(bundle: &Path, items: &[PathBuf], days: u32, trasher: Trasher) ->
     let staging_root = bundle
         .parent()
         .context("Bundle has no parent")?
-        .join(".trash-staging");
+        .join(STAGING);
     let staging = staging_root.join(format!("{name} media"));
-    let _ = std::fs::remove_dir_all(&staging);
+    // A folder left by an earlier attempt (an interrupted pass, or a trasher that failed) holds
+    // media that must not be deleted: stage beside it and put everything back if this fails.
     std::fs::create_dir_all(&staging)?;
+    let result = stage_and_trash(bundle, items, days, &staging, trasher);
+    if result.is_err() {
+        restore_staged(&staging, bundle);
+        let _ = std::fs::remove_dir(&staging);
+    }
+    let _ = std::fs::remove_dir(&staging_root);
+    result
+}
+
+/// Moves `items` into `staging`, sends the folder to the Trash, and only then marks the bundle
+/// cleaned.
+fn stage_and_trash(
+    bundle: &Path,
+    items: &[PathBuf],
+    days: u32,
+    staging: &Path,
+    trasher: Trasher,
+) -> Result<u64> {
     let mut freed = 0;
     let mut moved = Vec::new();
     for item in items {
         let Some(file) = item.file_name() else {
             continue;
         };
+        let destination = staging.join(file);
+        ensure!(
+            !destination.exists(),
+            "{} is already staged for the Trash",
+            destination.display()
+        );
         freed += size_of(item);
-        std::fs::rename(item, staging.join(file))?;
+        std::fs::rename(item, &destination)
+            .with_context(|| format!("Could not stage {}", item.display()))?;
         moved.push(file.to_string_lossy().into_owned());
     }
+    trasher(staging)?;
     let note = serde_json::json!({
         "cleanedAtMs": crate::pipeline::now_epoch_ms(),
         "afterDays": days,
@@ -463,9 +494,80 @@ fn trash_media(bundle: &Path, items: &[PathBuf], days: u32, trasher: Trasher) ->
         bundle.join(MEDIA_CLEANED),
         serde_json::to_vec_pretty(&note)?,
     )?;
-    trasher(&staging)?;
-    let _ = std::fs::remove_dir(&staging_root);
     Ok(freed)
+}
+
+/// The bundle name a staged folder belongs to: `<stem> media` is `<stem>`'s.
+fn staged_stem(staging: &Path) -> Option<String> {
+    let name = staging.file_name()?.to_string_lossy();
+    name.strip_suffix(" media").map(str::to_owned)
+}
+
+/// Moves everything in `staging` back into `bundle`, never over an existing entry. Whatever
+/// can't be put back stays in `staging`; returns how many entries came back.
+fn restore_staged(staging: &Path, bundle: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(staging) else {
+        return 0;
+    };
+    let mut restored = 0;
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let destination = bundle.join(entry.file_name());
+        if destination.exists() {
+            continue;
+        }
+        if std::fs::rename(entry.path(), &destination).is_ok() {
+            restored += 1;
+        }
+    }
+    restored
+}
+
+/// Puts media left in `<captures>/.trash-staging` back into its bundle, so a failed or
+/// interrupted cleanup never strands the bundle's video outside it and a stale
+/// `.media-cleaned` never claims it is gone. Staging whose bundle is gone goes to the Trash.
+fn recover_staged_media(captures: &Path, trasher: Trasher, now: SystemTime) -> usize {
+    let root = captures.join(STAGING);
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return 0;
+    };
+    let mut staged: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_dir())
+        .collect();
+    staged.sort();
+    let mut restored = 0;
+    for staging in staged {
+        let Some(stem) = staged_stem(&staging) else {
+            continue;
+        };
+        let bundle = captures.join(format!("{stem}.scrawl"));
+        if bundle.is_dir() {
+            let Some(_claim) = claim(&bundle) else {
+                continue;
+            };
+            if live_marker(&bundle, crate::handoff::MEDIA_PENDING, now)
+                || live_marker(&bundle, MEDIA_SENDING, now)
+            {
+                continue;
+            }
+            let count = restore_staged(&staging, &bundle);
+            if count > 0 {
+                let _ = std::fs::remove_file(bundle.join(MEDIA_CLEANED));
+                restored += count;
+            }
+        } else if !bundle.exists()
+            && let Err(error) = trasher(&staging)
+        {
+            scrawl_log(format!(
+                "retention: staged media for {} kept: {error:#}",
+                bundle.display()
+            ));
+            continue;
+        }
+        let _ = std::fs::remove_dir(&staging);
+    }
+    let _ = std::fs::remove_dir(&root);
+    restored
 }
 
 /// Runs a plan. Each step is checked again just before it runs, in case a capture or a copy
@@ -599,7 +701,7 @@ fn sweep_leftovers(captures: &Path, now: SystemTime) {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let leftover = name.ends_with(".shrinking.mov") || name == ".trash-staging";
+        let leftover = name.ends_with(".shrinking.mov");
         if leftover
             && modified_ago(&path, now).is_some_and(|ago| ago > Duration::from_secs(6 * 3600))
         {
@@ -616,8 +718,14 @@ pub fn run_pass(
     dry_run: bool,
     ahead: Duration,
     shrink: bool,
+    trasher: Trasher,
 ) -> (Vec<Action>, Report) {
     let now = SystemTime::now();
+    // Before planning: media a failed or interrupted cleanup staged goes back, so its bundle
+    // can be cleaned again and a stale note never claims it is gone.
+    if !dry_run {
+        recover_staged_media(captures, trasher, now);
+    }
     let mut actions = plan(captures, policy, now + ahead);
     if !shrink {
         actions.retain(|a| !matches!(a, Action::Shrink { .. }));
@@ -626,7 +734,7 @@ pub fn run_pass(
         return (actions, Report::default());
     }
     sweep_leftovers(captures, now);
-    let report = apply(&actions, policy, &trash, true);
+    let report = apply(&actions, policy, trasher, true);
     if report != Report::default() {
         scrawl_log(format!(
             "retention: media of {} bundle(s) and {} whole bundle(s) to the Trash, {} video(s) shrunk, {} freed, {} error(s)",
@@ -776,7 +884,8 @@ fn worker(jobs: &flume::Receiver<Job>) {
             let shrink = last_shrink.is_none_or(|at| {
                 SystemTime::now().duration_since(at).unwrap_or_default() >= SHRINK_EVERY
             });
-            let (actions, report) = run_pass(&captures, &policy, false, Duration::ZERO, shrink);
+            let (actions, report) =
+                run_pass(&captures, &policy, false, Duration::ZERO, shrink, &trash);
             if shrink {
                 last_shrink = Some(SystemTime::now());
             }
@@ -1065,6 +1174,10 @@ mod tests {
         }
         assert!(!old.join("recording.mov").exists());
         assert!(!captures.join(".trash-staging").exists());
+        assert!(
+            old.join(MEDIA_CLEANED).is_file(),
+            "cleaned only after the media reached the Trash"
+        );
         let reason = missing_media_reason(&old).unwrap();
         assert!(reason.contains("after 7 days"), "{reason}");
         let manifest: serde_json::Value =
@@ -1076,6 +1189,121 @@ mod tests {
         // Nothing left to clean, and the bundle changed today besides.
         let next_week = later() + Duration::from_secs(2 * 24 * 3600);
         assert!(plan(&captures, &Policy::default(), next_week).is_empty());
+    }
+
+    #[test]
+    fn failed_trashing_puts_the_media_back_and_marks_nothing() {
+        let tmp = TempDir::new("trash-fails");
+        let captures = tmp.0.join("captures");
+        let old = bundle(&captures, "scrawl-old", 8.0, false);
+        let actions = planned(&captures, &Policy::default());
+        assert_eq!(actions.len(), 1);
+        let refuse = |_: &Path| -> Result<()> { anyhow::bail!("there is no trash here") };
+        let report = apply(&actions, &Policy::default(), &refuse, false);
+        assert_eq!(report.errors, 1);
+        assert_eq!((report.media_trashed, report.bundles_trashed), (0, 0));
+        for kept in ["recording.mp4", "audio.wav", "frames/frame-01.png"] {
+            assert!(old.join(kept).is_file(), "{kept} back in the bundle");
+        }
+        assert!(
+            !old.join(MEDIA_CLEANED).exists(),
+            "nothing claims the media is gone"
+        );
+        assert!(!captures.join(STAGING).exists());
+    }
+
+    /// A trasher that moves one entry into `trash`.
+    fn fake_trash<'a>(trash: &'a Path) -> impl Fn(&Path) -> Result<()> + 'a {
+        move |path: &Path| {
+            std::fs::rename(path, trash.join(path.file_name().unwrap()))?;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn recovery_puts_staged_media_back_and_its_bundle_cleans_it_again() {
+        let tmp = TempDir::new("recover");
+        let captures = tmp.0.join("captures");
+        let trash = tmp.0.join("Trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        let old = bundle(&captures, "scrawl-old", 8.0, false);
+        let staging = captures.join(STAGING).join("scrawl-old media");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::rename(old.join("recording.mp4"), staging.join("recording.mp4")).unwrap();
+        std::fs::write(old.join(MEDIA_CLEANED), "{}").unwrap();
+        assert_eq!(
+            recover_staged_media(&captures, &fake_trash(&trash), SystemTime::now()),
+            1
+        );
+        assert!(old.join("recording.mp4").is_file());
+        assert!(!old.join(MEDIA_CLEANED).exists());
+        assert!(!captures.join(STAGING).exists());
+        assert_eq!(
+            planned(&captures, &Policy::default()),
+            vec![Action::TrashMedia {
+                bundle: old.clone(),
+                items: vec![old.join("recording.mp4"), old.join("audio.wav")],
+            }]
+        );
+    }
+
+    #[test]
+    fn staging_whose_bundle_is_gone_goes_to_the_trash() {
+        let tmp = TempDir::new("orphan");
+        let captures = tmp.0.join("captures");
+        std::fs::create_dir_all(&captures).unwrap();
+        let staging = captures.join(STAGING).join("scrawl-gone media");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("recording.mp4"), "mp4").unwrap();
+        let trash = tmp.0.join("Trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        assert_eq!(
+            recover_staged_media(&captures, &fake_trash(&trash), SystemTime::now()),
+            0
+        );
+        assert!(!staging.exists());
+        assert!(trash.join("scrawl-gone media/recording.mp4").is_file());
+        assert!(!captures.join(STAGING).exists());
+    }
+
+    #[test]
+    fn staging_whose_bundle_is_gone_stays_when_trashing_fails() {
+        let tmp = TempDir::new("orphan-fails");
+        let captures = tmp.0.join("captures");
+        std::fs::create_dir_all(&captures).unwrap();
+        let staging = captures.join(STAGING).join("scrawl-gone media");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("recording.mp4"), "mp4").unwrap();
+        let refuse = |_: &Path| -> Result<()> { anyhow::bail!("there is no trash here") };
+        assert_eq!(
+            recover_staged_media(&captures, &refuse, SystemTime::now()),
+            0
+        );
+        assert!(staging.join("recording.mp4").is_file());
+    }
+
+    #[test]
+    fn a_pass_hands_recovery_the_injected_trasher() {
+        let tmp = TempDir::new("pass-trasher");
+        let captures = tmp.0.join("captures");
+        std::fs::create_dir_all(&captures).unwrap();
+        let staging = captures.join(STAGING).join("scrawl-gone media");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("recording.mp4"), "mp4").unwrap();
+        let trash = tmp.0.join("Trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        let (actions, report) = run_pass(
+            &captures,
+            &Policy::default(),
+            false,
+            Duration::ZERO,
+            false,
+            &fake_trash(&trash),
+        );
+        assert!(actions.is_empty());
+        assert_eq!(report, Report::default());
+        assert!(trash.join("scrawl-gone media/recording.mp4").is_file());
+        assert!(!captures.join(STAGING).exists());
     }
 
     #[test]

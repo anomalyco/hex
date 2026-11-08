@@ -695,9 +695,18 @@ Never on Hex's path                      // capture.isolation
     captures), the agentContext summary format off
 
 Retention                                // capture.retention
-└── Hex's own thread: Scrawl's retention pass with capture.*'s policy, 90 s after
-    captures turn on, then hourly; skipped while a capture records or writes,
-    or while Scrawl.app runs (it cleans the shared folder then)
+├── Hex's own thread: Scrawl's retention pass with capture.*'s policy, 90 s after
+│   captures turn on, then hourly; skipped while a capture records or writes,
+│   or while Scrawl.app runs (it cleans the shared folder then)
+├── Linux sends media to the desktop Trash itself (the freedesktop.org Trash
+│   layout, no `trash` command; macOS uses /usr/bin/trash, Windows the
+│   Recycle Bin), so file managers can restore it
+├── `.media-cleaned` is written only after the media reaches the Trash; a
+│   failed trash leaves the media in the bundle. Staging left by an earlier
+│   version or an interrupted pass is put back on the next pass, and staging
+│   whose bundle is gone goes to the Trash
+└── Old media goes to the Trash and the prompt stays; after bundleDays the
+    whole bundle goes
 
 hex capture stop                         // capture.stop
 ├── Closes the sink (≤ 100 ms wait) -> reply: idle + the bundle path, at once
