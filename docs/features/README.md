@@ -882,16 +882,28 @@ Intentional recording                    // recording.environment, idle_sleep
     // no caffeinate child process or executable-policy dialog
 ```
 
-Feedback tones keep their output open for five idle minutes (macOS, Windows).
+Feedback tones keep their output open briefly after the last one: about ten
+seconds on macOS, where an open output is a live CoreAudio client coreaudiod
+services and holds a sleep assertion for, and five idle minutes on Windows.
 On Linux, where an open output stays listed in the desktop's sound controls,
 it closes about a second after the last tone ends
 ([#720](https://github.com/anomalyco/hex/issues/720)); the existing
 `output_opens_for_a_tone_and_releases_after_the_idle_grace` check covers the
-grace logic, not a real PipeWire stream list. On macOS the
-CoreAudio listeners on the default output, the device list, and an audio service
-restart advance an output route generation; the next tone drops an output opened
-under an older one and opens the current default at once, so unplugging a USB
-or Bluetooth output no longer silences tones until Hex restarts
+grace logic, not a real PipeWire stream list. A fatal stream error (the output
+became unavailable or invalid) sets a per-sink flag from the stream error
+callback, which may run on a CoreAudio thread; overload glitches (`Xrun`) do
+not. The worker drops a flagged sink on its next 250 ms observation or next
+tone, and the next tone opens a fresh one
+(`an_errored_sink_is_dropped_and_reopened_on_the_next_tone`). A default-output
+change is not fatal on macOS, where cpal reports `DeviceChanged` after the
+default-output unit has already rerouted the stream; on Windows cpal's WASAPI
+backend never rebinds, so a default-device change ends the stream with
+`StreamInvalidated`, which is fatal: the output is dropped and the next tone
+opens the new default. On macOS the CoreAudio listeners on the default output,
+the device list, and an audio service restart advance an output route
+generation; the next tone drops an output opened under an older one and opens
+the current default at once, so unplugging a USB or Bluetooth output no longer
+silences tones until Hex restarts
 ([#428](https://github.com/anomalyco/hex/issues/428)). Check:
 `a_route_change_reopens_the_output_on_the_current_default` in
 [feedback.rs](../../src/feedback.rs), with injected opens; a real unplug has not
@@ -2157,10 +2169,12 @@ The shared [feedback player](../../src/feedback.rs) uses Hex's bundled sounds
 ([Feedback](dictation.md#feedback)) on every platform; only macOS wake/sleep
 use `afplay`.
 Decoding happens before the Linux capture loop; the output device opens for
-the first tone and is released five minutes after the last one, as described
-in [macOS feedback](dictation.md#feedback). Playback admission is bounded and
-nonblocking. Output preparation failures are
-logged without blocking dictation. The Settings window saves the volume to
+the first tone and is released shortly after the last one (about ten seconds
+on macOS, five minutes on Windows, one second on Linux), as described in
+[macOS feedback](dictation.md#feedback). A fatal stream error (the output became
+unavailable or invalid) drops the output, so the next tone reopens it. Playback
+admission is bounded and nonblocking. Output preparation failures are logged
+without blocking dictation. The Settings window saves the volume to
 `settings.json` and the service reloads it without restarting the listener. The start sound does not wait
 for the 300 ms capture-retention threshold; input delivery and audio-device
 latency still apply. **While dictating** mute, pause, or lower does: the audio loop
