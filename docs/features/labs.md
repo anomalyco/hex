@@ -15,8 +15,9 @@ below is `Everyone` today unless marked `(Dev)`. Each feature also has a
 **group** (`labs::Feature::group` in `src/labs/group.rs`, one exhaustive
 `match`, so a new feature must choose): Dictation, Output (paste, formatting,
 spoken punctuation), History, Meetings, Annotate, Shortcuts, or Models. There
-is no master switch. **Labs** is always the last item in the sidebar and lists
-every Labs feature this OS has as a card (name, one-line description, toggle)
+is no master switch. **Labs** is always the last item in the sidebar (Up and
+Down reach it from the last pane; pressing it while it shows keeps it open) and
+lists every Labs feature this OS has as a card (name, one-line description, toggle)
 under its group's collapsible header, each **off by default**, plus Send
 feedback and Run setup again.
 
