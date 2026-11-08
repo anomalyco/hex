@@ -84,6 +84,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Floating meeting capsules on GNOME", "Cápsulas de reunião flutuantes no GNOME"),
     ("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running", "Mostra a oferta de gravação e o indicador de gravação flutuando sobre a sua chamada, pelo XWayland. Só funciona se o XWayland já estiver em execução"),
     ("Annotate on GNOME", "Annotate no GNOME"),
+    ("Persistent ink", "Tinta persistente"),
+    ("Ink stays on screen until you press Escape or stop recording", "A tinta fica na tela até você pressionar Esc ou parar a gravação"),
     ("Show Annotate's recording capsule and ink over your screen, through XWayland. Works only while XWayland is already running; Esc can't stop drawing there, so use the capsule's pen button or let go of a held Annotate key", "Mostra a cápsula de gravação e a tinta do Annotate sobre a sua tela, pelo XWayland. Só funciona se o XWayland já estiver em execução. O Esc não para o desenho ali; use o botão da caneta na cápsula ou solte a tecla Annotate segurada"),
     ("Restore clipboard on GNOME", "Restaurar a área de transferência no GNOME"),
     ("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running", "Devolve o que você copiou antes de ditar, pelo XWayland. Só funciona se o XWayland já estiver rodando"),

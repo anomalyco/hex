@@ -44,7 +44,7 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   pen_button; Linux: the overlay's drag, macOS: the tap's buttons); moving
 │   with the button up draws nothing, and clicks still never reach the app
 │   └── Releasing the button ends the stroke on the `capture-input` thread;
-│       the pointer it reads (capture_host::ink_source) has its own lock, so
+│       the pointer it reads (capture_host::ink::source) has its own lock, so
 │       it never re-takes the input target's lock that thread holds (#572:
 │       Windows hung on the first stroke). Check: capture_host
 │       ending_a_stroke_while_the_input_target_is_locked_does_not_deadlock;
@@ -52,7 +52,8 @@ Draw                                     // capture.draw (capture_host::drawing)
 ├── Esc while drawing -> stops drawing, never the recording (recognition.rs
 │   on macOS; the Escape grab on X11 (Wayland binds no Escape); the keyboard
 │   hook on Windows, when no dictation records; and the overlay's own key
-│   handler where it gets the keyboard)
+│   handler where it gets the keyboard). With Labs › Persistent ink on and
+│   ink on screen, Esc while nothing draws clears it instead
 ├── macOS and Windows -> Shift held alone still draws, as in Scrawl
 ├── While drawing -> the ink overlay takes the pointer with a pen cursor, so
 │   clicks never reach the app; the capsule stays clickable above it (macOS:
@@ -67,6 +68,12 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
 │   the bundle (keyframes, contact sheet, scrawl.json)
+├── Labs › Persistent ink (off by default) -> lifted strokes stay fully
+│   opaque on screen for the rest of the recording. Escape with nothing being
+│   drawn clears every stroke already on screen and is consumed; with no ink
+│   visible, Escape still reaches the app as before. The bundle, keyframes,
+│   contact sheet, and exported video keep Scrawl's hold and fade, so the
+│   recording still fades ink the screen kept (a known gap)
 ├── Linux: strokes are placed on the recorded screen in its logical points.
 │   A monitor pick whose portal names the output (`mapping_id`, as
 │   xdg-desktop-portal-hyprland 1.4.0+ does, e.g. `DP-3`) opens the pen on

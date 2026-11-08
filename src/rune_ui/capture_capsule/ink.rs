@@ -1,6 +1,7 @@
 //! The ink overlay: a click-through Rune overlay over the recording
 //! capture's target that draws what the pointer marks, as Scrawl's Metal
-//! overlay does. Shift-drawn ink holds 650 ms after it lifts, then fades;
+//! overlay does. Shift-drawn ink holds 650 ms after it lifts, then fades
+//! (Labs › Persistent ink keeps it fully opaque until Escape clears it);
 //! the laser trails a 0.42 s tapering tail with a soft glow and a hot core;
 //! a dot marks the pointer while Shift is held;
 //! and a full-screen capture's edges glow red for its first second.
@@ -54,6 +55,16 @@ fn laser_hot() -> Color {
 /// A stroke's points, each with its pressure or weight.
 type Points = Vec<([f32; 2], f32)>;
 
+/// How the overlay shows lifted ink: Scrawl's hold and fade, or Labs ›
+/// Persistent ink, with the capture time Escape last cleared at.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct InkStyle {
+    /// Lifted strokes stay fully opaque for the rest of the recording.
+    pub(crate) persistent: bool,
+    /// Strokes that ended before this capture time were cleared away.
+    pub(crate) cleared_at_ms: Option<u64>,
+}
+
 /// What the overlay draws at one moment, in the target's points.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Scene {
@@ -71,7 +82,19 @@ pub(crate) struct Scene {
 impl Scene {
     /// What shows `now_ms` into a capture with `ink`; `tip` is the pointer
     /// in global points while Shift is held.
+    #[cfg(test)]
     pub(crate) fn at(ink: &InkSnapshot, now_ms: u64, tip: Option<[f32; 2]>) -> Self {
+        Self::styled(ink, now_ms, tip, InkStyle::default())
+    }
+
+    /// What shows `now_ms` into a capture with `ink` and `style`; `tip` is
+    /// the pointer in global points while Shift is held.
+    pub(crate) fn styled(
+        ink: &InkSnapshot,
+        now_ms: u64,
+        tip: Option<[f32; 2]>,
+        style: InkStyle,
+    ) -> Self {
         let frame = ink.target;
         let (x, y) = (frame.x as f32, frame.y as f32);
         let (w, h) = (
@@ -101,7 +124,13 @@ impl Scene {
                     scene.laser.push(tail);
                 }
             } else {
-                let alpha = if live {
+                if style
+                    .cleared_at_ms
+                    .is_some_and(|cleared| stroke.t1 < cleared)
+                {
+                    continue;
+                }
+                let alpha = if live || style.persistent {
                     1.0
                 } else {
                     ink_alpha(now_ms.saturating_sub(stroke.t1))
@@ -184,6 +213,10 @@ pub(crate) struct InkState {
     shown: bool,
     /// The overlay takes the pointer to draw.
     drawing: bool,
+    /// Persistent ink is on screen, so the overlay keeps Escape's handler
+    /// while the desktop leaves it the keyboard (Linux).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    holding_escape: bool,
     /// Where the pointer last was on the overlay, and where the pen went
     /// down (Linux).
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -224,6 +257,7 @@ impl InkState {
             overlay: None,
             shown: true,
             drawing: false,
+            holding_escape: false,
             pointer: [0.0; 2],
             pressed_at: [0.0; 2],
             #[cfg(target_os = "linux")]
@@ -239,7 +273,7 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
     if s.overlay.is_none() {
         return false;
     }
-    s.source = crate::capture_host::ink_source();
+    s.source = crate::capture_host::ink::source();
     #[cfg(target_os = "linux")]
     place_pen(s);
     let Some(source) = &s.source else {
@@ -263,10 +297,14 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
             .unwrap_or_else(|error| error.into_inner())
     });
     let scale = crate::capture_host::pixels_per_point() as f32;
+    let style = InkStyle {
+        persistent: crate::labs::persistent_ink(),
+        cleared_at_ms: crate::capture_host::ink::cleared_at_ms(source),
+    };
     #[cfg(target_os = "linux")]
-    let mut scene = Scene::at(&ink, source.now_ms(), tip).in_points(scale);
+    let mut scene = Scene::styled(&ink, source.now_ms(), tip, style).in_points(scale);
     #[cfg(not(target_os = "linux"))]
-    let scene = Scene::at(&ink, source.now_ms(), tip).in_points(scale);
+    let scene = Scene::styled(&ink, source.now_ms(), tip, style).in_points(scale);
     // Linux learns the screen's size from the first stroke, so the start
     // glow would be drawn at a guess.
     #[cfg(target_os = "linux")]
@@ -281,11 +319,26 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
         scene.size[1],
     ];
     let drawing = crate::capture_host::drawing();
+    // Persistent ink on screen keeps Escape's handler while the desktop
+    // leaves the overlay the keyboard, so Escape can clear it (Linux).
+    let holding_escape = style.persistent && !scene.ink.is_empty();
     // The drawing surface's hit regions come from the view, so a change
     // must lay it out again even when no ink changed: without it, the
     // overlay asked for its regions while it had none, and every click went
     // through to the app.
-    let mut changed = drawing != s.drawing;
+    let mut changed = drawing != s.drawing || holding_escape != s.holding_escape;
+    // The ink overlay only hears Escape where the desktop gives it the
+    // keyboard, and only once it asks (Linux; X11's grab is the other way
+    // in, and XWayland never focuses this window).
+    #[cfg(target_os = "linux")]
+    if holding_escape
+        && !s.holding_escape
+        && !s.xwayland
+        && let Some(overlay) = &s.overlay
+    {
+        overlay.request_keys();
+    }
+    s.holding_escape = holding_escape;
     if drawing != s.drawing {
         s.drawing = drawing;
         if let Some(overlay) = &s.overlay {
@@ -512,7 +565,7 @@ pub(crate) fn view(s: &InkState, cx: &mut rune::Cx<InkState>) -> El {
         }
     };
     #[cfg(target_os = "linux")]
-    let mut root = draw_surface(s.drawing, cx.env().scale);
+    let mut root = draw_surface(s.drawing, s.holding_escape, cx.env().scale);
     if scene.is_empty() {
         return root;
     }
@@ -578,7 +631,7 @@ pub(crate) fn view(s: &InkState, cx: &mut rune::Cx<InkState>) -> El {
 }
 
 /// Escape on the overlay, where the desktop gives it the keyboard, stops
-/// drawing, never the recording.
+/// drawing or clears persistent ink, never the recording.
 fn escape(_: &mut InkState, key: &rune::KeyEvent, _: &mut Tx) -> bool {
     key.key == rune::Key::Escape && crate::capture_host::exit_drawing()
 }
@@ -588,12 +641,16 @@ fn escape(_: &mut InkState, key: &rune::KeyEvent, _: &mut Tx) -> bool {
 /// centre, where the capsule's panel sits), so the pen can be clicked off.
 /// `scale` is the screen's pixels per point.
 #[cfg(target_os = "linux")]
-fn draw_surface(drawing: bool, scale: f32) -> El {
+fn draw_surface(drawing: bool, holding_escape: bool, scale: f32) -> El {
     use super::surface::PANEL_W;
     use rune::{col, row};
     let root = el().w_full().h_full();
     if !drawing {
-        return root;
+        return if holding_escape {
+            root.focusable(true).on_key(escape)
+        } else {
+            root
+        };
     }
     // A press anywhere on the screen puts the pen down; the drag's travel
     // from where the pointer was moves it (Drag's own points are the
@@ -772,6 +829,29 @@ pub(crate) mod tests {
             assert!(last - now < 0.06, "ink fades {last} → {now} at {ms} ms");
             last = now;
         }
+    }
+
+    #[test]
+    fn persistent_ink_stays_opaque_until_escape_clears_it() {
+        let first = stroke(&wave([0.1, 0.2], [0.4, 0.2], 24, 0.1), 0, 10, false);
+        let second = stroke(&wave([0.1, 0.7], [0.6, 0.7], 24, 0.1), 400, 10, false);
+        let ink = snapshot(vec![first, second], None, false);
+        let persistent = InkStyle {
+            persistent: true,
+            cleared_at_ms: None,
+        };
+        let scene = Scene::styled(&ink, 5_000, None, persistent);
+        assert_eq!(scene.ink.len(), 2);
+        assert!(scene.ink.iter().all(|(_, alpha)| *alpha == 1.0));
+        // Escape at 400 ms clears the stroke that ended at 230 ms, not the
+        // one that ended at 630 ms.
+        let cleared = InkStyle {
+            persistent: true,
+            cleared_at_ms: Some(400),
+        };
+        let scene = Scene::styled(&ink, 5_000, None, cleared);
+        assert_eq!(scene.ink.len(), 1);
+        assert_eq!(scene.ink[0].1, 1.0);
     }
 
     #[test]

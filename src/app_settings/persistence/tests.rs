@@ -88,6 +88,13 @@ fn unset_retention_saves_a_shape_older_hex_can_read() {
 }
 
 #[test]
+fn an_older_settings_file_loads_persistent_ink_off() {
+    let settings: AppSettings = serde_json::from_str(r#"{"labs":{"live_text":true}}"#).unwrap();
+    assert!(settings.labs.live_text);
+    assert!(!settings.labs.persistent_ink);
+}
+
+#[test]
 fn invalid_enum_resets_only_that_field_and_leaves_disk_alone() {
     let original = br#"{"recording_audio_behavior":"future-mode","sound_effect_volume":0.37,"meetings":{"enabled":true}}"#;
     let file = SettingsFile::new(original);

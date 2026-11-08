@@ -123,10 +123,11 @@ pub enum Feature {
     QuitClosesWindow,
     ExpireMeetingAudio,
     CapsLockDictation,
+    PersistentInk,
 }
 
 impl Feature {
-    pub const ALL: [Self; 59] = [
+    pub const ALL: [Self; 60] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -186,6 +187,7 @@ impl Feature {
         Self::QuitClosesWindow,
         Self::ExpireMeetingAudio,
         Self::CapsLockDictation,
+        Self::PersistentInk,
     ];
 
     /// The features this OS and build have.
@@ -269,7 +271,8 @@ impl Feature {
             | Self::NotchIndicator
             | Self::QuitClosesWindow
             | Self::GnomeAnnotate
-            | Self::CapsLockDictation => Audience::Everyone,
+            | Self::CapsLockDictation
+            | Self::PersistentInk => Audience::Everyone,
         }
     }
 
@@ -331,7 +334,7 @@ impl Feature {
             | Self::ExpireMeetingAudio
             | Self::FailureNotices
             | Self::TypedText => 20261107,
-            Self::GnomeAnnotate | Self::TerminalPasteShortcut => 20261108,
+            Self::GnomeAnnotate | Self::TerminalPasteShortcut | Self::PersistentInk => 20261108,
         }
     }
 
@@ -408,6 +411,7 @@ impl Feature {
                     false
                 }
             }
+            Self::PersistentInk => cfg!(hex_capture),
             Self::Playground
             | Self::LiveText
             | Self::FailureNotices
@@ -498,6 +502,7 @@ impl Feature {
             Self::QuitClosesWindow => "quit-closes-window",
             Self::ExpireMeetingAudio => "expire-meeting-audio",
             Self::CapsLockDictation => "caps-lock-dictation",
+            Self::PersistentInk => "persistent-ink",
         }
     }
 
@@ -563,6 +568,7 @@ impl Feature {
             Self::QuitClosesWindow => "labs.quit_closes_window",
             Self::ExpireMeetingAudio => "labs.expire_meeting_audio",
             Self::CapsLockDictation => "labs.caps_lock_dictation",
+            Self::PersistentInk => "labs.persistent_ink",
         }
     }
 
@@ -632,6 +638,7 @@ impl Feature {
             Self::QuitClosesWindow => settings.labs.quit_closes_window,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation,
+            Self::PersistentInk => settings.labs.persistent_ink,
         }
     }
 
@@ -699,6 +706,7 @@ impl Feature {
             &mut labs.quit_closes_window,
             &mut labs.expire_meeting_audio,
             &mut labs.caps_lock_dictation,
+            &mut labs.persistent_ink,
         ]
     }
 
@@ -766,6 +774,7 @@ impl Feature {
             Self::QuitClosesWindow => settings.labs.quit_closes_window = on,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation = on,
+            Self::PersistentInk => settings.labs.persistent_ink = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -838,6 +847,9 @@ const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
 /// The next bit above Typed text's switch: Caps Lock dictation's recording
 /// light blinks slowly instead of staying solid.
 const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
+/// The next bit above the Caps Lock light: lifted Annotate ink stays on
+/// screen (Labs › Persistent ink).
+const PERSISTENT_INK: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1093,6 +1105,12 @@ pub fn annotate_replay() -> bool {
     on(ANNOTATE_REPLAY) && Feature::AnnotateReplay.on_this_os()
 }
 
+/// Lifted Annotate ink stays opaque until the recording ends or Escape
+/// clears it (read by the ink overlay each frame and by Escape).
+pub fn persistent_ink() -> bool {
+    on(PERSISTENT_INK) && Feature::PersistentInk.on_this_os()
+}
+
 /// Audio files may be imported as meetings (macOS; read where the Meetings
 /// pane offers Import audio and where an import starts).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -1265,6 +1283,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::AnnotateReplay,
             settings.annotate_replay,
             ANNOTATE_REPLAY,
+        ),
+        (
+            Feature::PersistentInk,
+            settings.persistent_ink,
+            PERSISTENT_INK,
         ),
         (
             Feature::MeetingImport,
@@ -1717,6 +1740,19 @@ mod tests {
         assert_eq!(state & GNOME_MEETING_CAPSULES, 0);
         assert_eq!(state & SCREENSHOTS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn persistent_ink_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & PERSISTENT_INK, 0);
+        labs.persistent_ink = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & PERSISTENT_INK, 0);
+        assert_eq!(state & ANNOTATE_REPLAY, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(Feature::PersistentInk.on_this_os(), cfg!(hex_capture));
     }
     #[test]
     fn gnome_meeting_capsules_is_its_own_bit_and_off_by_default() {

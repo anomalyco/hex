@@ -139,6 +139,8 @@ pub struct LabsSettings {
     pub expire_meeting_audio: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
+    /// Lifted Annotate ink stays on screen until Escape clears it or the recording ends.
+    pub persistent_ink: bool,
     /// Calls in more apps (Signal, Telegram, WeChat, LINE, Webex, Element, Phone) and on more websites are offered and named.
     pub more_call_apps: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
@@ -200,6 +202,7 @@ impl Default for LabsSettings {
             notch_indicator: false,
             meeting_finished_event: false,
             annotate_replay: false,
+            persistent_ink: false,
             more_call_apps: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,

@@ -19,6 +19,9 @@ use crate::model::{
 mod platform;
 pub use platform::*;
 
+// Ink queries on the telemetry; a child module keeps `capture.rs` under the code-shape cap.
+mod ink_state;
+
 pub const FRAME_SAMPLE_INTERVAL: Duration = Duration::from_millis(220);
 /// Candidate frames only feed scene diffs and keyframe selection; the keyframes themselves are
 /// decoded from `recording.mp4` at full size afterwards.

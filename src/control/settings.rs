@@ -509,6 +509,11 @@ const KEYS: &[Key] = &[
         "Labs: keep a rolling 15-second screen buffer so hex capture replay or capture.replay_hotkey saves what just happened; macOS shows the screen-recording dot the whole time it's on (macOS 27+)",
     ),
     key(
+        "labs.persistent_ink",
+        Kind::Bool,
+        "Labs: lifted Annotate ink stays on screen until Escape clears it or the recording ends; the capture's keyframes and exported video keep Scrawl's hold and fade",
+    ),
+    key(
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
