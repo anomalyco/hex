@@ -400,6 +400,31 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   runs out, and a rule's send waits (`CaptureCommand::Hold`). Leaving
 │   │   goes on with the time it had left, at least 1 s. A pick already went,
 │   │   so only its Undo waits (`Flow::hold_countdown`)
+│   ├── A capture of Ghostty -> the focused pane's folder and title
+│   │   (Ghostty's AppleScript), and what runs in front in it, read from the
+│   │   process tree under Ghostty (libproc: the shell's tty and foreground
+│   │   group, that process's name, arguments and folder; no new permission).
+│   │   Several panes are told apart by title and folder; still unclear, the
+│   │   process is left out (`look::terminal`)
+│   │   ├── OpenCode's TUI in front -> the session it shows is the top
+│   │   │   suggestion, "open in this terminal": the session titled as the
+│   │   │   terminal's `OC | <title>` (a cut title matches the long one,
+│   │   │   one in the pane's folder first), else the `-s ses_…` it was
+│   │   │   started with. A suggestion like any other, never sent by itself
+│   │   ├── OpenCode's home screen (`OpenCode`) or a plain shell -> the
+│   │   │   folder and the title's words are clues, as before
+│   │   ├── ⇧ (a folder that isn't home or `/`) -> the rule is
+│   │   │   `routing.terminals` keyed on the folder's project root ("hex
+│   │   │   terminal" in the header and the footer's app badge), naming the
+│   │   │   session picked; it covers that folder and everything under it (the
+│   │   │   longest key wins) and sends like a site rule. Ghostty itself stays
+│   │   │   a general app, so no rule ever sends all of Ghostty
+│   │   └── Checks -> `look::tests` (TUI session first, command-line
+│   │       fallback, home screen, home folder, terminal rule),
+│   │       `look::terminal::tests`, `policy` and `config` rule keys, and
+│   │       `capture_host::routing` `an_always_rule_from_a_terminal_keys_on_its_folder`.
+│   │       The process walk was measured once against a real Ghostty; no
+│   │       end-to-end capture of a TUI was run
 ├── A finished capture with nowhere sent yet reads "Copied" from the start
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
 │   │   answer) -> macOS: "Copied", then Search with the capture shortcut's
@@ -414,7 +439,7 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   │   "recent") or nothing; never "guess". No row moves once shown: a
 │   │   │   later answer gives a row its new reason in place and adds new
 │   │   │   sessions last (`routes::keep_rows`, as the router does)
-│   │   ├── Shift down (a guess or rule with a site or app) -> the row under
+│   │   ├── Shift down (a guess or rule with a site, terminal folder or app) -> the row under
 │   │   │   the pointer reads "always" in the accent and the header reads
 │   │   │   "Always send [site] to [row]" (with the pointer off the rows,
 │   │   │   "Always send [site] to…" and no row is marked). In the search the
@@ -779,7 +804,7 @@ Where it goes                            // capture.route; capture.routing's aut
 │   NoAnswer | Unreachable. Background refinements preserve an open search and
 │   selected session; a pick or Undo cancels them
 │   ├── Rule -> only a rule the person saved (`routing.sites`, `routing.apps`,
-│   │   a Shift pick's): a three-second countdown begins at Written. A folder
+│   │   `routing.terminals`, a Shift pick's): a three-second countdown begins at Written. A folder
 │   │   rule shows its repository while its session resolves; it sends once both
 │   │   the countdown and resolution finish. Undo during the countdown posts
 │   │   nothing. The capsule's `Hold` pauses the countdown while the pointer is

@@ -100,8 +100,8 @@ pub enum RouteAnswer {
     Looking,
     /// A saved folder rule matched locally; its session is still being resolved.
     ResolvingRule { name: String },
-    /// A rule the person saved (`routing.sites` or `routing.apps`, a
-    /// Shift pick's among them) says where it goes: sent to `to`
+    /// A rule the person saved (`routing.sites`, `routing.terminals` or
+    /// `routing.apps`, a Shift pick's among them) says where it goes: sent to `to`
     /// after the countdown, unless Undo cancels it. `site` is what the
     /// rule matches, for an always-rule sending it elsewhere instead.
     Rule {
@@ -114,8 +114,8 @@ pub enum RouteAnswer {
     /// HOME when Jev couldn't tell, a dev server's port, a page or its
     /// publisher, a name that was said). Nothing is sent until one is
     /// picked; picking one with `always` saves a rule for `site`, which is
-    /// what an always-rule would match (the site's host or the app's name),
-    /// `None` when no rule can be made.
+    /// what an always-rule would match (the site's host, the terminal's
+    /// folder or the app's name), `None` when no rule can be made.
     Guess {
         suggested: Vec<RouteDest>,
         recent: Vec<RouteDest>,
@@ -265,9 +265,10 @@ fn look_with(context: RouteContext, router: Router, senses: look::Senses) -> Opt
                         context.app_pid,
                         deadline,
                         &senses,
-                        |url| {
-                            local.lock().unwrap_or_else(|e| e.into_inner()).url =
-                                url.map(str::to_owned)
+                        |url, terminal| {
+                            let mut local = local.lock().unwrap_or_else(|e| e.into_inner());
+                            local.url = url.map(str::to_owned);
+                            local.terminal = terminal.map(Path::to_path_buf);
                         },
                     );
                     *local.lock().unwrap_or_else(|e| e.into_inner()) = live.clone();
@@ -641,6 +642,7 @@ impl Worker {
             }
         }
         let unread = live.as_ref().and_then(sessions_unread);
+        let terminal = live.as_ref().and_then(|live| live.terminal.clone());
         // Judged even without the sessions: a rule, page, or publisher names
         // one outright, and the record keeps what was seen for a replay.
         let (decision, url) = router.run(|| match (live, &loaded) {
@@ -655,13 +657,14 @@ impl Worker {
             .as_ref()
             .and_then(|loaded| loaded.target.bundle_id.clone());
         let app = loaded.as_ref().and_then(|loaded| loaded.target.app.clone());
-        let rule = policy::rule_key(url.as_deref(), bundle_id.as_deref());
-        let site = rule.as_ref().map(|(kind, key)| match kind {
-            RuleKind::Site => key
+        let rule = policy::rule_key(url.as_deref(), terminal.as_deref(), bundle_id.as_deref());
+        let site = rule.as_ref().map(|rule| match rule {
+            (RuleKind::Site, key) => key
                 .split_once("://")
                 .map_or(key.as_str(), |(_, host)| host)
                 .to_owned(),
-            RuleKind::App => app.clone().unwrap_or_else(|| key.clone()),
+            (RuleKind::App, key) => app.clone().unwrap_or_else(|| key.clone()),
+            (RuleKind::Terminal, _) => site_of(rule),
         });
         let Answered {
             answer,
@@ -880,7 +883,9 @@ impl Worker {
             "capture sent"
         );
         current.sent = sent;
-        current.route.offer = offered.as_ref().map(|offer| offer.key.clone());
+        current.route.offer = offered
+            .as_ref()
+            .map(|offer| site_of(&(offer.kind, offer.key.clone())));
         current.offered = offered;
         current.route.delivery = Some(delivery);
         self.publish();
@@ -1165,7 +1170,7 @@ fn send_why(error: &str, agent_host: bool) -> String {
     }
 }
 
-/// `routing.sites` or `routing.apps`, as `kind` says.
+/// `routing.sites`, `routing.apps` or `routing.terminals`, as `kind` says.
 fn rules_of(
     config: &scrawl_capture::RouterConfig,
     kind: RuleKind,
@@ -1173,6 +1178,22 @@ fn rules_of(
     match kind {
         RuleKind::Site => &config.sites,
         RuleKind::App => &config.apps,
+        RuleKind::Terminal => &config.terminals,
+    }
+}
+
+/// What the capsule calls the thing a rule would match: a site's origin
+/// or an app's bundle ID as they are, and a terminal by its folder's name
+/// ("hex terminal").
+fn site_of((kind, key): &(RuleKind, String)) -> String {
+    match kind {
+        RuleKind::Site | RuleKind::App => key.clone(),
+        RuleKind::Terminal => {
+            let name = Path::new(key)
+                .file_name()
+                .map_or_else(|| key.clone(), |n| n.to_string_lossy().into_owned());
+            format!("{name} terminal")
+        }
     }
 }
 
@@ -1200,6 +1221,7 @@ fn forget_rule(saved: &SavedRule) {
         let rules = match saved.kind {
             RuleKind::Site => &mut next.sites,
             RuleKind::App => &mut next.apps,
+            RuleKind::Terminal => &mut next.terminals,
         };
         match &saved.before {
             Some(before) => rules.insert(saved.key.clone(), before.clone()),
@@ -1348,7 +1370,7 @@ fn recent(candidates: &[smart::Candidate], shown: &[&str], now_ms: u64) -> Vec<R
 /// or nothing (a pick with no reason behind it, such as Jev's).
 fn why(via: &str) -> &str {
     match via {
-        "rule" | "app-rule" => "rule",
+        "rule" | "app-rule" | "terminal-rule" => "rule",
         "named" | "speech" => "mentioned",
         "sdk" | "page" => "same page",
         "viewed" => "you were just in it",
@@ -1356,6 +1378,7 @@ fn why(via: &str) -> &str {
         "recorded" | "chosen" => "sent before",
         "publisher" => "published it",
         "dev-build" => "dev build",
+        "terminal-session" => "open in this terminal",
         "terminal" => "same terminal",
         "document" => "same file",
         "app" => "same app",
@@ -2019,7 +2042,7 @@ mod tests {
         fn dev_server(port: u16) -> Option<PathBuf> {
             (port == 4948).then(|| PathBuf::from("/p/board"))
         }
-        fn no_terminal(_: &str) -> Option<(PathBuf, String)> {
+        fn no_terminal(_: &str, _: Option<i32>) -> Option<look::Pane> {
             None
         }
         fn board_tab(_: Option<&str>, _: Option<&str>) -> Option<String> {
@@ -2666,6 +2689,92 @@ mod tests {
                 senses(),
             );
             assert_eq!(sent.as_deref(), Some("ses_seer"));
+        }
+
+        /// A Shift pick on a Ghostty capture remembers the terminal's folder,
+        /// not Ghostty: the next capture of a terminal there (or below) goes
+        /// to the session picked, and one elsewhere is only guessed.
+        #[test]
+        fn an_always_rule_from_a_terminal_keys_on_its_folder() {
+            const GHOSTTY: &str = "com.mitchellh.ghostty";
+            fn shell_in(folder: &str) -> look::Pane {
+                look::Pane {
+                    cwd: Some(folder.into()),
+                    title: "zsh".into(),
+                    foreground: None,
+                }
+            }
+            fn in_seer(_: &str, _: Option<i32>) -> Option<look::Pane> {
+                Some(shell_in("/p/seer"))
+            }
+            fn below(_: &str, _: Option<i32>) -> Option<look::Pane> {
+                Some(shell_in("/p/seer/site"))
+            }
+            fn elsewhere(_: &str, _: Option<i32>) -> Option<look::Pane> {
+                Some(shell_in("/p/other"))
+            }
+            let senses = |terminal: fn(&str, Option<i32>) -> Option<look::Pane>| look::Senses {
+                hooks: Hooks {
+                    sdk: no_sdk,
+                    listener_dir: dev_server,
+                    api: one_checkout,
+                },
+                terminal,
+                ..senses(no_tab)
+            };
+            let context = || RouteContext {
+                front_bundle_id: Some(GHOSTTY.into()),
+                captured_bundle_id: Some(GHOSTTY.into()),
+                app_pid: None,
+            };
+            let look = look_with(
+                context(),
+                router_with(|c| c.smart_routing = true),
+                senses(in_seer),
+            )
+            .unwrap();
+            let mut worker = worker(SharedOutcomes::default());
+            worker.written(written(GHOSTTY), look);
+            settle(&mut worker);
+            let answer = &worker.current.as_ref().unwrap().route.answer;
+            assert!(
+                matches!(answer, RouteAnswer::Guess { site: Some(site), .. } if site == "seer terminal"),
+                "{answer:?}"
+            );
+            let (kind, key, target) = worker.rule_for("ses_rune").expect("a terminal rule");
+            assert_eq!(
+                (kind, key.as_str(), target.as_str()),
+                (RuleKind::Terminal, "/p/seer", "ses_rune")
+            );
+            let saved = RouterConfig {
+                send_captures: true,
+                smart_routing: true,
+                ..RouterConfig::default()
+            }
+            .with_rule(kind, &key, &target)
+            .unwrap();
+            for terminal in [
+                in_seer as fn(&str, Option<i32>) -> Option<look::Pane>,
+                below,
+            ] {
+                let (answer, sent) = route(
+                    router_with(|c| *c = saved.clone()),
+                    GHOSTTY,
+                    senses(terminal),
+                );
+                assert!(
+                    matches!(answer, RouteAnswer::Rule { ref to, .. } if to.session == "ses_rune"),
+                    "{answer:?}"
+                );
+                assert_eq!(sent.as_deref(), Some("ses_rune"));
+            }
+            let (answer, sent) = route(
+                router_with(|c| *c = saved.clone()),
+                GHOSTTY,
+                senses(elsewhere),
+            );
+            assert!(!matches!(answer, RouteAnswer::Rule { .. }), "{answer:?}");
+            assert_eq!(sent, None);
         }
 
         /// A real repository with SEER in its main checkout (the newer) and

@@ -45,6 +45,9 @@ pub struct RouterConfig {
     /// Bundle ID (or a prefix of one) → folder or `ses_` ID (`routing.apps`). General-purpose
     /// apps are ignored whatever this says.
     pub apps: BTreeMap<String, String>,
+    /// Folder → folder or `ses_` ID (`routing.terminals`): where captures of a terminal working
+    /// in that folder (or below it) go. The home folder and `/` are ignored.
+    pub terminals: BTreeMap<String, String>,
     /// URL prefix → the folder a file server serves (`routing.servers`).
     pub servers: BTreeMap<String, String>,
     /// Spoken name → the title or folder it means (`routing.aliases`).
@@ -80,6 +83,7 @@ impl Default for RouterConfig {
             undo_window_sec: None,
             sites: BTreeMap::new(),
             apps: BTreeMap::new(),
+            terminals: BTreeMap::new(),
             servers: BTreeMap::new(),
             aliases: BTreeMap::new(),
             refused_rules: Vec::new(),
@@ -106,6 +110,19 @@ impl RouterConfig {
         let mut apps = expand(&self.apps);
         apps.retain(|(id, _)| !policy::is_general_app(id));
         apps
+    }
+
+    /// `terminals`, `~` expanded in keys and targets, without the home folder or `/`.
+    pub fn terminal_rules(&self) -> Vec<(String, PathBuf)> {
+        let home = crate::user_dirs::home_dir().unwrap_or_default();
+        let mut terminals = expand(&self.terminals);
+        for (folder, _) in &mut terminals {
+            if let Some(rest) = folder.strip_prefix("~/") {
+                *folder = home.join(rest).display().to_string();
+            }
+        }
+        terminals.retain(|(folder, _)| policy::is_terminal_folder(Path::new(folder)));
+        terminals
     }
 
     /// `servers`, `~` expanded.
@@ -138,7 +155,7 @@ impl RouterConfig {
         self.smart_routing && self.jev_routing
     }
 
-    /// `rule add`: this config with `key` → `target` in `sites` or `apps` (a folder, `~` kept, or
+    /// `rule add`: this config with `key` → `target` in `sites`, `apps` or `terminals` (a folder, `~` kept, or
     /// a `ses_` ID; a relative folder is made absolute against the working directory). A
     /// refusal of `key` is lifted. The host saves it.
     pub fn with_rule(&self, kind: RuleKind, key: &str, target: &str) -> Result<Self> {
@@ -147,6 +164,7 @@ impl RouterConfig {
         match kind {
             RuleKind::Site => next.sites.insert(key.clone(), target),
             RuleKind::App => next.apps.insert(key.clone(), target),
+            RuleKind::Terminal => next.terminals.insert(key.clone(), target),
         };
         next.refused_rules.retain(|k| *k != key);
         Ok(next)
@@ -334,6 +352,7 @@ fn read_routing(
                     !general
                 });
             }
+            "terminals" => config.terminals = map_of(key, value, warnings),
             "servers" => config.servers = map_of(key, value, warnings),
             "aliases" => config.aliases = map_of(key, value, warnings),
             "autoSend" => match value.as_str().and_then(AutoSend::parse) {
@@ -450,6 +469,29 @@ mod tests {
         assert!(!config.send_captures);
         assert_eq!(config.auto_send, AutoSend::Rules);
         assert_eq!(parse_scrawl_config("not json"), RouterConfig::default());
+    }
+
+    #[test]
+    fn terminal_rules_key_on_folders_but_never_home_or_root() {
+        let config = parse_scrawl_config(
+            r#"{"routing": {"terminals": {
+                "/p/board": "ses_b", "~/code/hex": "~/code/hex", "~": "ses_h", "/": "ses_r"}}}"#,
+        );
+        assert_eq!(config.terminals.len(), 4, "kept as written");
+        let home = crate::user_dirs::home_dir().unwrap();
+        let mut rules = config.terminal_rules();
+        rules.sort();
+        let hex = home.join("code/hex");
+        let mut expected = vec![
+            ("/p/board".to_owned(), PathBuf::from("ses_b")),
+            (hex.display().to_string(), hex),
+        ];
+        expected.sort();
+        assert_eq!(rules, expected);
+        let next = RouterConfig::default()
+            .with_rule(RuleKind::Terminal, "/p/board", "ses_b")
+            .unwrap();
+        assert_eq!(next.terminals["/p/board"], "ses_b");
     }
 
     #[test]
