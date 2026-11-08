@@ -50,6 +50,15 @@ final class TranscriptCleanupGuardTests: XCTestCase {
         )
     }
 
+    func testRejectsAddedNegation() {
+        XCTAssertFalse(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "I will go tomorrow",
+                cleaned: "I will not go tomorrow"
+            )
+        )
+    }
+
     func testRejectsRunawayLength() {
         XCTAssertFalse(
             TranscriptCleanupGuard.isAcceptable(

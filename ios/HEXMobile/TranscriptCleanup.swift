@@ -60,8 +60,8 @@ nonisolated enum TranscriptCleanupGuard {
     ]
 
     /// A conservative cleanup may fix a misheard word or resolve a spoken correction. It
-    /// may not become much longer than the transcript, change a number or a negation, or
-    /// stop being made of the transcript's words.
+    /// may not become much longer than the transcript, change a number, add, drop, or swap
+    /// a negation, or stop being made of the transcript's words.
     static func isAcceptable(original: String, cleaned: String) -> Bool {
         let originalText = original.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanedText = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -75,9 +75,9 @@ nonisolated enum TranscriptCleanupGuard {
         guard !originalWords.isEmpty, !cleanedWords.isEmpty else { return false }
         guard cleanedWords.count <= originalWords.count * 2 + 4 else { return false }
 
-        let originalNegations = negationCounts(in: originalText)
-        let cleanedNegations = negationCounts(in: cleanedText)
-        for (negation, count) in originalNegations where cleanedNegations[negation, default: 0] < count {
+        // An added negation flips the meaning just as surely as a dropped one, so every
+        // negation count must match exactly.
+        guard negationCounts(in: originalText) == negationCounts(in: cleanedText) else {
             return false
         }
 
@@ -205,45 +205,98 @@ final class AppleIntelligenceCleaner: TranscriptCleaning {
     }
 
     #if canImport(FoundationModels)
-    /// Races the model against the budget. A late answer is dropped, never awaited.
+    /// Races the model against the budget. A late answer is dropped, never awaited, and
+    /// cancelling the caller stops the model work instead of waiting out the budget.
     @available(iOS 26.0, *)
     private static func respond(
         to text: String,
         within budget: Duration
     ) async -> String? {
+        guard !Task.isCancelled else { return nil }
         let gate = CleanupOnceGate()
-        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
-            let work = Task { @MainActor in
-                let session = LanguageModelSession(model: .default, instructions: instructions)
-                let content = try? await session.respond(
-                    to: text,
-                    options: GenerationOptions(temperature: 0.2, maximumResponseTokens: 1024)
-                ).content
-                if gate.claim() {
-                    continuation.resume(returning: content)
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+                let work = Task { @MainActor in
+                    guard !Task.isCancelled else { return }
+                    let session = LanguageModelSession(model: .default, instructions: instructions)
+                    let content = try? await session.respond(
+                        to: text,
+                        options: GenerationOptions(temperature: 0.2, maximumResponseTokens: 1024)
+                    ).content
+                    if gate.claim() {
+                        continuation.resume(returning: content)
+                    }
                 }
-            }
-            Task { @MainActor in
-                try? await Task.sleep(for: budget)
-                if gate.claim() {
-                    work.cancel()
-                    continuation.resume(returning: nil)
+                let timeout = Task { @MainActor in
+                    try? await Task.sleep(for: budget)
+                    if gate.claim() {
+                        work.cancel()
+                        continuation.resume(returning: nil)
+                    }
                 }
+                gate.attach(work: work, timeout: timeout, continuation: continuation)
             }
+        } onCancel: {
+            gate.cancel()
         }
     }
     #endif
 }
 
+/// Resumes a cleanup race exactly once, whichever of the model, the budget, or cancellation
+/// finishes first, and lets cancellation reach the model work.
 private final class CleanupOnceGate: @unchecked Sendable {
     private let lock = NSLock()
     private var claimed = false
+    private var cancelled = false
+    private var work: Task<Void, Never>?
+    private var timeout: Task<Void, Never>?
+    private var continuation: CheckedContinuation<String?, Never>?
 
+    /// Succeeds for the first caller only.
     func claim() -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        return claimLocked()
+    }
+
+    private func claimLocked() -> Bool {
         guard !claimed else { return false }
         claimed = true
         return true
+    }
+
+    /// The continuation and both tasks only exist inside the race, after `onCancel` may
+    /// already have run, so a late registration resumes and cancels immediately.
+    func attach(
+        work: Task<Void, Never>,
+        timeout: Task<Void, Never>,
+        continuation: CheckedContinuation<String?, Never>
+    ) {
+        lock.lock()
+        self.work = work
+        self.timeout = timeout
+        self.continuation = continuation
+        let cancelNow = cancelled && claimLocked()
+        lock.unlock()
+        guard cancelNow else { return }
+        work.cancel()
+        timeout.cancel()
+        continuation.resume(returning: nil)
+    }
+
+    /// Called from the caller's cancellation handler, which may run before `attach`.
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let work = self.work
+        let timeout = self.timeout
+        let continuation = self.continuation
+        let resumeNow = continuation != nil && claimLocked()
+        lock.unlock()
+        guard resumeNow, let work, let timeout, let continuation else { return }
+        work.cancel()
+        timeout.cancel()
+        continuation.resume(returning: nil)
     }
 }
