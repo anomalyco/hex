@@ -1,7 +1,7 @@
 name: HEXMobile
 options:
   minimumXcodeGenVersion: 2.46.0
-  bundleIdPrefix: com.kitlangton.hex
+  bundleIdPrefix: anomaly.hex
   deploymentTarget:
     iOS: "18.0"
   xcodeVersion: "2660"
@@ -11,7 +11,7 @@ packages:
     exactVersion: 0.15.5
 settings:
   base:
-    DEVELOPMENT_TEAM: QC99C9JE59
+    DEVELOPMENT_TEAM: 5NZ4Q7NXJ4
     SWIFT_VERSION: 6.0
 targets:
   HEXMobile:
@@ -38,7 +38,7 @@ targets:
         CADisableMinimumFrameDurationOnPhone: true
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
-            CFBundleURLName: com.kitlangton.hex.mobile.keyboard-session
+            CFBundleURLName: anomaly.hex.mobile.keyboard-session
             CFBundleURLSchemes:
               - hex-dictation
         NSMicrophoneUsageDescription: Hex records only while you dictate and transcribes locally on this iPhone.
@@ -67,7 +67,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: 0.2.0
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile
+        PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile
         PRODUCT_NAME: HEX
     scheme:
       gatherCoverageData: false
@@ -101,7 +101,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: 0.2.0
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.keyboard
+        PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile.keyboard
         PRODUCT_NAME: HEXKeyboard
         SKIP_INSTALL: YES
   HEXWidgets:
@@ -126,7 +126,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: 0.2.0
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile.widgets
         PRODUCT_NAME: HEXWidgets
         SKIP_INSTALL: YES
   HEXMobileTests:
@@ -143,5 +143,5 @@ targets:
         BUNDLE_LOADER: $(TEST_HOST)
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.tests
+        PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile.tests
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/HEX.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/HEX
