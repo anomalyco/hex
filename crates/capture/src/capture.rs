@@ -1973,6 +1973,15 @@ impl SharedCaptureTelemetry {
             .map(|stroke| stroke.t1)
     }
 
+    /// Whether a stroke is still being drawn, without copying it.
+    pub fn has_live_ink(&self) -> bool {
+        self.live_ink
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|stroke| !stroke.pts.is_empty())
+    }
+
     pub fn ink_snapshot(&self) -> InkSnapshot {
         let target = *self
             .target_frame

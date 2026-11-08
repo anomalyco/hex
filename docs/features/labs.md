@@ -1376,7 +1376,9 @@ change: they keep recording the strokes and Scrawl's hold and fade, so the
 video still fades ink the screen kept (a known gap, out of scope here). On
 X11, Hex takes Escape while persistent ink is visible and lets it go once the
 screen is clear; on Wayland it reaches the ink overlay only where the
-compositor leaves it the keyboard. Checks:
+compositor leaves it the keyboard, and on GNOME, where Annotate runs under
+XWayland, Escape can't reach the overlay, so persistent ink stays until the
+recording stops. Checks:
 `persistent_ink_stays_opaque_until_escape_clears_it` in
 [capture_capsule/ink.rs](../../src/rune_ui/capture_capsule/ink.rs) and
 `persistent_ink_is_its_own_bit_and_off_by_default` in

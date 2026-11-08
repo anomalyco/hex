@@ -70,10 +70,10 @@ use crate::dictation::audio::DictationAudio;
 use crate::transcription::engine::TranscriptionEngine;
 use crate::transcription::models::{ModelRuntime, TranscriptionModelId};
 
+pub(crate) mod ink;
 // `hex annotate`'s folder commands; Windows has no control transport for
 // them yet.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
-pub(crate) mod ink;
 mod library;
 mod permissions;
 mod replay;
@@ -2401,8 +2401,9 @@ pub fn exit_drawing() -> bool {
     PEN_DOWN.store(false, Ordering::Release);
     if drew {
         end_stroke();
-        // Escape while drawing only stops drawing; the ink it leaves stays
-        // until the next Escape clears it.
+        // Escape while drawing only stops drawing; under Labs › Persistent
+        // ink the ink it leaves stays until the next Escape clears it, and
+        // otherwise fades as usual.
         return true;
     }
     ink::clear()

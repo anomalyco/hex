@@ -57,7 +57,7 @@ fn visible(source: &InkSource) -> bool {
 /// Whether Escape belongs to Annotate: drawing, or persistent ink it would
 /// clear. Escape stays with the app when neither is true.
 pub(crate) fn escape_wanted() -> bool {
-    drawing() || source().is_some_and(|source| visible(&source))
+    drawing() || (crate::labs::persistent_ink() && source().is_some_and(|source| visible(&source)))
 }
 
 /// Escape's clear under Labs › Persistent ink: hides every stroke already on
@@ -66,6 +66,11 @@ pub(super) fn clear() -> bool {
     let Some(source) = source().filter(visible) else {
         return false;
     };
+    // A stroke still being drawn (Shift held on macOS and Windows draws
+    // without `drawing()`) is not the screen's ink yet: leave it to finish.
+    if source.telemetry.has_live_ink() {
+        return false;
+    }
     let capture = source.telemetry.started_at_boot_ns();
     *CLEARED.lock().unwrap_or_else(|error| error.into_inner()) = Some((capture, source.now_ms()));
     true
