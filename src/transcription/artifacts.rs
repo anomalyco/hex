@@ -41,6 +41,21 @@ pub(super) const PARAKEET_V3_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "parakeet",
     variant: "tdt-0.6b-v3",
 };
+// Oruk AI's Orukeet (CC-BY-SA-4.0), a Parakeet TDT 0.6B v3 fine-tune with
+// frozen fitted Gabor kernels in half the encoder's temporal depthwise
+// filters, trained on multilingual and multi-accent data. handy-computer
+// converted oruk/orukeet at b59c13a to GGUF for transcribe.cpp and quantized
+// it to Q8_0; the file needs no Gabor-specific runtime because the export
+// materializes the fitted taps as ordinary convolution weights.
+pub(super) const ORUKEET_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "orukeet-Q8_0.gguf",
+    revision: "c5511a3850fce1cbbfa5d94ef815966e1d99275f",
+    repository: "handy-computer/orukeet-gguf",
+    bytes: 739_508_704,
+    sha256: "68cd64b2a6c3c747f0a9f109884ed75b277c266c0fb8e5888c5a9f4d824fb9f7",
+    architecture: "parakeet",
+    variant: "tdt-0.6b-orukeet",
+};
 pub(super) const WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "whisper-large-v3-turbo-Q8_0.gguf",
     revision: "d222c9f621c1128299248f2ded4d8a1820519780",

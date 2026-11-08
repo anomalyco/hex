@@ -320,7 +320,7 @@ Language row is unexercised.
 
 ```ts
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
-├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
+├── Parakeet v3 and Orukeet -> Detect language from audio; selected language does not constrain output
 ├── Granite Speech 5.0 -> No language input; transcribes whichever of en, fr,
 │   de, es, pt, it, ja it hears (#1252)
 ├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
@@ -389,6 +389,11 @@ Settings picker > Every model row          // fixed height; scrolls
 ├── Labs > Parakeet Ultra (off) -> its row with a Labs tag and Details: languages,  // setup.parakeet-ultra
 │   measured memory, the CC BY 4.0 credit, notice, Source/License links, folded
 │   published benchmarks "not measured in Hex" (labs.md)
+├── Orukeet -> ordinary row with Details: languages, the CC BY-SA 4.0 credit  // setup.orukeet
+│   and notice, Source/License links, folded published FLEURS benchmarks
+│   "not measured in Hex"; never recommended or badged. Checks:
+│   `orukeet_is_offered_for_exactly_parakeet_v3s_languages_and_never_badged`,
+│   `orukeets_details_credit_its_base_and_cover_its_languages_once`
 ├── "Add model file…" in the header -> imported cards after the catalog:  // setup.custom-models
 │   Imported · family · languages · Not benchmarked · file · licence · SHA-256
 │   prefix; Rename, Remove (not the active
