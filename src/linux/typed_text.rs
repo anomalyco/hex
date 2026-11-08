@@ -105,11 +105,11 @@ pub(crate) fn run(
 ) -> Result<()> {
     if paster.pastes_with_shift() {
         tracing::info!(
-            "refusing typed text while the terminal-paste shortcut is on; it would send Ctrl+Shift+V"
+            "refusing typed text while Terminal paste is on; it would send Ctrl+Shift+V"
         );
         return Err(eyre!(
-            "Transform typed text is unavailable while Terminal paste shortcut is on: its \
-             Ctrl+V would become Ctrl+Shift+V. Turn Terminal paste shortcut off in Settings › \
+            "Transform typed text is unavailable while Terminal paste is on: its \
+             Ctrl+V would become Ctrl+Shift+V. Turn Terminal paste off in Settings › \
              General and try again."
         ));
     }

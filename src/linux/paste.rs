@@ -453,7 +453,7 @@ impl LinuxPaster {
         self.selection.current().text()
     }
 
-    /// Whether Terminal paste shortcut is on. It turns every paste's Ctrl+V
+    /// Whether Terminal paste is on. It turns every paste's Ctrl+V
     /// into Ctrl+Shift+V, so a typed-text replacement cannot use it.
     pub(crate) fn pastes_with_shift(&self) -> bool {
         self.paste_with_shift.load(Ordering::Relaxed)
