@@ -584,21 +584,22 @@ fn install_model(model: Option<String>, language: Option<String>, output: Output
 /// `model install` with no Hex running: make the switch the app would have
 /// made. A Hex that started while the model downloaded takes the choice;
 /// otherwise it is saved under the service lock `settings apply` uses, so a
-/// starting Hex is never written behind.
+/// starting Hex is never written behind. An unchanged selection needs neither.
 #[cfg(not(target_os = "macos"))]
 fn select_installed(
     selection: &crate::transcription::models::TranscriptionSelection,
     output: Output,
 ) -> u8 {
-    if running() {
-        return select_in_running_hex(selection, output);
+    if crate::app_settings::AppSettings::read()
+        .is_ok_and(|settings| settings.transcription == *selection)
+    {
+        let name = crate::transcription::models::definition(selection.model).name;
+        println!("{name} ({}) is already selected", selection.language);
+        return 0;
     }
-    #[cfg(target_os = "linux")]
-    let lock = crate::desktop::instance::acquire("service");
-    #[cfg(not(target_os = "linux"))]
-    let lock: color_eyre::Result<()> = Ok(());
-    match lock {
-        Ok(_lock) if !running() => match save_selection(selection) {
+    let handoff = hand_off(
+        || select_in_running_hex(selection, output),
+        || match save_selection(selection) {
             Ok(message) => {
                 println!("{message}");
                 0
@@ -607,14 +608,16 @@ fn select_installed(
                 "the model is installed, but selecting it failed: {error:#}"
             )),
         },
-        Ok(_) => select_in_running_hex(selection, output),
+    );
+    match handoff {
+        Handoff::Done(code) => code,
         #[cfg(target_os = "linux")]
-        Err(_) if crate::linux::service::instance_answers() => fail(&format!(
+        Handoff::OlderHex => fail(&format!(
             "the model is installed, but an older Hex is still running; \
              run `hex restart`, then `hex model use {}`",
             selection.model.as_str()
         )),
-        Err(_) => fail(&format!(
+        Handoff::Deadline => fail(&format!(
             "the model is installed, but Hex is starting and holds its settings; \
              run `hex model use {}` once it answers",
             selection.model.as_str()
@@ -995,6 +998,45 @@ pub fn settings(command: SettingsCommand) -> u8 {
     }
 }
 
+/// How handing settings to a running Hex went, or why it couldn't wait.
+enum Handoff {
+    /// The running Hex took the work, or the lock was free and the work was
+    /// written here; holds that command's exit code.
+    Done(u8),
+    /// On Linux, a Hex too old for `hex` commands answers on its socket.
+    #[cfg(target_os = "linux")]
+    OlderHex,
+    /// A Hex held the settings lock and didn't answer before the deadline.
+    Deadline,
+}
+
+/// `settings apply`'s wait, shared with `model install`: a Hex that holds the
+/// service lock may have read settings.json already, so hand the work to the
+/// Hex that answers (`send`), or write it here while the lock is held
+/// (`write`). Only a lock that never answers gives up.
+fn hand_off(send: impl FnOnce() -> u8, write: impl FnOnce() -> u8) -> Handoff {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
+    loop {
+        if running() {
+            return Handoff::Done(send());
+        }
+        // A Hex that holds the service lock may have read settings.json
+        // already; wait for it to answer instead of writing behind it.
+        #[cfg(target_os = "linux")]
+        let lock = crate::desktop::instance::acquire("service");
+        #[cfg(not(target_os = "linux"))]
+        let lock: color_eyre::Result<()> = Ok(());
+        match lock {
+            Ok(_lock) if !running() => return Handoff::Done(write()),
+            Ok(_) => {}
+            #[cfg(target_os = "linux")]
+            Err(_) if crate::linux::service::instance_answers() => return Handoff::OlderHex,
+            Err(_) if std::time::Instant::now() >= deadline => return Handoff::Deadline,
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+}
+
 /// `hex settings apply`: the running Hex saves and adopts the settings, so
 /// it never overwrites them from memory; with no Hex running they are
 /// written to settings.json here.
@@ -1014,35 +1056,28 @@ fn apply_settings(file: &std::path::Path, output: Output) -> u8 {
         Ok(values) => values,
         Err(error) => return fail(&format!("expected a JSON object of settings: {error}")),
     };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
-    loop {
-        if running() {
-            return send(ControlCommand::SettingsApply { values }, output);
-        }
-        // A Hex that holds the service lock may have read settings.json
-        // already; wait for it to answer instead of writing behind it.
+    let handoff = hand_off(
+        || {
+            send(
+                ControlCommand::SettingsApply {
+                    values: values.clone(),
+                },
+                output,
+            )
+        },
+        || print(apply_offline(&values), output),
+    );
+    match handoff {
+        Handoff::Done(code) => code,
         #[cfg(target_os = "linux")]
-        let lock = crate::desktop::instance::acquire("service");
-        #[cfg(not(target_os = "linux"))]
-        let lock: color_eyre::Result<()> = Ok(());
-        match lock {
-            Ok(_lock) if !running() => return print(apply_offline(&values), output),
-            Ok(_) => {}
-            #[cfg(target_os = "linux")]
-            Err(_) if crate::linux::service::instance_answers() => {
-                return print(older_hex(), output);
-            }
-            Err(_) if std::time::Instant::now() >= deadline => {
-                return print(
-                    ControlReply::error(
-                        "busy",
-                        "Hex is starting but didn't answer; run `hex settings apply` again",
-                    ),
-                    output,
-                );
-            }
-            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
-        }
+        Handoff::OlderHex => print(older_hex(), output),
+        Handoff::Deadline => print(
+            ControlReply::error(
+                "busy",
+                "Hex is starting but didn't answer; run `hex settings apply` again",
+            ),
+            output,
+        ),
     }
 }
 
