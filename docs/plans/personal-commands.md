@@ -66,6 +66,10 @@ Transformations section to run them in displayed order after that mode's
 corrections and optional OpenCode rewrite. This pipeline applies to Paste and
 Send, not Voice Action or meetings. If the transformation stage fails, Hex
 keeps the text from before that stage, not partially transformed output.
+Each transformation receives the focused app's context and `source`:
+`"dictation"` for spoken dictation, or `"typed-text"` for Labs › Transform
+typed text, which runs the same mode steps on text already in the field.
+`source` is absent from command-handler context.
 
 ```ts
 import { defineHexConfig } from "@hex/commands"

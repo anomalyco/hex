@@ -1083,6 +1083,9 @@ Output (main sidebar, replaces the Modes editor) // rune_ui/output.rs; scenes ou
 │   └── Labs > Fix results in Output (off, #989) -> Vocabulary (the shared sheet) and,
 │       with a sentence typed, Fix this: copies Edit with agent's prompt ending
 │       `When I say "<sentence>", Hex pastes "<result>". It should paste: ` (labs.md)
+├── Labs > Transform typed text (Linux, off) -> a Typed text section with typed_text_hotkey,
+│   unbound by default: copies the focused field, runs its Output steps, re-checks the
+│   selection, and replaces it (labs.md, dictation.md)
 └── In some apps -> Each mode's apps and its steps (Only: …), opens to list them
     // the old Modes editor stays in the code for its scenes, unreachable
 

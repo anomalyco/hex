@@ -106,6 +106,7 @@ pub enum Feature {
     HideMenuBarIcon,
     MovableMeetingCapsules,
     GnomeClipboardRestore,
+    TypedText,
     MeetingNotesVocabulary,
     NotchIndicator,
     MeetingFinishedEvent,
@@ -123,7 +124,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 57] = [
+    pub const ALL: [Self; 58] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -167,6 +168,7 @@ impl Feature {
         Self::HideMenuBarIcon,
         Self::MovableMeetingCapsules,
         Self::GnomeClipboardRestore,
+        Self::TypedText,
         Self::MeetingNotesVocabulary,
         Self::NotchIndicator,
         Self::MeetingFinishedEvent,
@@ -249,6 +251,7 @@ impl Feature {
             | Self::HideMenuBarIcon
             | Self::MovableMeetingCapsules
             | Self::GnomeClipboardRestore
+            | Self::TypedText
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::GnomeMeetingCapsules
@@ -322,7 +325,8 @@ impl Feature {
             | Self::QuitClosesWindow
             | Self::CapsLockDictation
             | Self::ExpireMeetingAudio
-            | Self::FailureNotices => 20261107,
+            | Self::FailureNotices
+            | Self::TypedText => 20261107,
             Self::GnomeAnnotate => 20261108,
         }
     }
@@ -365,6 +369,7 @@ impl Feature {
             Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
             Self::SectionKeyAlone
             | Self::GnomeClipboardRestore
+            | Self::TypedText
             | Self::GnomeMeetingCapsules
             | Self::GnomeAnnotate
             | Self::LiveTyping => cfg!(target_os = "linux"),
@@ -470,6 +475,7 @@ impl Feature {
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
             Self::MovableMeetingCapsules => "movable-meeting-capsules",
             Self::GnomeClipboardRestore => "gnome-clipboard-restore",
+            Self::TypedText => "typed-text",
             Self::MeetingNotesVocabulary => "meeting-notes-vocabulary",
             Self::NotchIndicator => "notch-indicator",
             Self::MeetingFinishedEvent => "meeting-finished-event",
@@ -533,6 +539,7 @@ impl Feature {
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
             Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
             Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
+            Self::TypedText => "labs.typed_text",
             Self::MeetingNotesVocabulary => "labs.meeting_notes_vocabulary",
             Self::NotchIndicator => "labs.notch_indicator",
             Self::MeetingFinishedEvent => "labs.meeting_finished_event",
@@ -600,6 +607,7 @@ impl Feature {
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
+            Self::TypedText => settings.labs.typed_text,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
@@ -665,6 +673,7 @@ impl Feature {
             &mut labs.hide_menu_bar_icon,
             &mut labs.movable_meeting_capsules,
             &mut labs.gnome_clipboard_restore,
+            &mut labs.typed_text,
             &mut labs.meeting_notes_vocabulary,
             &mut labs.notch_indicator,
             &mut labs.meeting_finished_event,
@@ -730,6 +739,7 @@ impl Feature {
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
+            Self::TypedText => settings.labs.typed_text = on,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
@@ -811,6 +821,8 @@ const FAILURE_NOTICES: u64 = MEETING_DESCRIPTIVE_FILENAMES << 1;
 const CAPS_LOCK_DICTATION: u64 = FAILURE_NOTICES << 1;
 /// The next bit above Caps Lock dictation's switch.
 const GNOME_ANNOTATE: u64 = CAPS_LOCK_DICTATION << 1;
+/// The next bit above Annotate on GNOME's switch.
+const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1021,6 +1033,14 @@ pub fn gnome_clipboard_restore() -> bool {
     on(GNOME_CLIPBOARD_RESTORE) && Feature::GnomeClipboardRestore.on_this_os()
 }
 
+/// A shortcut runs the focused app's Output steps on the text already typed
+/// there and replaces it (Linux; read as each shortcut press starts and by
+/// the Output pane's row).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn typed_text() -> bool {
+    on(TYPED_TEXT) && Feature::TypedText.on_this_os()
+}
+
 /// On a Wayland desktop without layer-shell (GNOME), the meeting capsules
 /// float on an already running XWayland (Linux; read as each capsule shows).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -1203,6 +1223,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             settings.gnome_clipboard_restore,
             GNOME_CLIPBOARD_RESTORE,
         ),
+        (Feature::TypedText, settings.typed_text, TYPED_TEXT),
         (
             Feature::MeetingNotesVocabulary,
             settings.meeting_notes_vocabulary,
@@ -1280,6 +1301,7 @@ pub fn log_launch() {
         failure_notices = failure_notices(),
         live_typing = live_typing(),
         live_chapters = live_chapters(),
+        typed_text = typed_text(),
         playground = playground(),
         vocabulary_biasing = vocabulary_biasing(),
         "labs"
@@ -1626,6 +1648,19 @@ mod tests {
         assert_ne!(state & GNOME_CLIPBOARD_RESTORE, 0);
         assert_eq!(state & MEETING_NOTES_VOCABULARY, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn typed_text_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & TYPED_TEXT, 0);
+        labs.typed_text = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & TYPED_TEXT, 0);
+        assert_eq!(state & GNOME_CLIPBOARD_RESTORE, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(Feature::TypedText.on_this_os(), cfg!(target_os = "linux"));
     }
 
     #[test]

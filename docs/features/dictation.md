@@ -300,6 +300,52 @@ Checks: `raw_dictation_owns_the_capture_it_starts` (Linux reducer),
 Proof limits: no physical shortcut run on any OS; the macOS machine pairing
 was not compiled or run here (Linux check, Windows cross-clippy only).
 
+### Transform Typed Text (Labs, Linux)
+
+With Labs › Transform typed text on (`labs.typed_text`, off by default),
+Settings › Output adds one section whose shortcut is unbound until recorded.
+The shortcut reads the text already typed in the focused field, runs the
+focused app's Output steps on it, and pastes the result over it. The lab's
+switch and binding are saved like any other Labs feature; the listener
+registers the shortcut only while the lab is on, and restarts registration
+when either changes.
+
+```ts
+Output > Typed text                        // labs.md
+├── Labs off -> no section, no recorder, no shortcut registered
+├── Labs on -> the section, with the same recorder as Dictate without processing
+│   └── typed_text_hotkey unbound by default -> nothing registered or reserved
+│       ├── Record one -> saved, and conflicts with the other active shortcuts
+│       └── Clear (trash) or `hex settings set typed_text_hotkey none` -> unbound
+├── Settings -> saved to settings.json as typed_text_hotkey
+└── Shortcut pressed while idle -> one job on the output worker
+    ├── snapshot the clipboard, then Ctrl+A and Ctrl+C in the focused app
+    ├── read the selection as text/plain, bounded to 1 MiB and one second
+    ├── no text -> error tone, clipboard restored, nothing pasted
+    ├── run the matching mode's Output steps, with transformation context
+    │   `source: "typed-text"` (dictation passes `"dictation"`); spoken
+    │   formatting, spoken symbols, and filler words are dictation-only
+    ├── processed text equals the selection -> clipboard restored, nothing pasted
+    ├── re-copy the selection -> different text -> abort, clipboard restored,
+    │   nothing pasted (typing or switching windows since the first copy)
+    └── otherwise Ctrl+V over the selection, restoring the clipboard as a
+        dictation paste does
+```
+
+Checks: `typed_text_is_its_own_bit_and_off_by_default` ([labs.rs](../../src/labs.rs)),
+`the_typed_text_shortcut_needs_its_lab_and_its_own_keys`
+([app_settings.rs](../../src/app_settings.rs)),
+`typed_text_is_registered_only_while_its_lab_is_on` and
+`typed_text_fires_only_while_idle_and_changes_no_capture_state`
+([input.rs](../../src/linux/input.rs)), `typed_text_skips_the_dictation_only_labs`
+and `transformation_context_names_its_source` ([processor.rs](../../src/dictation/processor.rs),
+[personal_commands.rs](../../src/personal_commands.rs)), and
+`a_changed_second_copy_aborts_the_replacement` ([typed_text.rs](../../src/linux/typed_text.rs)).
+Known limits: select-all replaces the whole field, so a field with mixed
+formatting loses it; on GNOME the clipboard text is read through `wl-paste`,
+which may briefly take focus. Proof limits: no shortcut press against a real
+target application was run; the flow is covered by unit tests only.
+
 ### Copy Recent Dictation (Labs, macOS)
 
 Paste Last Dictation reaches only the newest dictation. With Labs › Copy

@@ -2893,6 +2893,32 @@ fn the_trust_prompt_lists_what_a_config_reaches_until_it_is_allowed() {
     assert!(rt.find("allow-transformations").is_none());
 }
 
+/// Labs › Transform typed text: Output's Typed text section and its
+/// recorder appear only with the lab on, and the recorder listens like the
+/// raw dictation shortcut's.
+#[cfg(target_os = "linux")]
+#[test]
+fn typed_text_shows_its_recorder_only_with_its_lab() {
+    let output = |on: bool| {
+        let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        output::fixture(&mut state);
+        state.pane = Pane::Output;
+        state.settings.labs.typed_text = on;
+        runtime_for(state, false, TALL_SIZE)
+    };
+    let off = output(false);
+    assert!(off.find("typed-text-hotkey").is_none());
+    assert!(!texts(&off).iter().any(|text| text == "Typed text"));
+
+    let mut on = output(true);
+    assert!(on.find("typed-text-hotkey").is_some());
+    tap(&mut on, "typed-text-hotkey");
+    assert!(
+        texts(&on).iter().any(|text| text == "Press shortcut"),
+        "the recorder listens"
+    );
+}
+
 /// Labs › Fix results in Output: the Try card offers Vocabulary and Fix
 /// this only with the toggle on, and Fix this copies for the sentence typed.
 #[test]

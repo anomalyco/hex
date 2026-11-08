@@ -25,6 +25,7 @@ pub(crate) mod rune_hud;
 pub(crate) mod service;
 pub(crate) mod session;
 pub(crate) mod tray;
+pub(crate) mod typed_text;
 
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;

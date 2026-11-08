@@ -95,6 +95,15 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        keeping transcript, notes, summary, and Markdown
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
+├── Transform typed text no labs.typed_text + typed_text_hotkey (Linux) Settings › Output shows a Typed text section whose shortcut is unbound by
+│                                        default; the shortcut snapshots the clipboard, sends Ctrl+A then Ctrl+C, runs the focused app's Output
+│                                        steps on the copied text (skipping spoken formatting, spoken symbols, and filler words), re-copies to
+│                                        confirm the selection still holds that text, then pastes the result over it and restores the clipboard as a
+│                                        dictation paste does. Select-all replaces the whole field; on GNOME wl-paste may briefly take focus.
+│                                        // check: typed_text_is_its_own_bit_and_off_by_default (labs.rs), the shortcut's conflict rules
+│                                        // (app_settings.rs), typed_text_fires_only_while_idle_and_changes_no_capture_state (input.rs),
+│                                        // typed_text_skips_the_dictation_only_labs (processor.rs), a_changed_second_copy_aborts_the_replacement
+│                                        // (typed_text.rs); not observed with a real shortcut and target application
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
 │                                        recording capsule open on XWayland (Rune xwayland_input: override-redirect, clicks in the input shape, never keyboard
 │                                        focus), decided at each show, only while this user's Xwayland already runs; never starts it. Off, an offer opens

@@ -220,6 +220,13 @@ const KEYS: &[Key] = &[
          external keyboard (macOS, with labs.second_dictation_shortcut); none (the default) \
          turns it off",
     ),
+    optional(
+        "typed_text_hotkey",
+        Kind::Shortcut(HotkeySlot::TypedText),
+        "Labs: the shortcut that runs the focused app's Output steps on the text already \
+         typed in the focused field and replaces it (Linux, with labs.typed_text); none \
+         (the default) turns it off",
+    ),
     key(
         "screenshots.hotkey",
         Kind::Shortcut(HotkeySlot::Screenshot),
@@ -483,6 +490,11 @@ const KEYS: &[Key] = &[
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
+    ),
+    key(
+        "labs.typed_text",
+        Kind::Bool,
+        "Labs: Output shows a Typed text section whose shortcut runs the focused app's Output steps on the text already typed in the focused field and replaces it (Linux)",
     ),
     key(
         "labs.gnome_meeting_capsules",
@@ -767,6 +779,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.meeting_descriptive_filenames", "meetings"),
     ("labs.follow_live_transcript", "meetings"),
     ("experimental.hex_microphone", "fun"),
+    ("typed_text_hotkey", "typed_text"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),
     ("labs.quit_closes_window", "dock_icon"),
@@ -1054,6 +1067,7 @@ pub fn apply(
         "dictation_hotkey"
         | "paste_last_hotkey"
         | "raw_dictation_hotkey"
+        | "typed_text_hotkey"
         | "second_dictation_hotkey"
         | "cancel_hotkey"
         | "screenshots.hotkey"
@@ -1066,6 +1080,7 @@ pub fn apply(
                 HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
+                HotkeySlot::TypedText => candidate.typed_text_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
                 HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),

@@ -311,6 +311,7 @@ fn a_throwing_or_slow_transformation_pastes_the_text_unchanged() {
             &client,
             &ContextSnapshot::default(),
             &AtomicBool::new(false),
+            crate::dictation::processor::Source::Dictation,
         );
         assert_eq!(processed.text, "as heard");
         let fallback = processed.observation.unwrap().fallback.unwrap();

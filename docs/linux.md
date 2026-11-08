@@ -39,6 +39,20 @@ model that cannot stream shows no provisional words while speaking, but the
 final text still goes in through the input method. It has **not** been
 verified on a real compositor yet; only its unit tests and the build ran.
 
+With **Labs › Transform typed text** on (`labs.typed_text`, off by default),
+Settings › Output adds a **Typed text** section whose shortcut
+(`typed_text_hotkey`) is unbound until you record one. Pressing it while
+nothing records copies the text in the focused field (Ctrl+A, Ctrl+C), runs
+the focused app's Output steps on it, checks that the field still holds that
+text (a second Ctrl+C must return the same text), and pastes the result over
+it. Spoken formatting, spoken symbols, and filler words are dictation-only and
+do not run on typed text. The clipboard is restored after the paste the same
+way a dictation restores it; without data-control on GNOME, the text is read
+through `wl-paste` and the clipboard is left with the result. Select-all
+replaces the whole field, so mixed formatting is not preserved, and on GNOME
+`wl-paste` may briefly take focus. With the lab off, Output and the listener
+are unchanged and the shortcut is not registered.
+
 For Nix/NixOS, use the [Nix guide](nix.md). Nix owns updates to that installation;
 Hex's signed updater owns only the direct-install layout below.
 

@@ -699,6 +699,7 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         ui.platform.caps = platform::Capabilities::LINUX;
         ui.settings.labs.skip_pauses = true;
+        ui.settings.labs.typed_text = true;
         ui.labs_open = true;
     }),
     ("mac-production", |ui| {
