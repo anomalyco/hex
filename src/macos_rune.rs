@@ -1279,7 +1279,11 @@ impl Pump {
                     id,
                     title,
                     chapters: Vec::new(),
+                    warning: None,
                 };
+            }
+            ControllerEvent::SourceWarning { warning } => {
+                self.meeting_state.source_warning(warning)
             }
             ControllerEvent::Chapters(chapters) => {
                 if let MeetingMenuState::Recording {

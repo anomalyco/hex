@@ -63,6 +63,7 @@ mod retention;
 pub(crate) mod runtime;
 pub(crate) mod sweep;
 mod transcript;
+mod warning;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod watcher;
 #[cfg(all(debug_assertions, target_os = "macos"))]
@@ -78,6 +79,7 @@ pub use notes::{summarize, summarize_file};
 pub use retention::audio_expired;
 pub use retention::{expire, expire_audio, expired, retention_for};
 pub use transcript::TranscriptReader;
+pub use warning::TrackWarning;
 
 /// What the recorder knows about a meeting when it starts.
 #[derive(Clone, Debug, Default)]
@@ -129,6 +131,9 @@ pub enum RecordingUpdate {
     Retitled { title: String },
     /// The live chapters so far (Labs).
     Chapters(Vec<Chapter>),
+    /// The microphone's captured audio became digitally silent, or its
+    /// audio returned.
+    SourceWarning { warning: Option<TrackWarning> },
     /// Capture stopped; final transcription is running.
     Transcribing,
 }
@@ -281,6 +286,11 @@ pub struct TrackManifest {
     /// recording, filled with silence so the track stays on the timeline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gaps: Vec<TrackGap>,
+    /// A problem with this track that the user should know about. For the
+    /// microphone, `digital_silence` means the stream was digitally silent
+    /// at some point during the recording, even if its audio returned later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<TrackWarning>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -509,9 +519,11 @@ pub fn record(
         };
         // Each source recovers on its own: losing system audio (for example
         // when ScreenCaptureKit loses its display) never stops the microphone.
+        let microphone_warnings = warning::TrackWarnings::new(updates.clone());
         let microphone_capture = capture::SourceSupervisor::microphone(
             sink(MeetingSource::Microphone, &microphone_drops),
             start.application.clone(),
+            microphone_warnings.clone(),
         );
         let system_capture =
             capture::SourceSupervisor::system(sink(MeetingSource::System, &system_drops));
@@ -541,6 +553,9 @@ pub fn record(
             if let Some(chapters) = live_chapters.as_ref().and_then(|live| live.take()) {
                 record_chapters(&meeting_dir, manifest, chapters, updates.as_ref());
             }
+            // Written as soon as the microphone is warned about, so a crash
+            // while recording still says it was digitally silent.
+            warning::persist_warning(&meeting_dir, manifest, &microphone_warnings);
         };
         while !shutdown.load(Ordering::Relaxed) && !writer.is_finished() {
             take_updates(&mut manifest);
@@ -566,6 +581,7 @@ pub fn record(
         stats.microphone.dropped_packets = microphone_drops.load(Ordering::Relaxed);
         manifest.system = stats.system;
         manifest.microphone = stats.microphone;
+        manifest.microphone.warning = microphone_warnings.persisted();
         if crate::desktop::process_exit::quitting() && has_recorded_audio(&manifest) {
             // Final transcription would outlast quitting's drain.
             drop(rolling.finish());

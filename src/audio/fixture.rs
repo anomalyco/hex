@@ -113,6 +113,7 @@ pub(super) fn open(path: &Path) -> Result<AudioInput> {
         chunks,
         sample_rate,
         device_name: NAME.into(),
+        uid: None,
         selection: Selection::InUse,
         stream_errors,
         watch_service_restarts: false,

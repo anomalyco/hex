@@ -115,6 +115,8 @@ enum Kind {
         title: String,
         started: Instant,
         automatic: bool,
+        /// The microphone is digitally silent (#1518).
+        warning: Option<crate::meeting::TrackWarning>,
     },
 }
 
@@ -553,6 +555,14 @@ impl MeetingCapsules {
                     }
                 });
             }
+            ControllerEvent::SourceWarning { warning } => {
+                let warning = *warning;
+                self.recording.update(move |capsule, _| {
+                    if let Some(Kind::Recording { warning: shown, .. }) = &mut capsule.kind {
+                        *shown = warning;
+                    }
+                });
+            }
             ControllerEvent::CallEnded { app, auto_stop } => {
                 self.close_recording();
                 self.show_panel(
@@ -692,6 +702,7 @@ impl MeetingCapsules {
                 title,
                 started,
                 automatic,
+                warning: None,
             });
             capsule.live = Live::default();
             capsule.hovered = false;
@@ -1085,7 +1096,16 @@ fn ready(
 fn recording(p: Paint, capsule: &Capsule, title: &str, started: Instant, automatic: bool) -> El {
     let live = &capsule.live;
     let elapsed = meeting::format_duration(started.elapsed().as_millis() as u64);
-    let subtitle = if automatic && started.elapsed() < AUTOMATIC_LABEL {
+    let silent = matches!(
+        &capsule.kind,
+        Some(Kind::Recording {
+            warning: Some(_),
+            ..
+        })
+    );
+    let subtitle = if silent {
+        tr_fill("Microphone is silent · {}", &elapsed)
+    } else if automatic && started.elapsed() < AUTOMATIC_LABEL {
         tr_fill("Started automatically · {}", &elapsed)
     } else {
         elapsed
@@ -1414,6 +1434,7 @@ mod tests {
             title: "Slack Huddle call — 2:30 PM".into(),
             started,
             automatic: true,
+            warning: None,
         };
         let (rt, _, _) = runtime(recording(Instant::now()), false, true, RECORDING);
         assert!(
@@ -1424,6 +1445,23 @@ mod tests {
         let earlier = Instant::now() - AUTOMATIC_LABEL - Duration::from_secs(1);
         let (rt, _, _) = runtime(recording(earlier), false, true, RECORDING);
         assert!(!texts(&rt).iter().any(|text| text.contains("automatically")));
+    }
+
+    #[test]
+    fn a_recording_says_when_its_microphone_is_silent() {
+        let mut kind = live_recording("m");
+        let Kind::Recording { warning, .. } = &mut kind else {
+            panic!("a recording");
+        };
+        *warning = Some(crate::meeting::TrackWarning::DigitalSilence);
+        let (rt, _, _) = runtime(kind, false, true, RECORDING);
+        assert!(
+            texts(&rt)
+                .iter()
+                .any(|text| text.starts_with("Microphone is silent · ")),
+            "{:?}",
+            texts(&rt)
+        );
     }
 
     #[test]
@@ -1504,6 +1542,7 @@ mod tests {
             title: "Q4 launch sync".into(),
             started: Instant::now() - Duration::from_secs(258),
             automatic: false,
+            warning: None,
         }
     }
 
@@ -1979,6 +2018,7 @@ mod tests {
                     title: "Slack Huddle call — 2:30 PM".into(),
                     started: Instant::now() - Duration::from_secs(4),
                     automatic: true,
+                    warning: None,
                 },
                 false,
                 RECORDING,
