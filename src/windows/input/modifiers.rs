@@ -78,10 +78,6 @@ impl ModifierState {
     }
 }
 
-fn key_down(key: u16) -> bool {
-    unsafe { GetAsyncKeyState(i32::from(key)) < 0 }
-}
-
 pub(super) fn side_matches(side: Option<ModifierSide>, left: bool, right: bool) -> bool {
     match side {
         None => !left && !right,
