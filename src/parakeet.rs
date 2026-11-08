@@ -276,21 +276,37 @@ impl DictationWorker {
             pending_pastes: 0,
         }));
 
-        let engine = match TranscriptionEngine::start(WarmTranscriber::default()) {
+        let (_, selection) = crate::app_settings::transcription_selection();
+        // Labs › Unload model when idle parks a GGUF model at launch too:
+        // the first dictation reloads it, so memory stays free until then.
+        // Apple Speech holds no model of Hex's and stays loaded.
+        let parked = crate::labs::unload_idle().is_some()
+            && matches!(
+                validate(&selection).map(|definition| definition.runtime),
+                Ok(crate::transcription::models::ModelRuntime::Gguf(_))
+            );
+        let engine = if parked {
+            TranscriptionEngine::start_parked(selection)
+        } else {
+            TranscriptionEngine::start(WarmTranscriber::default())
+        };
+        let engine = match engine {
             Ok(engine) => {
-                let events = event_sender.clone();
-                let _ = engine.run(move |model| {
-                    prioritize_inference_thread();
-                    match WarmTranscriber::load() {
-                        Ok(loaded) => {
-                            tracing::info!("transcription model loaded");
-                            *model = loaded;
+                if !parked {
+                    let events = event_sender.clone();
+                    let _ = engine.run(move |model| {
+                        prioritize_inference_thread();
+                        match WarmTranscriber::load() {
+                            Ok(loaded) => {
+                                tracing::info!("transcription model loaded");
+                                *model = loaded;
+                            }
+                            Err(error) => {
+                                let _ = events.send(WorkerEvent::ModelFailed(error.to_string()));
+                            }
                         }
-                        Err(error) => {
-                            let _ = events.send(WorkerEvent::ModelFailed(error.to_string()));
-                        }
-                    }
-                });
+                    });
+                }
                 let engine = Arc::new(engine);
                 engine.share();
                 Some(engine)

@@ -389,7 +389,8 @@ pub struct TranscriptionEngine {
     /// Dictation requests sent so far. Background work submitted before a
     /// newer request yields to it.
     requests: Arc<AtomicU64>,
-    /// Whether the loaded model can stream on its device.
+    /// Whether the loaded model can stream on its device; while it is parked,
+    /// whether its definition advertises streaming.
     streams: Arc<AtomicBool>,
     /// Whether dictation streams publish their text as they go, asked as
     /// each stream begins: Labs › Live text, or a
@@ -528,16 +529,48 @@ impl PendingTranscript {
 
 impl TranscriptionEngine {
     pub fn start(model: Model) -> Result<Self> {
-        let streams = Arc::new(AtomicBool::new(model.stream_options().is_some()));
+        let streams = model.stream_options().is_some();
+        Self::with_model(Some(model), None, streams)
+    }
+
+    /// Starts with no model loaded, remembering `selection` to reload on the
+    /// first command that needs it, as [`Worker::park`] leaves the engine.
+    /// Labs › Unload model when idle uses this so a launch stays unloaded
+    /// until the first dictation. Whether it can stream is seeded from the
+    /// model's definition, not measured on this device: the first capture
+    /// either streams after the reload or falls back to its whole clip.
+    pub fn start_parked(
+        selection: crate::transcription::models::TranscriptionSelection,
+    ) -> Result<Self> {
+        let streams = crate::transcription::models::validate(&selection)
+            .is_ok_and(|definition| definition.streams);
+        Self::with_model(None, Some(selection), streams)
+    }
+
+    /// The engine and its worker thread: `model` loaded, or `parked` waiting
+    /// for the first command that needs it. `streams` is what the thread
+    /// publishes until the model loads.
+    fn with_model(
+        model: Option<Model>,
+        parked: Option<crate::transcription::models::TranscriptionSelection>,
+        streams: bool,
+    ) -> Result<Self> {
+        let streams = Arc::new(AtomicBool::new(streams));
         let (commands, receiver) = mpsc::channel();
         let requests = Arc::new(AtomicU64::new(0));
         let running = Running::default();
         let stalled = Arc::new(AtomicBool::new(false));
-        let held = Held::new(Mutex::new(model.gguf_selection().cloned()));
+        let held = Held::new(Mutex::new(
+            model
+                .as_ref()
+                .and_then(|model| model.gguf_selection().cloned())
+                .or_else(|| parked.clone()),
+        ));
         let dictating = Arc::new(AtomicBool::new(false));
         let worker = Worker {
-            model: Some(model),
-            parked: None,
+            model,
+            parked,
+            reload_error: None,
             idle_since: Instant::now(),
             running: running.clone(),
             stalled: stalled.clone(),
@@ -926,6 +959,8 @@ struct Worker {
     model: Option<Model>,
     /// What an unloaded model reloads, before the next command that needs it.
     parked: Option<crate::transcription::models::TranscriptionSelection>,
+    /// Why the last reload failed, so the job it failed can name it.
+    reload_error: Option<String>,
     /// When the last command ended.
     idle_since: Instant,
     running: Running,
@@ -1011,7 +1046,6 @@ impl Worker {
                     if let Some(model) = self.model() {
                         work(model);
                     }
-                    self.publish_streams();
                 }
                 Command::Reload(selection) => {
                     tracing::info!(model = ?selection.model, "replacing the speech model in place");
@@ -1019,7 +1053,6 @@ impl Worker {
                     self.parked = Some(selection);
                     // A failed load stays parked; the next command tries again.
                     let _ = self.model();
-                    self.publish_streams();
                 }
                 Command::Background { generation, work } => {
                     let current = self.requests.load(Ordering::Acquire) == generation;
@@ -1029,6 +1062,8 @@ impl Worker {
                 // Stale input for a stream that already ended.
                 Command::Feed { .. } | Command::Cancel { .. } => {}
             }
+            // Any command may load or switch the model.
+            self.publish_streams();
             self.publish_selection();
             self.idle_since = Instant::now();
         }
@@ -1095,8 +1130,12 @@ impl Worker {
                     );
                     self.model = Some(model);
                     self.parked = None;
+                    self.reload_error = None;
                 }
-                Err(error) => tracing::warn!(%error, "could not reload the speech model"),
+                Err(error) => {
+                    tracing::warn!(%error, "could not reload the speech model");
+                    self.reload_error = Some(error.to_string());
+                }
             }
         }
         self.model.as_mut()
@@ -1277,7 +1316,11 @@ impl Worker {
     ) {
         self.running.enter(&job.cancel);
         let Some(model) = self.model() else {
-            job.finish(Err("the speech model could not be reloaded".into()));
+            let reason = match &self.reload_error {
+                Some(error) => format!("the speech model could not be reloaded: {error}"),
+                None => "the speech model could not be reloaded".into(),
+            };
+            job.finish(Err(reason));
             return;
         };
         let result = crate::transcription::gguf_session::with_job_cancel(&job.cancel, || {
@@ -2112,6 +2155,33 @@ mod tests {
         assert_eq!(
             pending.job,
             JOB_DEADLINE + Duration::from_secs(30 * u64::from(JOB_SECONDS_PER_AUDIO_SECOND))
+        );
+    }
+
+    #[test]
+    fn a_parked_engine_holds_its_selection_and_reloads_it_before_the_first_job() {
+        // A language no model supports fails the reload deterministically,
+        // without depending on a model installed on the test machine.
+        let selection = crate::transcription::models::TranscriptionSelection {
+            language: "zz".into(),
+            ..Default::default()
+        };
+        let engine = TranscriptionEngine::start_parked(selection.clone()).unwrap();
+        assert!(engine.holds(&selection), "the parked model counts as held");
+        assert!(!engine.streams(), "an unusable selection cannot stream");
+        let transcribed = engine
+            .finish_with(
+                None,
+                Vec::new(),
+                Box::new(|_, _| panic!("a parked engine must reload its model first")),
+            )
+            .unwrap()
+            .wait();
+        assert!(
+            transcribed
+                .unwrap_err()
+                .starts_with("the speech model could not be reloaded"),
+            "the failure names why the reload failed"
         );
     }
 
