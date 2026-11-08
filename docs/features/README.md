@@ -882,12 +882,17 @@ Intentional recording                    // recording.environment, idle_sleep
     // no caffeinate child process or executable-policy dialog
 ```
 
-Feedback tones keep their output open for five idle minutes (macOS, Windows).
+Feedback tones keep their output open briefly after the last one: about ten
+seconds on macOS, where an open output is a live CoreAudio client coreaudiod
+services and holds a sleep assertion for, and five idle minutes on Windows.
 On Linux, where an open output stays listed in the desktop's sound controls,
 it closes about a second after the last tone ends
 ([#720](https://github.com/anomalyco/hex/issues/720)); the existing
 `output_opens_for_a_tone_and_releases_after_the_idle_grace` check covers the
-grace logic, not a real PipeWire stream list. On macOS the
+grace logic, not a real PipeWire stream list. A stream error sets a per-sink
+flag from the audio thread; the worker drops that sink and the next tone opens
+a fresh one
+(`an_errored_sink_is_dropped_and_reopened_on_the_next_tone`). On macOS the
 CoreAudio listeners on the default output, the device list, and an audio service
 restart advance an output route generation; the next tone drops an output opened
 under an older one and opens the current default at once, so unplugging a USB
@@ -2157,10 +2162,12 @@ The shared [feedback player](../../src/feedback.rs) uses Hex's bundled sounds
 ([Feedback](dictation.md#feedback)) on every platform; only macOS wake/sleep
 use `afplay`.
 Decoding happens before the Linux capture loop; the output device opens for
-the first tone and is released five minutes after the last one, as described
-in [macOS feedback](dictation.md#feedback). Playback admission is bounded and
-nonblocking. Output preparation failures are
-logged without blocking dictation. The Settings window saves the volume to
+the first tone and is released shortly after the last one (about ten seconds
+on macOS, five minutes on Windows, one second on Linux), as described in
+[macOS feedback](dictation.md#feedback). A stream that reports an error is
+dropped so the next tone reopens it. Playback admission is bounded and
+nonblocking. Output preparation failures are logged without blocking
+dictation. The Settings window saves the volume to
 `settings.json` and the service reloads it without restarting the listener. The start sound does not wait
 for the 300 ms capture-retention threshold; input delivery and audio-device
 latency still apply. **While dictating** mute, pause, or lower does: the audio loop

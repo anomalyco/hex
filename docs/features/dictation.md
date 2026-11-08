@@ -1537,7 +1537,10 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Classic has none: macOS Basso, Signature's error on Windows and Linux
      -> A lost microphone or input -> No tone; the capture ends
   Tone requested -> Playback worker opens the default output, then plays
-     -> Output stays open five minutes past the last tone, then releases
+     -> macOS releases ~10 s after the last tone; Windows 5 min; Linux 1 s
+     -> An open macOS output is a live CoreAudio client coreaudiod services
+        and holds an idle-sleep assertion for, so it must not idle for long
+     -> A stream that reports an error is dropped; the next tone reopens
      -> Released output holds no macOS idle-sleep assertion
   Feedback volume = 0 -> No tones
      -> Playback worker releases output on its next 250 ms observation
@@ -1675,16 +1678,24 @@ of the session. Linux already logged and continued; the macOS worker now
 matches that behavior instead of stopping desktop recognition.
 
 The playback worker never opens the output at startup. It opens the default
-output for the first tone, keeps it through a five-minute idle grace so bursts
-of dictation share a warm device, and releases it after that grace or on the
-next observation after sounds turn Off. macOS idle-sleep timers count from the
-last user input, and a tone implies recent input, so the grace never delays
-sleep by itself. A device open already in progress must return before the
-worker can observe that change. Output-open failures retry at most once per
-two seconds, and a released device reopens without that backoff. Bundled
-samples remain decoded in memory. A tone that arrives after the grace pays a
-cold device open first; the tone is delayed, not clipped or dropped.
-Overlapping tones extend the playing window rather than shortening it.
+output for the first tone, keeps it through an idle grace so bursts of
+dictation share a warm device, and releases it after that grace or on the next
+observation after sounds turn Off. On macOS the grace is ten seconds: an open
+output is a live CoreAudio IO client that coreaudiod services and holds an
+idle-sleep assertion for, and holding one idle for minutes is what let a
+stalled client block system audio (#1531). Ten seconds still covers a quick
+start-tone to stop-tone dictation. Windows keeps five minutes; Linux releases
+after one second because an open output is a listed stream in its sound
+controls (#720). A per-sink flag records a stream error from the audio thread;
+the worker drops that sink, logs one warning, and lets the next tone open a
+fresh one. macOS idle-sleep timers count from the last user input, and a tone
+implies recent input, so the grace never delays sleep by itself. A device open
+already in progress must return before the worker can observe that change.
+Output-open failures retry at most once per two seconds, and a released device
+reopens without that backoff. Bundled samples remain decoded in memory. A tone
+that arrives after the grace pays a cold device open first; the tone is
+delayed, not clipped or dropped. Overlapping tones extend the playing window
+rather than shortening it.
 
 **Fixed after 2.3.0:** the start tone used to wait for the 300 ms intentional
 hold, then pay rodio's default 50 ms output buffer, so it sounded about 345 ms
@@ -1710,9 +1721,10 @@ slept ([#95](https://github.com/anomalyco/hex/issues/95)). 2.1.18 released the
 stream only when sounds were Off. Startup admission therefore no longer
 reports `could not open the audio output`; a device failure surfaces as a
 warning when the first tone plays.
-`output_opens_for_a_tone_and_releases_after_the_idle_grace` and
-`overlapping_tones_extend_playback_instead_of_truncating_it` check ownership,
-grace, and drop with a controlled sink;
+`output_opens_for_a_tone_and_releases_after_the_idle_grace`,
+`overlapping_tones_extend_playback_instead_of_truncating_it`, and
+`an_errored_sink_is_dropped_and_reopened_on_the_next_tone` check ownership,
+grace, drop, and stream-error recovery with a controlled sink;
 `failed_output_initialization_retries_with_a_bounded_backoff` checks
 failure-to-success recovery without an audio device. The opt-in
 `native_output_release_clears_the_idle_sleep_assertion` opens the real default
