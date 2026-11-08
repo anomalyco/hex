@@ -432,9 +432,14 @@ impl CallbackState {
         let menu = binding.is_some_and(WindowsHotkey::holds_menu_modifier);
         let required_down =
             binding.is_some_and(|binding| self.modifiers.any_required_down(binding));
+        // Every key-down of the trigger masks its menu modifier's release,
+        // auto-repeats included: `process_button` clears the flag on each
+        // non-modifier key-down before this runs, and a held capture over
+        // the repeat delay must not leak a bare Alt/Win release. Dictation
+        // and Paste Last do the same before their first-press checks.
+        self.mask_release |= is_down && menu;
         if is_down && !trigger_down {
             self.set_second_trigger_down(flavour, true);
-            self.mask_release |= menu;
             self.capture.claim(flavour);
             let was_locked = self.capture.locked;
             if let Some(action) =
