@@ -23,15 +23,25 @@ fn clock() -> u32 {
     (epoch().elapsed().as_millis() as u32).wrapping_add(1)
 }
 
-/// Records the peak of a chunk the microphone delivered.
+/// Records the peak of a chunk the microphone delivered, measured around the
+/// chunk's mean so a DC offset never reads as a level.
 pub fn record(samples: &[f32]) {
     if samples.is_empty() {
         return;
     }
-    let peak = samples
+    LATEST.store(pack(chunk_peak(samples), clock()), Ordering::Relaxed);
+}
+
+/// The chunk's absolute peak around its mean; zero for no samples.
+fn chunk_peak(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let count = samples.len() as f32;
+    let mean = samples.iter().sum::<f32>() / count;
+    samples
         .iter()
-        .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
-    LATEST.store(pack(peak, clock()), Ordering::Relaxed);
+        .fold(0.0_f32, |peak, sample| peak.max((sample - mean).abs()))
 }
 
 /// The peak of the audio received in the last quarter second, 0 to 1, or
@@ -77,7 +87,16 @@ mod tests {
 
     #[test]
     fn recording_a_chunk_makes_its_peak_current() {
-        record(&[0.1, -0.4, 0.2]);
-        assert_eq!(recent(), Some(0.4));
+        record(&[0.25, -0.5, 0.25]);
+        assert_eq!(recent(), Some(0.5));
+    }
+
+    /// Some microphones (a Ryzen built-in digital microphone, #841) carry a
+    /// DC offset louder than the speech; the bars follow the signal, not the
+    /// offset, as the HUD's meter does.
+    #[test]
+    fn a_dc_offset_never_reads_as_a_level() {
+        assert!(chunk_peak(&[0.2; 512]) < 1e-5);
+        assert!((chunk_peak(&[0.7, -0.3]) - 0.5).abs() < 1e-6);
     }
 }

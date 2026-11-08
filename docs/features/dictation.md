@@ -1879,6 +1879,11 @@ it. The GPU device itself frees only once Rune's parked device also expires,
 and on Wayland layer-shell Rune keeps its own device regardless. The memory
 drop is not yet measured on a real Windows machine (#1431).
 
+Each chunk's meter removes the chunk's mean before measuring RMS and peak, so
+a microphone's DC offset (a Ryzen built-in digital microphone, #841) never
+reads as loudness; the dictation silence gate and the meeting pause detector
+remove it the same way.
+
 ```ts
 Dot scope                                    // dot_scope
 ├── Recording -> A scanner unfolds a resting braid; the voice's level widens it

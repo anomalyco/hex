@@ -620,7 +620,7 @@ lock reset. Checks:
 `without_the_hid_tracker_an_on_edge_is_the_fallback_press`, and
 `the_light_pattern_codes_round_trip` in
 [caps_lock_dictation.rs](../../src/caps_lock_dictation.rs);
-`meter_reports_rms_and_peak` in
+`meter_reports_rms_and_peak` and `a_dc_offset_never_reads_as_loudness` in
 [indicator.rs](../../src/dictation/indicator.rs);
 `a_meter_reaches_the_light_without_a_hud`,
 `escape_cancels_a_caps_lock_capture_in_hold_mode`,
