@@ -291,8 +291,10 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         if !text.is_empty()
             && let Some(start_ms) = self.stream.text_start_ms()
         {
-            // The same slack and threshold as the trailing check, on the
-            // speech that ends before the text begins.
+            // The trailing check's slack and threshold, on the speech that
+            // ends before the text begins. Unlike the trailing check, a
+            // late-emitted first token moves t0 later, the unsafe direction
+            // here, so the cost is at most a whole-clip run.
             let covered = (start_ms as usize * 16).saturating_sub(UNTRANSCRIBED_SLACK_SAMPLES);
             let untranscribed = self
                 .speech_ends

@@ -1084,8 +1084,8 @@ floor) through `metal_stream_tracks_offline_transcription` lost "I" after the
 on where speech resumes against the stream's chunks. Live text does not cause
 it: `HEX_STREAM_LIVE_TEXT=0` gives the same text. The losses replayed here sit
 in the middle of transcribed text, so neither coverage check below sees them;
-a loss at the stream's very start is caught since November 7, 2026
-(`a_stream_that_lost_the_opening_phrase_falls_back_to_the_whole_clip`).
+a loss of at least 300 ms at the stream's very start is checked since
+November 7, 2026 (`a_stream_that_lost_the_opening_phrase_falls_back_to_the_whole_clip`).
 
 **Mitigation, October 29, 2026 (#338's diagnosis, by ElliottH):** the engine's
 `PauseCap` now feeds a dictation stream only the first 2.5 s and last 0.3 s of
@@ -1152,25 +1152,6 @@ the macOS 400 ms trailing silence) while the whole clip kept it ("…channels
 product names, 1.7–15 s) finished from the stream; an 84 s speech ending in
 applause fell back. The stream's own loss is not fixed upstream.
 
-**Guard, November 7, 2026 (opening and language):** the coverage check now
-also runs at the start. `PauseCap` takes the first token with letters or
-digits (`spoken_text_start_ms`, the minimum `t0_ms`) and counts the speech
-frames the stream heard that end more than 400 ms before it; at least 300 ms
-of such speech means the stream lost its opening (or, under Auto, garbled it
-into another language), so the whole clip is transcribed offline
-(`source=fallback`, reason "the stream's text starts at … ms but … ms of
-speech precedes it"). A short click before the speech is shorter than that.
-The stream's unfiltered raw decode also keeps Nemotron 3.5's `<ll-RR>`
-language tags, which the public text drops; two distinct tags in one stream
-mean it changed language mid-clip, and the whole clip decides too
-(`language_tags`). Checks:
-`a_stream_that_lost_the_opening_phrase_falls_back_to_the_whole_clip`,
-`a_short_click_before_the_text_does_not_discard_the_stream`,
-`a_punctuation_token_does_not_start_the_streams_text`, and
-`a_stream_that_switched_language_falls_back_to_the_whole_clip` (synthetic
-tones and tags, a fake stream). Not measured on a real model, microphone, or
-device; the stream's own loss is not fixed upstream.
-
 **Nemotron 3.5 ASR, observed November 3, 2026, apollo (Vulkan, Q8, Auto):**
 ten clips through `PauseCap` and the real cache-aware stream (JFK, FLEURS
 English and German, product names, and speech, a 1–1.2 s pause, and a short
@@ -1182,6 +1163,31 @@ would have hidden a dropped phrase; the text's end is now the last token with
 letters or digits (`spoken_text_end_ms`), and no clip fell back. Check:
 `a_closing_full_stop_at_the_clips_end_does_not_cover_a_dropped_phrase`. Not
 macOS or a microphone.
+
+**Guard, November 7, 2026 (opening and language):** the coverage check now
+also runs at the start. `PauseCap` takes the first token with letters or
+digits (`spoken_text_start_ms`, the minimum `t0_ms`) and counts the speech
+frames the stream heard that end more than 400 ms before it; at least 300 ms
+of such speech means the stream lost its opening, so the whole clip is
+transcribed offline (`source=fallback`, reason "the stream's text starts at …
+ms but … ms of speech precedes it"). A short click before the speech is
+shorter than that. Hesitation fillers, coughs, or clicks that together reach
+300 ms before the first word would trip it too, and that false-positive rate
+is unmeasured; a false positive costs only the whole clip's latency, since its
+text is the fallback's. This check cannot see an opening that was garbled
+rather than dropped: a garbled opening still yields word tokens at the speech
+onset. The stream's unfiltered raw decode also keeps Nemotron 3.5's `<ll-RR>`
+language tags, which the public text drops; two distinct tags in one stream
+mean it changed language mid-clip, and the whole clip decides too
+(`language_tags`). That catches a garbled opening only when the garbled part
+carries a different tag, and neither check catches a stream that stays in one
+wrong language for the whole clip. Checks:
+`a_stream_that_lost_the_opening_phrase_falls_back_to_the_whole_clip`,
+`a_short_click_before_the_text_does_not_discard_the_stream`,
+`a_punctuation_token_does_not_start_the_streams_text`, and
+`a_stream_that_switched_language_falls_back_to_the_whole_clip` (synthetic
+tones and tags, a fake stream). Not measured on a real model, microphone, or
+device; the stream's own loss is not fixed upstream.
 
 ### Ongoing Jobs And Output
 
