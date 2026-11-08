@@ -37,12 +37,14 @@ fn show(bundle: &Path) -> anyhow::Result<()> {
         .next()
         .ok_or_else(|| anyhow::anyhow!("the recording has no frames"))?;
     if let Some(overlays) = super::OVERLAYS.get() {
+        let screen = super::screen_under_pointer();
         overlays.thumbnail.show_recording(
             bundle.to_owned(),
             Recording { movie, duration_ms },
             frame.width,
             frame.height,
             frame.rgba,
+            screen,
         );
     }
     Ok(())

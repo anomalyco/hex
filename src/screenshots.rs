@@ -189,9 +189,9 @@ fn shoot(target: CaptureTarget) {
 
 /// Shoots `target`, saves it, copies it, and shows its thumbnail.
 fn take(target: CaptureTarget) -> anyhow::Result<std::path::PathBuf> {
-    let (source, points_wide) = source(target)?;
-    let image = capture_core::screenshot_with(&source, &exclusions(), None, false)?;
-    let scale = f64::from(image.width) / points_wide.max(1.0);
+    let shot = source(target)?;
+    let image = capture_core::screenshot_with(&shot.source, &exclusions(), None, false)?;
+    let scale = f64::from(image.width) / shot.points_wide.max(1.0);
     let png = save::encode(image.width, image.height, &image.rgba, scale)?;
     let folder = crate::app_settings::screenshot_settings().folder();
     let path = save::write(&folder, &png);
@@ -202,16 +202,42 @@ fn take(target: CaptureTarget) -> anyhow::Result<std::path::PathBuf> {
     let path = path?;
     if let Some(overlays) = OVERLAYS.get() {
         let (width, height, small) = shrink(image.width, image.height, &image.rgba, THUMB_PX);
-        overlays.thumbnail.show(path.clone(), width, height, small);
+        overlays.thumbnail.show(
+            path.clone(),
+            width,
+            height,
+            small,
+            shot.screen,
+            shot.capture,
+        );
     }
     Ok(path)
+}
+
+/// The display under the pointer, in points, where a recording's card rests.
+fn screen_under_pointer() -> (f32, f32) {
+    use scrawl_capture::screens;
+    let displays = screens::displays();
+    screens::pointer()
+        .and_then(|at| screens::index_at(&displays, at))
+        .map(|i| (displays[i].frame[2] as f32, displays[i].frame[3] as f32))
+        .unwrap_or(crate::rune_ui::screenshot_thumbnail::NOMINAL)
 }
 
 /// The thumbnail's long edge, in pixels.
 const THUMB_PX: u32 = 480;
 
-/// What ScreenCaptureKit shoots for `target`, and its width in points.
-fn source(target: CaptureTarget) -> anyhow::Result<(capture_core::Source, f64)> {
+/// What ScreenCaptureKit shoots for `target`: its source, its width in
+/// points, the display it lands on, and where on that display it was taken
+/// from when it was an area or a window.
+struct Shot {
+    source: capture_core::Source,
+    points_wide: f64,
+    screen: (f32, f32),
+    capture: Option<[f32; 4]>,
+}
+
+fn source(target: CaptureTarget) -> anyhow::Result<Shot> {
     use scrawl_capture::screens;
     let displays = screens::displays();
     let display_at = |at: [f64; 2]| {
@@ -219,23 +245,43 @@ fn source(target: CaptureTarget) -> anyhow::Result<(capture_core::Source, f64)> 
             .map(|i| &displays[i])
             .ok_or_else(|| anyhow::anyhow!("no display there"))
     };
+    let screen = |display: &screens::Screen| (display.frame[2] as f32, display.frame[3] as f32);
     Ok(match target {
         CaptureTarget::Window { id } => {
-            let wide = scrawl_capture::windows::raw_windows()
+            let bounds = scrawl_capture::windows::raw_windows()
                 .into_iter()
                 .find(|w| w.id == id)
-                .map_or(0.0, |w| w.bounds[2]);
-            (capture_core::Source::Window(id), wide)
+                .map(|w| w.bounds);
+            let center = bounds.map_or([0.0, 0.0], |[x, y, w, h]| [x + w * 0.5, y + h * 0.5]);
+            let display = display_at(center)?;
+            let [dx, dy, ..] = display.frame;
+            Shot {
+                source: capture_core::Source::Window(id),
+                points_wide: bounds.map_or(0.0, |b| b[2]),
+                screen: screen(display),
+                capture: bounds
+                    .map(|[x, y, w, h]| [(x - dx) as f32, (y - dy) as f32, w as f32, h as f32]),
+            }
         }
         CaptureTarget::Pointer => {
             let at = screens::pointer().unwrap_or_default();
             let display = display_at(at)?;
-            (capture_core::Source::Display(display.id), display.frame[2])
+            Shot {
+                source: capture_core::Source::Display(display.id),
+                points_wide: display.frame[2],
+                screen: screen(display),
+                capture: None,
+            }
         }
         CaptureTarget::Phone => anyhow::bail!("a screenshot is never of an iPhone"),
         CaptureTarget::Display { at } => {
             let display = display_at(at)?;
-            (capture_core::Source::Display(display.id), display.frame[2])
+            Shot {
+                source: capture_core::Source::Display(display.id),
+                points_wide: display.frame[2],
+                screen: screen(display),
+                capture: None,
+            }
         }
         CaptureTarget::Area { rect: [x, y, w, h] } => {
             let display = display_at([x + w * 0.5, y + h * 0.5])?;
@@ -246,13 +292,15 @@ fn source(target: CaptureTarget) -> anyhow::Result<(capture_core::Source, f64)> 
                 width: w,
                 height: h,
             };
-            (
-                capture_core::Source::Region {
+            Shot {
+                source: capture_core::Source::Region {
                     display: display.id,
                     rect,
                 },
-                w,
-            )
+                points_wide: w,
+                screen: screen(display),
+                capture: Some([(x - dx) as f32, (y - dy) as f32, w as f32, h as f32]),
+            }
         }
     })
 }

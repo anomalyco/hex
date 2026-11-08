@@ -25,19 +25,17 @@ use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 use super::controls::Paint;
 use crate::desktop::i18n::tr;
 
-/// The overlay: room for the largest card and its shadow.
-const SIZE: (f32, f32) = (CARD_MAX.0 + 2.0 * PAD, CARD_MAX.1 + 2.0 * PAD);
+/// The overlay, before a shot gives it its display's size: a laptop's.
+pub(crate) const NOMINAL: (f32, f32) = (1440.0, 900.0);
+/// The display a fixture card rests on, small enough to read in a golden.
+const PREVIEW: (f32, f32) = (400.0, 300.0);
 const CARD_MAX: (f32, f32) = (240.0, 168.0);
-/// Around the card, for its shadow.
-const PAD: f32 = 16.0;
 /// The corner the card's own corner follows. macOS gives no display's
 /// corner radius (and a MacBook's bottom corners are square glass), so this
 /// is a design constant: the card's corner is concentric with it.
 const SCREEN_RADIUS: f32 = 30.0;
 /// From the display's edges to the card's.
 const INSET: f32 = 16.0;
-/// The overlay sits on the display's edges; [`PAD`] holds the card in.
-const MARGIN: f32 = INSET - PAD;
 /// Concentric with [`SCREEN_RADIUS`], and so the capture capsule's shell.
 const RADIUS: f32 = SCREEN_RADIUS - INSET;
 /// ✕ sits inside the card's corner, its corner concentric with the card's.
@@ -53,6 +51,9 @@ const REDUCED: Spring =
     super::capture_capsule::tuning::spring(crate::rune_hud::spring::REDUCED_FADE);
 /// How far it leans back as it travels, about its bottom-right corner.
 const TRAVEL_SCALE: f32 = 0.94;
+/// The shot growing in from the rectangle it was taken from, and shrinking
+/// back into it: one spring, and no bounce, so its size never overshoots.
+const ZOOM: Spring = Spring::new(0.34, 0.0);
 /// How long leaving takes, before the overlay hides.
 const LEAVE_S: f64 = 0.4;
 /// The recording pill's height, inside the card's bottom-left corner.
@@ -87,6 +88,11 @@ pub(crate) struct Recording {
 #[derive(Default)]
 pub(crate) struct Card {
     shot: Option<Shot>,
+    /// The display's size in points, where the card rests in its corner.
+    screen: (f32, f32),
+    /// Where the shot was taken from on that display, in points, when it was
+    /// an area or a window: the card grows in from it.
+    capture: Option<[f32; 4]>,
     on: bool,
     hovered: bool,
     /// Animation seconds it last appeared, or the pointer last left it.
@@ -103,6 +109,7 @@ impl Card {
     pub(crate) fn still(shot: Shot, hovered: bool) -> Self {
         Self {
             shot: Some(shot),
+            screen: PREVIEW,
             on: true,
             hovered,
             ..Self::default()
@@ -179,11 +186,11 @@ impl Thumbnail {
     pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
         let spec = OverlaySpec {
             name: "Hex screenshot",
-            size: SIZE,
+            size: NOMINAL,
             edge: ScreenEdge::Bottom,
-            margin: MARGIN,
+            margin: 0.0,
             align: Align::End,
-            inset: MARGIN,
+            inset: 0.0,
             interactive: true,
             view,
         }
@@ -202,10 +209,20 @@ impl Thumbnail {
     }
 
     /// Shows the shot at `path`, from `rgba` (`width` × `height` pixels,
-    /// already small), in place of any before it. Safe from any thread;
-    /// waits for the decode.
-    pub(crate) fn show(&self, path: PathBuf, width: u32, height: u32, rgba: Vec<u8>) {
-        self.present(path, None, width, height, rgba);
+    /// already small), on the display `screen` points across, in place of any
+    /// before it. `capture` is the rectangle it was taken from on that
+    /// display, in points, when it was an area or a window. Safe from any
+    /// thread; waits for the decode.
+    pub(crate) fn show(
+        &self,
+        path: PathBuf,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+        screen: (f32, f32),
+        capture: Option<[f32; 4]>,
+    ) {
+        self.present(path, None, width, height, rgba, screen, capture);
     }
 
     /// Shows the recording in the capture folder `bundle`, from its first
@@ -218,10 +235,12 @@ impl Thumbnail {
         width: u32,
         height: u32,
         rgba: Vec<u8>,
+        screen: (f32, f32),
     ) {
-        self.present(bundle, Some(recording), width, height, rgba);
+        self.present(bundle, Some(recording), width, height, rgba, screen, None);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn present(
         &self,
         path: PathBuf,
@@ -229,15 +248,22 @@ impl Thumbnail {
         width: u32,
         height: u32,
         rgba: Vec<u8>,
+        screen: (f32, f32),
+        capture: Option<[f32; 4]>,
     ) {
         let images = rune::ImageCache::new(std::sync::Arc::new(|| {}));
         let image = images.rgba(width, height, rgba);
         if image.wait().is_err() {
             return;
         }
+        // The overlay is the whole display, so the card can start wherever
+        // the shot was taken.
+        self.overlay.resize(screen);
         let handle = self.overlay.clone();
         self.overlay.update(move |s, tx| {
             *shown() = recording.is_none().then(|| path.clone());
+            s.screen = screen;
+            s.capture = capture;
             s.shot = Some(Shot {
                 path,
                 image,
@@ -258,18 +284,19 @@ impl Thumbnail {
 pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     let k = p.k;
+    let (sw, sh) = s.screen;
     let root = el()
         .key("screenshot-thumbnail")
-        .size(SIZE.0, SIZE.1)
+        .size(sw, sh)
         .hover_motion_within(Anim::INSTANT, Anim::INSTANT);
     let Some(shot) = s.shot.as_ref().filter(|_| s.on) else {
         return root;
     };
     let (w, h) = s.card_size();
-    let (x, y) = (SIZE.0 - PAD - w, SIZE.1 - PAD - h);
+    let (x, y) = (sw - INSET - w, sh - INSET - h);
     let mut card = el()
         .key("card")
-        .absolute(PAD, PAD)
+        .absolute(x, y)
         .size(w, h)
         .radius(RADIUS)
         .fill(k.c.bg_base);
@@ -296,40 +323,44 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
                 .border(p.hair, k.c.border_weak),
         );
     let close = IconButton::new(CLOSE)
-        .variant(IconButtonVariant::Neutral)
+        .variant(IconButtonVariant::Ghost)
         .control_size(ControlSize::Small)
         .label(tr("Close"))
         .on_press_tx(|s: &mut Card, tx| s.close(tx))
         .build(k)
         .key("close")
-        .radius(CLOSE_RADIUS)
-        .absolute(PAD + CLOSE_INSET, PAD + CLOSE_INSET)
+        .absolute(CLOSE_INSET, CLOSE_INSET)
         .opacity(if s.hovered { 1.0 } else { 0.0 })
         .opacity_motion(FADE);
-    // In from past the display's right edge, leaning back about the corner
-    // it rests in, and out the same way; Reduce Motion only fades.
     let length = shot
         .recording
         .as_ref()
         .map(|recording| length(p, recording.duration_ms));
     let pill = length.map(|pill| {
         pill.key("length")
-            .absolute(PAD + CLOSE_INSET, PAD + h - CLOSE_INSET - PILL_H)
+            .absolute(CLOSE_INSET, h - CLOSE_INSET - PILL_H)
     });
+    // A shot grows in from the rectangle it was taken from, at that
+    // rectangle's size and place, and shrinks into its corner slot; without
+    // one (a whole display) it comes in from past the display's right edge,
+    // leaning back about the corner it rests in. It leaves the same way.
+    // Reduce Motion only fades.
     let travel = if cx.is_reduced_motion() {
         Transition::opacity().springs(SpringPair::new(REDUCED, REDUCED))
+    } else if let Some([cx0, cy0, cw, _]) = s.capture {
+        let scale = (cw / w).max(0.02);
+        Transition::offset(cx0 - x, cy0 - y)
+            .combined(Transition::scale_anchor(scale, rune::Vec2::new(0.0, 0.0)))
+            .springs(SpringPair::new(ZOOM, LEAVE))
     } else {
-        Transition::offset(w + PAD + INSET, 0.0)
+        Transition::offset(w + INSET, 0.0)
             .combined(Transition::scale_anchor(
                 TRAVEL_SCALE,
                 rune::Vec2::new(1.0, 1.0),
             ))
             .springs(SpringPair::new(ENTER, LEAVE))
     };
-    let group = el()
-        .key("shot")
-        .absolute(x - PAD, y - PAD)
-        .size(w + 2.0 * PAD, h + 2.0 * PAD)
+    let card = card
         .hit()
         .on_hover_change(|s: &mut Card, on, tx| {
             s.hovered = on;
@@ -340,11 +371,10 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
             tx.animated();
         })
         .transition(travel)
-        .child(card)
         .child(close);
     root.child(match pill {
-        Some(pill) => group.child(pill),
-        None => group,
+        Some(pill) => card.child(pill),
+        None => card,
     })
 }
 
@@ -424,10 +454,11 @@ mod tests {
     }
 
     fn render(gpu: &rune::render::Gpu, card: Card, dark: bool) -> (u32, u32, Vec<u8>) {
+        let screen = card.screen;
         let mut rt = crate::rune_ui::offscreen::runtime(
             card,
             view,
-            SIZE,
+            screen,
             rune::Env {
                 system_dark: dark,
                 scale: 2.0,
@@ -436,7 +467,7 @@ mod tests {
         );
         rt.settle_all();
         rt.frame(0.0);
-        let (w, h) = ((SIZE.0 * 2.0) as u32, (SIZE.1 * 2.0) as u32);
+        let (w, h) = ((screen.0 * 2.0) as u32, (screen.1 * 2.0) as u32);
         let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
         let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
         renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
@@ -533,11 +564,15 @@ mod tests {
         let out = std::path::PathBuf::from(folder).join("thumbnail");
         std::fs::create_dir_all(&out).unwrap();
         let mut card = Card::still(desktop([1440, 900]), false);
+        // A window shot from the middle of the display: the card grows in
+        // from that rectangle.
+        card.capture = Some([120.0, 90.0, 260.0, 170.0]);
         card.on = false;
+        let screen = card.screen;
         let mut rt = crate::rune_ui::offscreen::runtime(
             card,
             view,
-            SIZE,
+            screen,
             rune::Env {
                 system_dark: true,
                 scale: 2.0,
@@ -545,7 +580,7 @@ mod tests {
             rune::text::TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES),
         );
         rt.frame(0.0);
-        let (w, h) = ((SIZE.0 * 2.0) as u32, (SIZE.1 * 2.0) as u32);
+        let (w, h) = ((screen.0 * 2.0) as u32, (screen.1 * 2.0) as u32);
         let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
         let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
         for index in 0..=150 {

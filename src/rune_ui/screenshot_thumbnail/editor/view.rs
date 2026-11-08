@@ -4,10 +4,9 @@
 use std::time::Duration;
 
 use rune::{
-    Anim, Color, Cursor, Cx, Drag, El, LineCap, Path, Phase, Shape, Spring, SpringPair, TextStyle,
-    Transition, Tx, canvas, el, row, text,
+    Anim, Cursor, Cx, Drag, El, Phase, Spring, SpringPair, TextStyle, Transition, Tx, el, row, text,
 };
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant};
 
 use super::clip::{Clip, duration_label};
 use super::marks::{self, Mark, Tool};
@@ -18,7 +17,7 @@ use crate::desktop::i18n::tr;
 use crate::rune_ui::capture_capsule::ink::{ink_red, layer};
 use crate::rune_ui::capture_capsule::surface::{self, CHIP_H, CHIP_PX, SHELL_RADIUS, medium};
 use crate::rune_ui::controls::{Paint, status_dot};
-use crate::rune_ui::icons::MIC;
+use crate::rune_ui::icons::{ARROW_TOOL, BOX_TOOL, CROP_TOOL, MIC, PEN, TEXT_TOOL};
 
 /// The panel's corner, the capsule's and the thumbnail's.
 const RADIUS: f32 = SHELL_RADIUS;
@@ -27,9 +26,6 @@ const INNER_RADIUS: f32 = RADIUS - PAD;
 /// The open Send to… list.
 const LIST_W: f32 = 320.0;
 const ROW_H: f32 = 32.0;
-/// The tool glyphs' stroke, in points, the capsule's marks' line.
-const GLYPH_STROKE: f32 = 0.8;
-const GLYPH: f32 = 16.0;
 /// In on the HUD family's spring; out shorter, none. Reduce Motion fades.
 const ENTER: Spring =
     crate::rune_ui::capture_capsule::tuning::spring(crate::rune_hud::spring::MORPH);
@@ -261,21 +257,17 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
         );
     }
     for tool in Tool::ALL.into_iter().filter(|_| s.clip.is_none()) {
-        let lit = s.tool == tool;
-        let ink = if lit { p.text() } else { p.muted() };
-        let mut chip = chip(p)
-            .w(CHIP_H)
-            .center()
-            .child(canvas(glyph(tool, ink)).size(GLYPH, GLYPH))
-            .role("radio")
-            .checked(lit)
-            .label(tr(tool.name()))
-            .help(tr(tool.name()))
-            .on_press(move |s: &mut Editor| s.pick(tool));
-        if lit {
-            chip = chip.fill(k.c.pressed);
-        }
-        bar = bar.child(chip);
+        bar = bar.child(
+            IconButton::new(icon(tool))
+                .variant(IconButtonVariant::Ghost)
+                .control_size(ControlSize::Large)
+                .label(tr(tool.name()))
+                .help(tr(tool.name()))
+                .expanded(s.tool == tool)
+                .on_press(move |s: &mut Editor| s.pick(tool))
+                .build(k)
+                .key(format!("tool-{}", tr(tool.name()))),
+        );
     }
     let note = s.note.as_ref().map(|(note, _)| note.as_str()).unwrap_or("");
     bar = bar.child(
@@ -284,10 +276,11 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
             .h_full()
             .center_y()
             .justify_end()
-            .px(8.0)
+            .px(4.0)
             .child(
                 text(note)
-                    .font(surface::small())
+                    .key("note")
+                    .font(k.ty.ui)
                     .color(p.muted())
                     .single_line()
                     .truncate(),
@@ -320,13 +313,14 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
             .on_press(|s: &mut Editor| s.open_send()),
     ))
     .child(
-        chip(p)
-            .w(CHIP_H)
-            .center()
-            .child(rune::icon(k.glyph.close, GLYPH).color(p.muted()))
+        IconButton::new(k.glyph.close)
+            .variant(IconButtonVariant::Ghost)
+            .control_size(ControlSize::Large)
             .label(tr("Close"))
             .help(tr("Close"))
-            .on_press_tx(|s: &mut Editor, tx| s.close(tx)),
+            .on_press_tx(|s: &mut Editor, tx| s.close(tx))
+            .build(k)
+            .key("close"),
     )
 }
 
@@ -363,18 +357,17 @@ fn words_el(p: Paint, s: &Editor, layout: Layout) -> El {
     } else {
         tr("Talk over it")
     };
-    let mut mic = chip(p)
-        .key("mic")
-        .w(CHIP_H)
-        .center()
-        .child(rune::icon(&MIC, GLYPH).color(if recording { p.text() } else { p.muted() }))
+    let mut mic = IconButton::new(&MIC)
+        .variant(IconButtonVariant::Ghost)
+        .control_size(ControlSize::Large)
         .label(mic_label)
         .help(mic_label)
-        .on_press(|_: &mut Editor| talk(Talk::Toggle));
+        .expanded(recording)
+        .on_press(|_: &mut Editor| talk(Talk::Toggle))
+        .build(k)
+        .key("mic");
     if recording {
-        mic = mic
-            .fill(k.c.pressed)
-            .child(status_dot(p.danger()).absolute(CHIP_H - 11.0, 5.0));
+        mic = mic.child(status_dot(p.danger()).absolute(19.0, 4.0));
     }
     let status = match s.listen {
         Listen::Idle => None,
@@ -418,15 +411,15 @@ fn words_el(p: Paint, s: &Editor, layout: Layout) -> El {
         .child(line);
     if !s.words.is_empty() && s.listen == Listen::Idle {
         bar = bar.child(
-            chip(p)
-                .key("clear-words")
-                .w(CHIP_H)
-                .center()
-                .self_start()
-                .child(rune::icon(k.glyph.close, GLYPH).color(p.muted()))
+            IconButton::new(k.glyph.close)
+                .variant(IconButtonVariant::Ghost)
+                .control_size(ControlSize::Large)
                 .label(tr("Clear words"))
                 .help(tr("Clear words"))
-                .on_press(|s: &mut Editor| s.words.clear()),
+                .on_press(|s: &mut Editor| s.words.clear())
+                .build(k)
+                .key("clear-words")
+                .self_start(),
         );
     }
     bar
@@ -479,7 +472,7 @@ fn strip_el(p: Paint, clip: &Clip, layout: Layout) -> El {
             el().key(key)
                 .absolute(left.clamp(0.0, (w - HANDLE_W).max(0.0)), 0.0)
                 .size(HANDLE_W, h)
-                .radius(INNER_RADIUS.min(HANDLE_W * 0.5))
+                .radius(k.radius.sm)
                 .fill(p.text())
                 .child(
                     el().absolute(HANDLE_W * 0.5 - 0.75, h * 0.5 - 7.0)
@@ -516,25 +509,21 @@ fn strip_el(p: Paint, clip: &Clip, layout: Layout) -> El {
         })
 }
 
-/// A toolbar chip: the capsule's chip height, its hover and press.
-fn chip(p: Paint) -> El {
-    row()
-        .h(CHIP_H)
-        .radius(INNER_RADIUS)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
-        .role("button")
+/// A toolbar button, the kit's own: Copy, the one main action, is its
+/// contrast button.
+fn push(k: &rune_kit::Kit, button: Button) -> El {
+    button.control_size(ControlSize::Large).build(k)
 }
 
-/// A labelled button the chips' height: the kit's, so Copy, the one main
-/// action, is its contrast button.
-fn push(k: &rune_kit::Kit, button: Button) -> El {
-    button
-        .control_size(ControlSize::Large)
-        .build(k)
-        .h(CHIP_H)
-        .px(CHIP_PX)
-        .radius(INNER_RADIUS)
+/// A tool's icon, in Hex's line icons, the theme's own stroke.
+fn icon(tool: Tool) -> &'static rune::Icon {
+    match tool {
+        Tool::Pen => &PEN,
+        Tool::Arrow => &ARROW_TOOL,
+        Tool::Box => &BOX_TOOL,
+        Tool::Text => &TEXT_TOOL,
+        Tool::Crop => &CROP_TOOL,
+    }
 }
 
 /// The open Send to… list: what's typed, then the sessions it matches.
@@ -634,57 +623,4 @@ fn send_list(p: Paint, list: &SendList) -> El {
         );
     }
     body
-}
-
-/// A tool's line glyph on a 24 × 24 grid.
-fn glyph(tool: Tool, color: Color) -> Shape {
-    let line = |a: [f32; 2], b: [f32; 2]| Path::new().move_to(a).line_to(b);
-    let paths: Vec<Path> = match tool {
-        // A pencil, tip at the bottom left, as Annotate's pen.
-        Tool::Pen => vec![
-            Path::new()
-                .move_to([16.5, 3.5])
-                .line_to([20.5, 7.5])
-                .line_to([8.0, 20.0])
-                .line_to([3.5, 20.5])
-                .line_to([4.0, 16.0])
-                .close(),
-            line([13.5, 6.5], [17.5, 10.5]),
-        ],
-        Tool::Arrow => vec![
-            line([5.0, 19.0], [19.0, 5.0]),
-            Path::new()
-                .move_to([10.0, 5.0])
-                .line_to([19.0, 5.0])
-                .line_to([19.0, 14.0]),
-        ],
-        Tool::Box => vec![
-            Path::new()
-                .move_to([4.0, 5.0])
-                .line_to([20.0, 5.0])
-                .line_to([20.0, 19.0])
-                .line_to([4.0, 19.0])
-                .close(),
-        ],
-        Tool::Text => vec![
-            line([5.0, 5.0], [19.0, 5.0]),
-            line([12.0, 5.0], [12.0, 20.0]),
-        ],
-        Tool::Crop => vec![
-            Path::new()
-                .move_to([7.0, 2.5])
-                .line_to([7.0, 17.0])
-                .line_to([21.5, 17.0]),
-            Path::new()
-                .move_to([2.5, 7.0])
-                .line_to([17.0, 7.0])
-                .line_to([17.0, 21.5]),
-        ],
-    };
-    let width = GLYPH_STROKE * 24.0 / GLYPH;
-    paths
-        .iter()
-        .fold(Shape::new().view_box(24.0, 24.0), |shape, path| {
-            shape.stroke_path(path, width, LineCap::Round, color)
-        })
 }
