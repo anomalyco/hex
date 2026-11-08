@@ -3357,7 +3357,7 @@ fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
                     }
                     Some(Err(error)) => tracing::warn!(%error, "contact sheet unreadable"),
                 }
-                paster.paste(&summary)
+                paster.paste(&summary, false)
             })
         }
         HandOff::Inspect => inspect(bundle),

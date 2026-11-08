@@ -70,7 +70,7 @@ impl ClipboardJob for LinuxPaster {
     }
 
     fn paste(&mut self, text: &str) -> Result<()> {
-        LinuxPaster::paste(self, text)
+        LinuxPaster::paste(self, text, false)
     }
 
     fn restore(&mut self, snapshot: Snapshot) -> Result<()> {

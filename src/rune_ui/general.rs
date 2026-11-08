@@ -74,6 +74,24 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Opt
                 ),
             );
         }
+        // Labs › Terminal paste shortcut (Windows, Linux): another key that
+        // dictates like the one above and always pastes with Ctrl+Shift+V.
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        if crate::labs::Feature::TerminalPasteShortcut.on(&ui.settings) {
+            rows.extend_described(
+                tr("Terminal paste shortcut"),
+                Some(tr("Dictates like the shortcut above")),
+                shortcut_rows(
+                    ui,
+                    p,
+                    "terminal-paste-shortcut",
+                    &KEYBOARD,
+                    tr("Terminal paste shortcut"),
+                    ShortcutTarget::TerminalPaste,
+                    Some(tr("Dictates like the shortcut above")),
+                ),
+            );
+        }
         // Annotate's shortcut beside dictation's on Linux, where the desktop
         // lists both and a lone F9 is otherwise easy to miss (#723).
         #[cfg(all(target_os = "linux", hex_capture))]
@@ -251,8 +269,13 @@ pub(super) fn shortcut_rows(
     let typed_text = target == ShortcutTarget::TypedText;
     #[cfg(not(target_os = "linux"))]
     let typed_text = false;
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let terminal = target == ShortcutTarget::TerminalPaste;
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    let terminal = false;
     let optional = second
         || typed_text
+        || terminal
         || matches!(
             target,
             ShortcutTarget::PasteLast | ShortcutTarget::RawDictation
@@ -269,6 +292,7 @@ pub(super) fn shortcut_rows(
                     #[cfg(target_os = "linux")]
                     ShortcutTarget::TypedText => settings.typed_text_hotkey = None,
                     _ if second => settings.second_dictation_hotkey = None,
+                    _ if terminal => settings.terminal_paste_hotkey = None,
                     _ => settings.paste_last_hotkey = None,
                 });
             },

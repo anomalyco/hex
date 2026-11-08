@@ -9,8 +9,9 @@
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard or only copying it (macOS), a second dictation shortcut
 //! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
-//! recording when its call ends (macOS), and Terminal paste
-//! and shortcut sharing on Windows) is just its toggle.
+//! recording when its call ends (macOS), and Terminal paste, shortcut sharing
+//! on Windows, and a terminal-paste dictation shortcut on Windows and Linux)
+//! is just its toggle.
 //!
 //! Each feature has an audience (`Feature::audience`): `Everyone` ships in
 //! every build; `Dev` exists only in dev builds (`dev_build::is_dev_build`:
@@ -84,6 +85,7 @@ pub enum Feature {
     FillerWords,
     SubtitleExport,
     SecondDictationShortcut,
+    TerminalPasteShortcut,
     SmartSpacing,
     SpokenSymbols,
     PickerSortFilter,
@@ -124,7 +126,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 58] = [
+    pub const ALL: [Self; 59] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -146,6 +148,7 @@ impl Feature {
         Self::FillerWords,
         Self::SubtitleExport,
         Self::SecondDictationShortcut,
+        Self::TerminalPasteShortcut,
         Self::SmartSpacing,
         Self::SpokenSymbols,
         Self::PickerSortFilter,
@@ -229,6 +232,7 @@ impl Feature {
             | Self::FillerWords
             | Self::SubtitleExport
             | Self::SecondDictationShortcut
+            | Self::TerminalPasteShortcut
             | Self::SmartSpacing
             | Self::SpokenSymbols
             | Self::PickerSortFilter
@@ -327,7 +331,7 @@ impl Feature {
             | Self::ExpireMeetingAudio
             | Self::FailureNotices
             | Self::TypedText => 20261107,
-            Self::GnomeAnnotate => 20261108,
+            Self::GnomeAnnotate | Self::TerminalPasteShortcut => 20261108,
         }
     }
 
@@ -376,7 +380,7 @@ impl Feature {
             | Self::GnomeMeetingCapsules
             | Self::GnomeAnnotate
             | Self::LiveTyping => cfg!(target_os = "linux"),
-            Self::StandaloneSpecialKeys | Self::SkipPauses => {
+            Self::StandaloneSpecialKeys | Self::SkipPauses | Self::TerminalPasteShortcut => {
                 cfg!(any(target_os = "linux", target_os = "windows"))
             }
             Self::MouseShortcuts
@@ -456,6 +460,7 @@ impl Feature {
             Self::FillerWords => "filler-words",
             Self::SubtitleExport => "subtitle-export",
             Self::SecondDictationShortcut => "second-dictation-shortcut",
+            Self::TerminalPasteShortcut => "terminal-paste-shortcut",
             Self::SmartSpacing => "smart-spacing",
             Self::SpokenSymbols => "spoken-symbols",
             Self::PickerSortFilter => "picker-sort-filter",
@@ -520,6 +525,7 @@ impl Feature {
             Self::FillerWords => "labs.filler_words",
             Self::SubtitleExport => "labs.subtitle_export",
             Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
+            Self::TerminalPasteShortcut => "labs.terminal_paste_shortcut",
             Self::SmartSpacing => "labs.smart_spacing",
             Self::SpokenSymbols => "labs.spoken_symbols",
             Self::PickerSortFilter => "labs.picker_sort_filter",
@@ -588,6 +594,7 @@ impl Feature {
             Self::FillerWords => settings.labs.filler_words,
             Self::SubtitleExport => settings.labs.subtitle_export,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
+            Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut,
             Self::SmartSpacing => settings.labs.smart_spacing,
             Self::SpokenSymbols => settings.labs.spoken_symbols,
             Self::PickerSortFilter => settings.labs.picker_sort_filter,
@@ -654,6 +661,7 @@ impl Feature {
             &mut labs.filler_words,
             &mut labs.subtitle_export,
             &mut labs.second_dictation_shortcut,
+            &mut labs.terminal_paste_shortcut,
             &mut labs.smart_spacing,
             &mut labs.spoken_symbols,
             &mut labs.picker_sort_filter,
@@ -722,6 +730,7 @@ impl Feature {
             Self::FillerWords => settings.labs.filler_words = on,
             Self::SubtitleExport => settings.labs.subtitle_export = on,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
+            Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut = on,
             Self::SmartSpacing => settings.labs.smart_spacing = on,
             Self::SpokenSymbols => settings.labs.spoken_symbols = on,
             Self::PickerSortFilter => settings.labs.picker_sort_filter = on,
@@ -829,6 +838,8 @@ const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
 /// The next bit above Typed text's switch: Caps Lock dictation's recording
 /// light blinks slowly instead of staying solid.
 const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
+/// The next bit above Caps Lock's slow blink.
+const TERMINAL_PASTE_SHORTCUT: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1276,6 +1287,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::CapsLockDictation,
             settings.caps_lock_light == CapsLockLight::SlowBlink,
             CAPS_LOCK_SLOW_BLINK,
+        ),
+        (
+            Feature::TerminalPasteShortcut,
+            settings.terminal_paste_shortcut,
+            TERMINAL_PASTE_SHORTCUT,
         ),
         (
             Feature::QuitClosesWindow,
@@ -1827,6 +1843,22 @@ mod tests {
         assert_ne!(state & CAPS_LOCK_DICTATION, 0);
         assert_eq!(state & GNOME_ANNOTATE, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 15);
+    }
+
+    #[test]
+    fn terminal_paste_shortcut_is_its_own_bit_and_windows_or_linux_only() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & TERMINAL_PASTE_SHORTCUT, 0);
+        labs.terminal_paste_shortcut = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & TERMINAL_PASTE_SHORTCUT, 0);
+        assert_eq!(state & CAPS_LOCK_DICTATION, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::TerminalPasteShortcut.on_this_os(),
+            cfg!(any(target_os = "windows", target_os = "linux"))
+        );
     }
 
     #[test]

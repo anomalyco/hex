@@ -44,7 +44,8 @@ installed, and a stable build with the driver keeps its pane for Uninstall
 alone), Playground (Dev), Live text, Live chapters, Vocabulary biasing, Switch
 model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
 pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
-Unload model when idle (#442), and Terminal paste (Windows). Externally contributed features land there too.
+Unload model when idle (#442), Terminal paste (Windows), and Terminal paste
+shortcut (Windows, Linux). Externally contributed features land there too.
 Annotate is a normal feature in every build, stable included, on macOS,
 Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
 `DEVELOPER_FEATURES_ENABLED`) stay gated to dev builds.

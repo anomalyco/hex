@@ -1194,6 +1194,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Caps Lock dictation", "Ditado com Caps Lock"),
     ("Press Caps Lock to start dictation and again to finish. Hex keeps Caps Lock off and uses its light while it records and transcribes", "Pressione Caps Lock para começar a ditar e de novo para terminar. O Hex mantém o Caps Lock desligado e usa a luz dele enquanto grava e transcreve"),
     ("Getting Hex ready to listen…", "O Hex está se preparando para ouvir…"),
+    ("Terminal paste shortcut", "Atalho de colar no terminal"),
+    ("Another dictation shortcut that always pastes with Ctrl+Shift+V", "Outro atalho de ditado que sempre cola com Ctrl+Shift+V"),
 ];
 
 #[cfg(test)]

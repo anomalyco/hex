@@ -86,6 +86,9 @@ pub(crate) enum ShortcutTarget {
     Capture,
     /// Dictate without processing.
     RawDictation,
+    /// Labs › Terminal paste shortcut: dictates like dictation and always
+    /// pastes with Ctrl+Shift+V.
+    TerminalPaste,
     /// Toggle mode's cancel shortcut.
     Cancel,
 }

@@ -30,6 +30,12 @@ pub(crate) fn shortcut_rule(slot: HotkeySlot, binding: &HotkeyBinding) -> Result
         // elsewhere a saved one meets the dictation shortcut's rules.
         #[cfg(not(target_os = "macos"))]
         HotkeySlot::SecondDictation | HotkeySlot::Screenshot => ShortcutTarget::Dictation,
+        // Labs › Terminal paste shortcut: its own hook rules where it exists,
+        // and the dictation shortcut's everywhere else, where it never runs.
+        #[cfg(target_os = "macos")]
+        HotkeySlot::TerminalPaste => ShortcutTarget::SecondDictation,
+        #[cfg(not(target_os = "macos"))]
+        HotkeySlot::TerminalPaste => ShortcutTarget::RawDictation,
     };
     host::validate_hotkey(target, binding)
 }

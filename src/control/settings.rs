@@ -231,6 +231,13 @@ const KEYS: &[Key] = &[
          typed in the focused field and replaces it (Linux, with labs.typed_text); none \
          (the default) turns it off",
     ),
+    optional(
+        "terminal_paste_hotkey",
+        Kind::Shortcut(HotkeySlot::TerminalPaste),
+        "Labs: another shortcut that dictates like dictation_hotkey and always pastes with \
+         Ctrl+Shift+V (Windows, Linux, with labs.terminal_paste_shortcut); none (the default) \
+         turns it off",
+    ),
     key(
         "screenshots.hotkey",
         Kind::Shortcut(HotkeySlot::Screenshot),
@@ -374,6 +381,12 @@ const KEYS: &[Key] = &[
         "labs.second_dictation_shortcut",
         Kind::Bool,
         "Labs: second_dictation_hotkey dictates like the dictation shortcut (macOS)",
+    ),
+    key(
+        "labs.terminal_paste_shortcut",
+        Kind::Bool,
+        "Labs: terminal_paste_hotkey dictates like the dictation shortcut and always pastes \
+         with Ctrl+Shift+V (Windows, Linux)",
     ),
     key(
         "labs.smart_spacing",
@@ -1078,6 +1091,7 @@ pub fn apply(
         | "raw_dictation_hotkey"
         | "typed_text_hotkey"
         | "second_dictation_hotkey"
+        | "terminal_paste_hotkey"
         | "cancel_hotkey"
         | "screenshots.hotkey"
         | "capture.hotkey"
@@ -1091,6 +1105,7 @@ pub fn apply(
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
                 HotkeySlot::TypedText => candidate.typed_text_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
+                HotkeySlot::TerminalPaste => candidate.terminal_paste_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
                 HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
                 #[cfg(hex_capture)]

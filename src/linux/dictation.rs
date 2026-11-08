@@ -41,8 +41,9 @@ struct Job {
     recording: Option<crate::history::Recording>,
     /// `hex dictation stop --print`: the text goes here, never pasted.
     print: Option<PrintReply>,
-    /// Dictate without processing: paste the transcript as heard.
-    raw: bool,
+    /// The shortcut that started this capture: dictation, Dictate without
+    /// processing, or Labs › Terminal paste.
+    flavour: crate::dictation::DictationFlavour,
     /// Labs › Live typing: the capture's input-method session, so its final
     /// text is committed instead of pasted. Dropping an unfinished job
     /// cancels it.
@@ -78,7 +79,7 @@ enum OutputKind {
 struct Finishing {
     release: ReleaseWait,
     print: Option<PrintReply>,
-    raw: bool,
+    flavour: crate::dictation::DictationFlavour,
     released: Instant,
 }
 
@@ -164,6 +165,9 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
             .map(LinuxHotkey::from),
         // Only while Labs › Transform typed text is on: off registers nothing.
         typed_text: settings.active_typed_text_hotkey().map(LinuxHotkey::from),
+        terminal_paste: settings
+            .active_terminal_paste_hotkey()
+            .map(LinuxHotkey::from),
         capture: settings
             .capture
             .enabled
@@ -208,14 +212,14 @@ impl DictationOutput {
         }
     }
 
-    /// Processes (unless `raw`) and pastes one transcript, or only
+    /// Processes (unless raw) and pastes one transcript, or only
     /// processes it when there is no paster (a printing stop), then records
     /// it.
     #[allow(clippy::too_many_arguments)]
     fn deliver(
         &self,
         raw_text: String,
-        raw: bool,
+        flavour: crate::dictation::DictationFlavour,
         language: &str,
         paster: Option<&mut LinuxPaster>,
         audio_ms: u64,
@@ -229,8 +233,8 @@ impl DictationOutput {
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .clone();
-        let context = crate::linux::context::capture(!raw && modes.reads_page());
-        let processed = if raw {
+        let context = crate::linux::context::capture(!flavour.raw() && modes.reads_page());
+        let processed = if flavour.raw() {
             crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
             modes.process(
@@ -261,7 +265,7 @@ impl DictationOutput {
         if let Some(paster) = paster
             && !inserted
         {
-            paster.paste(&processed.text)?;
+            paster.paste(&processed.text, flavour.terminal_paste())?;
         }
         if let Some(history) = &self.history {
             let mut draft = crate::dictation::modes::history_draft(
@@ -275,7 +279,7 @@ impl DictationOutput {
             );
             if printed {
                 draft.kind = crate::history::HistoryKind::Printed;
-            } else if raw {
+            } else if flavour.raw() {
                 draft.kind = crate::history::HistoryKind::Raw;
             }
             if let Err(error) = history.record(draft) {
@@ -393,7 +397,7 @@ pub(crate) fn run(
                             paster
                                 .as_mut()
                                 .map_err(|error| eyre!("{error:#}"))?
-                                .paste(&text)
+                                .paste(&text, false)
                         })
                         .map(|()| String::new())
                         .map_err(|error| format!("{error:#}"));
@@ -442,7 +446,7 @@ pub(crate) fn run(
                 if kind == OutputKind::Printed {
                     return output_settings.deliver(
                         text,
-                        job.raw,
+                        job.flavour,
                         &job.language,
                         None,
                         job.audio_ms,
@@ -455,7 +459,7 @@ pub(crate) fn run(
                 let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
                 output_settings.deliver(
                     text,
-                    job.raw,
+                    job.flavour,
                     &job.language,
                     Some(paster),
                     job.audio_ms,
@@ -544,8 +548,9 @@ pub(crate) fn run(
     // rate is the one in effect when the gap arrived.
     let mut restart_capture: Option<u32> = None;
     let mut finishing: Option<Finishing> = None;
-    // The recording skips processing (Dictate without processing).
-    let mut recording_raw = false;
+    // The flavour of the shortcut that started the recording (Dictate
+    // without processing, or Labs › Terminal paste).
+    let mut recording_flavour = crate::dictation::DictationFlavour::Normal;
     let mut pending = 0_usize;
     // A local API client's dictation, and its transcripts as they finish.
     let mut service = ServiceDictations::default();
@@ -735,7 +740,7 @@ pub(crate) fn run(
             let Finishing {
                 release,
                 print,
-                raw,
+                flavour,
                 ..
             } = finishing.take().expect("a release is finishing");
             let silent = submit_capture(
@@ -747,7 +752,7 @@ pub(crate) fn run(
                 &mut events,
                 &mut pending,
                 print,
-                raw,
+                flavour,
                 &mut active_typing,
             )?;
             if silent && reopen_silent_stream(&mut input, release_while_idle) {
@@ -867,8 +872,8 @@ pub(crate) fn run(
                     if capture_host
                         .as_mut()
                         .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
-                HotkeyEvent::Start { raw } if !capture.is_recording() && !start_pending => {
-                    recording_raw = raw;
+                HotkeyEvent::Start { flavour } if !capture.is_recording() && !start_pending => {
+                    recording_flavour = flavour;
                     // A short tap or chord must never create an input method;
                     // Live typing starts at the hold threshold (or the Toggle
                     // press), before the stream opens so it can demand text.
@@ -928,7 +933,7 @@ pub(crate) fn run(
                 HotkeyEvent::Finish if capture.is_recording() => {
                     let released_at = clock.at(Instant::now()).unwrap_or(CaptureInstant::ZERO);
                     finishing = Some(Finishing {
-                        raw: recording_raw,
+                        flavour: recording_flavour,
                         ..begin_finishing(&capture, released_at, print.take(), || {
                             suppressor.restore_then(feedback::deferred_stop())
                         })
@@ -1332,7 +1337,7 @@ fn begin_finishing(
     Finishing {
         release,
         print,
-        raw: false,
+        flavour: crate::dictation::DictationFlavour::Normal,
         released: Instant::now(),
     }
 }
@@ -1347,7 +1352,7 @@ fn submit_capture(
     events: &mut EventLog,
     pending: &mut usize,
     print: Option<PrintReply>,
-    raw: bool,
+    flavour: crate::dictation::DictationFlavour,
     typing: &mut Option<CaptureTyping>,
 ) -> Result<bool> {
     // A discarded capture drops this guard without starting or ending a
@@ -1386,7 +1391,7 @@ fn submit_capture(
                 language,
                 recording,
                 print,
-                raw,
+                flavour,
                 typing: typing.map(|CaptureTyping { session, .. }| session),
             });
             match jobs.try_send(job) {
@@ -1657,7 +1662,7 @@ mod tests {
             &mut events,
             &mut pending,
             None,
-            false,
+            crate::dictation::DictationFlavour::Normal,
             &mut None,
         )
         .unwrap();
@@ -1828,7 +1833,7 @@ mod tests {
             &mut events,
             &mut pending,
             None,
-            false,
+            crate::dictation::DictationFlavour::Normal,
             &mut None,
         )
         .unwrap();
@@ -1897,7 +1902,7 @@ mod tests {
             &mut events,
             &mut pending,
             finishing.print,
-            false,
+            crate::dictation::DictationFlavour::Normal,
             &mut None,
         )
         .unwrap();
@@ -1932,7 +1937,7 @@ mod tests {
             &mut events,
             &mut pending,
             None,
-            false,
+            crate::dictation::DictationFlavour::Normal,
             &mut None,
         )
         .unwrap();
