@@ -17,6 +17,9 @@ use super::scene_script::{self, Ending, Op, Script, Speaker, Wait};
 /// Every pause and pace in the scene, in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Timing {
+    /// From the conversation opening to the scene's clock: the lines from
+    /// before `start` land before it opens, or in it, opening in place.
+    pub(crate) opening: f64,
     /// From pressing start to Jay's first line after it.
     pub(crate) arrive: f64,
     /// Reading time per word of each of Jay's messages, after a fixed beat.
@@ -42,6 +45,7 @@ pub(crate) struct Timing {
 impl Default for Timing {
     fn default() -> Self {
         Self {
+            opening: INTRO,
             arrive: 0.35,
             read_word: 0.2,
             jay_typing: 1.0,
@@ -57,6 +61,15 @@ impl Default for Timing {
 }
 
 impl Timing {
+    /// The first run's: the conversation is there as setup finishes, and
+    /// Jay's messages land in it without a long wait for his next.
+    pub(crate) fn first_run() -> Self {
+        Self {
+            opening: FIRST_RUN_OPENING,
+            ..Self::default()
+        }
+    }
+
     /// How long a message holds so it can be read.
     pub(crate) fn read(&self, text: &str) -> f64 {
         0.75 + self.read_word * text.split_whitespace().count() as f64
@@ -82,6 +95,10 @@ const SLOW_AFTER: f64 = 0.8;
 /// it are already there, this far apart; Jay starts typing again once it
 /// has opened.
 pub(crate) const INTRO: f64 = 1.6;
+const FIRST_RUN_OPENING: f64 = 0.8;
+/// When the conversation is on screen before Jay's messages, the first of
+/// them lands this long after it.
+const FIRST_ARRIVES: f64 = 0.3;
 const BEFORE_STEP: f64 = 0.4;
 const OPEN_SETTLE: f64 = 0.5;
 /// An untimed tapback lands this long after the last, the first this long
@@ -322,7 +339,7 @@ impl Scene {
             .filter(|op| matches!(op, Op::Says { .. }))
             .count();
         // The lines from before land a beat before the conversation opens.
-        let mut at = -(INTRO + 0.1 + BEFORE_STEP * before as f64);
+        let mut at = -(t.opening + 0.1 + BEFORE_STEP * before as f64);
         let mut text = String::new();
         let mut caret = 0;
         let mut n = 0;
@@ -407,7 +424,7 @@ impl Scene {
                     }
                 }
                 Op::Start => {
-                    s.dots.push((OPEN_SETTLE - INTRO, t.arrive));
+                    s.dots.push((OPEN_SETTLE - t.opening, t.arrive));
                     at = t.arrive;
                 }
                 Op::Cut {
@@ -745,6 +762,15 @@ impl Scene {
     /// The whole scene, from start to the cut to `"With Hex"`.
     pub(crate) fn duration(&self) -> f64 {
         self.end
+    }
+
+    /// From the conversation coming on screen, empty, to the scene's clock:
+    /// the lines from before `start` land in it on the way.
+    pub(crate) fn lead_in(&self) -> f64 {
+        self.lines
+            .first()
+            .filter(|line| line.at < 0.0)
+            .map_or(INTRO, |line| FIRST_ARRIVES - line.at)
     }
 
     /// The time spent typing: each reply's first key to its send.

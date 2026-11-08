@@ -207,9 +207,11 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │       error), + Download + Add model file…. Check: golden
 │   │       `onboarding-no-model`, `onboarding_continue_without_model`
 │   └── Change or delete the model later in Settings      // setup.delete-model
-├── The demo, while the model downloads: the Launch Room's inbox row opens
-│   "Without Hex" (typed, with typos) -> "With Hex" (the same reply, spoken),
-│   then moves on by itself; Skip → (or Escape) cuts to the end
+├── The demo, while the model downloads: a second on Setting up Hex, then the
+│   Launch Room's conversation is there, Jay's messages landing in it ->
+│   "Without Hex" (typed, with typos) -> "With Hex" (the same reply, spoken,
+│   fireworks lighting the page), then moves on by itself; Skip → (or
+│   Escape) cuts to the end
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
 │   └── Permissions are read again at launch: a setup they now finish (macOS's
 │       Quit & Reopen after a grant) is passed; past setup, it waits until they do

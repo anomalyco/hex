@@ -25,6 +25,7 @@
 mod cards;
 mod dictated;
 mod field_text;
+mod fireworks;
 mod first_run;
 mod first_screen;
 mod fixture;

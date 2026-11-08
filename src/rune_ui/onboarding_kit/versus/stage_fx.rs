@@ -1,7 +1,6 @@
 //! What happens to the whole stage at once: the camera pushing in and
 //! shaking on autocorrect's hit, the autocorrect title slamming on, and the
-//! mode calls, `"Keyboard mode"` as `"Without Hex"` starts and
-//! `"Voice-first mode"` as `"With Hex"` takes over.
+//! `"Voice-first mode"` call as `"With Hex"` takes over.
 
 use rune::icon;
 use rune_kit::glyphs;
@@ -154,14 +153,8 @@ pub(super) fn slam(p: Paint, s: &Onboard, t: f64) -> Option<El> {
     )
 }
 
-/// How long a mode call takes to land, and how long it stays.
+/// How long the mode call takes to land.
 const CALL_IN: f64 = 0.14;
-const CALL_HOLD: f64 = 1.25;
-/// `"Keyboard mode"` stamps down as `"Without Hex"`'s clock starts, its
-/// second hit landing with the sound's.
-const KEYBOARD_CALL_AT: f64 = 0.0;
-/// When its stamp sounds, so the heavy second hit lands with it.
-pub(crate) const KEYBOARD_CALL_SOUND: f64 = KEYBOARD_CALL_AT + CALL_IN - 0.085;
 /// `"Voice-first mode"` lands as the rewind finishes, then shrinks into the
 /// HUD rising behind it; its chord rings as the HUD rises.
 pub(crate) const VOICE_CALL_AT: f64 = REWIND * 0.75;
@@ -171,33 +164,22 @@ const INTO_HUD: f64 = 0.24;
 // It has landed before the HUD rises, and gone before the key goes down.
 const _: () = assert!(VOICE_CALL_AT + CALL_IN < HUD_RISES);
 const _: () = assert!(VOICE_CALL_AT + VOICE_CALL_HOLD < BEFORE_KEY);
-const _: () = assert!(KEYBOARD_CALL_SOUND >= 0.0);
 
-/// The mode the story is in, called across the keyboard as it changes:
-/// `"Keyboard mode"` stamped down like a key bottoming out as `"Without
-/// Hex"` starts, and `"Voice-first mode"` blooming in as `"With Hex"`
-/// rewinds, then shrinking into the HUD. Reduce Motion fades each in and
+/// `"Voice-first mode"` blooming in across the keyboard as `"With Hex"`
+/// rewinds, then shrinking into the HUD. `"Without Hex"` has no call: the
+/// heading's chip already names the keyboard. Reduce Motion fades it in and
 /// out where it sits.
 pub(super) fn mode_call(p: Paint, s: &Onboard) -> Option<El> {
     let reduced = s.reduced.get();
-    let (voice, since) = match (hex_time(s), scene_time(s)) {
-        (Some(t), _) => (true, t - VOICE_CALL_AT),
-        (None, Some(t)) if s.step == Step::Parked => (false, t - KEYBOARD_CALL_AT),
-        _ => return None,
-    };
-    let hold = if voice { VOICE_CALL_HOLD } else { CALL_HOLD };
-    if !(0.0..hold).contains(&since) {
+    let since = hex_time(s)? - VOICE_CALL_AT;
+    if !(0.0..VOICE_CALL_HOLD).contains(&since) {
         return None;
     }
     let u = smoothstep((since / CALL_IN) as f32);
-    let gone = if voice {
-        smoothstep(((since - (hold - INTO_HUD)) / INTO_HUD) as f32)
-    } else {
-        0.0
-    };
+    let gone = smoothstep(((since - (VOICE_CALL_HOLD - INTO_HUD)) / INTO_HUD) as f32);
     let (scale, opacity, lift) = if reduced {
         (1.0, u * (1.0 - gone), 0.0)
-    } else if voice {
+    } else {
         // Blooms in past its size, settles, then shrinks into the HUD.
         let settle = (since - CALL_IN).max(0.0);
         let bloom = if since < CALL_IN {
@@ -206,70 +188,30 @@ pub(super) fn mode_call(p: Paint, s: &Onboard) -> Option<El> {
             1.0 + 0.08 * (-settle / 0.12).exp() as f32
         };
         (bloom * (1.0 - 0.8 * gone), u * (1.0 - gone), gone * 24.0)
-    } else {
-        // Drops from above its size, bottoms out, and kicks back once.
-        let settle = (since - CALL_IN).max(0.0);
-        let stamp = if since < CALL_IN {
-            1.7 - 0.78 * u
-        } else {
-            1.0 - 0.08
-                * (std::f64::consts::TAU * settle / 0.18).cos() as f32
-                * (-settle / 0.1).exp() as f32
-        };
-        (stamp, u.sqrt(), 0.0)
-    };
-    // The keyboard call fades out where it lands.
-    let opacity = if voice {
-        opacity
-    } else {
-        opacity * (1.0 - smoothstep(((since - (hold - 0.2)) / 0.2) as f32))
     };
     let k = p.k;
-    let (glyph, copy, fill, ink, glow) = if voice {
-        (
-            &glyphs::MIC,
-            "VOICE-FIRST MODE",
-            k.c.bg_accent,
-            k.c.submit_fg,
-            k.c.bg_accent.alpha(0.6),
-        )
-    } else {
-        (
-            &glyphs::KEYBOARD,
-            "KEYBOARD MODE",
-            k.c.surface_raised,
-            k.c.text_strong,
-            k.c.black.alpha(0.5),
-        )
-    };
+    let ink = k.c.submit_fg;
     let plate = row()
-        .key(if voice { "voice-call" } else { "keyboard-call" })
+        .key("voice-call")
         .px(22.0)
         .py(10.0)
         .gap(12.0)
         .center_y()
         .radius(14.0)
         .continuous_corners()
-        .fill(fill)
+        .fill(k.c.bg_accent)
         .border(p.hair, k.c.border_base)
-        .shadow(6.0, 26.0, glow)
-        .rotate(if voice { 0.0 } else { -0.05 })
-        .child(icon(glyph, 26.0).key("glyph").color(ink))
+        .shadow(6.0, 26.0, k.c.bg_accent.alpha(0.6))
+        .child(icon(&glyphs::MIC, 26.0).key("glyph").color(ink))
         .child(
-            text(copy.to_string())
+            text("VOICE-FIRST MODE".to_string())
                 .key("copy")
                 .font(TextStyle::new(30.0, 900.0).lh(34.0).tracking(-0.5))
                 .color(ink),
         );
-    let (_, kh) = keyboard::size();
-    let at_y = if voice {
-        HUD_CENTRE[1]
-    } else {
-        STAGE_H - kh * 0.5
-    };
     Some(
         el().key("mode-call")
-            .absolute(0.0, at_y - 40.0)
+            .absolute(0.0, HUD_CENTRE[1] - 40.0)
             .size(STAGE_W, 80.0)
             .center()
             .instant_changes()
@@ -280,19 +222,6 @@ pub(super) fn mode_call(p: Paint, s: &Onboard) -> Option<El> {
             })
             .child(plate.scale(scale).offset(0.0, lift).opacity(opacity)),
     )
-}
-
-/// How far the keyboard is knocked down, in points, as `"Keyboard mode"`
-/// stamps onto it. Reduce Motion leaves it still.
-pub(super) fn stamp_knock(s: &Onboard) -> f32 {
-    let Some(t) = scene_time(s).filter(|_| s.step == Step::Parked && !s.reduced.get()) else {
-        return 0.0;
-    };
-    let settle = t - KEYBOARD_CALL_AT - CALL_IN;
-    if !(0.0..0.5).contains(&settle) {
-        return 0.0;
-    }
-    6.0 * (1.0 - (-settle / 0.012).exp()) as f32 * (-settle / 0.07).exp() as f32
 }
 
 /// The mode the heading names beside its title: the keyboard while

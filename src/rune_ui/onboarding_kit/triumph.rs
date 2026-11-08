@@ -1,11 +1,12 @@
 //! `"With Hex"`'s payoff, timed from the scene's cheers ([`Cheer`]): your
 //! spoken line goes out, tapbacks rain on it, replies cascade in, status
-//! pills and renames pile on, and confetti and fireworks go off over the
-//! stage. Every part is optional per scene.
+//! pills and renames pile on, and confetti and fireworks go off around the
+//! conversation ([`super::fireworks`]). Every part is optional per scene.
 
-use rune::{Color, El, LineCap, Shape, canvas};
+use rune::{Color, El, Shape, Transition, canvas, effect};
 
 use super::super::controls::Paint;
+use super::fireworks;
 use super::scene_script::{Cheer, Effect, Script, Speaker};
 use super::typing::{Glyph, Timing, renamed};
 
@@ -170,9 +171,8 @@ pub(crate) fn check(script: &'static Script<'static>, send: f64, t: &Timing) -> 
     problems
 }
 
-/// How long confetti and fireworks run.
+/// How long confetti runs.
 pub(crate) const CONFETTI_LIFE: f32 = 2.4;
-const FIREWORKS_LIFE: f32 = 2.0;
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
@@ -254,104 +254,71 @@ fn confetti(mut shape: Shape, p: Paint, size: [f32; 2], t: f32, reduced: bool) -
     shape
 }
 
-/// Three shells rising from below the stage and bursting over the card, `t`
-/// seconds after the first goes up. Reduce Motion shows none.
-fn fireworks(mut shape: Shape, p: Paint, size: [f32; 2], t: f32) -> Shape {
-    const RISE: f32 = 0.42;
-    const SPARKS: usize = 32;
-    let shells = [
-        (0.0, [0.26, 0.24], 1),
-        (0.3, [0.72, 0.16], 3),
-        (0.58, [0.5, 0.34], 5),
-    ];
-    for (n, &(delay, [bx, by], tone)) in shells.iter().enumerate() {
-        let t = t - delay;
-        if t < 0.0 {
-            continue;
-        }
-        let burst = [bx * size[0], by * size[1]];
-        let color = hue(p, tone);
-        if t < RISE {
-            let u = t / RISE;
-            let eased = 1.0 - (1.0 - u) * (1.0 - u);
-            let head = [burst[0], lerp(size[1], burst[1], eased)];
-            let tail = [burst[0], (head[1] + 34.0 * (1.0 - u * 0.6)).min(size[1])];
-            shape = shape.line(tail, head, 2.0, LineCap::Round, color.alpha(0.85));
-            continue;
-        }
-        let t = t - RISE;
-        if t < 0.18 {
-            let u = t / 0.18;
-            let r = 6.0 + 22.0 * u;
-            shape = shape.stroke_with(
-                (0..24)
-                    .map(|k| {
-                        let a = k as f32 / 24.0 * std::f32::consts::TAU;
-                        [burst[0] + r * a.cos(), burst[1] + r * a.sin()]
-                    })
-                    .collect::<Vec<_>>(),
-                true,
-                2.0 * (1.0 - u),
-                LineCap::Round,
-                p.k.c.white.alpha(0.7 * (1.0 - u)),
-            );
-        }
-        for k in 0..SPARKS {
-            let seed = n * 97 + k * 7;
-            let life = rnd(seed, 0.95, 1.3);
-            if t >= life {
-                continue;
-            }
-            let a = k as f32 / SPARKS as f32 * std::f32::consts::TAU + rnd(seed + 1, -0.08, 0.08);
-            let speed = rnd(seed + 2, 240.0, 330.0);
-            let v = [a.cos() * speed, a.sin() * speed];
-            let at = thrown(burst, v, t, 3.2, 170.0);
-            let behind = thrown(burst, v, (t - 0.07).max(0.0), 3.2, 170.0);
-            let left = 1.0 - t / life;
-            let spark = if k % 3 == 0 { hue(p, tone + 2) } else { color };
-            shape = shape.line(
-                behind,
-                at,
-                1.8 * left + 0.4,
-                LineCap::Round,
-                spark.alpha(left.sqrt()),
-            );
-        }
-    }
-    shape
+/// What `beats` sets off at one moment: the fireworks' sparks, behind the
+/// conversation, and what goes over it, the confetti and the fireworks'
+/// light on the page.
+#[derive(Default)]
+pub(crate) struct Celebration {
+    pub(crate) behind: Option<El>,
+    pub(crate) over: Vec<El>,
+}
+
+/// One of the fireworks' slots over [`fireworks::AREA`]. It never fades:
+/// a faded slot is drawn in a layer of its own, where there's nothing for
+/// its light to fall on.
+fn fireworks_slot(mark: u32, key: &str) -> El {
+    let [x, y, w, h] = fireworks::AREA;
+    effect(mark)
+        .key(key.to_string())
+        .absolute(x, y)
+        .size(w, h)
+        .instant_changes()
+        .transition(Transition::identity())
 }
 
 /// Every effect `beats` sets off, `t` seconds after the shortcut, over a
-/// stage of `size`; `None` once they're all done.
+/// stage of `size`.
 pub(crate) fn effects(
     p: Paint,
     beats: &HexBeats,
     t: f64,
     size: [f32; 2],
     reduced: bool,
-) -> Option<El> {
+) -> Celebration {
     let mut shape = Shape::new();
-    let mut any = false;
+    let mut confetti_on = false;
+    let mut show = None;
     for &(at, effect) in &beats.effects {
         let since = (t - at) as f32;
         match effect {
             Effect::Confetti if (0.0..CONFETTI_LIFE).contains(&since) => {
-                any = true;
+                confetti_on = true;
                 shape = confetti(shape, p, size, since, reduced);
             }
-            Effect::Fireworks if !reduced && (0.0..FIREWORKS_LIFE).contains(&since) => {
-                any = true;
-                shape = fireworks(shape, p, size, since);
-            }
+            Effect::Fireworks => show = show.or_else(|| fireworks::show(p, since, reduced)),
             _ => {}
         }
     }
-    any.then(|| {
-        canvas(shape)
-            .key("celebration")
-            .absolute(0.0, 0.0)
-            .size(size[0], size[1])
-    })
+    let mut c = Celebration::default();
+    if confetti_on {
+        c.over.push(
+            canvas(shape)
+                .key("celebration")
+                .absolute(0.0, 0.0)
+                .size(size[0], size[1]),
+        );
+    }
+    if let Some(show) = &show {
+        if !show.streaks.is_empty() {
+            c.behind = Some(fireworks_slot(fireworks::SPARKS_MARK, "fireworks"));
+        }
+        if !show.lights.is_empty() {
+            c.over
+                .push(fireworks_slot(fireworks::LIGHT_MARK, "fireworks-light"));
+        }
+    }
+    fireworks::publish(show);
+    c
 }
 
 #[cfg(test)]

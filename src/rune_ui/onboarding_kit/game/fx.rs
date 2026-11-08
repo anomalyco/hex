@@ -386,7 +386,7 @@ impl GameFx {
     /// Draws the frame, painting the game's slots and, through `hud`,
     /// onboarding's Dot scope.
     pub(crate) fn render(&mut self, f: &mut Frame<'_, Ui>, hud: &mut OnboardingGpu) {
-        hud.begin();
+        hud.begin(f.device, f.queue);
         let fx = FX.lock().ok().and_then(|g| g.clone()).unwrap_or_default();
         let (device, queue) = (f.device, f.queue);
 

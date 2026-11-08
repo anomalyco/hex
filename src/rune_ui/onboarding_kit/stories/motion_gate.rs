@@ -56,41 +56,6 @@ const ALLOW: &[AllowRow] = &[
     )
     .max(3),
     AllowRow::new(
-        "pop-out",
-        "card/faces",
-        "island",
-        "fly into the conversation's header",
-    )
-    .max(6),
-    AllowRow::new(
-        "pop-out",
-        "top/title",
-        "island",
-        "flies into the conversation's header",
-    )
-    .max(6),
-    AllowRow::new(
-        "pop-out",
-        "bottom/preview",
-        "island",
-        "flies into the thread as Jay's question",
-    )
-    .max(6),
-    AllowRow::new(
-        "pop-out",
-        "bubble/surface",
-        "island",
-        "the question lands on its own bubble",
-    )
-    .max(6),
-    AllowRow::new(
-        "overshoot",
-        "bubble/msg",
-        "island",
-        "hidden while its preview flies over",
-    )
-    .max(6),
-    AllowRow::new(
         "appear-then-jump",
         "thread/hex-bubble",
         "words",
@@ -203,8 +168,8 @@ fn entrance(dark: bool, reduced: bool) -> Recording {
             play(s, now);
         })
     });
-    // The download flies up to the top bar 2.8 s in.
-    r.play(4.0);
+    // The download flies up to the top bar 1 s in.
+    r.play(3.0);
     r.rec
 }
 
@@ -223,26 +188,16 @@ fn beat(beat: fn(&Onboard) -> bool, before: f64, length: f64) -> Window {
 
 fn windows() -> Vec<(&'static str, Window)> {
     vec![
-        // The pill flies up and the Launch Room's row lands.
+        // The pill flies up and the conversation rises in under it.
         ("parks", beat(parked, 0.6, 3.0)),
-        // Nobody taps: the pointer comes in, clicks, and the island grows.
+        // Jay's messages land in it, and he answers his own question.
         (
-            "island-auto",
+            "opens",
             Window {
-                beat: |s| s.parked_from.is_some_and(|at| s.now >= at + 3.5),
+                beat: |s| s.parked_from.is_some_and(|at| s.now >= at + 1.0),
                 before: 0.0,
-                length: 4.5,
-                act: None,
-            },
-        ),
-        // A click opens it at once.
-        (
-            "island-click",
-            Window {
-                beat: |s| s.parked_from.is_some_and(|at| s.now >= at + 1.5),
-                before: 0.3,
                 length: 3.0,
-                act: Some(("click the Launch Room", |s, _| s.start_scene())),
+                act: None,
             },
         ),
         // Autocorrect's hit: the camera pushes in, shakes and pulls out.

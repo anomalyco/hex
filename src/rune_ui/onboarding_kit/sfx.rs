@@ -188,6 +188,20 @@ impl SfxTrack {
         self.push(now, Tone::Onboarding(OnboardingTone::ShortcutDown));
     }
 
+    /// The conversation on screen already, `"Without Hex"` from `from`:
+    /// the lines from before it land in it, each with its sound, in place
+    /// of the row's dings.
+    pub(crate) fn on_arrivals(&mut self, from: f64, scene: &typing::Scene) {
+        let incoming = Tone::Onboarding(OnboardingTone::Incoming);
+        let fired = self.fired.min(self.cues.len());
+        let mut kept = self.cues.split_off(fired);
+        kept.retain(|&(_, tone, _)| tone != incoming);
+        self.cues.extend(kept);
+        for line in scene.lines().iter().filter(|l| l.at < 0.0) {
+            self.push(from + line.at, incoming);
+        }
+    }
+
     /// `"Without Hex"` from `from`: every keystroke, harder as panic builds
     /// (a space-bar thud under the tap), a soft send, Jay's messages, a
     /// deadpan tick on `"Read"`, and the selected set's error on removal.
@@ -290,14 +304,6 @@ impl SfxTrack {
         }
     }
 
-    /// `"Keyboard mode"` called as `"Without Hex"`'s clock starts at `from`.
-    pub(crate) fn on_keyboard_mode(&mut self, from: f64) {
-        self.push(
-            from + super::versus::KEYBOARD_CALL_SOUND,
-            Tone::Onboarding(OnboardingTone::ModeKeyboard),
-        );
-    }
-
     /// The story winding back into `"With Hex"`, and `"Voice-first mode"`
     /// called.
     pub(crate) fn on_rewind(&mut self, now: f64) {
@@ -330,11 +336,21 @@ impl SfxTrack {
             );
         }
         for &(at, effect) in &beats.effects {
-            let tone = match effect {
-                scene_script::Effect::Confetti => OnboardingTone::Confetti,
-                scene_script::Effect::Fireworks => OnboardingTone::Fireworks,
-            };
-            self.push(from + at, Tone::Onboarding(tone));
+            match effect {
+                scene_script::Effect::Confetti => {
+                    self.push(from + at, Tone::Onboarding(OnboardingTone::Confetti))
+                }
+                // Each shell whistles up and booms.
+                scene_script::Effect::Fireworks => {
+                    for (after, level) in super::fireworks::launches() {
+                        self.push_at(
+                            from + at + after,
+                            Tone::Onboarding(OnboardingTone::Fireworks),
+                            level,
+                        );
+                    }
+                }
+            }
         }
     }
 

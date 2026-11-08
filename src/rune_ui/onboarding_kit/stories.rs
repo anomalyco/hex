@@ -47,6 +47,9 @@ const SLOW_SECS: f64 = 31.0;
 /// model lands.
 const SKETCH_DOWNLOAD_SECS: f64 = 66.0;
 const DOWNLOAD_HOLD: f64 = 2.8;
+/// How long the first run's `"Setting up Hex"` holds before its download
+/// flies up and `"Without Hex"` opens.
+const FIRST_RUN_HOLD: f64 = 1.0;
 const PERMISSIONS_WAIT: f64 = 0.6;
 const CLOSE_SECS: f64 = 0.65;
 const WORD_SECS: f64 = 0.22;
@@ -123,6 +126,9 @@ pub(crate) struct Onboard {
     polled: f64,
     pub(crate) parked_from: Option<f64>,
     pub(crate) typing_from: Option<f64>,
+    /// The conversation came on screen open, Jay's messages landing in it,
+    /// rather than growing out of the Launch Room's clicked row.
+    pub(crate) in_place: bool,
     pub(crate) voice_from: Option<f64>,
     /// When the resting HUD plate first showed on `"With Hex"` or
     /// `"Your turn"`: the HUD unfolds from here and keeps running through the
@@ -249,6 +255,11 @@ const PRESET_SHORTCUTS: &[&[&str]] = &[&["⌥"], &["fn"], &["⌃", "Space"], &["
 
 impl Onboard {
     pub(super) fn new(flow: Flow) -> Self {
+        let timing = if flow == Flow::FirstRun {
+            typing::Timing::first_run()
+        } else {
+            typing::Timing::default()
+        };
         Self {
             flow,
             speech: Speech::Apple,
@@ -269,13 +280,14 @@ impl Onboard {
             polled: f64::NEG_INFINITY,
             parked_from: None,
             typing_from: None,
+            in_place: false,
             voice_from: None,
             hud_from: None,
             take_from: None,
             sent_seen: 0,
             hex_seen: false,
-            timing: typing::Timing::default(),
-            scene: typing::Scene::default(),
+            scene: typing::Scene::build(&timing),
+            timing,
             partial: "",
             take: Script::chosen().take(),
             meter: (0.0, 0.0),
@@ -542,11 +554,26 @@ impl Onboard {
         self.manual_override = true;
         // The conversation opens on Jay finishing his question; the scene's
         // clock starts once it lands.
-        let from = self.now + typing::INTRO;
+        let from = self.now + self.timing.opening;
         self.typing_from = Some(from);
+        self.in_place = false;
         self.sfx.on_opened(self.now);
         self.sfx.on_without_hex(from, &self.scene);
-        self.sfx.on_keyboard_mode(from);
+        self.auto_due_at = Some(from + self.scene.duration());
+    }
+
+    /// `"Without Hex"` with the conversation already open: Jay's messages
+    /// land in it one by one, each with its sound, and the scene's clock
+    /// starts after them. The first run opens this way.
+    pub(crate) fn open_scene(&mut self) {
+        if self.step != Step::Parked || self.typing_from.is_some() {
+            return;
+        }
+        let from = self.now + self.scene.lead_in();
+        self.typing_from = Some(from);
+        self.in_place = true;
+        self.sfx.on_arrivals(from, &self.scene);
+        self.sfx.on_without_hex(from, &self.scene);
         self.auto_due_at = Some(from + self.scene.duration());
     }
 
@@ -954,10 +981,10 @@ pub(super) fn begin_first_run(s: &mut Onboard, now: f64) -> Option<f64> {
         s.closed = 1.0;
         s.closed_from = None;
         park(s, now);
-        Some(WATCH_AFTER)
+        Some(0.0)
     } else {
         s.sfx.on_download_start(now);
-        Some(DOWNLOAD_HOLD)
+        Some(FIRST_RUN_HOLD)
     }
 }
 
@@ -1073,21 +1100,16 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
         }
         Step::Pick | Step::Started => {
             park(s, now);
-            Some(WATCH_AFTER)
+            first_run_next(s, now)
         }
-        // The pointer clicks the Launch Room's row open unless the user
-        // already has.
+        // The conversation is there as the download flies up.
         Step::Parked if s.typing_from.is_none() => {
-            let at = s.parked_from.unwrap_or(now) + WATCH_AFTER;
-            if at - now > 1e-3 {
-                return Some(at - now);
-            }
-            s.start_scene();
-            Some(typing::INTRO + s.scene.duration() + COMEDY_HOLD)
+            s.open_scene();
+            Some(s.scene.lead_in() + s.scene.duration() + COMEDY_HOLD)
         }
-        // `"Without Hex"` waits for the Launch Room's row, plays out, and
-        // its last line holds a beat; then `"With Hex"` shows how it goes,
-        // with nothing asked of the user yet.
+        // `"Without Hex"` plays out and its last line holds a beat; then
+        // `"With Hex"` shows how it goes, with nothing asked of the user
+        // yet.
         Step::Parked => {
             let from = s.typing_from?;
             let left = from + s.scene.duration() + COMEDY_HOLD - now;
@@ -1159,10 +1181,6 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
 
 /// Short presses on the practice before it offers tap to start instead.
 pub(crate) const TAPS_BEFORE_TOGGLE: u8 = 2;
-
-/// How long the first run waits on the Launch Room's row before the
-/// pointer clicks it open.
-const WATCH_AFTER: f64 = super::inbox::CLICK_AT;
 
 /// The longest gap between polls that still plays a flight.
 const FLIGHT_SEEN: f64 = 0.25;
@@ -1526,24 +1544,32 @@ mod tests {
     }
 
     #[test]
-    fn the_pointer_clicks_the_launch_room_open() {
+    fn the_conversation_opens_in_place_and_jay_arrives_in_it() {
+        use crate::feedback::{OnboardingTone, Tone};
         let mut s = Onboard::new(Flow::FirstRun);
         s.had_model = true;
         s.begin_live(0.0);
         let mut tx = Tx::default();
-        poll(&mut s, WATCH_AFTER - 0.1, &mut tx);
+        poll(&mut s, 0.0, &mut tx);
         assert_eq!(s.step, Step::Parked);
-        assert!(versus::waiting_to_start(&s));
-        poll(&mut s, WATCH_AFTER, &mut tx);
-        assert!(!versus::waiting_to_start(&s));
-        // It opens on Jay's question, with him typing again.
-        let opened = WATCH_AFTER + typing::INTRO;
-        assert_eq!(s.scene.shown(WATCH_AFTER - opened), 2);
+        assert!(!versus::waiting_to_start(&s), "no row to click");
+        let opened = s.scene.lead_in();
+        assert_eq!(s.typing_from, Some(opened));
+        // Empty as it comes on, then Jay's question lands in it, each line
+        // with its sound, and he types again.
+        assert_eq!(s.scene.shown(-opened), 0);
+        assert_eq!(s.scene.shown(-0.2), 2);
         assert!(s.scene.dots(-0.2).is_some());
+        poll(&mut s, opened - 0.01, &mut tx);
+        let incoming = s
+            .sfx
+            .fired_cues()
+            .iter()
+            .filter(|&&(at, t, _)| at < opened && t == Tone::Onboarding(OnboardingTone::Incoming))
+            .count();
+        assert_eq!(incoming, 2);
         let end = opened + s.scene.duration();
         poll(&mut s, end - 0.05, &mut tx);
-        assert_eq!(s.step, Step::Parked);
-        poll(&mut s, end + 0.01, &mut tx);
         assert_eq!(s.step, Step::Parked);
         poll(&mut s, end + COMEDY_HOLD + 0.01, &mut tx);
         assert_eq!(s.step, Step::YourTurn);
@@ -1557,7 +1583,6 @@ mod tests {
         s.begin_live(0.0);
         let mut tx = Tx::default();
         poll(&mut s, 30.0, &mut tx);
-        s.start_scene();
         let mut now = 30.0;
         let mut shortcut = None;
         let mut steps = vec![s.step];
@@ -1611,9 +1636,6 @@ mod tests {
         let mut steps = vec![s.step];
         let mut now = 0.0;
         while now < 120.0 && s.step != Step::Ready {
-            if versus::waiting_to_start(&s) {
-                s.start_scene();
-            }
             poll(&mut s, now, &mut tx);
             if steps.last() != Some(&s.step) {
                 steps.push(s.step);
@@ -1748,8 +1770,7 @@ mod tests {
         s.begin_live(0.0);
         let mut tx = Tx::default();
         poll(&mut s, 30.0, &mut tx);
-        s.start_scene();
-        let opened = 30.0 + typing::INTRO;
+        let opened = 30.0 + s.scene.lead_in();
         poll(&mut s, opened + 1.0, &mut tx);
         assert!(!versus::skippable(&s));
         assert!(!s.skip_scene());
@@ -1769,7 +1790,6 @@ mod tests {
         s.begin_live(0.0);
         let mut tx = Tx::default();
         poll(&mut s, 30.0, &mut tx);
-        s.start_scene();
         let mut now = 30.0;
         while now < 120.0 && s.step != Step::Heard {
             poll(&mut s, now, &mut tx);
@@ -1800,9 +1820,6 @@ mod tests {
             let mut tx = Tx::default();
             let mut now = 0.0;
             while now < 90.0 && s.step != Step::Ready {
-                if versus::waiting_to_start(&s) {
-                    s.start_scene();
-                }
                 poll(&mut s, now, &mut tx);
                 now += 0.05;
             }

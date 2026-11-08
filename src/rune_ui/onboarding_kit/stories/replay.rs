@@ -102,7 +102,7 @@ impl Onboard {
     /// The start of the beat before this one.
     pub(crate) fn back_one_beat(&mut self) {
         match self.step {
-            Step::YourTurn | Step::Hearing | Step::Heard => self.without_hex(),
+            Step::YourTurn | Step::Hearing | Step::Heard => self.opener(),
             Step::Microphone
             | Step::Accessibility
             | Step::Waiting
@@ -126,14 +126,11 @@ impl Onboard {
         self.replay.speed = self.replay.speed.next();
     }
 
+    /// `"Without Hex"` from the top: the conversation opens as it would
+    /// after `"Setting up Hex"`.
     fn opener(&mut self) {
         self.jump_to_demo();
-        self.auto_due_at = Some(self.now + WATCH_AFTER);
-    }
-
-    fn without_hex(&mut self) {
-        self.jump_to_demo();
-        self.start_scene();
+        self.auto_due_at = Some(self.now);
     }
 
     /// `"With Hex"` from the top, `"Without Hex"` just behind it.
@@ -237,16 +234,14 @@ mod tests {
     }
 
     #[test]
-    fn back_from_with_hex_plays_without_hex_from_the_top() {
+    fn back_from_with_hex_opens_without_hex_from_the_top() {
         let mut s = Onboard::new(Flow::FirstRun);
         s.now = 5.0;
         s.with_hex();
         assert_eq!(s.step, Step::YourTurn);
         s.back_one_beat();
         assert_eq!(s.step, Step::Parked);
-        assert_eq!(s.typing_from, Some(5.0 + typing::INTRO));
-        s.back_one_beat();
         assert_eq!(s.typing_from, None);
-        assert_eq!(s.auto_due_at, Some(5.0 + WATCH_AFTER));
+        assert_eq!(s.auto_due_at, Some(5.0));
     }
 }

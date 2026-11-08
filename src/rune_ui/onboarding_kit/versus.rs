@@ -39,8 +39,8 @@ use super::scene_script::{Script, fill};
 use super::stories::{Flow, Onboard, Step};
 use super::triumph::{self, HexBeats, Said};
 use super::typing::{Focus, Glyph, Line, Scene, Timing, Who};
-pub(crate) use stage_fx::{KEYBOARD_CALL_SOUND, VOICE_CALL_AT};
-use stage_fx::{camera, camera_focus, mode_call, mode_chip, slam, stamp_knock};
+pub(crate) use stage_fx::VOICE_CALL_AT;
+use stage_fx::{camera, camera_focus, mode_call, mode_chip, slam};
 
 mod stage_fx;
 
@@ -367,10 +367,12 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
                 tr("Hold a key and talk. Hex types it wherever your cursor is.").into(),
             ),
         ),
+        // The chip says it all; the line under it stays, empty, so the
+        // stage doesn't move when `"With Hex"` brings its own.
         Step::Parked if !scene_over(s) || s.demo_hears() => (
             "without",
             tr("Without Hex").to_string(),
-            line("lead-usual", script().lead.to_string()),
+            el().key("lead-none"),
         ),
         Step::Parked => (
             "with",
@@ -455,9 +457,14 @@ fn hex_time(s: &Onboard) -> Option<f64> {
         .map(|from| s.now - from)
 }
 
-/// When the Launch Room was clicked open.
+/// When the Launch Room was clicked open, or came on screen open.
 fn opened_at(s: &Onboard) -> Option<f64> {
-    s.typing_from.map(|from| from - super::typing::INTRO)
+    let lead_in = if s.in_place {
+        s.scene.lead_in()
+    } else {
+        s.timing.opening
+    };
+    s.typing_from.map(|from| from - lead_in)
 }
 
 /// Where the Launch Room's row waits on the stage.
@@ -483,7 +490,7 @@ const HEADER_FACE: f32 = 17.0;
 fn opening(s: &Onboard) -> Option<f64> {
     opened_at(s)
         .map(|at| s.now - at)
-        .filter(|&age| age < OPEN_SECS && s.step == Step::Parked && !s.reduced.get())
+        .filter(|&age| age < OPEN_SECS && s.step == Step::Parked && !s.reduced.get() && !s.in_place)
 }
 
 /// Whether the row finished growing into the conversation after `from`
@@ -620,8 +627,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
             },
         },
     );
-    let knock_down = stamp_knock(s);
-    let kb_shift = (1.0 - enter_u) * 14.0 + melt_u * 6.0 + knock_down;
+    let kb_shift = (1.0 - enter_u) * 14.0 + melt_u * 6.0;
     let shudder = match t {
         Some(t) if !reduced && !voice_phase => s.scene.shudder(t),
         _ => [0.0, 0.0],
@@ -636,11 +642,6 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .offset(shudder[0], kb_shift + shudder[1])
         .size(kw, kh)
         .offset_motion(Anim::INSTANT)
-        .motion_intent(if knock_down > 0.0 {
-            MotionIntent::KICK
-        } else {
-            MotionIntent::NONE
-        })
         .child(kb_el.motion_intent(MotionIntent::STEP));
 
     // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
@@ -671,10 +672,15 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         Some(since) => with_hex_card(p, s, since),
         None => without_hex_card(p, s, focus, frozen, opening),
     };
-    // It grows out of the row rather than fading in, unless Reduce Motion.
+    // It grows out of the row rather than fading in, unless Reduce Motion;
+    // on screen open, it rises in under the heading.
     let fade = Transition::opacity();
     let enter = if reduced {
         fade
+    } else if s.in_place {
+        Transition::opacity()
+            .combined(Transition::offset(0.0, 14.0))
+            .combined(Transition::scale(0.98))
     } else {
         Transition::identity()
     };
@@ -728,12 +734,13 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     } else {
         camera
     };
-    el().key("stage")
-        .size(STAGE_W, STAGE_H)
-        .child(camera)
-        .children(t.filter(|_| !voice_phase).and_then(|t| slam(p, s, t)))
-        .children(mode_call(p, s))
-        .children(take_time(s).and_then(|t| {
+    // The fireworks burst behind the conversation and light it.
+    let celebration = take_time(s).map_or_else(
+        || {
+            super::fireworks::publish(None);
+            triumph::Celebration::default()
+        },
+        |t| {
             triumph::effects(
                 p,
                 &hex_beats(s.streams(), &s.timing),
@@ -741,7 +748,15 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
                 [STAGE_W, STAGE_H],
                 reduced,
             )
-        }))
+        },
+    );
+    el().key("stage")
+        .size(STAGE_W, STAGE_H)
+        .children(celebration.behind)
+        .child(camera)
+        .children(t.filter(|_| !voice_phase).and_then(|t| slam(p, s, t)))
+        .children(mode_call(p, s))
+        .children(celebration.over)
 }
 
 /// Caps Lock's light once it's on.

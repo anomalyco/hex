@@ -23,9 +23,10 @@ pub(super) fn amount(p: Paint, s: &Onboard, d: Download) -> Option<El> {
     })
 }
 
-/// One quiet line at the foot of the window: why there's a download.
+/// One quiet line at the foot of the window: why there's a download, and
+/// again when Hex asks for the microphone, where it matters most.
 pub(super) fn note(p: Paint, s: &Onboard) -> Option<El> {
-    (matches!(s.step, Step::Pick | Step::Started) && !failed(s)).then(|| {
+    (matches!(s.step, Step::Pick | Step::Started | Step::Microphone) && !failed(s)).then(|| {
         let quiet = p.muted();
         row()
             .key("first-note")

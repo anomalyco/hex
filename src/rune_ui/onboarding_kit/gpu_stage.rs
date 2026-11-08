@@ -1,4 +1,5 @@
-//! Dot scope drawn in Rune's effect slots, including a departing page's slot.
+//! Dot scope drawn in Rune's effect slots, including a departing page's slot,
+//! and `"With Hex"`'s fireworks ([`super::fireworks`]).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -9,6 +10,8 @@ use crate::rune_hud::{Painter, Target, WINDOW};
 use crate::rune_ui::Ui;
 use rune::compose::Frame;
 use rune::render::EffectSite;
+
+use super::fireworks::{self, is_fireworks_mark};
 
 pub(crate) const KEY_COUNT: usize = 64;
 const FIRST_MARK: u32 = 0x4800_0008;
@@ -27,7 +30,7 @@ pub(crate) fn hud_mark(key: &str) -> u32 {
 }
 
 pub(crate) const fn is_onboard_mark(mark: u32) -> bool {
-    mark >= FIRST_MARK && mark < FIRST_MARK + HUD_COUNT
+    mark >= FIRST_MARK && mark < FIRST_MARK + HUD_COUNT || is_fireworks_mark(mark)
 }
 
 // View-to-compositor handoff only. The compositor owns retained frames, so
@@ -52,6 +55,7 @@ struct Hud {
 pub(crate) struct OnboardingGpu {
     format: wgpu::TextureFormat,
     huds: HashMap<u32, Hud>,
+    fireworks: Option<fireworks::Painter>,
 }
 
 /// Builds, once per process and on a thread, the pipelines the first run
@@ -71,6 +75,7 @@ pub(crate) fn warm_later_pipelines(device: &wgpu::Device, format: wgpu::TextureF
             drop(renderer.first_use_ms(&device));
             drop(Painter::with_color_space(&device, LAYER, true));
             drop(super::game::fx::GameFx::new(&device));
+            drop(fireworks::Painter::new(&device));
         };
         if let Err(error) = std::thread::Builder::new()
             .name("onboarding-gpu-warm".into())
@@ -86,6 +91,7 @@ impl OnboardingGpu {
         Self {
             format,
             huds: HashMap::new(),
+            fireworks: None,
         }
     }
 
@@ -103,7 +109,7 @@ impl OnboardingGpu {
     }
 
     pub(crate) fn render(&mut self, f: &mut Frame<'_, Ui>) {
-        self.begin();
+        self.begin(f.device, f.queue);
         let clear = f.rt.clear_color();
         f.ui.prepare(
             f.device,
@@ -120,8 +126,11 @@ impl OnboardingGpu {
         self.end();
     }
 
-    /// Takes this frame's HUD frames; call before drawing.
-    pub(crate) fn begin(&mut self) {
+    /// Takes this frame's HUD frames and fireworks; call before drawing.
+    pub(crate) fn begin(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        self.fireworks
+            .get_or_insert_with(|| fireworks::Painter::new(device))
+            .begin(device, queue);
         for hud in self.huds.values_mut() {
             hud.seen = false;
         }
@@ -152,6 +161,12 @@ impl OnboardingGpu {
         queue: &wgpu::Queue,
         dark: bool,
     ) {
+        if is_fireworks_mark(site.mark) {
+            if let Some(fireworks) = self.fireworks.as_mut() {
+                fireworks.paint(pass, site, device, queue);
+            }
+            return;
+        }
         let Some(hud) = self.huds.get_mut(&site.mark) else {
             return;
         };
