@@ -78,7 +78,7 @@ impl ModifierState {
     }
 }
 
-pub(super) fn side_matches(side: Option<ModifierSide>, left: bool, right: bool) -> bool {
+fn side_matches(side: Option<ModifierSide>, left: bool, right: bool) -> bool {
     match side {
         None => !left && !right,
         Some(ModifierSide::Either) => left || right,
