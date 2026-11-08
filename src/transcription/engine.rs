@@ -1343,8 +1343,12 @@ mod tests {
         /// Fail every feed once this many samples are in, as a native
         /// stream error would.
         fail_after: Option<usize>,
+        /// Where its finalized text starts, in milliseconds.
+        text_start_ms: Option<u64>,
         /// Where its finalized text ends, in milliseconds.
         text_end_ms: Option<u64>,
+        /// Language tags its raw decode carries.
+        tags: Vec<String>,
     }
 
     impl StreamFeed for FakeStream {
@@ -1367,8 +1371,16 @@ mod tests {
             }
         }
 
+        fn text_start_ms(&self) -> Option<u64> {
+            self.text_start_ms
+        }
+
         fn text_end_ms(&self) -> Option<u64> {
             self.text_end_ms
+        }
+
+        fn language_tags(&self) -> Vec<String> {
+            self.tags.clone()
         }
     }
 
@@ -1498,8 +1510,33 @@ mod tests {
     }
 
     fn finish_with_text_end(clip: &[f32], text_end_ms: u64) -> Result<String, String> {
+        finish_with_text_bounds(clip, None, text_end_ms)
+    }
+
+    fn finish_with_text_bounds(
+        clip: &[f32],
+        text_start_ms: Option<u64>,
+        text_end_ms: u64,
+    ) -> Result<String, String> {
         let mut fake = FakeStream {
+            text_start_ms,
             text_end_ms: Some(text_end_ms),
+            ..FakeStream::default()
+        };
+        let mut capped = PauseCap::new(&mut fake, 0);
+        for chunk in clip.chunks(1_600) {
+            capped.feed(chunk).unwrap();
+        }
+        let result = finish_stream(&mut capped, clip, clip.len());
+        assert_eq!(fake.fed, clip);
+        result
+    }
+
+    fn finish_with_tags(clip: &[f32], tags: Vec<String>) -> Result<String, String> {
+        let mut fake = FakeStream {
+            text_start_ms: Some(500),
+            text_end_ms: Some(4_200),
+            tags,
             ..FakeStream::default()
         };
         let mut capped = PauseCap::new(&mut fake, 0);
@@ -1556,6 +1593,80 @@ mod tests {
         assert_eq!(
             finish_with_text_end(&clip, 2_500),
             Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_stream_that_lost_the_opening_phrase_falls_back_to_the_whole_clip() {
+        // Speech opens at 500 ms; text that starts at 3 s lost its opening.
+        let clip = speech_pause_phrase(12_800);
+        let result = finish_with_text_bounds(&clip, Some(3_000), 4_200);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|reason| reason.contains("precedes")),
+            "{result:?}"
+        );
+        // Text that starts with the speech is the stream's to keep.
+        assert_eq!(
+            finish_with_text_bounds(&clip, Some(500), 4_200),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_short_click_before_the_text_does_not_discard_the_stream() {
+        // A 150 ms click before the speech is not a lost opening.
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(2_400));
+        clip.extend(vec![0.0; 16_000]);
+        clip.extend(tone(12_800));
+        clip.extend(vec![0.0; 3_200]);
+        assert_eq!(
+            finish_with_text_bounds(&clip, Some(1_600), 2_500),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn a_punctuation_token_does_not_start_the_streams_text() {
+        let token = |text: &str, t0_ms| transcribe_cpp::Token {
+            text: text.into(),
+            t0_ms,
+            ..Default::default()
+        };
+        let tokens = [
+            token(".", 40),
+            token(" channels", 2_480),
+            token(" later", 3_000),
+        ];
+        assert_eq!(spoken_text_start_ms(&tokens), Some(2_480));
+        assert_eq!(spoken_text_start_ms(&[token(".", 40)]), None);
+    }
+
+    #[test]
+    fn a_stream_that_switched_language_falls_back_to_the_whole_clip() {
+        assert_eq!(language_tags("<en-US> hello <en-US> there"), ["<en-US>"]);
+        assert_eq!(
+            language_tags("<en-US> hello <de-DE>"),
+            ["<en-US>", "<de-DE>"]
+        );
+        let clip = speech_pause_phrase(12_800);
+        // One tag repeated, as one per segment, is not a switch.
+        let tags = |raw: &str| {
+            language_tags(raw)
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        let same = finish_with_tags(&clip, tags("<en-US> hello <en-US>"));
+        assert_eq!(same, Ok(format!("streamed {}", clip.len())));
+        let switched = finish_with_tags(&clip, tags("<en-US> hello <de-DE>"));
+        assert!(
+            switched
+                .as_ref()
+                .is_err_and(|reason| reason.contains("switched language from <en-US> to <de-DE>")),
+            "{switched:?}"
         );
     }
 
