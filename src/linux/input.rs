@@ -346,10 +346,19 @@ pub(crate) struct HotkeyOptions {
     pub(crate) cancel: Option<LinuxHotkey>,
 }
 
-/// Whether Annotate draws now, so Escape is Hex's (it stops drawing).
+/// Whether Annotate draws now: Escape stops drawing, not a dictation.
 fn annotate_drawing() -> bool {
     #[cfg(hex_capture)]
     return crate::capture_host::drawing();
+    #[cfg(not(hex_capture))]
+    false
+}
+
+/// Whether Escape is Hex's for Annotate: drawing, or persistent ink it would
+/// clear.
+fn annotate_wants_escape() -> bool {
+    #[cfg(hex_capture)]
+    return crate::capture_host::ink::escape_wanted();
     #[cfg(not(hex_capture))]
     false
 }

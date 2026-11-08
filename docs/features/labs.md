@@ -132,6 +132,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // (linux/meeting_capsules.rs); Rune's xwayland tests; not run on a GNOME session
 ├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
+├── Persistent ink  no    labs.persistent_ink (every OS with Annotate)
+│                                        lifted ink stays on screen until Escape clears it or the recording ends; the exported video still fades it
 ├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
 │                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
 │                                        macOS keeps its screen-recording dot lit the whole time it is on
@@ -1360,6 +1362,28 @@ after it. Details, checks, and live macOS 27.0 measurements:
 [capture.md](capture.md) (`capture.replay`) and
 `annotate_replay_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs).
 The row renders only on macOS 27+, so Linux goldens don't change.
+
+Persistent ink (`persistent-ink`, every OS with Annotate, group Annotate, off
+by default): for people who annotate a screen recording as they go. While
+`labs.persistent_ink` is on, a lifted Annotate stroke stays fully opaque on
+screen for the rest of the recording instead of Scrawl's 650 ms hold and
+650 ms fade; laser tails keep their 0.42 s taper. Escape with nothing being
+drawn clears every stroke already on screen (the overlay skips strokes that
+ended before a recorded clear time) and is consumed; with no ink visible,
+Escape reaches the app exactly as before, and while drawing it only stops
+drawing. The bundle, keyframes, contact sheet, and exported video never
+change: they keep recording the strokes and Scrawl's hold and fade, so the
+video still fades ink the screen kept (a known gap, out of scope here). On
+X11, Hex takes Escape while persistent ink is visible and lets it go once the
+screen is clear; on Wayland it reaches the ink overlay only where the
+compositor leaves it the keyboard. Checks:
+`persistent_ink_stays_opaque_until_escape_clears_it` in
+[capture_capsule/ink.rs](../../src/rune_ui/capture_capsule/ink.rs) and
+`persistent_ink_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Its row renders on every OS with Annotate; the
+macOS and Linux Labs goldens moved with it (the Windows and link scenes did
+not), and the golden test passes with them. Not yet observed: Escape clearing
+ink over a real recording on each OS.
 
 Movable meeting capsules (`movable-meeting-capsules`, issue 1093, macOS
 like Meetings; its row shows wherever Meetings does, in macOS builds): for

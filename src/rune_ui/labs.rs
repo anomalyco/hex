@@ -765,6 +765,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
             locked,
             group: Group::Annotate,
         });
+        rows.push(row(
+            Feature::PersistentInk,
+            None,
+            tr("Persistent ink"),
+            tr("Ink stays on screen until you press Escape or stop recording"),
+        ));
     }
     rows
 }
@@ -835,6 +841,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingImport => "lab-meeting-import",
         Feature::MeetingDescriptiveFilenames => "lab-meeting-descriptive-filenames",
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
+        Feature::PersistentInk => "lab-persistent-ink",
     }
 }
 

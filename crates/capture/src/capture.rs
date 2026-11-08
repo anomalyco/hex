@@ -1961,6 +1961,18 @@ impl SharedCaptureTelemetry {
         )
     }
 
+    /// The end time of the newest lifted ink stroke, without copying the
+    /// strokes (no laser).
+    pub fn newest_ink_end_ms(&self) -> Option<u64> {
+        self.strokes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .rev()
+            .find(|stroke| !stroke.laser)
+            .map(|stroke| stroke.t1)
+    }
+
     pub fn ink_snapshot(&self) -> InkSnapshot {
         let target = *self
             .target_frame

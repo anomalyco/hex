@@ -162,6 +162,7 @@ impl Feature {
             Self::CapsLockDictation => {
                 "Press Caps Lock to start and stop dictation; its light shows when Hex records and transcribes"
             }
+            Self::PersistentInk => "Ink stays on screen until you press Escape or stop recording",
         }
     }
 }

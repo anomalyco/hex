@@ -1181,9 +1181,10 @@ pub fn listen(
                 event => handle_dictation_event(event, &mut events, indicator)?,
             }
         }
-        // A recording capture takes Escape only while it draws (Escape stops
-        // drawing); otherwise only the capture shortcut's press before it
-        // starts, and the capsule's picker.
+        // A recording capture takes Escape while it draws (Escape stops
+        // drawing) or while persistent ink is on screen (Escape clears it);
+        // otherwise only the capture shortcut's press before it starts, and
+        // the capsule's picker.
         #[cfg(hex_capture)]
         let capture_escape = capture_host.is_some() && capture_shortcut.takes_escape();
         #[cfg(not(hex_capture))]

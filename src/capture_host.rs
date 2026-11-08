@@ -73,6 +73,7 @@ use crate::transcription::models::{ModelRuntime, TranscriptionModelId};
 // `hex annotate`'s folder commands; Windows has no control transport for
 // them yet.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
+pub(crate) mod ink;
 mod library;
 mod permissions;
 mod replay;
@@ -597,7 +598,7 @@ pub fn exclude_window(role: OwnWindow, window: u32) {
     own[role as usize] = Some(window);
     let joined = own_windows_of(&own);
     drop(own);
-    let Some(source) = ink_source() else { return };
+    let Some(source) = ink::source() else { return };
     for (ids, list) in [
         (&*source.telemetry.excluded_window_ids, joined.excluded),
         (&source.telemetry.passthrough_window_ids, joined.passthrough),
@@ -2391,7 +2392,8 @@ pub fn set_pen(on: bool) {
     }
 }
 
-/// Escape: stops drawing, never the recording. True when something drew.
+/// Escape: stops drawing, or, with Labs › Persistent ink on and ink on
+/// screen, clears it. Never the recording. True when it did something.
 pub fn exit_drawing() -> bool {
     let drew = drawing();
     *draw_held() = None;
@@ -2399,8 +2401,11 @@ pub fn exit_drawing() -> bool {
     PEN_DOWN.store(false, Ordering::Release);
     if drew {
         end_stroke();
+        // Escape while drawing only stops drawing; the ink it leaves stays
+        // until the next Escape clears it.
+        return true;
     }
-    drew
+    ink::clear()
 }
 
 /// Forgets the key and the pen: a new capture starts without drawing.
@@ -2412,7 +2417,7 @@ fn reset_drawing() {
 
 /// Ends a stroke under way where the pointer is, as letting go of Shift does.
 fn end_stroke() {
-    let [x, y] = ink_source()
+    let [x, y] = ink::source()
         .map(|source| {
             *source
                 .telemetry
@@ -2487,7 +2492,7 @@ pub fn draw(x: f32, y: f32, scale: f32) {
     }
     if let Some((width, height)) = scrawl_capture::capture::recorded_screen()
         && scale > 0.0
-        && let Some(source) = ink_source()
+        && let Some(source) = ink::source()
     {
         let area = crate::linux::output::pen_points()
             .or_else(scrawl_capture::capture::recorded_screen_points)
@@ -2539,25 +2544,6 @@ pub fn modifiers(flags: u64) -> Modifiers {
 struct LiveInput(Arc<Mutex<InputState>>);
 
 static SHARED_INPUT: Mutex<Option<LiveInput>> = Mutex::new(None);
-
-/// The recording capture's [`InkSource`], kept apart from [`LiveInput`]'s
-/// lock: the `capture-input` thread holds that lock while a pen release ends
-/// its stroke ([`end_stroke`]), which reads the pointer from here, so reading
-/// it through that lock deadlocked the thread and, with it, every view that
-/// asks for the ink.
-static INK: Mutex<Option<InkSource>> = Mutex::new(None);
-
-fn set_ink(source: Option<InkSource>) {
-    *INK.lock().unwrap_or_else(|error| error.into_inner()) = source;
-}
-
-/// The recording capture's ink, laser, and pointer, for the ink overlay to
-/// draw: `None` until its engine started, and once it ended.
-pub fn ink_source() -> Option<InkSource> {
-    INK.lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .clone()
-}
 
 /// Where a recording capture keeps its strokes, and its clock.
 #[derive(Clone)]
@@ -2621,7 +2607,7 @@ impl LiveInput {
         let mut state = self.state();
         state.recording = bundle.map(Path::to_path_buf);
         state.target = None;
-        set_ink(None);
+        ink::set(None);
         TAP_RECORDING.store(false, Ordering::Release);
         let dropped = DROPPED_INPUT.swap(0, Ordering::Relaxed);
         if dropped > 0 {
@@ -2644,7 +2630,7 @@ impl LiveInput {
         if state.recording.as_deref() != Some(bundle) {
             return;
         }
-        set_ink(Some(InkSource {
+        ink::set(Some(InkSource {
             telemetry: sink.telemetry().clone(),
             t0,
         }));
@@ -2667,7 +2653,7 @@ impl LiveInput {
             .is_some_and(|target| target.bundle == bundle)
         {
             state.target = None;
-            set_ink(None);
+            ink::set(None);
             TAP_RECORDING.store(false, Ordering::Release);
             reset_drawing();
         }
@@ -2987,11 +2973,12 @@ impl CaptureShortcut {
     }
 
     /// Whether Hex's tap keeps Escape from the app for captures: only for
-    /// this press before it records, and for the capsule's picker. (An open
-    /// list takes Escape at the session tap.) A recording capture never
-    /// takes it, and a send's Undo is a click.
+    /// this press before it records, for the capsule's picker, and while
+    /// persistent ink is on screen to clear. (An open list takes Escape at
+    /// the session tap.) A recording capture with no ink to clear never takes
+    /// it, and a send's Undo is a click.
     pub fn takes_escape(&self) -> bool {
-        self.armed() || wants_escape() || drawing() || self.replay.takes_escape()
+        self.armed() || wants_escape() || ink::escape_wanted() || self.replay.takes_escape()
     }
 
     /// Forgets a held key whose release the listener will not see, as while
@@ -3826,7 +3813,7 @@ mod tests {
         let held = thread::spawn(move || {
             let _state = live.state();
             end_stroke();
-            let _ = ink_source();
+            let _ = ink::source();
             let _ = done.send(());
         });
         assert!(
