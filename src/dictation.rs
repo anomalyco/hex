@@ -54,7 +54,8 @@ pub fn hotkey_pre_roll(behavior: crate::app_settings::RecordingAudioBehavior) ->
 /// What started a dictation, and so how its transcript is handled: the
 /// dictation shortcut and a local API client dictate normally, Dictate
 /// without processing skips Output, and Labs › Terminal paste always pastes
-/// with Ctrl+Shift+V.
+/// with Ctrl+Shift+V. Only the Windows and Linux listeners use it.
+#[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DictationFlavour {
     #[default]
@@ -66,6 +67,7 @@ pub enum DictationFlavour {
     TerminalPaste,
 }
 
+#[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
 impl DictationFlavour {
     /// Whether Output's steps are skipped and History says Raw.
     pub fn raw(self) -> bool {
