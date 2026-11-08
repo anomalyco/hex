@@ -8,14 +8,15 @@
 //! Linux, and WASAPI loopback on Windows.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
-use super::{AudioPacket, MeetingSource, SAMPLE_RATE};
+use super::{AudioPacket, MeetingSource, RecordingUpdate, SAMPLE_RATE, TrackWarning};
 use crate::dictation::StreamingResampler;
 
 const RETRY_INITIAL: Duration = Duration::from_millis(500);
@@ -24,6 +25,12 @@ pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Core Audio delivers silence continuously; this long without a buffer
 /// means the device or tap stopped.
 pub(super) const STALL_TIMEOUT: Duration = Duration::from_secs(3);
+/// Exact-zero samples that mean the microphone stream is digitally silent
+/// rather than a quiet room.
+const SILENCE_TIMEOUT: Duration = Duration::from_secs(3);
+/// How many times one recording reopens a digitally silent microphone before
+/// keeping the stream open and warning instead.
+const SILENCE_REOPENS: u8 = 2;
 
 /// Delivers one source's 16 kHz audio to the track writer, stamped on the
 /// meeting's shared capture clock.
@@ -54,6 +61,111 @@ impl PacketSink {
     }
 }
 
+/// The microphone's user-facing warning, shared by each reopened source with
+/// the recorder that persists the final one.
+#[derive(Clone)]
+pub(super) struct TrackWarnings {
+    current: Arc<Mutex<Option<TrackWarning>>>,
+    updates: Option<SyncSender<RecordingUpdate>>,
+}
+
+impl TrackWarnings {
+    pub(super) fn new(updates: Option<SyncSender<RecordingUpdate>>) -> Self {
+        Self {
+            current: Arc::default(),
+            updates,
+        }
+    }
+
+    /// Sets the warning, reporting a change to the controller.
+    fn set(&self, warning: Option<TrackWarning>) {
+        let mut current = self
+            .current
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if *current == warning {
+            return;
+        }
+        *current = warning;
+        drop(current);
+        if let Some(updates) = &self.updates {
+            let _ = updates.try_send(RecordingUpdate::SourceWarning { warning });
+        }
+    }
+
+    /// The warning as of the last source change, for the final manifest.
+    pub(super) fn current(&self) -> Option<TrackWarning> {
+        *self
+            .current
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+}
+
+/// What a microphone chunk's silence count crossed into.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SilenceEdge {
+    /// The stream reached [`SILENCE_TIMEOUT`] of exact zeros.
+    Silent,
+    /// Nonzero audio ended a digitally silent episode.
+    Audible,
+    /// Neither the start nor the end of an episode.
+    Unchanged,
+}
+
+/// Counts consecutive exact-zero samples from the microphone so a stream
+/// that keeps delivering digital silence while its chunks keep arriving, as
+/// a call app holding the device with voice processing does, is noticed.
+#[derive(Clone, Debug)]
+struct SilenceWatch {
+    rate: u32,
+    zeros: u64,
+}
+
+impl SilenceWatch {
+    fn new(rate: u32) -> Self {
+        Self { rate, zeros: 0 }
+    }
+
+    /// Starts a fresh count for a newly opened input device or sample rate.
+    fn reset(&mut self, rate: u32) {
+        self.rate = rate;
+        self.zeros = 0;
+    }
+
+    /// Counts `samples`, reporting only the edges of an episode.
+    fn observe(&mut self, samples: &[f32]) -> SilenceEdge {
+        let was_silent = self.is_silent();
+        for &sample in samples {
+            if sample == 0.0 {
+                self.zeros += 1;
+            } else {
+                self.zeros = 0;
+            }
+        }
+        match (was_silent, self.is_silent()) {
+            (false, true) => SilenceEdge::Silent,
+            (true, false) => SilenceEdge::Audible,
+            _ => SilenceEdge::Unchanged,
+        }
+    }
+
+    fn is_silent(&self) -> bool {
+        self.rate > 0
+            && self.zeros >= u64::from(self.rate).saturating_mul(SILENCE_TIMEOUT.as_secs())
+    }
+}
+
+/// Claims one of the recording's silence reopens; false once they are spent.
+fn claim_silence_reopen(reopens: &AtomicU8) -> bool {
+    let used = reopens.load(Ordering::Relaxed);
+    if used >= SILENCE_REOPENS {
+        return false;
+    }
+    reopens.store(used + 1, Ordering::Relaxed);
+    true
+}
+
 /// An open source that the supervisor polls until it fails.
 pub(super) trait LiveSource {
     /// Waits briefly for audio and forwards it; an error ends this instance.
@@ -71,11 +183,18 @@ impl SourceSupervisor {
     /// Records the input the call app `application` (a canonical bundle
     /// identifier) records from where the OS reports it, else the
     /// configured microphone.
-    pub(super) fn microphone(sink: PacketSink, application: Option<String>) -> Self {
+    pub(super) fn microphone(
+        sink: PacketSink,
+        application: Option<String>,
+        warnings: TrackWarnings,
+    ) -> Self {
+        let reopens = Arc::new(AtomicU8::new(0));
         Self::spawn(sink, move || {
             MicrophoneSource::open(
                 crate::app_settings::microphone_selection(),
                 application.clone(),
+                reopens.clone(),
+                warnings.clone(),
             )
             .map(|source| Box::new(source) as Box<dyn LiveSource>)
         })
@@ -266,6 +385,12 @@ struct MicrophoneSource {
     input: crate::audio::AudioInput,
     resample: To16k,
     last_audio: Instant,
+    /// Exact-zero samples from the current input.
+    silence: SilenceWatch,
+    /// Silence reopens this recording has already spent.
+    silence_reopens: Arc<AtomicU8>,
+    /// The controller-visible warning, shared across reopened streams.
+    warnings: TrackWarnings,
     selected: Option<String>,
     /// The [`crate::app_settings::microphone_selection`] revision of `selected`.
     selection_revision: u64,
@@ -283,6 +408,8 @@ impl MicrophoneSource {
     fn open(
         (selection_revision, selected): (u64, Option<String>),
         application: Option<String>,
+        silence_reopens: Arc<AtomicU8>,
+        warnings: TrackWarnings,
     ) -> Result<Self> {
         let route_generation = crate::audio::input_route_generation();
         let call_input = current_call_input(application.as_deref(), None);
@@ -303,6 +430,9 @@ impl MicrophoneSource {
         retry.resolved(input.selection, Instant::now());
         Ok(Self {
             input,
+            silence: SilenceWatch::new(resample.rate),
+            silence_reopens,
+            warnings,
             resample,
             last_audio: Instant::now(),
             selected,
@@ -381,6 +511,8 @@ impl MicrophoneSource {
             "meeting microphone switched"
         );
         self.retry.resolved(input.selection, now);
+        self.silence.reset(input.sample_rate);
+        self.warnings.set(None);
         self.input = input;
         self.last_audio = Instant::now();
     }
@@ -392,7 +524,32 @@ impl LiveSource for MicrophoneSource {
         match self.input.recv_timeout(POLL_INTERVAL) {
             crate::audio::AudioInputEvent::Chunk { samples, .. } => {
                 self.last_audio = Instant::now();
+                let edge = self.silence.observe(&samples);
                 sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
+                match edge {
+                    SilenceEdge::Silent if claim_silence_reopen(&self.silence_reopens) => {
+                        tracing::warn!(
+                            device = %self.input.device_name,
+                            "meeting microphone delivered digital silence; reopening it"
+                        );
+                        return Err("microphone delivered digital silence".into());
+                    }
+                    SilenceEdge::Silent => {
+                        tracing::warn!(
+                            device = %self.input.device_name,
+                            "meeting microphone is still digitally silent; keeping the stream open"
+                        );
+                        self.warnings.set(Some(TrackWarning::DigitalSilence));
+                    }
+                    SilenceEdge::Audible => {
+                        tracing::info!(
+                            device = %self.input.device_name,
+                            "meeting microphone audio returned"
+                        );
+                        self.warnings.set(None);
+                    }
+                    SilenceEdge::Unchanged => {}
+                }
                 Ok(())
             }
             crate::audio::AudioInputEvent::Timeout if self.last_audio.elapsed() > STALL_TIMEOUT => {
@@ -462,5 +619,40 @@ mod tests {
         assert!(retry.due.is_none());
         retry.resolved(Selection::Unlisted, start);
         assert!(retry.due.is_none());
+    }
+
+    #[test]
+    fn a_digital_silence_watch_needs_three_seconds_of_exact_zeros() {
+        let mut watch = SilenceWatch::new(1_000);
+        assert_eq!(watch.observe(&[0.0; 2_999]), SilenceEdge::Unchanged);
+        assert_eq!(watch.observe(&[0.0]), SilenceEdge::Silent);
+        assert_eq!(watch.observe(&[0.0; 500]), SilenceEdge::Unchanged);
+    }
+
+    #[test]
+    fn a_nonzero_sample_ends_a_digital_silence_episode() {
+        let mut watch = SilenceWatch::new(1_000);
+        assert_eq!(watch.observe(&[0.0; 3_000]), SilenceEdge::Silent);
+        assert_eq!(watch.observe(&[0.0, 0.25]), SilenceEdge::Audible);
+        assert_eq!(watch.observe(&[0.0; 2_999]), SilenceEdge::Unchanged);
+        assert_eq!(watch.observe(&[0.0]), SilenceEdge::Silent);
+    }
+
+    #[test]
+    fn a_route_change_restarts_the_digital_silence_watch() {
+        let mut watch = SilenceWatch::new(1_000);
+        assert_eq!(watch.observe(&[0.0; 3_000]), SilenceEdge::Silent);
+        watch.reset(2_000);
+        assert_eq!(watch.observe(&[0.0; 1_000]), SilenceEdge::Unchanged);
+        assert_eq!(watch.observe(&[0.0; 5_000]), SilenceEdge::Silent);
+    }
+
+    #[test]
+    fn a_digitally_silent_microphone_is_reopened_twice_before_warning() {
+        let reopens = AtomicU8::new(0);
+        assert!(claim_silence_reopen(&reopens));
+        assert!(claim_silence_reopen(&reopens));
+        assert!(!claim_silence_reopen(&reopens));
+        assert_eq!(reopens.load(Ordering::Relaxed), SILENCE_REOPENS);
     }
 }

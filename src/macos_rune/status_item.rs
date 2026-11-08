@@ -603,11 +603,16 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
             started,
             title,
             chapters,
+            warning,
             ..
         } => {
             let elapsed = crate::meeting::format_duration(started.elapsed().as_millis() as u64);
+            let mut status = format!("Recording · {} · {elapsed}", menu_title(title));
+            if warning.is_some() {
+                status.push_str(" · Microphone is silent");
+            }
             MeetingMenu {
-                status: Some(format!("Recording · {} · {elapsed}", menu_title(title))),
+                status: Some(status),
                 button_title: format!(" {elapsed}"),
                 recording: true,
                 can_start: false,
@@ -832,13 +837,17 @@ mod tests {
         assert!(idle.can_start && !idle.can_stop && idle.status.is_none());
         assert!(!meeting_menu(&MeetingMenuState::Idle, false).can_start);
         let started = std::time::Instant::now() - std::time::Duration::from_secs(754);
-        let recording_state = |title: &str, chapters| MeetingMenuState::Recording {
+        let recording_state = |title: &str, chapters, warning| MeetingMenuState::Recording {
             started,
             id: "1".into(),
             title: title.into(),
             chapters,
+            warning,
         };
-        let recording = meeting_menu(&recording_state("Zoom call — 2:30 PM", Vec::new()), false);
+        let recording = meeting_menu(
+            &recording_state("Zoom call — 2:30 PM", Vec::new(), None),
+            false,
+        );
         assert_eq!(
             recording.status.as_deref(),
             Some("Recording · Zoom call — 2:30 PM · 12:34")
@@ -847,6 +856,7 @@ mod tests {
             &recording_state(
                 "A very long provisional title that keeps going past the limit",
                 Vec::new(),
+                None,
             ),
             false,
         );
@@ -857,6 +867,18 @@ mod tests {
         assert_eq!(recording.button_title, " 12:34");
         assert!(recording.can_stop && !recording.can_start);
         assert!(recording.sections.is_empty());
+        let silent = meeting_menu(
+            &recording_state(
+                "Team sync",
+                Vec::new(),
+                Some(crate::meeting::TrackWarning::DigitalSilence),
+            ),
+            false,
+        );
+        assert_eq!(
+            silent.status.as_deref(),
+            Some("Recording · Team sync · 12:34 · Microphone is silent")
+        );
         let chapter = |title: &str, start_ms| crate::meeting::Chapter {
             title: title.into(),
             summary: String::new(),
@@ -866,6 +888,7 @@ mod tests {
             &recording_state(
                 "Team sync",
                 vec![chapter("Image storage", 0), chapter("Motion lint", 190_000)],
+                None,
             ),
             false,
         );

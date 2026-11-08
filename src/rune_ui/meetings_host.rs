@@ -173,6 +173,7 @@ fn pane_meeting(
         export_error: manifest.export_error.clone(),
         notes_error: manifest.notes_error.clone(),
         live_error: manifest.live_transcription_error.clone(),
+        microphone_warning: manifest.microphone.warning,
         transcript,
         imported: manifest.imported,
         // Sections come from the transcript lines, not the merged turns, as

@@ -18,7 +18,7 @@ use crate::meeting::detection::{
     AutoStop, BrowserPageMemory, CallPresence, Detection, MeetingCandidate, MeetingDetector,
     candidate_from_microphone,
 };
-use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart};
+use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
 
 pub(crate) enum ControllerCommand {
@@ -75,6 +75,10 @@ pub(crate) enum ControllerEvent {
     },
     /// The recording's live chapters so far (Labs).
     Chapters(Vec<meeting::Chapter>),
+    /// The microphone became digitally silent, or its audio returned.
+    SourceWarning {
+        warning: Option<TrackWarning>,
+    },
     OpenMeeting(String),
     Transcribing,
     /// `auto_stop` when the recording stops on its own after
@@ -122,8 +126,20 @@ pub enum MeetingMenuState {
         title: String,
         /// Live chapters, for Copy Section (Labs).
         chapters: Vec<meeting::Chapter>,
+        /// The microphone is digitally silent, as a call app holding it with
+        /// voice processing leaves it (#1518).
+        warning: Option<TrackWarning>,
     },
     Transcribing,
+}
+
+impl MeetingMenuState {
+    /// Sets the recording's microphone warning; other states have none.
+    pub(crate) fn source_warning(&mut self, warning: Option<TrackWarning>) {
+        if let Self::Recording { warning: shown, .. } = self {
+            *shown = warning;
+        }
+    }
 }
 
 pub struct ListenerConfig {
@@ -805,6 +821,9 @@ fn poll_recording(
                 }
                 meeting::RecordingUpdate::Chapters(chapters) => {
                     let _ = events.send(ControllerEvent::Chapters(chapters));
+                }
+                meeting::RecordingUpdate::SourceWarning { warning } => {
+                    let _ = events.send(ControllerEvent::SourceWarning { warning });
                 }
                 meeting::RecordingUpdate::Transcribing => {
                     if !active.stop.swap(true, Ordering::Relaxed) {

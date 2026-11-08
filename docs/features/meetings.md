@@ -697,8 +697,19 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │   │   saved device returns, mid-meeting
 │   │   -> New input opens before the old drops; same track, no retry gap
 │   │      // macOS only (meetings are macOS); a failed open keeps the old input
-│   └── Saved device listed but would not open -> System default stands in
-│       -> tried again after 1, 2, 4, 8, 16, 30, 30, 30 s, then only on a change
+│   ├── Saved device listed but would not open -> System default stands in
+│   │   -> tried again after 1, 2, 4, 8, 16, 30, 30, 30 s, then only on a change
+│   └── Stream delivers only exact zeros for 3 s (#1518)
+│       -> Reopened like a failed source, at most twice in one recording
+│       ├── Still silent -> keep recording; the capsule and menu bar say
+│       │   "Microphone is silent"; manifest.microphone.warning is digital_silence
+│       └── Nonzero audio returns -> the warning clears; another episode
+│           warns again, but it is not reopened again
+│          // checks: a_digital_silence_watch_needs_three_seconds_of_exact_zeros,
+│          // a_nonzero_sample_ends_a_digital_silence_episode,
+│          // a_route_change_restarts_the_digital_silence_watch,
+│          // a_digitally_silent_microphone_is_reopened_twice_before_warning;
+│          // not verified on a live device or call app
 └── System audio -> Core Audio process tap (global, excluding Hex) on a private
     aggregate device; no display dependency
     └── Tap not authorized + Screen Recording granted -> ScreenCaptureKit fallback
@@ -735,11 +746,19 @@ call, a muted call, and Zoom or Teams helpers),
 `meeting_menu_offers_one_action_per_state` in
 [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs), and
 `mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded`,
-`writer_fills_a_capture_gap_with_silence_and_records_it`, and
-`a_source_that_resumes_after_an_outage_is_padded_back_onto_the_timeline` in
+`writer_fills_a_capture_gap_with_silence_and_records_it`,
+`a_source_that_resumes_after_an_outage_is_padded_back_onto_the_timeline`,
+`a_digital_silence_watch_needs_three_seconds_of_exact_zeros`,
+`a_nonzero_sample_ends_a_digital_silence_episode`,
+`a_route_change_restarts_the_digital_silence_watch`,
+`a_digitally_silent_microphone_is_reopened_twice_before_warning` in
+[meeting/capture.rs](../../src/meeting/capture.rs), and
+`a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none` in
 [meeting/tests.rs](../../src/meeting/tests.rs). Menu-bar Record Meeting and
 Stop & Transcribe, and the recording and ready capsule buttons, were clicked
-on a real Mac on 2026-10-22; no automated test covers them.
+on a real Mac on 2026-10-22; no automated test covers them. The digital
+silence watch is not verified on a live device or call app that holds the
+microphone with voice processing.
 
 The capsules are Rune overlays in [meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs):
 interactive, non-activating `NSPanel`s at status level on every Space,

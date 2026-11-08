@@ -211,6 +211,27 @@ pub(super) fn error_panel(p: Paint, key: &str, title: &str, detail: &str) -> El 
         )
 }
 
+/// A warning title and its detail, as a tinted panel.
+pub(super) fn warning_panel(p: Paint, key: &str, title: &str, detail: &str) -> El {
+    let w = &p.k.c.warning;
+    col()
+        .key(key)
+        .px(12.0)
+        .py(10.0)
+        .gap(2.0)
+        .radius(p.k.radius.md)
+        .fill(w.bg)
+        .border(0.5, w.border)
+        .child(text(title).key("title").font(p.k.ty.ui_medium).color(w.fg))
+        .child(
+            text(detail)
+                .key("detail")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
+        )
+}
+
 /// An [`error_panel`] with a close button, for an error that stays until the
 /// user dismisses it.
 pub(super) fn dismissible_error_panel(

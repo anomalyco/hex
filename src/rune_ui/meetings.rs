@@ -18,7 +18,9 @@ use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, card, page, pulsing_dot, segmented_tx,
 };
 use super::list_detail::{self as ld, Item};
-use super::lists::{Tone, dismissible_error_panel, error_panel, section_label, tone_tag};
+use super::lists::{
+    Tone, dismissible_error_panel, error_panel, section_label, tone_tag, warning_panel,
+};
 use super::platform::MeetingRequest;
 use super::{Menu, Ui};
 use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
@@ -103,6 +105,8 @@ pub(super) struct Meeting {
     pub(super) export_error: Option<String>,
     pub(super) notes_error: Option<String>,
     pub(super) live_error: Option<String>,
+    /// The microphone was digitally silent for part of this recording.
+    pub(super) microphone_warning: Option<crate::meeting::TrackWarning>,
     pub(super) transcript: Transcript,
     pub(super) chapters: Vec<Chapter>,
     /// Imported from an audio file (Labs › Import audio): its one track is
@@ -885,6 +889,14 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     let mut body = col().key("detail-body").gap(24.0).pb(8.0);
     for (key, title, error) in errors.into_iter().flatten() {
         body = body.child(error_panel(p, key, title, error));
+    }
+    if !active && meeting.microphone_warning == Some(crate::meeting::TrackWarning::DigitalSilence) {
+        body = body.child(warning_panel(
+            p,
+            "microphone-silence",
+            tr("Microphone is silent"),
+            tr("Your microphone was silent for part of this call. Another app may have been using it with voice processing, so your side may be missing."),
+        ));
     }
     if let Some(summary) = &meeting.summary {
         let summary = summary.trim();

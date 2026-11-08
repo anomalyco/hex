@@ -102,6 +102,7 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
                 samples,
                 dropped_packets: 0,
                 gaps: Vec::new(),
+                warning: None,
             },
             microphone: TrackManifest {
                 file: "microphone.wav".into(),

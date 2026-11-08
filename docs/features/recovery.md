@@ -303,6 +303,14 @@ warm stream keeps running but delivers only exact zeros (macOS and Linux hotkey 
   -> its finish reopens the microphone like a stream failure // logged once
   -> next dictation records from a fresh stream
 
+meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
+  -> reopen the microphone source, at most twice in one recording
+  ├── still silent -> keep recording; the capsule and menu bar say
+  │     "Microphone is silent", and the manifest records
+  │     microphone.warning = digital_silence
+  └── nonzero audio returns -> clear the warning; a later episode warns
+        again, with no further reopens
+
 open stream stops delivering audio without an error (any OS, #1206)
   -> 4 s with no chunk (STREAM_STALL_TIMEOUT) -> treated as a stream failure
   -> reopened like any interrupted stream, idle or not // logged "microphone stopped delivering audio"
@@ -338,6 +346,15 @@ values; no iPhone observed with the lid closed),
 [linux/dictation.rs](../../src/linux/dictation.rs):
 `submit_capture_reports_when_a_clip_is_digital_silence`,
 `a_warm_silent_stream_reopens_once_unless_released`;
+[meeting/capture.rs](../../src/meeting/capture.rs):
+`a_digital_silence_watch_needs_three_seconds_of_exact_zeros`,
+`a_nonzero_sample_ends_a_digital_silence_episode`,
+`a_route_change_restarts_the_digital_silence_watch`,
+`a_digitally_silent_microphone_is_reopened_twice_before_warning`;
+[meeting/tests.rs](../../src/meeting/tests.rs):
+`a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none`
+(the exact-zeros watch and reopening are not verified on a live device or a
+call app holding the microphone with voice processing);
 [recognition.rs](../../src/recognition.rs):
 `microphone_loss_keeps_a_programmatic_clip_for_finish` (the hold, not a `/finish`
 through the running listener).
@@ -439,6 +456,19 @@ dictation does the same for a warm microphone; service and programmatic
 captures do not check it, and one released while idle opens fresh. The
 first such dictation is still discarded. Not verified with a real WhatsApp
 call.
+
+**Meeting capture ([#1518](https://github.com/anomalyco/hex/issues/1518)):**
+during a meeting, the microphone stream kept delivering chunks of exact 0.0
+samples for the whole call while the call app held the built-in microphone,
+so the existing stall watchdog never fired and the user's side was missing.
+A microphone stream that delivers 3 s of exact zeros now reopens like a
+failed source, at most twice in one recording. If it is still silent, Hex
+keeps recording and warns in the recording capsule, the menu bar, and the
+finished meeting's detail, and records `microphone.warning: digital_silence`
+in the manifest. Nonzero audio clears the warning; a later episode warns
+again without another reopen. The 3 s watch and its bounded reopens are
+unit-checked; none of it was observed on a live device or a call app holding
+the microphone with voice processing.
 
 **Fixed after 3.3.0 ([#1206](https://github.com/anomalyco/hex/issues/1206)):**
 after a burst of overrun warnings while idle, a warm USB microphone's stream
