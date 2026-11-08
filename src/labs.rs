@@ -838,8 +838,6 @@ const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
 /// The next bit above Typed text's switch: Caps Lock dictation's recording
 /// light blinks slowly instead of staying solid.
 const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
-/// The next bit above Caps Lock's slow blink.
-const TERMINAL_PASTE_SHORTCUT: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1287,11 +1285,6 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::CapsLockDictation,
             settings.caps_lock_light == CapsLockLight::SlowBlink,
             CAPS_LOCK_SLOW_BLINK,
-        ),
-        (
-            Feature::TerminalPasteShortcut,
-            settings.terminal_paste_shortcut,
-            TERMINAL_PASTE_SHORTCUT,
         ),
         (
             Feature::QuitClosesWindow,
@@ -1846,15 +1839,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_paste_shortcut_is_its_own_bit_and_windows_or_linux_only() {
-        let mut labs = LabsSettings::default();
-        assert_eq!(encode_where(&labs, |_| true) & TERMINAL_PASTE_SHORTCUT, 0);
-        labs.terminal_paste_shortcut = true;
-        labs.unload_idle_minutes = 24 * 60;
-        let state = encode_where(&labs, |_| true);
-        assert_ne!(state & TERMINAL_PASTE_SHORTCUT, 0);
-        assert_eq!(state & CAPS_LOCK_DICTATION, 0);
-        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+    fn terminal_paste_shortcut_is_windows_or_linux_only() {
         assert_eq!(
             Feature::TerminalPasteShortcut.on_this_os(),
             cfg!(any(target_os = "windows", target_os = "linux"))
