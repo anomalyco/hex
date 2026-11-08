@@ -65,6 +65,12 @@ it never accesses the microphone, speech model, or network.
     misheard words and spoken self-corrections, within a 2 s budget. A
     timeout, error, empty or implausible output keeps the raw transcript, and
     the toggle is disabled with a reason when Apple Intelligence is unusable.
+  - **Custom vocabulary (Experiments › Custom vocabulary):** Off by default.
+    A local list of up to 100 names and phrases, applied to every engine. After
+    transcription, matching words are rewritten to the listed spelling, across
+    case, spaces, a single hyphen, and possessive apostrophes, before cleanup
+    and formatting. On iOS 26 Apple Speech the list is also a best-effort
+    recognition hint; Parakeet gets no hint.
 - **Resilient capture & expiry contract (`DictationController`):**
   - Monotonic `jobGeneration`, retained `transcriptionTask`, and unique
     per-capture WAV filenames ensure an expiring warm session never drops an
@@ -109,3 +115,8 @@ xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=
   `AVAudioRecorder.isRecording` changes during warm handoff or Bluetooth route
   changes have not been reproduced on hardware; the meter recovery tests inject
   that condition through `ActiveAudioCapture`.
+- **Apple Speech hint:** Custom vocabulary's contextual strings are best effort
+  and unverified on a physical iPhone; Parakeet does not use them.
+- **No iOS CI:** Custom vocabulary is covered by unit tests only. No CI job
+  compiles or tests the iOS targets, so these checks run only in a local
+  `xcodebuild test`.

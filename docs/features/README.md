@@ -2347,7 +2347,13 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 ├── Modes: "Choose a file…" opens rune::FileDialogs (file_dialog) on its own thread
 ├── Modes app icons: the executable's first icon (PrivateExtractIconsW)
 └── Not yet: custom caption
-iOS prototype -> Record/transcribe/copy and keyboard handoff
+iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
+├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary
+├── Custom vocabulary (off by default): a local list of up to 100 terms; every
+│   engine spells matched words the listed way before cleanup and formatting
+├── Recognition hint: Apple Speech (iOS 26) contextual strings, best effort;
+│   Parakeet receives none
+└── Proof limits: unit tests only; no CI compiles the iOS targets
 Unmerged Windows / deferred features -> Not part of this map
 ```
 
@@ -2355,8 +2361,11 @@ Sources: [meeting.rs](../../src/meeting.rs),
 [meeting/watcher.rs](../../src/meeting/watcher.rs),
 [control/developer_control.rs](../../src/control/developer_control.rs),
 `SCENES` in [rune_ui.rs](../../src/rune_ui.rs), [iOS guide](../../ios/README.md).
-iOS physical-device proof and temporary-WAV failure cleanup remain gaps;
-best-effort deletion is not guaranteed deletion.
+The iOS custom vocabulary experiment stays off by default and keeps its list in
+the App Group. Apple Speech also receives it as a best-effort recognition hint,
+unverified on a physical iPhone; Parakeet receives none. iOS physical-device
+proof and temporary-WAV failure cleanup remain gaps; best-effort deletion is not
+guaranteed deletion.
 
 `dev.rune-ui` lives in [rune_ui.rs](../../src/rune_ui.rs) and its pane modules;
 its tests drive the Rune runtime headlessly (navigation; General rows per

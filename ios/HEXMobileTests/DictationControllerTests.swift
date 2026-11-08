@@ -545,6 +545,61 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(controller.transcript, "")
     }
 
+    func testCustomVocabularyAppliesOnlyWhenCaptured() async throws {
+        let now = 50_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("i use open code")
+        let bridge = KeyboardBridge(defaults: defaults)
+        let settings = CustomVocabularySettings(defaults: defaults)
+        settings.terms = ["OpenCode"]
+        let cleanupSettings = AppleIntelligenceCleanupSettings(defaults: defaults)
+        let cleaner = RecordingCleaner()
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false,
+            cleaner: cleaner,
+            cleanupSettings: cleanupSettings,
+            customVocabularySettings: settings
+        )
+        controller.prepareModel()
+        try await settle()
+
+        // Off: the transcript is formatted exactly as before.
+        settings.isEnabled = false
+        controller.startRecording(keyboardJobID: "vocabulary-off", styleOverride: .verbatim)
+        try await settle()
+        settings.isEnabled = true // A mid-capture toggle must not affect this session.
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "i use open code")
+
+        // On: the setting is captured at start, before formatting.
+        controller.clearTranscript()
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "vocabulary-on", styleOverride: .verbatim)
+        try await settle()
+        settings.isEnabled = false
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "i use OpenCode")
+
+        // Cleanup receives the spelled transcript, then formatting runs.
+        controller.clearTranscript()
+        settings.isEnabled = true
+        cleanupSettings.isEnabled = true
+        controller.startRecording(keyboardJobID: "vocabulary-cleanup", styleOverride: .polished)
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs, ["i use OpenCode"])
+        XCTAssertEqual(controller.transcript, "I use OpenCode.")
+    }
+
     private func settle() async throws {
         for _ in 0..<8 {
             try await Task.sleep(for: .milliseconds(25))
