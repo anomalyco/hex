@@ -8,6 +8,8 @@ use super::*;
 pub struct LabsSettings {
     /// Live text beside the HUD while dictating.
     pub live_text: bool,
+    /// A failed dictation's explanation beside the HUD for a few seconds.
+    pub failure_notices: bool,
     /// Provisional words in the focused text field as a Wayland input-method
     /// preedit, with the final text committed there (Linux Wayland).
     pub live_typing: bool,
@@ -72,6 +74,9 @@ pub struct LabsSettings {
     pub hide_menu_bar_icon: bool,
     /// ⌘Q closes the Settings window instead of quitting Hex (macOS).
     pub quit_closes_window: bool,
+    /// A Caps Lock press starts and stops dictation, and its light follows
+    /// Hex's recording and processing (macOS).
+    pub caps_lock_dictation: bool,
     pub movable_meeting_capsules: bool,
     /// A paste restores the clipboard through a running XWayland on Wayland desktops without data-control, such as GNOME (Linux, issue 1111).
     pub gnome_clipboard_restore: bool,
@@ -112,6 +117,7 @@ impl Default for LabsSettings {
     fn default() -> Self {
         Self {
             live_text: false,
+            failure_notices: false,
             live_typing: false,
             live_chapters: false,
             playground: false,
@@ -147,6 +153,7 @@ impl Default for LabsSettings {
             settings_search: false,
             hide_menu_bar_icon: false,
             quit_closes_window: false,
+            caps_lock_dictation: false,
             movable_meeting_capsules: false,
             gnome_clipboard_restore: false,
             meeting_notes_vocabulary: false,

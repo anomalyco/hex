@@ -890,9 +890,11 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
     ui.view = Some(ServiceView {
         listener: DesktopListenerSnapshot {
             running: true,
+            warming: false,
             status: "Enabled".into(),
             warning: None,
             notice: None,
+            last_failure: None,
             shortcuts,
             shortcuts_configurable: false,
         },

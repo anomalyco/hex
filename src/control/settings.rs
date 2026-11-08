@@ -280,6 +280,11 @@ const KEYS: &[Key] = &[
         "Labs: provisional words beside the HUD while dictating",
     ),
     key(
+        "labs.failure_notices",
+        Kind::Bool,
+        "Labs: when a dictation fails, show why for a few seconds beside the HUD",
+    ),
+    key(
         "labs.live_typing",
         Kind::Bool,
         "Labs: provisional words in the focused text field as an underlined input-method preedit, and the final text typed there instead of pasted (Linux Wayland)",
@@ -423,6 +428,11 @@ const KEYS: &[Key] = &[
         "labs.quit_closes_window",
         Kind::Bool,
         "Labs: the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits (macOS)",
+    ),
+    key(
+        "labs.caps_lock_dictation",
+        Kind::Bool,
+        "Labs: a Caps Lock press starts and stops dictation hands-free, and its light shows when Hex records and transcribes; Caps Lock stays off so typing is unchanged (macOS)",
     ),
     key(
         "labs.notch_indicator",

@@ -112,8 +112,21 @@ a reboot strands the old path) is replaced at startup by the user manager's
 current value, or dropped so Xlib uses `~/.Xauthority`. A unit started with no
 display at all (the desktop never imported its environment into systemd) adopts
 the user manager's `WAYLAND_DISPLAY`, else the newest Wayland socket of yours in
-`XDG_RUNTIME_DIR` that answers. Hyprland imports nothing by default; add this to
-its config so the service, its paste helpers, and the HUD get your session:
+`XDG_RUNTIME_DIR` that answers. One started with only Xwayland's `DISPLAY` does
+the same when `XDG_SESSION_TYPE` is `wayland` (from Hex's environment, else the
+user manager's): it takes the manager's live `WAYLAND_DISPLAY`, else the newest
+answering socket. Any other explicit session type (`x11`, `tty` from startx,
+`mir`, …) keeps its X display even when the user manager still names a nested
+compositor or another login's display, so paste keeps reaching X11 apps; only
+an absent type adopts a live manager display. Launchers (`hex`, `hex start`,
+`hex restart`) make the same decision before they write `session.env`, so the
+service and the launcher agree on the session; a launcher never adopts without
+a display, and when it would start the unit with nothing to write it still
+refuses with "Start Hex from your graphical login session". Without the
+adoption, a Wayland desktop's paste goes through XWayland, which native Wayland
+windows never see, and restoring the clipboard clears the compositor's.
+Hyprland imports nothing by default; add this to its config so the service, its
+paste helpers, and the HUD get your session:
 
 ```ini
 exec-once = dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
@@ -141,7 +154,11 @@ time, so a client's dictation and the shortcut never end each other.
 
 For development, run `cargo run --release`. `hex dictate` remains an explicit
 foreground diagnostic listener without the window or HUD and cannot coexist
-with Hex's listener. With
+with Hex's listener. Like `hex service`, it adopts the session's Wayland
+display when its shell has none, or only Xwayland's `DISPLAY` on a Wayland
+login (#756, #1506). `hex` commands reach only the
+service listener, so a foreground `hex dictate` receives none and says so at
+startup when no shortcut is bound. With
 `HEX_APPLICATION_SUPPORT_DIR` set, launches never start, stop, or restart the
 installed user unit; they forward to the Hex using that data directory or
 become it. `HEX_SYSTEMD_UNIT` names another unit for isolated tests.
@@ -473,7 +490,8 @@ hl.bind("F10", hl.dsp.global("anomaly.hex:paste-last"))
   Ctrl+V.
 - **Wayland without the portal** (for example Sway): nothing registers global
   shortcuts. Settings lists these commands; bind them in your desktop's own
-  keyboard configuration:
+  keyboard configuration. They reach only the listener `hex start` or
+  `hex service` runs; a foreground `hex dictate` can't receive them:
 
 ```sh
 hex dictation start     # bind to a key's press: start recording

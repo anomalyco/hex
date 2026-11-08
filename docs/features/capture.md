@@ -67,16 +67,22 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
 │   the bundle (keyframes, contact sheet, scrawl.json)
-├── Linux: strokes are placed on the recorded screen in its logical points,
-│   from the ScreenCast portal's stream size when it reports one smaller
-│   than the frames, so a fractional scale (1.5, 1.33), which reaches the
-│   overlay rounded up to 2, no longer pins strokes to a top-left part of
-│   the screen; without that size it divides the pixels by the overlay's
-│   scale. Check: scrawl-capture capture::platform::tests
-│   a_fractionally_scaled_screen_keeps_its_logical_size; not observed on a
-│   fractionally scaled monitor. Known gap: the overlay starts below a
-│   desktop bar's reserved area, so saved ink sits that bar's height off
-│   the live ink
+├── Linux: strokes are placed on the recorded screen in its logical points.
+│   A monitor pick whose portal names the output (`mapping_id`, as
+│   xdg-desktop-portal-hyprland 1.4.0+ does, e.g. `DP-3`) opens the pen on
+│   that output with its logical size from xdg-output (linux::output::find),
+│   so strokes land on the recorded monitor even when the overlay had opened
+│   on another one. Otherwise it uses the ScreenCast portal's stream size
+│   when it reports one smaller than the frames, so a fractional scale
+│   (1.5, 1.33), which reaches the overlay rounded up to 2, no longer pins
+│   strokes to a top-left part of the screen; without that size it divides
+│   the pixels by the overlay's scale. Window picks still report no position
+│   and no output. Check: scrawl-capture capture::platform::tests
+│   a_fractionally_scaled_screen_keeps_its_logical_size and
+│   linux::output::tests the_named_output_carries_its_global_and_logical_size;
+│   neither the follow nor a fractional scale is observed on real hardware
+│   here. Known gap: the overlay starts below a desktop bar's reserved area,
+│   so saved ink sits that bar's height off the live ink
 └── Linux recordings show the overlay itself (Wayland can't leave it out)
 
 On Linux                                 // capture.linux
@@ -102,8 +108,12 @@ On Linux                                 // capture.linux
 │   frames in 9.97 s from 282 raw 4K grabs; raw 4K pipe readback is CPU-bound)
 ├── Wayland -> the ScreenCast portal (zbus): Screen asks the desktop once and
 │   keeps its restore token (<support>/screencast-token), so later captures
-│   start without a dialog; Window shows the desktop's picker every time (the
-│   capsule's Window chip goes straight to it); the cursor is embedded
+│   start without a dialog and record the remembered monitor; a monitor pick
+│   the portal names (`mapping_id`: xdg-desktop-portal-hyprland 1.4.0+) moves
+│   the pen to that output (see the pen bullet above). Window shows the
+│   desktop's picker every time (the capsule's Window chip goes straight to
+│   it) and names no output, so the pen keeps its old placement; the cursor
+│   is embedded
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
 │   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
 │   KDE) or shared memory
@@ -407,17 +417,23 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   it; nothing sends until Kit picks. Linux: closed,
 │   │   with Paste, Inspect, and Send to…, which opens them on a click
 │   │   ├── "Send to" over up to five rows, suggested then the newest
-│   │   │   sessions, with no numbers and no footer; "⇧ remembers" on the
-│   │   │   header's right when a pick can save a rule. The first
-│   │   │   carries its reason in the accent. A reason is a real one in plain
-│   │   │   words ("you were just in it", "same page", "mentioned", "recent")
-│   │   │   or nothing; never "guess"
-│   │   ├── Shift down (a guess or rule with a site or app) -> "⇧ remembers"
-│   │   │   lights, and the highlighted row reads "always"; in the search the
-│   │   │   footer reads "Always send [site] to [row]", the site and the row's
-│   │   │   name each in a rounded-rect badge with its kind's icon (a globe for
-│   │   │   a site, a window for an app, a bubble for the session). Shift+click
-│   │   │   (or ⇧⏎ in the search)
+│   │   │   sessions, with no numbers and no footer; "⇧-click to always send
+│   │   │   [site] here" on the header's right when a pick can save a rule.
+│   │   │   The first carries its reason in the accent. A reason is a real one
+│   │   │   in plain words ("you were just in it", "same page", "mentioned",
+│   │   │   "recent") or nothing; never "guess". No row moves once shown: a
+│   │   │   later answer gives a row its new reason in place and adds new
+│   │   │   sessions last (`routes::keep_rows`, as the router does)
+│   │   ├── Shift down (a guess or rule with a site or app) -> the row under
+│   │   │   the pointer reads "always" in the accent and the header reads
+│   │   │   "Always send [site] to [row]" (with the pointer off the rows,
+│   │   │   "Always send [site] to…" and no row is marked). In the search the
+│   │   │   target is the row under the pointer, else the highlighted one: the
+│   │   │   highlight follows the pointer as in a menu and the arrows go on
+│   │   │   from it. The footer reads "Always send [site] to [row]", the site
+│   │   │   and the row's name each in a rounded-rect badge with its kind's
+│   │   │   icon (a globe for a site, a window for an app, a bubble for the
+│   │   │   session). Shift+click (or ⇧⏎ in the search)
 │   │   │   sends and saves the rule: "Sent to X · always", and its Undo
 │   │   │   takes back the send and the rule (what the key held before, or
 │   │   │   nothing, comes back). The rule names that session (`ses_…`),
@@ -647,7 +663,10 @@ Hex's own windows                        // capture.own-windows
     the last other app, never into Hex
 
 Ink and laser                            // capture.ink
-├── A click-through overlay over the recorded display, excluded from the recording
+├── A click-through overlay over the recorded display, excluded from the
+│   recording; on a Wayland monitor pick the portal names (`mapping_id`) it
+│   is recreated on that output, and strokes use its xdg-output logical size
+│   (see the Linux pen bullet above)
 ├── Shift strokes draw as ink, hold 650 ms, then fade over 650 ms
 └── The laser's tail lasts 420 ms; nothing lags the pointer
 
@@ -689,9 +708,18 @@ Never on Hex's path                      // capture.isolation
     captures), the agentContext summary format off
 
 Retention                                // capture.retention
-└── Hex's own thread: Scrawl's retention pass with capture.*'s policy, 90 s after
-    captures turn on, then hourly; skipped while a capture records or writes,
-    or while Scrawl.app runs (it cleans the shared folder then)
+├── Hex's own thread: Scrawl's retention pass with capture.*'s policy, 90 s after
+│   captures turn on, then hourly; skipped while a capture records or writes,
+│   or while Scrawl.app runs (it cleans the shared folder then)
+├── Linux sends media to the desktop Trash itself (the freedesktop.org Trash
+│   layout, no `trash` command; macOS uses /usr/bin/trash, Windows the
+│   Recycle Bin), so file managers can restore it
+├── `.media-cleaned` is written only after the media reaches the Trash; a
+│   failed trash leaves the media in the bundle. Staging left by an earlier
+│   version or an interrupted pass is put back on the next pass, and staging
+│   whose bundle is gone goes to the Trash
+└── Old media goes to the Trash and the prompt stays; after bundleDays the
+    whole bundle goes
 
 hex capture stop                         // capture.stop
 ├── Closes the sink (≤ 100 ms wait) -> reply: idle + the bundle path, at once

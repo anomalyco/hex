@@ -1,6 +1,6 @@
 # Performance benchmarks
 
-Hex is benchmarked with [strobe](https://github.com/Hona/strobe) as a native
+Hex is benchmarked with [strobe](https://github.com/anomalyco/strobe) as a native
 app. strobe builds two variants (for example `origin/dev` and your checkout),
 launches each in a fresh private home, and compares them in alternating runs.
 

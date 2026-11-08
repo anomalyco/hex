@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,7 +14,8 @@ use crate::control::{PrintReply, PrintedTranscript};
 use crate::desktop::events::{
     DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
-use crate::dictation::service::{DictationControl, Effect, MICROPHONE_LOST, ServiceDictations};
+use crate::desktop::host::DesktopShortcuts;
+use crate::dictation::service::{DictationQueue, Effect, MICROPHONE_LOST, ServiceDictations};
 use crate::dictation::{DictationCapture, Finish, ReleaseWait};
 use crate::feedback::{self, Tone};
 use crate::linux::input::{
@@ -26,6 +27,10 @@ use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
 use crate::transcription::local_transcriber::LocalTranscriber;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
+
+mod gap;
+
+use gap::{ChunkStep, chunk_step};
 
 struct Job {
     transcript: PendingTranscript,
@@ -120,35 +125,6 @@ impl Drop for OutputWorker {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
-    }
-}
-
-/// The local API's `/dictations` controls. The host keeps one queue for
-/// whichever listener runs; while none does, a control goes unanswered and
-/// the API answers `service-capture-unavailable`.
-#[derive(Clone)]
-pub(crate) struct DictationQueue(Arc<Mutex<mpsc::Receiver<DictationControl>>>);
-
-impl From<mpsc::Receiver<DictationControl>> for DictationQueue {
-    fn from(receiver: mpsc::Receiver<DictationControl>) -> Self {
-        Self(Arc::new(Mutex::new(receiver)))
-    }
-}
-
-/// A queue nothing sends to: a listener without the local API.
-impl Default for DictationQueue {
-    fn default() -> Self {
-        mpsc::sync_channel(0).1.into()
-    }
-}
-
-impl DictationQueue {
-    fn drain(&self) -> Vec<DictationControl> {
-        self.0
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .try_iter()
-            .collect()
     }
 }
 
@@ -295,6 +271,35 @@ impl DictationOutput {
             }
         }
         Ok(processed.text)
+    }
+}
+
+/// The line a listener prints once its shortcuts are settled: what actually
+/// starts dictation from here. `commands` is whether `hex` commands reach
+/// this listener.
+fn readiness_message(
+    device: &str,
+    hotkey: &str,
+    shortcuts: &DesktopShortcuts,
+    commands: bool,
+) -> String {
+    let ready = format!("Hex dictation is ready on {device}.");
+    match shortcuts {
+        DesktopShortcuts::Registered | DesktopShortcuts::Portal(_) => {
+            format!("{ready} Hold {hotkey} to dictate; Ctrl-C stops.")
+        }
+        // A listener sets its status before it reports ready, so no running
+        // listener prints this.
+        DesktopShortcuts::Unregistered => format!("{ready} Ctrl-C stops."),
+        DesktopShortcuts::Commands if commands => format!(
+            "{ready} No shortcut is bound: bind `hex dictation start` and `hex dictation stop` \
+             (or `hex dictation toggle`) in your desktop's keybindings; Ctrl-C stops."
+        ),
+        DesktopShortcuts::Commands => format!(
+            "{ready} No shortcut is bound and this foreground listener can't receive `hex` \
+             commands: run `hex start` and bind `hex dictation toggle` in your desktop's \
+             keybindings; Ctrl-C stops."
+        ),
     }
 }
 
@@ -500,6 +505,13 @@ pub(crate) fn run(
     // stream's first chunk; recording starts at that chunk.
     let mut start_pending = false;
     let mut clock = StreamClock::default();
+    // The end of the last chunk on this stream's timeline; reset whenever
+    // the stream is closed, replaced, or reopened.
+    let mut last_captured_through: Option<CaptureInstant> = None;
+    // A discontinuity ended the capture a release was finishing: its audio
+    // belongs to the old capture, so replace that once it is submitted. The
+    // rate is the one in effect when the gap arrived.
+    let mut restart_capture: Option<u32> = None;
     let mut finishing: Option<Finishing> = None;
     // The recording skips processing (Dictate without processing).
     let mut recording_raw = false;
@@ -512,7 +524,13 @@ pub(crate) fn run(
     })?;
     emit_state(&mut events, VoiceState::Listening, &device_label)?;
     println!(
-        "Hex dictation is ready on {device_label}. Hold {hotkey_label} to dictate; Ctrl-C stops."
+        "{}",
+        readiness_message(
+            &device_label,
+            &hotkey_label,
+            &hotkey_status.shortcuts(),
+            commands.connected(),
+        )
     );
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -560,6 +578,7 @@ pub(crate) fn run(
                 {
                     drop(input);
                     clock.reset();
+                    last_captured_through = None;
                     input = microphone_input(&next, device);
                     release_while_idle = next.release_microphone_while_idle;
                     audio_ready = input.is_open();
@@ -663,6 +682,7 @@ pub(crate) fn run(
             {
                 capture_holds_microphone = false;
                 input.close();
+                last_captured_through = None;
                 audio_ready = false;
             }
         }
@@ -687,7 +707,7 @@ pub(crate) fn run(
                 raw,
                 ..
             } = finishing.take().expect("a release is finishing");
-            submit_capture(
+            let silent = submit_capture(
                 &mut capture,
                 release.ended_at(),
                 tail,
@@ -699,9 +719,21 @@ pub(crate) fn run(
                 raw,
                 &mut active_typing,
             )?;
+            if silent && reopen_silent_stream(&mut input, release_while_idle) {
+                // Recovery blocks audio until a reopened stream arrives, so
+                // a press must wait for it rather than start a dead capture.
+                timeline.restart();
+                clock.reset();
+                last_captured_through = None;
+                audio_ready = false;
+            }
+            if let Some(sample_rate) = restart_capture.take() {
+                capture = DictationCapture::new(sample_rate);
+            }
             suppressor.restore();
             if release_while_idle && !timeline.wants_audio() {
                 input.close();
+                last_captured_through = None;
                 audio_ready = false;
             }
             emit_state(
@@ -770,6 +802,7 @@ pub(crate) fn run(
             suppressor.restore();
             if release_while_idle && !timeline.wants_audio() {
                 input.close();
+                last_captured_through = None;
                 audio_ready = false;
             }
         }
@@ -848,6 +881,7 @@ pub(crate) fn run(
                     suppressor.restore();
                     if release_while_idle && !timeline.wants_audio() {
                         input.close();
+                        last_captured_through = None;
                         audio_ready = false;
                     }
                     events.dictation(
@@ -897,6 +931,7 @@ pub(crate) fn run(
                     suppressor.restore();
                     if release_while_idle && !timeline.wants_audio() {
                         input.close();
+                        last_captured_through = None;
                         audio_ready = false;
                     }
                     events.dictation(DictationPhase::Cancelled, "")?;
@@ -923,7 +958,7 @@ pub(crate) fn run(
                 continue;
             }
             pending = pending.saturating_sub(1);
-            indicator.finished(result.is_ok());
+            indicator.finished(result.as_ref().err().map(String::as_str));
             match result {
                 Ok(text) => {
                     feedback::play(Tone::DictationDone);
@@ -957,9 +992,71 @@ pub(crate) fn run(
                 samples,
                 captured_through,
             } => {
+                let sample_rate = input.sample_rate();
+                let step = chunk_step(
+                    last_captured_through,
+                    samples.len(),
+                    captured_through,
+                    sample_rate,
+                );
+                if let ChunkStep::Discontinuity(gap) = step {
+                    // A gap past the stall watchdog cannot be bridged: end
+                    // any live capture and start the audio after it fresh.
+                    let cancelled =
+                        service.is_active() || (capture.is_recording() && finishing.is_none());
+                    tracing::warn!(
+                        gap_ms = gap.as_millis() as u64,
+                        recording = capture.is_recording(),
+                        cancelled,
+                        "microphone audio skipped; {}",
+                        if cancelled {
+                            "discarded the capture"
+                        } else {
+                            "restarted the capture timeline"
+                        }
+                    );
+                    clock.reset();
+                    // A release still in its tail finishes with the audio it
+                    // has, from the old capture.
+                    if let Some(finish) = &mut finishing {
+                        finish.release.stop_waiting();
+                    }
+                    if service.is_active() {
+                        capture.cancel();
+                        suppressor.restore();
+                        service.lost(MICROPHONE_LOST);
+                    } else if capture.is_recording() && finishing.is_none() {
+                        capture.cancel();
+                        cancel_typing(&mut active_typing);
+                        feedback::retract_start();
+                        suppressor.restore();
+                        events.dictation(DictationPhase::Cancelled, "")?;
+                    }
+                    if cancelled {
+                        events.dictation(
+                            DictationPhase::Failed(
+                                "microphone audio skipped; the capture was discarded".into(),
+                            ),
+                            "",
+                        )?;
+                        emit_state(
+                            &mut events,
+                            active_state(capture.is_recording(), pending),
+                            &device_label,
+                        )?;
+                    }
+                    last_captured_through = Some(captured_through);
+                    if finishing.is_some() {
+                        // The release submits the old capture next loop;
+                        // replace it before any later audio arrives.
+                        restart_capture = Some(sample_rate);
+                        continue; // This chunk belongs to neither capture.
+                    }
+                    capture = DictationCapture::new(sample_rate);
+                }
                 clock.chunk(captured_through, Instant::now());
                 if !audio_ready {
-                    capture = DictationCapture::new(input.sample_rate());
+                    capture = DictationCapture::new(sample_rate);
                     audio_ready = true;
                     device_label = input.device_name().to_string();
                 }
@@ -977,15 +1074,31 @@ pub(crate) fn run(
                         &mut service,
                         &suppressor,
                         captured_through,
-                        input.sample_rate(),
+                        sample_rate,
                     );
                 }
-                crate::audio::input_level::record(&samples);
-                timeline.feed(&samples, input.sample_rate(), captured_through);
-                capture.ingest(&samples, captured_through);
+                let mut padded = Vec::new();
+                if let ChunkStep::Pad(frames) = step {
+                    // A hiccup (often a Bluetooth stream starting) is filled
+                    // with silence so the capture keeps going.
+                    padded.resize(frames, 0.0);
+                    padded.extend_from_slice(&samples);
+                    tracing::warn!(
+                        gap_ms = (frames as f64 * 1_000.0 / f64::from(sample_rate)) as u64,
+                        recording = capture.is_recording(),
+                        "microphone audio skipped; filled the gap with silence"
+                    );
+                }
+                let captured: &[f32] = if padded.is_empty() { &samples } else { &padded };
+                crate::audio::input_level::record(captured);
+                // The sink turns timestamp gaps into its own Gap markers, so
+                // it gets the real chunk rather than the padded one.
+                timeline.feed(&samples, sample_rate, captured_through);
+                capture.ingest(captured, captured_through);
+                last_captured_through = Some(captured_through);
                 if capture.is_recording() {
-                    indicator.meter(&samples);
-                    service.audio(&samples, Instant::now());
+                    indicator.meter(captured);
+                    service.audio(captured, Instant::now());
                 }
                 if capture.become_intentional(captured_through) && finishing.is_none() {
                     // Ordinary shortcut chords and short taps never mute,
@@ -994,7 +1107,8 @@ pub(crate) fn run(
                 }
                 // A release in its tail never starts an input method: a
                 // short tap must stay inert even while its last audio lands.
-                if finishing.is_none() {
+                // A client's dictation returns its text and types nothing.
+                if finishing.is_none() && !service.is_active() {
                     begin_live_typing(
                         &capture,
                         toggle,
@@ -1005,16 +1119,19 @@ pub(crate) fn run(
                     );
                 }
                 stream_when_due(&mut capture, &engine, toggle);
-                if let Some(partial) = capture.report_live_text()
-                    && let Some(typing) = &active_typing
-                {
-                    typing.session.preedit(&partial.stable, &partial.tentative);
+                if let Some(partial) = capture.report_live_text() {
+                    if let Some(typing) = &active_typing {
+                        typing.session.preedit(&partial.stable, &partial.tentative);
+                    }
+                    // A client's dictation is the only capture while it records.
+                    service.partial(&partial);
                 }
             }
             RecoveringAudioInputEvent::Timeout => {}
             RecoveringAudioInputEvent::Interrupted => {
                 timeline.restart();
                 clock.reset();
+                last_captured_through = None;
                 // A release still in its tail finishes with the audio it has.
                 if let Some(finish) = &mut finishing {
                     finish.release.stop_waiting();
@@ -1044,6 +1161,7 @@ pub(crate) fn run(
             RecoveringAudioInputEvent::Reopened => {
                 timeline.restart();
                 clock.reset();
+                last_captured_through = None;
                 audio_ready = false;
                 device_label = input.device_name().to_string();
                 // A press waiting on the released microphone is already
@@ -1180,7 +1298,7 @@ fn submit_capture(
     print: Option<PrintReply>,
     raw: bool,
     typing: &mut Option<CaptureTyping>,
-) -> Result<()> {
+) -> Result<bool> {
     // A discarded capture drops this guard without starting or ending a
     // session; a transcribed one moves it into the job.
     let typing = typing.take();
@@ -1197,8 +1315,10 @@ fn submit_capture(
             events.dictation(DictationPhase::Discarded, "")?
         }
         Finish::Transcribe(clip) if clip.is_near_silent() => {
+            let silent = clip.is_digital_silence();
             no_speech(print);
-            events.dictation(DictationPhase::Discarded, "")?
+            events.dictation(DictationPhase::Discarded, "")?;
+            return Ok(silent);
         }
         Finish::Transcribe(mut clip) => {
             let audio_ms = clip.duration_ms();
@@ -1233,7 +1353,25 @@ fn submit_capture(
             }
         }
     }
-    Ok(())
+    Ok(false)
+}
+
+/// A warm microphone whose finished dictation was exactly zero: the stream
+/// runs but its device was handed to another app, and stays silent until
+/// reopened (#1122). Reopen it as after a stream failure. A microphone
+/// released while idle already opens fresh for the next press. Returns
+/// whether recovery was requested; the caller must treat the stream as
+/// unavailable until it reopens.
+fn reopen_silent_stream(input: &mut RecoveringAudioInput, release_while_idle: bool) -> bool {
+    if release_while_idle || !input.is_open() || input.is_recovering() {
+        return false;
+    }
+    tracing::warn!(
+        device = %input.device_name(),
+        "dictation audio was digital silence; reopening the microphone"
+    );
+    input.request_recovery();
+    true
 }
 
 /// Starts Live typing at the hold threshold (or the Toggle press), before
@@ -1332,6 +1470,41 @@ mod tests {
         (EventLog::create(&path).unwrap(), path)
     }
 
+    #[test]
+    fn the_ready_line_names_what_starts_dictation() {
+        assert_eq!(
+            readiness_message("System default", "Alt", &DesktopShortcuts::Registered, true),
+            "Hex dictation is ready on System default. Hold Alt to dictate; Ctrl-C stops."
+        );
+        assert_eq!(
+            readiness_message(
+                "Yeti",
+                "Alt+Space",
+                &DesktopShortcuts::Portal(Vec::new()),
+                false
+            ),
+            "Hex dictation is ready on Yeti. Hold Alt+Space to dictate; Ctrl-C stops."
+        );
+        let unregistered =
+            readiness_message("Yeti", "Alt+Space", &DesktopShortcuts::Unregistered, true);
+        assert!(!unregistered.contains("Hold"));
+
+        let service = readiness_message("Yeti", "Alt+Space", &DesktopShortcuts::Commands, true);
+        assert!(service.contains("No shortcut is bound"));
+        assert!(service.contains("`hex dictation start`"));
+        assert!(service.contains("`hex dictation stop`"));
+        assert!(service.contains("`hex dictation toggle`"));
+        assert!(service.contains("desktop's keybindings"));
+        assert!(!service.contains("Hold"));
+
+        let foreground = readiness_message("Yeti", "Alt+Space", &DesktopShortcuts::Commands, false);
+        assert!(foreground.contains("No shortcut is bound"));
+        assert!(foreground.contains("can't receive `hex` commands"));
+        assert!(foreground.contains("run `hex start`"));
+        assert!(foreground.contains("`hex dictation toggle`"));
+        assert!(!foreground.contains("Hold"));
+    }
+
     /// Records `seconds` of speech-level audio in 100 ms chunks, streaming
     /// as the live loop would.
     fn record(
@@ -1380,6 +1553,93 @@ mod tests {
     }
 
     #[test]
+    fn a_short_microphone_gap_is_padded_into_a_finished_clip() {
+        let mut capture = DictationCapture::new(16_000);
+        let start = capture_time();
+        start_capture(&mut capture, start, PRE_ROLL, || {});
+        let first_through = start + Duration::from_secs(1);
+        capture.ingest(&[0.1; 16_000], first_through);
+        // This chunk starts 100 ms after the last one ended.
+        let second_from = first_through + Duration::from_millis(100);
+        let second_through = second_from + Duration::from_secs(1);
+        let ChunkStep::Pad(padding) =
+            chunk_step(Some(first_through), 16_000, second_through, 16_000)
+        else {
+            panic!("a 100 ms gap is padded");
+        };
+        assert_eq!(padding, 1_600);
+        let mut padded = vec![0.0; padding];
+        padded.extend_from_slice(&[0.2; 16_000]);
+        capture.ingest(&padded, second_through);
+
+        // Releasing 500 ms into the second chunk keeps 200 ms of tail: the
+        // clip runs to 1.8 s because the gap is on the timeline. Without the
+        // padding, truncation would drop 100 ms of real speech before it.
+        let released = second_from + Duration::from_millis(500);
+        let Finish::Transcribe(clip) = capture.finish_with_tail(released, POST_RELEASE_TAIL) else {
+            panic!("the release transcribes");
+        };
+        let samples = clip.into_transcription_samples();
+        assert_eq!(samples.len(), 1_800 * 16);
+        assert!(samples[16_000..17_600].iter().all(|sample| *sample == 0.0));
+        assert_eq!(samples[17_600], 0.2);
+        assert_eq!(samples[28_799], 0.2);
+    }
+
+    #[test]
+    fn submit_capture_reports_when_a_clip_is_digital_silence() {
+        let (engine, _commands) = TranscriptionEngine::for_test();
+        let (mut events, path) = event_log();
+        let (jobs, queued) = mpsc::sync_channel(2);
+        let mut capture = DictationCapture::new(16_000);
+        let start = capture_time();
+        start_capture(&mut capture, start, PRE_ROLL, || {});
+        let released = start + Duration::from_secs(1);
+        capture.ingest(&[0.0; 16_000], released);
+        let mut pending = 0;
+        let silent = submit_capture(
+            &mut capture,
+            released,
+            POST_RELEASE_TAIL,
+            &engine,
+            &jobs,
+            &mut events,
+            &mut pending,
+            None,
+            false,
+            &mut None,
+        )
+        .unwrap();
+        assert!(silent);
+        assert_eq!(pending, 0);
+        assert!(queued.try_recv().is_err());
+        drop(events);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_warm_silent_stream_reopens_once_unless_released() {
+        let (mut input, opened) = RecoveringAudioInput::pending_for_test();
+        let (replacement, _samples) = crate::audio::AudioInput::channel_for_test();
+        opened
+            .send((0, Ok(crate::audio::Opened::Input(Box::new(replacement)))))
+            .unwrap();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert!(reopen_silent_stream(&mut input, false));
+        assert!(input.is_recovering());
+        // A second finish cannot queue another replacement.
+        assert!(!reopen_silent_stream(&mut input, false));
+
+        // Release while idle keeps the stream closed instead.
+        let (mut idle, _opened) = RecoveringAudioInput::pending_for_test();
+        assert!(!reopen_silent_stream(&mut idle, true));
+        assert!(!idle.is_recovering());
+    }
+
+    #[test]
     fn a_reopened_stream_carries_no_old_clock() {
         let mut clock = StreamClock::default();
         let received = Instant::now();
@@ -1408,10 +1668,11 @@ mod tests {
             let (reply, answer) = mpsc::sync_channel(1);
             assert_eq!(
                 owner.control(
-                    DictationControl::Start {
+                    crate::dictation::service::DictationControl::Start {
                         source: "test".into(),
                         owner_token: "hex_a".into(),
                         levels,
+                        partials: None,
                         reply,
                     },
                     false,

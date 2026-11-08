@@ -9,9 +9,7 @@ use std::time::Duration;
 
 use color_eyre::eyre::{Result, eyre};
 
-#[cfg(test)]
-use crate::app_settings::HotkeyBinding;
-use crate::app_settings::{HOTKEY_MODIFIERS_MASK, RuntimeHotkey, RuntimeHotkeys};
+use crate::app_settings::{HOTKEY_MODIFIERS_MASK, HotkeyBinding, RuntimeHotkey, RuntimeHotkeys};
 use crate::audio::CaptureInstant;
 use crate::dictation::{BOTH_SIDES_WINDOW, MINIMUM_HOLD_DURATION};
 
@@ -280,6 +278,7 @@ pub struct InputMonitor {
     pending: PendingInputEvents,
     takes_escape: Arc<AtomicBool>,
     takes_cancel: Arc<AtomicBool>,
+    caps_lock_cancel: Arc<AtomicBool>,
     run_loop: Arc<AtomicPtr<c_void>>,
     worker: Option<JoinHandle<()>>,
     /// Held only so dropping the input monitor stops the HID tracker.
@@ -333,14 +332,19 @@ impl InputMonitor {
         let tap_takes_escape = takes_escape.clone();
         let takes_cancel = Arc::new(AtomicBool::new(false));
         let tap_takes_cancel = takes_cancel.clone();
+        let caps_lock_cancel = Arc::new(AtomicBool::new(false));
+        let tap_caps_lock_cancel = caps_lock_cancel.clone();
         let pending = PendingInputEvents::default();
         let tap_pending = pending.clone();
         let worker = thread::spawn(move || {
             run_event_tap(
                 sender,
                 tap_activity,
-                tap_takes_escape,
-                tap_takes_cancel,
+                TapFlags {
+                    takes_escape: tap_takes_escape,
+                    takes_cancel: tap_takes_cancel,
+                    caps_lock_cancel: tap_caps_lock_cancel,
+                },
                 tap_pending,
                 tap_run_loop,
                 ready_sender,
@@ -359,6 +363,7 @@ impl InputMonitor {
             pending,
             takes_escape,
             takes_cancel,
+            caps_lock_cancel,
             run_loop,
             worker: Some(worker),
             _physical_keys: physical_keys,
@@ -373,6 +378,12 @@ impl InputMonitor {
     /// only while a toggled recording runs.
     pub fn set_takes_cancel(&self, enabled: bool) {
         self.takes_cancel.store(enabled, Ordering::Release);
+    }
+
+    /// Whether the tap also keeps Escape from the app in front because a
+    /// Caps Lock dictation records, even in Hold mode.
+    pub fn set_caps_lock_cancel(&self, enabled: bool) {
+        self.caps_lock_cancel.store(enabled, Ordering::Release);
     }
 
     pub fn pending_events(&self) -> PendingInputEvents {
@@ -400,11 +411,21 @@ impl Drop for InputMonitor {
     }
 }
 
+/// The current AlphaShift bit, used to seed Caps Lock dictation's tap state
+/// when its lab turns on.
+pub(crate) fn alpha_shift_now() -> bool {
+    // SAFETY: a read-only CoreGraphics state query.
+    (unsafe { CGEventSourceFlagsState(COMBINED_SESSION_STATE) }
+        & crate::caps_lock_dictation::ALPHA_SHIFT_MASK)
+        != 0
+}
+
 struct EventTapContext {
     sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
     takes_escape: Arc<AtomicBool>,
     takes_cancel: Arc<AtomicBool>,
+    caps_lock_cancel: Arc<AtomicBool>,
     key_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
     physical_tap: AtomicPtr<c_void>,
@@ -551,6 +572,18 @@ unsafe extern "C" fn event_callback(
             event
         };
     }
+    // Labs › Caps Lock dictation: every AlphaShift change, including Hex's
+    // own lock reset, reaches the gate; no IOKit runs on this thread.
+    if event_type == EVENT_FLAGS_CHANGED {
+        // SAFETY: CoreGraphics supplied a valid event to this callback.
+        let flags = unsafe { CGEventGetFlags(event) };
+        let shift = flags & crate::caps_lock_dictation::ALPHA_SHIFT_MASK != 0;
+        if crate::caps_lock_dictation::alpha_shift_changed(shift) {
+            // SAFETY: CoreGraphics supplied a valid event.
+            let at = CaptureInstant::from_nanos(unsafe { CGEventGetTimestamp(event) });
+            crate::caps_lock_dictation::alpha_shift(shift, at);
+        }
+    }
     #[cfg(hex_capture)]
     let screenshot_swallows = match screenshot_tap(event_type, event) {
         crate::screenshots::Take::No => false,
@@ -679,9 +712,11 @@ unsafe extern "C" fn event_callback(
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let mut hotkeys = crate::app_settings::runtime_hotkeys();
-    if !context.takes_cancel.load(Ordering::Acquire) {
-        hotkeys.cancel = None;
-    }
+    hotkeys.cancel = tap_cancel_binding(
+        hotkeys.cancel,
+        context.takes_cancel.load(Ordering::Acquire),
+        context.caps_lock_cancel.load(Ordering::Acquire),
+    );
     let suppress = suppression.process_all(
         input,
         hotkeys,
@@ -963,6 +998,23 @@ fn send_input(context: &EventTapContext, event: InputEvent, capture_at: CaptureI
 struct ShortcutSuppression {
     // Repeats and releases keep the original press's suppression decision.
     key_presses: HashMap<u16, bool>,
+}
+
+/// The tap's cancel binding: only while the listener arms it. A Caps Lock
+/// capture always cancels on Escape, even in Hold mode or with a different
+/// Toggle-mode cancel shortcut, so the tap keeps Escape from the app then.
+fn tap_cancel_binding(
+    armed: Option<RuntimeHotkey>,
+    takes_cancel: bool,
+    caps_lock_cancel: bool,
+) -> Option<RuntimeHotkey> {
+    if !takes_cancel {
+        None
+    } else if caps_lock_cancel {
+        Some(HotkeyBinding::cancel_default().runtime())
+    } else {
+        armed
+    }
 }
 
 impl ShortcutSuppression {

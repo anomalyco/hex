@@ -239,6 +239,10 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   Hex's own dictation (macOS listener, Linux and Windows event log) holds
 │   │   the keys, flies the live words, and lightning burns the answered card
 │   ├── A short, silent, or failed try -> a hint under the field
+│   ├── Listener running but still loading its model, microphone, or shortcuts
+│   │   -> "Getting Hex ready to listen…" in place of the hold prompt until its
+│   │   first session starts (desktop/host.rs `warming`)
+│   │   // setup.warming; Check: `the_practice_page_waits_for_the_listener`
 │   └── Done at any time -> Hex is ready  // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
 │   ├── First time -> Hex records a marker, reopens itself, resumes at the practice
@@ -671,6 +675,17 @@ Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)
   -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
+
+Labs > Caps Lock dictation (macOS, off)   // labs.md
+  -> a Caps Lock press starts a hands-free capture; the next press finishes it
+  -> needs both the HID Caps Lock key and its AlphaShift edge; remapped to
+     Control or Escape changes no AlphaShift, so it never toggles dictation
+  -> Caps Lock stays off so typing is unchanged; its light is solid while any
+     capture records (normal-shortcut and Annotate too), blinks while Hex
+     transcribes or processes, off when done
+  -> Escape cancels in any mode; in Toggle mode only Escape cancels a Caps
+     Lock capture; the normal shortcut stands down while one runs; off or
+     quit clears the light and restores Caps Lock
 
 Labs > Unload model when idle (off; 5/15/30/60 min, default 15)   // labs.md; transcription/engine
   -> nothing used the model that long and nothing records -> the model unloads
@@ -1632,6 +1647,8 @@ Linux beta                               // not macOS feature parity
 │   │       // check: only_backend_failures_count_as_a_missing_portal (the
 │   │       // classification only); not run on niri
 │   ├── Wayland without the portal -> Bind `hex` commands in the desktop
+│   │   ├── The commands reach only the service listener (`hex start`/`hex service`);
+│   │   │   a foreground `hex dictate` receives none and says so at startup (#1506)
 │   │   ├── General hides shortcut rows and lists the commands
 │   │   └── GNOME: Add GNOME keyboard shortcuts -> custom shortcuts running
 │   │       `hex dictation toggle` (#781); written only while the listener has no
@@ -1751,6 +1768,8 @@ Linux beta                               // not macOS feature parity
 │       ├── Asked by a modifier shortcut -> wait for its portal release + 250 ms
 │       │   (2 s cap without a release); after a hex command -> 250 ms
 │       │   // Hyprland merges held physical modifiers into virtual-keyboard keys (#353)
+│       ├── Shortcut fails partway -> releases the keys it still holds
+│       │   // portal path unit-tested; X11 untested
 │       ├── Compositor offers zwp_virtual_keyboard_manager_v1 and wtype is installed -> wtype
 │       │   └── V sent on evdev KEY_V (placeholder releases first), so Hyprland's
 │       │       binds read Ctrl(+Shift)+V, not Ctrl(+Shift)+Escape (#444)
@@ -2008,8 +2027,21 @@ Linux process                            // maintain.linux-service
 │   │       or Wayland socket discovery (unless HEX_SYSTEMD_UNIT explicitly opts in)
 │   └── Two racing launches -> One Hex; the other forwards and exits 0
 ├── hex start / desktop autostart / hex service -> Same, without the window
+│   └── No WAYLAND_DISPLAY (none at all, or only Xwayland's DISPLAY)
+│       -> Adopt the manager's live WAYLAND_DISPLAY, else the newest answering socket
+│       (#756); behind DISPLAY only for an explicit wayland session type, or an unset
+│       one whose manager names a live display. An explicit x11 or tty login keeps its
+│       X display. Launchers adopt first, so session.env agrees. The shortcut backend
+│       follows the adopted Wayland session: the portal, or the `hex` commands where
+│       it has none
 ├── hex dictation|paste-last -> Socket worker -> Listener queue (never the UI thread)
+├── hex dictate -> Foreground listener; adopts the session's Wayland display like hex service;
+│   `hex` commands reach only the service listener, never it (#1506)
 ├── hex status -> Published status; hex quit / Quit Hex / launcher action -> Drain, exit 0
+├── Any instance stop still draining after 20 s -> _exit before the unit's 30 s TimeoutStopSec
+│   └── A transcription or paste cut by the deadline is lost; checked by unit tests only,
+│       no observed systemd stop
+├── Stop / SIGTERM after a full window queue -> The window's quit is retried until taken
 ├── Open the window -> Maps at 980×760 (min = max), tiling WMs float it -> Resizable from 860×560
 ├── Close the window -> Keep microphone, accepted jobs, model preparation, and HUD
 │   └── Uncommitted shortcut capture -> Cancel and restore the prior listening state
@@ -2158,12 +2190,16 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No silence gate                  // model output, unlike hotkey dictation;
 │   │                                     // only recognition-hint echoes are dropped
-│   ├── Linux -> The listener records it (dictation::service owner)
+│   ├── Linux, Windows -> The listener records it (dictation::service owner)
+│   │   ├── With the microphone chosen in Settings, as the shortcut does
 │   │   ├── Shortcut or `hex dictation` records -> 409 dictation-busy
 │   │   ├── Client's dictation records -> shortcut starts and ends nothing
 │   │   ├── Lapsed lease or owner's cancel -> only that dictation is dropped
-│   │   └── Microphone lost -> finish answers microphone-lost (no kept clip)
-│   └── Windows, hex service -> serviceCapture false, 404 service-capture-unavailable
+│   │   ├── Microphone lost -> finish answers microphone-lost (no kept clip)
+│   │   └── Start with "partials": true -> GET /dictations/{id}/partials
+│   │       └── SSE {stable, tentative} while the model streams (GPU)
+│   ├── macOS -> No partials: dictationPartials false; the SSE ends at once
+│   └── hex service -> serviceCapture false, 404 service-capture-unavailable
 └── Distribution
     ├── SDK 0.3.0 -> Published
     └── Turnkey signed helper -> Unfinished
@@ -2185,6 +2221,18 @@ without a hold threshold or release tail. Unit tests cover ownership, lease
 expiry, busy refusal beside a shortcut capture, and the HTTP round trip
 (`local_api` tests now run on Linux). A live Linux microphone run through the
 SDK is unverified.
+
+Windows `/dictations` uses the same owner in the listener
+([windows/dictation.rs](../../src/windows/dictation.rs)), so a client gets
+Hex's microphone choice, pre-roll, and While dictating behavior, and the HUD
+shows the recording. Live text is opt-in per dictation: `POST /dictations
+{"source": "…", "partials": true}` holds a live-text demand for the
+recording's stream, and `GET /dictations/{id}/partials` (owner token, once)
+sends `data: {"stable": "…", "tentative": "…"}` after each change until the
+dictation ends; it is provisional, and `/finish` returns the transcript.
+`/capabilities` reports `dictationPartials`. Checked live on Windows x64
+(start, partials subscription, finish, a silent room's empty transcript);
+not run on Linux.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

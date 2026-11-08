@@ -1,21 +1,23 @@
 //! Running-app dictation a local API client owns (`/dictations`): the
 //! controls the API sends a capture loop, owner tokens, lease expiry, level
-//! metering, and the bounded record of how each dictation ended. The macOS
-//! recognition loop drives these controls itself; Linux drives them through
-//! [`ServiceDictations`].
+//! metering, live text, and the bounded record of how each dictation ended.
+//! The macOS recognition loop drives these controls itself; the Linux and
+//! Windows listeners drive them through [`ServiceDictations`].
 
 use std::collections::VecDeque;
 use std::sync::mpsc::SyncSender;
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
 use std::sync::mpsc::TrySendError;
 use std::time::{Duration, Instant};
+
+use crate::transcription::engine::Partial;
 
 /// How long a dictation lives without a heartbeat from its owner.
 pub(crate) const LEASE: Duration = Duration::from_secs(10);
 pub(crate) const COMPLETION_LIMIT: usize = 16;
 /// `/finish` on a dictation the microphone ended before it finished.
 pub(crate) const MICROPHONE_LOST: &str = "microphone-lost";
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
 const LEVEL_INTERVAL: Duration = Duration::from_millis(30);
 
 /// One `/dictations` request for the capture loop. Each carries the owner
@@ -26,6 +28,10 @@ pub enum DictationControl {
         source: String,
         owner_token: String,
         levels: SyncSender<DictationLevel>,
+        /// The text so far as the live stream hears it, when the client
+        /// asked for it (`"partials": true`). Provisional: only `/finish`
+        /// returns the transcript.
+        partials: Option<SyncSender<Partial>>,
         reply: SyncSender<Result<ProgrammaticDictationStart, String>>,
     },
     AttachAudio {
@@ -150,12 +156,44 @@ fn amplitude_db(amplitude: f32) -> f32 {
     (20.0 * amplitude.max(0.000_001).log10()).max(-120.0)
 }
 
-#[cfg(any(test, target_os = "linux"))]
-pub(crate) use owner::{Effect, ServiceDictations};
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
+pub(crate) use owner::{DictationQueue, Effect, ServiceDictations};
 
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(any(test, target_os = "linux", target_os = "windows"))]
 mod owner {
+    use std::sync::mpsc::{self, Receiver};
+    use std::sync::{Arc, Mutex};
+
     use super::*;
+
+    /// The local API's `/dictations` controls. The host keeps one queue for
+    /// whichever listener runs; while none does, a control goes unanswered
+    /// and the API answers `service-capture-unavailable`.
+    #[derive(Clone)]
+    pub(crate) struct DictationQueue(Arc<Mutex<Receiver<DictationControl>>>);
+
+    impl From<Receiver<DictationControl>> for DictationQueue {
+        fn from(receiver: Receiver<DictationControl>) -> Self {
+            Self(Arc::new(Mutex::new(receiver)))
+        }
+    }
+
+    /// A queue nothing sends to: a listener without the local API.
+    impl Default for DictationQueue {
+        fn default() -> Self {
+            mpsc::sync_channel(0).1.into()
+        }
+    }
+
+    impl DictationQueue {
+        pub(crate) fn drain(&self) -> Vec<DictationControl> {
+            self.0
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .try_iter()
+                .collect()
+        }
+    }
 
     /// What the capture loop does after [`ServiceDictations::control`].
     #[derive(Debug, Eq, PartialEq)]
@@ -178,6 +216,10 @@ mod owner {
         source: String,
         levels: SyncSender<DictationLevel>,
         audio: Option<SyncSender<DictationAudioChunk>>,
+        partials: Option<SyncSender<Partial>>,
+        /// Makes the recording's live stream publish its text while the
+        /// client wants it.
+        _live_text: Option<crate::dictation::live_text::ClientDemand>,
         last_level: Option<Instant>,
         lease_deadline: Instant,
         /// The start's answer, sent once the microphone's rate is known.
@@ -235,6 +277,7 @@ mod owner {
                     source,
                     owner_token,
                     levels,
+                    partials,
                     reply,
                 } => {
                     if busy || self.active.is_some() {
@@ -253,6 +296,12 @@ mod owner {
                         source,
                         levels,
                         audio: None,
+                        // Asked before the recording's stream begins, which
+                        // decides whether it publishes text.
+                        _live_text: partials
+                            .is_some()
+                            .then(crate::dictation::live_text::client_demand),
+                        partials,
                         last_level: None,
                         lease_deadline: now + LEASE,
                         start_reply: Some(reply),
@@ -455,6 +504,19 @@ mod owner {
             }
         }
 
+        /// Forwards the recording's text so far to a client that asked for
+        /// it. A full queue drops it: the next one carries the whole text.
+        pub(crate) fn partial(&mut self, partial: &Partial) {
+            let Some(active) = self.active.as_mut() else {
+                return;
+            };
+            if let Some(partials) = &active.partials
+                && let Err(TrySendError::Disconnected(_)) = partials.try_send(partial.clone())
+            {
+                active.partials = None;
+            }
+        }
+
         /// The finished recording `id` is transcribing.
         pub(crate) fn transcribing(&mut self, id: u64, duration_ms: u64) {
             if let Some(finishing) = self
@@ -591,6 +653,7 @@ mod tests {
                 source: "test".into(),
                 owner_token: owner_token.into(),
                 levels,
+                partials: None,
                 reply,
             },
             busy,

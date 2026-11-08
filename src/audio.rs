@@ -232,7 +232,7 @@ pub struct AudioInput {
 /// A running stream delivers audio every few milliseconds, even silence. One
 /// that has delivered nothing for this long has stopped without reporting an
 /// error (seen after a burst of overruns, #1206) and is reopened.
-const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(4);
+pub(crate) const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(4);
 
 pub enum AudioInputEvent {
     Chunk {
@@ -971,7 +971,8 @@ struct Route {
     avoid_bluetooth: bool,
 }
 
-const LID_CLOSED_ERROR: &str = "the built-in microphone is off while the lid is closed";
+pub(crate) const LID_CLOSED_ERROR: &str = "the built-in microphone is off while the lid is closed";
+pub(crate) const NO_MICROPHONE_ERROR: &str = "no microphone is available";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct InputPlan {
@@ -1061,7 +1062,7 @@ fn resolve_input(
             if (0..names.len()).any(off) {
                 LID_CLOSED_ERROR.into()
             } else {
-                "no microphone is available".into()
+                NO_MICROPHONE_ERROR.into()
             }
         })
 }
@@ -1767,7 +1768,7 @@ mod tests {
                 virtual_transports,
                 OPEN
             ),
-            Err("no microphone is available".into())
+            Err(NO_MICROPHONE_ERROR.into())
         );
         // A virtual default, saved microphone, or `--device` is used as named.
         assert_eq!(
@@ -1969,11 +1970,11 @@ mod tests {
                 &built_in,
                 OPEN
             ),
-            Err("no microphone is available".into())
+            Err(NO_MICROPHONE_ERROR.into())
         );
         assert_eq!(
             resolve_input(None, Some("USB Mic"), &[], None, &built_in, OPEN),
-            Err("no microphone is available".into())
+            Err(NO_MICROPHONE_ERROR.into())
         );
         assert_eq!(
             resolve_input(
@@ -1984,7 +1985,7 @@ mod tests {
                 &built_in,
                 OPEN
             ),
-            Err("no microphone is available".into())
+            Err(NO_MICROPHONE_ERROR.into())
         );
     }
 

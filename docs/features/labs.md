@@ -27,6 +27,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
 ├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
+├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
@@ -47,6 +48,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
+├── Caps Lock dictation no labs.caps_lock_dictation       (macOS)   a Caps Lock press starts and stops hands-free dictation; its light shows recording, processing, and off
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
@@ -428,6 +430,92 @@ suppressed, or checked for it, and Hex is unchanged. Checks:
 [recognition.rs](../../src/recognition.rs) (macOS only). Not yet observed: a
 real Mac with an external keyboard, or the recorder row's rendering (macOS
 builds only; no golden).
+
+Caps Lock dictation (`caps-lock-dictation`, macOS): while on, a physical Caps
+Lock press toggles a hands-free dictation. From idle it starts a capture that
+stays recording without a hold; the next Caps Lock press finishes it and hands
+it to the normal transcription, processing, and paste flow. A hold capture,
+a pending double tap, or another shortcut's recording is left alone. Escape
+cancels the Caps Lock capture in every shortcut mode; Toggle mode's configured
+cancel shortcut does not, only Escape does for a Caps Lock capture. The normal
+dictation shortcut keeps working when nothing records (while a Caps Lock
+capture runs it stands down, as a second shortcut does). Turning the lab off
+mid-capture cancels that capture.
+
+Caps Lock never changes typing: every press also resets the system Caps Lock
+state off through `IOHIDSetModifierLockState`, so the next keys stay
+lowercase. The key's light follows Hex's dictation state through the
+keyboard's HID LED output element (usage page 0x08, usage 0x02). It is on
+while any capture records, including a normal-shortcut or Annotate capture,
+blinking while an accepted job transcribes or processes, and off when nothing
+is left or the capture is discarded, cancelled, or failed. Turning the lab off
+or quitting Hex clears the light and stops forcing the lock off, so Caps Lock
+behaves normally again.
+
+```ts
+Labs › Caps Lock dictation on                        // labs.caps_lock_dictation
+├── Caps Lock press, idle -> hands-free capture starts (no hold, no short-tap discard)
+├── Caps Lock press, that capture running -> finishes and pastes normally
+├── Hold capture / pending double tap / another shortcut recording -> ignored
+├── Escape while it records -> cancels (the tap keeps Escape from the app)
+├── Toggle mode's other cancel shortcut -> does not touch a Caps Lock capture
+├── software Caps Lock -> off after every press; typing is unchanged
+├── light -> solid recording, blink transcribing/processing, off done/cancelled/failed
+├── Labs off mid-capture -> cancels it, light off, normal Caps Lock returns
+└── Hex quits -> light off, lock released
+```
+
+The gate is `labs::caps_lock_dictation()` in the listener
+([recognition.rs](../../src/recognition.rs)), which starts and stops the
+feature's worker each pass. Detection needs both halves of a physical press:
+the raw HID tracker records Caps Lock usage 0x39 with its press timestamp
+([suppression/physical_keys.rs](../../src/suppression/physical_keys.rs)), and
+the event tap confirms it with an AlphaShift change edge within 300 ms
+([suppression.rs](../../src/suppression.rs)). A key remapped to Control or
+Escape never changes AlphaShift, so it never toggles dictation. Hex's own
+lock-reset edge is marked and dropped before the press gate. A Caps Lock activation
+delay configured above 300 ms would make those presses invisible; the default
+has no delay. Without Input Monitoring the HID tracker is inactive, so an AlphaShift on edge is the
+fallback press and off edges remain resets. Confirmed presses reach the
+listener with the HID timestamp, before any IOKit work. The light model stays
+on the listener and publishes its pattern through an atomic; the worker
+([caps_lock_dictation/macos.rs](../../src/caps_lock_dictation/macos.rs)) owns
+every IOKit call, re-enumerates keyboards on a bounded refresh, and runs the
+blink timer. No IOKit work runs on the event-tap or audio threads. The pure
+press gate, press decision, and light model live in
+[caps_lock_dictation.rs](../../src/caps_lock_dictation.rs). The LED needs
+Input Monitoring, which Hex already asks for; without it, dictation still
+works and the light stays under macOS's control. Some keyboards, built-in ones
+included, may not expose a Caps Lock LED output element, and macOS's own light
+update after a reset can race Hex's write; neither changes dictation or the
+lock reset. Checks:
+`an_older_jobs_stage_event_never_interrupts_a_newer_capture`,
+`a_stage_event_for_an_unknown_job_changes_nothing`,
+`the_light_is_solid_recording_blinking_working_and_off_after`,
+`the_light_waits_for_every_accepted_job`,
+`cancelling_or_failing_a_capture_turns_the_light_off`,
+`a_hid_press_matches_an_edge_timestamp_from_before_the_callback`,
+`an_edge_that_arrives_before_the_hid_press_still_matches`,
+`a_fast_double_press_yields_two_presses`,
+`a_hid_press_without_an_alpha_shift_edge_never_presses`,
+`without_the_hid_tracker_an_on_edge_is_the_fallback_press`, and
+`the_light_pattern_codes_round_trip` in
+[caps_lock_dictation.rs](../../src/caps_lock_dictation.rs);
+`escape_cancels_a_caps_lock_capture_in_hold_mode`,
+`caps_lock_does_not_start_over_an_annotate_recording`,
+`the_dictation_shortcut_stands_down_while_caps_lock_records`,
+`turning_the_caps_lock_lab_off_stops_its_capture`,
+`caps_lock_never_starts_over_a_pending_double_tap`, and
+`a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode` in
+[recognition.rs](../../src/recognition.rs) and
+[suppression/tests.rs](../../src/suppression/tests.rs);
+`caps_lock_dictation_is_its_own_bit_and_macos_only` in
+[labs.rs](../../src/labs.rs);
+`contributed_options_are_labs_toggles_off_by_default` in
+[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real Mac
+with the lab on — no hardware run of the Caps Lock LED, the lock reset, the
+blink, Escape cancellation, or the off/quit cleanup. The `mac-labs` and
+`mac-labs-link` goldens were regenerated on Linux with the new row.
 
 Smart spacing (`smart-spacing`, issue 632, macOS): while on, a dictation
 pasted right after typed text gets one leading space, so words don't merge
@@ -1416,6 +1504,29 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs). The line has no golden
   and no `--snap` scene (overlays have none), and nothing headless checks
   how it appears and hides on screen.
+- Failure notices: when a dictation fails, the same click-through plate that
+  carries Live text shows why for about 6 seconds, or until the next capture
+  starts. It reuses the Live text overlay's window, placement
+  (`rune_hud::live_text_place`), and plate styling; the HUD's own coral failure
+  flash and its 600 ms stay exactly as they were. The reason travels with the
+  HUD's failure event, so no old failure is replayed from the event log at
+  launch. Known microphone causes use the same actionable wording as Settings'
+  listener card; any other failure keeps its logged message, truncated to one
+  line. The gate is `labs::failure_notices()` (toggle
+  `labs.failure_notices`, off by default), read when each failure reaches the
+  HUD; with it off, no notice is drawn. Every OS shows a notice for a failed
+  accepted job. Windows and macOS also show one when the microphone fails to
+  open. On Linux, notices cover failed transcriptions only: a microphone-open
+  failure never reaches its HUD today. A job failure that arrives while a newer
+  capture records is skipped. Checks: `a_failure_notice_lasts_six_seconds`,
+  `a_new_capture_dismisses_a_failure_notice_at_once`,
+  `only_a_notices_own_deadline_dismisses_it`,
+  `a_failure_arriving_after_a_queued_words_end_stays_visible`, and
+  `a_failure_notice_takes_the_plate_from_the_live_words` in
+  [rune_ui/live_text.rs](../../src/rune_ui/live_text.rs), and
+  `failure_notices_is_its_own_bit_and_off_by_default` in
+  [labs.rs](../../src/labs.rs). Proof limit: the timing and Labs gate are
+  unit-tested; the overlay was not observed on screen on macOS or Windows.
 - Live typing: on a wlroots-family Wayland session, a hotkey dictation's
   provisional words are an underlined input-method preedit in the focused
   text field, replaced on each update, and its final text is committed

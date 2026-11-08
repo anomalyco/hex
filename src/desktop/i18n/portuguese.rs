@@ -125,6 +125,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex Microphone virtual input and real-time voice filters", "Entrada virtual Hex Microphone e filtros de voz em tempo real"),
     ("Live text", "Texto ao vivo"),
     ("Show provisional words beside the HUD while dictating", "Mostra palavras provisórias ao lado do HUD durante o ditado"),
+    ("Failure notices", "Avisos de falha"),
+    ("Show why a dictation failed beside the HUD", "Mostra por que um ditado falhou ao lado do HUD"),
     ("Live typing", "Digitação ao vivo"),
     ("Show provisional words in the focused text field while dictating on Wayland, then type the final text there", "Mostra palavras provisórias no campo de texto em foco durante o ditado no Wayland e digita ali o texto final"),
     ("Live chapters", "Capítulos ao vivo"),
@@ -477,6 +479,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("OpenCode", "OpenCode"),
     ("Default", "Padrão"),
     ("Last dictation failed: {}", "O último ditado falhou: {}"),
+    ("Built-in mic is off with the lid closed. Open the lid or connect a mic.", "O microfone integrado fica desligado com a tampa fechada. Abra a tampa ou conecte um microfone."),
+    ("No microphone is available. Connect a microphone.", "Não há microfone disponível. Conecte um microfone."),
     ("Version {}", "Versão {}"),
     ("Hold", "Segurar"),
     ("Activity", "Atividade"),
@@ -1122,7 +1126,9 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Open the capture", "Abrir a captura"),
     ("Send to…", "Enviar para…"),
     ("Send to", "Enviar para"),
-    ("⇧ remembers", "⇧ memoriza"),
+    ("⇧-click to always send {site} here", "⇧-clique para sempre enviar {site} aqui"),
+    ("Always send {site} to {name}", "Sempre enviar {site} para {name}"),
+    ("Always send {site} to…", "Sempre enviar {site} para…"),
     ("Remember", "Memorizar"),
     ("New capture", "Nova captura"),
     ("Always send", "Sempre enviar"),
@@ -1172,6 +1178,9 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Try another search", "Tente outra pesquisa"),
     ("Descriptive meeting file names", "Nomes descritivos para arquivos de reunião"),
     ("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time", "Renomeia o Markdown exportado da reunião com o título dela assim que as notas ou uma renomeação fornecerem um, mantendo a data e a hora"),
+    ("Caps Lock dictation", "Ditado com Caps Lock"),
+    ("Press Caps Lock to start dictation and again to finish. Hex keeps Caps Lock off and uses its light while it records and transcribes", "Pressione Caps Lock para começar a ditar e de novo para terminar. O Hex mantém o Caps Lock desligado e usa a luz dele enquanto grava e transcreve"),
+    ("Getting Hex ready to listen…", "O Hex está se preparando para ouvir…"),
 ];
 
 #[cfg(test)]

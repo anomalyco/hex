@@ -1705,6 +1705,20 @@ impl CaptureHost {
         }
     }
 
+    /// The Trash retention uses: Linux has no `trash` command, so it moves
+    /// media to the freedesktop.org Trash itself; elsewhere Scrawl's own
+    /// trasher does (the Recycle Bin on Windows, `/usr/bin/trash` on macOS).
+    fn retention_trasher(path: &Path) -> anyhow::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            crate::meeting::move_to_trash(path).map_err(|error| anyhow::anyhow!("{error:#}"))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            scrawl_capture::retention::trash(path)
+        }
+    }
+
     /// The `capture-retention` thread: Scrawl's cleanup of the captures
     /// folder with `capture.*`'s policy, a while after the host starts and
     /// hourly, never while a capture records or is written, and never while
@@ -1734,6 +1748,7 @@ impl CaptureHost {
                             false,
                             Duration::ZERO,
                             false,
+                            &Self::retention_trasher,
                         );
                     }
                     wait = RETENTION_EVERY;
@@ -2474,10 +2489,12 @@ pub fn draw(x: f32, y: f32, scale: f32) {
         && scale > 0.0
         && let Some(source) = ink_source()
     {
-        let area = scrawl_capture::capture::recorded_screen_points().map_or(
-            [width as f32 / scale, height as f32 / scale],
-            |(width, height)| [width as f32, height as f32],
-        );
+        let area = crate::linux::output::pen_points()
+            .or_else(scrawl_capture::capture::recorded_screen_points)
+            .map_or(
+                [width as f32 / scale, height as f32 / scale],
+                |(width, height)| [width as f32, height as f32],
+            );
         let mut frame = source
             .telemetry
             .target_frame

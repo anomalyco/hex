@@ -584,6 +584,9 @@ struct Look<'a, S> {
     title: &'static str,
     /// The shortcut starts and stops dictation instead of being held.
     toggle: bool,
+    /// The listener runs but hasn't started listening: the game says so
+    /// instead of inviting a hold that does nothing.
+    warming: bool,
     /// What the last try needs said.
     hint: Option<&'static str>,
     /// Switches the shortcut to tap to start, for a player who keeps
@@ -930,12 +933,14 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     } else {
         tr("Clear your messages")
     };
+    let warming = s.live.as_ref().is_some_and(|live| live.warming);
     let (stage, field) = if s.live.is_some() {
         let look = Look::<Ui> {
             caps: &s.caps,
             hud,
             title,
             toggle: s.toggle,
+            warming,
             hint,
             offer: offers.then(|| Rc::new(live::use_toggle) as Action<Ui>),
             finish: Rc::new(live::on_ui(finish)),
@@ -957,6 +962,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
             hud,
             title,
             toggle: s.toggle,
+            warming: false,
             hint,
             offer: offers.then(|| {
                 Rc::new(|s: &mut Onboard| {
@@ -1091,6 +1097,7 @@ fn view(g: &Game, cx: &mut Cx<Game>) -> El {
             hud: g.hud.frame(),
             title: "Clear your messages",
             toggle: false,
+            warming: false,
             hint: None,
             offer: None,
             finish: Rc::new(|g: &mut Game| {
@@ -1288,7 +1295,14 @@ fn header<S: 'static>(
                 .font(title_font(p))
                 .color(p.text()),
         )
-        .child(
+        .child(if look.warming {
+            row().key("lead").center_y().child(
+                text(live::warming_copy())
+                    .key("warming")
+                    .font(LEAD)
+                    .color(p.muted()),
+            )
+        } else {
             row()
                 .key("lead")
                 .gap(8.0)
@@ -1305,8 +1319,8 @@ fn header<S: 'static>(
                         .key("rest")
                         .font(LEAD)
                         .color(p.muted()),
-                ),
-        );
+                )
+        });
     // The share card's Continue stands in for Done while it shows.
     let done = (chrome > 0.005).then(|| {
         row()

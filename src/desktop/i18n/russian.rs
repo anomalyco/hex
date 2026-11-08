@@ -121,6 +121,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hex Microphone virtual input and real-time voice filters", "Виртуальный вход Hex Microphone и голосовые фильтры в реальном времени"),
     ("Live text", "Текст в реальном времени"),
     ("Show provisional words beside the HUD while dictating", "Показывать предварительные слова рядом с HUD во время диктовки"),
+    ("Failure notices", "Уведомления об ошибках"),
+    ("Show why a dictation failed beside the HUD", "Показывать причину неудачной диктовки рядом с HUD"),
     ("Live typing", "Ввод в реальном времени"),
     ("Show provisional words in the focused text field while dictating on Wayland, then type the final text there", "Показывает промежуточные слова в поле ввода при диктовке в Wayland и вводит туда итоговый текст"),
     ("Live chapters", "Главы в реальном времени"),
@@ -470,6 +472,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("OpenCode", "OpenCode"),
     ("Default", "По умолчанию"),
     ("Last dictation failed: {}", "Последняя диктовка не удалась: {}"),
+    ("Built-in mic is off with the lid closed. Open the lid or connect a mic.", "Встроенный микрофон выключен, пока крышка закрыта. Откройте крышку или подключите микрофон."),
+    ("No microphone is available. Connect a microphone.", "Нет доступного микрофона. Подключите микрофон."),
     ("Version {}", "Версия {}"),
     ("Hold", "Удерживать"),
     ("Activity", "Активность"),
@@ -1121,7 +1125,9 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Open the capture", "Открыть запись"),
     ("Send to…", "Отправить в…"),
     ("Send to", "Отправить в"),
-    ("⇧ remembers", "⇧ запоминает"),
+    ("⇧-click to always send {site} here", "⇧-клик: всегда отправлять {site} сюда"),
+    ("Always send {site} to {name}", "Всегда отправлять {site} в {name}"),
+    ("Always send {site} to…", "Всегда отправлять {site} в…"),
     ("Remember", "Запомнить"),
     ("New capture", "Новая запись"),
     ("Always send", "Всегда отправлять"),
@@ -1175,6 +1181,9 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Try another search", "Попробуйте другой запрос"),
     ("Descriptive meeting file names", "Описательные имена файлов встреч"),
     ("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time", "Переименовывает экспортированный Markdown встречи по её названию, как только его дадут заметки или переименование, сохраняя дату и время"),
+    ("Caps Lock dictation", "Диктовка Caps Lock"),
+    ("Press Caps Lock to start dictation and again to finish. Hex keeps Caps Lock off and uses its light while it records and transcribes", "Нажмите Caps Lock, чтобы начать диктовку, и ещё раз, чтобы закончить. Hex держит Caps Lock выключенным и использует его индикатор во время записи и расшифровки"),
+    ("Getting Hex ready to listen…", "Hex готовится слушать…"),
 ];
 
 #[cfg(test)]

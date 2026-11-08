@@ -79,6 +79,9 @@ fn set_live_text(spot: Spot) {
 #[derive(Clone)]
 pub(crate) struct HudSender {
     overlay: OverlayHandle<Hud>,
+    /// Whether a capture is active, so an older job's failure never covers
+    /// a newer recording's live notice.
+    recording: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     animating: Arc<AtomicBool>,
     #[cfg(target_os = "windows")]
@@ -107,8 +110,35 @@ const FIRST_FRAME: std::time::Duration = std::time::Duration::from_millis(1500);
 
 impl HudSender {
     pub(crate) fn send(&self, event: HudEvent) {
+        if matches!(&event, HudEvent::Started) {
+            self.recording.store(true, Ordering::Release);
+        } else if matches!(
+            &event,
+            HudEvent::Submitted { .. }
+                | HudEvent::Discarded
+                | HudEvent::Cancelled
+                | HudEvent::Failed { .. }
+                | HudEvent::Reset
+        ) {
+            self.recording.store(false, Ordering::Release);
+        }
+        match &event {
+            HudEvent::Started => {
+                crate::rune_ui::live_text::capture_started();
+            }
+            HudEvent::Failed {
+                message: Some(message),
+            } => crate::rune_ui::live_text::show_failure(message),
+            HudEvent::JobFailed {
+                message: Some(message),
+                ..
+            } if !self.recording.load(Ordering::Acquire) => {
+                crate::rune_ui::live_text::show_failure(message)
+            }
+            _ => {}
+        }
         #[cfg(target_os = "windows")]
-        if matches!(event, HudEvent::Started) {
+        if matches!(&event, HudEvent::Started) {
             let presents = self.overlay.surface_stats().totals.presents;
             let mut watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
             if watch.position != IndicatorPosition::Hidden && watch.pending.is_none() {
@@ -242,17 +272,18 @@ impl Hud {
         // so a placement Rune resolved wrong on another screen (#873)
         // doesn't stick.
         #[cfg(target_os = "macos")]
-        if let HudEvent::ConfigureDotScope(_) | HudEvent::Started = event {
+        if matches!(&event, HudEvent::ConfigureDotScope(_) | HudEvent::Started) {
             self.placed = None;
         }
         #[cfg(not(target_os = "macos"))]
-        if let HudEvent::Started = event {
+        if matches!(&event, HudEvent::Started) {
             self.edge_placed = None;
         }
+        let starts = matches!(&event, HudEvent::Started);
+        let meter = matches!(&event, HudEvent::Meter { .. });
         self.model.handle(event, Instant::now(), self.reduce);
         self.animating.store(true, Ordering::Release);
-        let starts = matches!(event, HudEvent::Started);
-        if starts || (self.shown && !matches!(event, HudEvent::Meter { .. })) {
+        if starts || (self.shown && !meter) {
             self.show();
         }
     }
@@ -459,6 +490,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
     overlay.update(move |hud, _| hud.this = Some(this));
     HudSender {
         overlay,
+        recording: Arc::default(),
         #[cfg(target_os = "macos")]
         animating,
         #[cfg(target_os = "windows")]

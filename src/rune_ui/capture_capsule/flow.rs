@@ -369,10 +369,14 @@ pub(crate) struct List {
     /// than the suggestions it opened from never shrinks it.
     pub(crate) min_rows: usize,
     pub(crate) selected: usize,
+    /// The row a Shift pick would send to: the one under the pointer, else
+    /// the search's highlighted row. Over the suggestions, a click picks,
+    /// so with the pointer off the rows there is none.
+    pub(crate) target: Option<usize>,
     pub(crate) footer: Footer,
     /// The site or app a Shift pick saves a rule for, and whether Shift is
-    /// down: then the footer says so and the highlighted row reads
-    /// "always".
+    /// down: then the footer (or the suggestions' header) says so and the
+    /// target row reads "always".
     pub(crate) always: Option<(String, bool)>,
 }
 
@@ -390,6 +394,10 @@ impl List {
 
     pub(crate) fn selected_dest(&self) -> Option<&Dest> {
         self.rows().nth(self.selected)
+    }
+
+    pub(crate) fn target_dest(&self) -> Option<&Dest> {
+        self.target.and_then(|row| self.rows().nth(row))
     }
 }
 
@@ -575,6 +583,9 @@ struct Open {
     back: bool,
     /// Shift is down: a pick also saves a rule.
     shift: bool,
+    /// The row the pointer moved onto, until it leaves the row, a key
+    /// moves the highlight, or the rows change under it.
+    pointed: Option<usize>,
 }
 
 impl Open {
@@ -585,6 +596,7 @@ impl Open {
             typing: false,
             back: false,
             shift: false,
+            pointed: None,
         }
     }
 }
@@ -857,6 +869,34 @@ impl Flow {
         self.keys() != before
     }
 
+    /// The pointer moved on the open list's `row` (`on`), or left it. The
+    /// row it is on is where a Shift pick goes; in the search the highlight
+    /// follows it too, as in a menu, and the arrow keys go on from there.
+    /// True when that changes what the capsule draws.
+    pub(crate) fn point(&mut self, row: usize, on: bool) -> bool {
+        let Phase::Routed(Routed {
+            route,
+            open: Some(open),
+            ..
+        }) = &mut self.phase
+        else {
+            return false;
+        };
+        let before = (open.pointed, open.selected);
+        if on {
+            if row >= list(route, open).rows().count() {
+                return false;
+            }
+            open.pointed = Some(row);
+            if open.typing {
+                open.selected = row;
+            }
+        } else if open.pointed == Some(row) {
+            open.pointed = None;
+        }
+        (open.pointed, open.selected) != before
+    }
+
     pub(crate) fn input(&mut self, input: Input, now: f64) -> Vec<Action> {
         // A new capture or a new answer may change the list under a resting
         // pointer: it has to move again before typing searches.
@@ -867,13 +907,40 @@ impl Flow {
             self.aimed = false;
         }
         let before = self.phase.clone();
+        let pointed = self.pointed();
         let actions = self.step(input, now);
+        // Another session under a resting pointer: it has to move to
+        // point again.
+        if self.pointed() != pointed
+            && let Phase::Routed(Routed {
+                open: Some(open), ..
+            }) = &mut self.phase
+        {
+            open.pointed = None;
+        }
         self.cue(&before, &actions);
         self.closing(&before);
         self.left_waiting(before, &actions);
         let mut actions = actions;
         actions.extend(self.hold_countdown(now));
         actions
+    }
+
+    /// The session of the open list's row under the pointer.
+    fn pointed(&self) -> Option<String> {
+        let Phase::Routed(Routed {
+            route,
+            open: Some(open),
+            ..
+        }) = &self.phase
+        else {
+            return None;
+        };
+        let row = open.pointed?;
+        list(route, open)
+            .rows()
+            .nth(row)
+            .map(|dest| dest.session.clone())
     }
 
     /// A list closed with nothing picked waits for Send to….
@@ -2621,9 +2688,22 @@ mod tests {
         flow.input(Input::Shift(true), 0.5);
         let (_, list) = done(&flow, 0.5).open.unwrap();
         assert_eq!(list.always, Some(("problems.kitlangton.com".into(), true)));
+        assert!(
+            list.rows().all(|dest| dest.why != "always"),
+            "over the suggestions a click picks: off the rows, nowhere yet"
+        );
+        assert!(flow.point(1, true));
+        let (_, list) = done(&flow, 0.6).open.unwrap();
         let notes: Vec<_> = list.rows().map(|dest| dest.why.as_str()).collect();
-        assert_eq!(notes[0], "always", "the highlighted row is where it goes");
-        assert_ne!(notes[1], "always");
+        assert_eq!(
+            notes[1], "always",
+            "the row under the pointer is where it goes"
+        );
+        assert_ne!(notes[0], "always");
+        assert_eq!(
+            list.target_dest().map(|dest| dest.name.as_str()),
+            Some("HEX")
+        );
         flow.input(Input::Shift(false), 1.0);
         let (_, list) = done(&flow, 1.0).open.unwrap();
         assert_eq!(list.always, Some(("problems.kitlangton.com".into(), false)));
@@ -2656,6 +2736,61 @@ mod tests {
             flow.click(Id::Row(0), 1.0),
             [Action::Send {
                 to: "SEER".into(),
+                always: Some("problems.kitlangton.com".into())
+            }]
+        );
+    }
+
+    #[test]
+    fn shift_follows_the_pointer_and_the_arrows_go_on_from_it() {
+        let names = |flow: &Flow| -> Vec<String> {
+            let (_, list) = done(flow, 1.0).open.unwrap();
+            list.rows()
+                .filter(|dest| dest.why == "always")
+                .map(|dest| dest.name.clone())
+                .collect()
+        };
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        flow.input(Input::Shift(true), 0.1);
+        flow.point(0, true);
+        assert_eq!(names(&flow), ["SEER"]);
+        // Onto the next row: the pointer reaches it before it leaves the
+        // last one.
+        flow.point(2, true);
+        assert!(!flow.point(0, false), "leaving a row it already left");
+        assert_eq!(names(&flow), ["HOME"]);
+        assert!(flow.point(2, false));
+        assert!(names(&flow).is_empty(), "off the rows");
+        // A Shift click on the pointed row sends there and saves it.
+        flow.point(2, true);
+        assert_eq!(
+            flow.click(super::super::surface::Id::Row(2), 0.5),
+            [Action::Send {
+                to: "HOME".into(),
+                always: Some("problems.kitlangton.com".into())
+            }]
+        );
+        // In the search the highlight follows the pointer, and the arrows
+        // and ⇧⏎ go on from it.
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(guess()), 0.0);
+        flow.point(1, true);
+        flow.input(Input::OpenList, 0.1);
+        flow.input(Input::Shift(true), 0.2);
+        assert_eq!(
+            names(&flow),
+            ["HEX"],
+            "the search starts on the pointed row"
+        );
+        flow.point(2, true);
+        assert_eq!(names(&flow), ["HOME"]);
+        flow.input(Input::Move(-1), 0.3);
+        assert_eq!(names(&flow), ["HEX"], "the arrows take over");
+        assert_eq!(
+            flow.input(Input::Send { always: true }, 0.4),
+            [Action::Send {
+                to: "HEX".into(),
                 always: Some("problems.kitlangton.com".into())
             }]
         );

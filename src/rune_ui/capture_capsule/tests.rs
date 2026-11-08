@@ -75,9 +75,11 @@ fn no_answer() -> Route {
 enum Beat {
     In(Input),
     Click(Id),
+    /// The pointer moves onto the open list's row.
+    Point(usize),
 }
 
-use Beat::{Click, In};
+use Beat::{Click, In, Point};
 
 /// `pres` after `beats`, each a second apart, read just after the last.
 fn after(beats: &[Beat]) -> Pres {
@@ -91,6 +93,9 @@ fn after(beats: &[Beat]) -> Pres {
             }
             Click(id) => {
                 flow.click(*id, now);
+            }
+            Point(row) => {
+                flow.point(*row, true);
             }
         }
     }
@@ -177,8 +182,10 @@ fn stills() -> Vec<(&'static str, Pres)> {
             flow.pres(undo_s() + 1.0)
         }),
         ("guess", after(&routed(guess()))),
+        // Shift down with the pointer on HEX: that row is where it goes.
         ("shift", {
             let mut beats = routed(guess());
+            beats.push(Point(1));
             beats.push(In(Input::Shift(true)));
             after(&beats)
         }),
@@ -365,7 +372,7 @@ fn every_state_draws_its_pieces() {
         // A rule's send counts down on the Undo chip, with no words.
         ("rule-sent", &["done", "undo", "close"]),
         ("rule-final", &["done", "paste", "inspect", "close"]),
-        ("guess", &["done", "ask", "list", "row-SEER", "remembers"]),
+        ("guess", &["done", "ask", "list", "row-SEER", "shift-hint"]),
         ("guess-five", &["done", "ask", "list", "row-SEER"]),
         ("no-answer", &["done", "why", "ask", "list"]),
         (
@@ -515,11 +522,18 @@ fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>
             (shell[1] + shell[3] + 36.0).max(TOP + 40.0 + 36.0)
         }
     };
-    let rt = runtime(pres, dark);
+    draw(gpu, &mut runtime(pres, dark), height)
+}
+
+/// Pixels of `rt`'s panel's top `height` points, at 2×.
+fn draw(
+    gpu: &rune::render::Gpu,
+    rt: &mut Runtime<CapsuleState>,
+    height: f32,
+) -> (u32, u32, Vec<u8>) {
     let (w, h) = ((PANEL_W * 2.0) as u32, (PANEL_H * 2.0) as u32);
     let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
     let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
-    let mut rt = rt;
     renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
     renderer.prepare(
         &gpu.device,
@@ -975,6 +989,7 @@ fn play(
                     tx.wake_after(std::time::Duration::ZERO);
                 }
                 Click(id) => s.click(id, tx),
+                Point(row) => s.point(row, true, tx),
             });
             next += 1;
         }
@@ -1114,12 +1129,16 @@ fn presses_reach_the_host() {
 /// The live capsule after `inputs`, at rest, with every action it hands the
 /// host recorded.
 fn live(inputs: Vec<Input>) -> (Runtime<CapsuleState>, Arc<Mutex<Vec<Action>>>) {
+    live_in(inputs, true)
+}
+
+fn live_in(inputs: Vec<Input>, dark: bool) -> (Runtime<CapsuleState>, Arc<Mutex<Vec<Action>>>) {
     let mut state = CapsuleState::new(false);
     let actions: Arc<Mutex<Vec<Action>>> = Arc::default();
     let record = actions.clone();
     state.act = Some(Arc::new(move |action| record.lock().unwrap().push(action)));
     let mut rt =
-        crate::rune_ui::offscreen::runtime(state, view, (PANEL_W, PANEL_H), env(true), text());
+        crate::rune_ui::offscreen::runtime(state, view, (PANEL_W, PANEL_H), env(dark), text());
     rt.poll = Some(poll);
     rt.frame(0.0);
     for input in inputs {
@@ -1170,6 +1189,71 @@ fn click_on(rt: &mut Runtime<CapsuleState>, key: &str, nth: usize) {
     rt.frame(1.0 / FPS);
     rt.pointer_up(cx, cy);
     settle(rt);
+}
+
+/// Moves the pointer onto the middle of the live element keyed `key`, a
+/// few points at a time as a hand does, and lets it rest there.
+fn point_at(rt: &mut Runtime<CapsuleState>, key: &str) {
+    let [x, y, w, h] = rt
+        .elements()
+        .iter()
+        .find(|e| !e.exiting && e.key.as_deref().and_then(|k| k.split('#').next()) == Some(key))
+        .unwrap_or_else(|| panic!("no {key} in {:?}", keys(rt)))
+        .rect;
+    let (cx, cy) = (x + w * 0.5, y + h * 0.5);
+    for step in [6.0, 3.0, 0.0] {
+        rt.pointer_move(cx - step, cy);
+        rt.frame(1.0 / FPS);
+    }
+    settle(rt);
+}
+
+/// `input` from Hex's tap, as a key reaches the live capsule.
+fn tap(rt: &mut Runtime<CapsuleState>, input: Input) {
+    rt.update(move |s, tx| {
+        s.inbox.push(input);
+        tx.wake_after(std::time::Duration::ZERO);
+    });
+    settle(rt);
+}
+
+/// `HEX_CAPSULE_HOVER_SNAPS=<folder>` writes the live capsule with the
+/// pointer resting on RUNE, the fourth row, and Shift down, over the
+/// suggestions and over the search, light and dark.
+#[test]
+fn capture_capsule_hover_snapshots() {
+    let Some(folder) = std::env::var_os("HEX_CAPSULE_HOVER_SNAPS") else {
+        return;
+    };
+    let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+        eprintln!("skipping capture capsule hover snapshots: no GPU adapter");
+        return;
+    };
+    let folder = std::path::PathBuf::from(folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    for (name, search) in [("suggestions", false), ("search", true)] {
+        for dark in [false, true] {
+            let mut inputs = vec![processing_input(), Input::Routed(guess())];
+            if search {
+                inputs.push(Input::OpenList);
+            }
+            let (mut rt, _) = live_in(inputs, dark);
+            rt.state.backdrop = true;
+            point_at(&mut rt, "row-RUNE");
+            tap(&mut rt, Input::Shift(true));
+            let height = match &rt.state.surface.pres {
+                Pres::Done(super::flow::Done {
+                    open: Some((_, list)),
+                    ..
+                }) => super::surface::LIST_Y + super::list_height(list) + 28.0,
+                pres => panic!("{name}: no list in {pres:?}"),
+            };
+            let (w, h, pixels) = draw(&gpu, &mut rt, height);
+            let theme = if dark { "dark" } else { "light" };
+            let path = folder.join(format!("shift-hover-{name}-{theme}.png"));
+            rune::render::write_png(&path, w, h, &pixels).unwrap();
+        }
+    }
 }
 
 /// Clicking any of the capsule's choices does what it says, in every flow:
@@ -1235,6 +1319,51 @@ fn clicks_on_the_capsule_do_what_they_say() {
             assert_eq!(*actions.lock().unwrap(), vec![send("HEX")], "{flow:?}");
         });
     }
+}
+
+/// Kit: holding Shift over a row marked the keyboard's row instead. The
+/// live capsule marks the row under the pointer, its header says where,
+/// and a Shift click there saves the rule for it, over the suggestions
+/// and in the search.
+#[test]
+fn shift_marks_and_saves_the_row_under_the_pointer() {
+    use super::tuning::{self, CapsuleFlow};
+    let always = |rt: &Runtime<CapsuleState>| -> Vec<String> {
+        let Pres::Done(super::flow::Done {
+            open: Some((_, list)),
+            ..
+        }) = &rt.state.surface.pres
+        else {
+            panic!("no list in {:?}", rt.state.surface.pres);
+        };
+        list.rows()
+            .filter(|dest| dest.why == "always")
+            .map(|dest| dest.name.clone())
+            .collect()
+    };
+    tuning::with_flow(CapsuleFlow::List, || {
+        for search in [false, true] {
+            let mut inputs = vec![processing_input(), Input::Routed(guess())];
+            if search {
+                inputs.push(Input::OpenList);
+            }
+            let (mut rt, actions) = live(inputs);
+            point_at(&mut rt, "row-HOME");
+            tap(&mut rt, Input::Shift(true));
+            assert_eq!(always(&rt), ["HOME"], "search: {search}");
+            point_at(&mut rt, "row-RUNE");
+            assert_eq!(always(&rt), ["RUNE"], "search: {search}");
+            click_on(&mut rt, "row-RUNE", 0);
+            assert_eq!(
+                *actions.lock().unwrap(),
+                [Action::Send {
+                    to: "RUNE".into(),
+                    always: Some("problems.kitlangton.com".into())
+                }],
+                "search: {search}"
+            );
+        }
+    });
 }
 
 fn processing_input() -> Input {

@@ -515,6 +515,19 @@ impl CapsuleState {
         }
     }
 
+    /// The pointer moved on the list's `row` (`on`) or left it: a Shift
+    /// pick goes there.
+    fn point(&mut self, row: usize, on: bool, tx: &mut Tx) {
+        if !self.flow.point(row, on) {
+            tx.live_only();
+            return;
+        }
+        let now = self.now;
+        self.present(now);
+        self.live.sync(&self.surface);
+        tx.wake_after(Duration::ZERO);
+    }
+
     /// Moves the surface to what the flow shows. True when it changed.
     fn present(&mut self, now: f64) -> bool {
         let pres = self.with_thumb(self.flow.pres(now));
