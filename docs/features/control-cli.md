@@ -58,10 +58,12 @@ Agent or terminal                                  // control.cli; every OS
 │       └── Hex stopped -> written to settings.json under the service lock
 │           (Linux); a Hex holding it is waited for (≤ 35 s) instead
 ├── hex model list | use <id> | install [id] | cancel
-│   ├── use -> installed models only; never downloads or repairs; keeps the
-│   │   model's remembered language and hints (--language overrides)
-│   └── Linux/Windows: install with Hex stopped downloads here; status,
-│       devices, check, transcribe run here (macOS: unsupported)
+│   ├── use -> installed models only; needs the running Hex; never downloads
+│   │   or repairs; keeps the model's remembered language and hints
+│   │   (--language overrides)
+│   └── Linux/Windows: install with Hex stopped downloads and selects here
+│       (a Hex that starts meanwhile makes the switch); status, devices,
+│       check, transcribe run here (macOS: unsupported)
 ├── hex window show [pane] | hide
 │   ├── settings -> the General pane (status window.pane stays "settings")
 │   ├── meetings pane with Meetings off -> the pane's opt-in card
