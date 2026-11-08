@@ -1143,6 +1143,7 @@ mod tests {
                     title: "Send to",
                     min_rows: 0,
                     selected: 0,
+                    target: Some(0),
                     footer: Footer::Search { remember: false },
                     always: None,
                 },

@@ -59,7 +59,7 @@ pub(super) fn refine(mut routed: Routed, route: Route, _now: f64, suggest: bool)
             .get(open.selected)
             .map(|d| d.session.clone())
     });
-    routed.route = route;
+    routed.route = keep_rows(&routed.route, route);
     if resolving && suggest && matches!(routed.route, Route::Guess { .. }) {
         routed.open = Some(Open::suggesting());
     }
@@ -70,6 +70,62 @@ pub(super) fn refine(mut routed: Routed, route: Route, _now: f64, suggest: bool)
             .unwrap_or(0);
     }
     routed
+}
+
+/// `next` with every session `shown` listed kept in its place, since the
+/// pointer may be on it: a row takes its new name and reason (its old
+/// reason when the new one is blank), no row leaves, and sessions new to
+/// the list come last, a rule's own session too. The router keeps its
+/// rows in place as well; this holds whatever answer reaches the capsule.
+fn keep_rows(shown: &Route, next: Route) -> Route {
+    let (above, below) = sections(shown);
+    let (suggested, recent) = sections(&next);
+    let fresh: Vec<&Dest> = suggested.iter().chain(recent).collect();
+    if above.is_empty() && below.is_empty() || fresh.is_empty() {
+        return next;
+    }
+    let was = |dest: &Dest| {
+        above
+            .iter()
+            .chain(below)
+            .any(|old| old.session == dest.session)
+    };
+    let latest = |old: &Dest| match fresh.iter().find(|new| new.session == old.session) {
+        Some(new) if new.why.is_empty() => Dest {
+            why: old.why.clone(),
+            ..(*new).clone()
+        },
+        Some(new) => (*new).clone(),
+        None => old.clone(),
+    };
+    let suggested: Vec<Dest> = above.iter().map(latest).collect();
+    let mut recent: Vec<Dest> = below.iter().map(latest).collect();
+    let mut added = Vec::new();
+    for new in fresh {
+        if !was(new) && !added.iter().any(|d: &Dest| d.session == new.session) {
+            added.push(new.clone());
+        }
+    }
+    recent.extend(added);
+    match next {
+        Route::Rule { to, site, .. } => Route::Rule {
+            to,
+            suggested,
+            recent,
+            site,
+        },
+        Route::Guess { site, .. } => Route::Guess {
+            suggested,
+            recent,
+            site,
+        },
+        Route::NoAnswer { .. } => Route::NoAnswer {
+            recent: suggested.into_iter().chain(recent).collect(),
+        },
+        _ => Route::Nothing {
+            recent: suggested.into_iter().chain(recent).collect(),
+        },
+    }
 }
 
 pub(super) fn sections(route: &Route) -> (&[Dest], &[Dest]) {
@@ -113,6 +169,82 @@ mod tests {
         }
         flow.input(Input::Refined(route), 2.0);
         assert_eq!(flow.pres(2.0), before);
+    }
+
+    /// Kit: "the suggested places still rearrange themselves". Nothing
+    /// that happens while the list shows moves a row.
+    #[test]
+    fn no_shown_row_ever_moves() {
+        let rows = |flow: &Flow| -> Vec<(String, String)> {
+            let Pres::Done(done) = flow.pres(5.0) else {
+                panic!("missing capsule");
+            };
+            let (_, list) = done.open.expect("the list shows");
+            list.rows()
+                .map(|dest| (dest.session.clone(), dest.why.clone()))
+                .collect()
+        };
+        let sessions = |flow: &Flow| -> Vec<String> {
+            rows(flow).into_iter().map(|(session, _)| session).collect()
+        };
+        let guess_of = |suggested: Vec<Dest>, recent: Vec<Dest>| Route::Guess {
+            suggested,
+            recent,
+            site: Some("problems.kitlangton.com".into()),
+        };
+        let mut flow = Flow::new();
+        flow.input(
+            Input::Routed(guess_of(
+                vec![Dest::new("Board", "same page").session("ses_board")],
+                vec![
+                    Dest::new("Home", "recent").session("ses_home"),
+                    Dest::new("Hex", "recent").session("ses_hex"),
+                ],
+            )),
+            0.0,
+        );
+        let shown = sessions(&flow);
+        assert_eq!(shown, ["ses_board", "ses_home", "ses_hex"]);
+        flow.point(1, true);
+        flow.input(Input::Shift(true), 0.2);
+        flow.input(Input::Shift(false), 0.3);
+        assert_eq!(sessions(&flow), shown, "pointing and Shift");
+        // Jev's pick replaces the answer: Hex on top, the recent ones
+        // re-sorted by their latest activity, and one more session.
+        flow.input(
+            Input::Refined(guess_of(
+                vec![Dest::new("Hex", "mentioned").session("ses_hex")],
+                vec![
+                    Dest::new("Rune", "recent").session("ses_rune"),
+                    Dest::new("Board", "recent").session("ses_board"),
+                    Dest::new("Home", "").session("ses_home"),
+                ],
+            )),
+            0.4,
+        );
+        assert_eq!(
+            rows(&flow),
+            [
+                ("ses_board".into(), "recent".into()),
+                ("ses_home".into(), "recent".into()),
+                ("ses_hex".into(), "mentioned".into()),
+                ("ses_rune".into(), "recent".into()),
+            ],
+            "rows keep their place and take their new reason; a new one comes last"
+        );
+        let shown = sessions(&flow);
+        flow.input(Input::OpenList, 0.5);
+        assert_eq!(sessions(&flow), shown, "the search opens on the same rows");
+        flow.input(Input::Escape, 0.6);
+        assert_eq!(sessions(&flow), shown, "and goes back to them");
+        flow.input(
+            Input::Refined(guess_of(
+                vec![Dest::new("Rune", "mentioned").session("ses_rune")],
+                Vec::new(),
+            )),
+            0.7,
+        );
+        assert_eq!(sessions(&flow), shown, "a row never leaves");
     }
 
     #[test]

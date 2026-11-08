@@ -143,8 +143,13 @@ pub(super) fn list(route: &Route, open: &Open) -> List {
     };
     let always = site.map(|site| (site, open.shift));
     let every = || suggested.iter().chain(recent);
+    let rows = matching(every(), &open.query.text);
+    let target = open
+        .pointed
+        .or(open.typing.then_some(open.selected))
+        .filter(|row| *row < rows.len());
     let mut list = List {
-        rows: matching(every(), &open.query.text),
+        rows,
         title: if open.typing {
             tr("All sessions")
         } else {
@@ -158,6 +163,7 @@ pub(super) fn list(route: &Route, open: &Open) -> List {
             0
         },
         selected: open.selected,
+        target,
         footer: if open.typing {
             Footer::Search {
                 remember: always.is_some(),
@@ -167,9 +173,9 @@ pub(super) fn list(route: &Route, open: &Open) -> List {
         },
         always,
     };
-    // Shift down, the highlighted row is where the rule would send it.
+    // Shift down, the target row is where the rule would send it.
     if list.always.as_ref().is_some_and(|(_, shift)| *shift)
-        && let Some(row) = list.rows.get_mut(list.selected)
+        && let Some(row) = list.target.and_then(|row| list.rows.get_mut(row))
     {
         row.why = tr("always").into();
     }
