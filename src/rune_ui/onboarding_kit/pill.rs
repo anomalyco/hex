@@ -4,7 +4,7 @@
 //! `"Setting up Hex"` flies smoothly up to the top bar during the demo and
 //! permissions, then back to centre stage for `"Hex is ready"`.
 
-use crate::desktop::i18n::tr;
+use crate::desktop::i18n::{tr, tr_named};
 use rune::{Align, El, Spring, Transition, el, icon, row, text};
 
 use super::super::controls::Paint;
@@ -96,44 +96,52 @@ pub(crate) fn pill(p: Paint, download: Download, closed: f32) -> El {
     k.elevate(pill, &k.elevation.raised)
 }
 
-/// Interactive capsule button naming the model's language inside
-/// `"Downloading [ English ▾ ] speech model"`.
+/// The language capsule inside `"Downloading [ English ] speech model"`.
+///
+/// With a press handler it switches between English and the system
+/// language's recommended model, and says so to assistive technology.
+/// Without one it is a plain label: no focus, no hover, nothing to press.
 pub(crate) fn language_capsule<S: 'static>(
     p: Paint,
     language: Language,
-    press: impl Fn(&mut S) + 'static,
+    press: Option<fn(&mut S)>,
 ) -> El {
     let k = p.k;
     let c = &k.c;
     let mut cap = row()
         .key("language-capsule")
-        .role("button")
-        .label(tr("Language"))
-        .a11y_value(language_label(language))
-        .focusable(true)
-        .focus_ring(1.5, 1.0, c.border_focus)
         .h(26.0)
         .pl(10.0)
-        .pr(7.0)
+        .pr(10.0)
         .gap(4.0)
         .center_y()
         .radius(13.0)
         .fill(c.surface_raised)
-        .border(p.hair, c.border_base)
-        .hover(c.hover)
-        .press(c.pressed)
-        .on_press(press)
-        .child(
-            text(language_label(language))
-                .key("name")
-                .font(k.ty.ui_medium.lh(16.0))
-                .color(p.text()),
-        )
-        .child(
-            icon(k.glyph.chevron_down, 12.0)
-                .key("chevron")
-                .color(c.icon_muted),
-        );
+        .border(p.hair, c.border_base);
+    if let Some(press) = press {
+        let next = match language {
+            Language::English => Language::Other,
+            Language::Other => Language::English,
+        };
+        cap = cap
+            .role("button")
+            .label(tr_named(
+                "Choosing it switches the language to {language}",
+                &[("language", language_label(next))],
+            ))
+            .a11y_value(language_label(language))
+            .focusable(true)
+            .focus_ring(1.5, 1.0, c.border_focus)
+            .hover(c.hover)
+            .press(c.pressed)
+            .on_press(press);
+    }
+    cap = cap.child(
+        text(language_label(language))
+            .key("name")
+            .font(k.ty.ui_medium.lh(16.0))
+            .color(p.text()),
+    );
     for shadow in k.shadow_layers(&k.elevation.button_neutral) {
         cap = cap.box_shadow(shadow);
     }
