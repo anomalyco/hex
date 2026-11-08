@@ -20,10 +20,10 @@ const LIST_FADE: (f32, f32) = (18.0, 28.0);
 /// Room the card's text leaves for its scroll bar.
 const SCROLL_BAR: f32 = 12.0;
 
-/// The pane bar's thumb, wider than the kit's 6/10, so it reads and grabs
-/// like a control on a light surface.
+/// The pane bar's thumb: 8 pt at rest and 10 under the pointer, so it stays
+/// inside the card's 12 pt scroll-bar room.
 const PANE_THUMB: f32 = 8.0;
-const PANE_THUMB_HOVER: f32 = 12.0;
+const PANE_THUMB_HOVER: f32 = 10.0;
 
 pub(super) static COPY_ICON: &Icon = &rune_theme_opencode::icons::OUTLINE_COPY;
 pub(super) static TRASH_ICON: &Icon = &rune_theme_opencode::icons::TRASH;
