@@ -79,6 +79,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound", "Использовать клавишу § (слева от 1 на клавиатурах ISO) как сочетание без модификатора. Пока она назначена, Hex забирает § у всех приложений"),
     ("Floating meeting capsules on GNOME", "Плавающие капсулы встреч в GNOME"),
     ("Show the recording offer and recording indicator floating over your call, through XWayland. Works only while XWayland is already running", "Показывает предложение записи и индикатор записи поверх звонка через XWayland. Работает, только когда XWayland уже запущен"),
+    ("Annotate on GNOME", "Annotate в GNOME"),
+    ("Show Annotate's recording capsule and ink over your screen, through XWayland. Works only while XWayland is already running; Esc can't stop drawing there, so use the capsule's pen button or let go of a held Annotate key", "Показывает капсулу записи и рисунок Annotate поверх экрана через XWayland. Работает, только когда XWayland уже запущен. Esc не остановит там рисование; используйте кнопку пера на капсуле или отпустите удерживаемую клавишу Annotate"),
     ("Restore clipboard on GNOME", "Восстановление буфера обмена в GNOME"),
     ("Put back what you copied before a dictation, through XWayland. Works only while XWayland is already running", "Возвращает через XWayland то, что было скопировано до диктовки. Работает, только когда XWayland уже запущен"),
     ("This desktop doesn't let Hex put your clipboard back after a paste. Turn on Labs › Restore clipboard on GNOME to try it.", "Это окружение не позволяет Hex восстановить буфер обмена после вставки. Чтобы попробовать, включите Лаборатория › Восстановление буфера обмена в GNOME."),

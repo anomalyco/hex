@@ -198,6 +198,11 @@ pub(crate) struct InkState {
     /// without one puts it back on the primary display (Linux).
     #[cfg(target_os = "linux")]
     moved: bool,
+    /// Whether this overlay can only show on XWayland (Linux Wayland without
+    /// layer-shell). Its surface is made with pointer regions and no keys, so
+    /// it stays in regions while not drawing: an XWayland window made
+    /// click-through can't take the pointer later.
+    xwayland: bool,
 }
 
 impl InkState {
@@ -225,6 +230,7 @@ impl InkState {
             recorded_output: None,
             #[cfg(target_os = "linux")]
             moved: false,
+            xwayland: false,
         }
     }
 }
@@ -284,7 +290,14 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
         s.drawing = drawing;
         if let Some(overlay) = &s.overlay {
             overlay.set_input(if !drawing {
-                rune::OverlayInput::None
+                // XWayland can't turn a click-through surface back into one
+                // that takes the pointer, so it keeps regions with no hit
+                // area (`draw_surface`) while not drawing.
+                if s.xwayland {
+                    rune::OverlayInput::Regions
+                } else {
+                    rune::OverlayInput::None
+                }
             } else if cfg!(target_os = "linux") {
                 // Everything but the capsule's pill (`draw_surface`).
                 rune::OverlayInput::Regions
@@ -292,7 +305,8 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
                 rune::OverlayInput::All
             });
             // For Escape, where the desktop gives the overlay the keyboard.
-            if drawing {
+            // XWayland never focuses this window, so it asks for nothing.
+            if drawing && !s.xwayland {
                 overlay.request_keys();
             }
         }
@@ -315,6 +329,10 @@ fn poll(s: &mut InkState, _now: f64, tx: &mut Tx) -> bool {
         }
         if !s.shown {
             s.shown = true;
+            // Read at each show: the lab or this user's XWayland may have
+            // changed since the last one.
+            #[cfg(target_os = "linux")]
+            overlay.set_xwayland_input(crate::linux::annotate_overlays::on_xwayland());
             overlay.show();
         }
     }
@@ -403,16 +421,29 @@ impl InkOverlay {
             DisplayTarget, OverlayInput, OverlayLevel, OverlayOptions, OverlayPlacement,
             OverlaySpec,
         };
+        // On Wayland without layer-shell the overlay can only show on
+        // XWayland, which needs pointer regions when it is made and never
+        // gives an `OnDemand` overlay the keyboard. Everywhere else it stays
+        // click-through until drawing.
+        let xwayland = takes_xwayland_pointer();
         let spec = OverlaySpec::new("Hex ink", (1440.0, 900.0), view)
             .options(OverlayOptions {
                 placement: Some(OverlayPlacement::FullScreen),
                 display: DisplayTarget::Primary,
                 level: OverlayLevel::AboveStatus,
                 exclude_from_capture: !crate::capture_host::own_windows_recorded(),
-                input: OverlayInput::None,
+                input: if xwayland {
+                    OverlayInput::Regions
+                } else {
+                    OverlayInput::None
+                },
                 prewarm: true,
                 // Escape while drawing, asked for only then.
-                keys: rune::KeyPolicy::OnDemand,
+                keys: if xwayland {
+                    rune::KeyPolicy::None
+                } else {
+                    rune::KeyPolicy::OnDemand
+                },
                 ..Default::default()
             })
             .release_gpu_when_hidden()
@@ -427,6 +458,7 @@ impl InkOverlay {
             });
         let mut state = InkState::still(Scene::default());
         state.shown = false;
+        state.xwayland = xwayland;
         let overlay = app.overlay(spec, state);
         let handle = overlay.clone();
         overlay.update(move |s, _| s.overlay = Some(handle));
@@ -443,6 +475,21 @@ impl InkOverlay {
     /// one records. Safe from any thread.
     pub(crate) fn wake(&self) {
         self.overlay.update(|_, tx| tx.wake_after(Duration::ZERO));
+    }
+}
+
+/// Whether this overlay can only show on XWayland (Linux Wayland without
+/// layer-shell), decided when it is made because keys and input are fixed
+/// then. Elsewhere, and on a compositor with layer-shell or X11, it is
+/// click-through until drawing and asks for the keyboard for Escape.
+fn takes_xwayland_pointer() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux::annotate_overlays::ink_uses_xwayland_pointer()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
     }
 }
 

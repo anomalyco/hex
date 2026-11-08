@@ -171,6 +171,21 @@ On Linux                                 // capture.linux
 ├── Shortcuts -> F9 (tap to start and stop, hold to draw) through the
 │   GlobalShortcuts portal ("Annotate") or X11 grabs. There is no separate
 │   draw shortcut and no send-to list shortcut on any OS
+├── GNOME Wayland -> no layer-shell, so Rune can't show the capsule or ink
+│   until Labs › Annotate on GNOME (`labs.gnome_annotate`, off by default)
+│   opens them on XWayland (`OverlayOptions::xwayland_input`): override-redirect
+│   windows that take the pointer in their input shape and never keyboard
+│   focus, only while this user's Xwayland already runs (never started by Hex;
+│   the meeting capsules' decision in linux/meeting_capsules.rs). The ink is
+│   made with pointer regions and `KeyPolicy::None`, since Rune refuses an
+│   OnDemand overlay on XWayland, and keeps regions with no hit area while not
+│   drawing because a click-through XWayland window can't take the pointer
+│   later. Esc can't stop drawing there: the capsule's pen button does, or
+│   letting go of a held Annotate key (a tap of it stops the recording). The
+│   in-app picker shows on Linux only in the edge states that return to
+│   Selecting (Window starts the portal's picker, Area isn't offered), and
+│   takes the same opt-in whenever it does. Check: labs
+│   gnome_annotate_is_its_own_bit_*; not run on a GNOME session
 ├── While it records, dictation starts nothing (the portal
 │   or grab already took their keys, so nothing reaches the app)
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen

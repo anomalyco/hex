@@ -1711,6 +1711,10 @@ Linux beta                               // not macOS feature parity
 │       │   ├── Meeting capsules take clicks, so they open there only with Labs ›
 │       │   │   Floating meeting capsules on GNOME on and Xwayland already running
 │       │   │   (meetings.md, labs.md; #1274)
+│       │   ├── Annotate's capsule and ink take clicks too, so they open there only
+│       │   │   with Labs › Annotate on GNOME and Xwayland already running; the ink
+│       │   │   takes pointer regions and no keys, Esc can't stop drawing there, and
+│       │   │   the capsule's pen button does (capture.md, labs.md)
 │       │   ├── Drawn on the compositor's GPU only, opaque when its driver offers
 │       │   │   no translucent alpha (NVIDIA), never moved to an iGPU or lavapipe
 │       │   │   that can't make its swapchain (#979, #982)

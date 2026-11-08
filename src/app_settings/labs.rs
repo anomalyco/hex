@@ -88,6 +88,8 @@ pub struct LabsSettings {
     pub meeting_finished_event: bool,
     /// The meeting capsules float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux, issue 1274).
     pub gnome_meeting_capsules: bool,
+    /// Annotate's capsule and ink float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux).
+    pub gnome_annotate: bool,
     /// The screenshot shortcut takes an area or a window (macOS); its
     /// shortcut and folder are `screenshots.*`.
     pub screenshots: bool,
@@ -162,6 +164,7 @@ impl Default for LabsSettings {
             annotate_replay: false,
             more_call_apps: false,
             gnome_meeting_capsules: false,
+            gnome_annotate: false,
             screenshots: false,
             follow_live_transcript: false,
             meeting_import: false,
