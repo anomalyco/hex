@@ -1178,6 +1178,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time", "Renomeia o Markdown exportado da reunião com o título dela assim que as notas ou uma renomeação fornecerem um, mantendo a data e a hora"),
     ("Caps Lock dictation", "Ditado com Caps Lock"),
     ("Press Caps Lock to start dictation and again to finish. Hex keeps Caps Lock off and uses its light while it records and transcribes", "Pressione Caps Lock para começar a ditar e de novo para terminar. O Hex mantém o Caps Lock desligado e usa a luz dele enquanto grava e transcreve"),
+    ("Getting Hex ready to listen…", "O Hex está se preparando para ouvir…"),
 ];
 
 #[cfg(test)]

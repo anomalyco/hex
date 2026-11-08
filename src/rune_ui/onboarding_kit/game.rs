@@ -569,6 +569,9 @@ impl Play {
 /// What the game shows around [`Play`], and what its buttons do.
 struct Look<'a, S> {
     caps: &'a [String],
+    /// The listener runs but hasn't started listening: the game says so
+    /// instead of inviting a hold that does nothing.
+    warming: bool,
     /// The microphone's level while dictation records.
     meter: Option<(f32, f32)>,
     /// What the last try needs said.
@@ -791,9 +794,11 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
         }),
     };
     let hint = s.live.as_ref().and_then(live::hint_copy);
+    let warming = s.live.as_ref().is_some_and(|live| live.warming);
     let (stage, field) = if s.live.is_some() {
         let look = Look::<Ui> {
             caps: &s.caps,
+            warming,
             meter,
             hint,
             done: Rc::new(live::on_ui(Onboard::jump_to_ready)),
@@ -811,6 +816,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
     } else {
         let look = Look::<Onboard> {
             caps: &s.caps,
+            warming: false,
             meter,
             hint,
             done: Rc::new(Onboard::jump_to_ready),
@@ -929,6 +935,7 @@ fn view(g: &Game, cx: &mut Cx<Game>) -> El {
         g.reduced.get(),
         &Look::<Game> {
             caps: &caps,
+            warming: false,
             meter: g.script.meter,
             hint: None,
             done: Rc::new(Game::restart),
@@ -1120,7 +1127,14 @@ fn header<S: 'static>(
                 .font(title_font(p))
                 .color(p.text()),
         )
-        .child(
+        .child(if look.warming {
+            row().key("lead").center_y().child(
+                text(live::warming_copy())
+                    .key("warming")
+                    .font(LEAD)
+                    .color(p.muted()),
+            )
+        } else {
             row()
                 .key("lead")
                 .gap(8.0)
@@ -1132,8 +1146,8 @@ fn header<S: 'static>(
                         .key("rest")
                         .font(LEAD)
                         .color(p.muted()),
-                ),
-        );
+                )
+        });
     // The share card's Continue stands in for Done while it shows.
     let done = (chrome > 0.005).then(|| {
         row()

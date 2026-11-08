@@ -1332,6 +1332,9 @@ impl LinuxDesktopHost {
             activity: self.activity.clone(),
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
+                warming: self.listener.as_ref().is_some_and(|listener| {
+                    matches!(listener.startup, ListenerStartup::Awaiting { .. })
+                }),
                 status: self.status.clone(),
                 notice: crate::linux::paste::listener_warning(self.is_running()),
                 shortcuts: self
@@ -1601,6 +1604,18 @@ mod tests {
             assert!(listener.stop.load(Ordering::Relaxed));
             listener.finish().unwrap();
         }
+    }
+
+    #[test]
+    fn a_listener_still_starting_is_warming_until_its_session_begins() {
+        let mut host = host_for_edit(true);
+        assert!(!host.snapshot().listener.warming);
+        host.listener.as_mut().unwrap().startup = ListenerStartup::Awaiting {
+            previous_session: None,
+        };
+        assert!(host.snapshot().listener.warming);
+        host.listener.as_mut().unwrap().startup = ListenerStartup::Observed;
+        assert!(!host.snapshot().listener.warming);
     }
 
     #[test]

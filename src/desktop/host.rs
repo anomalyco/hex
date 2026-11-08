@@ -30,6 +30,10 @@ pub(crate) struct DesktopTranscriptionSnapshot {
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopListenerSnapshot {
     pub(crate) running: bool,
+    /// Running, but its model, microphone, or shortcuts aren't up yet, so the
+    /// shortcut does nothing.
+    #[serde(default)]
+    pub(crate) warming: bool,
     pub(crate) status: String,
     /// Why the listener itself could not run (stopped, or its HUD could not
     /// show). `hex status` treats this as a stopped listener.
@@ -155,6 +159,7 @@ mod tests {
         let snapshot: DesktopListenerSnapshot =
             serde_json::from_str(r#"{"running":true,"status":"Listening"}"#).unwrap();
         assert!(snapshot.running);
+        assert!(!snapshot.warming);
         assert_eq!(snapshot.status, "Listening");
         assert!(snapshot.warning.is_none());
         assert!(snapshot.notice.is_none());
