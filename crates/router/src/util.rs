@@ -221,6 +221,7 @@ pub fn process_args(_pid: i32) -> Option<Vec<String>> {
 
 /// `KERN_PROCARGS2`'s layout: `argc`, the executable's path, padding, then `argc` strings (the
 /// environment follows, and is never read).
+#[cfg(any(target_os = "macos", test))]
 fn procargs(buf: &[u8]) -> Vec<String> {
     let Some((count, rest)) = buf.split_first_chunk::<4>() else {
         return Vec::new();
