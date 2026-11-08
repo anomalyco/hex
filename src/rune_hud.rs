@@ -388,13 +388,20 @@ const EXIT_FADE: Duration = Duration::from_millis(120);
 /// Windows gives it back, window included, once the HUD's exit fade ends: a hidden
 /// topmost window that presented with DXGI let NVIDIA's Instant Replay take
 /// Hex for the running game (#1308). The device itself waits five minutes for
-/// the next show either way, so dictations reuse one device (#1268). On Linux
-/// the HUD's painter, and its own hold on that device, goes with the surface
-/// after the same idle (#1431); macOS keeps both.
+/// the next show either way, so dictations reuse one device (#1268). The
+/// painter goes apart, after `PAINTER_IDLE` hidden on Windows and Linux
+/// (#1431); macOS keeps it.
 #[cfg(not(target_os = "windows"))]
 const GPU_IDLE: Duration = Duration::from_secs(5 * 60);
 #[cfg(target_os = "windows")]
 const GPU_IDLE: Duration = Duration::ZERO;
+
+/// How long the hidden HUD keeps its painter on Windows and Linux, and with it
+/// its own hold on the GPU device: the five minutes Rune parks a device, so a
+/// burst of dictations reuses one painter and the device still frees once Rune
+/// lets go (#1431).
+#[cfg(not(target_os = "macos"))]
+const PAINTER_IDLE: Duration = Duration::from_secs(5 * 60);
 
 /// The format the HUD draws in on Windows and Linux (Rune drops the
 /// surface's sRGB suffix for `srgb_blend`).
@@ -729,8 +736,9 @@ struct HudCompositor {
     /// again can draw on another device (#982). Keyed by Rune's device key,
     /// since wgpu compares a new Rune GPU's device equal to the old one.
     ///
-    /// Windows and Linux let go of it once the HUD has hidden, and with it the
-    /// GPU device its buffers hold (#1431).
+    /// Windows and Linux let go of it once the HUD has been hidden for
+    /// `PAINTER_IDLE`, and with it the GPU device its buffers hold; macOS
+    /// keeps it (#1431).
     #[cfg(not(target_os = "macos"))]
     gpu: Arc<Mutex<GpuSlot>>,
     #[cfg(target_os = "macos")]
@@ -751,56 +759,42 @@ struct GpuSlot {
     releasing: Option<u64>,
 }
 
-impl HudCompositor {
-    /// The painter that draws `f`, made on its device and format when the HUD
-    /// has none for them.
-    #[cfg(target_os = "macos")]
-    fn painter(&mut self, f: &Frame<'_, Hud>) -> &Painter {
-        if self
-            .gpu
-            .as_ref()
-            .is_none_or(|(device, painter)| *device != f.device_key() || painter.format != f.format)
-        {
-            tracing::info!(gpu = %rune::describe_gpu(f.device), "HUD draws");
-            let painter =
-                prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
-            self.gpu = Some((f.device_key(), painter));
-        }
-        &self.gpu.as_ref().expect("created above").1
+/// The painter that draws `f`, made on its device and format when `gpu` has
+/// none for them.
+fn painter<'a>(
+    gpu: &'a mut Option<(rune::compose::DeviceKey, Painter)>,
+    f: &Frame<'_, Hud>,
+) -> &'a Painter {
+    if gpu
+        .as_ref()
+        .is_none_or(|(device, painter)| *device != f.device_key() || painter.format != f.format)
+    {
+        tracing::info!(gpu = %rune::describe_gpu(f.device), "HUD draws");
+        let painter =
+            prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
+        *gpu = Some((f.device_key(), painter));
     }
+    &gpu.as_ref().expect("created above").1
+}
 
+impl HudCompositor {
     /// Writes and draws the frame's dots; the lock keeps a pending release
     /// from dropping the painter mid-frame.
     #[cfg(not(target_os = "macos"))]
     fn draw(&self, f: &mut Frame<'_, Hud>, drawn: &DotFrame, layout: Layout, target: Target) {
         let mut gpu = self.gpu.lock().unwrap_or_else(|error| error.into_inner());
         gpu.generation = gpu.generation.wrapping_add(1);
-        if gpu
-            .painter
-            .as_ref()
-            .is_none_or(|(device, painter)| *device != f.device_key() || painter.format != f.format)
-        {
-            tracing::info!(gpu = %rune::describe_gpu(f.device), "HUD draws");
-            let painter =
-                prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
-            gpu.painter = Some((f.device_key(), painter));
-        }
-        let painter = &gpu.painter.as_ref().expect("created above").1;
+        let painter = painter(&mut gpu.painter, f);
         paint(painter, f, drawn, layout, target);
     }
 
     /// Lets go of the painter, and with its buffers, bind group and pipeline
-    /// the GPU device they hold (#1431). Windows drops it at once: its next
-    /// show prebuilds one on the shortcut's first key. Linux keeps it for
-    /// `GPU_IDLE`, the time Rune keeps the HUD's surface, so a burst of
-    /// dictations draws without making a pipeline for each.
+    /// the GPU device they hold (#1431): Windows and Linux keep it for
+    /// `PAINTER_IDLE` hidden, the time Rune keeps a parked device, so a burst
+    /// of dictations reuses one painter.
     #[cfg(not(target_os = "macos"))]
     fn release(&self) {
         let mut gpu = self.gpu.lock().unwrap_or_else(|error| error.into_inner());
-        if GPU_IDLE.is_zero() {
-            gpu.painter = None;
-            return;
-        }
         let generation = gpu.generation;
         if gpu.painter.is_none() || gpu.releasing == Some(generation) {
             return;
@@ -811,7 +805,7 @@ impl HudCompositor {
         let _ = std::thread::Builder::new()
             .name("hud-release".into())
             .spawn(move || {
-                std::thread::sleep(GPU_IDLE);
+                std::thread::sleep(PAINTER_IDLE);
                 let mut gpu = gpu.lock().unwrap_or_else(|error| error.into_inner());
                 if gpu.generation == generation {
                     gpu.painter = None;
@@ -874,7 +868,7 @@ impl Compositor<Hud> for HudCompositor {
             return;
         };
         #[cfg(target_os = "macos")]
-        paint(self.painter(f), f, &drawn, layout, target);
+        paint(painter(&mut self.gpu, f), f, &drawn, layout, target);
         #[cfg(not(target_os = "macos"))]
         self.draw(f, &drawn, layout, target);
         f.rt.state.drawn = Some(drawn);
