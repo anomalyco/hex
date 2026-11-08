@@ -536,13 +536,12 @@ impl TranscriptionEngine {
     /// Starts with no model loaded, remembering `selection` to reload on the
     /// first command that needs it, as [`Worker::park`] leaves the engine.
     /// Labs › Unload model when idle uses this so a launch stays unloaded
-    /// until the first dictation.
+    /// until the first dictation. Whether it can stream is seeded from the
+    /// model's definition, not measured on this device: the first capture
+    /// either streams after the reload or falls back to its whole clip.
     pub fn start_parked(
         selection: crate::transcription::models::TranscriptionSelection,
     ) -> Result<Self> {
-        // No model has probed this device, so a definition that advertises
-        // streaming seeds it: the first capture then either streams after
-        // the reload or falls back to its whole clip.
         let streams = crate::transcription::models::validate(&selection)
             .is_ok_and(|definition| definition.streams);
         Self::with_model(None, Some(selection), streams)
@@ -571,6 +570,7 @@ impl TranscriptionEngine {
         let worker = Worker {
             model,
             parked,
+            reload_error: None,
             idle_since: Instant::now(),
             running: running.clone(),
             stalled: stalled.clone(),
@@ -959,6 +959,8 @@ struct Worker {
     model: Option<Model>,
     /// What an unloaded model reloads, before the next command that needs it.
     parked: Option<crate::transcription::models::TranscriptionSelection>,
+    /// Why the last reload failed, so the job it failed can name it.
+    reload_error: Option<String>,
     /// When the last command ended.
     idle_since: Instant,
     running: Running,
@@ -1044,7 +1046,6 @@ impl Worker {
                     if let Some(model) = self.model() {
                         work(model);
                     }
-                    self.publish_streams();
                 }
                 Command::Reload(selection) => {
                     tracing::info!(model = ?selection.model, "replacing the speech model in place");
@@ -1052,7 +1053,6 @@ impl Worker {
                     self.parked = Some(selection);
                     // A failed load stays parked; the next command tries again.
                     let _ = self.model();
-                    self.publish_streams();
                 }
                 Command::Background { generation, work } => {
                     let current = self.requests.load(Ordering::Acquire) == generation;
@@ -1062,6 +1062,8 @@ impl Worker {
                 // Stale input for a stream that already ended.
                 Command::Feed { .. } | Command::Cancel { .. } => {}
             }
+            // Any command may load or switch the model.
+            self.publish_streams();
             self.publish_selection();
             self.idle_since = Instant::now();
         }
@@ -1128,8 +1130,12 @@ impl Worker {
                     );
                     self.model = Some(model);
                     self.parked = None;
+                    self.reload_error = None;
                 }
-                Err(error) => tracing::warn!(%error, "could not reload the speech model"),
+                Err(error) => {
+                    tracing::warn!(%error, "could not reload the speech model");
+                    self.reload_error = Some(error.to_string());
+                }
             }
         }
         self.model.as_mut()
@@ -1310,7 +1316,11 @@ impl Worker {
     ) {
         self.running.enter(&job.cancel);
         let Some(model) = self.model() else {
-            job.finish(Err("the speech model could not be reloaded".into()));
+            let reason = match &self.reload_error {
+                Some(error) => format!("the speech model could not be reloaded: {error}"),
+                None => "the speech model could not be reloaded".into(),
+            };
+            job.finish(Err(reason));
             return;
         };
         let result = crate::transcription::gguf_session::with_job_cancel(&job.cancel, || {
@@ -2149,7 +2159,7 @@ mod tests {
     }
 
     #[test]
-    fn a_parked_engine_holds_its_selection_and_loads_it_for_the_first_job() {
+    fn a_parked_engine_holds_its_selection_and_reloads_it_before_the_first_job() {
         // A language no model supports fails the reload deterministically,
         // without depending on a model installed on the test machine.
         let selection = crate::transcription::models::TranscriptionSelection {
@@ -2167,9 +2177,11 @@ mod tests {
             )
             .unwrap()
             .wait();
-        assert_eq!(
-            transcribed.unwrap_err(),
-            "the speech model could not be reloaded"
+        assert!(
+            transcribed
+                .unwrap_err()
+                .starts_with("the speech model could not be reloaded"),
+            "the failure names why the reload failed"
         );
     }
 

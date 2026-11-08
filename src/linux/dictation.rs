@@ -291,7 +291,8 @@ fn readiness_message(
 }
 
 /// Runs hotkey dictation until `shutdown`. A prepared transcriber skips the
-/// model load; otherwise the supplied transcription selection is loaded here.
+/// model load; otherwise the supplied transcription selection is loaded here,
+/// or parked until the first dictation with Labs › Unload model when idle.
 /// `updates` change settings, the model, and shortcut registration in place.
 /// `dictations` records a local API client's dictation beside the shortcut:
 /// one capture at a time, and neither ends the other.
@@ -309,21 +310,16 @@ pub(crate) fn run(
     updates: mpsc::Receiver<ListenerUpdate>,
 ) -> Result<()> {
     let mut settings = settings.clone();
-    // Labs › Unload model when idle: a launch stays parked until the first
-    // dictation, as after an idle unload; drop a model Settings prepared for
-    // this listener.
-    let transcriber = if crate::labs::unload_idle().is_some() {
-        drop(transcriber);
-        None
-    } else {
-        Some(transcriber.map_or_else(
-            || {
-                LocalTranscriber::load(&crate::transcription::custom_models::runnable(
-                    &settings.transcription,
-                ))
-            },
-            Ok,
-        )?)
+    // Labs › Unload model when idle: a launch with no model Settings prepared
+    // for this listener starts parked, as after an idle unload, until the
+    // first dictation. A prepared model starts loaded; the idle timer unloads
+    // it.
+    let transcriber = match transcriber {
+        Some(transcriber) => Some(transcriber),
+        None if crate::labs::unload_idle().is_some() => None,
+        None => Some(LocalTranscriber::load(
+            &crate::transcription::custom_models::runnable(&settings.transcription),
+        )?),
     };
     crate::transcription::speech_detector::prewarm();
     // The engine outlives the output worker, which waits on its transcripts.

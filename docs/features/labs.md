@@ -242,8 +242,11 @@ on, its card shows "Unload after" (5, 15, 30, or 60 minutes; default 15).
 has reached it for that long and nothing records (`audio::idle_sleep::held()`: a
 dictation past its hold or a meeting; a macOS capture from its press via
 `dictation_busy`), freeing its RAM and VRAM; between commands no request
-runs. Hex also starts parked: a launch with the lab on loads no GGUF model
-until the first dictation, so memory stays free even when nobody dictates.
+runs. With the lab on, a launch loads no GGUF model: the first dictation,
+local API request, meeting chunk, or model switch loads it, so memory stays
+free even when nobody dictates. On Linux, a model Settings has just prepared
+for the listener starts loaded and unloads after the idle period. Until it
+loads, whether it can stream comes from the model's definition.
 Apple Speech stays loaded. The unloaded model still counts as held
 (`TranscriptionEngine::holds`), so dictation, meetings, and the local API send
 their work to the engine as before, and the worker reloads it before the
@@ -253,7 +256,7 @@ catches up, falling back to the whole clip if it can't finish in time; the
 HUD shows its transcribing state while a released clip waits on the reload,
 with no look of its own. A failed reload fails that job and is retried by the
 next. Check: `unload_idle_carries_its_minutes` in [labs.rs](../../src/labs.rs);
-`a_parked_engine_holds_its_selection_and_loads_it_for_the_first_job` in
+`a_parked_engine_holds_its_selection_and_reloads_it_before_the_first_job` in
 [transcription/engine.rs](../../src/transcription/engine.rs) covers a parked
 start and its first job. The unload itself has no automated check.
 
