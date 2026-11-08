@@ -219,7 +219,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     } else {
         Language::Other
     };
-    let alternate = alternate_selection(&choice, &crate::desktop::i18n::preferred_language());
+    let alternate = alternate_selection(&choice, &ui.preferred_language());
     let other = if english_language(&choice) {
         alternate.as_ref()
     } else {

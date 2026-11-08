@@ -6,6 +6,7 @@
 
 use crate::desktop::i18n::{tr, tr_named};
 use rune::{Align, El, Spring, Transition, el, icon, row, text};
+#[cfg(not(test))]
 use std::sync::Mutex;
 
 use super::super::controls::Paint;
@@ -24,26 +25,52 @@ const HEIGHT: f32 = 30.0;
 
 /// What the real first run calls [`Language::Other`]: the language it
 /// downloads. Each run replaces it, so a later setup never shows the
-/// language of an earlier one.
+/// language of an earlier one. Tests keep one per thread, as `i18n` does.
+#[cfg(not(test))]
 static OTHER: Mutex<String> = Mutex::new(String::new());
+
+#[cfg(test)]
+thread_local! {
+    static OTHER: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
 /// The story fixture's own other language, until a real run sets one.
 const OTHER_FALLBACK: &str = "French";
 
-pub(crate) fn set_other_label(label: Option<&str>) {
-    let mut other = OTHER
+#[cfg(test)]
+fn set_other(value: String) {
+    OTHER.with(|other| *other.borrow_mut() = value);
+}
+
+#[cfg(not(test))]
+fn set_other(value: String) {
+    *OTHER
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *other = label.map_or_else(String::new, str::to_owned);
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = value;
+}
+
+pub(crate) fn set_other_label(label: Option<&str>) {
+    set_other(label.map_or_else(String::new, str::to_owned));
+}
+
+#[cfg(test)]
+fn other_label() -> String {
+    OTHER.with(|other| other.borrow().clone())
+}
+
+#[cfg(not(test))]
+fn other_label() -> String {
+    OTHER.lock().map_or_else(
+        |poisoned| poisoned.into_inner().clone(),
+        |label| label.clone(),
+    )
 }
 
 pub(crate) fn language_label(language: Language) -> String {
     match language {
         Language::English => "English".into(),
         Language::Other => {
-            let label = OTHER.lock().map_or_else(
-                |poisoned| poisoned.into_inner().clone(),
-                |label| label.clone(),
-            );
+            let label = other_label();
             if label.is_empty() {
                 OTHER_FALLBACK.into()
             } else {
