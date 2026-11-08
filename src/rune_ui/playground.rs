@@ -169,9 +169,13 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-delete", "Window/Meetings/Delete"),
     ("meetings-failed", "Window/Meetings/Failed"),
     ("meetings-empty", "Window/Meetings/Empty"),
-    ("meetings-platform-icons", "Window/Meetings/Platform icons"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
+    ("meetings-summaries", "Window/Meetings/Summaries"),
+    (
+        "meetings-summaries-unavailable",
+        "Window/Meetings/Summaries without Apple Intelligence",
+    ),
     ("meetings-summary-model", "Window/Meetings/Summary model"),
     (
         "meetings-summary-model-not-running",
@@ -184,6 +188,9 @@ const PATHS: &[(&str, &str)] = &[
         "Window/Meetings/Calendar denied",
     ),
     ("history", "Window/History/History"),
+    ("history-menu", "Window/History/Retention menu"),
+    ("history-clear", "Window/History/Clear all asks first"),
+    ("history-stats", "Window/History/Stats dialog"),
     ("history-empty", "Window/History/Empty"),
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
@@ -214,7 +221,7 @@ const PATHS: &[(&str, &str)] = &[
     ("mac-labs-screenshots", "Window/General/Labs screenshots"),
     ("mac-labs-category", "Window/General/Labs category"),
     ("mac-labs-search", "Window/General/Labs search"),
-    ("mac-labs-drawer", "Window/General/Labs drawer"),
+    ("mac-labs-settings", "Window/General/Labs settings"),
     ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),
     ("mac-onboarding", "Window/Onboarding/Setting up Hex"),

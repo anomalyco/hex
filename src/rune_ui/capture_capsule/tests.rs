@@ -506,7 +506,12 @@ fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>
         _ => {
             // A card's guesses hang under the line.
             use super::surface::{Anchor, anchor_for, layout_at};
-            let (shell, _) = layout_at(&pres, "0:00", anchor_for(&pres, Anchor::Top));
+            let (shell, _) = layout_at(
+                &pres,
+                "0:00",
+                anchor_for(&pres, Anchor::Top),
+                super::notch::Geometry::default(),
+            );
             (shell[1] + shell[3] + 36.0).max(TOP + 40.0 + 36.0)
         }
     };

@@ -4,7 +4,9 @@ Hold the configured shortcut, speak, and release. Hex transcribes locally and
 inserts the result at the current focus. New captures do not cancel accepted
 work. Only Toggle mode has a cancel: its cancel shortcut, Escape by default,
 discards the recording (#786, #1022); every other intentional dictation
-finishes and pastes.
+finishes and pastes. The exception is a Labs › Caps Lock dictation capture on
+macOS: it is hands-free in every shortcut mode, so its own Escape binding
+cancels it even in Hold.
 
 This map covers the macOS release path. Linux shares the basic journey, not
 every timing, input, or recovery guarantee; see the
@@ -43,6 +45,25 @@ Linux/X11 maps Mouse 4/5 to native buttons 8/9, skipping wheel events; the
 recorder temporarily grabs the pointer while its window has focus and releases
 it on save, cancellation, focus loss or window close. Windows waits for the
 click that opened the recorder to be released before accepting a mouse button.
+
+macOS with Labs › Caps Lock dictation on (`labs.caps_lock_dictation`, off by
+default): a physical Caps Lock press toggles a hands-free dictation instead of
+typing. From idle it starts a capture that stays recording without a hold; the
+next press finishes it through the same transcription, processing, and paste
+path as Toggle's lock. A hold capture, a pending double tap, or another
+shortcut's recording is left alone, the normal shortcut keeps working when
+nothing records and stands down while a Caps Lock capture runs, and Escape
+cancels the Caps Lock capture in every shortcut mode (in Toggle mode, Toggle's
+other cancel shortcut does not; only Escape does). A Caps Lock remapped to
+Control or Escape never changes AlphaShift, so it never toggles dictation. Each
+press also clears the system Caps Lock state, so following keys stay
+lowercase, and the key's light is solid while any capture records (including a
+normal-shortcut or Annotate capture), blinks while Hex transcribes or
+processes, and is off otherwise. Turning the lab off or quitting Hex clears the
+light and restores normal Caps Lock behaviour. The light needs Input Monitoring
+(which Hex already asks for); without it dictation still works and the light
+stays under macOS's control. Implemented November 7, 2026, not verified on
+hardware; details and checks in [labs.md](labs.md).
 
 Wayland's XDG shortcut syntax has no mouse-button trigger. Use the desktop's
 mouse bindings to run `hex dictation start`/`stop` (hold) or `hex dictation toggle`
@@ -132,6 +153,28 @@ For a shortcut that holds Fn, key code 179 is now neither a chord key nor HID
 chord evidence; any other key still is. Check:
 `globe_key_events_are_not_a_chord_with_the_function_shortcut` in
 `suppression/tests.rs` (constructed events; no physical-keyboard run).
+
+**Implemented November 7, 2026 (issue 37), unverified:** remapping Caps Lock to
+Control makes macOS's HID keyboard filter rewrite its usage (0x39) to Right
+Control (0xE4) before CoreGraphics sees it, so a Right Control shortcut also
+started from Caps Lock. Hex now reads the raw HID modifier state below that
+filter (`IOHIDManager`, opened without seizing the keyboards), and when Caps
+Lock is physically held while a side-specific modifier bit has no matching
+physical key, it drops the side and keeps the general modifier flag, which
+matches as either side. A real Right Control press (physical usage 0xE4) is
+untouched. Hex never requests Input Monitoring, so the tracker runs only when
+Hex already has it: turn Hex on under System Settings › Privacy & Security ›
+Input Monitoring and restart Hex. `IOHIDCheckAccess` gates the tracker; without
+that permission it stays off (logged once), the flags are unchanged, and Right
+Control still starts from a remapped Caps Lock. The shortcut recorder applies
+the same normalization only while the listener's input monitor is running, so
+recording a remapped Caps Lock saves a side-less Control. This is implemented
+but not verified on physical hardware; see the missing-evidence note in
+[recovery.md](recovery.md#remapped-control).
+Check: `normalized_remapped_caps_lock_starts_only_a_side_less_control_binding`
+and `a_remapped_caps_lock_does_not_hold_a_real_right_control_capture` in
+`suppression/tests.rs`, plus the normalization tests in
+`app_settings/hotkeys.rs` (constructed snapshots; no physical remap run in CI).
 
 ### Chord Shortcuts
 
@@ -405,6 +448,79 @@ Output shows a note pointing to it. Checks:
 `gnome_desktops_point_to_the_clipboard_lab_until_it_is_on` (constructed state;
 not run on GNOME).
 
+### Live Typing (Labs, Linux Wayland)
+
+```ts
+Labs › Live typing on (labs.live_typing, off by default, Wayland only)  // labs.live-typing
+Capture becomes intentional (hold threshold, or the Toggle press)
+  -> Takes a dictation::live_text::TypingDemand, then Begin: get_input_method(seat)
+  -> The stream opens afterwards, so the engine sees the demand and publishes partials
+  -> Each stable + tentative change -> The newest preedit is sent (older ones coalesce), underlined in the focused field
+  -> Escape, a short tap, silence, a lost microphone, a failed job, or the listener quitting -> Cancel: clear, destroy
+Release -> Process the final text -> Finish
+  ├── Active text input and one line within 4000 bytes -> The owner claims the commit first,
+  │     then clear preedit, commit_string, destroy -> inserted, clipboard untouched
+  ├── A caller that gives up first -> abandoned; owner only clears (up to 250 ms), then LinuxPaster.paste
+  ├── No decision in 350 ms and the owner already claimed -> wait up to 750 ms and do not paste
+  └── CPU engine or non-streaming model -> No words while speaking; the final text still commits here
+```
+
+The input method exists from that intentional start until Finish or Cancel,
+which includes post-release processing; a short tap or chord that never
+becomes intentional creates none. It does not need a stream: a CPU engine or
+a model that cannot stream shows no provisional words, but the finished text
+still goes in through the input method instead of the clipboard. Hex's own
+first-run practice field on Linux is an ordinary focused field, so it takes
+the preedit and the final commit too while Live typing is on. A newer
+capture's Begin takes over from an older job, whose Finish then returns false
+and pastes. `zwp_input_method_manager_v2` is a wlroots-family protocol (Sway,
+Hyprland, and other wlroots compositors); KWin and Mutter do not offer it, so
+KDE and GNOME paste through the RemoteDesktop portal or `wtype` instead. A
+compositor with another input method (fcitx, ibus) reports `unavailable` and
+Live typing stays inert.
+
+History, last dictation, tones, and Output are unchanged: a committed
+dictation counts as pasted. Live text off does **not** disable Live typing:
+the capture takes its own `TypingDemand` at that same intentional start
+before the stream opens, which the engine sees and the plate does not. The
+plate itself is decided once when the stream opens, so toggling Labs › Live
+text mid-capture changes nothing. On X11 or with the toggle off, nothing
+starts and the capture behaves exactly as before.
+
+The commit claim is one shared atomic state: the owner changes Pending →
+Committing before it queues any commit request, and a waiting caller changes
+Pending → Abandoned when it gives up. Only one can win. If the caller wins,
+it waits up to 250 ms for the owner's clear; after that it pastes anyway, so
+a wedged compositor can leave a preedit visible until it tears the input
+method down. After an abandoned Finish, Live typing starts no new captures
+and pastes instead until Hex restarts; a session that had already begun
+still finishes and cancels. A residual protocol race remains: a `done` event can arrive
+after `dispatch_pending` and before `commit(serial)`, so a commit can use a
+serial one behind; the affected preedit or commit is then ignored by the
+compositor. A commit ignored for a stale serial has already returned
+“inserted”, so that dictation is lost rather than pasted (wlroots does not
+enforce the serial today). Checks (unit tests only):
+`provisional_words_become_one_preedit_line`,
+`a_preedit_stops_at_a_character_boundary`,
+`only_one_line_text_within_the_limit_commits_through_the_input_method`,
+`the_cursor_sits_after_the_preedit`,
+`done_events_number_the_commit_serial_and_apply_activation`,
+`the_owner_wins_the_commit_before_queueing_it`,
+`a_waiting_caller_wins_abandonment_before_the_owner_claims`,
+`a_started_session_cancels_when_dropped`,
+`a_session_that_never_started_sends_nothing`,
+`finishing_a_session_never_sends_cancel`,
+`only_the_newest_preedit_waits_and_it_wakes_once`,
+`a_full_control_queue_stops_new_sessions_but_not_old_ones`, and
+`a_stopped_owner_still_finishes_and_cancels_a_session_that_began` in
+[linux/live_typing.rs](../../src/linux/live_typing.rs);
+`a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
+[dictation/live_text.rs](../../src/dictation/live_text.rs); and
+`the_plate_follows_the_decision_made_when_the_stream_opened` in
+[dictation.rs](../../src/dictation.rs). **Not verified on
+a real compositor**: no GTK/Qt field or Sway/Hyprland run; KWin and Mutter
+fall back to paste by design.
+
 **Fixed November 3, 2026 (issue 1158):** on Linux with PipeWire, Hex's
 microphone stream (held open while the microphone is kept ready) was named
 by the ALSA plugin after the binary, with spaces and varying by packaging,
@@ -436,11 +552,26 @@ chunks; not run against PipeWire or a physical microphone).
 **Changed November 4, 2026 (issue 1309 follow-up):** with "While dictating"
 set to Mute or Pause media, the pre-roll came from before the mute took
 effect and picked up whatever was playing. On every OS, those hotkey captures
-now keep no pre-roll (`dictation::hotkey_pre_roll`); Duck and Do nothing keep
-450 ms. There is no separate setting. Check:
-`muting_or_pausing_while_dictating_keeps_no_pre_roll` in
+now keep no pre-roll (`dictation::hotkey_pre_roll`); Do nothing keeps 450 ms
+(Duck kept it until issue 1468, below). There is no separate setting. Check:
+`suppressing_audio_while_dictating_keeps_no_pre_roll` in
 [dictation.rs](../../src/dictation.rs) (constructed audio; not run on a
 device).
+
+**Changed November 7, 2026 (issue 1468):** with "While dictating" set to
+Lower audio, lowering ramped over a full second after the 300 ms hold
+threshold, and the 450 ms pre-roll came from before the lower took effect, so
+the start of every dictation stayed loud. Lowering now reaches its target in
+about 120 ms (`LOWER` in
+[audio/output_ducking.rs](../../src/audio/output_ducking.rs)), Duck keeps no
+pre-roll like Mute and Pause media, and restoring still eases back over one
+second. Checks:
+`ducking_preserves_balance_silence_and_restores` and
+`lowering_finishes_at_its_own_duration_while_restoring_is_still_ramping` in
+audio/output_ducking.rs, and
+`suppressing_audio_while_dictating_keeps_no_pre_roll` in
+[dictation.rs](../../src/dictation.rs) (constructed audio; not run on a device
+or physical output).
 
 **Fixed November 2, 2026 (issue 978):** a Windows paste refused to run when
 the clipboard held only a format Hex can't snapshot (an app's private
@@ -648,7 +779,7 @@ These cover gesture decisions, not hardware keyboard-layout or remapping equival
 ```ts
 Keep ready -> Press shortcut                          // dictate.boundaries
   -> Include up to 450 ms of available pre-roll
-     └── "While dictating" mutes or pauses -> No pre-roll (it predates the mute)
+     └── "While dictating" mutes, pauses, or lowers -> No pre-roll (it predates it)
   -> Linux: press and release placed on the stream clock (newest chunk's end
      plus the time since it arrived), so large chunks add no pre-press audio
   -> Delayed handling still uses original event boundaries
@@ -804,6 +935,12 @@ Model advertises streaming, GPU device             // dictate.streaming
   ├── Provisional: never pasted, copied, or kept (the final text replaces it)
   ├── A failed or interrupted stream clears the text while the capture goes on
   └── process.log: `partials` on "finished live stream"; per change at debug (no words)
+  Labs + labs.live_typing (Linux Wayland) -> The same text is the focused field's preedit  // labs.live-typing
+  ├── Begin at the intentional start, before the stream opens; destroyed at Finish or Cancel, so another input method keeps the seat
+  ├── Non-streaming model -> No words while speaking, but the final text still commits through the input method
+  ├── Finish -> The owner wins the commit claim, clears the preedit, commits the processed text, no clipboard
+  ├── Caller gives up first (350 ms) -> Owner only clears (up to 250 ms), then Paste
+  └── Owner already claimed the commit -> Wait up to 750 ms; never paste over it
   Picker -> "Streams" tag on catalog models whose artifact streams   // setup.model-card
   Picker -> The saved language's Recommended/Fastest/Most accurate cards first  // setup.model-routing
   ├── el: Cohere; tr, ms, fil, fa, mk, ar, ja, fi, sv, da: Whisper turbo first
@@ -1282,8 +1419,14 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
         the microphone is open and the hold counts
   Dictation pasted >= 2 s after the stop tone -> Done tone      // dictate.done-tone
      -> Pasted sooner (the usual case) -> Stop tone only; `DONE_MIN_AFTER_STOP`
+     -> Stop tone still waiting on Lower audio -> Stop only, never done first
      -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
   Failure -> Error tone; wake/sleep keep macOS Pop/Tink      // dictate.error-tone
+     -> Settings listener card: "Last dictation failed: …"   // macOS, Windows
+        -> clears once a later dictation completes
+        -> a known microphone cause explains itself; other failures keep their wording
+     -> Labs › Failure notices: why beside the HUD for ~6 s  // dictate.failure-notice, off by default
+        -> a new capture dismisses it; no old failure is replayed at launch
      -> Classic has none: macOS Basso, Signature's error on Windows and Linux
      -> A lost microphone or input -> No tone; the capture ends
   Tone requested -> Playback worker opens the default output, then plays
@@ -1295,6 +1438,41 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Cold audio stack exceeds preload admission -> Warn once; recognition continues
      -> Loader keeps running; later tones play once the output opens
 ```
+
+A failed dictation also stays visible in Settings' listener card as "Last
+dictation failed: …" until a later dictation completes. macOS now reads the
+listener's own event log on its runtime thread, as Windows already did. The
+listener's own stopped warning and a dictation failure are separate fields, so
+`hex status` keeps treating only the former as a stopped listener; the card
+shows the stopped warning first. A failure whose timestamp predates this run's
+start is ignored. Known
+microphone causes say what to do in every interface language — a built-in
+microphone switched off by a closed lid, or no microphone available; other
+failures keep their logged wording. Sources and checks:
+`DesktopActivity::visible_failure_since`, `last_completed_at`, and
+`failure_explanation` in [desktop/activity.rs](../../src/desktop/activity.rs),
+`newest_failure_shows_until_a_later_transcript_completes`,
+`a_startup_reader_ignores_the_previous_sessions_failure`, and
+`known_microphone_failures_get_an_actionable_explanation`, and the listener
+card in [rune_ui/settings.rs](../../src/rune_ui/settings.rs). Proof limit: the
+projection and wording are unit-tested; the macOS event-log wiring and listener
+card are not natively verified.
+
+With Labs › Failure notices on (`labs.failure_notices`, off by default), the
+same explanation also appears for about six seconds as one click-through line
+beside the HUD, reusing the Live text plate and placement. A new capture hides
+it at once, and the message travels with the HUD's failure event, so a launch
+never replays an old failure. The HUD's coral flash, its 600 ms, tones, and
+capture behavior are unchanged. A job failure that arrives while a newer
+capture records is skipped. Checks:
+`a_failure_notice_lasts_six_seconds`,
+`a_new_capture_dismisses_a_failure_notice_at_once`,
+`only_a_notices_own_deadline_dismisses_it`,
+`a_failure_arriving_after_a_queued_words_end_stays_visible`, and
+`a_failure_notice_takes_the_plate_from_the_live_words` in
+[rune_ui/live_text.rs](../../src/rune_ui/live_text.rs) cover the timing and
+plate; the overlay itself is not natively verified on macOS or Windows. See
+[Labs](labs.md) for its per-OS scope.
 
 **Fixed November 1, 2026 (issue 873):** on macOS the HUD remembered its last
 placement and skipped sending it to Rune again when it matched, so a HUD Rune
@@ -1360,7 +1538,8 @@ restored from git; it has no done tone, errors play macOS Basso as they
 did, and onboarding success plays its stop sound (the other sets have their own).
 The done sound of every set plays only when the paste lands at least
 `DONE_MIN_AFTER_STOP` (2 s) after the stop sound, as after a slow rewrite; the
-Sounds sheet's demo still plays it. Checked by `done_plays_only_after_a_slow_paste`.
+Sounds sheet's demo still plays it. Checked by
+`done_plays_only_after_a_slow_paste` and `done_never_plays_before_a_delayed_stop_tone`.
 
 Each set is a folder in `resources/audio/sounds/` made by
 [`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)

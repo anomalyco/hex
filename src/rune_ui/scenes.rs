@@ -76,6 +76,28 @@ pub(super) const SCENES: &[Scene] = &[
         ui.history = history::HistoryPane::fixture();
         ui.pane = Pane::History;
     }),
+    ("history-menu", |ui| {
+        *ui = portal_fixture();
+        ui.history = history::HistoryPane::fixture();
+        ui.pane = Pane::History;
+        ui.open = Some(Menu::HistoryRetention);
+    }),
+    ("history-clear", |ui| {
+        *ui = portal_fixture();
+        ui.history = history::HistoryPane::fixture();
+        ui.history.clear_armed = true;
+        ui.pane = Pane::History;
+    }),
+    // Labs › Dictation stats: the Stats button with its dialog open.
+    ("history-stats", |ui| {
+        *ui = portal_fixture();
+        ui.history = history::HistoryPane::fixture();
+        ui.history.stats = Some(history::HistoryPane::fixture_stats());
+        ui.history.stats_open = true;
+        ui.settings.labs.history_stats = true;
+        crate::labs::apply(&ui.settings.labs);
+        ui.pane = Pane::History;
+    }),
     ("history-empty", |ui| {
         *ui = portal_fixture();
         ui.history = history::HistoryPane::fixture_empty();
@@ -478,8 +500,24 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings.view = meetings::View::Settings;
         ui.pane = Pane::Meetings;
     }),
-    // Labs › Choose meeting summary model: the picker in Advanced, then
-    // with OpenCode not running, the saved model kept.
+    // Summaries' picker open: Off, On this Mac, OpenCode, each saying what
+    // it does; then with Apple Intelligence off, On this Mac kept, disabled,
+    // with the fix.
+    ("meetings-summaries", |ui| {
+        *ui = mac_fixture();
+        ui.meetings.view = meetings::View::Settings;
+        ui.pane = Pane::Meetings;
+        ui.open = Some(Menu::Pick("meeting-summaries"));
+    }),
+    ("meetings-summaries-unavailable", |ui| {
+        *ui = mac_fixture();
+        ui.platform.notes = platform::NotesAvailability::NotEnabled;
+        ui.meetings.view = meetings::View::Settings;
+        ui.pane = Pane::Meetings;
+        ui.open = Some(Menu::Pick("meeting-summaries"));
+    }),
+    // Summaries set to OpenCode: its model nested under it, then with
+    // OpenCode not running, the saved model kept.
     ("meetings-summary-model", |ui| {
         summary_model_scene(ui, models::Models::fixture())
     }),
@@ -541,12 +579,6 @@ pub(super) const SCENES: &[Scene] = &[
     ("meetings-chapters", |ui| {
         *ui = mac_fixture();
         ui.meetings = meetings::MeetingsPane::chapters_fixture();
-        ui.pane = Pane::Meetings;
-    }),
-    ("meetings-platform-icons", |ui| {
-        *ui = mac_fixture();
-        ui.settings.labs.meeting_platform_icons = true;
-        ui.meetings = meetings::MeetingsPane::platforms_fixture();
         ui.pane = Pane::Meetings;
     }),
     ("meetings-empty", |ui| {
@@ -623,10 +655,11 @@ pub(super) const SCENES: &[Scene] = &[
         ui.pane = Pane::HudLab;
     }),
     ("mac-labs", labs_with_some_on),
+    // Where hex://labs/vocabulary-biasing lands: its group's chip.
     ("mac-labs-link", |ui| {
         *ui = mac_fixture();
         ui.labs_open = true;
-        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::VocabularyBiasing));
+        ui.lab_store.group = Some(crate::labs::Feature::VocabularyBiasing.group());
     }),
     ("mac-labs-on", |ui| {
         labs_with_some_on(ui);
@@ -640,15 +673,18 @@ pub(super) const SCENES: &[Scene] = &[
         labs_with_some_on(ui);
         ui.lab_store.search = rune::TextEdit::new("paste".to_string());
     }),
-    ("mac-labs-drawer", |ui| {
+    // A lab's own settings on its card while it's on.
+    ("mac-labs-settings", |ui| {
         labs_with_some_on(ui);
-        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::LiveText));
+        ui.settings.labs.unload_idle = true;
+        ui.lab_store.group = Some(crate::labs::Feature::UnloadIdle.group());
     }),
-    // Labs › Screenshots' drawer (macOS only: elsewhere the lab has no row).
+    // Labs › Screenshots' card while on (macOS only: elsewhere the lab has
+    // no row).
     ("mac-labs-screenshots", |ui| {
         labs_with_some_on(ui);
         ui.settings.labs.screenshots = true;
-        ui.lab_store.drawer = Some(labs::Lab::Feature(crate::labs::Feature::Screenshots));
+        ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
     }),
     // Labs on Windows and Linux: only their OS's labs, groups holding a
     // lab that's on open.
@@ -792,6 +828,7 @@ pub(super) fn mac_fixture() -> Ui {
     ui.settings.dictation_hotkey = AppSettings::default().dictation_hotkey;
     ui.settings.paste_with_shift = false;
     ui.settings.meetings.enabled = true;
+    ui.settings.meetings.summaries = crate::app_settings::MeetingSummaries::Mac;
     ui.settings.meetings.providers = vec![
         crate::app_settings::MeetingProviderChoice {
             key: "com.tinyspeck.slackmacgap".into(),
@@ -819,16 +856,13 @@ pub(super) fn mac_fixture() -> Ui {
     ui
 }
 
-/// Meetings › Settings with Advanced open, Summarize with OpenCode and Labs ›
-/// Choose meeting summary model on, a model saved, and `models` as the
-/// OpenCode catalog.
+/// Meetings › Settings with Summaries set to OpenCode, a model saved, and
+/// `models` as the OpenCode catalog.
 fn summary_model_scene(ui: &mut Ui, models: models::Models) {
     *ui = mac_fixture();
-    ui.settings.labs.meeting_summary_model = true;
-    ui.settings.meetings.summarize_with_opencode = true;
+    ui.settings.meetings.summaries = crate::app_settings::MeetingSummaries::OpenCode;
     ui.settings.meetings.opencode_model = Some("anthropic/claude-sonnet-4-5".into());
     ui.models = models;
-    ui.advanced = vec![Pane::Meetings];
     ui.meetings.view = meetings::View::Settings;
     ui.pane = Pane::Meetings;
 }
@@ -885,13 +919,17 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
         ..AppSettings::default()
     };
     let mut ui = Ui::with(settings, Service::Fixture(Vec::new()));
+    ui.platform.wayland = true;
     ui.models = models::Models::fixture();
     ui.picker.installed = Some(vec![TranscriptionModelId::ParakeetUnifiedEnglish]);
     ui.view = Some(ServiceView {
         listener: DesktopListenerSnapshot {
             running: true,
+            warming: false,
             status: "Enabled".into(),
             warning: None,
+            notice: None,
+            last_failure: None,
             shortcuts,
             shortcuts_configurable: false,
         },

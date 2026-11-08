@@ -2,7 +2,8 @@
 //! title bar, group chips, the newest labs as featured cards, then every
 //! lab as a card in two columns under its group's header. A header folds
 //! its group; a search or chip shows every match open. A card's switch
-//! turns its lab on or off; pressing anywhere else on it opens its drawer.
+//! turns its lab on or off; a lab with settings of its own shows them on
+//! its card while on.
 
 use rune::{El, Icon, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Switch, TextInput};
@@ -11,7 +12,7 @@ use super::super::Ui;
 use super::super::controls::{DESCRIPTION, METRICS, Paint, PushSize, segmented_tx};
 use super::super::list_detail::{FOLDED, UNFOLDED};
 use super::super::lists::{Tone, tone_tag};
-use super::{Row, Tab, flip, group, open_drawer, row_key, shown};
+use super::{Row, Tab, extras, flip, group, row_key, shown};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::labs::Group;
 
@@ -77,7 +78,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
                     "featured",
                     featured
                         .into_iter()
-                        .map(|row| card(p, row, true, true))
+                        .map(|row| card(ui, p, row, true, true))
                         .collect(),
                 ));
         }
@@ -124,7 +125,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint) -> El {
                         &format!("grid-row{index}"),
                         pair_rows
                             .iter()
-                            .map(|row| card(p, row, is_new(row), false))
+                            .map(|row| card(ui, p, row, is_new(row), false))
                             .collect(),
                     ));
                 }
@@ -294,7 +295,7 @@ fn chip(
 }
 
 /// A rounded neutral square with the lab's icon.
-pub(super) fn tile(p: Paint, icon: &'static Icon, size: f32) -> El {
+fn tile(p: Paint, icon: &'static Icon, size: f32) -> El {
     el().key("tile")
         .size(size, size)
         .center()
@@ -313,9 +314,9 @@ pub(super) fn tile(p: Paint, icon: &'static Icon, size: f32) -> El {
 }
 
 /// One lab as a card: tile, name and tags on one line, up to two lines of
-/// description, and its switch. `featured` cards sit under New in Labs, so
-/// they carry no New tag.
-fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
+/// description, its switch, and while on any settings of its own.
+/// `featured` cards sit under New in Labs, so they carry no New tag.
+fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool) -> El {
     let c = &p.k.c;
     let lab = entry.lab;
     let mut tags = Vec::new();
@@ -343,7 +344,7 @@ fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
         .child(el().key("spacer").grow(1.0).min_w(8.0))
         .child(lab_switch(p, entry).key(row_key(lab)));
     // The description runs under the switch too.
-    let copy = col()
+    let mut copy = col()
         .key("copy")
         .grow(1.0)
         .shrink()
@@ -357,6 +358,9 @@ fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
                 .color(p.muted())
                 .max_lines(2),
         );
+    if let Some(extras) = extras(ui, p, entry) {
+        copy = copy.child(extras.mt(8.0));
+    }
     let key = if featured {
         format!("lab-featured-{}", lab.id())
     } else {
@@ -364,17 +368,14 @@ fn card(p: Paint, entry: &Row, new: bool, featured: bool) -> El {
     };
     row()
         .key(key)
-        .role("button")
+        .role("group")
         .label(entry.title)
         .padding(CARD_PADDING)
         .gap(10.0)
         .items_start()
         .radius(p.k.radius.lg)
-        .hover(c.hover)
-        .press(c.pressed)
         .child(tile(p, entry.icon, TILE))
         .child(copy)
-        .on_press(move |ui: &mut Ui| open_drawer(ui, lab))
         .fill(c.bg_base)
         .border(p.hair, c.border_weak)
 }
@@ -383,7 +384,7 @@ const CARD_PADDING: f32 = 12.0;
 const TILE: f32 = 32.0;
 
 /// A lab's switch: it flips the lab; a locked lab's is disabled.
-pub(super) fn lab_switch(p: Paint, entry: &Row) -> El {
+fn lab_switch(p: Paint, entry: &Row) -> El {
     let lab = entry.lab;
     Switch::new(entry.on)
         .control_size(ControlSize::Small)
@@ -424,7 +425,7 @@ fn footer(p: Paint) -> El {
 }
 
 /// Opens Labs' feedback form.
-pub(super) fn feedback_button(p: Paint, key: &str, variant: ButtonVariant) -> El {
+fn feedback_button(p: Paint, key: &str, variant: ButtonVariant) -> El {
     Button::new(tr("Send feedback"))
         .variant(variant)
         .on_press(|ui: &mut Ui| {

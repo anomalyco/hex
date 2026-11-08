@@ -232,7 +232,7 @@ pub struct AudioInput {
 /// A running stream delivers audio every few milliseconds, even silence. One
 /// that has delivered nothing for this long has stopped without reporting an
 /// error (seen after a burst of overruns, #1206) and is reopened.
-const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(4);
+pub(crate) const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(4);
 
 pub enum AudioInputEvent {
     Chunk {
@@ -314,6 +314,9 @@ pub struct RecoveringAudioInput {
     opener: Opener,
     route_generation_source: fn() -> u64,
     outage: Option<Option<String>>, // why no input opens; `Some(None)` once taken
+    /// The retry error last logged, so a microphone that stays gone (a closed
+    /// lid, an unplugged headset) logs once, not on every retry.
+    retry_warning: Option<String>,
 }
 
 /// Whether a listener's capture is idle, so [`RecoveringAudioInput`] may
@@ -649,6 +652,7 @@ impl RecoveringAudioInput {
             opener: Arc::new(open_configured_input),
             route_generation_source: input_route_generation,
             outage: None,
+            retry_warning: None,
         }
     }
 
@@ -715,6 +719,7 @@ impl RecoveringAudioInput {
         input.feed_hex_microphone(true);
         self.input = Some(input);
         self.outage = None;
+        self.retry_warning = None;
     }
 
     pub fn close(&mut self) {
@@ -724,6 +729,7 @@ impl RecoveringAudioInput {
         self.replacement = None;
         self.recovery.recovered();
         self.outage = None;
+        self.retry_warning = None;
     }
 
     pub fn is_open(&self) -> bool {
@@ -808,10 +814,13 @@ impl RecoveringAudioInput {
                         return RecoveringAudioInputEvent::OpenFailed(error);
                     }
                     self.recovery.failed(now);
-                    tracing::warn!(
-                        %error,
-                        "could not reopen dictation microphone; retrying"
-                    );
+                    if self.retry_warning.as_ref() != Some(&error) {
+                        tracing::warn!(
+                            %error,
+                            "could not reopen dictation microphone; retrying"
+                        );
+                        self.retry_warning = Some(error.clone());
+                    }
                     if self.recovery.blocks_audio() {
                         self.outage.get_or_insert(Some(error));
                     }
@@ -962,7 +971,8 @@ struct Route {
     avoid_bluetooth: bool,
 }
 
-const LID_CLOSED_ERROR: &str = "the built-in microphone is off while the lid is closed";
+pub(crate) const LID_CLOSED_ERROR: &str = "the built-in microphone is off while the lid is closed";
+pub(crate) const NO_MICROPHONE_ERROR: &str = "no microphone is available";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct InputPlan {
@@ -1052,7 +1062,7 @@ fn resolve_input(
             if (0..names.len()).any(off) {
                 LID_CLOSED_ERROR.into()
             } else {
-                "no microphone is available".into()
+                NO_MICROPHONE_ERROR.into()
             }
         })
 }
@@ -1758,7 +1768,7 @@ mod tests {
                 virtual_transports,
                 OPEN
             ),
-            Err("no microphone is available".into())
+            Err(NO_MICROPHONE_ERROR.into())
         );
         // A virtual default, saved microphone, or `--device` is used as named.
         assert_eq!(
@@ -1960,11 +1970,11 @@ mod tests {
                 &built_in,
                 OPEN
             ),
-            Err("no microphone is available".into())
+            Err(NO_MICROPHONE_ERROR.into())
         );
         assert_eq!(
             resolve_input(None, Some("USB Mic"), &[], None, &built_in, OPEN),
-            Err("no microphone is available".into())
+            Err(NO_MICROPHONE_ERROR.into())
         );
         assert_eq!(
             resolve_input(
@@ -1975,7 +1985,7 @@ mod tests {
                 &built_in,
                 OPEN
             ),
-            Err("no microphone is available".into())
+            Err(NO_MICROPHONE_ERROR.into())
         );
     }
 

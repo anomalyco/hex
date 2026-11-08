@@ -47,6 +47,9 @@ const STALL_AFTER: f64 = 30.0;
 pub(crate) struct Live {
     /// Hex's own dictation records.
     pub(crate) listening: bool,
+    /// The listener runs but its model, microphone, and shortcuts aren't up
+    /// yet, so the practice waits instead of inviting a hold.
+    pub(crate) warming: bool,
     /// The model download stopped with an error.
     pub(crate) failed: bool,
     /// Why, in one line, such as a proxy or certificate (#894).
@@ -59,6 +62,9 @@ pub(crate) struct Live {
     pub(crate) using_file: bool,
     pub(crate) microphone: ItemStatus,
     pub(crate) accessibility: ItemStatus,
+    /// General's "Turn off the mic when not dictating" was on when the
+    /// first run opened, so the microphone opens only while you dictate.
+    pub(crate) release_microphone: bool,
     /// Every permission is on and one applies only after Hex restarts.
     pub(crate) restart: bool,
     /// macOS asks for Microphone and Accessibility; Windows only shows the
@@ -226,6 +232,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     };
     s.live = Some(Live {
         listening: false,
+        warming: false,
         failed: false,
         failure: None,
         stalled: false,
@@ -233,6 +240,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         using_file: false,
         microphone: ItemStatus::Todo,
         accessibility: ItemStatus::Todo,
+        release_microphone: ui.settings.release_microphone_while_idle,
         restart: false,
         accessibility_row: ui.platform.caps.permissions,
         accessibility_renamed: ui.platform.accessibility_renamed,
@@ -394,6 +402,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         return false;
     };
     let model = transcription_models::validate(&choice).ok();
+    let warming = ui.view.as_ref().is_some_and(|view| view.listener.warming);
     let (preparing, downloaded_bytes, errored) =
         ui.view.as_ref().map_or((false, 0, false), |view| {
             let t = &view.transcription;
@@ -451,6 +460,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let Some(live) = s.live.as_mut() else {
         return false;
     };
+    live.warming = warming;
     live.checked = Some(checked);
     // Linux and Windows ask for no permissions: both rows are ready.
     if !asks_permissions {
@@ -726,6 +736,12 @@ pub(super) fn practice_changed(ui: &mut Ui, tx: &mut Tx) {
     if let Some(s) = ui.first_run.as_mut() {
         s.on_practice_change(tx);
     }
+}
+
+/// What the practice says in place of the shortcut invitation while the
+/// listener loads its model, microphone, and shortcuts.
+pub(super) fn warming_copy() -> &'static str {
+    tr("Getting Hex ready to listen…")
 }
 
 /// What the practice dictation's last try needs said.

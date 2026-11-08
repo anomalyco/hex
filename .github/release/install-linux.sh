@@ -518,6 +518,15 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 printf 'Installed Hex %s to %s\n' "$version" "$binary"
+# Wayland paste runs wl-copy, from the wl-clipboard package this installer
+# does not bring. Say so now, not after the first dictation fails.
+if ! command -v wl-copy >/dev/null 2>&1; then
+  printf '\nWayland paste needs wl-copy from the wl-clipboard package, and wtype on wlroots compositors and niri:\n'
+  printf '  Debian/Ubuntu: sudo apt install wl-clipboard wtype\n'
+  printf '  Fedora: sudo dnf install wl-clipboard wtype\n'
+  printf '  Arch: sudo pacman -S --needed wl-clipboard wtype\n'
+  printf '\n'
+fi
 printf 'Install a model: %s model install\n' "$binary"
 printf 'Launch Hex: %s\n' "$binary"
 printf 'Start in the background: %s start (quit with %s quit)\n' "$binary" "$binary"

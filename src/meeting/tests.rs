@@ -1,3 +1,6 @@
+use super::retention::{
+    audio_expired_meetings, expired_meetings, trash_audio_tracks, trash_expired,
+};
 use super::*;
 use hound::WavReader;
 
@@ -169,6 +172,8 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        audio_removed_at_ms: None,
+        imported: false,
     };
     write_manifest(&directory, &manifest).unwrap();
 
@@ -215,6 +220,8 @@ fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() 
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        audio_removed_at_ms: None,
+        imported: false,
     };
     let (sender, receiver) = mpsc::sync_channel(4);
 
@@ -335,7 +342,7 @@ fn finished_meeting(name: &str, title: &str) -> (PathBuf, PathBuf) {
 fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
     let (base, directory) = finished_meeting("rename", "Meeting — 2:18 PM");
     let export = read_manifest(&directory).unwrap().export_path.unwrap();
-    let renamed = rename_meeting(&directory, "  Arcade   planning ").unwrap();
+    let renamed = rename_meeting_with(&directory, "  Arcade   planning ", false).unwrap();
     assert_eq!(renamed.title, "Arcade planning");
     assert_eq!(read_manifest(&directory).unwrap().title, "Arcade planning");
     // Only live chapters read the title's source; with the experiment off
@@ -355,13 +362,45 @@ fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
 
     // A heading the user changed is theirs; only the manifest follows.
     fs::write(&export, "# My own heading\n\nNotes.\n").unwrap();
-    rename_meeting(&directory, "Arcade sync").unwrap();
+    rename_meeting_with(&directory, "Arcade sync", false).unwrap();
     assert_eq!(read_manifest(&directory).unwrap().title, "Arcade sync");
     assert_eq!(
         fs::read_to_string(&export).unwrap(),
         "# My own heading\n\nNotes.\n"
     );
-    assert!(rename_meeting(&directory, "   ").is_err());
+    assert!(rename_meeting_with(&directory, "   ", false).is_err());
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_rename_follows_the_title_when_descriptive_file_names_are_on() {
+    let (base, directory) = finished_meeting("rename-file-name", "Meeting — 2:18 PM");
+    let export = read_manifest(&directory).unwrap().export_path.unwrap();
+    let renamed = rename_meeting_with(&directory, "Arcade planning", true).unwrap();
+    let path = renamed.export_path.clone().unwrap();
+    assert_ne!(path, export);
+    assert!(!export.exists());
+    // The rename keeps the file's own date and time prefix, not one
+    // recomputed from `created_at_ms`.
+    assert_eq!(
+        path.file_name().unwrap().to_string_lossy(),
+        "2026-10-15 1418 Arcade planning.md"
+    );
+    assert!(
+        fs::read_to_string(&path)
+            .unwrap()
+            .starts_with("# Arcade planning\n")
+    );
+
+    // With the switch off the next rename keeps the file name.
+    let kept = rename_meeting_with(&directory, "Arcade sync", false).unwrap();
+    assert_eq!(kept.export_path, Some(path.clone()));
+    assert!(path.exists());
+    assert!(
+        fs::read_to_string(&path)
+            .unwrap()
+            .starts_with("# Arcade sync\n")
+    );
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -475,6 +514,227 @@ fn deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording(
     fs::remove_dir_all(base).unwrap();
 }
 
+#[test]
+fn the_exported_markdown_is_the_reveal_target_only_while_it_exists() {
+    let (base, directory) = finished_meeting("reveal", "Design sync");
+    let manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    assert_eq!(
+        RevealTarget::for_meeting(&manifest, &directory),
+        RevealTarget::Markdown(export.clone())
+    );
+    fs::remove_file(&export).unwrap();
+    assert_eq!(
+        RevealTarget::for_meeting(&read_manifest(&directory).unwrap(), &directory),
+        RevealTarget::Folder(directory.clone())
+    );
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn separate_audio_expiry_covers_only_finished_meetings_older_than_it() {
+    use crate::app_settings::MeetingRetention;
+    let day = MeetingRetention::Day.max_age_ms().unwrap();
+    let now = 100 * day;
+    let mut meetings = vec![
+        retention_manifest(
+            "old",
+            MeetingStatus::Complete,
+            now - 3 * day,
+            Some(now - 2 * day),
+        ),
+        // Exactly at the cutoff: kept.
+        retention_manifest("edge", MeetingStatus::Complete, now - day, Some(now - day)),
+        retention_manifest(
+            "interrupted",
+            MeetingStatus::Interrupted,
+            now - 3 * day,
+            Some(now - 2 * day),
+        ),
+        retention_manifest(
+            "failed",
+            MeetingStatus::Failed,
+            now - 3 * day,
+            Some(now - 2 * day),
+        ),
+        retention_manifest("starting", MeetingStatus::Starting, now - 3 * day, None),
+        retention_manifest("recording", MeetingStatus::Recording, now - 3 * day, None),
+        retention_manifest(
+            "transcribing",
+            MeetingStatus::Transcribing,
+            now - 3 * day,
+            Some(now - 2 * day),
+        ),
+        retention_manifest(
+            "already-removed",
+            MeetingStatus::Complete,
+            now - 3 * day,
+            Some(now - 2 * day),
+        ),
+        retention_manifest(
+            "pending",
+            MeetingStatus::Complete,
+            now - 3 * day,
+            Some(now - 2 * day),
+        ),
+    ];
+    meetings[7].audio_removed_at_ms = Some(now - day / 2);
+    let pending = vec!["pending".to_string()];
+
+    assert_eq!(
+        audio_expired_meetings(&meetings, MeetingRetention::Day, &pending, now),
+        ["old"]
+    );
+    assert!(audio_expired_meetings(&meetings, MeetingRetention::Week, &pending, now).is_empty());
+    assert!(audio_expired_meetings(&meetings, MeetingRetention::Month, &pending, now).is_empty());
+    // Unchosen, or the lab off, never removes audio.
+    assert!(!audio_expired(&meetings[0], meetings[0].status, None, now));
+}
+
+#[test]
+fn audio_expiry_moves_only_the_wavs_and_records_it() {
+    let (base, directory) = finished_meeting("audio-expiry", "Design sync");
+    fs::write(directory.join("system.wav"), b"system").unwrap();
+    fs::write(directory.join("microphone.wav"), b"microphone").unwrap();
+    fs::write(directory.join("transcript.ndjson"), b"{}\n").unwrap();
+    fs::write(directory.join("transcript.md"), b"# Design sync\n").unwrap();
+    let export = read_manifest(&directory).unwrap().export_path.unwrap();
+    let mut trashed = Vec::new();
+    trash_audio_tracks(
+        &directory,
+        |_| false,
+        |path| {
+            trashed.push(path.to_path_buf());
+            fs::remove_file(path)?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        trashed,
+        [
+            directory.join("system.wav"),
+            directory.join("microphone.wav")
+        ]
+    );
+    assert!(!directory.join("system.wav").exists());
+    assert!(!directory.join("microphone.wav").exists());
+    assert!(directory.join("transcript.ndjson").exists());
+    assert!(directory.join("transcript.md").exists());
+    assert!(export.exists(), "the exported Markdown stays");
+    let manifest = read_manifest(&directory).unwrap();
+    assert!(manifest.audio_removed_at_ms.is_some());
+    assert_eq!(manifest.title, "Design sync");
+
+    // A second pass has nothing left to move.
+    trashed.clear();
+    trash_audio_tracks(
+        &directory,
+        |_| false,
+        |path| {
+            trashed.push(path.to_path_buf());
+            fs::remove_file(path)?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(trashed.is_empty());
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn audio_expiry_keeps_a_rename_that_lands_while_the_wavs_move() {
+    let (base, directory) = finished_meeting("audio-expiry-rename", "Design sync");
+    let mut manifest = read_manifest(&directory).unwrap();
+    let export = manifest.export_path.clone().unwrap();
+    manifest.export_sha256 = file_sha256(&export);
+    write_manifest(&directory, &manifest).unwrap();
+    fs::write(directory.join("system.wav"), b"system").unwrap();
+    fs::write(directory.join("microphone.wav"), b"microphone").unwrap();
+    let mut renamed = None;
+    trash_audio_tracks(
+        &directory,
+        |_| false,
+        |path| {
+            if renamed.is_none() {
+                renamed = Some(rename_meeting(&directory, "Arcade planning").unwrap());
+            }
+            fs::remove_file(path)?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    let renamed = renamed.expect("the rename ran before the first WAV moved");
+    assert!(
+        renamed.export_sha256.is_some(),
+        "the rename claimed its copy"
+    );
+    let manifest = read_manifest(&directory).unwrap();
+    assert_eq!(manifest.title, "Arcade planning");
+    assert_eq!(manifest.export_sha256, renamed.export_sha256);
+    assert!(manifest.audio_removed_at_ms.is_some());
+    assert_eq!(
+        file_sha256(manifest.export_path.as_ref().unwrap()),
+        manifest.export_sha256
+    );
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn audio_expiry_leaves_unfinished_pending_locked_or_annotated_meetings() {
+    let (base, directory) = finished_meeting("audio-skip", "Design sync");
+    fs::write(directory.join("system.wav"), b"system").unwrap();
+    let mut trashed = Vec::new();
+    fn try_audio(directory: &Path, notes_busy: bool, trashed: &mut Vec<PathBuf>) -> Result<()> {
+        trash_audio_tracks(
+            directory,
+            |_| notes_busy,
+            |path| {
+                trashed.push(path.to_path_buf());
+                Ok(())
+            },
+        )
+    }
+
+    // Notes are being written.
+    assert!(
+        try_audio(&directory, true, &mut trashed)
+            .unwrap_err()
+            .to_string()
+            .contains("notes")
+    );
+    assert!(trashed.is_empty());
+
+    // Its final transcript is still pending.
+    fs::write(directory.join(FINAL_PENDING_FILE), b"").unwrap();
+    assert!(try_audio(&directory, false, &mut trashed).is_err());
+    assert!(trashed.is_empty());
+    fs::remove_file(directory.join(FINAL_PENDING_FILE)).unwrap();
+
+    // A recorder still holds its folder.
+    let active = ActiveMeeting::acquire(&directory).unwrap();
+    assert!(try_audio(&directory, false, &mut trashed).is_err());
+    assert!(trashed.is_empty());
+    drop(active);
+
+    // Interrupted or failed meetings keep their audio.
+    for status in [MeetingStatus::Interrupted, MeetingStatus::Failed] {
+        let mut manifest = read_manifest(&directory).unwrap();
+        manifest.status = status;
+        write_manifest(&directory, &manifest).unwrap();
+        assert!(try_audio(&directory, false, &mut trashed).is_err());
+        assert!(trashed.is_empty());
+    }
+
+    // Once it is Complete with no pending transcript, only its audio moves.
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.status = MeetingStatus::Complete;
+    write_manifest(&directory, &manifest).unwrap();
+    try_audio(&directory, false, &mut trashed).unwrap();
+    assert_eq!(trashed, [directory.join("system.wav")]);
+    fs::remove_dir_all(base).unwrap();
+}
+
 fn retention_manifest(
     id: &str,
     status: MeetingStatus,
@@ -506,7 +766,28 @@ fn retention_manifest(
         chapters_refined: false,
         retention_applies: false,
         export_sha256: None,
+        audio_removed_at_ms: None,
+        imported: false,
     }
+}
+
+#[test]
+fn imported_meetings_keep_their_flag_and_older_manifests_read_as_recorded() {
+    let mut manifest = retention_manifest("imported", MeetingStatus::Complete, 1, Some(2));
+    let recorded = serde_json::to_value(&manifest).unwrap();
+    assert!(
+        recorded.get("imported").is_none(),
+        "recorded meetings stay unchanged"
+    );
+
+    manifest.imported = true;
+    let json = serde_json::to_value(&manifest).unwrap();
+    assert_eq!(json["imported"], true);
+    let decoded: MeetingManifest = serde_json::from_value(json).unwrap();
+    assert!(decoded.imported);
+
+    let older: MeetingManifest = serde_json::from_value(recorded).unwrap();
+    assert!(!older.imported);
 }
 
 #[test]

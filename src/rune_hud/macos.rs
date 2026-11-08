@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSEvent, NSScreen, NSStatusBar};
-use objc2_foundation::NSRect;
+use objc2_foundation::{NSNumber, NSRect, NSString};
 use rune::{DisplayTarget, OverlayHandle, OverlayPlacement};
 
 use super::{Hud, HudEvent, HudSender, LIVE_TEXT_GAP, WINDOW, set_live_text};
@@ -18,20 +18,28 @@ use crate::rune_ui::live_text::Spot;
 const STATUS_LEVEL: isize = 25;
 
 /// The screen under the pointer (else the main one) as `hud_placement`
-/// reads it, and the primary screen's top, which Rune's global space hangs
-/// from.
-fn pointer_screen(mtm: MainThreadMarker) -> Option<(hud_placement::Screen, f64)> {
+/// reads it, the primary screen's top, which Rune's global space hangs
+/// from, the screen's backing scale, and its `NSScreenNumber`, which Rune's
+/// `NativeDisplayId::MacOS` pins an overlay to.
+pub(crate) fn pointer_screen(
+    mtm: MainThreadMarker,
+) -> Option<(hud_placement::Screen, f64, f64, Option<u32>)> {
     let pointer = NSEvent::mouseLocation();
     let screens = NSScreen::screens(mtm);
     let primary = screens.iter().next()?;
+    // The half-open rule Rune resolves `UnderPointer` with (closed at a
+    // screen's top, open at its bottom), so the capsule's panel and the
+    // notch it hangs from pick the same display where two share an edge.
+    // The fallback stays the main screen: Rune's "previous display" would
+    // need state the HUD's placement doesn't keep.
     let screen = screens
         .iter()
         .find(|screen| {
             let frame = screen.frame();
             pointer.x >= frame.origin.x
                 && pointer.x < frame.origin.x + frame.size.width
-                && pointer.y >= frame.origin.y
-                && pointer.y < frame.origin.y + frame.size.height
+                && pointer.y > frame.origin.y
+                && pointer.y <= frame.origin.y + frame.size.height
         })
         .or_else(|| NSScreen::mainScreen(mtm))?;
     let rect = |r: NSRect| hud_placement::Rect {
@@ -51,7 +59,20 @@ fn pointer_screen(mtm: MainThreadMarker) -> Option<(hud_placement::Screen, f64)>
     Some((
         metrics,
         primary.frame().origin.y + primary.frame().size.height,
+        screen.backingScaleFactor(),
+        screen_number(&screen),
     ))
+}
+
+/// The screen's `NSScreenNumber` (`CGDirectDisplayID`), the id Rune's
+/// `NativeDisplayId::MacOS` matches: winit reports a monitor's native id
+/// the same way (`CGDisplayGetDisplayIDFromUUID`), so a measured notch can
+/// pin the panel to the display it was read on.
+fn screen_number(screen: &NSScreen) -> Option<u32> {
+    let description = screen.deviceDescription();
+    let key = NSString::from_str("NSScreenNumber");
+    let number = description.objectForKey(&key)?;
+    Some(number.downcast_ref::<NSNumber>()?.unsignedIntValue())
 }
 
 /// The HUD's window and widest plate, and how far its island
@@ -128,7 +149,8 @@ impl Hud {
     /// With the HUD hidden, the live text starts where its plate would sit
     /// under the menu bar.
     pub(super) fn place_live_text_without_hud(&self) {
-        let Some((screen, primary_top)) = MainThreadMarker::new().and_then(pointer_screen) else {
+        let Some((screen, primary_top, _, _)) = MainThreadMarker::new().and_then(pointer_screen)
+        else {
             return;
         };
         let content = content(0.0);
@@ -142,7 +164,8 @@ impl Hud {
     }
 
     pub(super) fn place_on_pointer_screen(&mut self, overlay: &OverlayHandle<Hud>) {
-        let Some((mut metrics, primary_top)) = MainThreadMarker::new().and_then(pointer_screen)
+        let Some((mut metrics, primary_top, _, _)) =
+            MainThreadMarker::new().and_then(pointer_screen)
         else {
             return;
         };
@@ -152,11 +175,14 @@ impl Hud {
         }
         let (width, height) = WINDOW;
         let content = content(tuning.island_spread);
-        // Labs' notch indicator takes the top position on a notched screen;
-        // anywhere else HUD Lab's placement stands.
-        let ears = (crate::labs::notch_indicator() && self.position == IndicatorPosition::Top)
-            .then(|| hud_placement::ears(&metrics, content))
-            .flatten();
+        // Labs' notch indicator takes any shown position on a notched screen;
+        // Hidden and flat screens leave HUD Lab's placement standing.
+        let ears = hud_placement::notch_placement(
+            crate::labs::notch_indicator(),
+            self.position,
+            &metrics,
+            content,
+        );
         let placed = ears.unwrap_or_else(|| {
             hud_placement::place(
                 tuning.placement,

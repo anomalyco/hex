@@ -18,8 +18,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 packages=(--workspace)
 if [[ "$(uname -s)" == Darwin ]]; then
-    # zbus depends on the crates.io `hex`, so the root package is named by its ID.
-    packages=(-p "$(cargo pkgid)" -p scrawl-router -p scrawl-capture -p capture-core)
+    # zbus depends on the crates.io `hex`, so the root package is named with its
+    # version. Not the full `cargo pkgid`: its path URL names this checkout,
+    # which matches nothing once HiveMind runs cargo in a copy on another Mac.
+    pkgid="$(cargo pkgid)"
+    packages=(-p "hex@${pkgid##*[#@]}" -p scrawl-router -p scrawl-capture -p capture-core)
 fi
 
 stage() {
@@ -33,6 +36,7 @@ stage "code-shape"
 python3 scripts/code-shape.py --check || exit 13
 
 stage "nix pins"
+python3 scripts/test-check-nix-git-pins.py || exit 14
 python3 scripts/check-nix-git-pins.py || exit 14
 
 if [[ $# -eq 0 ]]; then

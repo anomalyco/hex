@@ -27,12 +27,26 @@ pub(crate) struct DesktopTranscriptionSnapshot {
     pub(crate) preparing: Option<TranscriptionModelId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopListenerSnapshot {
     pub(crate) running: bool,
+    /// Running, but its model, microphone, or shortcuts aren't up yet, so the
+    /// shortcut does nothing.
+    #[serde(default)]
+    pub(crate) warming: bool,
     pub(crate) status: String,
+    /// Why the listener itself could not run (stopped, or its HUD could not
+    /// show). `hex status` treats this as a stopped listener.
     #[serde(default)]
     pub(crate) warning: Option<String>,
+    /// An environment notice while listening (e.g. a missing paste helper),
+    /// never a dictation failure.
+    #[serde(default)]
+    pub(crate) notice: Option<String>,
+    /// The newest failed dictation, for the listener card, after a later
+    /// dictation completed. Never describes the listener itself.
+    #[serde(default)]
+    pub(crate) last_failure: Option<String>,
     #[serde(default)]
     pub(crate) shortcuts: DesktopShortcuts,
     /// The desktop can show its own dialog for Hex's shortcuts.
@@ -145,8 +159,10 @@ mod tests {
         let snapshot: DesktopListenerSnapshot =
             serde_json::from_str(r#"{"running":true,"status":"Listening"}"#).unwrap();
         assert!(snapshot.running);
+        assert!(!snapshot.warming);
         assert_eq!(snapshot.status, "Listening");
         assert!(snapshot.warning.is_none());
+        assert!(snapshot.notice.is_none());
         assert_eq!(snapshot.shortcuts, DesktopShortcuts::Unregistered);
     }
 }

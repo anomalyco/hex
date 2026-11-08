@@ -5,7 +5,7 @@
 use rune::{El, col, el, row, text};
 
 use super::facts::{
-    self as facts, Entry, State, compact_progress, errors, errors_heading, errors_label, tnum,
+    self as facts, Entry, State, errors, errors_heading, errors_label, progress_line, tnum,
 };
 use super::{self as picker, View};
 use crate::desktop::i18n::{tr, tr_fill};
@@ -18,7 +18,7 @@ const LABEL: f32 = 156.0;
 const PAD: f32 = 24.0;
 const HEAD: f32 = 124.0;
 const ROW: f32 = 40.0;
-const ACTION: f32 = 64.0;
+const ACTION: f32 = 48.0;
 const COLUMNS: usize = 3;
 
 /// The columns: the first three models that speak the language, with the
@@ -151,18 +151,6 @@ fn measures(ui: &Ui, shown: &[&Entry], language: &str) -> Vec<Measure> {
             .map(|entry| facts::reads_vocabulary(ui, entry.def).then_some(1.0))
             .collect(),
     });
-    measures.push(Measure {
-        key: "download",
-        label: tr("Download"),
-        values: shown
-            .iter()
-            .map(|entry| facts::download_label(entry))
-            .collect(),
-        scores: shown
-            .iter()
-            .map(|entry| Some(-(facts::to_download(entry) as f64)))
-            .collect(),
-    });
     measures
 }
 
@@ -206,7 +194,18 @@ pub(super) fn body(ui: &Ui, p: Paint, entries: &[Entry], language: &str) -> El {
     let mut table = row().key("compare").px(PAD).pt(8.0).child(labels);
     for (index, entry) in shown.iter().enumerate() {
         let recommended = entry.recommendation == Some(Recommendation::Recommended);
-        let eyebrow = facts::role(ui, entry, &shown).unwrap_or("");
+        // An eyebrow that a row's bold value already says goes.
+        let eyebrow = match facts::role(ui, entry, &shown) {
+            Some((_, Some(key)))
+                if measures
+                    .iter()
+                    .any(|measure| measure.key == key && measure.best() == Some(index)) =>
+            {
+                ""
+            }
+            Some((label, _)) => label,
+            None => "",
+        };
         let head = col()
             .key("head")
             .h(HEAD)
@@ -259,7 +258,7 @@ pub(super) fn body(ui: &Ui, p: Paint, entries: &[Entry], language: &str) -> El {
         }
         let action = match &entry.state {
             State::InUse => facts::in_use(p),
-            State::Preparing { .. } => compact_progress(p, entry),
+            State::Preparing { .. } => progress_line(p, entry),
             _ if entry.def.available() => facts::choose_button(p, entry, primary == Some(index)),
             _ => el(),
         };

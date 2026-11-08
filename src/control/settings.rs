@@ -280,6 +280,21 @@ const KEYS: &[Key] = &[
         "Labs: provisional words beside the HUD while dictating",
     ),
     key(
+        "labs.failure_notices",
+        Kind::Bool,
+        "Labs: when a dictation fails, show why for a few seconds beside the HUD",
+    ),
+    key(
+        "labs.live_typing",
+        Kind::Bool,
+        "Labs: provisional words in the focused text field as an underlined input-method preedit, and the final text typed there instead of pasted (Linux Wayland)",
+    ),
+    key(
+        "labs.settings_search",
+        Kind::Bool,
+        "Labs: a search field at the top of General that filters its rows",
+    ),
+    key(
         "labs.live_chapters",
         Kind::Bool,
         "Labs: chapter meeting transcripts while recording",
@@ -410,9 +425,19 @@ const KEYS: &[Key] = &[
         "Labs: hide Hex's menu bar icon while nothing records; shortcuts keep working, and opening Hex again from Finder or Spotlight shows Settings (macOS)",
     ),
     key(
+        "labs.quit_closes_window",
+        Kind::Bool,
+        "Labs: the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits (macOS)",
+    ),
+    key(
+        "labs.caps_lock_dictation",
+        Kind::Bool,
+        "Labs: a Caps Lock press starts and stops dictation hands-free, and its light shows when Hex records and transcribes; Caps Lock stays off so typing is unchanged (macOS)",
+    ),
+    key(
         "labs.notch_indicator",
         Kind::Bool,
-        "Labs: with indicator_position top, the recording indicator grows out of the notch on a screen that has one, and sits below the menu bar elsewhere (macOS)",
+        "Labs: on a screen with a notch, the recording indicator grows out of the notch at either visible position; Hidden still hides it, and flat screens keep the Top or Bottom setting (macOS)",
     ),
     key(
         "labs.skip_pauses",
@@ -425,14 +450,14 @@ const KEYS: &[Key] = &[
         "Labs: a meeting recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet, unless you keep recording (macOS)",
     ),
     key(
+        "labs.more_call_apps",
+        Kind::Bool,
+        "Labs: offer to record calls in Signal, Telegram, WeChat, LINE, Webex, Element and the Phone app, and name calls on Google Voice, Messenger, Teams, FaceTime, GroupMe, and Webex pages",
+    ),
+    key(
         "labs.movable_meeting_capsules",
         Kind::Bool,
         "Labs: drag meeting capsules such as Meeting transcript ready out of the way; they show in the corner you left them, shared with the recording capsule (macOS)",
-    ),
-    key(
-        "labs.meeting_summary_model",
-        Kind::Bool,
-        "Labs: meeting notes written with OpenCode use meetings.opencode_model, with no fallback to another model",
     ),
     key(
         "labs.meeting_notes_vocabulary",
@@ -465,19 +490,24 @@ const KEYS: &[Key] = &[
         "Labs: on Wayland desktops without layer-shell, such as GNOME, the meeting capsules float over the call through XWayland while it is already running (Linux)",
     ),
     key(
-        "labs.meeting_platform_icons",
-        Kind::Bool,
-        "Labs: each recording in the Meetings list shows a small icon for its call app or website, or a neutral one when Hex doesn't know it",
-    ),
-    key(
         "labs.follow_live_transcript",
         Kind::Bool,
         "Labs: while a meeting records, its transcript in Meetings scrolls to the newest line; scroll up to read earlier text, back to the bottom to follow again",
     ),
     key(
-        "labs.collapsible_meeting_sections",
+        "labs.meeting_import",
         Kind::Bool,
-        "Labs: the summary, chapters, and day groups in Meetings fold and unfold with a click; folds last until Hex quits",
+        "Labs: Meetings offers Import audio…, so a local audio file is transcribed and kept as a meeting (macOS)",
+    ),
+    key(
+        "labs.meeting_descriptive_filenames",
+        Kind::Bool,
+        "Labs: an exported meeting's Markdown follows its title once notes or a rename provide one, keeping the date and time",
+    ),
+    key(
+        "labs.expire_meeting_audio",
+        Kind::Bool,
+        "Labs: finished meetings drop their WAVs on meetings.audio_retention while their transcripts, notes, summary, and Markdown stay",
     ),
     key(
         "labs.output_fixes",
@@ -510,19 +540,14 @@ const KEYS: &[Key] = &[
         "Folder for meeting Markdown; none uses ~/Documents/Hex Meetings",
     ),
     key(
-        "meetings.summarize_with_apple_intelligence",
-        Kind::Bool,
-        "Title and summarize meetings with Apple Intelligence",
-    ),
-    key(
-        "meetings.summarize_with_opencode",
-        Kind::Bool,
-        "Title and summarize meetings with the OpenCode model (sends the transcript to it)",
+        "meetings.summaries",
+        SUMMARIES,
+        "Who titles and summarizes meetings: off, mac (Apple Intelligence, nothing leaves this Mac), or opencode (sends the transcript to the OpenCode model)",
     ),
     optional(
         "meetings.opencode_model",
         Kind::Text,
-        "The OpenCode provider/model meeting notes use, with labs.meeting_summary_model; none tries Hex's ranked fast models",
+        "The OpenCode provider/model meeting notes use when meetings.summaries is opencode; none lets Hex pick a fast model",
     ),
     key(
         "meetings.show_recording_indicator",
@@ -538,6 +563,11 @@ const KEYS: &[Key] = &[
         "meetings.retention",
         Kind::Choice(&["day", "week", "month", "forever"]),
         "How long finished meetings are kept before they move to the Trash; none keeps new meetings 24 hours and older ones until you choose",
+    ),
+    optional(
+        "meetings.audio_retention",
+        Kind::Choice(&["day", "week", "month", "forever"]),
+        "How long finished meetings keep their audio with Labs › Expire meeting audio separately on; none follows meetings.retention",
     ),
     key(
         "meetings.providers",
@@ -699,6 +729,23 @@ const CAPTURE_KEYS: &[Key] = &[];
 #[cfg(hex_capture)]
 const RETENTION_DAYS: Kind = Kind::Integer { min: 1, max: 3650 };
 
+#[cfg(target_os = "macos")]
+const SUMMARIES: Kind = Kind::Choice(&["off", "mac", "opencode"]);
+#[cfg(not(target_os = "macos"))]
+const SUMMARIES: Kind = Kind::Choice(&["off", "opencode"]);
+
+/// Keys that were replaced, and what replaced them.
+const RETIRED: &[(&str, &str)] = &[
+    (
+        "meetings.summarize_with_apple_intelligence",
+        "meetings.summaries mac",
+    ),
+    (
+        "meetings.summarize_with_opencode",
+        "meetings.summaries opencode",
+    ),
+];
+
 /// Settings that act only where Hex has a capability (by its
 /// `rune_ui::capabilities` name), the same one that shows their row in the
 /// window. The first matching prefix decides.
@@ -708,16 +755,16 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.live_chapters", "meetings"),
     ("labs.subtitle_export", "meetings"),
     ("labs.stop_when_call_ends", "meetings"),
+    ("labs.more_call_apps", "meetings"),
     ("labs.movable_meeting_capsules", "meetings"),
-    ("labs.meeting_summary_model", "meetings"),
     ("labs.meeting_notes_vocabulary", "meetings"),
     ("labs.meeting_finished_event", "meetings"),
-    ("labs.meeting_platform_icons", "meetings"),
+    ("labs.meeting_descriptive_filenames", "meetings"),
     ("labs.follow_live_transcript", "meetings"),
-    ("labs.collapsible_meeting_sections", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),
+    ("labs.quit_closes_window", "dock_icon"),
     ("keyboard_model_switching.", "keyboard_model_switching"),
     ("enable_on_launch", "listener_control"),
     ("share_dictation_shortcut", "share_shortcut"),
@@ -872,6 +919,12 @@ pub fn get(settings: &AppSettings, name: &str) -> Result<Vec<SettingValue>, Cont
 }
 
 fn unknown(name: &str) -> ControlError {
+    if let Some((_, replacement)) = RETIRED.iter().find(|(retired, _)| *retired == name) {
+        return ControlError::new(
+            "unknown-setting",
+            format!("`{name}` was replaced: use `hex settings set {replacement}`"),
+        );
+    }
     let near = keys()
         .map(|key| key.key)
         .find(|key| {
@@ -969,6 +1022,13 @@ pub fn apply(
     let mut effects = Vec::new();
     let message = format!("Set {name}");
     match key.key {
+        "meetings.summaries"
+            if candidate.meetings.summaries == crate::app_settings::MeetingSummaries::OpenCode
+                && crate::policy::Policy::current()
+                    .locks(crate::policy::Lock::OpenCodeProcessing) =>
+        {
+            return Err(managed(name, crate::policy::Lock::OpenCodeProcessing));
+        }
         "sound_effect_volume" => {
             let volume = candidate.sound_effect_volume;
             candidate.sound_effects = volume > 0.0;
@@ -1436,11 +1496,7 @@ mod tests {
             .with(Lock::Meetings)
             .with(Lock::Annotate)
             .with(Lock::OpenCodeProcessing);
-        for name in [
-            "meetings.enabled",
-            "capture.enabled",
-            "meetings.summarize_with_opencode",
-        ] {
+        for name in ["meetings.enabled", "capture.enabled"] {
             let error = unavailable_under(name, policy).expect(name);
             assert_eq!(error.code, "managed");
             assert!(error.message.contains("managed by your organization"));
@@ -1525,6 +1581,7 @@ mod tests {
             }],
             meetings: crate::app_settings::MeetingSettings {
                 retention: Some(crate::app_settings::MeetingRetention::Day),
+                audio_retention: Some(crate::app_settings::MeetingRetention::Day),
                 opencode_model: Some("anthropic/claude-haiku".into()),
                 ..Default::default()
             },
@@ -1766,13 +1823,43 @@ mod tests {
                 .value
                 .is_null()
         );
+        let change = apply(&settings, "meetings.summaries", "opencode", &rules()).unwrap();
+        assert_eq!(
+            change.settings.meetings.summaries,
+            crate::app_settings::MeetingSummaries::OpenCode
+        );
+        assert_eq!(
+            get(&change.settings, "meetings.summaries").unwrap()[0].value,
+            "opencode"
+        );
+        let retired = apply(
+            &settings,
+            "meetings.summarize_with_opencode",
+            "on",
+            &rules(),
+        )
+        .unwrap_err();
+        assert!(retired.message.contains("meetings.summaries opencode"));
         let mut saved = settings.clone();
         saved.microphone = Some("USB Mic".into());
         let change = apply(&saved, "microphone", "system-default", &rules()).unwrap();
         assert_eq!(change.settings.microphone, None);
-        let change = apply(&settings, "history_retention", "month", &rules()).unwrap();
+        let history = apply(&settings, "history_retention", "month", &rules()).unwrap();
+        let change = apply(&settings, "meetings.audio_retention", "week", &rules()).unwrap();
         assert_eq!(
-            change.effects,
+            change.settings.meetings.audio_retention,
+            Some(crate::app_settings::MeetingRetention::Week)
+        );
+        let cleared = apply(
+            &change.settings,
+            "meetings.audio_retention",
+            "none",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(cleared.settings.meetings.audio_retention, None);
+        assert_eq!(
+            history.effects,
             vec![Effect::HistoryRetention(
                 crate::history::HistoryRetention::Month
             )]

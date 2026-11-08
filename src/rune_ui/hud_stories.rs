@@ -240,7 +240,10 @@ fn done(s: &mut HudStory, play: &mut Play<'_, HudStory>) {
 }
 
 fn fail(s: &mut HudStory, play: &mut Play<'_, HudStory>) {
-    send(Event::JobFailed { job_id: JOB });
+    send(Event::JobFailed {
+        job_id: JOB,
+        message: None,
+    });
     s.showing = "Failed";
     then(s, play, SETTLE_SECS, |s, _| {
         send(Event::Reset);

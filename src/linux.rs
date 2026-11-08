@@ -13,6 +13,7 @@ pub(crate) mod icons;
 pub(crate) mod linux_input;
 pub(crate) use linux_input as input;
 pub(crate) mod input_route;
+pub(crate) mod live_typing;
 pub(crate) mod login_item;
 pub(crate) mod meeting_capsules;
 pub(crate) mod paste;
@@ -82,6 +83,39 @@ enum Command {
     Devices,
 }
 
+/// What a command adopts from this desktop before it starts any thread.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SessionAdoption {
+    /// The service and the foreground listener also adopt with no display at
+    /// all (#756).
+    Service,
+    /// A launcher adopts only behind Xwayland's `DISPLAY`, so the session it
+    /// computes and writes to `session.env` is the one its service reports.
+    /// The adopted `WAYLAND_DISPLAY` is what makes winit choose Wayland,
+    /// matching `LinuxSession::detect`, even when `DISPLAY` is also set.
+    Launcher,
+}
+
+/// The service and the foreground `hex dictate` listener adopt the session's
+/// Wayland display when their unit or shell has none (#756, #1506). A
+/// launcher adopts only behind Xwayland's `DISPLAY`, before it computes or
+/// writes the session environment; with no display at all it keeps today's
+/// behavior, including "Start Hex from your graphical login session" when it
+/// would start the unit. The window, commands that only forward or read, and
+/// the embedded service keep whatever display their parent gave them.
+fn session_adoption(command: &Command) -> Option<SessionAdoption> {
+    match command {
+        Command::Service { embedded: false } | Command::Dictate { .. } => {
+            Some(SessionAdoption::Service)
+        }
+        // `hex start` spawns `hex app --hidden`, which is the launcher that
+        // writes session.env; `hex restart` writes it itself.
+        Command::App { rune_args, .. } if rune_args.is_empty() => Some(SessionAdoption::Launcher),
+        Command::Control(ControlCli::Restart { .. }) => Some(SessionAdoption::Launcher),
+        _ => None,
+    }
+}
+
 pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
     let activation = crate::linux::service::Activation::take_from_environment();
     crate::linux::service::refresh_x_authority();
@@ -90,6 +124,16 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         hidden: false,
         rune_args: Vec::new(),
     });
+    // Before the log, which starts a thread, and before `hex restart` writes
+    // session.env: a launcher and the service it talks to must agree on the
+    // session (#756, #1506).
+    let adopted = match session_adoption(&command) {
+        Some(SessionAdoption::Service) => crate::linux::service::adopt_wayland_display(),
+        Some(SessionAdoption::Launcher) => {
+            crate::linux::service::adopt_wayland_display_for_launcher()
+        }
+        None => None,
+    };
     // Control and read commands talk to the running Hex or read files: no
     // log, lock, or Hex of their own.
     let command = match command {
@@ -100,11 +144,6 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
         )),
         command => command,
     };
-    // Before the log, which starts a thread: the service may need the
-    // session's Wayland display (#756).
-    let adopted = matches!(command, Command::Service { embedded: false })
-        .then(crate::linux::service::adopt_wayland_display)
-        .flatten();
     // Rune reads its own flags (`--snap`, `--scene`, …) from the process
     // arguments. A render draws fixtures: no log or data folder of its own.
     if let Command::App { rune_args, .. } = &command
@@ -155,8 +194,9 @@ pub(crate) fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 ),
                 None,
                 Default::default(),
-                // Only shortcuts drive a foreground listener.
-                std::sync::mpsc::channel().1.into(),
+                // Only shortcuts drive a foreground listener: the service's
+                // `hex` commands can't reach it.
+                crate::linux::input::CommandQueue::disconnected(),
                 Default::default(),
                 std::sync::mpsc::channel().1,
             )
@@ -199,7 +239,49 @@ fn launch(
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, Command, ControlCli};
+    use super::{Cli, Command, ControlCli, SessionAdoption, session_adoption};
+
+    #[test]
+    fn the_service_adopts_any_display_and_launchers_only_xwayland() {
+        assert_eq!(
+            session_adoption(&Command::Service { embedded: false }),
+            Some(SessionAdoption::Service)
+        );
+        assert_eq!(
+            session_adoption(&Command::Dictate { device: None }),
+            Some(SessionAdoption::Service)
+        );
+        assert_eq!(session_adoption(&Command::Service { embedded: true }), None);
+        assert_eq!(
+            session_adoption(&Command::App {
+                hidden: true,
+                rune_args: Vec::new(),
+            }),
+            Some(SessionAdoption::Launcher)
+        );
+        assert_eq!(
+            session_adoption(&Command::Control(ControlCli::Restart {
+                force: false,
+                output: Default::default(),
+            })),
+            Some(SessionAdoption::Launcher)
+        );
+        // `hex start` sends the detached `hex app --hidden` that adopts.
+        assert_eq!(
+            session_adoption(&Command::Control(ControlCli::Start {
+                output: Default::default(),
+            })),
+            None
+        );
+        assert_eq!(
+            session_adoption(&Command::App {
+                hidden: true,
+                rune_args: vec!["--snap".into(), "out.png".into()],
+            }),
+            None
+        );
+        assert_eq!(session_adoption(&Command::Devices), None);
+    }
 
     #[test]
     fn the_shared_control_commands_parse_beside_linuxs_own() {

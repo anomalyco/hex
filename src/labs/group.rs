@@ -52,12 +52,16 @@ impl Feature {
     pub const fn group(self) -> Group {
         match self {
             Self::LiveText
+            | Self::FailureNotices
+            | Self::LiveTyping
             | Self::NotchIndicator
             | Self::VocabularyBiasing
             | Self::PauseBrowser
             | Self::SkipPauses
             | Self::VoiceFilter
             | Self::HideMenuBarIcon
+            | Self::QuitClosesWindow
+            | Self::SettingsSearch
             | Self::Playground => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting
@@ -74,13 +78,14 @@ impl Feature {
             | Self::SubtitleExport
             | Self::StopWhenCallEnds
             | Self::MovableMeetingCapsules
-            | Self::MeetingSummaryModel
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
-            | Self::MeetingPlatformIcons
             | Self::FollowLiveTranscript
-            | Self::CollapsibleMeetingSections
-            | Self::GnomeMeetingCapsules => Group::Meetings,
+            | Self::MoreCallApps
+            | Self::GnomeMeetingCapsules
+            | Self::MeetingImport
+            | Self::MeetingDescriptiveFilenames
+            | Self::ExpireMeetingAudio => Group::Meetings,
             Self::Screenshots | Self::AnnotateReplay => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
@@ -89,7 +94,8 @@ impl Feature {
             | Self::RestoreShortcutDefault
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone
-            | Self::ShareShortcut => Group::Shortcuts,
+            | Self::ShareShortcut
+            | Self::CapsLockDictation => Group::Shortcuts,
             Self::KeyboardModelSwitching
             | Self::UnloadIdle
             | Self::PickerSortFilter

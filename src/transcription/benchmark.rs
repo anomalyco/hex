@@ -68,7 +68,7 @@ fn load_onnx() -> Result<LoadedBackend> {
     use transcribe_rs::onnx::Quantization;
     use transcribe_rs::onnx::parakeet::ParakeetModel;
 
-    let model_path = crate::app_paths::support_dir()?.join("models/parakeet-tdt-0.6b-v2-int8");
+    let model_path = crate::app_paths::models_dir()?.join("parakeet-tdt-0.6b-v2-int8");
     Ok(LoadedBackend::Onnx(
         ParakeetModel::load(&model_path, &Quantization::Int8).wrap_err_with(|| {
             format!(

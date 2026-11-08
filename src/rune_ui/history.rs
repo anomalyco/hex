@@ -1,6 +1,6 @@
-//! The History pane: retained dictations (newest first) with search, the
-//! retention choice, two-step Clear all, and a detail view with Copy and
-//! Delete. It shares the host's store, which the listener records into.
+//! The History pane: retained dictations (newest first) with search, one
+//! menu for retention, Keep recordings, and two-step Clear all history, and
+//! a detail view with Copy and Delete. It shares the host's store, which the listener records into.
 //! With Labs › Keep recordings on, an entry that kept its audio offers
 //! Transcribe again with any installed model, run on a worker; Replace keeps
 //! the earlier transcripts as versions to copy or switch back to. Every
@@ -8,17 +8,21 @@
 
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use rune::{El, TextEdit, Tx, col, row, text};
-use rune_kit::{Select, SelectAppearance, TextInput};
+use rune::{El, TextEdit, Tx, col, el, row, text};
+use rune_kit::{Menu as KitMenu, MenuItem, Placement, Select, SelectAppearance, TextInput};
 
-use super::controls::{ButtonKind, Paint, button};
+use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
 use super::list_detail::{self as ld, Item};
 use super::lists::{error_panel, section_label};
 use super::{Menu, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
-use crate::history::stats::HistoryStats;
+use crate::history::stats::{AppCount, HistoryStats};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention, Transcript};
 use crate::transcription::models::TranscriptionModelId;
+
+/// The stats dialog's width and padding.
+const STATS_WIDTH: f32 = 460.0;
+const PADDING: f32 = 18.0;
 
 #[derive(Default)]
 pub(super) struct HistoryPane {
@@ -36,6 +40,8 @@ pub(super) struct HistoryPane {
     error: Option<String>,
     /// Labs › Dictation stats: every retained entry summed up, while on.
     pub(super) stats: Option<HistoryStats>,
+    /// The stats dialog is open.
+    pub(super) stats_open: bool,
     /// Labs › Keep recordings: the installed models Transcribe again
     /// offers, read when its menu opens.
     models: Vec<(TranscriptionModelId, &'static str)>,
@@ -124,28 +130,49 @@ impl HistoryPane {
             Some(store) if crate::labs::history_stats() => Some(store.stats()),
             _ => None,
         };
+        if self
+            .stats
+            .as_ref()
+            .is_none_or(|stats| stats.dictations == 0)
+        {
+            self.stats_open = false;
+        }
     }
 
     /// While the pane shows, picks up new dictations and search edits. It
     /// searches again only when the query or the store's revision changed,
-    /// and sums the stats again only when the entries or the toggle changed.
+    /// and sums the stats again when the entries or the toggle changed, or
+    /// once when the dialog closes because the stats emptied.
     pub(super) fn poll(&mut self, visible: bool) -> bool {
         let answered = self.poll_again();
+        let mut changed = false;
+        // The dialog belongs to the pane and its switch: leaving History,
+        // turning Dictation stats off, or emptying the stats closes it.
+        if self.stats_open
+            && (!visible
+                || !crate::labs::history_stats()
+                || self
+                    .stats
+                    .as_ref()
+                    .is_none_or(|stats| stats.dictations == 0))
+        {
+            self.stats_open = false;
+            changed = true;
+        }
         let Some(store) = self.store.as_ref().filter(|_| visible) else {
-            return answered;
+            return answered || changed;
         };
         let stale = self.search.text != self.searched || self.revision != Some(store.revision());
-        let mut changed = false;
         if stale {
             let previous = std::mem::take(&mut self.entries);
             self.reload_entries();
-            changed = self.entries != previous;
+            changed |= self.entries != previous;
         }
         if changed || self.stats.is_some() != crate::labs::history_stats() {
             self.reload_stats();
             return true;
         }
-        answered
+        answered || changed
     }
 
     /// Takes Transcribe again's answer once its worker sends it.
@@ -229,6 +256,33 @@ impl HistoryPane {
 
     pub(super) fn fixture_empty() -> Self {
         Self::default()
+    }
+
+    /// A representative summary for the stats dialog's snapshots and tests.
+    pub(super) fn fixture_stats() -> HistoryStats {
+        HistoryStats {
+            dictations: 128,
+            words: 1_482,
+            audio_ms: 720_000,
+            words_per_minute: Some(123),
+            changed_by_output: 34,
+            streak_days: 9,
+            active_days: 21,
+            top_apps: vec![
+                AppCount {
+                    application: "Slack".into(),
+                    dictations: 41,
+                },
+                AppCount {
+                    application: "WezTerm".into(),
+                    dictations: 33,
+                },
+                AppCount {
+                    application: "Firefox".into(),
+                    dictations: 27,
+                },
+            ],
+        }
     }
 }
 
@@ -433,7 +487,7 @@ fn delete(ui: &mut Ui, id: u64) {
     }
 }
 
-/// The header actions (retention, Clear all) and the list + detail body.
+/// The header's retention menu and the list + detail body.
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     let pane = &ui.history;
     let actions = header_actions(ui, p, layer);
@@ -445,11 +499,6 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             tr("History could not be loaded."),
             error,
         ));
-    }
-    if ui.settings.labs.history_stats
-        && let Some(stats) = pane.stats.as_ref().filter(|stats| stats.dictations > 0)
-    {
-        notices.push(stats_block(p, stats));
     }
     let searching = !pane.searched.trim().is_empty();
     let body = match empty(ui, p).filter(|_| !searching) {
@@ -495,6 +544,9 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             ld::body(p, "history-body", column, detail(ui, p, layer))
         }
     };
+    if let Some(modal) = stats_modal(ui, p) {
+        layer.extend(modal);
+    }
     (
         actions,
         col()
@@ -506,9 +558,9 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     )
 }
 
-/// Labs › Dictation stats: every retained dictation summed up, above the
-/// list. Shown only while something is retained.
-fn stats_block(p: Paint, stats: &HistoryStats) -> El {
+/// Labs › Dictation stats: every retained dictation summed up, in the
+/// dialog the header's Stats button opens.
+fn stats_lines(p: Paint, stats: &HistoryStats) -> Vec<El> {
     let wpm = stats
         .words_per_minute
         .map_or_else(|| "–".to_owned(), |wpm| wpm.to_string());
@@ -541,71 +593,205 @@ fn stats_block(p: Paint, stats: &HistoryStats) -> El {
             .join(", ");
         lines.push(tr_fill("Top apps: {}", &apps));
     }
-    col()
-        .key("history-stats")
-        .gap(4.0)
-        .px(12.0)
-        .py(10.0)
-        .radius(p.k.radius.md)
-        .fill(p.k.c.layer_01)
-        .child(section_label(p, "label", tr("Dictation stats")))
-        .children(lines.into_iter().enumerate().map(|(index, line)| {
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
             text(line)
                 .key(format!("line{index}"))
                 .font(super::controls::DESCRIPTION)
                 .color(p.muted())
                 .wrap()
-        }))
+        })
+        .collect()
 }
 
-/// Retention as a borderless menu, and Clear all beside it while there is
-/// something to clear.
+/// The stats dialog's scrim and panel, while its button and stats show.
+fn stats_modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
+    if !ui.history.stats_open || !ui.settings.labs.history_stats {
+        return None;
+    }
+    let stats = ui
+        .history
+        .stats
+        .as_ref()
+        .filter(|stats| stats.dictations > 0)?;
+    let c = &p.k.c;
+    let mut panel = col()
+        .key("history-stats-dialog")
+        .role("dialog")
+        .label(tr("Dictation stats"))
+        .w(STATS_WIDTH)
+        .pt(PADDING)
+        .px(PADDING)
+        .pb(14.0)
+        .gap(12.0)
+        .radius(p.k.radius.xl)
+        .fill(c.bg_base)
+        .border(p.hair, c.border_weak)
+        // Presses inside the panel stay inside.
+        .on_press(|_: &mut Ui| {})
+        .child(
+            text(tr("Dictation stats"))
+                .key("title")
+                .font(p.k.ty.body_medium)
+                .color(p.text()),
+        )
+        .children(stats_lines(p, stats))
+        .child(
+            row().key("footer").justify_end().child(
+                button(
+                    p,
+                    "history-stats-close",
+                    tr("Close"),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| close_stats(ui),
+                )
+                .default_button(),
+            ),
+        );
+    for shadow in &p.k.elevation.overlay {
+        panel = panel.box_shadow(*shadow);
+    }
+    let layer = |key: &str| {
+        el().key(key)
+            .role("none")
+            .absolute(0.0, 0.0)
+            .w_full()
+            .h_full()
+    };
+    Some([
+        layer("history-stats-scrim")
+            .fill(c.scrim)
+            .on_press(close_stats)
+            .transition(modal_scrim_transition(p)),
+        layer("history-stats-layer")
+            .center()
+            .transition(modal_transition(p))
+            // Keys stay inside, Escape or a press outside closes, and focus
+            // returns to the Stats button that opened it.
+            .child(panel.modal(true, close_stats)),
+    ])
+}
+
+/// Closes the stats dialog, from its button, Escape, or the scrim.
+pub(super) fn close_stats(ui: &mut Ui) {
+    ui.history.stats_open = false;
+}
+
+/// What the retention menu's trigger says: how long History keeps
+/// dictations, or that it is off.
+fn kept_label(retention: HistoryRetention) -> String {
+    match retention {
+        HistoryRetention::Off => tr("History off").to_string(),
+        HistoryRetention::Forever => tr("Kept forever").to_string(),
+        other => tr_fill("Kept {}", tr(other.label())),
+    }
+}
+
+/// One menu for everything about keeping: how long, Labs › Keep recordings
+/// where that lab shows, and Clear all history… last. Once Clear all is
+/// chosen, the menu gives way to its confirmation until it is answered.
 fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
-    let labels: Vec<&str> = HistoryRetention::ALL
-        .iter()
-        .map(|r| tr(r.label()))
-        .collect();
-    let current = tr_fill("Keep: {}", tr(ui.settings.history_retention.label()));
-    let retention = Select::new("history-retention", &labels)
+    if ui.history.clear_armed {
+        return vec![
+            button(
+                p,
+                "history-confirm-clear",
+                tr("Clear all history"),
+                ButtonKind::Danger,
+                |ui: &mut Ui, _| clear(ui),
+            ),
+            button(
+                p,
+                "history-cancel-clear",
+                tr("Cancel"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| ui.history.clear_armed = false,
+            ),
+        ];
+    }
+    let saved = ui.settings.history_retention;
+    let open = ui.open == Some(Menu::HistoryRetention);
+    let current = kept_label(saved);
+    let trigger = Select::new::<&str>("history-retention-field", &[])
         .appearance(SelectAppearance::Inline)
         .current(Some(&current))
-        .open(ui.open == Some(Menu::HistoryRetention))
+        .open(open)
         .on_toggle(|ui: &mut Ui| {
             ui.open = (ui.open != Some(Menu::HistoryRetention)).then_some(Menu::HistoryRetention);
         })
-        .on_close(|ui: &mut Ui| ui.open = None)
-        .on_choose(|ui: &mut Ui, choice: &str, _: &mut Tx| {
-            if let Some(retention) = HistoryRetention::ALL
-                .into_iter()
-                .find(|r| tr(r.label()) == choice)
-            {
-                set_retention(ui, retention);
-            }
-        })
-        .build(p.k, layer)
+        .trigger(p.k)
         .label(tr("History retention"))
-        .a11y_value(tr(ui.settings.history_retention.label()));
-    let mut actions = vec![retention];
-    if !ui.history.entries.is_empty() || ui.history.clear_armed {
-        actions.push(if ui.history.clear_armed {
-            button(
-                p,
-                "history-clear",
-                tr("Really clear all?"),
-                ButtonKind::Danger,
-                |ui: &mut Ui, _| clear(ui),
-            )
-        } else {
-            button(
-                p,
-                "history-clear",
-                tr("Clear all"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| clear(ui),
-            )
-        });
+        .a11y_value(current.clone());
+    let mut menu = KitMenu::new("history-retention")
+        .trigger(trigger)
+        .placement(Placement::BottomEnd)
+        .gutter(4.0)
+        .min_width(320.0)
+        .open(open)
+        .on_close(|ui: &mut Ui| ui.open = None);
+    for retention in HistoryRetention::ALL {
+        let mut item = MenuItem::new(tr(retention.label())).checked(saved == retention);
+        if retention.is_off() {
+            item = item.description(tr("Keeps no new dictations"));
+        }
+        menu = menu.item(item.on_select(move |ui: &mut Ui| set_retention(ui, retention)));
     }
-    actions
+    let keep_audio = crate::labs::Feature::KeepRecordings;
+    if keep_audio
+        .audience()
+        .reaches(crate::dev_build::is_dev_build())
+        && keep_audio.managed().is_none()
+    {
+        menu = menu.separator().item(
+            MenuItem::new(tr("Keep audio too"))
+                .badge(tr("Lab"))
+                .description(tr("Lets you transcribe a dictation again"))
+                .checked(ui.settings.labs.keep_recordings)
+                .on_select(move |ui: &mut Ui| {
+                    ui.open = None;
+                    let on = !ui.settings.labs.keep_recordings;
+                    ui.update(|settings| keep_audio.set(settings, on));
+                }),
+        );
+    }
+    let nothing = ui.history.entries.is_empty() && ui.history.searched.trim().is_empty();
+    menu = menu.separator().item(
+        MenuItem::new(tr("Clear all history…"))
+            .danger(true)
+            .disabled(nothing)
+            .on_select(|ui: &mut Ui| {
+                ui.open = None;
+                clear(ui);
+            }),
+    );
+    let menu = menu.build(p.k, layer);
+    if ui.settings.labs.history_stats
+        && ui
+            .history
+            .stats
+            .as_ref()
+            .is_some_and(|stats| stats.dictations > 0)
+    {
+        return vec![
+            row()
+                .key("history-actions")
+                .gap(8.0)
+                .child(menu)
+                .child(button(
+                    p,
+                    "history-stats-open",
+                    tr("Stats"),
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| {
+                        ui.open = None;
+                        ui.history.stats_open = true;
+                    },
+                )),
+        ];
+    }
+    vec![menu]
 }
 
 /// Copy as an icon: a row's hover action, or the card's.

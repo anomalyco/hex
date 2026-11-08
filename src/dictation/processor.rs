@@ -318,6 +318,7 @@ impl Profiles {
     pub fn process_cancellable(
         &self,
         transcript: &str,
+        language: &str,
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
     ) -> Processed {
@@ -340,12 +341,19 @@ impl Profiles {
             transcript
         };
         // Labs › Remove filler words, likewise ahead of the corrections.
+        // Only English dictations run it: "er" and "um" are ordinary words
+        // in other languages, and "auto" says nothing about the language.
         let unfilled;
-        let transcript = if crate::labs::filler_words() {
-            unfilled = crate::dictation::filler_words::apply(transcript);
-            unfilled.as_str()
-        } else {
-            transcript
+        let transcript = match crate::dictation::filler_words::strip_if(
+            transcript,
+            language,
+            crate::labs::filler_words(),
+        ) {
+            Some(stripped) => {
+                unfilled = stripped;
+                unfilled.as_str()
+            }
+            None => transcript,
         };
         let corrected = profile
             .replacements
@@ -487,7 +495,7 @@ pub(crate) fn generate_text(
 }
 
 /// One generation from exactly `model`, never another provider's: a failure
-/// is OpenCode's answer for that model (Labs › Choose meeting summary model).
+/// is OpenCode's answer for that model (the meeting summary model).
 pub(crate) fn generate_text_with(
     prompt: &str,
     model: &Model,
@@ -682,14 +690,25 @@ fn forget_ranked_candidates() {
     }
 }
 
-fn ranked_candidates_for(service: &Service) -> Vec<Model> {
+fn ranked_candidates_for(
+    service: &Service,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Vec<Model> {
     if let Ok(guard) = CACHED_RANKED_CANDIDATES.lock()
         && let Some((cached, candidates)) = guard.as_ref()
         && cached == service
     {
         return candidates.clone();
     }
-    let Ok(models) = opencode_api::<ModelsResponse>(service, "/api/model") else {
+    let Ok(models) = opencode_api_within::<ModelsResponse>(
+        service,
+        "/api/model",
+        deadline.min(CATALOG_DEADLINE),
+        cancelled,
+    ) else {
+        // A cancelled or timed-out lookup caches nothing, like any other
+        // catalog failure: the next generation reads it again.
         return Vec::new();
     };
     let catalog = build_model_catalog(models.data, None);
@@ -781,15 +800,17 @@ fn decode_api_response<T: for<'de> Deserialize<'de>>(path: &str, body: &[u8]) ->
 }
 
 fn opencode_api<T: for<'de> Deserialize<'de>>(service: &Service, path: &str) -> Result<T> {
+    opencode_api_within(service, path, CATALOG_DEADLINE, &AtomicBool::new(false))
+}
+
+fn opencode_api_within<T: for<'de> Deserialize<'de>>(
+    service: &Service,
+    path: &str,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<T> {
     let workspace = crate::app_paths::opencode_workspace()?;
-    let response = service.request(
-        "GET",
-        path,
-        None,
-        Some(&workspace),
-        CATALOG_DEADLINE,
-        &AtomicBool::new(false),
-    )?;
+    let response = service.request("GET", path, None, Some(&workspace), deadline, cancelled)?;
     if !(200..300).contains(&response.status) {
         return Err(eyre!("OpenCode {path} answered HTTP {}", response.status));
     }
@@ -918,12 +939,28 @@ fn generate_cancellable(
     if crate::policy::Policy::current().locks(lock) {
         return Err(eyre!(lock.refusal()));
     }
-    let service =
-        crate::desktop::opencode_service::find().map_err(|missing| eyre!(missing.message()))?;
+    // Service discovery and the catalog read spend the generation's own
+    // remaining budget, so a stalled OpenCode falls back by the deadline
+    // instead of adding its fixed lookup timeouts on top.
+    let service = crate::desktop::opencode_service::find_cancellable(
+        remaining_generation_deadline(started, deadline)?,
+        cancelled,
+    );
+    if cancelled.load(Ordering::Acquire) {
+        return Err(eyre!("OpenCode generation was cancelled"));
+    }
+    remaining_generation_deadline(started, deadline)?;
+    let service = service.map_err(|missing| eyre!(missing.message()))?;
     generate_with_candidates(
         prompt,
         model,
-        || ranked_candidates_for(&service),
+        || {
+            ranked_candidates_for(
+                &service,
+                deadline.saturating_sub(started.elapsed()),
+                cancelled,
+            )
+        },
         forget_ranked_candidates,
         started,
         deadline,
@@ -1133,6 +1170,8 @@ fn wait_for_generation_retry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
+
     use url::Url;
 
     #[test]
@@ -1417,6 +1456,7 @@ mod tests {
 
         let processed = profiles.process_cancellable(
             "Use open code.",
+            "en",
             &context("Zed", None),
             &AtomicBool::new(false),
         );
@@ -1448,6 +1488,7 @@ mod tests {
         let profiles = Profiles::new(Profile::new("default", "Rewrite freely.").ai_enabled(true));
         let processed = profiles.process_cancellable(
             "one two three four five",
+            "en",
             &context("Zed", None),
             &AtomicBool::new(false),
         );
@@ -1464,7 +1505,7 @@ mod tests {
         assert!(!retryable_generation_error("processor returned empty text"));
     }
 
-    /// Labs › Choose meeting summary model: a chosen model is the only one
+    /// The meeting summary model: a chosen model is the only one
     /// asked, and its failure is reported rather than another provider tried.
     #[test]
     fn a_chosen_model_is_asked_alone_and_never_falls_back() {
@@ -1512,6 +1553,58 @@ mod tests {
 
         assert!(error.to_string().contains("was cancelled"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// A rewrite with no time left, or one already cancelled, stops before
+    /// asking for a service; nothing may add a fixed lookup timeout on top.
+    #[test]
+    fn a_generation_without_time_or_after_cancellation_fails_promptly() {
+        let started = Instant::now();
+        let error = generate_cancellable(
+            "Rewrite this.",
+            None,
+            Duration::ZERO,
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("exceeded"), "{error}");
+        let error = generate_cancellable(
+            "Rewrite this.",
+            None,
+            Duration::from_secs(1),
+            &AtomicBool::new(true),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("cancelled"), "{error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_cancelled_catalog_lookup_returns_nothing_and_caches_nothing() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let service = crate::desktop::opencode_service::tests::fixture(&url);
+        let started = Instant::now();
+        assert!(
+            ranked_candidates_for(&service, Duration::from_secs(30), &AtomicBool::new(true))
+                .is_empty()
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+        let cached = CACHED_RANKED_CANDIDATES.lock().unwrap();
+        assert!(
+            !cached
+                .as_ref()
+                .is_some_and(|(cached, _)| *cached == service),
+            "a cancelled catalog lookup must not cache its result"
+        );
     }
 
     /// The service fixture answering each `(path, status, body)` POST in order.

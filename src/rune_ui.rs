@@ -36,6 +36,7 @@ mod live_notes;
 pub(crate) mod live_text;
 pub(crate) mod meeting_capsules;
 mod meetings;
+pub(crate) use self::meetings::meeting_import_failed;
 mod meetings_host;
 mod model_details;
 mod model_import;
@@ -357,10 +358,7 @@ fn on_close(ui: &mut Ui, _: &mut Tx) {
     settings::cancel_capture(ui);
     ui.open = None;
     models::close(ui);
-    picker::close(ui);
-    explainer::close(ui);
-    sound_sets::close(ui);
-    vocabulary::close(ui);
+    ui.close_dialogs();
     // HUD Lab's demo would otherwise stay on screen; reopening starts at
     // General, and coming back to HUD Lab starts the demo again.
     if ui.pane == Pane::HudLab {
@@ -408,10 +406,7 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
         Destination::Modes => Pane::Output,
         Destination::History => Pane::History,
     };
-    picker::close(ui);
-    explainer::close(ui);
-    sound_sets::close(ui);
-    vocabulary::close(ui);
+    ui.close_dialogs();
     if pane.shown(ui) {
         ui.select_pane(pane, tx);
     }
@@ -690,11 +685,13 @@ pub(crate) struct Ui {
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     mic_level: general::MicLevel,
+    /// General's search, while Labs › Settings search is on.
+    general_search: TextEdit,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
     labs_open: bool,
-    /// The Labs store's search, tab, chip, and open drawer.
+    /// The Labs store's search, tab, and chip.
     lab_store: labs::Store,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
@@ -809,6 +806,7 @@ impl Ui {
             input_sources_listed_at: f64::NEG_INFINITY,
             microphones_listing: None,
             mic_level: general::MicLevel::default(),
+            general_search: TextEdit::default(),
             advanced: Vec::new(),
             labs_open: false,
             lab_store: labs::Store::default(),
@@ -1106,6 +1104,15 @@ impl Ui {
         }
     }
 
+    /// Closes the dialogs and sheets a pane switch or window close ends.
+    fn close_dialogs(&mut self) {
+        picker::close(self);
+        explainer::close(self);
+        sound_sets::close(self);
+        vocabulary::close(self);
+        history::close_stats(self);
+    }
+
     /// Switches panes at once: the new pane replaces the old without a fade,
     /// already at rest (a grant's morph doesn't replay).
     fn select_pane(&mut self, pane: Pane, tx: &mut Tx) {
@@ -1117,11 +1124,9 @@ impl Ui {
         self.flush_drafts();
         settings::cancel_capture(self);
         self.open = None;
+        self.general_search.clear();
         models::close(self);
-        picker::close(self);
-        explainer::close(self);
-        sound_sets::close(self);
-        vocabulary::close(self);
+        self.close_dialogs();
         self.output.prompt_copied = false;
         if self.pane == Pane::HudLab {
             self.ask(platform::PlatformRequest::EndHudDemo);
@@ -1158,9 +1163,8 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         ui.quit();
         return true;
     }
-    // ⌘F (Ctrl+F off macOS) searches Labs.
-    if event.key == rune::Key::Command('f') && ui.labs_open && !event.mods.shift {
-        labs::focus_search(ui);
+    // ⌘F (Ctrl+F off macOS) searches Labs or General.
+    if general::focus_search_key(ui, event) {
         return true;
     }
     if let rune::Key::Command(digit @ '1'..='9') = event.key
@@ -1169,6 +1173,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         && !ui.explainer.open
         && !ui.sound_sets.open
         && !ui.vocabulary.open
+        && !ui.history.stats_open
         && ui.tour.is_none()
     {
         let index = digit as usize - '1' as usize;
@@ -1192,9 +1197,6 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         true
     } else if ui.picker.open {
         picker::close(ui);
-        true
-    } else if ui.labs_open && ui.lab_store.drawer.is_some() {
-        labs::close_drawer(ui);
         true
     } else if ui.open.is_some() {
         ui.open = None;
@@ -1265,7 +1267,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let mut changed = ui.save_drafts(now);
     changed |= paste_access::poll(ui);
     // The OpenCode catalog is read only while a pane that uses it shows:
-    // Modes, or Labs › Choose meeting summary model's picker.
+    // Modes, or Meetings › Settings while OpenCode writes the summaries.
     changed |= ui.models.poll(
         ui.live()
             && (ui.pane == Pane::Modes || platform_settings::summary_model_shown(ui))
@@ -1289,6 +1291,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
     changed |= model_import::poll(ui);
+    changed |= meetings::poll_import(ui);
     changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
@@ -1447,9 +1450,6 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     }
     if let Some(modal) = vocabulary::modal(ui, p) {
         layer.extend(modal);
-    }
-    if let Some(drawer) = labs::drawer(ui, p) {
-        layer.extend(drawer);
     }
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);

@@ -4,6 +4,7 @@
 //! capsule can place alike; `dictation_indicator` reads the metrics from
 //! `NSScreen` and applies the result.
 
+use crate::app_settings::IndicatorPosition;
 use crate::rune_hud::dot_scope::Placement;
 
 /// The plate's gap under the menu bar: as close as it sits and still
@@ -274,6 +275,20 @@ pub fn ears(screen: &Screen, content: Content) -> Option<Placed> {
     })
 }
 
+/// Labs' notch indicator when `lab` is on and the HUD is shown: [`ears`]'
+/// island on a notched screen, whatever the position setting, or `None`
+/// while Hidden or on a flat screen.
+pub fn notch_placement(
+    lab: bool,
+    position: IndicatorPosition,
+    screen: &Screen,
+    content: Content,
+) -> Option<Placed> {
+    (lab && position != IndicatorPosition::Hidden)
+        .then(|| ears(screen, content))
+        .flatten()
+}
+
 /// The placed plate's top and bottom edges in screen coordinates (y up),
 /// with an island's room below it.
 pub fn plate_span(placed: &Placed, content: Content) -> (f64, f64) {
@@ -428,6 +443,38 @@ mod tests {
         assert_eq!(plate(&placed).1, 982.0 - 16.0);
         // A pretend notch counts as one.
         assert!(ears(&flat().pretending_notch(), CONTENT).is_some());
+    }
+
+    #[test]
+    fn the_notch_indicator_wins_at_top_or_bottom_but_still_needs_a_notch() {
+        let placed =
+            |lab, position, screen: &Screen| notch_placement(lab, position, screen, CONTENT);
+        let ears = ears(&notched(), CONTENT);
+        assert_eq!(
+            placed(true, IndicatorPosition::Top, &notched()),
+            ears,
+            "the top setting keeps the island"
+        );
+        assert_eq!(
+            placed(true, IndicatorPosition::Bottom, &notched()),
+            ears,
+            "the bottom setting gets the island too"
+        );
+        assert_eq!(
+            placed(true, IndicatorPosition::Hidden, &notched()),
+            None,
+            "hidden still hides"
+        );
+        assert_eq!(
+            placed(true, IndicatorPosition::Top, &flat()),
+            None,
+            "a flat screen keeps its position setting"
+        );
+        assert_eq!(
+            placed(false, IndicatorPosition::Top, &notched()),
+            None,
+            "the lab off changes nothing"
+        );
     }
 
     #[test]

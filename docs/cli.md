@@ -77,7 +77,7 @@ hex
 │   └── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
 ├── screenshot [--pick]           Labs (macOS): shoot the display under the pointer and print the PNG's path; --pick opens the ⌘⇧4 picker
 ├── labs [on|off <feature>]       list Labs features or turn one on/off; edits settings.json (features/labs.md)
-│   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens that lab's drawer in Hex's Labs page
+│   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens Hex's Labs page on that lab's group
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (macOS: installed Hex.app only; Windows Run key; Linux XDG autostart)
 └── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
@@ -456,6 +456,11 @@ observe input-source changes or show these controls.
   older ones stay until you choose). Hex moves meetings that ended longer
   ago than that to the Trash at launch and hourly, Meetings on or off, and
   `hex meetings` and `hex mcp` no longer list them.
+- `meetings.audio_retention` is `day`, `week`, `month`, `forever`, or `none`
+  (the default). With Labs › Expire meeting audio separately on, a finished
+  meeting's WAVs move to the Trash on that window while its transcript,
+  notes, summary, and Markdown stay; `none` follows `meetings.retention`.
+  With the lab off it does nothing.
 - `transcription.model` and `transcription.language` are read-only here: use
   `hex model use`. `transcription_recents` and `meetings.calendar.connected`
   are read-only (connecting a calendar asks macOS for access from Settings).
@@ -472,10 +477,9 @@ Writable keys: `release_microphone_while_idle`,
 `second_dictation_hotkey`, `labs.second_dictation_shortcut`, `labs.standalone_special_keys`, `show_dock_icon`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,
 `history_retention`, `meetings.enabled`,
-`meetings.output_folder`, `meetings.summarize_with_apple_intelligence`,
-`meetings.summarize_with_opencode`,
+`meetings.output_folder`, `meetings.summaries`, `meetings.opencode_model`,
 `meetings.show_recording_indicator`, `meetings.recording_indicator_corner`,
-`meetings.retention`, `meetings.providers`, `meetings.calendar.excluded_calendars`,
+`meetings.retention`, `meetings.audio_retention`, `meetings.providers`, `meetings.calendar.excluded_calendars`,
 `meetings.calendar.remind`, `meetings.calendar.lead_minutes`,
 `experimental.hex_microphone`, `experimental.hex_microphone_mode`,
 `experimental.hex_microphone_comfort_noise`,
@@ -488,6 +492,14 @@ comma-separated, and `set` (or `apply`) adds the comma-separated names to it;
 `list` leaves the key out. Model listings keep `supports_recognition_hints`
 (true where the model reads the vocabulary as its prompt) beside the newer
 `vocabulary`: `prompt`, `bias`, or `none`.
+
+`meetings.summaries` chooses who titles and summarizes meetings: `off`, `mac`
+(Apple Intelligence; nothing leaves this Mac, and nothing falls back to
+OpenCode), or `opencode` (sends the transcript to `meetings.opencode_model`,
+or a fast model Hex picks when that is `none`). Off a Mac it is `off` or
+`opencode`. The retired `meetings.summarize_with_apple_intelligence` and
+`meetings.summarize_with_opencode` are refused with the `meetings.summaries`
+command to use instead.
 
 A test (`control::settings::tests::every_persisted_setting_has_a_cli_key`)
 fails when a new persisted setting has no key here.

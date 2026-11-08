@@ -39,6 +39,7 @@ impl LocalMeetings {
                 crate::meeting::runtime::request(Controller::Start { title: None })
             }
             MeetingRequest::Stop => crate::meeting::runtime::request(Controller::Stop),
+            MeetingRequest::Import(_) => Err("Importing audio is only available on macOS.".into()),
             MeetingRequest::Summarize(id) => {
                 crate::meeting::runtime::request(Controller::Summarize(id))
             }
@@ -46,8 +47,10 @@ impl LocalMeetings {
                 .map(|_| ())
                 .map_err(failed),
             MeetingRequest::Trash(id) => crate::meeting::trash(&id).map_err(failed),
-            MeetingRequest::Reveal(id) => {
-                crate::meeting::reveal(&crate::meeting::root().map_err(failed)?.join(id));
+            MeetingRequest::Reveal(target) => {
+                // Explorer selects the exported Markdown; Linux opens the
+                // folder that holds it.
+                crate::meeting::reveal(target.path());
                 Ok(())
             }
             MeetingRequest::RevealFolder => {
@@ -120,16 +123,21 @@ impl MeetingFeed {
         };
         let scan = library.scan().map_err(|error| format!("{error:#}"))?;
         let now_ms = crate::desktop::events::now_ms();
+        let root = library.root();
         Ok(scan
             .meetings
             .iter()
-            .map(|meeting| pane_meeting(meeting, now_ms))
+            .map(|meeting| pane_meeting(meeting, root, now_ms))
             .collect())
     }
 }
 
 /// A stored meeting as the pane shows it.
-fn pane_meeting(meeting: &crate::meeting::query::Meeting, now_ms: u64) -> Meeting {
+fn pane_meeting(
+    meeting: &crate::meeting::query::Meeting,
+    root: &std::path::Path,
+    now_ms: u64,
+) -> Meeting {
     use crate::meeting::MeetingStatus;
     let manifest = &meeting.manifest;
     let transcript = if meeting.entries.is_empty() && !meeting.warnings.is_empty() {
@@ -137,6 +145,7 @@ fn pane_meeting(meeting: &crate::meeting::query::Meeting, now_ms: u64) -> Meetin
     } else {
         Transcript::Loaded(turns(&meeting.entries))
     };
+    let folder = root.join(&meeting.id);
     Meeting {
         id: meeting.id.clone(),
         title: meeting.title(),
@@ -158,15 +167,14 @@ fn pane_meeting(meeting: &crate::meeting::query::Meeting, now_ms: u64) -> Meetin
             .map(|notes| notes.summary.clone())
             .filter(|summary| !summary.is_empty()),
         notes_running: crate::meeting::notes_in_progress(&meeting.id),
-        has_markdown: manifest
-            .export_path
-            .as_ref()
-            .is_some_and(|path| path.exists()),
+        reveal: crate::meeting::RevealTarget::for_meeting(manifest, &folder),
+        folder,
         error: manifest.error.clone(),
         export_error: manifest.export_error.clone(),
         notes_error: manifest.notes_error.clone(),
         live_error: manifest.live_transcription_error.clone(),
         transcript,
+        imported: manifest.imported,
         // Sections come from the transcript lines, not the merged turns, as
         // the menu bar and `hex meetings show --chapter` read them.
         kept_for: (!meeting.status.is_active())
@@ -286,7 +294,7 @@ mod tests {
         let library = crate::meeting::query::Library::new(&root);
         let meeting = library.meeting(id).unwrap();
         let now_ms = crate::desktop::events::now_ms();
-        let pane = pane_meeting(&meeting, now_ms);
+        let pane = pane_meeting(&meeting, &root, now_ms);
         let chapters = &meeting.manifest.chapters;
         for (index, chapter) in pane.chapters.iter().enumerate() {
             // The menu bar's Copy Section (`meeting::section_for_id`).
