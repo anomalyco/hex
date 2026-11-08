@@ -136,8 +136,10 @@ menu bar's Paste Last Dictation does nothing in that case.
 
 `typed-text` (Linux) runs the same job as Labs › Transform typed text's
 shortcut, for desktops without the shortcuts portal. It needs a listening Hex
-and the lab on (`disabled` when it is off), and sends Ctrl+A and Ctrl+C, so it
-is not meant for terminals.
+and the lab on (`disabled` when it is off), and refuses while Terminal paste
+shortcut is on (`disabled`), because its Ctrl+V would become Ctrl+Shift+V. It
+sends Ctrl+A and Ctrl+C, so it is not meant for terminals. While a capture
+records or finishes, it answers done but the listener drops the job.
 
 `model import`, `rename`, `repair`, and `remove` run in this process on every
 OS; `hex models` is an alias for `hex model`. An import's id is `custom-` and

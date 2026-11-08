@@ -105,10 +105,18 @@ impl crate::control::host::Host for LinuxControl {
     }
 
     fn typed_text(&self) -> std::result::Result<(), ControlError> {
-        if !self.state()?.settings.labs.typed_text {
+        let settings = self.state()?.settings;
+        if !settings.labs.typed_text {
             return Err(ControlError::new(
                 "disabled",
                 "Labs › Transform typed text is off; turn it on with `hex labs on typed-text`",
+            ));
+        }
+        if settings.paste_with_shift {
+            return Err(ControlError::new(
+                "disabled",
+                "Terminal paste shortcut is on, so typed text would send Ctrl+Shift+V; turn it \
+                 off in Settings › General first",
             ));
         }
         self.shortcut(ShortcutCommand::TypedText)

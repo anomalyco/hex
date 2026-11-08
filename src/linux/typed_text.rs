@@ -18,7 +18,7 @@ use crate::linux::paste::LinuxPaster;
 /// The job polls until text appears, so a fast app is not held back.
 const COPY_DEADLINE: Duration = Duration::from_millis(500);
 /// How often the job re-reads the clipboard while it waits.
-const COPY_POLL: Duration = Duration::from_millis(20);
+const COPY_POLL: Duration = Duration::from_millis(100);
 /// Typed text has no spoken language. The only language-sensitive step is
 /// the dictation-only filler-word filter, which skips typed text, so this
 /// value never changes the result.
@@ -103,6 +103,16 @@ pub(crate) fn run(
     transformations: &crate::personal_commands::TransformationClient,
     stop: &AtomicBool,
 ) -> Result<()> {
+    if paster.pastes_with_shift() {
+        tracing::info!(
+            "refusing typed text while the terminal-paste shortcut is on; it would send Ctrl+Shift+V"
+        );
+        return Err(eyre!(
+            "Transform typed text is unavailable while Terminal paste shortcut is on: its \
+             Ctrl+V would become Ctrl+Shift+V. Turn Terminal paste shortcut off in Settings › \
+             General and try again."
+        ));
+    }
     run_with(
         paster,
         |text| {
@@ -142,11 +152,9 @@ where
 {
     // Clear before every copy, whatever the snapshot did: a Ctrl+C the
     // target ignores must not leave older clipboard text looking like the
-    // selection. A failed clear means the copy cannot be trusted, so the
-    // job stops before it reads or pastes anything.
-    clipboard
-        .clear()
-        .wrap_err("could not clear the clipboard before copying the selection")?;
+    // selection. A clear that fails or leaves text means the copy cannot be
+    // trusted, so the job stops before it reads or pastes anything.
+    clear(clipboard, "before copying the selection")?;
     clipboard.select_all()?;
     clipboard.copy_selection()?;
     let Some(text) = wait_for_text(clipboard, stop)? else {
@@ -163,9 +171,7 @@ where
 
     // The selection must still be the text copied before processing: typing
     // over it or switching windows changes what a fresh Ctrl+C returns.
-    clipboard
-        .clear()
-        .wrap_err("could not clear the clipboard before re-copying the selection")?;
+    clear(clipboard, "before re-copying the selection")?;
     clipboard.copy_selection()?;
     let recopied = wait_for_text(clipboard, stop)?;
     if !selection_unchanged(&text, recopied.as_deref()) {
@@ -183,6 +189,22 @@ where
             }
         }
         None => clipboard.paste(replacement)?,
+    }
+    Ok(())
+}
+
+/// Clears the clipboard and proves it: a copy the target ignores could
+/// otherwise read text the clear left behind. One read is enough; a clear
+/// that failed to empty it is not worth polling.
+fn clear<C: ClipboardJob>(clipboard: &mut C, when: &str) -> Result<()> {
+    clipboard
+        .clear()
+        .wrap_err_with(|| format!("could not clear the clipboard {when}"))?;
+    if clipboard
+        .clipboard_text()?
+        .is_some_and(|text| !text.is_empty())
+    {
+        return Err(eyre!("the clipboard still held text {when}"));
     }
     Ok(())
 }
@@ -240,6 +262,7 @@ mod tests {
         copies: VecDeque<Option<String>>,
         snapshot_available: bool,
         clear_fails: bool,
+        clear_leaves_text: bool,
         paste_fails: bool,
         clears: usize,
         selects: usize,
@@ -260,6 +283,7 @@ mod tests {
                 copies: VecDeque::new(),
                 snapshot_available: true,
                 clear_fails: false,
+                clear_leaves_text: false,
                 paste_fails: false,
                 clears: 0,
                 selects: 0,
@@ -290,7 +314,9 @@ mod tests {
             if self.clear_fails {
                 return Err(eyre!("the test clear failed"));
             }
-            self.clipboard = None;
+            if !self.clear_leaves_text {
+                self.clipboard = None;
+            }
             Ok(())
         }
 
@@ -393,6 +419,26 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(fake.selects, 0, "nothing is selected after a failed clear");
+        assert_eq!(fake.copy_calls, 0);
+        assert!(fake.pasted.is_empty());
+        assert_eq!(fake.restored, [original]);
+    }
+
+    /// A clear that reports success but leaves text behind cannot be
+    /// trusted: abort before selecting, copying, or pasting.
+    #[test]
+    fn a_clear_that_leaves_text_aborts_before_copying() {
+        let mut fake = Fake::new().copies(&[Some("typed")]);
+        fake.clear_leaves_text = true;
+        let original = fake.original();
+        let result = run_with(
+            &mut fake,
+            |text| format!("{text}."),
+            &AtomicBool::new(false),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(fake.selects, 0);
         assert_eq!(fake.copy_calls, 0);
         assert!(fake.pasted.is_empty());
         assert_eq!(fake.restored, [original]);

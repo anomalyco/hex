@@ -101,14 +101,17 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        formatting, spoken symbols, and filler words), clears and re-copies to confirm the selection still holds
 │                                        that text, then pastes the result over it and restores the clipboard 500 ms later unless a newer copy
 │                                        replaced it. A failed paste restores it too. Select-all replaces the whole field; on GNOME text is read
-│                                        through wl-paste and cleared through wl-copy --clear. It sends Ctrl+A/Ctrl+C, so it is not meant for
-│                                        terminals.
+│                                        through wl-paste and cleared through wl-copy --clear. A clear that leaves text behind aborts.
+│                                        It sends Ctrl+A/Ctrl+C, so it is not meant for terminals, and refuses before any key while
+│                                        Terminal paste shortcut is on, because its Ctrl+V would become Ctrl+Shift+V.
 │                                        // checks: typed_text_is_its_own_bit_and_off_by_default (labs.rs), the shortcut's rules
 │                                        // (app_settings.rs), typed_text_fires_only_while_idle_and_changes_no_capture_state (linux/input.rs),
 │                                        // typed_text_skips_the_dictation_only_labs (dictation/processor.rs),
 │                                        // typed_text_joins_the_commands_only_while_its_lab_is_on (linux/gnome_shortcuts.rs), the fake-backed
 │                                        // typed-text job tests and a_changed_second_copy_aborts_the_replacement (linux/typed_text.rs),
-│                                        // a_new_clipboard_job_adopts_the_pending_restore (linux/paste.rs); not observed with a real shortcut
+│                                        // a_new_clipboard_job_adopts_the_pending_restore and
+│                                        // a_failed_dictation_paste_leaves_the_transcript_on_the_clipboard (linux/paste.rs),
+│                                        // the_gnome_shortcut_key_tracks_typed_text (linux/app.rs); not observed with a real shortcut
 │                                        // and target application
 ├── Floating meeting capsules on GNOME no labs.gnome_meeting_capsules (Linux) on a Wayland desktop without layer-shell (GNOME), the recording offer and
 │                                        recording capsule open on XWayland (Rune xwayland_input: override-redirect, clicks in the input shape, never keyboard

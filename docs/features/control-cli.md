@@ -39,8 +39,10 @@ Agent or terminal                                  // control.cli; every OS
 │   └── Recording or shortcut gesture in progress -> busy (menu bar: nothing)
 ├── hex typed-text (Linux) -> the Transform typed text shortcut's one job
 │   ├── Labs › Transform typed text off -> disabled
+│   ├── Terminal paste shortcut on -> disabled (it would send Ctrl+Shift+V)
 │   ├── Setup gates the listener -> not-ready
-│   └── Recording or shortcut gesture in progress -> busy
+│   └── Recording, a pending start, or a capture still finishing -> done,
+│       but the listener drops the job: no keys are sent and no state changes
 ├── hex meetings record [--title] | stop | copy-last
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording

@@ -53,11 +53,13 @@ Hex could not snapshot the clipboard, the result stays on it. Without
 data-control on GNOME, text is read through `wl-paste`, the clipboard is
 cleared through `wl-copy --clear`, and a result Hex could not snapshot stays
 on the clipboard. Because it sends Ctrl+A and Ctrl+C, it is not meant for
-terminals. Select-all replaces the whole field, so mixed formatting is not
-preserved, and on GNOME `wl-paste` may briefly take focus. With the lab off,
-Output and the listener are unchanged and the shortcut is not registered;
-`hex typed-text` runs the same job from a desktop keybinding, and refuses
-clearly when the lab is off or Hex isn't listening.
+terminals. With **Terminal paste shortcut** on, it refuses before sending any
+key: its Ctrl+V would become Ctrl+Shift+V. Select-all replaces the whole
+field, so mixed formatting is not preserved, and on GNOME `wl-paste` may
+briefly take focus. With the lab off, Output and the listener are unchanged
+and the shortcut is not registered; `hex typed-text` runs the same job from a
+desktop keybinding, and refuses clearly when the lab is off, Terminal paste
+shortcut is on, or Hex isn't listening.
 
 For Nix/NixOS, use the [Nix guide](nix.md). Nix owns updates to that installation;
 Hex's signed updater owns only the direct-install layout below.

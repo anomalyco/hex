@@ -79,6 +79,14 @@ impl Restore {
             None
         }
     }
+
+    /// A failed paste leaves the clipboard as it is. An ordinary paste keeps
+    /// its transcript there for Ctrl+V, and a typed-text job restores the
+    /// original it saved itself.
+    fn failed(&mut self) {
+        self.inserted = None;
+        self.original = None;
+    }
 }
 
 enum Backend {
@@ -445,6 +453,12 @@ impl LinuxPaster {
         self.selection.current().text()
     }
 
+    /// Whether Terminal paste shortcut is on. It turns every paste's Ctrl+V
+    /// into Ctrl+Shift+V, so a typed-text replacement cannot use it.
+    pub(crate) fn pastes_with_shift(&self) -> bool {
+        self.paste_with_shift.load(Ordering::Relaxed)
+    }
+
     /// Puts a [`Self::begin_clipboard_job`] snapshot back.
     pub(crate) fn restore(&self, snapshot: Snapshot) -> Result<()> {
         self.selection.current().restore(snapshot)
@@ -491,7 +505,6 @@ impl LinuxPaster {
         let selection = self.selection.current();
         let mut state = restore.lock().unwrap_or_else(PoisonError::into_inner);
         state.generation = state.generation.wrapping_add(1);
-        let caller_restores = original.is_some();
         // A paste before the previous one restored keeps that one's original.
         let previous_pending = state
             .inserted
@@ -516,19 +529,9 @@ impl LinuxPaster {
             state.inserted = Some((mime, bytes.to_vec()));
             schedule_restore(restore.clone(), state.generation, selection);
         } else {
-            state.inserted = None;
-            // A failed paste may still have taken the clipboard. Put the
-            // previous clipboard back rather than leave the transcript
-            // there; a typed-text job restores the original it passed in.
-            if let Some(original) = state.original.take()
-                && !caller_restores
-                && let Err(error) = selection.restore(original)
-            {
-                tracing::warn!(
-                    error = format!("{error:#}"),
-                    "could not restore the clipboard after a failed paste"
-                );
-            }
+            // A paste that only reached the clipboard leaves the transcript
+            // there for Ctrl+V; a typed-text job restores its own original.
+            state.failed();
         }
         drop(state);
         // Give the target time to request the selection before the next queued
@@ -914,6 +917,26 @@ mod tests {
         assert!(restore.inserted.is_none());
         assert!(restore.original.is_none());
         assert_eq!(restore.begin(true), None);
+    }
+
+    /// A dictation paste that only reached the clipboard leaves its
+    /// transcript there for Ctrl+V: nothing is put back over it.
+    #[test]
+    fn a_failed_dictation_paste_leaves_the_transcript_on_the_clipboard() {
+        let mut restore = Restore {
+            generation: 2,
+            original: Some(Snapshot::Wayland(vec![(
+                "text/plain;charset=utf-8".into(),
+                b"before the dictation".to_vec(),
+            )])),
+            inserted: Some((Mime::Text, b"the dictation".to_vec())),
+        };
+        restore.failed();
+        assert!(
+            restore.original.is_none(),
+            "nothing is restored over the transcript"
+        );
+        assert!(restore.inserted.is_none());
     }
 
     /// If something newer replaced the transcript, a new job snapshots that

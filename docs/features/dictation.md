@@ -321,11 +321,14 @@ Output > Typed text                        // labs.md
 │       └── Clear (trash) or `hex settings set typed_text_hotkey none` -> unbound
 ├── Settings -> saved to settings.json as typed_text_hotkey
 └── Shortcut pressed while idle, or `hex typed-text` -> one job on the output worker
+    ├── Terminal paste shortcut on -> refused before any key: its Ctrl+V would
+    │   become Ctrl+Shift+V; the job logs why and sends nothing
     ├── take the clipboard for the job: cancel any paste restore still pending
     │   and keep the clipboard that paste replaced, else snapshot it now
     ├── clear the clipboard, then Ctrl+A and Ctrl+C in the focused app
     │   ├── GNOME without data-control clears through `wl-copy --clear`
-    │   └── a clear that fails aborts before copying, and restores
+    │   └── a clear that fails, or leaves text behind, aborts before copying
+    │       and restores
     ├── poll the clipboard for text, up to 500 ms, honoring Cancel
     ├── read the selection as text/plain, bounded to 1 MiB and one second
     ├── no text, or only whitespace -> error tone, clipboard restored, nothing pasted
@@ -355,14 +358,18 @@ and `transformation_context_names_its_source` ([processor.rs](../../src/dictatio
 ([gnome_shortcuts.rs](../../src/linux/gnome_shortcuts.rs)); the fake-backed
 `an_ignored_copy_pastes_nothing_and_restores_the_clipboard`,
 `an_ignored_second_copy_pastes_nothing`, `text_changed_between_copies_pastes_nothing`,
-`a_failed_clear_aborts_before_copying_or_pasting`, `a_failed_paste_restores_the_original`,
+`a_failed_clear_aborts_before_copying_or_pasting`,
+`a_clear_that_leaves_text_aborts_before_copying`, `a_failed_paste_restores_the_original`,
 `success_pastes_the_result_and_hands_over_the_original`,
 `unchanged_processing_pastes_nothing_and_restores`,
 `a_job_without_a_snapshot_still_clears_and_pastes`, and
 `a_changed_second_copy_aborts_the_replacement`
-([typed_text.rs](../../src/linux/typed_text.rs)); and
-`a_new_clipboard_job_adopts_the_pending_restore`
-([paste.rs](../../src/linux/paste.rs)). Known limits: select-all replaces the
+([typed_text.rs](../../src/linux/typed_text.rs));
+`a_new_clipboard_job_adopts_the_pending_restore`,
+`a_changed_clipboard_is_not_replaced_by_a_pending_restore`, and
+`a_failed_dictation_paste_leaves_the_transcript_on_the_clipboard`
+([paste.rs](../../src/linux/paste.rs)); and `the_gnome_shortcut_key_tracks_typed_text`
+([app.rs](../../src/linux/app.rs)). Known limits: select-all replaces the
 whole field, so a field with mixed formatting loses it; on GNOME the clipboard
 text is read through `wl-paste`, which may briefly take focus. Proof limits: no
 shortcut press against a real target application was run; the flow is covered
