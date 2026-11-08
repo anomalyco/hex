@@ -1078,6 +1078,9 @@ Model advertises streaming, GPU device             // dictate.streaming
   │   no hint) follows without a badge: on FLEURS test it trailed Parakeet
   │   Unified/v3 in every European language and tied Whisper turbo in Japanese
   │   (5.04% CER against 5.02%), Hex's run (#1252)
+  ├── Orukeet: Oruk AI's Parakeet v3 fine-tune (740 MB, no hint) follows without
+  │   a badge; 1.86% WER on LibriSpeech test-clean from transcribe.cpp's
+  │   published conversion benchmark, with its FLEURS figures in Details
   └── Every other available model follows without a badge, selectable and
       deletable; never auto-switched or auto-downloaded (setup.language-select)
 ```

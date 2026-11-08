@@ -956,6 +956,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Almost any language, and it reads your vocabulary", "Quase qualquer idioma, e lê seu vocabulário"),
     ("The English model before Parakeet Unified", "O modelo de inglês anterior ao Parakeet Unified"),
     ("25 European languages, and it hears which one you speak", "25 idiomas europeus, e reconhece qual você fala"),
+    ("A Parakeet v3 fine-tune, a bit more accurate in 20 of its 25 languages", "Um ajuste do Parakeet v3, um pouco mais preciso em 20 dos seus 25 idiomas"),
     ("Parakeet v3, retrained for fewer wrong words", "Parakeet v3, retreinado para menos palavras erradas"),
     ("Chinese and 29 more, and it reads your vocabulary", "Chinês e mais 29, e lê seu vocabulário"),
     ("Egyptian Arabic, mixed with English", "Árabe egípcio, misturado com inglês"),

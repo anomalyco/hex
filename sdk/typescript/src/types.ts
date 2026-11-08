@@ -2,6 +2,7 @@ export const MODEL_IDS = [
   "parakeet_unified_en",
   "parakeet_v2",
   "parakeet_v3",
+  "orukeet",
   "whisper_large_v3_turbo",
   "qwen3_asr06_b",
   "qwencleo_asr_1_7b",
