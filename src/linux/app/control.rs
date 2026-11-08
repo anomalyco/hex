@@ -104,6 +104,16 @@ impl crate::control::host::Host for LinuxControl {
         self.shortcut(ShortcutCommand::PasteLast)
     }
 
+    fn typed_text(&self) -> std::result::Result<(), ControlError> {
+        if !self.state()?.settings.labs.typed_text {
+            return Err(ControlError::new(
+                "disabled",
+                "Labs › Transform typed text is off; turn it on with `hex labs on typed-text`",
+            ));
+        }
+        self.shortcut(ShortcutCommand::TypedText)
+    }
+
     fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
         self.host
             .save_settings(settings)

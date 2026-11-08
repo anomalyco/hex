@@ -98,6 +98,9 @@ pub enum ControlCommand {
         raw: bool,
     },
     PasteLast,
+    /// Labs › Transform typed text (Linux): runs the focused field's text
+    /// through its Output steps and replaces it, as its shortcut does.
+    TypedText,
     /// Labs › Screenshots (macOS): the display under the pointer, or with
     /// `pick` the picker its shortcut opens.
     Screenshot {
@@ -1071,6 +1074,7 @@ mod tests {
                 raw: true,
             },
             ControlCommand::PasteLast,
+            ControlCommand::TypedText,
             ControlCommand::Screenshot { pick: false },
             ControlCommand::Screenshot { pick: true },
             ControlCommand::MeetingRecord {

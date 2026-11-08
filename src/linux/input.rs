@@ -297,6 +297,8 @@ pub(crate) enum ShortcutCommand {
     /// `hex dictation cancel`: discards whatever records, in any mode.
     DictationCancel,
     PasteLast,
+    /// `hex typed-text`: the typed-text shortcut's one job.
+    TypedText,
     /// `hex dictation start --raw` and `toggle --raw`.
     DictationStartRaw,
     DictationToggleRaw,
@@ -847,9 +849,11 @@ impl ShortcutState {
             }
             Input::Released(Shortcut::PasteLast) => None,
             // The typed-text job owns no capture state: pressing its shortcut
-            // while idle asks for one job, and while recording it does
-            // nothing at all.
-            Input::Pressed(Shortcut::TypedText) => self.idle().then_some(HotkeyEvent::TypedText),
+            // or sending `hex typed-text` while idle asks for one job, and
+            // while recording it does nothing at all.
+            Input::Pressed(Shortcut::TypedText) | Input::Command(ShortcutCommand::TypedText) => {
+                self.idle().then_some(HotkeyEvent::TypedText)
+            }
             Input::Released(Shortcut::TypedText) => None,
             Input::Pressed(Shortcut::Capture) => Some(HotkeyEvent::Capture),
             Input::Released(Shortcut::Capture) => Some(HotkeyEvent::CaptureUp),
@@ -864,7 +868,9 @@ impl ShortcutState {
                     self.stop_dictation().or_else(|| self.start_dictation(true))
                 }
                 ShortcutCommand::DictationCancel => self.cancel(),
-                ShortcutCommand::PasteLast => unreachable!("handled above"),
+                ShortcutCommand::PasteLast | ShortcutCommand::TypedText => {
+                    unreachable!("handled above")
+                }
             },
         }
     }
@@ -2319,13 +2325,19 @@ mod tests {
         let mut test = Test::new(true);
         test.press(Shortcut::TypedText);
         test.release(Shortcut::TypedText);
-        assert_eq!(test.events, [HotkeyEvent::TypedText]);
+        test.command(Command::TypedText);
+        assert_eq!(
+            test.events,
+            [HotkeyEvent::TypedText, HotkeyEvent::TypedText]
+        );
         assert_eq!(test.state.capture, Capture::Idle);
-        // Recording owns the shortcut: no job and no state change.
+        // Recording owns the shortcut and `hex typed-text`: no job and no
+        // state change.
         test.press(Shortcut::Dictation);
         test.events.clear();
         test.press(Shortcut::TypedText);
         test.release(Shortcut::TypedText);
+        test.command(Command::TypedText);
         assert!(test.events.is_empty());
         assert!(matches!(test.state.capture, Capture::Held { .. }));
         assert_eq!(

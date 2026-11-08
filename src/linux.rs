@@ -294,6 +294,7 @@ mod tests {
             &["hex", "status", "--json"][..],
             &["hex", "dictation", "stop", "--print"],
             &["hex", "paste-last"],
+            &["hex", "typed-text"],
             &["hex", "settings", "set", "sound_effects", "off"],
             &["hex", "model", "use", "parakeet_v3", "--language", "pl"],
             &["hex", "model", "install"],

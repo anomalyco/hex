@@ -18,7 +18,7 @@ use x11rb::rust_connection::RustConnection;
 
 use crate::linux::clipboard::{Selection, Snapshot};
 use crate::linux::input::{
-    KEY_PRESS, KEY_RELEASE, ShortcutKeys, XK_CONTROL_L, XK_SHIFT_L, connect_x11,
+    KEY_PRESS, KEY_RELEASE, Keymap, ShortcutKeys, XK_CONTROL_L, XK_SHIFT_L, connect_x11,
 };
 use crate::linux::remote_desktop::RemoteDesktop;
 use crate::linux::session::LinuxSession;
@@ -61,6 +61,24 @@ struct Restore {
     original: Option<Snapshot>,
     /// What the latest paste put on the clipboard, until it restores.
     inserted: Option<(Mime, Vec<u8>)>,
+}
+
+impl Restore {
+    /// Starts a job that shares the clipboard: cancels the pending restore,
+    /// and hands back the clipboard that paste replaced when the clipboard
+    /// still holds that paste (`pending_holds`), as a second paste would keep
+    /// it. The job owns the original from here; a changed clipboard is read
+    /// afresh instead.
+    fn begin(&mut self, pending_holds: bool) -> Option<Snapshot> {
+        self.generation = self.generation.wrapping_add(1);
+        self.inserted = None;
+        if pending_holds {
+            self.original.take()
+        } else {
+            self.original = None;
+            None
+        }
+    }
 }
 
 enum Backend {
@@ -378,7 +396,48 @@ impl LinuxPaster {
     /// Empties the clipboard, so a copy that the focused app ignores cannot
     /// leave older text looking like a fresh selection.
     pub(crate) fn clear_clipboard(&self) -> Result<()> {
-        self.selection.current().restore(Snapshot::Empty)
+        let selection = self.selection.current();
+        // GNOME offers neither data-control protocol, so only wl-copy can
+        // clear its clipboard; restoring an empty selection would fail.
+        if selection == Selection::Wayland
+            && crate::linux::clipboard::wayland_without_data_control()
+        {
+            require_wl_copy()?;
+            let mut clear = Command::new(WL_COPY);
+            clear.arg("--clear");
+            return run_helper(clear, &[], &self.stop, HELPER_TIMEOUT)
+                .wrap_err("could not clear the Wayland clipboard; install wl-clipboard");
+        }
+        selection.restore(Snapshot::Empty)
+    }
+
+    /// Starts a job that owns the clipboard until it restores: cancels any
+    /// pending paste restore, adopts the clipboard that paste replaced when
+    /// there is one, or snapshots the clipboard now. `None` when Hex cannot
+    /// read it; the job still runs, and its result stays on the clipboard.
+    pub(crate) fn begin_clipboard_job(&mut self) -> Result<Option<Snapshot>> {
+        let selection = self.selection.current();
+        let mut state = self.restore.lock().unwrap_or_else(PoisonError::into_inner);
+        // The lock keeps a scheduled restore from putting its original back
+        // between this cancel and the snapshot. Only a clipboard that still
+        // holds the earlier paste keeps that paste's original.
+        let pending_holds = state
+            .inserted
+            .as_ref()
+            .is_some_and(|(mime, bytes)| selection.holds(mime.wayland(), bytes));
+        if let Some(original) = state.begin(pending_holds) {
+            return Ok(Some(original));
+        }
+        match selection.snapshot() {
+            Ok(snapshot) => Ok(Some(snapshot)),
+            Err(error) => {
+                tracing::info!(
+                    error = format!("{error:#}"),
+                    "not restoring the clipboard after this typed-text job"
+                );
+                Ok(None)
+            }
+        }
     }
 
     /// The clipboard's plain text, bounded and within the read deadline.
@@ -386,12 +445,7 @@ impl LinuxPaster {
         self.selection.current().text()
     }
 
-    /// The whole clipboard, for a job that must put it back afterwards.
-    pub(crate) fn snapshot(&self) -> Result<Snapshot> {
-        self.selection.current().snapshot()
-    }
-
-    /// Puts a [`Self::snapshot`] back.
+    /// Puts a [`Self::begin_clipboard_job`] snapshot back.
     pub(crate) fn restore(&self, snapshot: Snapshot) -> Result<()> {
         self.selection.current().restore(snapshot)
     }
@@ -437,6 +491,7 @@ impl LinuxPaster {
         let selection = self.selection.current();
         let mut state = restore.lock().unwrap_or_else(PoisonError::into_inner);
         state.generation = state.generation.wrapping_add(1);
+        let caller_restores = original.is_some();
         // A paste before the previous one restored keeps that one's original.
         let previous_pending = state
             .inserted
@@ -461,8 +516,19 @@ impl LinuxPaster {
             state.inserted = Some((mime, bytes.to_vec()));
             schedule_restore(restore.clone(), state.generation, selection);
         } else {
-            // A paste that only reached the clipboard leaves it for Ctrl+V.
-            state.original = None;
+            state.inserted = None;
+            // A failed paste may still have taken the clipboard. Put the
+            // previous clipboard back rather than leave the transcript
+            // there; a typed-text job restores the original it passed in.
+            if let Some(original) = state.original.take()
+                && !caller_restores
+                && let Err(error) = selection.restore(original)
+            {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    "could not restore the clipboard after a failed paste"
+                );
+            }
         }
         drop(state);
         // Give the target time to request the selection before the next queued
@@ -543,9 +609,10 @@ struct X11Paster {
     root: u32,
     control: u8,
     shift: u8,
-    a: u8,
-    c: u8,
     v: u8,
+    /// Resolved only when Ctrl+A or Ctrl+C asks for them, so a keymap
+    /// without A or C never breaks an ordinary Ctrl+V paste.
+    keymap: Keymap,
 }
 
 impl X11Paster {
@@ -558,9 +625,8 @@ impl X11Paster {
             root,
             control: keymap.keycode(XK_CONTROL_L)?,
             shift: keymap.keycode(XK_SHIFT_L)?,
-            a: keymap.keycode(XK_A)?,
-            c: keymap.keycode(XK_C)?,
             v: keymap.keycode(XK_V)?,
+            keymap,
         })
     }
 
@@ -568,8 +634,8 @@ impl X11Paster {
     fn chord(&mut self, chord: Chord, stop: &AtomicBool, keys: &ShortcutKeys) -> Result<()> {
         self.wait_for_modifier_release(stop, keys)?;
         let key = match chord {
-            Chord::SelectAll => self.a,
-            Chord::Copy => self.c,
+            Chord::SelectAll => self.keymap.keycode(XK_A)?,
+            Chord::Copy => self.keymap.keycode(XK_C)?,
             Chord::Paste => self.v,
         };
         self.send_keys(&[
@@ -827,6 +893,45 @@ mod tests {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", script]);
         command
+    }
+
+    /// A typed-text job may start while a dictation paste still waits to
+    /// restore: it must cancel that restore and keep its original, not
+    /// snapshot the transcript the paste left behind.
+    #[test]
+    fn a_new_clipboard_job_adopts_the_pending_restore() {
+        let original = Snapshot::Wayland(vec![(
+            "text/plain;charset=utf-8".into(),
+            b"before the dictation".to_vec(),
+        )]);
+        let mut restore = Restore {
+            generation: 7,
+            original: Some(original.clone()),
+            inserted: Some((Mime::Text, b"the dictation".to_vec())),
+        };
+        assert_eq!(restore.begin(true), Some(original));
+        assert_eq!(restore.generation, 8, "the pending restore is cancelled");
+        assert!(restore.inserted.is_none());
+        assert!(restore.original.is_none());
+        assert_eq!(restore.begin(true), None);
+    }
+
+    /// If something newer replaced the transcript, a new job snapshots that
+    /// clipboard instead of putting the older paste's original back over it.
+    #[test]
+    fn a_changed_clipboard_is_not_replaced_by_a_pending_restore() {
+        let stale = Snapshot::Wayland(vec![(
+            "text/plain;charset=utf-8".into(),
+            b"before the dictation".to_vec(),
+        )]);
+        let mut restore = Restore {
+            generation: 3,
+            original: Some(stale),
+            inserted: Some((Mime::Text, b"the dictation".to_vec())),
+        };
+        assert_eq!(restore.begin(false), None);
+        assert_eq!(restore.generation, 4);
+        assert!(restore.original.is_none());
     }
 
     #[test]

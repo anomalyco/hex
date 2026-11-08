@@ -305,10 +305,12 @@ was not compiled or run here (Linux check, Windows cross-clippy only).
 With Labs › Transform typed text on (`labs.typed_text`, off by default),
 Settings › Output adds one section whose shortcut is unbound until recorded.
 The shortcut reads the text already typed in the focused field, runs the
-focused app's Output steps on it, and pastes the result over it. The lab's
-switch and binding are saved like any other Labs feature; the listener
-registers the shortcut only while the lab is on, and restarts registration
-when either changes.
+focused app's Output steps on it, and pastes the result over it. `hex
+typed-text` runs the same job for desktops without the shortcuts portal, and
+refuses clearly while the lab is off or Hex isn't listening. The lab's switch
+and binding are saved like any other Labs feature; the listener registers the
+shortcut only while the lab is on, and restarts registration when either
+changes. The job sends Ctrl+A and Ctrl+C, so it is not meant for terminals.
 
 ```ts
 Output > Typed text                        // labs.md
@@ -318,18 +320,27 @@ Output > Typed text                        // labs.md
 │       ├── Record one -> saved, and conflicts with the other active shortcuts
 │       └── Clear (trash) or `hex settings set typed_text_hotkey none` -> unbound
 ├── Settings -> saved to settings.json as typed_text_hotkey
-└── Shortcut pressed while idle -> one job on the output worker
-    ├── snapshot the clipboard, then Ctrl+A and Ctrl+C in the focused app
+└── Shortcut pressed while idle, or `hex typed-text` -> one job on the output worker
+    ├── take the clipboard for the job: cancel any paste restore still pending
+    │   and keep the clipboard that paste replaced, else snapshot it now
+    ├── clear the clipboard, then Ctrl+A and Ctrl+C in the focused app
+    │   ├── GNOME without data-control clears through `wl-copy --clear`
+    │   └── a clear that fails aborts before copying, and restores
+    ├── poll the clipboard for text, up to 500 ms, honoring Cancel
     ├── read the selection as text/plain, bounded to 1 MiB and one second
-    ├── no text -> error tone, clipboard restored, nothing pasted
+    ├── no text, or only whitespace -> error tone, clipboard restored, nothing pasted
     ├── run the matching mode's Output steps, with transformation context
     │   `source: "typed-text"` (dictation passes `"dictation"`); spoken
     │   formatting, spoken symbols, and filler words are dictation-only
     ├── processed text equals the selection -> clipboard restored, nothing pasted
-    ├── re-copy the selection -> different text -> abort, clipboard restored,
-    │   nothing pasted (typing or switching windows since the first copy)
-    └── otherwise Ctrl+V over the selection, restoring the clipboard as a
-        dictation paste does
+    ├── clear, re-copy the selection -> different text or an ignored copy ->
+    │   abort, clipboard restored, nothing pasted (typing or switching windows
+    │   since the first copy)
+    ├── otherwise Ctrl+V over the selection; a paste failure restores the
+    │   clipboard, and a success restores it 500 ms later unless something newer
+    │   replaced the result first
+    └── a clipboard Hex could not snapshot still clears and runs, but its result
+        stays on the clipboard
 ```
 
 Checks: `typed_text_is_its_own_bit_and_off_by_default` ([labs.rs](../../src/labs.rs)),
@@ -339,12 +350,23 @@ Checks: `typed_text_is_its_own_bit_and_off_by_default` ([labs.rs](../../src/labs
 `typed_text_fires_only_while_idle_and_changes_no_capture_state`
 ([input.rs](../../src/linux/input.rs)), `typed_text_skips_the_dictation_only_labs`
 and `transformation_context_names_its_source` ([processor.rs](../../src/dictation/processor.rs),
-[personal_commands.rs](../../src/personal_commands.rs)), and
-`a_changed_second_copy_aborts_the_replacement` ([typed_text.rs](../../src/linux/typed_text.rs)).
-Known limits: select-all replaces the whole field, so a field with mixed
-formatting loses it; on GNOME the clipboard text is read through `wl-paste`,
-which may briefly take focus. Proof limits: no shortcut press against a real
-target application was run; the flow is covered by unit tests only.
+[personal_commands.rs](../../src/personal_commands.rs));
+`typed_text_joins_the_commands_only_while_its_lab_is_on`
+([gnome_shortcuts.rs](../../src/linux/gnome_shortcuts.rs)); the fake-backed
+`an_ignored_copy_pastes_nothing_and_restores_the_clipboard`,
+`an_ignored_second_copy_pastes_nothing`, `text_changed_between_copies_pastes_nothing`,
+`a_failed_clear_aborts_before_copying_or_pasting`, `a_failed_paste_restores_the_original`,
+`success_pastes_the_result_and_hands_over_the_original`,
+`unchanged_processing_pastes_nothing_and_restores`,
+`a_job_without_a_snapshot_still_clears_and_pastes`, and
+`a_changed_second_copy_aborts_the_replacement`
+([typed_text.rs](../../src/linux/typed_text.rs)); and
+`a_new_clipboard_job_adopts_the_pending_restore`
+([paste.rs](../../src/linux/paste.rs)). Known limits: select-all replaces the
+whole field, so a field with mixed formatting loses it; on GNOME the clipboard
+text is read through `wl-paste`, which may briefly take focus. Proof limits: no
+shortcut press against a real target application was run; the flow is covered
+by unit tests only.
 
 ### Copy Recent Dictation (Labs, macOS)
 

@@ -38,6 +38,7 @@ const TEXT_TARGETS: [&str; 5] = [
     "STRING",
 ];
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Snapshot {
     /// Nothing owned the clipboard; restoring clears it.
     Empty,
@@ -45,6 +46,7 @@ pub(crate) enum Snapshot {
     X11(Vec<X11Format>),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct X11Format {
     target: u32,
     type_: u32,
@@ -183,9 +185,10 @@ fn too_large() -> color_eyre::eyre::Report {
 /// data-control (GNOME). `wl-paste` comes with the `wl-copy` every Wayland
 /// paste already needs. Its windowless client can briefly take focus on
 /// GNOME, which is why Hex reads through data-control wherever it exists.
+/// `--type text` keeps a binary clipboard from being read as text.
 fn wl_paste_text() -> Result<Option<String>> {
     let mut child = Command::new("wl-paste")
-        .arg("--no-newline")
+        .args(["--no-newline", "--type", "text"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

@@ -42,16 +42,22 @@ verified on a real compositor yet; only its unit tests and the build ran.
 With **Labs › Transform typed text** on (`labs.typed_text`, off by default),
 Settings › Output adds a **Typed text** section whose shortcut
 (`typed_text_hotkey`) is unbound until you record one. Pressing it while
-nothing records copies the text in the focused field (Ctrl+A, Ctrl+C), runs
-the focused app's Output steps on it, checks that the field still holds that
-text (a second Ctrl+C must return the same text), and pastes the result over
-it. Spoken formatting, spoken symbols, and filler words are dictation-only and
-do not run on typed text. The clipboard is restored after the paste the same
-way a dictation restores it; without data-control on GNOME, the text is read
-through `wl-paste` and the clipboard is left with the result. Select-all
-replaces the whole field, so mixed formatting is not preserved, and on GNOME
-`wl-paste` may briefly take focus. With the lab off, Output and the listener
-are unchanged and the shortcut is not registered.
+nothing records clears the clipboard, sends Ctrl+A and Ctrl+C to the focused
+field, runs the focused app's Output steps on the copied text, clears and
+copies again to check the field still holds that text, then sends Ctrl+V to
+replace it. Spoken formatting, spoken symbols, and filler words are
+dictation-only and do not run on typed text. It takes the clipboard for the
+job, including any paste still waiting to restore, and puts the saved
+clipboard back 500 ms after the paste unless something newer replaced it. If
+Hex could not snapshot the clipboard, the result stays on it. Without
+data-control on GNOME, text is read through `wl-paste`, the clipboard is
+cleared through `wl-copy --clear`, and a result Hex could not snapshot stays
+on the clipboard. Because it sends Ctrl+A and Ctrl+C, it is not meant for
+terminals. Select-all replaces the whole field, so mixed formatting is not
+preserved, and on GNOME `wl-paste` may briefly take focus. With the lab off,
+Output and the listener are unchanged and the shortcut is not registered;
+`hex typed-text` runs the same job from a desktop keybinding, and refuses
+clearly when the lab is off or Hex isn't listening.
 
 For Nix/NixOS, use the [Nix guide](nix.md). Nix owns updates to that installation;
 Hex's signed updater owns only the direct-install layout below.
@@ -512,6 +518,7 @@ hex dictation start     # bind to a key's press: start recording
 hex dictation stop      # bind to the same key's release: stop and transcribe
 hex dictation toggle    # one key: start, then stop and transcribe
 hex paste-last          # paste the last dictation again
+hex typed-text          # Labs › Transform typed text: replace the focused field's text
 hex dictation toggle --raw  # dictate without processing: paste the words as heard
 ```
 
@@ -528,7 +535,8 @@ GNOME 46 and older (Ubuntu 24.04) have no shortcuts portal. There, Settings ›
 Desktop shortcuts › **Add GNOME keyboard shortcuts** writes Hex's own entries
 into GNOME Settings › Keyboard › Custom Shortcuts with your shortcuts:
 `hex dictation toggle` (GNOME runs custom shortcuts on the key press only, so
-dictation toggles), `hex paste-last`, and `hex annotate toggle` while Annotate
+dictation toggles), `hex paste-last`, `hex typed-text` while Transform typed
+text is on and its shortcut is bound, and `hex annotate toggle` while Annotate
 is on. Hex removes them while it's disabled and puts them back when you enable
 it; **Remove** takes them out for good. Keys you change in GNOME Settings stay.
 Hex never touches your other custom shortcuts.

@@ -84,6 +84,14 @@ pub enum ControlCli {
         #[command(flatten)]
         output: Output,
     },
+    /// Run the focused field's text through its Output steps and replace it
+    /// (Labs › Transform typed text, Linux).
+    ///
+    /// Sends Ctrl+A and Ctrl+C, so it is not meant for terminals.
+    TypedText {
+        #[command(flatten)]
+        output: Output,
+    },
     /// Take a screenshot of the display under the pointer and print its
     /// path (Labs › Screenshots, macOS).
     Screenshot {
@@ -427,6 +435,7 @@ pub fn run(command: ControlCli) -> u8 {
             send(ControlCommand::Dictation { action, print, raw }, output)
         }
         ControlCli::PasteLast { output } => send(ControlCommand::PasteLast, output),
+        ControlCli::TypedText { output } => send(ControlCommand::TypedText, output),
         ControlCli::Screenshot { pick, output } => {
             send(ControlCommand::Screenshot { pick }, output)
         }

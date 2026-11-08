@@ -21,14 +21,15 @@ pub(crate) fn shortcut_rule(slot: HotkeySlot, binding: &HotkeyBinding) -> Result
         #[cfg(target_os = "macos")]
         HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
         #[cfg(target_os = "macos")]
-        HotkeySlot::Screenshot | HotkeySlot::TypedText => ShortcutTarget::Screenshot,
-        // Labs › Second dictation shortcut, Screenshots, and Transform typed
-        // text are macOS's or Linux's; elsewhere a saved one meets the
-        // dictation shortcut's rules.
+        HotkeySlot::Screenshot => ShortcutTarget::Screenshot,
+        // Transform typed text is Linux-only. A saved binding meets the
+        // dictation shortcut's rules everywhere else, including macOS, where
+        // it is never registered.
+        HotkeySlot::TypedText => ShortcutTarget::Dictation,
+        // Labs › Second dictation shortcut and Screenshots are macOS-only;
+        // elsewhere a saved one meets the dictation shortcut's rules.
         #[cfg(not(target_os = "macos"))]
-        HotkeySlot::SecondDictation | HotkeySlot::Screenshot | HotkeySlot::TypedText => {
-            ShortcutTarget::Dictation
-        }
+        HotkeySlot::SecondDictation | HotkeySlot::Screenshot => ShortcutTarget::Dictation,
     };
     host::validate_hotkey(target, binding)
 }
