@@ -1168,17 +1168,26 @@ shortcut uses) opens a second copy of Annotate's capture picker
                   ├── clipboard -> the PNG and the file's URL, one pasteboard item
                   └── thumbnail bottom right for 5 s (held while the pointer is on it), 16 pt in,
                       its corner concentric with the display's (30 pt, a design constant):
-                      slides in from past the right edge on the HUD's spring and out the same way
-                      (Reduce Motion: a fade); ✕ shows inside its top-left corner on hover;
+                      an area or window shot grows in from exactly the rectangle captured, at that
+                      size and place, and springs into its corner slot on one spring that never
+                      overshoots its size, leaving the same way; a whole-display shot slides in from
+                      past the right edge on the HUD's spring (Reduce Motion: a fade either way);
+                      ✕ shows inside its top-left corner on hover;
                       click -> opens it in the editor, drag -> the file, ✕ -> closes
                       a dictation while it shows -> pastes as usual, being no shot's talk-over
                       a failure -> the error tone; there is no success sound (Hex has no shutter cue)
 ```
 
+The card's overlay is the whole display under the pointer, click-through
+outside the card, so the card can start anywhere a shot was taken from.
+
 A click on the thumbnail opens the editor
 ([screenshot_thumbnail/editor.rs](../../src/rune_ui/screenshot_thumbnail/editor.rs)), a panel
 centred on the display under the pointer, the capsule's corners and
-shadow, growing in on the HUD's spring (Reduce Motion: a fade). The shot
+shadow, growing in on the HUD's spring (Reduce Motion: a fade). Its tools,
+✕ and microphone are the kit's icon buttons (a picked tool filled, as a
+capsule's expanded one is) and Copy, Save and Send to… are the kit's
+buttons, so it reads as the rest of Hex. The shot
 shows at no more than its own points. It stays until Escape or ✕:
 
 ```ts
@@ -1315,11 +1324,14 @@ list's search, and both exports
 without one) in [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
 and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/screenshot_thumbnail/editor/marks.rs);
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
-its card renders as `--scene mac-labs-screenshots`. Not yet observed: a
+its card renders as `--scene mac-labs-screenshots`; the card's entrance
+is `thumbnail_frames` (`HEX_SCREENSHOT_FRAMES` writes it at 60 fps).
+Not yet observed: a
 real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
 clipboard paste, the thumbnail's drag, the editor on a real display
 (its keys, Copy, Save, and a session receiving a sent shot), talking over a
-shot with a real shortcut and microphone, and whether a session
+shot with a real shortcut and microphone, the card growing in from a real
+capture rectangle, and whether a session
 tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
 symbolic hotkeys are dispatched, not tested). The row renders only in
 macOS builds, so the settings goldens don't change.
