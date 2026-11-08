@@ -29,8 +29,10 @@ use crate::transcription::local_transcriber::LocalTranscriber;
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 
 mod gap;
+mod shortcuts;
 
 use gap::{ChunkStep, chunk_step};
+use shortcuts::shortcuts;
 
 struct Job {
     transcript: PendingTranscript,
@@ -144,37 +146,6 @@ pub(crate) enum ListenerUpdate {
     },
     /// True while the window records a shortcut: global matching stops.
     SuspendShortcuts(bool),
-}
-
-/// The shortcuts a listener registers for `settings`.
-fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
-    let options = HotkeyOptions {
-        double_tap: settings.double_tap_lock,
-        // Double-tap-only needs the double-tap window and a non-modifier key.
-        double_tap_only: settings.double_tap_lock
-            && settings.double_tap_only
-            && settings.dictation_hotkey.key.is_some(),
-        toggle: settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle,
-        // Labs › Tap or hold, off by default; it acts only in Toggle mode.
-        tap_or_hold: settings.shortcut_mode == crate::dictation::ShortcutMode::Toggle
-            && crate::labs::Feature::TapOrHold.on(settings),
-        paste_last: settings.paste_last_hotkey.as_ref().map(LinuxHotkey::from),
-        raw_dictation: settings
-            .raw_dictation_hotkey
-            .as_ref()
-            .map(LinuxHotkey::from),
-        // Only while Labs › Transform typed text is on: off registers nothing.
-        typed_text: settings.active_typed_text_hotkey().map(LinuxHotkey::from),
-        terminal_paste: settings
-            .active_terminal_paste_hotkey()
-            .map(LinuxHotkey::from),
-        capture: settings
-            .capture
-            .enabled
-            .then(|| LinuxHotkey::from(&settings.capture.hotkey)),
-        cancel: settings.active_cancel_hotkey().map(LinuxHotkey::from),
-    };
-    (LinuxHotkey::from(&settings.dictation_hotkey), options)
 }
 
 /// Opens `--device`, else the microphone `settings` select, else the system

@@ -472,7 +472,9 @@ and the others' checks count it while the toggle is on. The gate is
 `AppSettings::active_terminal_paste_hotkey`: only on Windows and Linux, with
 the toggle on, a binding saved, and no overlap is it handed to the listener,
 so X11 grabs or the shortcuts portal register it (id `terminal-paste`), and
-the Windows hook matches it. Off, nothing is registered, matched, or checked
+the Windows hook matches it. Linux has no `hex` command for it, so without
+X11 grabs or the portal it stays unregistered, as raw dictation does. Off,
+nothing is registered, matched, or checked
 for it, and the saved binding stays. A capture it starts is a normal
 dictation in every other way: the same Hold/Toggle and double-tap lock,
 modes processing, History kind Dictation, last-dictation update, and Escape,

@@ -21,6 +21,10 @@ use crate::windows::input::WindowsHotkey;
 use crate::windows::input::{HotkeyAction, WindowsHotkeyMonitor};
 use crate::windows::paste::WindowsPaster;
 
+mod shortcuts;
+
+use shortcuts::Shortcuts;
+
 const UPDATE_INTERVAL: Duration = Duration::from_millis(5);
 /// The longest wait with the microphone streaming, idle or recording. Its
 /// chunks (about every 10 ms) wake the loop, which then takes shortcut
@@ -1164,40 +1168,6 @@ fn job_result(kind: OutputKind, result: Result<String, String>, latency_ms: u32)
             latency_ms,
             result: Err(error),
         },
-    }
-}
-
-/// The shortcuts a listener's keyboard hook registers.
-#[derive(PartialEq)]
-struct Shortcuts {
-    hotkey: WindowsHotkey,
-    paste_last_hotkey: Option<WindowsHotkey>,
-    raw_dictation_hotkey: Option<WindowsHotkey>,
-    terminal_paste_hotkey: Option<WindowsHotkey>,
-    annotate_hotkey: Option<WindowsHotkey>,
-    cancel_hotkey: Option<WindowsHotkey>,
-    double_tap_lock: bool,
-    double_tap_only: bool,
-    shortcut_mode: crate::dictation::ShortcutMode,
-    share_dictation_shortcut: bool,
-}
-
-impl Shortcuts {
-    fn start(&self) -> Result<WindowsHotkeyMonitor> {
-        // Double-tap-only depends on the double-tap window; without the lock
-        // there is no second tap to wait for.
-        WindowsHotkeyMonitor::start(
-            self.hotkey.clone(),
-            self.paste_last_hotkey.clone(),
-            self.raw_dictation_hotkey.clone(),
-            self.terminal_paste_hotkey.clone(),
-            self.annotate_hotkey.clone(),
-            self.cancel_hotkey.clone(),
-            self.double_tap_lock,
-            self.double_tap_lock && self.double_tap_only,
-            self.shortcut_mode,
-            self.share_dictation_shortcut,
-        )
     }
 }
 
