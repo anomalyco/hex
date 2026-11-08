@@ -67,16 +67,22 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
 │   the bundle (keyframes, contact sheet, scrawl.json)
-├── Linux: strokes are placed on the recorded screen in its logical points,
-│   from the ScreenCast portal's stream size when it reports one smaller
-│   than the frames, so a fractional scale (1.5, 1.33), which reaches the
-│   overlay rounded up to 2, no longer pins strokes to a top-left part of
-│   the screen; without that size it divides the pixels by the overlay's
-│   scale. Check: scrawl-capture capture::platform::tests
-│   a_fractionally_scaled_screen_keeps_its_logical_size; not observed on a
-│   fractionally scaled monitor. Known gap: the overlay starts below a
-│   desktop bar's reserved area, so saved ink sits that bar's height off
-│   the live ink
+├── Linux: strokes are placed on the recorded screen in its logical points.
+│   A monitor pick whose portal names the output (`mapping_id`, as
+│   xdg-desktop-portal-hyprland 1.4.1+ does, e.g. `DP-3`) opens the pen on
+│   that output with its logical size from xdg-output (linux::output::find),
+│   so strokes land on the recorded monitor even when the overlay had opened
+│   on another one. Otherwise it uses the ScreenCast portal's stream size
+│   when it reports one smaller than the frames, so a fractional scale
+│   (1.5, 1.33), which reaches the overlay rounded up to 2, no longer pins
+│   strokes to a top-left part of the screen; without that size it divides
+│   the pixels by the overlay's scale. Window picks still report no position
+│   and no output. Check: scrawl-capture capture::platform::tests
+│   a_fractionally_scaled_screen_keeps_its_logical_size and
+│   linux::output::tests the_named_output_carries_its_global_and_logical_size;
+│   neither the follow nor a fractional scale is observed on real hardware
+│   here. Known gap: the overlay starts below a desktop bar's reserved area,
+│   so saved ink sits that bar's height off the live ink
 └── Linux recordings show the overlay itself (Wayland can't leave it out)
 
 On Linux                                 // capture.linux
@@ -102,8 +108,12 @@ On Linux                                 // capture.linux
 │   frames in 9.97 s from 282 raw 4K grabs; raw 4K pipe readback is CPU-bound)
 ├── Wayland -> the ScreenCast portal (zbus): Screen asks the desktop once and
 │   keeps its restore token (<support>/screencast-token), so later captures
-│   start without a dialog; Window shows the desktop's picker every time (the
-│   capsule's Window chip goes straight to it); the cursor is embedded
+│   start without a dialog and record the remembered monitor; a monitor pick
+│   the portal names (`mapping_id`: xdg-desktop-portal-hyprland 1.4.1+) moves
+│   the pen to that output (see the pen bullet above). Window shows the
+│   desktop's picker every time (the capsule's Window chip goes straight to
+│   it) and names no output, so the pen keeps its old placement; the cursor
+│   is embedded
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
 │   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
 │   KDE) or shared memory
@@ -653,7 +663,10 @@ Hex's own windows                        // capture.own-windows
     the last other app, never into Hex
 
 Ink and laser                            // capture.ink
-├── A click-through overlay over the recorded display, excluded from the recording
+├── A click-through overlay over the recorded display, excluded from the
+│   recording; on a Wayland monitor pick the portal names (`mapping_id`) it
+│   is recreated on that output, and strokes use its xdg-output logical size
+│   (see the Linux pen bullet above)
 ├── Shift strokes draw as ink, hold 650 ms, then fade over 650 ms
 └── The laser's tail lasts 420 ms; nothing lags the pointer
 
