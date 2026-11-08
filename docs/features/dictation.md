@@ -1540,7 +1540,8 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> macOS releases ~10 s after the last tone; Windows 5 min; Linux 1 s
      -> An open macOS output is a live CoreAudio client coreaudiod services
         and holds an idle-sleep assertion for, so it must not idle for long
-     -> A stream that reports an error is dropped; the next tone reopens
+     -> A fatal stream error (the output became unavailable or invalid)
+        drops the output, and the next tone reopens
      -> Released output holds no macOS idle-sleep assertion
   Feedback volume = 0 -> No tones
      -> Playback worker releases output on its next 250 ms observation
@@ -1683,17 +1684,21 @@ dictation share a warm device, and releases it after that grace or on the next
 observation after sounds turn Off. On macOS the grace is ten seconds: an open
 output is a live CoreAudio IO client that coreaudiod services and holds an
 idle-sleep assertion for. coreaudiod logged client timeouts against Hex's open
-idle output (#1531), and a shorter grace reduces how long such a client exists.
+output (#1531), and a shorter grace reduces how long such a client exists.
 Ten seconds still covers a quick start-tone to stop-tone dictation, though a
 dictation held past about ten seconds pays a cold output open for its stop
 tone; the tone is delayed, not dropped. Cold-open time on Bluetooth outputs is
 unmeasured. Windows keeps five minutes; Linux releases after one second because
 an open output is a listed stream in its sound controls (#720). A per-sink flag
-records a fatal stream error (the output became unavailable); overload glitches
-and default-output changes do not set it. The stream error callback may run on
-a CoreAudio thread, so it only flips the flag; the worker drops a flagged sink
-on its next 250 ms observation or next tone, logs one warning, and lets the
-next tone open a fresh one. macOS idle-sleep timers count from the last user
+records a fatal stream error (the output became unavailable or invalid);
+overload glitches (`Xrun`) never set it. A default-output change does not set it
+on macOS, where cpal reports `DeviceChanged` only after the default-output unit
+has already rerouted the stream. On Windows cpal's WASAPI backend never
+rebinds, so a default-device change ends the stream with `StreamInvalidated`
+and counts as fatal, dropping that output so the next tone opens the new
+default. The stream error callback may run on a CoreAudio thread, so it only
+flips the flag; the worker drops a flagged sink on its next 250 ms observation
+or next tone, logs one warning, and lets the next tone open a fresh one. macOS idle-sleep timers count from the last user
 input, and a tone implies recent input, so the grace never delays sleep by
 itself. A device open
 already in progress must return before the worker can observe that change.

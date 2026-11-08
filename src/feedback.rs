@@ -141,7 +141,7 @@ fn sounds_enabled() -> bool {
 ///
 /// On macOS an open output is a live CoreAudio IO client: coreaudiod services
 /// its render callbacks and keeps an idle-sleep assertion for it. coreaudiod
-/// logged client timeouts against Hex's open idle output (#1531), and a
+/// logged client timeouts against Hex's open output (#1531), and a
 /// shorter grace reduces how long such a client exists, so macOS releases the
 /// output about ten seconds after the last tone. Ten seconds still covers a
 /// quick start-tone to stop-tone dictation, though a dictation held past about
@@ -1118,9 +1118,13 @@ impl<S: Source> Source for Retractable<S> {
 }
 
 /// Whether a stream error leaves the output unusable. An underrun or overrun
-/// is a glitch on a stream that keeps running, and a default-output change has
-/// already rerouted the stream; neither should drop the sink. Every other kind
-/// reports an output Hex can no longer rely on.
+/// is a glitch on a stream that keeps running. A default-output change is only
+/// safe on macOS, where cpal reports `DeviceChanged` after the default-output
+/// unit has already rerouted the stream; on Windows cpal's WASAPI backend never
+/// rebinds, so a default-device change ends the stream with
+/// `StreamInvalidated`, which is fatal. Other kinds are treated as an output
+/// that may no longer work; dropping it costs only a cold reopen at the next
+/// tone.
 fn stream_error_is_fatal(kind: rodio::cpal::ErrorKind) -> bool {
     !matches!(
         kind,
@@ -1692,9 +1696,10 @@ mod tests {
         assert_eq!(live.get(), 0);
     }
 
-    /// Only an output that became unavailable drops the sink. A glitch on a
-    /// stream that keeps running, or a default-output change the stream already
-    /// followed, must not.
+    /// Only an output that became unavailable or invalid drops the sink. A
+    /// glitch on a stream that keeps running must not, and neither must the
+    /// macOS default-output `DeviceChanged` that cpal reports after the unit
+    /// has already rerouted.
     #[test]
     fn only_an_unavailable_output_is_a_fatal_stream_error() {
         use rodio::cpal::ErrorKind;
