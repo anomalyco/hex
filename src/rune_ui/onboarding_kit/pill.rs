@@ -29,11 +29,11 @@ static OTHER: Mutex<String> = Mutex::new(String::new());
 /// The story fixture's own other language, until a real run sets one.
 const OTHER_FALLBACK: &str = "French";
 
-pub(crate) fn set_other_label(label: &str) {
+pub(crate) fn set_other_label(label: Option<&str>) {
     let mut other = OTHER
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *other = label.to_owned();
+    *other = label.map_or_else(String::new, str::to_owned);
 }
 
 pub(crate) fn language_label(language: Language) -> String {

@@ -225,9 +225,8 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     } else {
         Some(&choice)
     };
-    if let Some(other) = other {
-        set_other_label(transcription_models::language_name(&other.language));
-    }
+    // Replaces the previous run's label; an English-only run clears it.
+    set_other_label(other.map(|other| transcription_models::language_name(&other.language)));
     let had_model = installed(ui, &choice);
     let status = ui.platform.setup_status(had_model);
     let granted = granted(status, ui.platform.paste);
