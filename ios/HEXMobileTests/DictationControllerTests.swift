@@ -79,6 +79,7 @@ private actor ControlledTranscriber: LocalTranscribing {
     private var pendingResume: String?
     private var cannedOutput = "ship the build"
     private(set) var transcribedURLs: [URL] = []
+    private(set) var vocabularyArguments: [[String]] = []
     private var suspendNext = false
 
     func armSuspension() {
@@ -116,6 +117,23 @@ private actor ControlledTranscriber: LocalTranscribing {
             }
         }
         return cannedOutput
+    }
+
+    func transcribe(_ audioURL: URL, vocabulary: [String]) async throws -> String {
+        vocabularyArguments.append(vocabulary)
+        return try await transcribe(audioURL)
+    }
+}
+
+@MainActor
+private final class RecordingCleaner: TranscriptCleaning {
+    var isAvailable = true
+    var output: String?
+    private(set) var cleanedInputs: [String] = []
+
+    func clean(_ text: String) async -> String? {
+        cleanedInputs.append(text)
+        return output
     }
 }
 
@@ -455,6 +473,234 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(controller.transcript, "Ship the build.")
         XCTAssertEqual(controller.audioLevel, 0)
         XCTAssertEqual(bridge.snapshot().audioLevel, 0)
+    }
+
+    func testCleanupRunsBeforeFormattingOnlyWhenCapturedAndSkipsVerbatim() async throws {
+        let now = 40_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("we should use cloud code for this")
+        let bridge = KeyboardBridge(defaults: defaults)
+        let settings = AppleIntelligenceCleanupSettings(defaults: defaults)
+        let cleaner = RecordingCleaner()
+        cleaner.output = "We should use Claude Code for this."
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false,
+            cleaner: cleaner,
+            cleanupSettings: settings
+        )
+        controller.prepareModel()
+        try await settle()
+
+        // Off: the transcript is formatted exactly as before.
+        settings.isEnabled = false
+        controller.startRecording(keyboardJobID: "cleanup-off")
+        try await settle()
+        settings.isEnabled = true // A mid-capture toggle must not affect this session.
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs, [])
+        XCTAssertEqual(controller.transcript, "We should use cloud code for this.")
+
+        // On: the setting is captured at start, and cleanup runs before formatting.
+        controller.clearTranscript()
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "cleanup-on")
+        try await settle()
+        settings.isEnabled = false
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs, ["we should use cloud code for this"])
+        XCTAssertEqual(controller.transcript, "We should use Claude Code for this.")
+
+        // Verbatim skips cleanup even with the experiment on.
+        controller.clearTranscript()
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "cleanup-verbatim", styleOverride: .verbatim)
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs.count, 1)
+        XCTAssertEqual(controller.transcript, "we should use cloud code for this")
+
+        // A cleaner that declines leaves the raw transcript for the formatter.
+        controller.clearTranscript()
+        cleaner.output = nil
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "cleanup-fallback")
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs.count, 2)
+        XCTAssertEqual(controller.transcript, "We should use cloud code for this.")
+
+        // Empty transcripts skip cleanup too.
+        controller.clearTranscript()
+        await transcriber.setCannedOutput("   ")
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "cleanup-empty")
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs.count, 2)
+        XCTAssertEqual(controller.transcript, "")
+    }
+
+    func testCustomVocabularyAppliesOnlyWhenCaptured() async throws {
+        let now = 50_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("i use open code")
+        let bridge = KeyboardBridge(defaults: defaults)
+        let settings = CustomVocabularySettings(defaults: defaults)
+        settings.terms = ["OpenCode"]
+        let cleanupSettings = AppleIntelligenceCleanupSettings(defaults: defaults)
+        let cleaner = RecordingCleaner()
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false,
+            cleaner: cleaner,
+            cleanupSettings: cleanupSettings,
+            customVocabularySettings: settings
+        )
+        controller.prepareModel()
+        try await settle()
+
+        // Off: the transcript is formatted exactly as before.
+        settings.isEnabled = false
+        controller.startRecording(keyboardJobID: "vocabulary-off", styleOverride: .verbatim)
+        try await settle()
+        settings.isEnabled = true // A mid-capture toggle must not affect this session.
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "i use open code")
+
+        // On: the setting is captured at start, before formatting.
+        controller.clearTranscript()
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "vocabulary-on", styleOverride: .verbatim)
+        try await settle()
+        settings.isEnabled = false
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "i use OpenCode")
+
+        // Cleanup receives the spelled transcript, then formatting runs.
+        controller.clearTranscript()
+        settings.isEnabled = true
+        cleanupSettings.isEnabled = true
+        controller.startRecording(keyboardJobID: "vocabulary-cleanup", styleOverride: .polished)
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(cleaner.cleanedInputs, ["i use OpenCode"])
+        XCTAssertEqual(controller.transcript, "I use OpenCode.")
+    }
+
+    func testCustomVocabularyReachesTheTranscriberOnlyWhileEnabled() async throws {
+        let now = 60_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("i use open code")
+        let bridge = KeyboardBridge(defaults: defaults)
+        let settings = CustomVocabularySettings(defaults: defaults)
+        settings.terms = ["OpenCode"]
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false,
+            customVocabularySettings: settings
+        )
+        controller.prepareModel()
+        try await settle()
+
+        settings.isEnabled = false
+        controller.startRecording(keyboardJobID: "vocabulary-hint-off")
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        var arguments = await transcriber.vocabularyArguments
+        XCTAssertEqual(arguments, [[]])
+
+        settings.isEnabled = true
+        controller.startRecording(keyboardJobID: "vocabulary-hint-on")
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        arguments = await transcriber.vocabularyArguments
+        XCTAssertEqual(arguments, [[], ["OpenCode"]])
+    }
+
+    func testCustomVocabularySurvivesCasualFormatting() async throws {
+        let now = 70_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("iphone 17 broke")
+        let bridge = KeyboardBridge(defaults: defaults)
+        let settings = CustomVocabularySettings(defaults: defaults)
+        settings.terms = ["iPhone 17"]
+        settings.isEnabled = true
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false,
+            customVocabularySettings: settings
+        )
+        controller.prepareModel()
+        try await settle()
+
+        // Casual lowercases the whole sentence, so the second spelling pass has to
+        // restore the listed term.
+        controller.startRecording(keyboardJobID: "vocabulary-casual", styleOverride: .casual)
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "iPhone 17 broke")
+    }
+
+    func testCustomVocabularySurvivesPolishedFormatting() async throws {
+        let now = 80_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("iphone 17 broke")
+        let bridge = KeyboardBridge(defaults: defaults)
+        let settings = CustomVocabularySettings(defaults: defaults)
+        settings.terms = ["iPhone 17"]
+        settings.isEnabled = true
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false,
+            customVocabularySettings: settings
+        )
+        controller.prepareModel()
+        try await settle()
+
+        // Polished capitalizes the sentence start ("IPhone"), so the second pass
+        // has to restore the listed term.
+        controller.startRecording(keyboardJobID: "vocabulary-polished", styleOverride: .polished)
+        try await settle()
+        controller.finishRecording()
+        try await settle()
+        XCTAssertEqual(controller.transcript, "iPhone 17 broke.")
     }
 
     private func settle() async throws {

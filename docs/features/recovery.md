@@ -301,7 +301,27 @@ virtual input or iPhone Continuity microphone (macOS: ccwd/ccwl transport) // #1
 warm stream keeps running but delivers only exact zeros (macOS and Linux hotkey dictation, #1122)
   -> that dictation is discarded as near-silent, as before
   -> its finish reopens the microphone like a stream failure // logged once
+     -> the dead stream is closed first, so the replacement opens cold as at launch
   -> next dictation records from a fresh stream
+
+meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
+  -> only while the call app records from that same input, by device UID,
+     checked once a second; a manual recording never reopens or warns
+  -> a gated or noise-suppressed microphone the call app also uses still
+     counts as held, so it can trigger the reopens and warning
+  -> reopen the microphone source, at most twice in one recording, the budget
+     shared across reopened streams
+  ├── still silent -> keep recording; the recording capsule says
+  │     "Microphone is silent · 12:34" and the menu bar "Microphone is silent"
+  │     -> manifest.microphone.warning = digital_silence is written as soon
+  │        as it is raised, so a crash while recording keeps it
+  ├── nonzero audio returns -> clear the live warning, including in a stream
+  │     reopened after a supervisor restart; the persisted warning stays,
+  │     because the recording means "silent at some point"
+  └── the call app leaves the input -> no further reopens or warnings, but a
+        live warning stays until nonzero audio returns; the finished meeting's
+        panel still says the microphone was silent for part of the call
+  // not verified on a live device or call app
 
 open stream stops delivering audio without an error (any OS, #1206)
   -> 4 s with no chunk (STREAM_STALL_TIMEOUT) -> treated as a stream failure
@@ -328,7 +348,8 @@ Checks in [audio.rs](../../src/audio.rs):
 values; no iPhone observed with the lid closed),
 `where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
 `only_an_idle_capture_lets_the_microphone_switch`,
-`a_stream_that_stops_delivering_audio_is_reopened`;
+`a_stream_that_stops_delivering_audio_is_reopened`,
+`a_dead_stream_is_stopped_before_its_replacement_opens`;
 [dictation/audio.rs](../../src/dictation/audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
 `microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,
@@ -338,6 +359,22 @@ values; no iPhone observed with the lid closed),
 [linux/dictation.rs](../../src/linux/dictation.rs):
 `submit_capture_reports_when_a_clip_is_digital_silence`,
 `a_warm_silent_stream_reopens_once_unless_released`;
+[meeting/warning.rs](../../src/meeting/warning.rs):
+`a_silence_budget_is_shared_across_reopened_streams`,
+`audible_audio_clears_a_warning_a_reopened_stream_inherited`,
+`a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned`,
+`a_sticky_warning_survives_its_live_one_clearing`,
+`a_dropped_warning_update_is_not_committed_and_is_retried`,
+`a_warning_is_written_to_the_manifest_as_soon_as_it_is_raised`,
+`a_device_switch_restarts_the_zero_count_without_clearing_the_warning`;
+[meeting/capture.rs](../../src/meeting/capture.rs):
+`a_meeting_follows_the_input_its_call_app_records_from`,
+`a_microphone_that_would_not_open_is_tried_a_bounded_number_of_times`,
+`only_an_input_the_call_app_reports_counts_as_held`;
+[meeting/tests.rs](../../src/meeting/tests.rs):
+`a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none`
+(the exact-zeros watch and reopening are not verified on a live device or a
+call app holding the microphone with voice processing);
 [recognition.rs](../../src/recognition.rs):
 `microphone_loss_keeps_a_programmatic_clip_for_finish` (the hold, not a `/finish`
 through the running listener).
@@ -433,12 +470,37 @@ after a WhatsApp desktop call ended, the warm built-in microphone stream kept
 running without an error but delivered only exact zeros, so every dictation
 was discarded as near-silent (`zero_fraction` 1.0) until Hex restarted. A
 finished dictation whose audio through the release is exactly zero now
-reopens the stream the way a stream failure does; a cold microphone
-(release-while-idle) already opens fresh for each press. Linux hotkey
+reopens the stream the way a stream failure does, closing the dead stream
+before its replacement opens so the new one starts cold as at launch; a cold
+microphone (release-while-idle) already opens fresh for each press. Linux hotkey
 dictation does the same for a warm microphone; service and programmatic
 captures do not check it, and one released while idle opens fresh. The
 first such dictation is still discarded. Not verified with a real WhatsApp
 call.
+
+**Meeting capture ([#1518](https://github.com/anomalyco/hex/issues/1518)):**
+during a meeting, the microphone stream kept delivering chunks of exact 0.0
+samples for the whole call while the call app held the built-in microphone,
+so the existing stall watchdog never fired and the user's side was missing.
+A microphone stream that delivers 3 s of exact zeros now reopens like a
+failed source, at most twice in one recording, but only while the call app
+still reports recording from the same input; a manual recording, or an app
+that reports no input, never reopens or warns, and a gated or
+noise-suppressed microphone the call app also uses still counts as held so
+it can trigger the reopens and warning. If it is still silent, Hex keeps
+recording and warns in the recording capsule, the menu bar, and the finished
+meeting's detail. The manifest records `microphone.warning:
+digital_silence` as soon as it is raised, so a crash keeps it, and it means
+the microphone was silent at some point during the recording. Nonzero audio
+clears the live warning, including in a stream reopened after a supervisor
+restart; if the call app leaves the input while zeros continue, no further
+reopens or warnings happen but a live warning stays until nonzero audio
+returns. A later episode warns again without another reopen. Each gated
+episode is also logged once at info level with the opened device and the
+call app's reported inputs, so field logs can confirm the gate. The 3 s
+watch, its shared reopen budget, and its gating are unit-checked; none of it
+was observed on a live device or a call app holding the microphone with
+voice processing.
 
 **Fixed after 3.3.0 ([#1206](https://github.com/anomalyco/hex/issues/1206)):**
 after a burst of overrun warnings while idle, a warm USB microphone's stream

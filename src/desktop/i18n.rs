@@ -592,6 +592,11 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Crop", ["Przytnij", "裁剪", "切り取り", "Zuschneiden", "Recortar", "Обрізати"]),
     ("Screenshot", ["Zrzut ekranu", "截图", "スクリーンショット", "Bildschirmfoto", "Captura de pantalla", "Знімок екрана"]),
     ("Sending to {}…", ["Wysyłanie do {}…", "正在发送到 {}…", "{} に送信中…", "Wird an {} gesendet…", "Enviando a {}…", "Надсилання в {}…"]),
+    ("Sending to {} once your words are in…", ["Wysyłanie do {}, gdy tylko będą Twoje słowa…", "你的话一到就发送到 {}…", "話した内容がそろい次第 {} に送信します…", "Wird an {} gesendet, sobald deine Worte da sind…", "Se enviará a {} en cuanto lleguen tus palabras…", "Надішлемо в {}, щойно з'являться ваші слова…"]),
+    ("Talk over it", ["Skomentuj głosem", "配上讲解", "話して説明", "Dazu sprechen", "Coméntalo en voz alta", "Прокоментувати голосом"]),
+    ("Finish talking", ["Zakończ mówienie", "结束讲话", "話し終える", "Fertig sprechen", "Terminar de hablar", "Завершити розповідь"]),
+    ("Clear words", ["Wyczyść słowa", "清除文字", "言葉を消去", "Worte löschen", "Borrar palabras", "Очистити слова"]),
+    ("Hold your dictation shortcut to talk over it", ["Przytrzymaj skrót dyktowania, aby skomentować głosem", "按住听写快捷键即可配上讲解", "音声入力のショートカットを押したまま話して説明できます", "Halte dein Diktierkürzel gedrückt, um dazu zu sprechen", "Mantén pulsado tu atajo de dictado para comentarlo en voz alta", "Утримуйте комбінацію диктування, щоб прокоментувати голосом"]),
     ("Couldn't copy", ["Nie udało się skopiować", "无法复制", "コピーできませんでした", "Kopieren fehlgeschlagen", "No se pudo copiar", "Не вдалося скопіювати"]),
     ("Couldn't send", ["Nie udało się wysłać", "无法发送", "送信できませんでした", "Senden fehlgeschlagen", "No se pudo enviar", "Не вдалося надіслати"]),
     ("Looking for sessions…", ["Szukanie sesji…", "正在查找会话…", "セッションを検索中…", "Sitzungen werden gesucht…", "Buscando sesiones…", "Пошук сесій…"]),
@@ -1284,6 +1289,7 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Almost any language, and it reads your vocabulary", ["Prawie każdy język i czyta twoje słownictwo", "几乎支持所有语言，并读取你的词汇表", "ほぼすべての言語に対応し、語彙も読み取ります", "Fast jede Sprache, und es liest dein Vokabular", "Casi cualquier idioma, y lee tu vocabulario", "Майже будь-яка мова, і читає ваш словник"]),
     ("The English model before Parakeet Unified", ["Angielski model sprzed Parakeet Unified", "Parakeet Unified 之前的英语模型", "Parakeet Unified 以前の英語モデル", "Das englische Modell vor Parakeet Unified", "El modelo de inglés anterior a Parakeet Unified", "Англійська модель до Parakeet Unified"]),
     ("25 European languages, and it hears which one you speak", ["25 języków europejskich i sam rozpoznaje, którym mówisz", "25 种欧洲语言，并能听出你说的是哪种", "ヨーロッパの 25 言語に対応し、話している言語を聞き分けます", "25 europäische Sprachen, und es hört, welche du sprichst", "25 idiomas europeos, y reconoce cuál hablas", "25 європейських мов, і сама чує, якою ви говорите"]),
+    ("A Parakeet v3 fine-tune, a bit more accurate in 20 of its 25 languages", ["Dostrojona wersja Parakeet v3, nieco dokładniejsza w 20 z 25 języków", "Parakeet v3 的微调版，在 25 种语言中的 20 种里略为准确", "Parakeet v3 の微調整版。25 言語のうち 20 言語でわずかに精度が高い", "Eine Parakeet-v3-Feinabstimmung, in 20 seiner 25 Sprachen etwas genauer", "Un ajuste fino de Parakeet v3, algo más preciso en 20 de sus 25 idiomas", "Донавчена версія Parakeet v3, трохи точніша в 20 із 25 мов"]),
     ("Parakeet v3, retrained for fewer wrong words", ["Parakeet v3, douczony, by mylić mniej słów", "Parakeet v3 的再训练版，错词更少", "誤りを減らすよう再学習した Parakeet v3", "Parakeet v3, nachtrainiert für weniger falsche Wörter", "Parakeet v3, reentrenado para menos palabras erróneas", "Parakeet v3, донавчена для меншої кількості хибних слів"]),
     ("Chinese and 29 more, and it reads your vocabulary", ["Chiński i 29 innych, i czyta twoje słownictwo", "中文及另外 29 种语言，并读取你的词汇表", "中国語ほか 29 言語に対応し、語彙も読み取ります", "Chinesisch und 29 weitere, und es liest dein Vokabular", "Chino y 29 más, y lee tu vocabulario", "Китайська та ще 29, і читає ваш словник"]),
     ("Egyptian Arabic, mixed with English", ["Egipski arabski, przeplatany angielskim", "埃及阿拉伯语，夹杂英语", "英語交じりのエジプト・アラビア語", "Ägyptisches Arabisch, gemischt mit Englisch", "Árabe egipcio, mezclado con inglés", "Єгипетська арабська впереміш з англійською"]),
@@ -1497,12 +1503,6 @@ const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("session", ["sesja", "会话", "セッション", "Sitzung", "sesión", "сесія"]),
     ("Already sent to {}", ["Już wysłano do {}", "已发送到 {}", "{} に送信済み", "Schon an {} gesendet", "Ya enviado a {}", "Вже надіслано до {}"]),
     ("OpenCode didn't answer", ["OpenCode nie odpowiedział", "OpenCode 没有响应", "OpenCode が応答しませんでした", "OpenCode hat nicht geantwortet", "OpenCode no respondió", "OpenCode не відповів"]),
-    ("Screenshots", ["Zrzuty ekranu", "截图", "スクリーンショット", "Bildschirmfotos", "Capturas de pantalla", "Знімки екрана"]),
-    ("Press ⌘⇧4 to capture an area, or press Space for a window. The shot goes on the clipboard and into a folder", ["Naciśnij ⌘⇧4, aby uchwycić obszar, lub naciśnij spację, aby wybrać okno. Zrzut trafia do schowka i do folderu", "按 ⌘⇧4 截取一块区域，或按空格键截取窗口。截图会放到剪贴板并存入文件夹", "⌘⇧4 で範囲を撮影し、スペースキーでウインドウに切り替えます。撮影した画像はクリップボードとフォルダに入ります", "Drücke ⌘⇧4, um einen Bereich aufzunehmen, oder die Leertaste für ein Fenster. Die Aufnahme landet in der Zwischenablage und in einem Ordner", "Pulsa ⌘⇧4 para capturar un área o la barra espaciadora para una ventana. La captura va al portapapeles y a una carpeta", "Натисніть ⌘⇧4, щоб зняти область, або пробіл, щоб зняти вікно. Знімок потрапляє в буфер обміну й у теку"]),
-    ("Saves to", ["Zapisuje w", "保存到", "保存先", "Speichert in", "Guarda en", "Зберігає в"]),
-    ("macOS takes this shortcut first. Turn off its screenshot shortcuts in Keyboard Shortcuts › Screenshots, or choose another", ["macOS przechwytuje ten skrót pierwszy. Wyłącz jego skróty zrzutów ekranu w Skróty klawiszowe › Zrzuty ekranu albo wybierz inny", "macOS 会先占用这个快捷键。请在“键盘快捷键 › 截屏”中关闭它的截屏快捷键，或换一个", "このショートカットは macOS が先に使います。「キーボードショートカット › スクリーンショット」で macOS のショートカットをオフにするか、別のものを選んでください", "macOS belegt dieses Kürzel zuerst. Schalte seine Bildschirmfoto-Kürzel unter Tastaturkurzbefehle › Bildschirmfotos aus oder wähle ein anderes", "macOS usa este atajo primero. Desactiva sus atajos de captura en Funciones rápidas de teclado › Capturas de pantalla o elige otro", "macOS перехоплює цю комбінацію першою. Вимкніть її комбінації для знімків у Сполучення клавіш › Знімки екрана або виберіть іншу"]),
-    ("Open Keyboard Settings", ["Otwórz ustawienia klawiatury", "打开键盘设置", "キーボード設定を開く", "Tastatureinstellungen öffnen", "Abrir ajustes de teclado", "Відкрити налаштування клавіатури"]),
-    ("Full screen · Click to capture", ["Cały ekran · Kliknij, aby uchwycić", "全屏 · 点按以截图", "全画面 · クリックで撮影", "Ganzer Bildschirm · Klicken zum Aufnehmen", "Pantalla completa · Haz clic para capturar", "Увесь екран · Клацніть, щоб зняти"]),
     ("Caps Lock dictation", ["Dyktowanie Caps Lockiem", "Caps Lock 听写", "Caps Lock で音声入力", "Diktat mit der Feststelltaste", "Dictado con Bloq Mayús", "Диктування Caps Lock"]),
     ("Press Caps Lock to start dictation and again to finish. Hex keeps Caps Lock off and uses its light while it records and transcribes", ["Naciśnij Caps Lock, aby rozpocząć dyktowanie, i ponownie, aby zakończyć. Hex wyłącza Caps Lock i używa jego lampki podczas nagrywania i transkrypcji", "按 Caps Lock 开始听写，再按一次结束。Hex 会让 Caps Lock 保持关闭，并在录音和转写时使用它的指示灯", "Caps Lock を押すと音声入力を開始し、もう一度押すと終了します。Hex は Caps Lock をオフに保ち、録音と文字起こしの間そのライトを使います", "Caps Lock startet das Diktat, noch einmal beendet es. Hex hält Caps Lock aus und nutzt seine Leuchte während Aufnahme und Transkription", "Pulsa Bloq Mayús para empezar a dictar y otra vez para terminar. Hex mantiene Bloq Mayús apagado y usa su luz mientras graba y transcribe", "Натисніть Caps Lock, щоб почати диктування, і ще раз, щоб завершити. Hex тримає Caps Lock вимкненим і використовує його індикатор під час запису й розпізнавання"]),
 ];
@@ -1689,6 +1689,10 @@ mod tests {
         include_str!("../rune_ui/onboarding_kit/versus.rs"),
         include_str!("../rune_ui/output.rs"),
         include_str!("../rune_ui/screenshot_thumbnail.rs"),
+        #[cfg(hex_capture)]
+        include_str!("../rune_ui/screenshot_thumbnail/card.rs"),
+        #[cfg(hex_capture)]
+        include_str!("../rune_ui/captures.rs"),
         #[cfg(hex_capture)]
         include_str!("../rune_ui/screenshot_thumbnail/editor.rs"),
         #[cfg(hex_capture)]

@@ -4,17 +4,20 @@
 use std::time::Duration;
 
 use rune::{
-    Anim, Color, Cursor, Cx, Drag, El, LineCap, Path, Phase, Shape, Spring, SpringPair, TextStyle,
-    Transition, Tx, canvas, el, row, text,
+    Anim, Cursor, Cx, Drag, El, Phase, Spring, SpringPair, TextStyle, Transition, Tx, el, row, text,
 };
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant};
 
+use super::clip::{Clip, duration_label};
 use super::marks::{self, Mark, Tool};
-use super::{Editor, Layout, Out, PAD, SendList, Sessions, Shot, clamp_panel, matching};
+use super::{
+    Editor, Layout, Listen, Out, PAD, SendList, Sessions, Shot, Talk, clamp_panel, matching, talk,
+};
 use crate::desktop::i18n::tr;
 use crate::rune_ui::capture_capsule::ink::{ink_red, layer};
 use crate::rune_ui::capture_capsule::surface::{self, CHIP_H, CHIP_PX, SHELL_RADIUS, medium};
-use crate::rune_ui::controls::Paint;
+use crate::rune_ui::controls::{Paint, status_dot};
+use crate::rune_ui::icons::{ARROW_TOOL, BOX_TOOL, CROP_TOOL, MIC, PEN, TEXT_TOOL};
 
 /// The panel's corner, the capsule's and the thumbnail's.
 const RADIUS: f32 = SHELL_RADIUS;
@@ -23,9 +26,6 @@ const INNER_RADIUS: f32 = RADIUS - PAD;
 /// The open Send to… list.
 const LIST_W: f32 = 320.0;
 const ROW_H: f32 = 32.0;
-/// The tool glyphs' stroke, in points, the capsule's marks' line.
-const GLYPH_STROKE: f32 = 0.8;
-const GLYPH: f32 = 16.0;
 /// In on the HUD family's spring; out shorter, none. Reduce Motion fades.
 const ENTER: Spring =
     crate::rune_ui::capture_capsule::tuning::spring(crate::rune_hud::spring::MORPH);
@@ -74,7 +74,7 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
         .w_full()
         .h_full()
         .hover_motion_within(Anim::INSTANT, Anim::INSTANT);
-    let Some(shot) = s.shot.as_ref().filter(|_| s.on) else {
+    let Some(shot) = s.picture().filter(|_| s.on) else {
         return root;
     };
     let k = p.k;
@@ -87,7 +87,11 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
         .radius(RADIUS)
         .fill(k.c.bg_base)
         .role("dialog")
-        .label(tr("Screenshot"));
+        .label(if s.clip.is_some() {
+            tr("Screen recording")
+        } else {
+            tr("Screenshot")
+        });
     for shadow in &k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
     }
@@ -131,6 +135,10 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
         )
         .child(toolbar(p, s, w - 2.0 * PAD).absolute(PAD, PAD))
         .child(canvas_el(p, s, shot, layout));
+    if let Some(clip) = &s.clip {
+        panel = panel.child(strip_el(p, clip, layout));
+    }
+    let mut panel = panel.child(words_el(p, s, layout));
     if let Some(list) = &s.send {
         panel = panel.child(send_list(p, list).absolute(w - PAD - LIST_W, PAD + CHIP_H + 4.0));
     }
@@ -156,17 +164,22 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
         .fill(k.c.layer_02)
         .pixels_fit(shot.image.pixels(), rune::SurfaceFit::Fit)
         .clip_rounded(INNER_RADIUS)
-        .instant_changes()
-        .hit()
-        .cursor(cursor)
-        .on_drag(move |s: &mut Editor, d: &mut Drag, tx: &mut Tx| {
-            if d.phase == Phase::Down {
-                s.send = None;
-                s.keys();
-            }
-            s.draw(d.phase, [d.x / fit, d.y / fit]);
-            tx.wake_after(Duration::ZERO);
-        });
+        .instant_changes();
+    // A recording's frame takes no marks.
+    if s.clip.is_none() {
+        image =
+            image
+                .hit()
+                .cursor(cursor)
+                .on_drag(move |s: &mut Editor, d: &mut Drag, tx: &mut Tx| {
+                    if d.phase == Phase::Down {
+                        s.send = None;
+                        s.keys();
+                    }
+                    s.draw(d.phase, [d.x / fit, d.y / fit]);
+                    tx.wake_after(Duration::ZERO);
+                });
+    }
     let marks = s
         .marks
         .iter()
@@ -227,26 +240,34 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
 }
 
 /// The tools on the left; a note, Copy, Save, Send to…, and ✕ on the
-/// right. Its empty middle moves the panel.
+/// right. Its empty middle moves the panel. A recording has the span kept
+/// in place of the tools, and no Copy: Save is its main action.
 fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
     let k = p.k;
     let mut bar = row().center_y().gap(2.0).size(w, CHIP_H);
-    for tool in Tool::ALL {
-        let lit = s.tool == tool;
-        let ink = if lit { p.text() } else { p.muted() };
-        let mut chip = chip(p)
-            .w(CHIP_H)
-            .center()
-            .child(canvas(glyph(tool, ink)).size(GLYPH, GLYPH))
-            .role("radio")
-            .checked(lit)
-            .label(tr(tool.name()))
-            .help(tr(tool.name()))
-            .on_press(move |s: &mut Editor| s.pick(tool));
-        if lit {
-            chip = chip.fill(k.c.pressed);
-        }
-        bar = bar.child(chip);
+    if let Some(clip) = &s.clip {
+        let [from, to] = clip.trim;
+        bar = bar.child(
+            text(format!("{} – {}", duration_label(from), duration_label(to)))
+                .key("span")
+                .font(medium())
+                .color(p.muted())
+                .single_line()
+                .px(CHIP_PX - 4.0),
+        );
+    }
+    for tool in Tool::ALL.into_iter().filter(|_| s.clip.is_none()) {
+        bar = bar.child(
+            IconButton::new(icon(tool))
+                .variant(IconButtonVariant::Ghost)
+                .control_size(ControlSize::Large)
+                .label(tr(tool.name()))
+                .help(tr(tool.name()))
+                .expanded(s.tool == tool)
+                .on_press(move |s: &mut Editor| s.pick(tool))
+                .build(k)
+                .key(format!("tool-{}", tr(tool.name()))),
+        );
     }
     let note = s.note.as_ref().map(|(note, _)| note.as_str()).unwrap_or("");
     bar = bar.child(
@@ -255,25 +276,33 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
             .h_full()
             .center_y()
             .justify_end()
-            .px(8.0)
+            .px(4.0)
             .child(
                 text(note)
-                    .font(surface::small())
+                    .key("note")
+                    .font(k.ty.ui)
                     .color(p.muted())
                     .single_line()
                     .truncate(),
             ),
     );
+    if s.clip.is_none() {
+        bar = bar.child(push(
+            k,
+            Button::new(tr("Copy"))
+                .variant(ButtonVariant::Contrast)
+                .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Copy, tx)),
+        ));
+    }
+    let save = if s.clip.is_some() {
+        ButtonVariant::Contrast
+    } else {
+        ButtonVariant::Ghost
+    };
     bar.child(push(
         k,
-        Button::new(tr("Copy"))
-            .variant(ButtonVariant::Contrast)
-            .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Copy, tx)),
-    ))
-    .child(push(
-        k,
         Button::new(tr("Save"))
-            .variant(ButtonVariant::Ghost)
+            .variant(save)
             .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Save, tx)),
     ))
     .child(push(
@@ -284,35 +313,217 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
             .on_press(|s: &mut Editor| s.open_send()),
     ))
     .child(
-        chip(p)
-            .w(CHIP_H)
-            .center()
-            .child(rune::icon(k.glyph.close, GLYPH).color(p.muted()))
+        IconButton::new(k.glyph.close)
+            .variant(IconButtonVariant::Ghost)
+            .control_size(ControlSize::Large)
             .label(tr("Close"))
             .help(tr("Close"))
-            .on_press_tx(|s: &mut Editor, tx| s.close(tx)),
+            .on_press_tx(|s: &mut Editor, tx| s.close(tx))
+            .build(k)
+            .key("close"),
     )
 }
 
-/// A toolbar chip: the capsule's chip height, its hover and press.
-fn chip(p: Paint) -> El {
-    row()
-        .h(CHIP_H)
-        .radius(INNER_RADIUS)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
-        .role("button")
+/// Under the shot: the microphone, then what was said over the shot, or
+/// how to say it. While a dictation goes, the microphone carries the
+/// recording dot and the words end with where it's at.
+fn words_el(p: Paint, s: &Editor, layout: Layout) -> El {
+    let k = p.k;
+    let [x, y, w, h] = layout.words;
+    if s.clip.is_some() {
+        let words = s.words();
+        let words = if words.is_empty() {
+            text(tr("Nothing was said")).color(p.faint())
+        } else {
+            text(words.into_owned()).color(p.text())
+        };
+        return row()
+            .key("words")
+            .absolute(x, y)
+            .size(w, h)
+            .py(super::WORDS_PY)
+            .center_y()
+            .child(
+                words
+                    .font(medium())
+                    .max_lines(super::WORDS_LINES)
+                    .grow(1.0)
+                    .min_w(0.0),
+            );
+    }
+    let recording = s.listen == Listen::Recording;
+    let mic_label = if recording {
+        tr("Finish talking")
+    } else {
+        tr("Talk over it")
+    };
+    let mut mic = IconButton::new(&MIC)
+        .variant(IconButtonVariant::Ghost)
+        .control_size(ControlSize::Large)
+        .label(mic_label)
+        .help(mic_label)
+        .expanded(recording)
+        .on_press(|_: &mut Editor| talk(Talk::Toggle))
+        .build(k)
+        .key("mic");
+    if recording {
+        mic = mic.child(status_dot(p.danger()).absolute(19.0, 4.0));
+    }
+    let status = match s.listen {
+        Listen::Idle => None,
+        Listen::Recording => Some(tr("Listening…")),
+        Listen::Transcribing => Some(surface::processing()),
+    };
+    let words = if !s.words.is_empty() {
+        text(&s.words).color(p.text())
+    } else if let Some(status) = status {
+        text(status).color(p.muted())
+    } else {
+        text(tr("Hold your dictation shortcut to talk over it")).color(p.faint())
+    };
+    let mut line = row()
+        .grow(1.0)
+        .h_full()
+        .py(super::WORDS_PY)
+        .center_y()
+        .gap(8.0)
+        .child(
+            words
+                .font(medium())
+                .max_lines(super::WORDS_LINES)
+                .grow(1.0)
+                .min_w(0.0),
+        );
+    if let Some(status) = status.filter(|_| !s.words.is_empty()) {
+        line = line.child(
+            text(status)
+                .font(surface::small())
+                .color(p.muted())
+                .single_line(),
+        );
+    }
+    let mut bar = row()
+        .key("words")
+        .absolute(x, y)
+        .size(w, h)
+        .gap(super::GAP)
+        .child(mic.self_start())
+        .child(line);
+    if !s.words.is_empty() && s.listen == Listen::Idle {
+        bar = bar.child(
+            IconButton::new(k.glyph.close)
+                .variant(IconButtonVariant::Ghost)
+                .control_size(ControlSize::Large)
+                .label(tr("Clear words"))
+                .help(tr("Clear words"))
+                .on_press(|s: &mut Editor| s.words.clear())
+                .build(k)
+                .key("clear-words")
+                .self_start(),
+        );
+    }
+    bar
 }
 
-/// A labelled button the chips' height: the kit's, so Copy, the one main
-/// action, is its contrast button.
-fn push(k: &rune_kit::Kit, button: Button) -> El {
-    button
-        .control_size(ControlSize::Large)
-        .build(k)
-        .h(CHIP_H)
-        .px(CHIP_PX)
+/// A handle's width, at each end of the span kept.
+const HANDLE_W: f32 = 8.0;
+
+/// A recording's filmstrip: its frames side by side, the span kept framed
+/// between two handles and the rest shaded. A drag moves the nearer handle
+/// and shows the frame there above.
+fn strip_el(p: Paint, clip: &Clip, layout: Layout) -> El {
+    let k = p.k;
+    let [x, y, w, h] = layout.strip;
+    let duration = clip.duration_ms.max(1) as f32;
+    let at = |ms: u64| (ms as f32 / duration * w).clamp(0.0, w).round();
+    let cell = w / clip.frames.len().max(1) as f32;
+    let mut strip = el()
+        .key("strip")
+        .absolute(x, y)
+        .size(w, h)
         .radius(INNER_RADIUS)
+        .fill(k.c.layer_02)
+        .clip_rounded(INNER_RADIUS)
+        .instant_changes();
+    for (i, (_, frame)) in clip.frames.iter().enumerate() {
+        strip = strip.child(
+            el().absolute((i as f32 * cell).floor(), 0.0)
+                .size(cell.ceil() + 1.0, h)
+                .pixels_fit(frame.image.pixels(), rune::SurfaceFit::Fill),
+        );
+    }
+    let (a, b) = (at(clip.trim[0]), at(clip.trim[1]));
+    let shade = k.alpha(k.c.black, 0.55);
+    if a > 0.0 {
+        strip = strip.child(el().absolute(0.0, 0.0).size(a, h).fill(shade));
+    }
+    if b < w {
+        strip = strip.child(el().absolute(b, 0.0).size(w - b, h).fill(shade));
+    }
+    strip = strip.child(
+        el().key("span")
+            .absolute(a, 0.0)
+            .size((b - a).max(2.0 * HANDLE_W), h)
+            .radius(INNER_RADIUS)
+            .border(2.0, p.text()),
+    );
+    for (key, left) in [("start", a), ("end", b - HANDLE_W)] {
+        strip = strip.child(
+            el().key(key)
+                .absolute(left.clamp(0.0, (w - HANDLE_W).max(0.0)), 0.0)
+                .size(HANDLE_W, h)
+                .radius(k.radius.sm)
+                .fill(p.text())
+                .child(
+                    el().absolute(HANDLE_W * 0.5 - 0.75, h * 0.5 - 7.0)
+                        .size(1.5, 14.0)
+                        .radius(0.75)
+                        .fill(k.c.bg_base),
+                ),
+        );
+    }
+    strip
+        .child(
+            el().absolute(0.0, 0.0)
+                .size(w, h)
+                .radius(INNER_RADIUS)
+                .border(p.hair, k.alpha(k.c.text_base, 0.14)),
+        )
+        .hit()
+        .cursor(Cursor::ResizeColumn)
+        .role("slider")
+        .label(tr("Trim"))
+        .on_drag(move |s: &mut Editor, d: &mut Drag, tx: &mut Tx| {
+            s.send = None;
+            if let Some(clip) = &mut s.clip {
+                let ms = ((d.x / w).clamp(0.0, 1.0) * clip.duration_ms as f32).round() as u64;
+                let handle = match (d.phase, clip.holding) {
+                    (Phase::Down, _) | (_, None) => clip.nearer(ms),
+                    (_, Some(handle)) => handle,
+                };
+                clip.holding = (d.phase != Phase::Up).then_some(handle);
+                clip.drag(handle, ms);
+            }
+            tx.instant();
+            tx.wake_after(Duration::ZERO);
+        })
+}
+
+/// A toolbar button, the kit's own: Copy, the one main action, is its
+/// contrast button.
+fn push(k: &rune_kit::Kit, button: Button) -> El {
+    button.control_size(ControlSize::Large).build(k)
+}
+
+/// A tool's icon, in Hex's line icons, the theme's own stroke.
+fn icon(tool: Tool) -> &'static rune::Icon {
+    match tool {
+        Tool::Pen => &PEN,
+        Tool::Arrow => &ARROW_TOOL,
+        Tool::Box => &BOX_TOOL,
+        Tool::Text => &TEXT_TOOL,
+        Tool::Crop => &CROP_TOOL,
+    }
 }
 
 /// The open Send to… list: what's typed, then the sessions it matches.
@@ -412,57 +623,4 @@ fn send_list(p: Paint, list: &SendList) -> El {
         );
     }
     body
-}
-
-/// A tool's line glyph on a 24 × 24 grid.
-fn glyph(tool: Tool, color: Color) -> Shape {
-    let line = |a: [f32; 2], b: [f32; 2]| Path::new().move_to(a).line_to(b);
-    let paths: Vec<Path> = match tool {
-        // A pencil, tip at the bottom left, as Annotate's pen.
-        Tool::Pen => vec![
-            Path::new()
-                .move_to([16.5, 3.5])
-                .line_to([20.5, 7.5])
-                .line_to([8.0, 20.0])
-                .line_to([3.5, 20.5])
-                .line_to([4.0, 16.0])
-                .close(),
-            line([13.5, 6.5], [17.5, 10.5]),
-        ],
-        Tool::Arrow => vec![
-            line([5.0, 19.0], [19.0, 5.0]),
-            Path::new()
-                .move_to([10.0, 5.0])
-                .line_to([19.0, 5.0])
-                .line_to([19.0, 14.0]),
-        ],
-        Tool::Box => vec![
-            Path::new()
-                .move_to([4.0, 5.0])
-                .line_to([20.0, 5.0])
-                .line_to([20.0, 19.0])
-                .line_to([4.0, 19.0])
-                .close(),
-        ],
-        Tool::Text => vec![
-            line([5.0, 5.0], [19.0, 5.0]),
-            line([12.0, 5.0], [12.0, 20.0]),
-        ],
-        Tool::Crop => vec![
-            Path::new()
-                .move_to([7.0, 2.5])
-                .line_to([7.0, 17.0])
-                .line_to([21.5, 17.0]),
-            Path::new()
-                .move_to([2.5, 7.0])
-                .line_to([17.0, 7.0])
-                .line_to([17.0, 21.5]),
-        ],
-    };
-    let width = GLYPH_STROKE * 24.0 / GLYPH;
-    paths
-        .iter()
-        .fold(Shape::new().view_box(24.0, 24.0), |shape, path| {
-            shape.stroke_path(path, width, LineCap::Round, color)
-        })
 }

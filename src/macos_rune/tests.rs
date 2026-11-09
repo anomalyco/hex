@@ -1,7 +1,9 @@
 //! Runtime request/scheduling regressions; no native model loading or settings writes.
 
+use super::runtime::Runtime;
 use super::*;
 use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
+use crate::transcription::preparation::TranscriptionPreparation;
 
 const WAIT: Duration = Duration::from_secs(3);
 

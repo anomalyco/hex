@@ -1,16 +1,20 @@
 # Nix
 
-The flake packages Hex for `x86_64-linux` and `aarch64-linux`. Both build
-from source; `aarch64-linux` evaluates but has not been built or run on real
-ARM64 hardware yet. It supports the Linux X11 beta
-and native Wayland on compatible wlroots compositors. Wayland requires
-layer-shell for the recording overlay, the clipboard protocol used by
-`wl-copy`, and the virtual-keyboard protocol used by `wtype`. Global shortcuts
-come from the desktop's GlobalShortcuts portal, or from your own compositor
-keybindings running the `hex` commands. This is not a claim of support for every
-Wayland desktop; GNOME and KDE are not covered by this contract.
+The flake packages Hex for Linux only, `x86_64-linux` and `aarch64-linux`;
+there is no macOS package. Both targets build from source; `aarch64-linux`
+evaluates but has not been built or run on real ARM64 hardware yet. It
+supports the Linux X11 beta and native Wayland on compatible wlroots
+compositors. Wayland requires layer-shell for the recording overlay, the
+clipboard protocol used by `wl-copy`, and the virtual-keyboard protocol
+used by `wtype`. Global shortcuts come from the desktop's GlobalShortcuts
+portal, or from your own compositor keybindings running the `hex` commands.
+This is not a claim of support for every Wayland desktop; GNOME and KDE are
+not covered by this contract.
 
 ## Run Or Install
+
+On macOS, install the [DMG or Homebrew cask](../README.md#downloads) instead;
+the flake has no `aarch64-darwin` package.
 
 From a checkout, with Nix flakes enabled:
 

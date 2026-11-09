@@ -18,6 +18,35 @@ const GENERATE_ENDPOINTS: [&str; 2] = ["/api/experimental/generate", "/api/gener
 
 pub use crate::app_settings::DictationPostProcessing as PostProcessingSettings;
 
+/// Where the text a mode processes came from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Source {
+    /// A hotkey, API, or meeting dictation: heard speech.
+    Dictation,
+    /// Labs › Transform typed text: the selection already written in the
+    /// focused field.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    TypedText,
+}
+
+impl Source {
+    /// The `source` field transformations receive.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Dictation => "dictation",
+            Self::TypedText => "typed-text",
+        }
+    }
+}
+
+/// The speech-only Labs steps, read once per processing run.
+#[derive(Clone, Copy, Debug, Default)]
+struct DictationLabs {
+    spoken_formatting: bool,
+    spoken_symbols: bool,
+    filler_words: bool,
+}
+
 #[derive(Clone)]
 pub struct Profile {
     name: String,
@@ -321,43 +350,25 @@ impl Profiles {
         language: &str,
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
+        source: Source,
     ) -> Processed {
         let profile = self.select(context);
-        // Labs › Spoken formatting starts here, ahead of every mode's
-        // corrections, so it is off for raw dictation and meetings.
-        let formatted;
-        let transcript = if crate::labs::spoken_formatting() {
-            formatted = crate::dictation::spoken_formatting::apply(transcript);
-            formatted.as_str()
-        } else {
-            transcript
-        };
-        // Labs › Spoken symbols, likewise ahead of the corrections.
-        let symbolized;
-        let transcript = if crate::labs::spoken_symbols() {
-            symbolized = crate::dictation::spoken_symbols::apply(transcript);
-            symbolized.as_str()
-        } else {
-            transcript
-        };
-        // Labs › Remove filler words, likewise ahead of the corrections.
-        // Only English dictations run it: "er" and "um" are ordinary words
-        // in other languages, and "auto" says nothing about the language.
-        let unfilled;
-        let transcript = match crate::dictation::filler_words::strip_if(
+        // Labs › Spoken formatting, spoken symbols, and filler words only
+        // make sense for speech: typed text starts from what is already
+        // written and skips them.
+        let prepared = prepare_transcript(
             transcript,
             language,
-            crate::labs::filler_words(),
-        ) {
-            Some(stripped) => {
-                unfilled = stripped;
-                unfilled.as_str()
-            }
-            None => transcript,
-        };
+            source,
+            DictationLabs {
+                spoken_formatting: crate::labs::spoken_formatting(),
+                spoken_symbols: crate::labs::spoken_symbols(),
+                filler_words: crate::labs::filler_words(),
+            },
+        );
         let corrected = profile
             .replacements
-            .replace(&self.global.replace(transcript));
+            .replace(&self.global.replace(&prepared));
         // A transcript of numbers alone has nothing to rewrite; a model only
         // turns it into digits and re-punctuates it (#949).
         let numbers_only = profile.ai_enabled && numbers_only(&corrected);
@@ -844,12 +855,19 @@ impl Processed {
         client: &crate::personal_commands::TransformationClient,
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
+        source: Source,
     ) {
         if self.transformations.is_empty() || cancelled.load(Ordering::Acquire) {
             return;
         }
         let started = Instant::now();
-        let transformed = client.transform(&self.transformations, &self.text, context, cancelled);
+        let transformed = client.transform(
+            &self.transformations,
+            &self.text,
+            context,
+            cancelled,
+            source,
+        );
         let observation = self
             .observation
             .get_or_insert_with(|| ProcessingObservation {
@@ -865,6 +883,38 @@ impl Processed {
             Err(error) => observation.fallback = Some(error),
         }
     }
+}
+
+/// The transcript ahead of mode corrections. Spoken formatting, spoken
+/// symbols, and filler words only apply to heard speech, so typed text skips
+/// every one of them.
+fn prepare_transcript(
+    transcript: &str,
+    language: &str,
+    source: Source,
+    labs: DictationLabs,
+) -> String {
+    if source != Source::Dictation {
+        return transcript.to_owned();
+    }
+    let formatted;
+    let transcript = if labs.spoken_formatting {
+        formatted = crate::dictation::spoken_formatting::apply(transcript);
+        formatted.as_str()
+    } else {
+        transcript
+    };
+    let symbolized;
+    let transcript = if labs.spoken_symbols {
+        symbolized = crate::dictation::spoken_symbols::apply(transcript);
+        symbolized.as_str()
+    } else {
+        transcript
+    };
+    // Only English dictations drop fillers: "er" and "um" are ordinary words
+    // in other languages, and "auto" says nothing about the language.
+    crate::dictation::filler_words::strip_if(transcript, language, labs.filler_words)
+        .unwrap_or_else(|| transcript.to_owned())
 }
 
 fn prompt(
@@ -1443,6 +1493,35 @@ mod tests {
     }
 
     #[test]
+    fn typed_text_skips_the_dictation_only_labs() {
+        let labs = DictationLabs {
+            spoken_formatting: true,
+            spoken_symbols: true,
+            filler_words: true,
+        };
+        let speech = "um first new line done comma thanks";
+        let dictated = prepare_transcript(speech, "en", Source::Dictation, labs);
+        assert!(dictated.contains('\n'), "{dictated}");
+        assert!(dictated.contains(", "), "{dictated}");
+        assert!(!dictated.to_lowercase().contains("um "), "{dictated}");
+        assert!(!dictated.contains("new line"), "{dictated}");
+        assert!(
+            !dictated.contains("comma"),
+            "spoken symbols should have replaced it: {dictated}"
+        );
+
+        // Typed text runs the same profile but none of the speech Labs.
+        assert_eq!(
+            prepare_transcript(speech, "en", Source::TypedText, labs),
+            speech
+        );
+        assert_eq!(
+            prepare_transcript(speech, "en", Source::Dictation, DictationLabs::default()),
+            speech
+        );
+    }
+
+    #[test]
     fn mode_corrections_run_before_registered_transformations() {
         let profile = Profile::new("Global", "")
             .replacements(ReplacementSet::new(&[
@@ -1459,6 +1538,7 @@ mod tests {
             "en",
             &context("Zed", None),
             &AtomicBool::new(false),
+            Source::Dictation,
         );
 
         assert_eq!(processed.text, "Use OpenCode.");
@@ -1491,6 +1571,7 @@ mod tests {
             "en",
             &context("Zed", None),
             &AtomicBool::new(false),
+            Source::Dictation,
         );
         assert_eq!(processed.text, "one two three four five");
         assert!(processed.observation.is_none());

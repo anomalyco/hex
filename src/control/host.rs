@@ -45,6 +45,14 @@ pub(crate) trait Host {
         raw: bool,
     ) -> Result<(), ControlError>;
     fn paste_last(&self) -> Result<(), ControlError>;
+    /// Runs the focused field's text through its Output steps and replaces
+    /// it, where this OS has Labs › Transform typed text.
+    fn typed_text(&self) -> Result<(), ControlError> {
+        Err(ControlError::new(
+            "unsupported",
+            "Transform typed text is Linux only",
+        ))
+    }
     /// Saves `settings` as the window would and lets the runtime, the
     /// listener, and an open window adopt them.
     fn save(&self, settings: AppSettings) -> Result<(), ControlError>;
@@ -146,6 +154,10 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
         ControlCommand::PasteLast => reply(
             host.paste_last()
                 .map(|()| ControlReply::done("Pasting the last dictation")),
+        ),
+        ControlCommand::TypedText => reply(
+            host.typed_text()
+                .map(|()| ControlReply::done("Transforming the focused text")),
         ),
         ControlCommand::MeetingRecord { title } => meeting(false, title),
         ControlCommand::MeetingStop => meeting(true, None),
@@ -763,6 +775,7 @@ mod tests {
         let host = FakeHost::default();
         for command in [
             ControlCommand::LaunchAtLogin { enabled: None },
+            ControlCommand::TypedText,
             ControlCommand::ScrawlCaptureUndo,
             ControlCommand::WindowStory {
                 story: "HUD".into(),

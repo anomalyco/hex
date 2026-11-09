@@ -173,8 +173,10 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     └── not observed on a real GNOME session; no automated check
 Files -> Reveal files opens the recording folder (selected in Explorer,
     opened by xdg-open); Reveal Markdown additionally appears while the
-    exported .md exists and selects it (Explorer) or opens the folder holding
-    it (xdg-open); Delete moves to the freedesktop Trash or the Recycle Bin
+    exported .md exists and selects it (Explorer gets `/select,"<path>"`,
+    with the switch outside the quotes so a folder such as `Hex Meetings`
+    stays one path) or opens the folder holding it (xdg-open); Delete moves
+    to the freedesktop Trash or the Recycle Bin
 ```
 
 The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and
@@ -255,12 +257,16 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      ├── A call whose page names a meeting code (Google Meet's, from the
      │   address or a code-only tab title) is snoozed by that code: another
      │   code in the same browser is a new call and is offered or recorded;
-     │   a page without a code still counts as the snoozed call (#1113)
+     │   a `/meet/<code>` address (Arc opening a Calendar link) resolves to
+     │   its code, and a page without a code still counts as the snoozed
+     │   call (#1113)
      └── Stopped by hand -> the snooze ends once the call app has been off
          the microphone for 3 s (seen while transcribing too), so the next
          call in the same app is offered; a dismissed offer keeps the minute
          for a muted call dropping off mid-call. Checks:
          `a_different_meet_call_in_the_same_browser_is_not_snoozed_by_the_first`,
+         `meet_prefixed_addresses_are_snoozed_by_their_own_codes`,
+         `extracts_a_meet_code_from_a_meet_prefixed_address`,
          `a_stopped_call_s_app_is_snoozed_only_until_it_leaves_for_a_few_seconds`
   -> "Left the call" prompt after the call app is off the microphone for 3 s
   -> Times are wall-clock runs: observations more than 10 s apart (sleep, a
@@ -356,9 +362,13 @@ voice note elsewhere would otherwise get a known service's 2 s threshold or
 trigger Always record. (A call in a background tab is therefore judged by the
 active tab's page, which is the unknown-page 20 s for a new site.) That query is
 an AppleScript round trip, so the watcher starts it on its own
-thread (at most one at a time, about once a second) and reads the newest answer,
+thread (at most one at a time) and reads the newest answer,
 at most 5 s after it finished; a slow or timed-out query (the existing 2 s
-limit) never holds up the loop. Answers and the remembered page are dropped
+limit) never holds up the loop. A browser that just started holding the
+microphone is queried once a second for 30 s, enough to name the call before
+the 20 s unknown-page threshold; after that it is queried every 30 s, and the
+page remembered from the last answer names the call in between. Answers and
+the remembered page are dropped
 while Hex records, Meetings is off, the browser is snoozed for a call without
 a meeting code, or no browser holds
 the microphone; a query in flight at that moment is not repeated beside itself,
@@ -366,7 +376,8 @@ and its answer is discarded. When a browser's page is found for a run already
 under way (the first pass had no answer yet), the run keeps counting, now
 toward the known service's 2 s. When no answer names a page, the last page a browser showed while
 it held the microphone names the call for 60 s (`BrowserPageMemory`), so the
-site survives a failed query or Hex being in front. Safari, Chrome, Firefox and
+site survives a failed query, Hex being in front, or the 30 s between slow
+queries. Safari, Chrome, Firefox and
 Edge expose no URL, so their calls are unnamed unless the foreground context
 says otherwise. Banshee has no recognised room path, so any `banshee.app` page
 counts; it is not in Settings' always-listed providers, but appears under
@@ -381,7 +392,14 @@ call detected" offer; that is what the 20 s browser threshold prevents.
 A second Banshee call on 2026-10-26 got no offer in the 30 s before Kit started
 recording by hand: the "about 20 s" threshold was 40 loop observations, and each
 loop took about 0.9 s (500 ms sleep plus the browser inspection), so an unknown
-browser page needed about 37 s. The thresholds are now clock time.
+browser page needed about 37 s. The thresholds are now clock time, and the
+foreground context monitor no longer runs an AppleScript read every poll
+(README's website-context section): it reads a scriptable browser's page when
+the browser comes to the front and once a dictation capture is real (held past
+its hold threshold, or at a finish that lands earlier, or at the control
+command's start). The watcher's own queries (once a second for the first 30 s a
+browser holds the microphone, then every 30 s) keep naming the call, so after
+the first 30 s a tab change can take up to 30 s to be noticed.
 Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds`,
 `a_slow_loop_still_ends_a_snooze_after_a_minute`,
 `a_stalled_loop_does_not_count_the_gap_as_time_on_the_microphone`,
@@ -396,6 +414,7 @@ Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds
 `a_slow_tab_query_never_holds_up_the_loop`,
 `a_reset_drops_the_answer_in_flight_without_starting_a_second_query`,
 `an_answer_is_dated_by_when_its_query_finished`,
+`tab_queries_back_off_after_the_first_thirty_seconds_and_reset`,
 `a_cold_tab_query_then_its_answer_leads_to_a_banshee_offer` and
 `a_snoozed_or_non_browser_application_is_not_queried` (meeting/watcher.rs),
 `the_meeting_tab_query_reads_only_the_active_tab` (dictation/context.rs),
@@ -579,6 +598,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   pill `.hit()`); the window is as wide as the open pill, and clicks
      │   in its transparent rest reach the app beneath (#1305; not observed
      │   on a real Mac)
+     ├── Windows: each capsule's window is only as wide as the drawn pill,
+     │   so the area around it stays clickable (not verified on a real
+     │   Windows machine)
      ├── In the saved recording_indicator_corner
      ├── Compact: pulsing red dot · title · mm:ss, plus "+N" when turns wait
      ├── Hover -> widens toward the screen with the actions below; pointer
@@ -697,8 +719,36 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │   │   saved device returns, mid-meeting
 │   │   -> New input opens before the old drops; same track, no retry gap
 │   │      // macOS only (meetings are macOS); a failed open keeps the old input
-│   └── Saved device listed but would not open -> System default stands in
-│       -> tried again after 1, 2, 4, 8, 16, 30, 30, 30 s, then only on a change
+│   ├── Saved device listed but would not open -> System default stands in
+│   │   -> tried again after 1, 2, 4, 8, 16, 30, 30, 30 s, then only on a change
+│   └── Stream delivers only exact zeros for 3 s (#1518)
+│       -> checked only while the call app records from the same input, by
+│          device UID, looked at once a second; a manual recording never
+│          reopens or warns, and neither does an app that reports no input
+│       -> a gated or noise-suppressed microphone the call app also uses
+│          still counts as held, so it can trigger the reopens and warning
+│       -> Reopened like a failed source, at most twice in one recording,
+│          the budget shared by every reopened stream
+│       ├── Still silent -> keep recording; the capsule says
+│       │   "Microphone is silent · 12:34" and the menu bar "Microphone is
+│       │   silent"; manifest.microphone.warning is written as soon as it is
+│       │   raised, so a crash keeps it
+│       ├── Nonzero audio returns -> the live warning clears, including in a
+│       │   stream reopened after a supervisor restart; the persisted warning
+│       │   stays
+│       ├── The call app leaves the input -> no further reopens or warnings;
+│       │   a live warning stays until nonzero audio returns
+│       ├── Another episode after audio returns -> warns again, never reopens
+│       └── Finished meeting -> its panel says the microphone was silent for
+│           part of the call; the manifest means "silent at some point", not
+│           the last moment
+│          // checks: a_silence_budget_is_shared_across_reopened_streams,
+│          // audible_audio_clears_a_warning_a_reopened_stream_inherited,
+│          // a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned,
+│          // a_sticky_warning_survives_its_live_one_clearing,
+│          // a_dropped_warning_update_is_not_committed_and_is_retried,
+│          // only_an_input_the_call_app_reports_counts_as_held;
+│          // not verified on a live device or call app
 └── System audio -> Core Audio process tap (global, excluding Hex) on a private
     aggregate device; no display dependency
     └── Tap not authorized + Screen Recording granted -> ScreenCaptureKit fallback
@@ -735,11 +785,26 @@ call, a muted call, and Zoom or Teams helpers),
 `meeting_menu_offers_one_action_per_state` in
 [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs), and
 `mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded`,
-`writer_fills_a_capture_gap_with_silence_and_records_it`, and
-`a_source_that_resumes_after_an_outage_is_padded_back_onto_the_timeline` in
-[meeting/tests.rs](../../src/meeting/tests.rs). Menu-bar Record Meeting and
+`writer_fills_a_capture_gap_with_silence_and_records_it`,
+`a_source_that_resumes_after_an_outage_is_padded_back_onto_the_timeline`, and
+`a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none` in
+[meeting/tests.rs](../../src/meeting/tests.rs);
+`a_meeting_follows_the_input_its_call_app_records_from`,
+`a_microphone_that_would_not_open_is_tried_a_bounded_number_of_times`, and
+`only_an_input_the_call_app_reports_counts_as_held` in
+[meeting/capture.rs](../../src/meeting/capture.rs); and
+`a_silence_budget_is_shared_across_reopened_streams`,
+`audible_audio_clears_a_warning_a_reopened_stream_inherited`,
+`a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned`,
+`a_sticky_warning_survives_its_live_one_clearing`,
+`a_dropped_warning_update_is_not_committed_and_is_retried`,
+`a_warning_is_written_to_the_manifest_as_soon_as_it_is_raised`, and
+`a_device_switch_restarts_the_zero_count_without_clearing_the_warning` in
+[meeting/warning.rs](../../src/meeting/warning.rs). Menu-bar Record Meeting and
 Stop & Transcribe, and the recording and ready capsule buttons, were clicked
-on a real Mac on 2026-10-22; no automated test covers them.
+on a real Mac on 2026-10-22; no automated test covers them. The digital
+silence watch is not verified on a live device or call app that holds the
+microphone with voice processing.
 
 The capsules are Rune overlays in [meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs):
 interactive, non-activating `NSPanel`s at status level on every Space,
@@ -1050,6 +1115,9 @@ Final publication                                   // meetings.output
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
+    // Reveal on Windows selects the exported Markdown in Explorer; only the
+    // explorer_select argument unit test checks it, not observed on a real
+    // Windows machine
 Meetings pane -> Copy icon on a completed row's hover, the card's Copy
     transcript icon, Reveal files (opens the recording folder), and Reveal
     Markdown (selects the exported .md) while the export exists
@@ -1116,8 +1184,9 @@ both stay recoverable from the Trash. Sources:
 `a_rename_follows_the_title_when_descriptive_file_names_are_on`,
 `notes_rename_the_export_only_with_descriptive_file_names`,
 `retitling_replaces_only_a_matching_first_heading`,
-`the_exported_markdown_is_the_reveal_target_only_while_it_exists`, and the Rune
-pane tests `meetings_select_search_and_copy_a_transcript`,
+`the_exported_markdown_is_the_reveal_target_only_while_it_exists`,
+`explorer_selects_the_meeting_file_with_the_switch_outside_the_quotes`, and the
+Rune pane tests `meetings_select_search_and_copy_a_transcript`,
 `meetings_rename_from_the_title_field`,
 `deleting_a_meeting_takes_the_menu_then_a_confirmation`,
 `the_overflow_menu_copies_the_summary_and_asks_for_new_notes`, and

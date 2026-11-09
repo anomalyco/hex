@@ -71,20 +71,24 @@ pub enum DictationIndicatorEvent {
 }
 
 impl DictationIndicatorEvent {
-    /// A `Meter` event from captured samples: their RMS and absolute peak;
-    /// `None` for no samples.
+    /// A `Meter` event from captured samples: their RMS and absolute peak
+    /// around the chunk's mean, so a microphone's DC offset never reads as
+    /// loudness; `None` for no samples.
     pub fn meter(samples: &[f32]) -> Option<Self> {
         if samples.is_empty() {
             return None;
         }
+        let count = samples.len() as f32;
+        let mean = samples.iter().sum::<f32>() / count;
         let mut sum_of_squares = 0.0;
         let mut peak = 0.0_f32;
         for sample in samples {
-            sum_of_squares += sample * sample;
-            peak = peak.max(sample.abs());
+            let centered = sample - mean;
+            sum_of_squares += centered * centered;
+            peak = peak.max(centered.abs());
         }
         Some(Self::Meter {
-            average: (sum_of_squares / samples.len() as f32).sqrt(),
+            average: (sum_of_squares / count).sqrt(),
             peak,
         })
     }
@@ -111,33 +115,11 @@ mod macos {
                 crate::macos_rune::wake_pump();
             }
         }
-
-        pub fn meter(&self, samples: &[f32]) {
-            if let Some(event) = DictationIndicatorEvent::meter(samples) {
-                self.send(event);
-            }
-        }
     }
 
     pub fn channel() -> (DictationIndicatorSender, Receiver<DictationIndicatorEvent>) {
         let (sender, receiver) = mpsc::channel();
         (DictationIndicatorSender(sender), receiver)
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn meter_reports_rms_and_peak() {
-            let (sender, receiver) = channel();
-            sender.meter(&[-0.5, 0.5]);
-            let DictationIndicatorEvent::Meter { average, peak } = receiver.recv().unwrap() else {
-                panic!("expected meter event");
-            };
-            assert!((average - 0.5).abs() < f32::EPSILON);
-            assert!((peak - 0.5).abs() < f32::EPSILON);
-        }
     }
 }
 
@@ -476,6 +458,43 @@ impl IndicatorModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meter_reports_rms_and_peak() {
+        let Some(DictationIndicatorEvent::Meter { average, peak }) =
+            DictationIndicatorEvent::meter(&[-0.5, 0.5])
+        else {
+            panic!("expected a meter event");
+        };
+        assert!((average - 0.5).abs() < f32::EPSILON);
+        assert!((peak - 0.5).abs() < f32::EPSILON);
+        assert!(DictationIndicatorEvent::meter(&[]).is_none());
+    }
+
+    /// Some microphones (a Ryzen built-in digital microphone, #841) carry a
+    /// constant DC offset louder than the speech; the meter measures around
+    /// each chunk's mean, as the dictation silence gate does.
+    #[test]
+    fn a_dc_offset_never_reads_as_loudness() {
+        let Some(DictationIndicatorEvent::Meter { average, peak }) =
+            DictationIndicatorEvent::meter(&[0.2; 512])
+        else {
+            panic!("expected a meter event");
+        };
+        assert!(
+            average < 1e-5,
+            "a constant offset reads as silence: {average}"
+        );
+        assert!(peak < 1e-5, "and has no peak: {peak}");
+
+        let Some(DictationIndicatorEvent::Meter { average, peak }) =
+            DictationIndicatorEvent::meter(&[0.7, -0.3])
+        else {
+            panic!("expected a meter event");
+        };
+        assert!((average - 0.5).abs() < 1e-6);
+        assert!((peak - 0.5).abs() < 1e-6);
+    }
 
     #[test]
     fn an_island_spreads_the_field_across_it_at_the_same_spacing() {

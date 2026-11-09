@@ -43,11 +43,9 @@ use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use objc2_foundation::{MainThreadMarker, NSAppleEventManager, NSObject, NSString, NSTimer};
 
 use crate::app_settings::AppSettings;
-use crate::desktop::activity::{DesktopActivity, last_completed_at};
-use crate::desktop::events::EventReader;
 use crate::desktop::host::{
-    DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopShortcuts,
-    DesktopTranscriptionSnapshot, DesktopUpdateStatus,
+    DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopTranscriptionSnapshot,
+    DesktopUpdateStatus,
 };
 use crate::dictation::indicator::DictationIndicatorEvent;
 use crate::macos_rune::status_item::StatusItemAction;
@@ -56,21 +54,20 @@ use crate::meeting::watcher::{ControllerEvent, ListenerConfig, MeetingMenuState}
 use crate::recognition::RecognitionControl;
 use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
-use crate::transcription::models::{
-    ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
-};
-use crate::transcription::preparation::TranscriptionPreparation;
+use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 
 mod activation;
 mod control;
 mod launch;
 mod main_menu;
+mod runtime;
 pub(crate) mod status_item;
 mod wake;
 
 use activation::{observe_activation, reopen_on_activation};
 use launch::{LaunchWindow, launched_as_login_item, observe_launch, take_login_launch_activation};
 use main_menu::install_main_menu;
+use runtime::run_runtime;
 use wake::{pump_now, relay, start_pump_timer};
 
 pub(crate) use wake::wake_pump;
@@ -142,6 +139,8 @@ pub(crate) enum ShortcutTarget {
     Cancel,
     /// Labs › Screenshots.
     Screenshot,
+    /// Labs › Screenshots' record shortcut.
+    ScreenshotRecord,
 }
 
 /// What the runtime last published for the window and the menu bar.
@@ -373,6 +372,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let event_path = listener.event_path.clone();
     let event_log = crate::desktop::events::EventLog::create(&event_path)?;
     let drained_event_log = event_log.clone();
+    let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
     let (developer_sender, developer_receiver) = mpsc::sync_channel(8);
     let (control_sender, control_receiver) = mpsc::sync_channel(8);
     let (recognition_controls, recognition_control_receiver) = mpsc::sync_channel(8);
@@ -382,6 +382,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             developer_control: crate::DEVELOPER_FEATURES_ENABLED.then(|| developer_sender.clone()),
             dictation_control: Some(recognition_controls.clone()),
             control: Some(control_sender),
+            processing: crate::local_api::processing::profiles_processing(transformations.clone()),
             ..Default::default()
         },
     )?;
@@ -389,7 +390,6 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let (controller_commands, controller_command_receiver) = mpsc::sync_channel(8);
     let (meeting_requests, meeting_request_receiver) = mpsc::sync_channel(8);
     let (indicator, indicator_events) = crate::dictation::indicator::channel();
-
     // The controller idles without inspecting microphone activity until the
     // user opts in to meetings (always available in developer builds).
     let controller = thread::Builder::new()
@@ -440,6 +440,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                     Some(recognition_indicator.clone()),
                     recognition_history,
                     Some(recognition_control_receiver),
+                    transformations,
                 )
             }));
             let failure = match result {
@@ -664,264 +665,6 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
 
 /// Stops and joins the runtime, listener, meeting controller, and local API.
 static DRAIN: crate::desktop::process_exit::Drain = crate::desktop::process_exit::Drain::new();
-
-// ---------------------------------------------------------------------------
-// Runtime thread
-
-fn run_runtime(
-    settings: AppSettings,
-    initial_input_source: Option<String>,
-    requests: Receiver<Request>,
-    shared: &Shared,
-    shutdown: &AtomicBool,
-    recognition_start: Option<SyncSender<()>>,
-    listener_failure: Arc<Mutex<Option<String>>>,
-) {
-    let mut event_reader = EventReader::open(shared.event_path().to_path_buf());
-    let mut activity = DesktopActivity::default();
-    activity.refresh(&mut event_reader);
-    let last_completed_at = last_completed_at(event_reader.events().iter());
-    let mut runtime = Runtime {
-        keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
-            settings.keyboard_model_switching.clone(),
-            initial_input_source,
-        ),
-        automatic_preparation: false,
-        settings,
-        preparation: TranscriptionPreparation::default(),
-        recognition_start,
-        listener_failure,
-        event_reader,
-        activity,
-        last_completed_at,
-        started_at: shared.started_at,
-    };
-    loop {
-        let mut next = match requests.recv_timeout(RUNTIME_TICK) {
-            Ok(request) => Some(request),
-            Err(RecvTimeoutError::Timeout) => None,
-            Err(RecvTimeoutError::Disconnected) => break,
-        };
-        while let Some(request) = next {
-            runtime.handle(request);
-            next = requests.try_recv().ok();
-        }
-        if shutdown.load(Ordering::Relaxed) {
-            break;
-        }
-        runtime.tick();
-        runtime.refresh_activity();
-        let published = Arc::new(runtime.publish());
-        let changed = {
-            let mut current = lock(&shared.published);
-            let changed = current.as_deref() != Some(&published);
-            if changed {
-                *current = Some(published);
-            }
-            changed
-        };
-        if changed {
-            for wake in lock(&shared.wakers).iter() {
-                wake();
-            }
-        }
-    }
-    runtime.preparation.cancel();
-}
-
-/// Two selections that load the same thing.
-fn same_model_and_language(left: &TranscriptionSelection, right: &TranscriptionSelection) -> bool {
-    left.model == right.model && left.language == right.language
-}
-
-struct Runtime {
-    settings: AppSettings,
-    preparation: TranscriptionPreparation,
-    keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher,
-    automatic_preparation: bool,
-    /// Starts the listener once setup is ready; `None` once started.
-    recognition_start: Option<SyncSender<()>>,
-    /// Why the listener stopped, once it has.
-    listener_failure: Arc<Mutex<Option<String>>>,
-    /// The listener's event log, read on this thread so the window can show a
-    /// failed dictation without another polling thread.
-    event_reader: EventReader,
-    activity: DesktopActivity,
-    /// When the current session's newest dictation completed.
-    last_completed_at: Option<u64>,
-    /// When this runtime started, in the event log's wall-clock ms. Failures
-    /// older than this belong to the previous session.
-    started_at: u64,
-}
-
-impl Runtime {
-    fn handle(&mut self, request: Request) {
-        match request {
-            Request::ChooseModel { model, language } => {
-                self.manual_choice();
-                let selection = TranscriptionSelection { model, language };
-                self.preparation.start(selection, false);
-            }
-            Request::SelectInstalledModel(model) => {
-                self.reload_settings();
-                self.manual_choice();
-                self.preparation
-                    .start(self.settings.transcription_for_model(model), true);
-            }
-            Request::UseInstalledSelection(selection) => {
-                self.manual_choice();
-                // `hex model use` replies "already in use" on the same test.
-                if !same_model_and_language(&selection, &self.settings.transcription) {
-                    self.preparation.start(selection, true);
-                }
-            }
-            Request::InputSourceChanged(source) => {
-                if self
-                    .keyboard_switcher
-                    .source_changed(source, Instant::now())
-                {
-                    self.supersede_automatic();
-                }
-            }
-            Request::CancelModel => {
-                self.manual_choice();
-                self.preparation.cancel();
-            }
-            Request::ReloadSettings => self.reload_settings(),
-            Request::Desktop(_)
-            | Request::CaptureShortcutFor(_)
-            | Request::CancelShortcut
-            | Request::SetShortcut { .. } => {}
-        }
-    }
-
-    fn reload_settings(&mut self) {
-        match AppSettings::load() {
-            Ok(settings) => {
-                if self
-                    .keyboard_switcher
-                    .configure(settings.keyboard_model_switching.clone(), Instant::now())
-                {
-                    self.supersede_automatic();
-                }
-                self.settings = settings;
-            }
-            Err(error) => tracing::warn!(%error, "could not reload settings"),
-        }
-    }
-
-    fn manual_choice(&mut self) {
-        self.keyboard_switcher.manual_choice();
-        if self.automatic_preparation {
-            self.preparation.cancel();
-            self.automatic_preparation = false;
-        }
-    }
-
-    fn supersede_automatic(&mut self) {
-        // A source being cycled through must not cancel a manual operation.
-        // Manual work is superseded only when the debounced choice is due.
-        if self.automatic_preparation {
-            self.preparation.cancel();
-            self.automatic_preparation = false;
-        }
-    }
-
-    /// Commits a prepared model and starts a listener that waited for setup.
-    fn tick(&mut self) {
-        self.tick_at(Instant::now());
-    }
-
-    /// Reads the listener's newest events, bounded by `EventReader`'s
-    /// retention, so the window's warning follows failed dictations.
-    fn refresh_activity(&mut self) {
-        self.activity.refresh(&mut self.event_reader);
-        self.last_completed_at = last_completed_at(self.event_reader.events().iter());
-    }
-
-    fn tick_at(&mut self, now: Instant) {
-        if let Some(choice) = self.keyboard_switcher.take_due(now) {
-            let selection = TranscriptionSelection {
-                language: choice.language,
-                ..self.settings.transcription_for_model(choice.model)
-            };
-            if !same_model_and_language(&selection, &self.settings.transcription) {
-                self.preparation.start(selection, true);
-                self.automatic_preparation = true;
-            } else {
-                // The debounced choice keeps the current model, but must
-                // still prevent an older manual preparation replacing it.
-                self.preparation.cancel();
-                self.automatic_preparation = false;
-            }
-        }
-        if let Some(result) = self.preparation.poll() {
-            self.automatic_preparation = false;
-            let result = result.and_then(|selection| {
-                crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
-                let mut settings = AppSettings::load().map_err(|e| format!("{e:#}"))?;
-                settings
-                    .save_transcription(selection)
-                    .map_err(|e| format!("{e:#}"))?;
-                self.settings = settings;
-                Ok(())
-            });
-            match result {
-                Ok(()) => self.preparation.set_error(None),
-                Err(error) => {
-                    tracing::warn!(%error, "could not select transcription model");
-                    self.preparation.set_error(Some(error));
-                }
-            }
-        }
-        if self.recognition_start.is_some()
-            && crate::desktop::onboarding::status(&self.settings.transcription).ready()
-            && let Some(start) = self.recognition_start.take()
-        {
-            let _ = start.try_send(());
-        }
-    }
-
-    fn publish(&self) -> Published {
-        let preparation = self.preparation.status();
-        let failure = lock(&self.listener_failure).clone();
-        let running = self.recognition_start.is_none() && failure.is_none();
-        Published {
-            listener: DesktopListenerSnapshot {
-                running,
-                warming: false,
-                status: if failure.is_some() {
-                    "Stopped"
-                } else if running {
-                    "Enabled"
-                } else {
-                    "Waiting for setup"
-                }
-                .into(),
-                warning: failure,
-                notice: None,
-                last_failure: self
-                    .activity
-                    .visible_failure_since(self.started_at, self.last_completed_at),
-                shortcuts: DesktopShortcuts::Registered,
-                shortcuts_configurable: false,
-            },
-            transcription: DesktopTranscriptionSnapshot {
-                downloaded_bytes: preparation.downloaded_bytes,
-                error: preparation.error.clone(),
-                preparation_stage: preparation
-                    .model
-                    .map(|_| ModelPreparationStage::Downloading),
-                selection: self.settings.transcription.clone(),
-                preparing: preparation.model,
-            },
-            update_status: update_status(),
-            update_notes: UPDATER.get().and_then(crate::updater::Updater::notes),
-            settings: self.settings.clone(),
-            preparation,
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Main thread: status item, menu, reopen, HUD
@@ -1279,7 +1022,11 @@ impl Pump {
                     id,
                     title,
                     chapters: Vec::new(),
+                    warning: None,
                 };
+            }
+            ControllerEvent::SourceWarning { warning } => {
+                self.meeting_state.source_warning(warning)
             }
             ControllerEvent::Chapters(chapters) => {
                 if let MeetingMenuState::Recording {

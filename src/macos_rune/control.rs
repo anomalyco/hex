@@ -169,6 +169,10 @@ impl Pump {
             ControlCommand::Dictation { .. } | ControlCommand::PasteLast => {
                 unreachable!("listener_command answers it")
             }
+            ControlCommand::TypedText => Some(ControlReply::error(
+                "unsupported",
+                "Transform typed text is Linux only",
+            )),
             ControlCommand::Screenshot { pick } => screenshot(pick, reply),
             ControlCommand::MeetingRecord { title } => self.meeting(false, title, reply),
             ControlCommand::MeetingStop => self.meeting(true, None, reply),
@@ -785,7 +789,7 @@ fn wait_for_model(
 ) -> Result<ControlReply, ControlError> {
     let name = crate::transcription::models::definition(selection.model).name;
     let matches = |settings: &AppSettings| {
-        super::same_model_and_language(&settings.transcription, &selection)
+        super::runtime::same_model_and_language(&settings.transcription, &selection)
     };
     if load().is_ok_and(|settings| matches(&settings)) {
         return Ok(ControlReply::unchanged(format!(
@@ -981,7 +985,7 @@ mod tests {
                 Ok(())
             },
         ));
-        let mut runtime = super::super::Runtime {
+        let mut runtime = super::super::runtime::Runtime {
             settings: Default::default(),
             keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher::new(
                 Default::default(),

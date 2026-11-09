@@ -99,6 +99,22 @@ pub(super) const SCENES: &[Scene] = &[
         crate::labs::apply(&ui.settings.labs);
         ui.pane = Pane::History;
     }),
+    // Labs › Screenshots' Captures: a shot, a recording with its words, and
+    // an older shot; and before any.
+    #[cfg(hex_capture)]
+    ("captures", |ui| {
+        *ui = portal_fixture();
+        ui.settings.labs.screenshots = true;
+        ui.captures = captures::CapturesPane::fixture();
+        ui.pane = Pane::Captures;
+    }),
+    #[cfg(hex_capture)]
+    ("captures-empty", |ui| {
+        *ui = portal_fixture();
+        ui.settings.labs.screenshots = true;
+        ui.captures = captures::CapturesPane::fixture_empty();
+        ui.pane = Pane::Captures;
+    }),
     ("history-empty", |ui| {
         *ui = portal_fixture();
         ui.history = history::HistoryPane::fixture_empty();
@@ -705,6 +721,7 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         ui.platform.caps = platform::Capabilities::LINUX;
         ui.settings.labs.skip_pauses = true;
+        ui.settings.labs.typed_text = true;
         ui.labs_open = true;
     }),
     ("mac-production", |ui| {

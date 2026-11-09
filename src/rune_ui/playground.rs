@@ -193,6 +193,10 @@ const PATHS: &[(&str, &str)] = &[
     ("history-stats", "Window/History/Stats dialog"),
     ("history-empty", "Window/History/Empty"),
     #[cfg(hex_capture)]
+    ("captures", "Window/Captures/Captures"),
+    #[cfg(hex_capture)]
+    ("captures-empty", "Window/Captures/Empty"),
+    #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
     #[cfg(hex_capture)]
     ("mac-scrawl-off", "Window/Annotate/Off"),

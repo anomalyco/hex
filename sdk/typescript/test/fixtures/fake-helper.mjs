@@ -43,6 +43,7 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
         audioFormats: ["audio/wav"],
         partialTranscripts: false,
         serviceCapture: process.env.HEX_FAKE_SERVICE_CAPTURE === "1",
+        outputProcessing: false,
       }))
       return
     }
@@ -93,7 +94,12 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
           response.flushHeaders()
           return
         }
-        response.end(JSON.stringify({ transcript: "hello from hex", durationMs: 750 }))
+        const processed = url.searchParams.get("process") === "global"
+        response.end(JSON.stringify(
+          processed
+            ? { transcript: "hello from hex", durationMs: 750, processed: "Hello from Hex." }
+            : { transcript: "hello from hex", durationMs: 750 },
+        ))
       })
       return
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { decodeEndpoint, decodeEndpointValue } from "../src/protocol.js"
+import { decodeCapabilities, decodeEndpoint, decodeEndpointValue } from "../src/protocol.js"
 
 const endpoint = {
   type: "ready",
@@ -8,6 +8,28 @@ const endpoint = {
   apiVersion: "2",
   pid: 1,
 }
+
+describe("capabilities decoding", () => {
+  const capabilities = {
+    audioFormats: ["audio/wav"],
+    partialTranscripts: false,
+    serviceCapture: false,
+  } as const
+
+  it("keeps output processing optional and typed", () => {
+    expect(decodeCapabilities(capabilities)).toEqual(capabilities)
+    expect(decodeCapabilities({ ...capabilities, outputProcessing: true })).toEqual({
+      ...capabilities,
+      outputProcessing: true,
+    })
+    expect(decodeCapabilities({ ...capabilities, outputProcessing: false })).toEqual({
+      ...capabilities,
+      outputProcessing: false,
+    })
+    expect(() => decodeCapabilities({ ...capabilities, outputProcessing: "yes" }))
+      .toThrowError(expect.objectContaining({ code: "invalid-response" }))
+  })
+})
 
 describe("endpoint decoding", () => {
   it("accepts the same endpoint from startup JSON and an already parsed value", () => {

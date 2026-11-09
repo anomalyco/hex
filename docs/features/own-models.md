@@ -28,9 +28,10 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // set
 │   copy; the same file again keeps the first import
 ├── ID custom-<first 16 hex of the SHA-256> (TranscriptionModelId::Custom)
 ├── Card -> name from general.name (Rename edits it), languages from the file,
-│   offline only (no streaming), Parakeet without language prompt or Auto,
-│   no benchmark; Use prepares it like a catalog model (verifies Hex's copy
-│   against its receipt instead of downloading). General's Language menu
+│   offline only (no streaming), no language prompt for a no-hint family,
+│   Auto when its header says it detects the language (as Parakeet v3-type
+│   files do), no benchmark; Use prepares it like a catalog model (verifies
+│   Hex's copy against its receipt instead of downloading). General's Language menu
 │   lists every language the file declares: Hex's usual list first, then the
 │   rest of Whisper's codes by English name (Norwegian `no`, Norwegian
 │   Nynorsk `nn`, …; #1148)

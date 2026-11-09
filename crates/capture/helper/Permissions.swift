@@ -28,7 +28,6 @@ enum Permissions {
       "screen-recording": CGPreflightScreenCaptureAccess() ? "granted" : "not-determined",
       "microphone": av(.audio),
       "accessibility": AXIsProcessTrusted() ? "granted" : "not-determined",
-      "camera": av(.video),
     ]
     // Only SFSpeechRecognizer, the macOS 15 transcriber, needs it; SpeechAnalyzer doesn't.
     if !SpeechModel.analyzer {

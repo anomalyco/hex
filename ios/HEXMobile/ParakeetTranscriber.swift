@@ -15,6 +15,14 @@ protocol LocalTranscribing: Actor {
     ) async throws
 
     func transcribe(_ audioURL: URL) async throws -> String
+    func transcribe(_ audioURL: URL, vocabulary: [String]) async throws -> String
+}
+
+extension LocalTranscribing {
+    /// Engines without a recognition hint ignore the list and transcribe exactly as before.
+    nonisolated func transcribe(_ audioURL: URL, vocabulary: [String]) async throws -> String {
+        try await transcribe(audioURL)
+    }
 }
 
 actor ParakeetTranscriber: LocalTranscribing {

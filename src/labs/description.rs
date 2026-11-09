@@ -51,6 +51,9 @@ impl Feature {
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
             }
+            Self::TerminalPasteShortcut => {
+                "Another dictation shortcut that always pastes with Ctrl+Shift+V (terminal_paste_hotkey)"
+            }
             Self::SmartSpacing => "Add a space before a dictation pasted right after a word",
             Self::SpokenSymbols => {
                 "Turn spoken \"comma\", \"colon\", \"hashtag\", \"underscore\", and similar words into symbols joined to their words"
@@ -63,6 +66,9 @@ impl Feature {
             }
             Self::TapOrHold => {
                 "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
+            }
+            Self::DoubleTapModifiers => {
+                "Double-tap shortcut mode accepts any shortcut without a key, such as Option, Globe, or ⌃⌥"
             }
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
@@ -105,6 +111,9 @@ impl Feature {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
             }
             Self::SettingsSearch => "Find any setting in General with a search field",
+            Self::ReleaseNotesLink => {
+                "Show a link to this build's release notes in the sidebar footer"
+            }
             Self::HideMenuBarIcon => {
                 "Hide Hex's menu bar icon; shortcuts keep working, and opening Hex again shows Settings"
             }
@@ -113,6 +122,9 @@ impl Feature {
             }
             Self::GnomeClipboardRestore => {
                 "Put the previous clipboard back after a paste on GNOME Wayland, through the XWayland clipboard while XWayland is running"
+            }
+            Self::TypedText => {
+                "Run the focused app's Output steps on the text already typed in the focused field and replace it (typed_text_hotkey)"
             }
             Self::MeetingNotesVocabulary => {
                 "Meeting titles and summaries read your vocabulary, so names are spelled the way you wrote them"
@@ -125,6 +137,9 @@ impl Feature {
             }
             Self::GnomeMeetingCapsules => {
                 "Show the meeting capsules (recording offer, recording indicator) floating over your call on GNOME Wayland, through XWayland while XWayland is running"
+            }
+            Self::GnomeAnnotate => {
+                "Show Annotate's recording capsule and ink over your screen on GNOME Wayland, through XWayland while XWayland is running; Esc can't stop drawing there, so use the capsule's pen button or let go of a held Annotate key"
             }
             Self::Screenshots => {
                 "Take a screenshot of an area or a window with a shortcut (Command-Shift-4 by default): copied, saved, and shown in the corner"
@@ -152,6 +167,15 @@ impl Feature {
             }
             Self::CapsLockDictation => {
                 "Press Caps Lock to start and stop dictation; its light shows when Hex records and transcribes"
+            }
+            Self::OpenCodeInWsl => {
+                "Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker; looking for it can start WSL"
+            }
+            Self::TranscribeFiles => {
+                "Turn a WAV recording into text with hex transcribe <file> and your dictation model"
+            }
+            Self::ApiProcessing => {
+                "Let apps using Hex's local API ask for transcripts with your Global mode's corrections, rewrite, and transformations applied"
             }
         }
     }

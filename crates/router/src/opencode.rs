@@ -291,15 +291,7 @@ fn opencode_api_within(
 ) -> Result<Vec<u8>> {
     let Some(host) = agent_host() else {
         let body = data.map(serde_json::to_vec).transpose()?;
-        let (address, password) = local_server();
-        return http_request(
-            address,
-            password.as_deref(),
-            &method.to_ascii_uppercase(),
-            path,
-            body.as_deref(),
-            timeout,
-        );
+        return local_request(&method.to_ascii_uppercase(), path, body.as_deref(), timeout);
     };
     let started = std::time::Instant::now();
     if crate::env::get().config.agent_opencode.is_none() {
@@ -487,6 +479,40 @@ fn local_server() -> (std::net::SocketAddr, Option<String>) {
     resolve_server(&files, env_password.as_deref())
 }
 
+/// One HTTP request to the local OpenCode service: the host's transport when it has one
+/// (Windows: a service in WSL), else this machine's registration. A non-2xx answer is an
+/// [`HttpStatus`] error either way.
+fn local_request(
+    method: &str,
+    path: &str,
+    body: Option<&[u8]>,
+    timeout: std::time::Duration,
+) -> Result<Vec<u8>> {
+    let transport = crate::env::get().opencode.clone();
+    local_request_with(transport.as_deref(), method, path, body, timeout, || {
+        let (address, password) = local_server();
+        http_request(address, password.as_deref(), method, path, body, timeout)
+    })
+}
+
+/// [`local_request`] with the host's transport and the fallback given, so a test can prove
+/// which one answered without a registration file.
+fn local_request_with(
+    transport: Option<&dyn crate::env::OpenCode>,
+    method: &str,
+    path: &str,
+    body: Option<&[u8]>,
+    timeout: std::time::Duration,
+    local: impl FnOnce() -> Result<Vec<u8>>,
+) -> Result<Vec<u8>> {
+    if let Some(transport) = transport
+        && let Some(answer) = transport.request(method, path, body, timeout)
+    {
+        return answer.and_then(|reply| answered(reply.status, reply.body));
+    }
+    local()
+}
+
 fn base64(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -503,6 +529,7 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
+#[cfg(test)]
 fn http_get(
     address: std::net::SocketAddr,
     password: Option<&str>,
@@ -528,6 +555,20 @@ impl std::error::Error for HttpStatus {}
 /// The status of a failed request, when the server answered.
 pub fn http_status(err: &anyhow::Error) -> Option<u16> {
     err.downcast_ref::<HttpStatus>().map(|s| s.0)
+}
+
+/// A response's body, or the [`HttpStatus`] error a non-2xx answer is, with what OpenCode
+/// said attached. The router's own requests and a host transport's both end here, so a refusal
+/// reads the same whichever answered.
+fn answered(status: u16, body: Vec<u8>) -> Result<Vec<u8>> {
+    if !(200..300).contains(&status) {
+        let err = anyhow::Error::new(HttpStatus(status));
+        return Err(match said(&body) {
+            Some(said) => err.context(said),
+            None => err,
+        });
+    }
+    Ok(body)
 }
 
 fn http_request(
@@ -600,14 +641,7 @@ fn http_request(
     {
         ensure!(body.len() == length, "Incomplete OpenCode HTTP response");
     }
-    if !(200..300).contains(&status) {
-        let err = anyhow::Error::new(HttpStatus(status));
-        return Err(match said(&body) {
-            Some(said) => err.context(said),
-            None => err,
-        });
-    }
-    Ok(body)
+    answered(status, body)
 }
 
 /// What OpenCode said in a refusal (`{"message": …}`, or its text), as `OpenCode said: …`.
@@ -651,15 +685,7 @@ pub fn api_within(
         return opencode_api_within(&method.to_ascii_lowercase(), path, data, timeout);
     }
     let body = data.map(serde_json::to_vec).transpose()?;
-    let (address, password) = local_server();
-    http_request(
-        address,
-        password.as_deref(),
-        method,
-        path,
-        body.as_deref(),
-        timeout,
-    )
+    local_request(method, path, body.as_deref(), timeout)
 }
 
 /// [`api_get`] for routing: talks HTTP directly to the local OpenCode server with a
@@ -668,8 +694,7 @@ pub fn api_get_within(path: &str, timeout: std::time::Duration) -> Result<Vec<u8
     if agent_host().is_some() {
         return opencode_api_within("get", path, None, timeout);
     }
-    let (address, password) = local_server();
-    http_get(address, password.as_deref(), path, timeout)
+    local_request("GET", path, None, timeout)
 }
 
 /// How many pages of root sessions (100 each, newest first) a search reads before giving up.
@@ -946,10 +971,21 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
     } else {
         ""
     };
+    // A host that reaches OpenCode another way names the folder as its server sees it
+    // (Windows: `/mnt/<drive>/…` for a service in WSL). SSH sends keep the path as it is.
+    let recorded = if agent_host().is_none() {
+        crate::env::get()
+            .opencode
+            .as_ref()
+            .and_then(|opencode| opencode.directory(&directory))
+            .unwrap_or_else(|| directory.display().to_string())
+    } else {
+        directory.display().to_string()
+    };
     let text = format!(
         "{}\n\n{attached}{availability}\nRecorded at {}.\nThis capture is {} ms long.",
         summary.trim_end(),
-        directory.display(),
+        recorded,
         bundle.duration_ms,
     );
     let posted = post_prompt(session, serde_json::json!({ "text": text, "files": files }))?;
@@ -1572,5 +1608,198 @@ mod session_lookup {
             resolve_opencode_session_with(get, None, Some("Nothing"), None).unwrap()
         });
         assert_eq!(result.0, "ses_00000");
+    }
+}
+
+#[cfg(test)]
+mod host_transport {
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use super::*;
+    use crate::env::{self, Env, OpenCode, Reply};
+
+    type Seen = Vec<(String, String, Option<Vec<u8>>)>;
+
+    /// The real host's summary header names the capture folder on this machine.
+    fn summary_with_windows_path(_bundle: &ScrawlBundle, directory: &Path) -> String {
+        format!("[scrawl · captured · {}]", directory.display())
+    }
+
+    /// A host transport whose answer and directory mapping a test sets.
+    struct Fake {
+        reply: Option<(u16, &'static str)>,
+        directory: Option<String>,
+        seen: Mutex<Seen>,
+    }
+
+    impl Fake {
+        fn new(reply: Option<(u16, &'static str)>, directory: Option<&str>) -> Arc<Self> {
+            Arc::new(Self {
+                reply,
+                directory: directory.map(str::to_owned),
+                seen: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn seen(&self) -> Seen {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    impl OpenCode for Fake {
+        fn request(
+            &self,
+            method: &str,
+            path: &str,
+            body: Option<&[u8]>,
+            _timeout: Duration,
+        ) -> Option<anyhow::Result<Reply>> {
+            self.seen.lock().unwrap().push((
+                method.to_owned(),
+                path.to_owned(),
+                body.map(<[u8]>::to_vec),
+            ));
+            self.reply.as_ref().map(|(status, body)| {
+                Ok(Reply {
+                    status: *status,
+                    body: body.as_bytes().to_vec(),
+                })
+            })
+        }
+
+        fn directory(&self, _host: &Path) -> Option<String> {
+            self.directory.clone()
+        }
+    }
+
+    #[test]
+    fn local_requests_ask_the_hosts_opencode_first() {
+        let hook = Fake::new(Some((200, r#"{"data":{"id":"msg_fixture"}}"#)), None);
+        let _entered = env::enter(Arc::new(Env {
+            opencode: Some(hook.clone()),
+            ..Default::default()
+        }));
+        let body = api_within(
+            "POST",
+            "/api/session/ses_a/prompt",
+            Some(&serde_json::json!({ "text": "hi" })),
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert_eq!(body, br#"{"data":{"id":"msg_fixture"}}"#);
+        assert_eq!(
+            api_get_within("/api/session/active", Duration::from_secs(1)).unwrap(),
+            br#"{"data":{"id":"msg_fixture"}}"#
+        );
+        let seen = hook.seen();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].0, "POST");
+        assert_eq!(seen[0].1, "/api/session/ses_a/prompt");
+        assert_eq!(seen[0].2.as_deref(), Some(br#"{"text":"hi"}"#.as_slice()));
+        assert_eq!(seen[1].0, "GET");
+    }
+
+    #[test]
+    fn a_local_request_falls_back_when_the_host_has_no_opinion() {
+        let hook = Fake::new(None, None);
+        let mut fell_back = false;
+        let body = local_request_with(
+            Some(&*hook),
+            "GET",
+            "/api/session",
+            None,
+            Duration::from_secs(1),
+            || {
+                fell_back = true;
+                Ok(b"local".to_vec())
+            },
+        )
+        .unwrap();
+        assert_eq!(body, b"local");
+        assert!(fell_back);
+        assert_eq!(hook.seen().len(), 1, "the host was still asked");
+        assert_eq!(
+            local_request_with(None, "GET", "/api/x", None, Duration::from_secs(1), || Ok(
+                b"own".to_vec()
+            ))
+            .unwrap(),
+            b"own"
+        );
+    }
+
+    #[test]
+    fn a_hosts_refusal_keeps_its_http_status_and_what_opencode_said() {
+        for (status, body, said) in [
+            (
+                404,
+                r#"{"message":"Session not found"}"#,
+                "OpenCode said: Session not found",
+            ),
+            (500, "", "OpenCode API failed: HTTP 500"),
+        ] {
+            let hook = Fake::new(Some((status, body)), None);
+            let err = local_request_with(
+                Some(&*hook),
+                "GET",
+                "/api/session/ses_x",
+                None,
+                Duration::from_secs(1),
+                || panic!("the local path was used"),
+            )
+            .unwrap_err();
+            assert_eq!(http_status(&err), Some(status));
+            assert!(format!("{err:#}").contains(said), "{err:#}");
+        }
+    }
+
+    #[test]
+    fn a_sent_prompt_names_the_folder_as_the_hosts_server_sees_it() {
+        let root =
+            std::env::temp_dir().join(format!("scrawl-host-{}", crate::util::make_bundle_id()));
+        let bundle = root.join("fixture.scrawl");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(
+            bundle.join("scrawl.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1, "id": "fixture", "createdAtMs": 0, "durationMs": 1500,
+                "target": {"mode": "window", "displayId": 0,
+                    "frame": {"x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "scale": 1.0}},
+                "transcript": {"source": "test", "text": "hello", "segments": []},
+                "strokes": [], "marks": [], "events": [], "keyframes": [], "contactSheet": ""
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let canonical = bundle.canonicalize().unwrap().display().to_string();
+
+        for mapped in [Some("/mnt/c/captures/fixture.scrawl"), None] {
+            let hook = Fake::new(Some((200, r#"{"data":{"id":"msg_fixture"}}"#)), mapped);
+            let _entered = env::enter(Arc::new(Env {
+                opencode: Some(hook.clone()),
+                summary: Some(summary_with_windows_path),
+                ..Default::default()
+            }));
+            let posted = send_bundle(&bundle, "ses_fixture").unwrap();
+            assert_eq!(posted.message_id.as_deref(), Some("msg_fixture"));
+            let seen = hook.seen();
+            let prompt = seen
+                .iter()
+                .find(|(method, path, _)| method == "POST" && path.ends_with("/prompt"))
+                .expect("a prompt was sent");
+            let sent: serde_json::Value =
+                serde_json::from_slice(prompt.2.as_deref().unwrap()).unwrap();
+            let text = sent["text"].as_str().unwrap();
+            let expected = mapped.unwrap_or(&canonical);
+            assert!(text.contains(expected), "{text}");
+            if mapped.is_some() {
+                assert!(
+                    text.contains(&canonical),
+                    "the summary header keeps the Windows path: {text}"
+                );
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

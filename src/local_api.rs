@@ -17,6 +17,7 @@ mod dictation;
 mod discovery;
 mod http;
 mod meeting_events;
+pub(crate) mod processing;
 mod streams;
 
 #[cfg(debug_assertions)]
@@ -24,7 +25,9 @@ mod streams;
 pub use discovery::call_developer;
 use discovery::*;
 pub use discovery::{call_control, running_pid};
+pub(crate) use discovery::{error_code, post_wav};
 use http::*;
+pub use processing::Processing;
 const API_VERSION: &str = "2";
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// The longest the accept loop sleeps without a connection. Shutdown wakes
@@ -44,7 +47,7 @@ const CONNECTION_QUEUE_CAPACITY: usize = 16;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_HEADERS: usize = 64;
 const MAX_PATH_BYTES: usize = 2 * 1024;
-const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DEVELOPER_CONTROL_BYTES: usize = 16 * 1024;
 const DEVELOPER_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CONTROL_BYTES: usize = 64 * 1024;
@@ -95,6 +98,7 @@ struct HttpContext {
     streams: Arc<crate::transcription::stream::Streams>,
     stream_engine: crate::transcription::stream::EngineSource,
     meeting_events: meeting_events::Source,
+    processing: processing::Processing,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -114,6 +118,9 @@ struct CapabilitiesResponse {
     dictation_partials: bool,
     /// `/streams` (`docs/streams.md`).
     streams: bool,
+    /// `process=global` on `/transcriptions` and `/streams/{id}/finish`
+    /// (Labs › Process API transcripts).
+    output_processing: bool,
     developer_control: bool,
     control: bool,
 }
@@ -127,6 +134,10 @@ pub struct LocalApiOptions {
     /// Running-app dictation (`/dictations`): the macOS recognition loop or
     /// the Linux or Windows listener.
     pub dictation_control: Option<dictation::Control>,
+    /// The running app's Global-mode output processor for `process=global`.
+    /// Uninstalled, `/transcriptions` and `/streams/{id}/finish` answer
+    /// `409 processing-unavailable` when asked to process.
+    pub processing: Processing,
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
     pub(crate) stream_engine: Option<crate::transcription::stream::EngineSource>,
@@ -152,6 +163,7 @@ impl LocalApi {
         event_path: &Path,
         control: SyncSender<crate::control::ControlCall>,
         dictation_control: Option<dictation::Control>,
+        processing: Option<Processing>,
     ) -> Option<Self> {
         let started = EventLog::create(event_path)
             .map_err(Into::into)
@@ -161,6 +173,7 @@ impl LocalApi {
                     LocalApiOptions {
                         control: Some(control),
                         dictation_control,
+                        processing: processing.unwrap_or_default(),
                         ..Default::default()
                     },
                 )
@@ -258,6 +271,7 @@ impl LocalApi {
                 .stream_engine
                 .unwrap_or_else(|| Arc::new(crate::transcription::stream::shared_engine)),
             meeting_events,
+            processing: options.processing,
         };
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -567,15 +581,16 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 content_length,
                 body_prefix,
                 admission,
+                processing,
             } => {
                 let response = transcribe_audio(
                     &mut stream,
                     selection,
                     content_length,
                     body_prefix,
-                    &context.transcription,
-                    &context.shutdown,
                     admission,
+                    processing,
+                    &context,
                 );
                 if let Some(response) = response
                     && let Err(error) = write_response(&mut stream, response)
@@ -646,7 +661,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
         return RequestAction::Respond(HttpResponse::empty(401));
     }
     if request.method == "POST" && path == "/transcriptions" {
-        return transcription_action(request, &context.transcription);
+        return transcription_action(request, &context.transcription, &context.processing);
     }
     if request.method == "POST" && path == "/dev/control" {
         return developer_control_action(request, context.developer_control.is_some());
@@ -710,6 +725,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 service_capture: context.dictations.available(),
                 dictation_partials: context.dictations.partials_available(),
                 streams: true,
+                output_processing: context.processing.available(),
                 developer_control: context.developer_control.is_some(),
                 control: context.control.is_some(),
             },
@@ -758,7 +774,15 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
 fn transcription_action(
     request: HttpRequest,
     transcription: &crate::transcription::service::TranscriptionServiceHandle,
+    processing: &processing::Processing,
 ) -> RequestAction {
+    let guard = match processing::wanted(&request.path) {
+        Ok(wanted) => match processing::gate(wanted, processing) {
+            Ok(guard) => guard,
+            Err(response) => return RequestAction::Respond(response),
+        },
+        Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
+    };
     if !request.has_content_type("audio/wav") {
         return RequestAction::Respond(HttpResponse::code(415, "unsupported-audio"));
     }
@@ -794,6 +818,7 @@ fn transcription_action(
         content_length,
         body_prefix: request.body_prefix,
         admission,
+        processing: guard,
     }
 }
 
@@ -1010,10 +1035,12 @@ fn transcribe_audio(
     selection: crate::transcription::models::TranscriptionSelection,
     content_length: usize,
     mut body: Vec<u8>,
-    transcription: &crate::transcription::service::TranscriptionServiceHandle,
-    shutdown: &AtomicBool,
     admission: crate::transcription::service::AudioAdmission,
+    guard: Option<processing::Guard>,
+    context: &HttpContext,
 ) -> Option<HttpResponse> {
+    let transcription = &context.transcription;
+    let shutdown = &context.shutdown;
     if let Err(error) = read_body_bounded(
         stream,
         content_length,
@@ -1046,6 +1073,7 @@ fn transcribe_audio(
         }
     };
     let duration_ms = clip.duration_ms;
+    let language = selection.language.clone();
     let job = match transcription.transcribe(selection, clip, admission) {
         Ok(job) => job,
         Err(error) => return Some(transcription_error(error)),
@@ -1053,13 +1081,18 @@ fn transcribe_audio(
     loop {
         match job.wait_timeout(TRANSCRIPTION_POLL_INTERVAL) {
             Ok(Some(Ok(transcript))) => {
-                return Some(HttpResponse::json(
-                    200,
-                    &serde_json::json!({
-                        "transcript": transcript,
-                        "durationMs": duration_ms,
-                    }),
-                ));
+                let mut response = serde_json::json!({
+                    "transcript": &transcript,
+                    "durationMs": duration_ms,
+                });
+                processing::attach(
+                    &mut response,
+                    guard.as_ref(),
+                    &transcript,
+                    &language,
+                    &context.shutdown,
+                );
+                return Some(HttpResponse::json(200, &response));
             }
             Ok(Some(Err(error))) | Err(error) => return Some(transcription_error(error)),
             Ok(None) => {
@@ -1370,6 +1403,8 @@ enum RequestAction {
         content_length: usize,
         body_prefix: Vec<u8>,
         admission: crate::transcription::service::AudioAdmission,
+        /// `process=global` was asked for; the guard holds its one slot.
+        processing: Option<processing::Guard>,
     },
     DeveloperControl {
         content_length: usize,
@@ -1479,6 +1514,7 @@ mod tests {
         assert_eq!(capabilities["serviceCapture"], false);
         assert_eq!(capabilities["developerControl"], false);
         assert_eq!(capabilities["control"], false);
+        assert_eq!(capabilities["outputProcessing"], false);
         assert_eq!(capabilities["audioFormats"][0], "audio/wav");
         let vitals = request(document.port, Some(&document.token), "/profile/vitals");
         #[cfg(target_os = "macos")]
@@ -2113,6 +2149,7 @@ mod tests {
                 body_prefix: Vec::new(),
             },
             &transcription,
+            &Processing::default(),
         );
         let RequestAction::Respond(response) = action else {
             panic!("unsupported audio must be rejected before upload");
@@ -2131,6 +2168,7 @@ mod tests {
                 body_prefix: Vec::new(),
             },
             &transcription,
+            &Processing::default(),
         );
         let RequestAction::Respond(response) = action else {
             panic!("unsafe body size must be rejected before upload");
@@ -2160,6 +2198,7 @@ mod tests {
             streams: Arc::default(),
             stream_engine: Arc::new(crate::transcription::stream::shared_engine),
             meeting_events: meeting_events::Source::default(),
+            processing: Processing::default(),
         };
         let action = handle_request(
             HttpRequest {

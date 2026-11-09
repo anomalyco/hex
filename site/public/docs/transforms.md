@@ -42,8 +42,11 @@ export default defineHexConfig({
 describes the foreground app, each field present only when known:
 
 ```ts
-{ application?: string, browserHost?: string, browserUrl?: string, windowTitle?: string }
+{ application?: string, browserHost?: string, browserUrl?: string, windowTitle?: string, source?: 'dictation' | 'typed-text' }
 ```
+
+`source` is `"dictation"` for spoken dictation and `"typed-text"` for Labs ›
+Transform typed text (Linux), which runs the same steps on text already typed.
 
 Selected transforms run in order after the mode's word replacements and
 optional AI rewrite. Don't reuse the built-in ids `lowercase`,

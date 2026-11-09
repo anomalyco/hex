@@ -80,6 +80,7 @@ pub(crate) enum LedPattern {
     Off,
     Solid,
     Blink,
+    SlowBlink,
 }
 
 impl LedPattern {
@@ -89,6 +90,7 @@ impl LedPattern {
             Self::Off => 0,
             Self::Solid => 1,
             Self::Blink => 2,
+            Self::SlowBlink => 3,
         }
     }
 
@@ -96,18 +98,45 @@ impl LedPattern {
         match code {
             1 => Self::Solid,
             2 => Self::Blink,
+            3 => Self::SlowBlink,
             _ => Self::Off,
+        }
+    }
+
+    /// How long each on and off phase lasts; `None` when the light does not
+    /// blink. Slow blink is for a recording light, and stays clearly slower
+    /// than the transcribing blink.
+    pub(crate) const fn interval(self) -> Option<Duration> {
+        match self {
+            Self::Off | Self::Solid => None,
+            Self::Blink => Some(Duration::from_millis(350)),
+            Self::SlowBlink => Some(Duration::from_millis(700)),
         }
     }
 }
 
-/// The dictation phases the light follows: on while a capture records,
-/// blinking while any accepted job is transcribed or processed, off once
-/// nothing is left. The model mirrors the HUD's event vocabulary without a
-/// second reader of its channel.
+/// Whether the microphone has delivered any audio for the current capture.
+/// A press starts [`Self::Waiting`]; only the capture's first `Meter` makes
+/// it [`Self::Live`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum CaptureState {
+    /// No capture records.
+    #[default]
+    Idle,
+    /// A capture started, and the light waits for its first audio.
+    Waiting,
+    /// The microphone is delivering the capture's audio.
+    Live,
+}
+
+/// The dictation phases the light follows: solid (or slowly blinking) while
+/// a capture records and its microphone delivers audio, blinking while any
+/// accepted job is transcribed or processed, off once nothing is left. The
+/// model mirrors the HUD's event vocabulary without a second reader of its
+/// channel.
 #[derive(Debug, Default)]
 pub(crate) struct LedModel {
-    recording: bool,
+    capture: CaptureState,
     jobs: BTreeSet<u64>,
 }
 
@@ -115,14 +144,21 @@ impl LedModel {
     pub(crate) fn handle(&mut self, event: DictationIndicatorEvent) {
         match event {
             DictationIndicatorEvent::Reset => {
-                self.recording = false;
+                self.capture = CaptureState::Idle;
                 self.jobs.clear();
             }
-            DictationIndicatorEvent::Started => self.recording = true,
+            DictationIndicatorEvent::Started => self.capture = CaptureState::Waiting,
+            // The first audio proves the microphone is delivering; a Meter
+            // with no capture started must turn nothing on.
+            DictationIndicatorEvent::Meter { .. } => {
+                if self.capture == CaptureState::Waiting {
+                    self.capture = CaptureState::Live;
+                }
+            }
             // Only submission accepts a job. A stage event for an older or
             // unknown job must not flip a newer capture back to blinking.
             DictationIndicatorEvent::Submitted { job_id } => {
-                self.recording = false;
+                self.capture = CaptureState::Idle;
                 self.jobs.insert(job_id);
             }
             DictationIndicatorEvent::JobCompleted { job_id }
@@ -132,22 +168,23 @@ impl LedModel {
             }
             DictationIndicatorEvent::Discarded
             | DictationIndicatorEvent::Cancelled
-            | DictationIndicatorEvent::Failed { .. } => self.recording = false,
+            | DictationIndicatorEvent::Failed { .. } => self.capture = CaptureState::Idle,
             DictationIndicatorEvent::ConfigureDotScope(_)
             | DictationIndicatorEvent::DemoVoice
             | DictationIndicatorEvent::Transcribing { .. }
-            | DictationIndicatorEvent::Processing { .. }
-            | DictationIndicatorEvent::Meter { .. } => {}
+            | DictationIndicatorEvent::Processing { .. } => {}
         }
     }
 
-    pub(crate) fn pattern(&self) -> LedPattern {
-        if self.recording {
-            LedPattern::Solid
-        } else if self.jobs.is_empty() {
-            LedPattern::Off
-        } else {
-            LedPattern::Blink
+    /// The pattern to publish. `slow_blink` picks the recording light's slow
+    /// blink; while a capture waits for audio the pattern is what it would
+    /// be without it.
+    pub(crate) fn pattern(&self, slow_blink: bool) -> LedPattern {
+        match self.capture {
+            CaptureState::Live if slow_blink => LedPattern::SlowBlink,
+            CaptureState::Live => LedPattern::Solid,
+            CaptureState::Idle | CaptureState::Waiting if self.jobs.is_empty() => LedPattern::Off,
+            CaptureState::Idle | CaptureState::Waiting => LedPattern::Blink,
         }
     }
 }
@@ -348,16 +385,123 @@ mod tests {
     #[test]
     fn the_light_is_solid_recording_blinking_working_and_off_after() {
         let mut model = LedModel::default();
-        assert_eq!(model.pattern(), LedPattern::Off);
+        assert_eq!(model.pattern(false), LedPattern::Off);
 
         model.handle(DictationIndicatorEvent::Started);
-        assert_eq!(model.pattern(), LedPattern::Solid);
+        assert_eq!(
+            model.pattern(false),
+            LedPattern::Off,
+            "the microphone has not delivered audio yet"
+        );
+
+        model.handle(DictationIndicatorEvent::Meter {
+            average: 0.1,
+            peak: 0.2,
+        });
+        assert_eq!(model.pattern(false), LedPattern::Solid);
 
         model.handle(DictationIndicatorEvent::Submitted { job_id: 3 });
-        assert_eq!(model.pattern(), LedPattern::Blink);
+        assert_eq!(model.pattern(false), LedPattern::Blink);
 
         model.handle(DictationIndicatorEvent::JobCompleted { job_id: 3 });
-        assert_eq!(model.pattern(), LedPattern::Off);
+        assert_eq!(model.pattern(false), LedPattern::Off);
+    }
+
+    #[test]
+    fn the_light_waits_for_the_captures_first_audio() {
+        let mut model = LedModel::default();
+        model.handle(DictationIndicatorEvent::Started);
+        assert_eq!(model.pattern(false), LedPattern::Off);
+        assert_eq!(model.pattern(true), LedPattern::Off);
+
+        model.handle(DictationIndicatorEvent::Meter {
+            average: 0.1,
+            peak: 0.2,
+        });
+        assert_eq!(model.pattern(false), LedPattern::Solid);
+        assert_eq!(model.pattern(true), LedPattern::SlowBlink);
+    }
+
+    #[test]
+    fn a_meter_without_a_capture_turns_nothing_on() {
+        let mut model = LedModel::default();
+        model.handle(DictationIndicatorEvent::Meter {
+            average: 0.1,
+            peak: 0.2,
+        });
+        assert_eq!(model.pattern(false), LedPattern::Off);
+    }
+
+    #[test]
+    fn ending_a_waiting_capture_clears_the_wait() {
+        for event in [
+            DictationIndicatorEvent::Submitted { job_id: 1 },
+            DictationIndicatorEvent::Discarded,
+            DictationIndicatorEvent::Cancelled,
+            DictationIndicatorEvent::Failed { message: None },
+            DictationIndicatorEvent::Reset,
+        ] {
+            let submitted = matches!(&event, DictationIndicatorEvent::Submitted { .. });
+            let mut model = LedModel::default();
+            model.handle(DictationIndicatorEvent::Started);
+            model.handle(event.clone());
+            model.handle(DictationIndicatorEvent::Meter {
+                average: 0.1,
+                peak: 0.2,
+            });
+            let expected = if submitted {
+                LedPattern::Blink
+            } else {
+                LedPattern::Off
+            };
+            assert_eq!(model.pattern(false), expected, "{event:?}");
+        }
+    }
+
+    #[test]
+    fn a_waiting_capture_keeps_earlier_jobs_blinking() {
+        let mut model = LedModel::default();
+        model.handle(DictationIndicatorEvent::Submitted { job_id: 7 });
+        model.handle(DictationIndicatorEvent::Started);
+        assert_eq!(
+            model.pattern(false),
+            LedPattern::Blink,
+            "the previous job still transcribes while the microphone opens"
+        );
+
+        model.handle(DictationIndicatorEvent::Meter {
+            average: 0.1,
+            peak: 0.2,
+        });
+        assert_eq!(model.pattern(false), LedPattern::Solid);
+        model.handle(DictationIndicatorEvent::Submitted { job_id: 8 });
+        assert_eq!(model.pattern(false), LedPattern::Blink);
+    }
+
+    #[test]
+    fn the_slow_blink_setting_only_changes_the_recording_light() {
+        let mut model = LedModel::default();
+        model.handle(DictationIndicatorEvent::Started);
+        model.handle(DictationIndicatorEvent::Meter {
+            average: 0.1,
+            peak: 0.2,
+        });
+        assert_eq!(model.pattern(true), LedPattern::SlowBlink);
+        assert_eq!(
+            LedPattern::SlowBlink.interval(),
+            Some(Duration::from_millis(700))
+        );
+
+        model.handle(DictationIndicatorEvent::Submitted { job_id: 1 });
+        assert_eq!(
+            model.pattern(true),
+            LedPattern::Blink,
+            "transcribing stays at its own blink"
+        );
+        assert_eq!(
+            LedPattern::Blink.interval(),
+            Some(Duration::from_millis(350))
+        );
     }
 
     #[test]
@@ -367,12 +511,12 @@ mod tests {
         model.handle(DictationIndicatorEvent::Submitted { job_id: 1 });
         model.handle(DictationIndicatorEvent::Submitted { job_id: 2 });
         model.handle(DictationIndicatorEvent::JobCompleted { job_id: 1 });
-        assert_eq!(model.pattern(), LedPattern::Blink);
+        assert_eq!(model.pattern(false), LedPattern::Blink);
         model.handle(DictationIndicatorEvent::JobFailed {
             job_id: 2,
             message: None,
         });
-        assert_eq!(model.pattern(), LedPattern::Off);
+        assert_eq!(model.pattern(false), LedPattern::Off);
     }
 
     #[test]
@@ -380,20 +524,24 @@ mod tests {
         let mut model = LedModel::default();
         model.handle(DictationIndicatorEvent::Started);
         model.handle(DictationIndicatorEvent::Submitted { job_id: 1 });
-        assert_eq!(model.pattern(), LedPattern::Blink);
+        assert_eq!(model.pattern(false), LedPattern::Blink);
 
         model.handle(DictationIndicatorEvent::Started);
-        assert_eq!(model.pattern(), LedPattern::Solid);
+        model.handle(DictationIndicatorEvent::Meter {
+            average: 0.1,
+            peak: 0.2,
+        });
+        assert_eq!(model.pattern(false), LedPattern::Solid);
         model.handle(DictationIndicatorEvent::Transcribing { job_id: 1 });
         model.handle(DictationIndicatorEvent::Processing { job_id: 1 });
         assert_eq!(
-            model.pattern(),
+            model.pattern(false),
             LedPattern::Solid,
             "an older job's stage must not clear recording or blink"
         );
 
         model.handle(DictationIndicatorEvent::JobCompleted { job_id: 1 });
-        assert_eq!(model.pattern(), LedPattern::Solid);
+        assert_eq!(model.pattern(false), LedPattern::Solid);
     }
 
     #[test]
@@ -401,11 +549,15 @@ mod tests {
         let mut model = LedModel::default();
         model.handle(DictationIndicatorEvent::Transcribing { job_id: 42 });
         model.handle(DictationIndicatorEvent::Processing { job_id: 42 });
-        assert_eq!(model.pattern(), LedPattern::Off);
+        assert_eq!(model.pattern(false), LedPattern::Off);
 
         model.handle(DictationIndicatorEvent::Started);
+        model.handle(DictationIndicatorEvent::Meter {
+            average: 0.1,
+            peak: 0.2,
+        });
         model.handle(DictationIndicatorEvent::Transcribing { job_id: 42 });
-        assert_eq!(model.pattern(), LedPattern::Solid);
+        assert_eq!(model.pattern(false), LedPattern::Solid);
     }
 
     #[test]
@@ -417,8 +569,13 @@ mod tests {
         ] {
             let mut model = LedModel::default();
             model.handle(DictationIndicatorEvent::Started);
+            model.handle(DictationIndicatorEvent::Meter {
+                average: 0.1,
+                peak: 0.2,
+            });
+            assert_eq!(model.pattern(false), LedPattern::Solid);
             model.handle(event.clone());
-            assert_eq!(model.pattern(), LedPattern::Off, "{event:?}");
+            assert_eq!(model.pattern(false), LedPattern::Off, "{event:?}");
         }
     }
 
@@ -495,8 +652,14 @@ mod tests {
 
     #[test]
     fn the_light_pattern_codes_round_trip() {
-        for pattern in [LedPattern::Off, LedPattern::Solid, LedPattern::Blink] {
+        for pattern in [
+            LedPattern::Off,
+            LedPattern::Solid,
+            LedPattern::Blink,
+            LedPattern::SlowBlink,
+        ] {
             assert_eq!(LedPattern::from_code(pattern.code()), pattern);
         }
+        assert_eq!(LedPattern::from_code(99), LedPattern::Off);
     }
 }

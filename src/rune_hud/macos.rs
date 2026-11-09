@@ -5,7 +5,10 @@
 use std::sync::atomic::Ordering;
 
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSEvent, NSScreen, NSStatusBar};
+use objc2::rc::Retained;
+use objc2_app_kit::{
+    NSApplication, NSEvent, NSScreen, NSStatusBar, NSWindow, NSWindowCollectionBehavior,
+};
 use objc2_foundation::{NSNumber, NSRect, NSString};
 use rune::{DisplayTarget, OverlayHandle, OverlayPlacement};
 
@@ -113,11 +116,23 @@ fn live_text_beside(
 /// The pump's handle on the HUD (main thread).
 pub(crate) struct DictationIndicatorUi {
     hud: HudSender,
+    /// The HUD's panel and the window number it had when found: Rune makes a
+    /// new window, with a new number, when it remakes the overlay.
+    panel: Option<(u32, Retained<NSWindow>)>,
+    /// A re-home was attempted for this show and the panel has not been seen
+    /// back on the active Space since. It resets when the HUD hides, so each
+    /// show gets one attempt, and when the panel is seen on the active Space,
+    /// so a later Space change that strands it gets one more.
+    rehomed: bool,
 }
 
 impl DictationIndicatorUi {
     pub(crate) fn new(hud: HudSender) -> Self {
-        Self { hud }
+        Self {
+            hud,
+            panel: None,
+            rehomed: false,
+        }
     }
 
     pub(crate) fn handle(&mut self, event: HudEvent) {
@@ -130,18 +145,87 @@ impl DictationIndicatorUi {
         self.hud.animating.load(Ordering::Acquire)
     }
 
-    /// Keeps a showing HUD on the pointer's screen, and hides it when the
-    /// indicator is set to Hidden.
+    /// Keeps a showing HUD on the pointer's screen and the active Space, and
+    /// hides it when the indicator is set to Hidden.
     pub(crate) fn follow_pointer(&mut self) {
-        if !self.hud.animating.load(Ordering::Acquire) {
+        let animating = self.hud.animating.load(Ordering::Acquire);
+        let shown = self.hud.shown.load(Ordering::Acquire);
+        if !shown {
+            // Each show gets a fresh attempt.
+            self.rehomed = false;
+        } else if let Some(mtm) = MainThreadMarker::new() {
+            self.rehome_on_active_space(mtm);
+        }
+        if !animating {
             return;
         }
         self.hud.overlay.update_if(|hud, _| {
-            if hud.shown {
+            if hud.shown.load(Ordering::Acquire) {
                 hud.show();
             }
             false
         });
+    }
+
+    /// The HUD's panel, found among the app's windows once per Rune window.
+    fn panel(&mut self, mtm: MainThreadMarker) -> Option<(u32, Retained<NSWindow>)> {
+        let Some(number) = self.hud.overlay.window_number() else {
+            self.panel = None;
+            return None;
+        };
+        if let Some((cached, panel)) = &self.panel
+            && *cached == number
+        {
+            return Some((number, panel.clone()));
+        }
+        let panel = NSApplication::sharedApplication(mtm)
+            .windows()
+            .iter()
+            .find(|window| window.windowNumber() == number as isize);
+        let Some(panel) = panel else {
+            self.panel = None;
+            return None;
+        };
+        self.panel = Some((number, panel.clone()));
+        Some((number, panel))
+    }
+
+    /// Puts a shown HUD back on the active Space. Changing the activation
+    /// policy (the Dock icon follows Settings) can tie Rune's panel to one
+    /// Space while AppKit still reports `CanJoinAllSpaces`, and Rune repairs
+    /// that only as its panel shows (#1084). Clearing the mask and setting it
+    /// back makes the window server apply it again; the panel is ordered out
+    /// and back in, so this reorders the panel but leaves Rune's presence
+    /// state and alpha alone. It is attempted once per show, and once more
+    /// after the panel has been seen on the active Space again, so a repair
+    /// that did not take cannot loop.
+    fn rehome_on_active_space(&mut self, mtm: MainThreadMarker) {
+        let Some((number, panel)) = self.panel(mtm) else {
+            return;
+        };
+        // Rune applies the queued show later than `shown` flips.
+        if !panel.isVisible() {
+            return;
+        }
+        if panel.isOnActiveSpace() {
+            // Back where it belongs: a later Space change gets another try.
+            self.rehomed = false;
+            return;
+        }
+        if self.rehomed {
+            return;
+        }
+        self.rehomed = true;
+        let behavior = panel.collectionBehavior();
+        panel.orderOut(None);
+        panel.setCollectionBehavior(NSWindowCollectionBehavior::Default);
+        panel.setCollectionBehavior(behavior);
+        panel.orderFrontRegardless();
+        tracing::info!(
+            window = number,
+            active_space = panel.isOnActiveSpace(),
+            "re-homed the dictation HUD on the active Space"
+        );
     }
 }
 

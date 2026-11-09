@@ -44,7 +44,8 @@ installed, and a stable build with the driver keeps its pane for Uninstall
 alone), Playground (Dev), Live text, Live chapters, Vocabulary biasing, Switch
 model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
 pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
-Unload model when idle (#442), and Terminal paste (Windows). Externally contributed features land there too.
+Unload model when idle (#442), Terminal paste (Windows), and Terminal paste
+shortcut (Windows, Linux). Externally contributed features land there too.
 Annotate is a normal feature in every build, stable included, on macOS,
 Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
 `DEVELOPER_FEATURES_ENABLED`) stay gated to dev builds.
@@ -172,7 +173,8 @@ substitute for source inspection or a second roadmap.
   pinned artifact verification, and lazy installation.
 - `transcription/model_details`: what a catalog model's details view adds:
   licence credit, source and licence links, the publisher's notice, measured
-  memory, and benchmarks the publisher (never Hex) measured (Parakeet Ultra).
+  memory, and benchmarks the publisher (never Hex) measured (Parakeet Ultra,
+  Orukeet).
 - `transcription/custom_models`, `transcription/gguf_header`: your own speech
   models: GGUF imports checked from their header alone (family, variant,
   languages, F32/F16/Q8_0 tensors), copied into `models/custom/` under their
@@ -259,7 +261,14 @@ substitute for source inspection or a second roadmap.
   scriptable browsers (Safari and Chromium
   dictionaries) through AppleScript and any other app's focused AXWebArea
   `AXURL`, and the front window's title only while a script
-  transformation is set up (`reads_window_title`); `windows/context` reads any browser through UI Automation and
+  transformation is set up (`reads_window_title`). The cheap 500 ms poll never
+  runs AppleScript: a scriptable browser's page is cached per frontmost pid
+  (so switching away and back reads it again) and read once more when a
+  capture is real, not on every press: the shortcut held past its hold
+  threshold, a finish that lands earlier, or a control start asks for one
+  refresh, while a press a chord discards before that threshold reads nothing
+  (holding past the threshold first still reads the page once);
+  `windows/context` reads any browser through UI Automation and
   `linux/atspi` through AT-SPI.
 - `application_catalog`: cached installed-application discovery for the Modes
   picker, one module per OS: macOS bundles, Windows executables from Start menu
@@ -894,14 +903,16 @@ CoreAudio formats, AppleScript details, or event serialization.
   after the current capture, and opening the replacement must succeed before
   the old stream is dropped; a device that resolves to the one already open is
   kept. An explicit CLI `--device` remains authoritative for that listener
-  process and never falls back. A runtime stream failure cancels an incomplete
-  capture (a programmatic one keeps the audio delivered before the failure for
-  its owner's `/finish`, which answers `microphone-lost` when there is none),
-  discards stale chunks, and retries with bounded backoff; it must not
-  require a settings change or process restart. An initial open failure uses
-  the same bounded recovery without stopping the listener. Cancellation does
-  not stop warm-microphone retries; enabling release-while-idle stops them once
-  capture is idle.
+  process and never falls back. A stream that already failed or delivered
+  digital silence is stopped before its replacement opens, so the replacement
+  starts with no dictation stream on the device, as at launch. A runtime stream
+  failure cancels an incomplete capture (a programmatic one keeps the audio
+  delivered before the failure for its owner's `/finish`, which answers
+  `microphone-lost` when there is none), discards stale chunks, and retries
+  with bounded backoff; it must not require a settings change or process
+  restart. An initial open failure uses the same bounded recovery without
+  stopping the listener. Cancellation does not stop warm-microphone retries;
+  enabling release-while-idle stops them once capture is idle.
 - Feedback volume is persisted from zero through one; zero disables tones.
   Volume changes apply immediately and preview one recording-start tone.
 - Launch at Login uses `SMAppService` for the signed main app. Treat both
@@ -1071,8 +1082,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   Activated/Deactivated). The recording capsule is `● 0:07 │ ✎ │ ■ ✕`,
   icons only, with no target chips; its pen stays on until clicked
   again and draws only while the mouse button is down (drag to draw,
-  move freely otherwise), and Esc stops drawing, never the recording. Shift still
-  draws on the Mac. While drawing, the ink overlay takes the pointer with
+  move freely otherwise), and Esc stops drawing, never the recording; on
+  GNOME Wayland with Labs › Annotate on GNOME the ink can't take keys, so the
+  capsule's pen button stops drawing, as does letting go of a held Annotate
+  key (a tap of it stops the recording instead). Shift still draws on the
+  Mac. While drawing, the ink overlay takes the pointer with
   a pen cursor (Linux leaves a hole over the capsule's pill), so clicks
   reach neither the app nor anything but the capsule. Ink has no pins and
   no undo. There is no separate draw shortcut and no send-to list
@@ -1321,9 +1335,17 @@ CoreAudio formats, AppleScript details, or event serialization.
   session without layer-shell and only while this user's XWayland process
   already runs; Hex decides at each show and never starts XWayland. Off, or
   when the overlay still can't open, an offer opens the Meetings pane (#1271).
-  Everything else stays on Wayland. The desktop may grant a different
-  trigger, keep an older one, or refuse one; Settings shows what it granted,
-  follows ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
+  A third: Labs › Annotate on GNOME (`gnome-annotate`, off by default) does the
+  same for Annotate's recording capsule, ink, and picker, with the same
+  conditions and per-show decision. Rune never shows an `OnDemand` overlay on
+  XWayland, so on such a session the ink takes `KeyPolicy::None` and pointer
+  regions from the start, keeping regions with no hit area while not drawing
+  (an XWayland window made click-through can never take the pointer later);
+  Esc can't stop drawing there, so the capsule's pen button ends it, as does
+  letting go of a held Annotate key (a tap stops the recording). Everything
+  else stays on Wayland. The desktop may grant a different trigger, keep an
+  older one, or refuse one; Settings shows what it granted, follows
+  ShortcutsChanged, and opens ConfigureShortcuts (portal version 2).
   Hex's app id is `anomaly.hex`: every install (direct, AUR, deb/rpm, Nix)
   ships `anomaly.hex.desktop` with `StartupWMClass=anomaly.hex`, and the
   windows report that id, so there is one launcher entry. Every entry says

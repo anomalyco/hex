@@ -10,6 +10,7 @@
 
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,11 +19,26 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 /// The most clipboard data a paste preserves. Larger clipboards (big
 /// images) are left replaced by the transcript.
 pub(crate) const CAP: usize = 32 * 1024 * 1024;
+/// The most plain text a typed-text job reads from the clipboard: a larger
+/// selection is reported as unreadable rather than held on the output
+/// worker.
+const TEXT_CAP: usize = 1024 * 1024;
 /// How long a paste waits for the clipboard's owner to hand over its formats.
 const READ_DEADLINE: Duration = Duration::from_secs(1);
 /// How long a restored clipboard waits for a slow reader.
 const SERVE_DEADLINE: Duration = Duration::from_secs(2);
 
+/// The clipboard MIME types and X11 targets that carry plain text, preferred
+/// first.
+const TEXT_TARGETS: [&str; 5] = [
+    "text/plain;charset=utf-8",
+    "text/plain",
+    "UTF8_STRING",
+    "TEXT",
+    "STRING",
+];
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Snapshot {
     /// Nothing owned the clipboard; restoring clears it.
     Empty,
@@ -30,6 +46,7 @@ pub(crate) enum Snapshot {
     X11(Vec<X11Format>),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct X11Format {
     target: u32,
     type_: u32,
@@ -75,6 +92,16 @@ impl Selection {
             Self::Wayland => wayland::snapshot(None),
             Self::XWayland => x11::snapshot().wrap_err("could not read the XWayland clipboard"),
             Self::X11 { .. } => x11::snapshot(),
+        }
+    }
+
+    /// The clipboard's plain text, within [`TEXT_CAP`] and the read
+    /// deadline; `None` when it holds no readable text.
+    pub(crate) fn text(self) -> Result<Option<String>> {
+        match self {
+            Self::Wayland => wayland::text(),
+            Self::XWayland => x11::text().wrap_err("could not read the XWayland clipboard"),
+            Self::X11 { .. } => x11::text(),
         }
     }
 
@@ -152,6 +179,47 @@ fn xwayland_listed(uid: u32, mut processes: impl Iterator<Item = (u32, String)>)
 
 fn too_large() -> color_eyre::eyre::Report {
     eyre!("the clipboard holds more than {} MiB", CAP / (1024 * 1024))
+}
+
+/// The clipboard's text through `wl-paste`, for a Wayland compositor without
+/// data-control (GNOME). `wl-paste` comes with the `wl-copy` every Wayland
+/// paste already needs. Its windowless client can briefly take focus on
+/// GNOME, which is why Hex reads through data-control wherever it exists.
+/// `--type text` keeps a binary clipboard from being read as text.
+fn wl_paste_text() -> Result<Option<String>> {
+    let mut child = Command::new("wl-paste")
+        .args(["--no-newline", "--type", "text"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .wrap_err("could not start wl-paste; install wl-clipboard")?;
+    let deadline = Instant::now() + READ_DEADLINE;
+    let result = (|| {
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| eyre!("wl-paste has no output"))?;
+        let data = read_bounded(OwnedFd::from(stdout), TEXT_CAP, deadline)?;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                return Err(eyre!("wl-paste did not finish in time"));
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        if !status.success() {
+            return Ok(None);
+        }
+        Ok(String::from_utf8(data).ok())
+    })();
+    if result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
 }
 
 fn pipe() -> Result<(OwnedFd, OwnedFd)> {
@@ -334,6 +402,35 @@ macro_rules! data_control {
             })
         }
 
+        /// The selection's plain text, within [`TEXT_CAP`] and the read
+        /// deadline; `None` when it offers no text.
+        pub(super) fn text() -> Result<Option<String>> {
+            let deadline = Instant::now() + READ_DEADLINE;
+            let session = connect()?;
+            let Some(Some(offer)) = session.state.selection.clone() else {
+                return Ok(None);
+            };
+            let mimes = session
+                .state
+                .offers
+                .get(&offer.id())
+                .cloned()
+                .unwrap_or_default();
+            let Some(mime) = TEXT_TARGETS
+                .iter()
+                .find(|wanted| mimes.iter().any(|mime| mime == *wanted))
+            else {
+                return Ok(None);
+            };
+            let (read, write) = pipe()?;
+            offer.receive((*mime).to_owned(), write.as_fd());
+            drop(write);
+            session.connection.flush()?;
+            let data = read_bounded(read, TEXT_CAP, deadline)
+                .wrap_err("could not read the clipboard's text")?;
+            Ok(String::from_utf8(data).ok())
+        }
+
         /// Takes the selection with `formats`, or clears it when there are none,
         /// and serves it on a thread until another client replaces it.
         pub(super) fn serve(formats: Vec<(String, Vec<u8>)>) -> Result<()> {
@@ -493,6 +590,16 @@ mod wayland {
             wlr::snapshot(only)
         } else {
             Err(missing())
+        }
+    }
+
+    pub(super) fn text() -> Result<Option<String>> {
+        if offers(ext::GLOBAL) {
+            ext::text()
+        } else if offers(wlr::GLOBAL) {
+            wlr::text()
+        } else {
+            super::wl_paste_text()
         }
     }
 
@@ -699,6 +806,53 @@ mod x11 {
         let _ = connection.destroy_window(window);
         let _ = connection.flush();
         result
+    }
+
+    /// The clipboard's plain text, within [`TEXT_CAP`] and the read
+    /// deadline; `None` when it holds no text.
+    pub(super) fn text() -> Result<Option<String>> {
+        let deadline = Instant::now() + READ_DEADLINE;
+        let (connection, screen, atoms) = connect()?;
+        if connection
+            .get_selection_owner(atoms.CLIPBOARD)?
+            .reply()?
+            .owner
+            == NONE
+        {
+            return Ok(None);
+        }
+        let window = window(&connection, screen)?;
+        let result = (|| {
+            for target in TEXT_TARGETS {
+                let target = connection
+                    .intern_atom(false, target.as_bytes())?
+                    .reply()?
+                    .atom;
+                let Some(format) =
+                    convert(&connection, &atoms, window, target, TEXT_CAP, deadline)?
+                else {
+                    continue;
+                };
+                let latin1 = target == connection.intern_atom(false, b"STRING")?.reply()?.atom;
+                if let Some(text) = decode_text(format.data, latin1) {
+                    return Ok(Some(text));
+                }
+            }
+            Ok(None)
+        })();
+        let _ = connection.destroy_window(window);
+        let _ = connection.flush();
+        result
+    }
+
+    /// Clipboard bytes as text: UTF-8, or Latin-1 for the legacy `STRING`
+    /// target.
+    fn decode_text(data: Vec<u8>, latin1: bool) -> Option<String> {
+        match String::from_utf8(data) {
+            Ok(text) => Some(text),
+            Err(error) if latin1 => Some(error.into_bytes().into_iter().map(char::from).collect()),
+            Err(_) => None,
+        }
     }
 
     /// One target of the clipboard, following INCR transfers.

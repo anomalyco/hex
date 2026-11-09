@@ -40,6 +40,7 @@ describe("Promise client", () => {
       audioFormats: ["audio/wav"],
       partialTranscripts: false,
       serviceCapture: false,
+      outputProcessing: false,
     })
     expect(await host.client.models.list()).toMatchObject([{ id: "parakeet_v2", installed: true }])
     await host.client.models.prepare("parakeet_v2", {
@@ -52,6 +53,12 @@ describe("Promise client", () => {
       model: "parakeet_v2",
       language: "en",
     })).toEqual({ transcript: "hello from hex", durationMs: 750 })
+    expect(await host.client.transcribe({
+      audio: { data: new Uint8Array([1, 2, 3]), contentType: "audio/wav" },
+      model: "parakeet_v2",
+      language: "en",
+      process: "global",
+    })).toEqual({ transcript: "hello from hex", durationMs: 750, processed: "Hello from Hex." })
 
     const pid = host.pid
     expect(processIsAlive(pid)).toBe(true)

@@ -1031,16 +1031,22 @@ fn clean_google_meet_title(title: &str) -> String {
     cleaned.to_string()
 }
 
-/// A Meet call's code from its address: the first path segment, so query
-/// strings (`?authuser=0`) never make one call look like two.
+/// A Meet call's code from its address: the path segment shaped like one, so
+/// query strings (`?authuser=0`) and the `/meet/` prefix Arc adds when it
+/// opens a Calendar link never make one call look like two. A nickname path
+/// without a code-shaped segment (`/team-sync`) is its own code, as before.
 fn google_meet_url_code(url: &Url) -> Option<String> {
-    let code = url
-        .path()
-        .trim_matches('/')
-        .split('/')
-        .next()?
-        .to_ascii_lowercase();
-    (!code.is_empty()).then_some(code)
+    let mut fallback = None;
+    for segment in url.path_segments()?.map(str::to_ascii_lowercase) {
+        if segment.is_empty() {
+            continue;
+        }
+        if is_google_meet_code(&segment) {
+            return Some(segment);
+        }
+        fallback.get_or_insert(segment);
+    }
+    fallback
 }
 
 /// A Meet call's code from a tab title that shows only the code
@@ -1867,6 +1873,44 @@ mod tests {
     }
 
     #[test]
+    fn extracts_a_meet_code_from_a_meet_prefixed_address() {
+        let plain = Url::parse("https://meet.google.com/abc-defg-hij?authuser=0").unwrap();
+        assert_eq!(
+            google_meet_url_code(&plain).as_deref(),
+            Some("abc-defg-hij")
+        );
+
+        // Arc opens a Calendar link as `/meet/<code>?authuser=…`; the prefix
+        // is not the call's code.
+        let prefixed = Url::parse("https://meet.google.com/meet/abc-defg-hij?authuser=0").unwrap();
+        assert_eq!(
+            google_meet_url_code(&prefixed).as_deref(),
+            Some("abc-defg-hij")
+        );
+
+        // Uppercase still names the same code, and a fragment is ignored.
+        let uppercase = Url::parse("https://meet.google.com/meet/ABC-DEFG-HIJ#fragment").unwrap();
+        assert_eq!(
+            google_meet_url_code(&uppercase).as_deref(),
+            Some("abc-defg-hij")
+        );
+
+        // A nickname path without a code-shaped segment is its own code, as
+        // before; only a path with no segment at all names none.
+        for (address, code) in [
+            ("https://meet.google.com/team-sync", Some("team-sync")),
+            ("https://meet.google.com/lookup", Some("lookup")),
+            ("https://meet.google.com/", None),
+        ] {
+            assert_eq!(
+                google_meet_url_code(&Url::parse(address).unwrap()).as_deref(),
+                code,
+                "{address}"
+            );
+        }
+    }
+
+    #[test]
     fn switching_tabs_during_a_snoozed_browser_call_does_not_re_offer() {
         let brave = ActiveMicrophoneApplication {
             pid: 1592,
@@ -1929,6 +1973,37 @@ mod tests {
             Some("abc-defg-hij")
         );
         assert_eq!(google_meet_title_code("Meet - Design sync"), None);
+    }
+
+    #[test]
+    fn meet_prefixed_addresses_are_snoozed_by_their_own_codes() {
+        let first = meet_in_brave(
+            "https://meet.google.com/meet/abc-defg-hij?authuser=0",
+            "Meet - Design sync",
+        );
+        let again = meet_in_brave(
+            "https://meet.google.com/meet/abc-defg-hij?authuser=1",
+            "Meet - Design sync",
+        );
+        let second = meet_in_brave(
+            "https://meet.google.com/meet/xyz-wxyz-xyz?authuser=0",
+            "Meet - Standup",
+        );
+        assert_eq!(first.call.as_deref(), Some("abc-defg-hij"));
+        assert_eq!(second.call.as_deref(), Some("xyz-wxyz-xyz"));
+
+        let mut watch = Watch::new();
+        assert_eq!(
+            watch.stable(&first, &[]),
+            Some(Detection::Offer(first.clone()))
+        );
+        assert!(!watch.detector.is_application_snoozed("com.brave.Browser"));
+        // The same call under another account is still snoozed.
+        assert!(watch.run(Some(&again), &[], 5_000).is_empty());
+        // The first call ended without a stop by hand, so only its different
+        // code lets the next one through after a short gap (#1594).
+        assert!(watch.run(None, &[], 2_000).is_empty());
+        assert_eq!(watch.stable(&second, &[]), Some(Detection::Offer(second)));
     }
 
     #[test]

@@ -89,10 +89,26 @@ objc2::define_class!(
             }
         }
 
+        /// Labs › Screenshots: the capture card closed last, back in the
+        /// corner, at once (it's safe from any thread).
+        #[unsafe(method(restoreCapture:))]
+        fn restore_capture(&self, _sender: &AnyObject) {
+            #[cfg(hex_capture)]
+            crate::screenshots::restore_last();
+        }
+
         /// The status menu's delegate: it is about to open.
         #[unsafe(method(menuNeedsUpdate:))]
         fn menu_needs_update(&self, _menu: &NSMenu) {
             refresh_recent_dictations();
+            refresh_restore_capture();
+        }
+
+        /// Restore Last Capture is dimmed while no closed card can come
+        /// back; every other item stays enabled.
+        #[unsafe(method(validateMenuItem:))]
+        fn validate_menu_item(&self, item: &NSMenuItem) -> bool {
+            item.action() != Some(sel!(restoreCapture:)) || restore_capture_enabled()
         }
 
         #[unsafe(method(startMeeting:))]
@@ -160,6 +176,8 @@ enum Row {
     /// Labs › Copy recent dictations: hidden until the menu opens with it on.
     CopyRecentDictation,
     CopyLastMeetingTranscript,
+    /// Labs › Screenshots: hidden until the menu opens with it on.
+    RestoreCapture,
     SpeechModel,
     Separator,
     Settings,
@@ -167,7 +185,7 @@ enum Row {
     Quit,
 }
 
-const ROWS: [Row; 13] = [
+const ROWS: [Row; 14] = [
     Row::MeetingStatus,
     Row::StopMeeting,
     Row::CopySection,
@@ -176,6 +194,7 @@ const ROWS: [Row; 13] = [
     Row::PasteLast,
     Row::CopyRecentDictation,
     Row::CopyLastMeetingTranscript,
+    Row::RestoreCapture,
     Row::SpeechModel,
     Row::Separator,
     Row::Settings,
@@ -195,6 +214,7 @@ impl Row {
             Row::PasteLast => "Paste Last Dictation",
             Row::CopyRecentDictation => "Copy Recent Dictation",
             Row::CopyLastMeetingTranscript => "Copy Last Meeting Transcript",
+            Row::RestoreCapture => "Restore Last Capture",
             Row::SpeechModel => "Speech Model",
             Row::Settings => "Settings…",
             Row::Update => "Check for Updates…",
@@ -210,6 +230,7 @@ impl Row {
             Row::RecordMeeting => sel!(startMeeting:),
             Row::PasteLast => sel!(pasteLast:),
             Row::CopyLastMeetingTranscript => sel!(copyLastMeetingTranscript:),
+            Row::RestoreCapture => sel!(restoreCapture:),
             Row::Settings => sel!(openSettings:),
             Row::Update => sel!(checkForUpdates:),
             Row::Quit => sel!(quit:),
@@ -242,6 +263,7 @@ impl Row {
                 | Row::MeetingSeparator
                 | Row::CopyRecentDictation
                 | Row::CopyLastMeetingTranscript
+                | Row::RestoreCapture
         )
     }
 }
@@ -310,6 +332,7 @@ struct StatusItemController {
     paste_last_key: RefCell<Option<KeyEquivalent>>,
     recent: Retained<NSMenuItem>,
     recent_menu: Retained<NSMenu>,
+    restore_capture: Retained<NSMenuItem>,
     update: Option<Retained<NSMenuItem>>,
     update_title: RefCell<String>,
     _menu: Retained<NSMenu>,
@@ -458,6 +481,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             paste_last_key: RefCell::new(None),
             recent: row(Row::CopyRecentDictation),
             recent_menu,
+            restore_capture: row(Row::RestoreCapture),
             update: (!update_managed).then(|| row(Row::Update)),
             update_title: RefCell::new("Check for Updates…".into()),
             _menu: menu,
@@ -603,11 +627,16 @@ fn meeting_menu(state: &crate::meeting::watcher::MeetingMenuState, enabled: bool
             started,
             title,
             chapters,
+            warning,
             ..
         } => {
             let elapsed = crate::meeting::format_duration(started.elapsed().as_millis() as u64);
+            let mut status = format!("Recording · {} · {elapsed}", menu_title(title));
+            if warning.is_some() {
+                status.push_str(" · Microphone is silent");
+            }
             MeetingMenu {
-                status: Some(format!("Recording · {} · {elapsed}", menu_title(title))),
+                status: Some(status),
                 button_title: format!(" {elapsed}"),
                 recording: true,
                 can_start: false,
@@ -699,6 +728,27 @@ fn refresh_recent_dictations() {
         }
         controller.recent.setHidden(!listed);
     });
+}
+
+/// Shows Restore Last Capture while Labs › Screenshots is on, as the menu
+/// opens.
+fn refresh_restore_capture() {
+    let shown = crate::labs::screenshots();
+    STATUS_ITEM.with(|controller| {
+        if let Some(controller) = controller.borrow().as_ref() {
+            controller.restore_capture.setHidden(!shown);
+        }
+    });
+}
+
+#[cfg(hex_capture)]
+fn restore_capture_enabled() -> bool {
+    crate::screenshots::can_restore()
+}
+
+#[cfg(not(hex_capture))]
+fn restore_capture_enabled() -> bool {
+    false
 }
 
 fn update_title(status: &crate::desktop::host::DesktopUpdateStatus) -> String {
@@ -832,13 +882,17 @@ mod tests {
         assert!(idle.can_start && !idle.can_stop && idle.status.is_none());
         assert!(!meeting_menu(&MeetingMenuState::Idle, false).can_start);
         let started = std::time::Instant::now() - std::time::Duration::from_secs(754);
-        let recording_state = |title: &str, chapters| MeetingMenuState::Recording {
+        let recording_state = |title: &str, chapters, warning| MeetingMenuState::Recording {
             started,
             id: "1".into(),
             title: title.into(),
             chapters,
+            warning,
         };
-        let recording = meeting_menu(&recording_state("Zoom call — 2:30 PM", Vec::new()), false);
+        let recording = meeting_menu(
+            &recording_state("Zoom call — 2:30 PM", Vec::new(), None),
+            false,
+        );
         assert_eq!(
             recording.status.as_deref(),
             Some("Recording · Zoom call — 2:30 PM · 12:34")
@@ -847,6 +901,7 @@ mod tests {
             &recording_state(
                 "A very long provisional title that keeps going past the limit",
                 Vec::new(),
+                None,
             ),
             false,
         );
@@ -857,6 +912,18 @@ mod tests {
         assert_eq!(recording.button_title, " 12:34");
         assert!(recording.can_stop && !recording.can_start);
         assert!(recording.sections.is_empty());
+        let silent = meeting_menu(
+            &recording_state(
+                "Team sync",
+                Vec::new(),
+                Some(crate::meeting::TrackWarning::DigitalSilence),
+            ),
+            false,
+        );
+        assert_eq!(
+            silent.status.as_deref(),
+            Some("Recording · Team sync · 12:34 · Microphone is silent")
+        );
         let chapter = |title: &str, start_ms| crate::meeting::Chapter {
             title: title.into(),
             summary: String::new(),
@@ -866,6 +933,7 @@ mod tests {
             &recording_state(
                 "Team sync",
                 vec![chapter("Image storage", 0), chapter("Motion lint", 190_000)],
+                None,
             ),
             false,
         );
@@ -898,6 +966,7 @@ mod tests {
                 "Paste Last Dictation".into(),
                 "Copy Recent Dictation".into(),
                 "Copy Last Meeting Transcript".into(),
+                "Restore Last Capture".into(),
                 "Speech Model".into(),
                 "—".into(),
                 "Settings…".into(),

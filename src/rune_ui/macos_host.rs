@@ -477,7 +477,10 @@ pub(super) fn validate_hotkey(
 ) -> Result<(), &'static str> {
     if matches!(
         target,
-        ShortcutTarget::PasteLast | ShortcutTarget::Cancel | ShortcutTarget::Screenshot
+        ShortcutTarget::PasteLast
+            | ShortcutTarget::Cancel
+            | ShortcutTarget::Screenshot
+            | ShortcutTarget::ScreenshotRecord
     ) && binding.key.is_none()
     {
         return Err(tr("Add a key"));
@@ -1254,8 +1257,8 @@ impl ScrawlHost {
     fn send(&mut self, request: super::platform::ScrawlRequest) {
         use super::platform::ScrawlRequest;
         match request {
-            // `send` moves the next refresh to now.
-            ScrawlRequest::Refresh => {}
+            // The pane opened or the window became key: read now.
+            ScrawlRequest::Refresh => crate::capture_host::invalidate_screen_access(),
             ScrawlRequest::QuitScrawl => crate::capture_host::quit_scrawl(),
             ScrawlRequest::RevealFolder => {
                 let folder = crate::app_settings::capture_settings().captures_dir();
@@ -1306,7 +1309,16 @@ impl ScrawlHost {
         if !(refresh || changed) {
             return changed;
         }
-        let screen = crate::capture_host::screen_access();
+        // The row on screen follows the grant within seconds; without it an
+        // idle read stands, so no helper runs just because a window polls.
+        let screen = if state
+            .permissions_shown
+            .contains(&PermissionKind::ScreenRecording)
+        {
+            crate::capture_host::screen_access_watched()
+        } else {
+            crate::capture_host::screen_access()
+        };
         let screen_recording = screen == crate::capture_host::ScreenAccess::Allowed;
         let needs_restart = screen == crate::capture_host::ScreenAccess::NeedsRestart;
         changed |= update(&mut view.screen_needs_restart, needs_restart);

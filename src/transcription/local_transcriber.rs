@@ -6,7 +6,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
 use crate::app_settings::TranscriptionDevice;
-use crate::transcription::gguf_session::OfflineGgufSession;
+use crate::transcription::gguf_session::{OfflineGgufSession, output_truncated};
 use crate::transcription::gpu_health;
 use crate::transcription::models::{
     TranscriptionSelection, download_with_progress, model_path, validate,
@@ -214,9 +214,20 @@ pub fn transcribe_wav_with_selection(
     LocalTranscriber::load(selection)?.transcribe(&samples)
 }
 
+/// A WAV already in memory, as `hex transcribe` read it.
+pub fn transcribe_wav_bytes(wav: &[u8], selection: &TranscriptionSelection) -> Result<String> {
+    let samples = read_wav(std::io::Cursor::new(wav))?;
+    LocalTranscriber::load(selection)?.transcribe(&samples)
+}
+
 pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
-    let mut reader = hound::WavReader::open(path)
-        .wrap_err_with(|| format!("could not open {}", path.display()))?;
+    let file =
+        std::fs::File::open(path).wrap_err_with(|| format!("could not open {}", path.display()))?;
+    read_wav(std::io::BufReader::new(file))
+}
+
+fn read_wav(reader: impl std::io::Read + std::io::Seek) -> Result<Vec<f32>> {
+    let mut reader = hound::WavReader::new(reader)?;
     let spec = reader.spec();
     let samples = match spec.sample_format {
         hound::SampleFormat::Float => reader
@@ -414,12 +425,25 @@ impl LocalTranscriber {
         Ok(transcriber)
     }
 
-    /// Runs [`PREWARM_SAMPLES`] of silence through the model. A decoder
-    /// that runs to its generation cap on silence (Qwen3-ASR 1.7B, #968)
-    /// still ran the whole graph on the device, so that is a warm model,
-    /// not a failed device.
+    /// Runs [`PREWARM_SAMPLES`] of silence through the model, without the
+    /// vocabulary prompt: with it, a decoder such as Qwen3-ASR reads a long
+    /// term list back to its output cap on every warm-up (#1568). A decode
+    /// that still runs to that cap ran the whole graph on the device, so
+    /// that is a warm model, not a failed device.
     fn warm_on_silence(&mut self) -> Result<()> {
-        match self.transcribe(&vec![0.0; PREWARM_SAMPLES]) {
+        let run = |this: &mut Self| {
+            this.session
+                .warm(&vec![0.0; PREWARM_SAMPLES], &this.options)
+                .map(drop)
+                .wrap_err("transcription failed")
+        };
+        let result = match run(self) {
+            // A GPU that fails mid-run reloads on the CPU, as a transcript
+            // does; the CPU model is warmed by its own load.
+            Err(error) if self.gpu_failed(&error) => self.recover_on_cpu(&error),
+            result => result,
+        };
+        match result {
             Err(error) if output_truncated(&error) => {
                 tracing::info!(
                     error = format!("{error:#}"),
@@ -427,7 +451,7 @@ impl LocalTranscriber {
                 );
                 Ok(())
             }
-            result => result.map(drop),
+            result => result,
         }
     }
 
@@ -645,16 +669,6 @@ impl LocalTranscriber {
     }
 }
 
-/// Whether `error` is a decode stopped at its output limit.
-fn output_truncated(error: &color_eyre::eyre::Report) -> bool {
-    error.chain().any(|cause| {
-        matches!(
-            cause.downcast_ref::<transcribe_cpp::Error>(),
-            Some(transcribe_cpp::Error::OutputTruncated { .. })
-        )
-    })
-}
-
 /// The local API's own model, loaded for the selection a host asks for
 /// when the dictation engine holds another one.
 #[derive(Default)]
@@ -852,22 +866,6 @@ pub(crate) struct SwapFailed {
 mod model_swap_tests {
     use super::*;
     use crate::transcription::models::TranscriptionModelId;
-
-    #[test]
-    fn a_truncated_decode_is_recognised_through_its_context() {
-        let truncated: Result<()> = Err(transcribe_cpp::Error::OutputTruncated {
-            message: "budget".into(),
-            partial: None,
-        })
-        .wrap_err("transcription failed");
-        assert!(output_truncated(&truncated.unwrap_err()));
-        let other: Result<()> = Err(transcribe_cpp::Error::OutputRepetition {
-            message: "loop".into(),
-            partial: None,
-        })
-        .wrap_err("transcription failed");
-        assert!(!output_truncated(&other.unwrap_err()));
-    }
 
     #[test]
     fn an_unchanged_selection_loads_nothing() {

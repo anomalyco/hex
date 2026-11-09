@@ -157,6 +157,10 @@ fn amplitude_db(amplitude: f32) -> f32 {
 }
 
 #[cfg(any(test, target_os = "linux", target_os = "windows"))]
+#[cfg_attr(
+    not(any(target_os = "linux", target_os = "windows")),
+    allow(unused_imports)
+)]
 pub(crate) use owner::{DictationQueue, Effect, ServiceDictations};
 
 #[cfg(any(test, target_os = "linux", target_os = "windows"))]
@@ -169,6 +173,7 @@ mod owner {
     /// The local API's `/dictations` controls. The host keeps one queue for
     /// whichever listener runs; while none does, a control goes unanswered
     /// and the API answers `service-capture-unavailable`.
+    #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
     #[derive(Clone)]
     pub(crate) struct DictationQueue(Arc<Mutex<Receiver<DictationControl>>>);
 
@@ -186,6 +191,7 @@ mod owner {
     }
 
     impl DictationQueue {
+        #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
         pub(crate) fn drain(&self) -> Vec<DictationControl> {
             self.0
                 .lock()
@@ -216,6 +222,7 @@ mod owner {
         source: String,
         levels: SyncSender<DictationLevel>,
         audio: Option<SyncSender<DictationAudioChunk>>,
+        #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
         partials: Option<SyncSender<Partial>>,
         /// Makes the recording's live stream publish its text while the
         /// client wants it.
@@ -506,6 +513,7 @@ mod owner {
 
         /// Forwards the recording's text so far to a client that asked for
         /// it. A full queue drops it: the next one carries the whole text.
+        #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
         pub(crate) fn partial(&mut self, partial: &Partial) {
             let Some(active) = self.active.as_mut() else {
                 return;

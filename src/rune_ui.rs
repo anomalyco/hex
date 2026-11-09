@@ -37,7 +37,10 @@ pub(crate) mod live_text;
 pub(crate) mod meeting_capsules;
 mod meetings;
 pub(crate) use self::meetings::meeting_import_failed;
+#[cfg(hex_capture)]
+mod captures;
 mod meetings_host;
+pub(crate) use meetings_host::{meeting_corner_moved, meeting_failed, meeting_provider_chosen};
 mod model_details;
 mod model_import;
 mod models;
@@ -58,6 +61,7 @@ mod scrawl;
 pub(crate) mod screenshot_thumbnail;
 mod settings;
 mod shortcut_mode;
+mod shortcut_rule;
 mod sidebar;
 mod sidebar_update;
 mod sound_sets;
@@ -85,6 +89,7 @@ use host::{Backend, Request, ShortcutTarget};
 use onboarding_kit::live::Page;
 use scenes::{SCENES, Scene, fixture, mac_fixture, portal_fixture};
 use settings::Capture;
+pub(crate) use shortcut_rule::shortcut_rule;
 use sidebar::{BuildKind, Pane, pane_header, sidebar};
 
 /// How long typing pauses before a text field's edit is saved.
@@ -454,36 +459,6 @@ pub(crate) fn current_pane(ui: &Ui) -> &'static str {
     }
 }
 
-/// The OS's rules for a shortcut, the ones Settings applies when recording
-/// one; shared with `hex settings set`.
-pub(crate) fn shortcut_rule(
-    slot: crate::app_settings::HotkeySlot,
-    binding: &HotkeyBinding,
-) -> Result<(), &'static str> {
-    use crate::app_settings::HotkeySlot;
-    let target = match slot {
-        HotkeySlot::Dictation => ShortcutTarget::Dictation,
-        HotkeySlot::PasteLast => ShortcutTarget::PasteLast,
-        HotkeySlot::RawDictation => ShortcutTarget::RawDictation,
-        HotkeySlot::Cancel => ShortcutTarget::Cancel,
-        #[cfg(hex_capture)]
-        HotkeySlot::Capture => ShortcutTarget::Capture,
-        #[cfg(all(hex_capture, target_os = "macos"))]
-        HotkeySlot::CaptureReplay => ShortcutTarget::CaptureReplay,
-        #[cfg(all(hex_capture, not(target_os = "macos")))]
-        HotkeySlot::CaptureReplay => ShortcutTarget::Capture,
-        #[cfg(target_os = "macos")]
-        HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
-        #[cfg(target_os = "macos")]
-        HotkeySlot::Screenshot => ShortcutTarget::Screenshot,
-        // Labs › Second dictation shortcut and Screenshots are macOS's;
-        // elsewhere a saved one meets the dictation shortcut's rules.
-        #[cfg(not(target_os = "macos"))]
-        HotkeySlot::SecondDictation | HotkeySlot::Screenshot => ShortcutTarget::Dictation,
-    };
-    host::validate_hotkey(target, binding)
-}
-
 /// The key `name` names on the active keyboard layout ("v", "space", "f5").
 #[cfg(target_os = "macos")]
 pub(crate) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
@@ -505,24 +480,6 @@ pub(crate) fn shortcut_rules() -> crate::control::settings::ShortcutRules {
     }
 }
 
-/// A capsule's "Never offer" or "Always record" choice, kept in the window's
-/// live settings so its next save doesn't drop it.
-pub(crate) fn meeting_provider_chosen(
-    ui: &mut Ui,
-    choice: crate::app_settings::MeetingProviderChoice,
-) {
-    crate::app_settings::set_meeting_provider(&mut ui.settings.meetings, choice);
-}
-
-/// The corner the recording capsule was dragged to, kept in the window's live
-/// settings so its next save doesn't move it back.
-pub(crate) fn meeting_corner_moved(
-    ui: &mut Ui,
-    corner: crate::app_settings::MeetingIndicatorCorner,
-) {
-    ui.settings.meetings.recording_indicator_corner = corner;
-}
-
 /// An error from outside the window, such as settings that could not be read
 /// at launch, shown where save errors show.
 #[cfg(target_os = "macos")]
@@ -534,13 +491,6 @@ pub(crate) fn show_error(ui: &mut Ui, error: String) {
 #[cfg(target_os = "macos")]
 pub(crate) fn update_check_asked(ui: &mut Ui) {
     ui.update_asked = true;
-}
-
-/// A meeting recording could not start or finish; the Meetings pane says why.
-pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
-    ui.meetings.start_pending = false;
-    ui.meetings.stop_pending = false;
-    ui.meetings.runtime_error = Some(error);
 }
 
 /// `hex app -- --snap out.png --scene …`: a headless render of a fixture
@@ -656,6 +606,9 @@ enum Menu {
 
 pub(crate) struct Ui {
     settings: AppSettings,
+    /// A test's preferred system language, instead of the host locale.
+    #[cfg(test)]
+    preferred_language: Option<String>,
     service: Service,
     /// This window's app, to know whether it shows (`app` sets it).
     window: Option<rune::AppHandle<Ui>>,
@@ -704,6 +657,8 @@ pub(crate) struct Ui {
     duck_volume_drag: Option<f32>,
     models: models::Models,
     history: history::HistoryPane,
+    #[cfg(hex_capture)]
+    captures: captures::CapturesPane,
     modes: modes::ModesPane,
     output: output::OutputPane,
     picker: picker::Picker,
@@ -793,6 +748,8 @@ impl Ui {
         let vocabulary = vocabulary::VocabularyEditor::new(&settings.vocabulary);
         Self {
             settings,
+            #[cfg(test)]
+            preferred_language: None,
             service,
             view: None,
             error: None,
@@ -818,6 +775,8 @@ impl Ui {
             duck_volume_drag: None,
             models: models::Models::default(),
             history: history::HistoryPane::default(),
+            #[cfg(hex_capture)]
+            captures: captures::CapturesPane::default(),
             modes,
             output: output::OutputPane::default(),
             picker: picker::Picker::default(),
@@ -848,6 +807,16 @@ impl Ui {
     /// A scene or test: nothing here runs on real time.
     fn is_fixture(&self) -> bool {
         matches!(self.service, Service::Fixture(_))
+    }
+
+    /// The person's first preferred system language: a test's when it sets
+    /// one, else the host locale.
+    fn preferred_language(&self) -> String {
+        #[cfg(test)]
+        if let Some(language) = &self.preferred_language {
+            return language.clone();
+        }
+        crate::desktop::i18n::preferred_language()
     }
 
     fn send(&mut self, request: Request) {
@@ -1245,6 +1214,8 @@ fn local_meetings(ui: &mut Ui) -> bool {
 fn setup(ui: &mut Ui, waker: Waker) {
     ui.modes.waker = Some(waker.clone());
     ui.modes.icon_cache = Some(rune::ImageCache::new(waker.clone()));
+    #[cfg(hex_capture)]
+    ui.captures.set_cache(rune::ImageCache::new(waker.clone()));
     if let Service::Pending(connect) = &mut ui.service {
         let connect = std::mem::take(connect);
         #[cfg(target_os = "macos")]
@@ -1279,6 +1250,8 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
     );
     changed |= ui.history.poll(ui.pane == Pane::History);
+    #[cfg(hex_capture)]
+    let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;
     if ui.pane == Pane::Output && !ui.labs_open {
         changed |= output::poll(ui, clock, tx);
     }
@@ -1397,6 +1370,8 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
         Pane::History => history::pane(ui, p, &mut layer),
+        #[cfg(hex_capture)]
+        Pane::Captures => (Vec::new(), captures::pane(ui, p)),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
         #[cfg(hex_capture)]
         Pane::Annotate => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
