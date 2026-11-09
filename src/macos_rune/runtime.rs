@@ -108,7 +108,7 @@ pub(super) struct Runtime {
 }
 
 impl Runtime {
-    fn handle(&mut self, request: Request) {
+    pub(super) fn handle(&mut self, request: Request) {
         match request {
             Request::ChooseModel { model, language } => {
                 self.manual_choice();
@@ -192,7 +192,7 @@ impl Runtime {
         self.last_completed_at = last_completed_at(self.event_reader.events().iter());
     }
 
-    fn tick_at(&mut self, now: Instant) {
+    pub(super) fn tick_at(&mut self, now: Instant) {
         if let Some(choice) = self.keyboard_switcher.take_due(now) {
             let selection = TranscriptionSelection {
                 language: choice.language,
