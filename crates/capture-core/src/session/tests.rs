@@ -575,6 +575,7 @@ fn records_a_region_at_its_long_edge() {
             },
         },
         long_edge: Some(1_280),
+        encoder: crate::Encoder::System,
     }];
     let recording = crate::Recorder::start(plan).unwrap();
     thread::sleep(Duration::from_secs(1));

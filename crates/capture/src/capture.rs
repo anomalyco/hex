@@ -359,6 +359,18 @@ pub enum AudioIn {
     Microphone,
 }
 
+/// How a screen capture's movie is recorded (macOS; elsewhere always compact).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MovieQuality {
+    /// Sized for agents: H.264 with a 1280 px long edge, 2560 for a whole display so a crop to
+    /// part of it stays sharp.
+    #[default]
+    Compact,
+    /// For people: every pixel, as hardware HEVC at a constant quality
+    /// (`capture_core::Encoder::Hevc`).
+    Full,
+}
+
 #[derive(Clone, Debug)]
 pub struct Start {
     /// The capture's start on the boot-time nanosecond clock that audio and input timestamps share.
@@ -368,6 +380,7 @@ pub struct Start {
     pub audio: AudioIn,
     pub window_log: bool,
     pub note: Option<String>,
+    pub movie: MovieQuality,
 }
 
 impl Default for Start {
@@ -379,6 +392,7 @@ impl Default for Start {
             audio: AudioIn::External,
             window_log: true,
             note: None,
+            movie: MovieQuality::Compact,
         }
     }
 }
@@ -393,6 +407,7 @@ impl Start {
             audio: AudioIn::External,
             window_log,
             note: None,
+            movie: MovieQuality::Compact,
         }
     }
 
@@ -413,6 +428,7 @@ impl Start {
             audio: AudioIn::None,
             window_log: false,
             note: None,
+            movie: MovieQuality::Compact,
         }
     }
 }
@@ -857,6 +873,8 @@ pub fn capture_size(target: &TargetInfo, long_edge: f64) -> (u32, u32) {
 pub(crate) struct Sampler {
     pub target: TargetInfo,
     pub video_output_path: Option<PathBuf>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub movie_quality: MovieQuality,
     /// Scrawl's own windows to leave out of the recording.
     #[cfg_attr(any(target_os = "windows", target_os = "linux"), allow(dead_code))]
     pub excluded_window_ids: Arc<Mutex<Vec<u32>>>,
@@ -903,6 +921,7 @@ impl ScreenCaptureSession {
             excluded_window_ids,
             Arc::default(),
             CANDIDATE_BUDGET_BYTES,
+            MovieQuality::Compact,
         )
     }
 
@@ -912,6 +931,7 @@ impl ScreenCaptureSession {
         excluded_window_ids: Arc<Mutex<Vec<u32>>>,
         own_windows_recorded: Arc<AtomicBool>,
         budget_bytes: usize,
+        movie_quality: MovieQuality,
     ) -> Self {
         let started_at = Instant::now();
         #[cfg(target_os = "macos")]
@@ -932,6 +952,7 @@ impl ScreenCaptureSession {
                 platform::run_sampler(Sampler {
                     target: sampler_target,
                     video_output_path,
+                    movie_quality,
                     excluded_window_ids,
                     own_windows_recorded,
                     started_at,
@@ -2692,6 +2713,7 @@ impl Engine {
                     Arc::clone(&telemetry.excluded_window_ids),
                     Arc::clone(&own.recorded),
                     engine_cfg.candidate_budget_bytes(),
+                    req.movie,
                 );
                 self.host
                     .metric("sck_start_ms", stage.elapsed().as_secs_f64() * 1_000.0);

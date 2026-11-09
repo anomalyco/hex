@@ -1,8 +1,9 @@
 //! Screen recording for macOS on `ScreenCaptureKit`.
 //!
 //! A host describes a recording with a [`Plan`] and starts it with [`Recorder::start`]. Each
-//! display, window or region source records to its own H.264 MP4 through an
-//! `SCRecordingOutput`.
+//! display, window or region source records to its own MP4: H.264 through an
+//! `SCRecordingOutput`, or HEVC at a constant quality through Hex's own `AVAssetWriter`
+//! ([`Encoder`]).
 //! [`Recording::stop`] returns at once; the files are finished on the recording's own thread and
 //! come back from [`Finishing::wait`] along with a versioned [`Manifest`] that places every file
 //! on one clock: Mach host time in nanoseconds.
@@ -28,6 +29,7 @@ mod system_audio;
 #[cfg(test)]
 mod test_dir;
 mod time;
+mod video_writer;
 
 pub use cursor::{
     CursorButton, CursorButtonEvent, CursorButtonState, CursorCapture, CursorCaptureDiagnostics,
@@ -48,8 +50,8 @@ pub use manifest::{
 };
 pub use native::Recorder;
 pub use plan::{
-    AudioPlan, CursorDrawing, Exclusions, ExternalMic, Input, MANIFEST_NAME, MIC_WARMUP, Mic,
-    Names, Plan, Rect, Source, SourcePlan,
+    AudioPlan, CursorDrawing, Encoder, Exclusions, ExternalMic, Input, MANIFEST_NAME, MIC_WARMUP,
+    Mic, Names, Plan, Rect, Source, SourcePlan,
 };
 pub use screenshot::{Image, screenshot, screenshot_with};
 pub use session::{Finished, Finishing, Recording, SourceCursor};

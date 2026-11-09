@@ -45,8 +45,8 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use scrawl_capture::audio::RecordedAudio;
 use scrawl_capture::capture::{
-    AudioIn, ConfigSource, Event, Host, InputSink, OwnWindows, SharedCaptureTelemetry,
-    SharedResources, Stage, Start, Target,
+    AudioIn, ConfigSource, Event, Host, InputSink, MovieQuality, OwnWindows,
+    SharedCaptureTelemetry, SharedResources, Stage, Start, Target,
 };
 use scrawl_capture::handoff::EngineConfig;
 use scrawl_capture::hosted_input::{HostInput, HostedInput, Modifiers};
@@ -429,6 +429,7 @@ fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target) -> Start {
         audio: AudioIn::External,
         window_log: true,
         note: None,
+        movie: MovieQuality::Compact,
     }
 }
 
