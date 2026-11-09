@@ -32,6 +32,14 @@ running service (`src/desktop/opencode_service.rs`):
   `$XDG_STATE_HOME/opencode`, else `~/.local/state/opencode`; OpenCode uses the
   same path on Windows. On macOS and Linux the file must be a regular file the
   user owns with no group or other permissions.
+- On Windows, when no Windows registration answers and Labs › OpenCode in WSL
+  is on, it reads the default WSL distribution's registration at
+  `<home>/.local/state/opencode` through `\\wsl.localhost\`. The distribution
+  comes from `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss`, and the
+  home from that distribution's `/etc/passwd` for its `DefaultUid` (at most
+  1 MiB, and only the default distribution; opening another could boot it).
+  WSL2 forwards loopback, so the registered URL is dialed as registered. No
+  `wsl.exe` runs, and passwd contents and passwords are never logged.
 - The registration's `url` must be loopback `http://` (`localhost`, `0.0.0.0`
   and `::` are reached through loopback); anything else is refused.
 - `GET /api/info` with the registration's password (HTTP Basic, user
@@ -46,7 +54,9 @@ the OpenCode docs; Hex starts nothing.
 
 Hex reads `/api/model` and `/api/model/default` through authenticated HTTP, avoiding
 large piped CLI responses. It supplies `x-opencode-directory` for its Application
-Support workspace. Model selections use the catalog's `id`, not the upstream
+Support workspace; a service found in WSL gets a Linux workspace instead
+(`<home>/.local/share/hex/opencode`), because a Windows path is relative to a
+Linux server. Model selections use the catalog's `id`, not the upstream
 provider's `modelID`. Available text-output models remain selectable regardless
 of release status, including alpha and beta. Selecting a thinking variant for the
 floating default saves the resolved catalog model alongside it; existing explicit

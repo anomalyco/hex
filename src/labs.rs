@@ -124,10 +124,11 @@ pub enum Feature {
     QuitClosesWindow,
     ExpireMeetingAudio,
     CapsLockDictation,
+    OpenCodeInWsl,
 }
 
 impl Feature {
-    pub const ALL: [Self; 60] = [
+    pub const ALL: [Self; 61] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -188,6 +189,7 @@ impl Feature {
         Self::QuitClosesWindow,
         Self::ExpireMeetingAudio,
         Self::CapsLockDictation,
+        Self::OpenCodeInWsl,
     ];
 
     /// The features this OS and build have.
@@ -272,7 +274,8 @@ impl Feature {
             | Self::NotchIndicator
             | Self::QuitClosesWindow
             | Self::GnomeAnnotate
-            | Self::CapsLockDictation => Audience::Everyone,
+            | Self::CapsLockDictation
+            | Self::OpenCodeInWsl => Audience::Everyone,
         }
     }
 
@@ -334,7 +337,10 @@ impl Feature {
             | Self::ExpireMeetingAudio
             | Self::FailureNotices
             | Self::TypedText => 20261107,
-            Self::GnomeAnnotate | Self::TerminalPasteShortcut | Self::ReleaseNotesLink => 20261108,
+            Self::GnomeAnnotate
+            | Self::TerminalPasteShortcut
+            | Self::ReleaseNotesLink
+            | Self::OpenCodeInWsl => 20261108,
         }
     }
 
@@ -376,7 +382,9 @@ impl Feature {
             | Self::MovableMeetingCapsules
             | Self::MeetingImport => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
-            Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
+            Self::TerminalPaste | Self::ShareShortcut | Self::OpenCodeInWsl => {
+                cfg!(target_os = "windows")
+            }
             Self::SectionKeyAlone
             | Self::GnomeClipboardRestore
             | Self::TypedText
@@ -504,6 +512,7 @@ impl Feature {
             Self::QuitClosesWindow => "quit-closes-window",
             Self::ExpireMeetingAudio => "expire-meeting-audio",
             Self::CapsLockDictation => "caps-lock-dictation",
+            Self::OpenCodeInWsl => "opencode-in-wsl",
         }
     }
 
@@ -570,6 +579,7 @@ impl Feature {
             Self::QuitClosesWindow => "labs.quit_closes_window",
             Self::ExpireMeetingAudio => "labs.expire_meeting_audio",
             Self::CapsLockDictation => "labs.caps_lock_dictation",
+            Self::OpenCodeInWsl => "labs.opencode_in_wsl",
         }
     }
 
@@ -640,6 +650,7 @@ impl Feature {
             Self::QuitClosesWindow => settings.labs.quit_closes_window,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation,
+            Self::OpenCodeInWsl => settings.labs.opencode_in_wsl,
         }
     }
 
@@ -708,6 +719,7 @@ impl Feature {
             &mut labs.quit_closes_window,
             &mut labs.expire_meeting_audio,
             &mut labs.caps_lock_dictation,
+            &mut labs.opencode_in_wsl,
         ]
     }
 
@@ -776,6 +788,7 @@ impl Feature {
             Self::QuitClosesWindow => settings.labs.quit_closes_window = on,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation = on,
+            Self::OpenCodeInWsl => settings.labs.opencode_in_wsl = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -848,6 +861,9 @@ const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
 /// The next bit above Typed text's switch: Caps Lock dictation's recording
 /// light blinks slowly instead of staying solid.
 const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
+/// The next bit above Caps Lock's slow blink: an OpenCode service in WSL is
+/// found when no Windows one answers (Windows).
+const OPENCODE_IN_WSL: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1132,6 +1148,14 @@ pub fn caps_lock_slow_blink() -> bool {
     on(CAPS_LOCK_SLOW_BLINK) && Feature::CapsLockDictation.on_this_os()
 }
 
+/// An OpenCode service running in the default WSL distribution is used when
+/// no Windows registration answers (Windows; read as each service search
+/// starts).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn opencode_in_wsl() -> bool {
+    on(OPENCODE_IN_WSL) && Feature::OpenCodeInWsl.on_this_os()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).
@@ -1295,6 +1319,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::CapsLockDictation,
             settings.caps_lock_light == CapsLockLight::SlowBlink,
             CAPS_LOCK_SLOW_BLINK,
+        ),
+        (
+            Feature::OpenCodeInWsl,
+            settings.opencode_in_wsl,
+            OPENCODE_IN_WSL,
         ),
         (
             Feature::QuitClosesWindow,
@@ -1846,6 +1875,23 @@ mod tests {
         assert_ne!(state & CAPS_LOCK_DICTATION, 0);
         assert_eq!(state & GNOME_ANNOTATE, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 15);
+    }
+
+    #[test]
+    fn opencode_in_wsl_is_its_own_bit_and_windows_only() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & OPENCODE_IN_WSL, 0);
+        labs.opencode_in_wsl = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & OPENCODE_IN_WSL, 0);
+        assert_eq!(state & CAPS_LOCK_SLOW_BLINK, 0);
+        assert_eq!(state & TYPED_TEXT, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::OpenCodeInWsl.on_this_os(),
+            cfg!(target_os = "windows")
+        );
     }
 
     #[test]

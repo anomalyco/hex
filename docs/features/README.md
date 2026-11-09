@@ -1251,7 +1251,10 @@ though the race it prevents is not reproduced in a test.
 
 OpenCode transformation talks only to an already running OpenCode service,
 found through its registration file ([desktop/opencode_service.rs](../../src/desktop/opencode_service.rs));
-Hex runs no OpenCode executable and starts nothing. The catalog loads only while
+Hex runs no OpenCode executable and starts nothing. On Windows, Labs › OpenCode
+in WSL adds the default WSL distribution's registration and a Linux
+`x-opencode-directory` workspace when no Windows registration answers; off,
+only the Windows registration is read. The catalog loads only while
 the Modes pane shows. Without a service, "OpenCode isn't running" shows beside
 the switch and the setup/retry notice below;
 `unavailable_opencode_is_explained_beside_each_switch` covers it headlessly, and

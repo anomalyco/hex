@@ -1203,6 +1203,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Getting Hex ready to listen…", "Hex se prépare à écouter…"),
     ("Terminal paste shortcut", "Raccourci d’insertion dans le terminal"),
     ("Another dictation shortcut that always pastes with Ctrl+Shift+V", "Un autre raccourci de dictée qui colle toujours avec Ctrl+Maj+V"),
+    ("OpenCode in WSL", "OpenCode dans WSL"),
+    ("Use an OpenCode service running in your default WSL distribution for Modes rewriting and its model picker. Looking for it can start WSL.", "Utilisez un service OpenCode exécuté dans votre distribution WSL par défaut pour la réécriture des modes et son sélecteur de modèles. Sa recherche peut démarrer WSL."),
 ];
 
 #[cfg(test)]

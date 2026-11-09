@@ -136,9 +136,17 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
 │                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
 │                                        macOS keeps its screen-recording dot lit the whole time it is on
-└── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General);
-                                         Java games (javaw/java, e.g. Minecraft) still get Ctrl+V (#1362)
-                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
+├── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General);
+│                                         Java games (javaw/java, e.g. Minecraft) still get Ctrl+V (#1362)
+│                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
+└── OpenCode in WSL no    labs.opencode_in_wsl          (Windows) Modes rewriting and the model picker use an OpenCode service
+                                         running in the default WSL distribution when no Windows registration answers; looking for it can start WSL
+                                         // checks: the_passwd_line_for_the_uid_names_its_home,
+                                         // a_linux_home_maps_into_the_distributions_unc_path,
+                                         // a_distribution_or_home_windows_cant_reach_is_refused,
+                                         // a_wsl_service_gets_the_workspace_its_linux_server_can_use,
+                                         // a_wsl_service_is_a_fallback_only_without_a_windows_one,
+                                         // opencode_in_wsl_is_its_own_bit_and_windows_only; not run on a real Windows PC with WSL
 
 Settings › Labs                          // labs.page, a store (labs/store.rs)
 ├── Header -> "Labs", Search N labs (⌘F focuses it), Discover | Turned on · N
@@ -1845,6 +1853,44 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 - Terminal paste shortcut (Windows, Linux): another dictation shortcut whose
   paste is always Ctrl+Shift+V, whatever Terminal paste says. Its own switch
   is `labs.terminal_paste_shortcut`, and General shows its recorder while on.
+- OpenCode in WSL (Windows): Modes rewriting and the Modes model picker use an
+  OpenCode service running inside the default WSL distribution. WSL2 forwards
+  loopback, so Hex dials the registered URL as usual; what it cannot see
+  without this lab is the registration, which lives in the distribution's
+  home.
+
+```ts
+Settings › Labs › OpenCode in WSL on            // labs.opencode_in_wsl
+├── a Windows registration answers /api/info -> it wins, exactly as before
+├── none answers -> read HKCU\…\Lxss\DefaultDistribution, its DistributionName and DefaultUid
+│   ├── \\wsl.localhost\<distribution>\etc\passwd (at most 1 MiB) -> the line whose uid is DefaultUid -> its home
+│   ├── only the default distribution is opened; another one's UNC path could boot it
+│   ├── state dir -> <home>/.local/state/opencode; same service.json order, cap, loopback, /api/info, password
+│   └── found -> Hex's workspace is created at <home>/.local/share/hex/opencode and every
+│       x-opencode-directory names the Linux path <home>/.local/share/hex/opencode
+├── no registration or no home -> OpenCode isn't running, or the update notice when one answered /api/info with 404
+└── Labs off -> nothing reads the registry or any WSL path; Hex is exactly as before
+```
+
+The pure parts (the passwd line for a uid, a Linux home to its UNC path, the
+Linux workspace string) live in
+[desktop/opencode_service/wsl.rs](../../src/desktop/opencode_service/wsl.rs);
+the registry and `\\wsl.localhost\` reads are Windows-only. Nothing runs
+`wsl.exe`, and the passwd contents and password are never logged. The first
+lookup can wait while WSL starts. Checks:
+`the_passwd_line_for_the_uid_names_its_home`,
+`a_linux_home_maps_into_the_distributions_unc_path`,
+`a_distribution_or_home_windows_cant_reach_is_refused`, and
+`the_workspace_is_created_somewhere_windows_can_write_it` in
+[wsl.rs](../../src/desktop/opencode_service/wsl.rs);
+`a_wsl_service_gets_the_workspace_its_linux_server_can_use` and
+`a_wsl_service_is_a_fallback_only_without_a_windows_one` in
+[opencode_service.rs](../../src/desktop/opencode_service.rs);
+`opencode_in_wsl_is_its_own_bit_and_windows_only` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real Windows PC with a
+running OpenCode inside WSL, including whether the UNC read starts the
+distribution and whether its server accepts the Linux workspace path. The
+`windows-labs` golden shows the new card.
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,
