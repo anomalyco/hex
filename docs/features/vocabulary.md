@@ -98,10 +98,15 @@ A mode's own vocabulary                  // vocabulary.modes; DictationMode::voc
 ├── Its terms come first, then the shared list's, each term once (any case),
 │   so the 64-term cap keeps them
 ├── OpenCode rewriting -> every OS, the mode chosen for the dictation
-└── Transcription -> macOS dictation only: the mode of the app and page last
-    seen by the context monitor (≤ 0.5 s old) when the stream or whole-clip run
-    starts; meetings, captures, the local API, Linux, and Windows hear with
-    the shared list
+└── Transcription -> macOS dictation only: the mode of the app and page the
+    context monitor last saw when the stream or whole-clip run starts. The app
+    is polled every 0.5 s; a scriptable browser's page is read when the browser
+    comes to the front and once more when a dictation capture is real (held
+    past its hold threshold, at a finish that lands earlier, or at the control
+    command's start), never on every press. A live stream starts with the page
+    cached when the browser came to the front; the refresh applies to the
+    finished text. Meetings, captures, the local API, Linux, and Windows hear with the
+    shared list
 
 OpenCode rewriting (Modes)               // vocabulary.prompt
 └── Prompt gains "Vocabulary (spell these exactly when the speaker means them):

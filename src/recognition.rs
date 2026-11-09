@@ -11,7 +11,7 @@ use crate::audio::recording_environment::RecordingEnvironmentController;
 use crate::control::{CaptureAction, CaptureKind, CaptureSnapshot, ControlReply, PrintReply};
 use crate::desktop::events::{DictationPhase, EventLog, VoiceEvent, VoiceState, now_ms};
 use crate::dictation::audio::{DictationAudio, DictationAudioEvent, LostCapture};
-use crate::dictation::context::{ContextMonitor, ContextSnapshot};
+use crate::dictation::context::ContextSnapshot;
 use crate::dictation::indicator::{DictationIndicatorEvent, DictationIndicatorSender};
 use crate::dictation::service::{
     Completion, DictationAudioChunk, DictationControl, DictationLevel, LEASE, MICROPHONE_LOST,
@@ -24,6 +24,10 @@ use crate::parakeet::{
     DictationJobId, DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,
 };
 use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputEvent, InputMonitor};
+
+mod context_watch;
+
+use context_watch::ContextWatch;
 
 enum FinishResult {
     Discarded,
@@ -413,8 +417,7 @@ pub fn listen(
     let mut microphone_policy = crate::app_settings::microphone_policy();
     let mut events = events;
     let input_monitor = InputMonitor::start()?;
-    let context_monitor = ContextMonitor::start();
-    let mut context = ContextSnapshot::default();
+    let mut context = ContextWatch::start(input_monitor.activity.clone());
     let mut hotkeys = Hotkeys {
         dictation: DictationHotkey::new(
             CaptureInstant::now(),
@@ -529,7 +532,7 @@ pub fn listen(
                 input.captured_through(),
                 &input,
                 &dictation_worker,
-                &context,
+                &mut context,
                 &input.device_name(),
                 &mut events,
                 indicator,
@@ -606,7 +609,7 @@ pub fn listen(
                             &mut hotkeys,
                             &input,
                             &dictation_worker,
-                            &context,
+                            &mut context,
                             &mut events,
                             indicator,
                             release_while_idle,
@@ -910,20 +913,7 @@ pub fn listen(
                 },
             );
         }
-        while let Ok(next_context) = context_monitor.updates.try_recv() {
-            if context != next_context {
-                input_monitor.activity.invalidate();
-            }
-            let switched_app = context.application != next_context.application;
-            context = next_context;
-            crate::dictation::vocabulary::focus(&context);
-            if switched_app {
-                events.emit(&VoiceEvent::Context {
-                    timestamp_ms: now_ms(),
-                    application: context.application.clone(),
-                })?;
-            }
-        }
+        context.drain(&mut events)?;
         let next_microphone_policy = crate::app_settings::microphone_policy();
         if next_microphone_policy.release_while_idle != microphone_policy.release_while_idle {
             input.set_release_while_idle(next_microphone_policy.release_while_idle);
@@ -943,7 +933,7 @@ pub fn listen(
                 input.captured_through(),
                 &input,
                 &dictation_worker,
-                &context,
+                &mut context,
                 &input.device_name(),
                 &mut events,
                 indicator,
@@ -968,7 +958,7 @@ pub fn listen(
                 input.captured_through(),
                 &input,
                 &dictation_worker,
-                &context,
+                &mut context,
                 &input.device_name(),
                 &mut events,
                 indicator,
@@ -1002,7 +992,7 @@ pub fn listen(
                 at,
                 &input,
                 &dictation_worker,
-                &context,
+                &mut context,
                 &input.device_name(),
                 &mut events,
                 indicator,
@@ -1086,7 +1076,7 @@ pub fn listen(
                     capture_at,
                     &input,
                     &dictation_worker,
-                    &context,
+                    &mut context,
                     &input.device_name(),
                     &mut events,
                     indicator,
@@ -1108,9 +1098,14 @@ pub fn listen(
                 &input,
                 microphone_policy.release_while_idle,
             ))?
-            && microphone_policy.release_while_idle
         {
-            feedback::play(Tone::DictationStart);
+            // The press is a real capture now: read its page once, here
+            // rather than on every provisional press. A tap this loop never
+            // sees that way asks when it finishes instead.
+            context.intend();
+            if microphone_policy.release_while_idle {
+                feedback::play(Tone::DictationStart);
+            }
         }
         // Only once every queued edge is handled, so a release already seen
         // ends the press first.
@@ -1208,6 +1203,9 @@ pub fn listen(
         while let Some(audio_event) = input.try_recv_event() {
             match audio_event {
                 DictationAudioEvent::ReadyIntentional { .. } => {
+                    // A released microphone opened after the press already
+                    // counted as intentional: read this capture's page now.
+                    context.intend();
                     if input.is_recording() {
                         feedback::play(Tone::DictationStart);
                     }
@@ -1431,7 +1429,7 @@ fn handle_hotkey_action(
     action_at: CaptureInstant,
     dictation: &DictationAudio,
     worker: &DictationWorker,
-    context: &ContextSnapshot,
+    context: &mut ContextWatch,
     device: &str,
     events: &mut EventLog,
     indicator: DictationSink<'_>,
@@ -1442,6 +1440,9 @@ fn handle_hotkey_action(
             if !dictation.start(action_at)? {
                 return Ok(false);
             }
+            // The press started a capture, but it may still be provisional:
+            // no page is read until the capture is held past its threshold.
+            context.begin();
             // The tone confirms the press at once; a chord or short tap
             // retracts it. A released microphone confirms only once it opens.
             if release_while_idle {
@@ -1454,20 +1455,26 @@ fn handle_hotkey_action(
             indicator.send(DictationIndicatorEvent::Started);
             emit_state(events, true, device)
         }
-        HotkeyAction::Finish => finish_hotkey_dictation(
-            action_at,
-            dictation,
-            worker,
-            context,
-            device,
-            events,
-            indicator,
-            release_while_idle,
-            None,
-            raw,
-        )
-        .map(drop),
+        HotkeyAction::Finish => {
+            // The capture's own page, or none rather than the last
+            // dictation's.
+            let context = context.finish(events)?;
+            finish_hotkey_dictation(
+                action_at,
+                dictation,
+                worker,
+                &context,
+                device,
+                events,
+                indicator,
+                release_while_idle,
+                None,
+                raw,
+            )
+            .map(drop)
+        }
         HotkeyAction::Discard(_) | HotkeyAction::Cancel | HotkeyAction::CancelShortcut => {
+            context.cancel();
             feedback::retract_start();
             if action == HotkeyAction::CancelShortcut {
                 feedback::play(Tone::Cancel);
@@ -1486,6 +1493,7 @@ fn handle_hotkey_action(
         }
         HotkeyAction::PasteLast | HotkeyAction::PasteMeeting => {
             // The paste chord's modifier press started a provisional capture.
+            context.cancel();
             feedback::retract_start();
             dictation.cancel()?;
             let paste_result = match action {
@@ -1628,7 +1636,7 @@ fn control_dictation(
     hotkeys: &mut Hotkeys,
     input: &DictationAudio,
     worker: &DictationWorker,
-    context: &ContextSnapshot,
+    context: &mut ContextWatch,
     events: &mut EventLog,
     indicator: DictationSink<'_>,
     release_while_idle: bool,
@@ -1683,7 +1691,10 @@ fn control_dictation(
                 release_while_idle,
             )?;
             if accepted {
-                // A warm start already queued its provisional tone.
+                // A warm start already queued its provisional tone. A control
+                // start has no hold threshold to wait for, so its capture is
+                // real now and reads its page at once.
+                context.intend();
                 make_control_capture_intentional(input, release_while_idle)?;
                 ControlReply::done("Recording; `hex dictation stop` or the shortcut finishes")
             } else {
@@ -1699,11 +1710,14 @@ fn control_dictation(
         false => {
             hotkeys.suspend_recording();
             let printing = print.is_some();
+            // A control capture asked for its page when it started; this
+            // waits for that read if it is still in flight.
+            let context = context.finish(events)?;
             let finished = finish_hotkey_dictation(
                 capture_boundary(input, release_while_idle),
                 input,
                 worker,
-                context,
+                &context,
                 &device,
                 events,
                 indicator,
