@@ -1484,9 +1484,6 @@ fn control_dictation(
     })
 }
 
-/// A `hex paste-last` (or the menu bar's Paste Last Dictation) waits for
-/// every capture and shortcut gesture to end: pasting cancels the audio
-/// owner's capture, which would strand the machine that started it.
 /// Pastes the last dictation at the current focus.
 fn paste_last(
     worker: &DictationWorker,

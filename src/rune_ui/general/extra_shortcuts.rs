@@ -1,6 +1,6 @@
-//! Labs › More dictation shortcuts (macOS): General's rows for up to four
-//! extra dictation shortcuts, each with its recorder, its own shortcut mode,
-//! and a button that clears and removes it, then the row that adds another.
+//! Labs › More dictation shortcuts (macOS): General's numbered rows for up
+//! to four extra dictation shortcuts, each with its recorder, its own
+//! shortcut mode, and a Remove button, then the row that adds another.
 
 use rune::El;
 
@@ -32,8 +32,7 @@ pub(super) fn rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
     built
 }
 
-/// Row `index`'s recorder, its shortcut mode, and the button that clears and
-/// removes it.
+/// Row `index`'s recorder, its shortcut mode, and the button that removes it.
 fn extra_row(ui: &Ui, p: Paint, index: usize, layer: &mut Vec<El>) -> CardRow {
     let target = ShortcutTarget::ExtraDictation(index);
     let binding = ui.settings.extra_dictation_hotkeys[index].binding.as_ref();
@@ -47,7 +46,7 @@ fn extra_row(ui: &Ui, p: Paint, index: usize, layer: &mut Vec<El>) -> CardRow {
             p,
             &format!("remove-extra-dictation-{index}"),
             &rune_theme_opencode::icons::TRASH,
-            tr("Clear shortcut"),
+            tr("Remove"),
             move |ui: &mut Ui| {
                 // A recorder still listening for this row would outlive it.
                 s::cancel_capture(ui);
@@ -60,11 +59,8 @@ fn extra_row(ui: &Ui, p: Paint, index: usize, layer: &mut Vec<El>) -> CardRow {
         p,
         &format!("extra-dictation-{index}"),
         &KEYBOARD,
-        tr("Extra dictation shortcut"),
-        Some((
-            tr("Dictates like the shortcut above").to_string(),
-            p.muted(),
-        )),
+        &tr_fill("Extra shortcut {}", &(index + 1).to_string()),
+        None,
         control,
     )
     .into()
@@ -118,7 +114,7 @@ fn add_row(p: Paint) -> CardRow {
         p,
         "add-extra-dictation",
         &KEYBOARD,
-        tr("Extra dictation shortcut"),
+        tr("Add shortcut"),
         None,
         small_button(
             p,

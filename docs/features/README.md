@@ -712,8 +712,8 @@ Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
 
 Labs > More dictation shortcuts (macOS, off)   // labs.md
-  -> General shows a row per extra (recorder, shortcut mode, Clear) and Add under four
-  -> each row dictates like the shortcut in its own mode; Escape cancels its capture
+  -> General shows a numbered row per extra (recorder, shortcut mode, Remove) and Add shortcut under four
+  -> each row dictates like the shortcut in its own mode; Escape cancels once it's locked, in Tap, or on a bare key or mouse button
   -> off, the saved rows stay and nothing matches; on, each needs its own keys
 
 Labs > Terminal paste shortcut (Windows, Linux; off)   // labs.md

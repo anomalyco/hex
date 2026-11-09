@@ -545,15 +545,11 @@ unsafe extern "C" fn physical_event_callback(
 /// Escape ends no dictation, and Hex's own shortcuts act through their session events.
 fn is_chord_evidence(code: u16, flags: u64, hotkeys: RuntimeHotkeys) -> bool {
     code != ESCAPE_KEY_CODE
-        && !is_own_globe_key(code, hotkeys.dictation)
-        && !hotkeys
-            .second_dictation
-            .is_some_and(|second| is_own_globe_key(code, second))
         && !hotkeys
             .all()
             .iter()
             .flatten()
-            .any(|hotkey| hotkey.matches_key_press(code, flags))
+            .any(|hotkey| is_own_globe_key(code, *hotkey) || hotkey.matches_key_press(code, flags))
 }
 
 /// The Globe key's own key event, which some keyboards and remappers

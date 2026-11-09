@@ -38,7 +38,7 @@ impl ExtraDictationMode {
     /// The shortcut machine's switches: toggle, double-tap enabled, and
     /// double-tap only, exactly as `Trigger::apply` saves the dictation
     /// shortcut's (`rune_ui::shortcut_mode`).
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub const fn switches(self) -> (bool, bool, bool) {
         match self {
             Self::HoldOrDoubleTap => (false, true, false),

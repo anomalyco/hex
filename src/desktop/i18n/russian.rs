@@ -1250,6 +1250,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Extra dictation shortcut", "Дополнительное сочетание для диктовки"),
     ("More dictation shortcuts", "Больше сочетаний для диктовки"),
     ("Up to four more shortcuts that each dictate like the main one, each with its own mode", "До четырёх дополнительных сочетаний, каждое диктует как основное, со своим режимом"),
+    ("Extra shortcut {}", "Дополнительное сочетание {}"),
+    ("Add shortcut", "Добавить сочетание"),
 ];
 
 #[cfg(test)]

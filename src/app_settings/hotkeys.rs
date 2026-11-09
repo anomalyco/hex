@@ -1237,9 +1237,10 @@ pub fn hotkey_conflicts(
 
 impl AppSettings {
     /// Whether `binding` overlaps a shortcut `slot` must not share: the other
-    /// active shortcuts and, where meetings exist (macOS), meeting paste. The
-    /// two capture shortcuts never share a key, on or off, since turning
-    /// captures on can't pull them apart.
+    /// active shortcuts (each active Labs › More dictation shortcuts row
+    /// included) and, where meetings exist (macOS), meeting paste. The two
+    /// capture shortcuts never share a key, on or off, since turning captures
+    /// on can't pull them apart.
     pub fn hotkey_in_use(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
         let mut others = Vec::new();
         if slot != HotkeySlot::Dictation {

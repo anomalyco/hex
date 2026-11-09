@@ -1247,6 +1247,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Extra dictation shortcut", "Atalho de ditado extra"),
     ("More dictation shortcuts", "Mais atalhos de ditado"),
     ("Up to four more shortcuts that each dictate like the main one, each with its own mode", "Até quatro atalhos extras que ditam como o principal, cada um com seu próprio modo"),
+    ("Extra shortcut {}", "Atalho extra {}"),
+    ("Add shortcut", "Adicionar atalho"),
 ];
 
 #[cfg(test)]

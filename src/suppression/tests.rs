@@ -787,6 +787,19 @@ fn globe_key_events_are_not_a_chord_with_the_function_shortcut() {
         ..RuntimeHotkeys::default()
     };
     assert!(is_chord_evidence(GLOBE_KEY_CODE, FUNCTION_KEY_MASK, option));
+    // A raw or extra shortcut holding Fn owns Globe too.
+    let raw = RuntimeHotkeys {
+        raw_dictation: Some(function_binding()),
+        ..RuntimeHotkeys::default()
+    };
+    assert!(!is_chord_evidence(GLOBE_KEY_CODE, FUNCTION_KEY_MASK, raw));
+    assert!(is_chord_evidence(0, FUNCTION_KEY_MASK, raw));
+    let extra = RuntimeHotkeys {
+        extra_dictation: [Some(function_binding()), None, None, None],
+        ..RuntimeHotkeys::default()
+    };
+    assert!(!is_chord_evidence(GLOBE_KEY_CODE, FUNCTION_KEY_MASK, extra));
+    assert!(is_chord_evidence(0, FUNCTION_KEY_MASK, extra));
 }
 
 #[test]
@@ -2620,6 +2633,8 @@ fn a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode() {
 
 /// An extra dictation shortcut cancels in its own mode: the tap keeps the
 /// armed cancel if Toggle configured one, else Escape, while it records.
+/// Escape itself only matches with no modifiers held, so a Hold row's chord
+/// keeps Escape from the tap.
 #[test]
 fn an_extra_capture_keeps_its_cancel_from_the_app() {
     let escape = HotkeyBinding::cancel_default().runtime();
@@ -2635,7 +2650,7 @@ fn an_extra_capture_keeps_its_cancel_from_the_app() {
     assert_eq!(
         tap_cancel_binding(None, true, false, true),
         Some(escape),
-        "an extra Hold capture takes Escape with no armed cancel"
+        "a recording extra arms Escape while it has no Toggle cancel"
     );
     assert_eq!(
         tap_cancel_binding(Some(custom), true, false, true),
