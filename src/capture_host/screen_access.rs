@@ -23,8 +23,13 @@ pub enum ScreenAccess {
     Allowed,
 }
 
-/// How long a fresh read stands before [`screen_access`] reads again.
-const FRESH_FOR: Duration = Duration::from_secs(2);
+/// How long a read stands while nothing shows it: every window's
+/// once-a-second refresh asks, and a denial that spawns a helper each time
+/// costs a process for nothing.
+const IDLE_FOR: Duration = Duration::from_secs(60);
+
+/// How long a read stands while a permission surface shows it.
+const WATCHED_FOR: Duration = Duration::from_secs(2);
 
 struct Cached {
     access: ScreenAccess,
@@ -38,14 +43,25 @@ static CACHED: Mutex<Cached> = Mutex::new(Cached {
     reading: false,
 });
 
-/// Never blocks: the preflight, else the last fresh read, starting another
-/// on its own thread when that one is older than [`FRESH_FOR`].
+/// Never blocks: the preflight, else the last read, starting another on its
+/// own thread when that one is older than [`IDLE_FOR`]. An idle window keeps
+/// asking once a second without paying a helper process every time.
 pub fn screen_access() -> ScreenAccess {
+    cached_read(IDLE_FOR)
+}
+
+/// [`screen_access`] for a surface that shows the permission right now, so
+/// a grant made in System Settings shows within [`WATCHED_FOR`].
+pub fn screen_access_watched() -> ScreenAccess {
+    cached_read(WATCHED_FOR)
+}
+
+fn cached_read(fresh_for: Duration) -> ScreenAccess {
     if crate::meeting::screen_recording_permitted() {
         return ScreenAccess::Allowed;
     }
     let mut cached = CACHED.lock().unwrap_or_else(|e| e.into_inner());
-    let stale = cached.at.is_none_or(|at| at.elapsed() >= FRESH_FOR);
+    let stale = is_stale(cached.at, Instant::now(), fresh_for);
     if stale && !cached.reading {
         cached.reading = true;
         let spawned = std::thread::Builder::new()
@@ -64,6 +80,11 @@ pub fn screen_access() -> ScreenAccess {
         }
     }
     cached.access
+}
+
+/// Whether a read from `at` is older than `fresh_for`; one never read is.
+fn is_stale(at: Option<Instant>, now: Instant, fresh_for: Duration) -> bool {
+    at.is_none_or(|at| now.saturating_duration_since(at) >= fresh_for)
 }
 
 /// Marks the cached Screen Recording state stale so the next [`screen_access`]
@@ -101,5 +122,28 @@ fn read() -> ScreenAccess {
     } else {
         tracing::info!("Screen Recording is granted but needs Hex to restart");
         ScreenAccess::NeedsRestart
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_idle_read_stands_longer_than_a_watched_one() {
+        let at = Instant::now();
+        assert!(is_stale(None, at, WATCHED_FOR));
+        assert!(!is_stale(
+            Some(at),
+            at + Duration::from_secs(1),
+            WATCHED_FOR
+        ));
+        assert!(is_stale(Some(at), at + WATCHED_FOR, WATCHED_FOR));
+        assert!(!is_stale(
+            Some(at),
+            at + IDLE_FOR - Duration::from_secs(1),
+            IDLE_FOR
+        ));
+        assert!(is_stale(Some(at), at + IDLE_FOR, IDLE_FOR));
     }
 }

@@ -73,7 +73,8 @@ pub fn missing(screen: bool) -> Option<(CaptureNeed, NeedState)> {
 }
 
 /// How `need` stands now: `None` once a capture can use it. Never blocks
-/// unless `fresh`: Screen Recording then reads through a new helper.
+/// unless `fresh`: Screen Recording then reads through a new helper, else it
+/// follows the watched cache a visible permission surface polls.
 #[cfg(target_os = "macos")]
 pub fn state_of(need: CaptureNeed, fresh: bool) -> Option<NeedState> {
     use super::ScreenAccess;
@@ -85,7 +86,7 @@ pub fn state_of(need: CaptureNeed, fresh: bool) -> Option<NeedState> {
             let access = if fresh {
                 super::screen_access_now()
             } else {
-                super::screen_access()
+                super::screen_access_watched()
             };
             match access {
                 ScreenAccess::Allowed => None,
