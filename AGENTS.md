@@ -1597,17 +1597,20 @@ GitHub OIDC token, under app `hex`, artifact `desktop`;
 [`docs/plans/release-service.md`](docs/plans/release-service.md) pins the
 target and file names and the direct-install receipt, and
 [`docs/releasing.md`](docs/releasing.md) owns the workflow, channels, secrets,
-and old clients. The 2.3.1 feeds and appcast at `https://anoma.ly/hex/files`
-(and Kit's `downloads.hex.kitlangton.dev`/`.com`, which must keep redirecting
-there) stay frozen. GitHub app releases use `v<VERSION>` tags (`app-v…`
+and old clients. The 2.3.1 feeds at `https://anoma.ly/hex/files` (and Kit's
+`downloads.hex.kitlangton.dev`/`.com`, which must keep redirecting there)
+stay frozen; the appcast there is `packaging/macos/legacy-appcast.xml`, served
+by the site build. GitHub app releases use `v<VERSION>` tags (`app-v…`
 through 2.3.1); each stable one is created as GitHub's Latest release
 (`--latest=true`, stable only), and SDK releases (`release-typescript.yml`)
 are created with `--latest=false` so they never take the badge. Nothing
 downloads through GitHub's `releases/latest` redirect. Never overwrite a published artifact with different bytes.
 `https://anoma.ly/hex` (in-repo `site/`) is the only Hex website. One
-`site/cloudflare.config.ts` defines the production Worker `hex-production-site` (anoma.ly/hex,
-bucket `hex-production-files`) and the dev Worker `hex-dev-site` (dev.anoma.ly/hex,
-bucket `hex-dev-files`); `cf deploy --prebuilt --mode <mode>` picks one, and
+`site/cloudflare.config.ts` defines the production Worker `hex-production-site` (anoma.ly/hex)
+and the dev Worker `hex-dev-site` (dev.anoma.ly/hex), both reading the frozen
+2.3.1 history from `hex-production-files`; the installers and appcast ship with
+the site build and the dev notes come from the `dev-notes` branch.
+`cf deploy --prebuilt --mode <mode>` picks one, and
 only CI deploys: a push to `dev` touching `site/` deploys dev, a stable
 Release deploys production. No subdomains. The site's download links come
 from the service's stable manifest when it builds. After publishing a version,
@@ -1709,8 +1712,8 @@ whose digest its job reports and every consumer checks. Site deploy follows
 the same split: its build job has no secret, and its `release` job runs only
 `.github/release/deploy-site.sh`, which deploys the verified Build Output only
 when it names exactly that mode's site Worker, routes, and bindings, with the
-cf CLI locked in `.github/release/cf/`; Legacy appcast checks out only
-`.github/release/` and the appcast. Keep that boundary:
+cf CLI locked in `.github/release/cf/`; its build job runs the installer test
+and the appcast check on repository code, no secret. Keep that boundary:
 never add a step that builds, installs dependencies, or runs repository code
 to a job that holds a secret or an OIDC token, and pin every action by SHA.
 `.github/` changes need Dax (CODEOWNERS and the "release boundary" ruleset).
@@ -1766,7 +1769,7 @@ q8_0, and q5_0 (NB-Whisper Medium) tensors and no MUL_MAT_ID (`CMAKE_ARGS` in
 use another type, so widen `GGML_VULKAN_SHADER_TYPES` before the catalog
 gains a model that needs one. Release executables are stripped (`[profile.release]`). The
 installers live in the locked `.github/release/` (`install-linux.sh`,
-`install-windows.ps1`; the Installers workflow serves them at
+`install-windows.ps1`; the site build serves them at
 `https://anoma.ly/hex/files/`) and install from the service's manifest,
 checking each file's size and SHA-256 plus the Linux ed25519 signature or the
 Windows Authenticode signature; `scripts/test-install-linux-release.sh`

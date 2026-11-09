@@ -16,6 +16,7 @@ on:
       - ".github/release/cf/**"
       - ".github/release/install-linux.sh"
       - ".github/release/install-windows.ps1"
+      - "packaging/macos/legacy-appcast.xml"
   workflow_dispatch:
 
 permissions:
@@ -28,7 +29,9 @@ concurrency:
 jobs:
   deploy:
     if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/production'
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/site-deploy.yml
     with:
       mode: ${{ github.ref == 'refs/heads/production' && 'production' || 'dev' }}
-    secrets: inherit

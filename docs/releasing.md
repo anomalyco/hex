@@ -9,7 +9,7 @@ the release service itself: Hex never publishes to it or reads from it. Builds
 are tested before stable on the production service's `dev` channel.
 
 Like OpenCode's release, building is split from everything that holds a
-secret. `.github/workflows/` (Release, Site deploy, Legacy appcast) and
+secret. `.github/workflows/` (Release, Site deploy, Site) and
 `.github/release/` are the security boundary:
 
 - **Build jobs** run repository code (cargo, build.rs, bun, makepkg, brew)
@@ -49,8 +49,8 @@ Release (push to dev: dev channel; workflow_dispatch: ref + channel check | dev 
 ├─ aur-stage → aur          stable: makepkg + install from the published files → push-aur.sh          [build → release]
 ├─ homebrew-stage → homebrew stable: render + brew style/audit → push-homebrew.sh                     [build → release]
 ├─ record-aur, record-brew  OIDC: the package manager serves the version                              [release]
-└─ dev-notes-stage → dev-notes  dev: PR titles since the last dev build (release-dev-notes.sh) →     [build → release]
-                            dev-notes.json in hex-production-files (publish-dev-notes.sh)
+└─ dev-notes-stage → dev-notes  dev: PR titles since the last dev build (release-dev-notes.sh) →     [build → contents: write]
+                            dev-notes.json on the dev-notes branch (publish-dev-notes.sh)
 ```
 
 Without a platform's signing values, dev and check runs go on without that
@@ -60,10 +60,9 @@ by Release: after a stable release, run **Site** with `mode: production` from
 
 ### Signing values (`release` environment)
 
-- macOS: secret `APPLE_SIGNING_CERTIFICATE` (base64 `.p12` with the Developer
-  ID Application identity for team `5NZ4Q7NXJ4`; optional secret
-  `APPLE_SIGNING_CERTIFICATE_PASSWORD` if the `.p12` has one), secret
-  `APPLE_NOTARY_KEY` (the App Store Connect API `.p8`), and variables
+- macOS: secret `shared/APPLE_SIGNING_CERTIFICATE` (base64 `.p12`, no password,
+  with the Developer ID Application identity for team `5NZ4Q7NXJ4`), secret
+  `shared/APPLE_NOTARY_KEY` (the App Store Connect API `.p8`), and variables
   `APPLE_NOTARY_KEY_ID` and `APPLE_NOTARY_ISSUER_ID`. `macos-credentials.sh`
   imports them into a throwaway keychain and prints nothing secret.
 - Windows: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
@@ -142,10 +141,13 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   runs it by hand. It runs in `release`, which needs no approval. Each dev
   build's notes are the titles of the PRs merged since the previous dev
   build, without CI fixes and changes outside the app
-  (`scripts/release-dev-notes.sh`); once the build is published they join
-  `https://anoma.ly/hex/files/dev-notes.json`, which the changelog at
-  `https://anoma.ly/hex/dev` (the dev release's `notes_url`) and the app's
-  Restart to update read. The
+  (`scripts/release-dev-notes.sh`); once the build is published they replace
+  `dev-notes.json` on the one-commit `dev-notes` branch
+  (`.github/release/publish-dev-notes.sh`, GITHUB_TOKEN only), which
+  `https://anoma.ly/hex/files/dev-notes.json`, the changelog at
+  `https://anoma.ly/hex/dev` (the dev release's `notes_url`), and the app's
+  Restart to update read. A one-commit branch, not a bucket: the file changes
+  without a credential and the site Worker serves it. The
   version is `0.0.0-dev-<run number>`, as OpenCode numbers its dev builds.
   Versions are display text that nothing compares: each channel has one
   current release and installs follow it, so a dev build below 2.3.1 is fine,
@@ -231,21 +233,29 @@ picks one:
 
 ```ts
 cloudflare.config.ts (cf deploy --prebuilt --mode <mode>, from CI only)
-├─ production: Worker hex-production-site  routes anoma.ly/hex, anoma.ly/hex/*          bucket hex-production-files
-└─ dev:        Worker hex-dev-site         routes dev.anoma.ly/hex, dev.anoma.ly/hex/*  bucket hex-dev-files
+├─ production: Worker hex-production-site  routes anoma.ly/hex, anoma.ly/hex/*         bucket hex-production-files
+└─ dev:        Worker hex-dev-site         routes dev.anoma.ly/hex, dev.anoma.ly/hex/* bucket hex-production-files
 
 https://anoma.ly/hex/                      the site; downloads read the service's stable manifest at build time
 ├─ download/dev                            302 to the dev channel's macos-arm64-dmg, read per request
-├─ dev                                     the dev builds' changelog, rendered per request from files/dev-notes.json
+├─ dev                                     the dev builds' changelog, rendered per request from the dev-notes branch
 ├─ install-linux.sh, install-windows.ps1   the installers, copied from .github/release/ at build time
-└─ files/                                  the frozen 2.3.1 bucket for old clients (below)
+└─ files/                                  the one owner of every release file (below)
+   ├─ install-linux.sh, install-windows.ps1, appcast.xml   built and served with the site
+   ├─ dev-notes.json                                        the Release workflow's dev-notes branch
+   └─ *-update.json, releases/…                             frozen 2.3.1 history, read-only from the bucket
 ```
 
-The site's download links come from `site/scripts/release-data.ts`, which
-reads the stable manifest of the mode's service when the site builds; until
-the service has a stable Hex release they name the frozen 2.3.1 downloads.
-The installers fetch the stable manifest, download their target, check its
-size and SHA-256, and write the direct-install receipt.
+Both Workers bind `hex-production-files` because the frozen 2.3.1 history is
+the same for both and is only read; CI holds no R2 credential. The bucket's
+old `install-linux.sh`, `install-windows.ps1`, `appcast.xml`, and
+`dev-notes.json` objects are no longer read once this is deployed; delete
+them after the cutover. The site's
+download links come from `site/scripts/release-data.ts`, which reads the
+stable manifest of the mode's service when the site builds; until the
+service has a stable Hex release they name the frozen 2.3.1 downloads. The
+installers fetch the stable manifest, download their target, check its size
+and SHA-256, and write the direct-install receipt.
 
 `/hex/download/dev` is the permanent team link to the newest Mac dev build:
 the Worker reads its host's service `dev.json` on every request and redirects
@@ -283,20 +293,21 @@ untrusted: it deploys only the Build Output files, and only if the root config
 is a non-preview build of that mode and the Worker config is exactly that
 mode's Worker (`hex-dev-site` or `hex-production-site`), its two `anoma.ly`
 routes, `workersDev`/`previewUrls` off, and the bindings `ASSETS`, `FILES`
-(that mode's bucket), and `CANONICAL_HOST`. Any other Worker name, route,
-binding, key, Worker, or Container is refused: a binding would give the
-Worker access to another resource, and the token can write every Worker. A
-change to those parts of `site/cloudflare.config.ts` therefore needs the
-matching change in `deploy-site.sh` (Dax).
+(`hex-production-files`, read for the frozen history), and `CANONICAL_HOST`.
+Any other Worker name, route, binding, key, Worker, or Container is refused: a
+binding would give the Worker access to another resource, and the token can
+write every Worker. A change to those parts of `site/cloudflare.config.ts`
+therefore needs the matching change in `deploy-site.sh` (Dax).
 
 Set once by hand on the anomaly account, because the config only binds them:
-the two buckets (`cf deploy` provisions only unnamed bindings; a missing named
-bucket fails the deploy), the `expire-staging` lifecycle rule on
-`hex-dev-files`, and an anoma.ly `http_config_settings` rule that turns off
-Browser Integrity Check for `/hex/files/` on both hosts (it returned 403 to
-Python's default user agent).
+the files bucket (`cf deploy` provisions only unnamed bindings; a missing
+named bucket fails the deploy) and an anoma.ly `http_config_settings` rule that
+turns off Browser Integrity Check for `/hex/files/` on both hosts (it returned
+403 to Python's default user agent). The site build serves the installers and
+the appcast; the bucket only holds the frozen 2.3.1 feeds and artifacts, which
+the Worker reads and never writes.
 
-Two account tokens, each used by one locked step only:
+One account token, used by one locked step only:
 
 - `hex-site-deploy` (`release` secret `CLOUDFLARE_API_TOKEN`): Workers Scripts
   Write (account) and Workers Routes Write (zone `anoma.ly`), used only by
@@ -308,26 +319,21 @@ Two account tokens, each used by one locked step only:
   Routes are always written on deploy, and `cf` then needs Routes Write on the
   zone. Recreate rather than edit a token's policies: an edited policy did not
   take effect on the routes API in testing.
-- `hex-r2-production-files` (`release` secret `R2_SECRET_ACCESS_KEY`, variable
-  `R2_ACCESS_KEY_ID` = its id): object write on `hex-production-files` only,
-  used through `.github/release/r2-put.sh` by the Installers and Legacy
-  appcast workflows and Release's dev-notes job.
 
 ## Old clients (2.3.1 and earlier)
 
-`https://anoma.ly/hex/files/` (`hex-production-files`) keeps serving the 2.3.1
+`https://anoma.ly/hex/files/` keeps serving the 2.3.1
 `linux-update.json`, `windows-update.json`, `windows-aarch64-update.json`,
-`appcast.xml`, and their files, frozen: nothing updates them anymore (the
-bucket now also holds the installers and `dev-notes.json`), and those
-installs see no update on their own. The new Hex is effectively a new
+and their files from `hex-production-files`, frozen: nothing updates them
+anymore, and those installs see no update on their own. The site Worker reads
+the bucket binding; no CI job writes it. The new Hex is effectively a new
 app (new updater, and on macOS a new bundle ID), so:
 
-- **macOS:** at the first release on the service, add one informational item
-  to `appcast.xml` that tells 2.3.1 users to download the new Hex from
-  https://anoma.ly/hex (no enclosure, so Sparkle installs nothing). The item
-  is prepared with the macOS client work; upload it with the Legacy appcast
-  workflow (`.github/workflows/legacy-appcast.yml`, dispatch from `production`),
-  which replaces only `appcast.xml`. Superseded (Kit, 2026-11-02): the 2.3.1
+- **macOS:** the appcast at `/hex/files/appcast.xml` is
+  `packaging/macos/legacy-appcast.xml`, served by the site build: one
+  informational item that tells 2.3.1 users to download the new Hex from
+  https://anoma.ly/hex (no enclosure, so Sparkle installs nothing). Edit that
+  file and push; the Site deploy serves it. Superseded (Kit, 2026-11-02): the 2.3.1
   and Swift feeds offer the released ZIP itself, signed with their old Sparkle
   key, so Install Update moves those Macs onto the new Hex
   (docs/plans/swift-app-handoff.md, "Legacy Update"). Keep `SUPublicEDKey` in
@@ -357,7 +363,8 @@ the release service compile `https://anoma.ly/release`.
   (`hex-legacy-downloads`, routes `downloads.hex.kitlangton.dev/*` and
   `downloads.hex.kitlangton.com/*` → `https://anoma.ly/hex/files/<path>`,
   302, path and query preserved). Deploy it with Kit's personal Wrangler
-  login, before the Legacy appcast workflow runs, which checks both hosts:
+  login, before the appcast at `/hex/files/appcast.xml` gains the notice, so
+  old installs reach it on either host:
 
   ```sh
   bunx wrangler@latest deploy --config packaging/legacy-downloads/wrangler.jsonc
@@ -377,30 +384,35 @@ the release service compile `https://anoma.ly/release`.
 - Without the redirect, 2.3.1 Macs read the bucket's own `appcast.xml` and
   never see the informational item.
 
-## Secrets (`release` environment, limited to `dev` and `production`)
+## Secrets
 
-`dev` is allowed because dev-channel builds and dev site deploys run from
-it. No reviewer is required.
+Release secrets live in AWS Secrets Manager (account `anomaly-secrets`), managed from
+[anomalyco/secrets](https://github.com/anomalyco/secrets). Jobs in the `release` environment
+(limited to `dev` and `production`; `dev` is allowed because dev-channel builds and dev site
+deploys run from it, and no reviewer is required) assume `role/github/hex-release` with
+GitHub OIDC and fetch only what they use. That role can read `hex/release/*` and the shared Apple, AUR and Homebrew
+secrets. Set a value with `bun set hex release <NAME>` in that repo.
 
-| Name | Use |
+| Secret | Use |
 | --- | --- |
 | (none) | publishing to the release service: the job's GitHub OIDC token |
-| `CLOUDFLARE_API_TOKEN`, var `CLOUDFLARE_ACCOUNT_ID` | site deploys (`hex-site-deploy`, used only by `deploy-site.sh`) |
-| `R2_SECRET_ACCESS_KEY`, var `R2_ACCESS_KEY_ID` | uploads to `hex-production-files` (`hex-r2-production-files`): the installers, the legacy appcast, and `dev-notes.json` |
-| `AUR_SSH_PRIVATE_KEY` | pushes `hex-bin` (key `github-actions-hex-aur`) |
-| `HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb` (deploy key `github-actions-hex-homebrew`, write access on `anomalyco/homebrew-tap` only) |
-| `AZURE_*` | Authenticode (docs/windows-signing.md) |
-| `APPLE_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
-| `HEX_RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |
+| `hex/release/CLOUDFLARE_API_TOKEN`, var `CLOUDFLARE_ACCOUNT_ID` | site deploys (`hex-site-deploy`, used only by `deploy-site.sh`) |
+| `shared/AUR_SSH_KEY` | pushes `hex-bin`; one key for every Anomaly AUR package (`github-actions-hex-aur`) |
+| `shared/HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb`; one deploy key on `anomalyco/homebrew-tap` for every app (`anomaly-release`) |
+| vars `AZURE_*` | Authenticode (docs/windows-signing.md); not secrets, `azure/login` uses OIDC |
+| `shared/APPLE_SIGNING_CERTIFICATE`, `shared/APPLE_NOTARY_KEY`, vars `APPLE_NOTARY_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
+| `hex/release/RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |
 | `SPARKLE_ED_PRIVATE_KEY` | old 2.3.1 appcast key; unused, kept for old clients |
 
 ## Linux packages
 
 - **Direct install** (`curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh`,
-  kept current by the Installers workflow; stable, or dev until there is a
-  stable release): the user-local version layout plus the
-  `install.json` receipt; it updates itself from the service's manifest and
-  the window offers "Update" (restart into the staged version).
+  copied from `.github/release/install-linux.sh` at the site build and served
+  by the site Worker; stable, or dev until there is a stable release): the
+  user-local version layout plus the `install.json` receipt; it updates
+  itself from the service's manifest and the window offers "Update" (restart
+  into the staged version). The Site deploy runs the installer test before it
+  deploys and compares the served bytes with `.github/release/` afterwards.
 - **AUR** `hex-bin` (`packaging/aur`, staged by `scripts/release-aur.sh`, pushed by `.github/release/push-aur.sh`):
   `/usr/bin/hex`, the desktop entry, and the systemd user unit
   `/usr/lib/systemd/user/hex.service`, from the release service's

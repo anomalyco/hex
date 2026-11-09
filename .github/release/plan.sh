@@ -44,7 +44,7 @@ case "$CHANNEL" in
     # builds by it, and it names version directories), so continue past them.
     number=$((GITHUB_RUN_NUMBER + 100))
     release_channel=dev release_version="0.0.0-dev-$number" tag=""
-    # The dev changelog lists what each build changed (dev-notes jobs).
+    # The dev changelog lists what each build changed (dev-notes branch).
     notes="https://anoma.ly/hex/dev#$release_version"
     if [ "$CHANNEL" = check ]; then
       tag="v0.0.0-test-$number"

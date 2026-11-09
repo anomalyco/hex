@@ -1,17 +1,18 @@
 name: Site deploy
 
 # Builds site/ for one environment and deploys its Worker (the site at /hex and
-# the files bucket at /hex/files): dev -> https://dev.anoma.ly/hex,
+# the files at /hex/files: built installers and appcast, the dev notes, and the
+# frozen 2.3.1 bucket): dev -> https://dev.anoma.ly/hex,
 # production -> https://anoma.ly/hex. Split like Release (docs/releasing.md):
 #
 # - build runs repository code (bun install, site/scripts/build.ts) with no
 #   environment and no secrets, and uploads the Worker's Build Output with a
 #   SHA256SUMS whose digest it reports.
-# - deploy runs in the release environment, which holds the hex-site-deploy
-#   token. It checks out only .github/release/, verifies the artifact against
-#   that digest, and runs only .github/release/deploy-site.sh, which pins the
-#   Worker, routes, and bindings and deploys with the cf CLI locked in
-#   .github/release/cf/.
+# - deploy runs in the release environment, which reads the hex-site-deploy
+#   token from AWS Secrets Manager. It checks out only .github/release/,
+#   verifies the artifact against that digest, and runs only
+#   .github/release/deploy-site.sh, which pins the Worker, routes, and
+#   bindings and deploys with the cf CLI locked in .github/release/cf/.
 # - verify checks the live site and every download link without secrets.
 on:
   workflow_call:
@@ -38,6 +39,18 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - run: bun install --frozen-lockfile
+      # The checks the Installers and Legacy appcast workflows ran before they
+      # uploaded these files to the bucket. The site now serves them, so a
+      # broken installer or appcast fails the deploy instead.
+      - name: Check the legacy appcast
+        run: |
+          python3 -c 'import sys, xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])' ../packaging/macos/legacy-appcast.xml
+          grep -Fq '<sparkle:informationalUpdate' ../packaging/macos/legacy-appcast.xml
+          grep -Fq 'https://anoma.ly/hex' ../packaging/macos/legacy-appcast.xml
+      - name: Test the installers
+        run: |
+          sh ../scripts/test-install-linux-release.sh
+          pwsh -NoProfile -Command "[void][ScriptBlock]::Create((Get-Content -Raw ../.github/release/install-windows.ps1))"
       - name: Build
         env:
           MODE: ${{ inputs.mode }}
@@ -57,6 +70,9 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     environment: release
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: site-deploy-${{ inputs.mode }}
       cancel-in-progress: false
@@ -88,10 +104,21 @@ jobs:
         with:
           pattern: site-${{ inputs.mode }}
           digests: site-${{ inputs.mode }}=${{ needs.build.outputs.digest }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
+          role-session-name: hex-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: Fetch the release secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
+        with:
+          secret-ids: |
+            CLOUDFLARE_API_TOKEN,hex/release/CLOUDFLARE_API_TOKEN
+          parse-json-secrets: false
       - name: Deploy
         env:
           MODE: ${{ inputs.mode }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: bash .github/release/deploy-site.sh "$MODE" "$RUNNER_TEMP/in/site-$MODE"
 
@@ -121,3 +148,14 @@ jobs:
           test "$status" = 200
           bun scripts/release-data.ts --mode "$MODE"
           bun run check:downloads
+      - name: Check the files the site serves
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          host=$([ "$MODE" = dev ] && echo dev.anoma.ly || echo anoma.ly)
+          for name in install-linux.sh install-windows.ps1 appcast.xml; do
+            curl -fsS "https://$host/hex/files/$name?check=$GITHUB_RUN_ID" -o "$RUNNER_TEMP/$name"
+          done
+          cmp "$RUNNER_TEMP/install-linux.sh" ../.github/release/install-linux.sh
+          cmp "$RUNNER_TEMP/install-windows.ps1" ../.github/release/install-windows.ps1
+          cmp "$RUNNER_TEMP/appcast.xml" ../packaging/macos/legacy-appcast.xml

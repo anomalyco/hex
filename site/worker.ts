@@ -1,11 +1,12 @@
-// One Worker serves Hex under /hex on its host: the site, the release files
-// bucket at /hex/files (feeds, appcast, installers, artifacts), and
+// One Worker serves Hex under /hex on its host: the site, /hex/files (the
+// installers and appcast built with the site, the dev notes, and the frozen
+// 2.3.1 feeds and artifacts in the read-only files bucket), and
 // /hex/download/dev, the latest dev channel Mac download, /hex/dev, the dev
 // builds' changelog, and
 // /hex/download/<target>, the release every download button names. Other hosts and
 // plain HTTP redirect to the canonical host. `cf dev` with ANY_HOST set turns
 // the redirect off for local testing.
-import { BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DOWNLOAD_PATH, FILES_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
+import { BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
 import { parseDevNotes, renderDevNotes } from "./src/dev-notes"
 
 type Env = {
@@ -163,11 +164,31 @@ async function devDownload(request: Request): Promise<Response> {
   return new Response(null, { status: 302, headers })
 }
 
-// The dev builds' changelog, rendered from the files bucket's dev-notes.json.
-// The Release workflow writes it to the production bucket only, so the dev
-// site reads the production copy.
+// The dev builds' changelog: dev-notes.json on the Release workflow's
+// one-commit dev-notes branch, so a new dev build shows without a site deploy
+// and nothing needs a bucket credential.
 const DEV_NOTES_KEY = "dev-notes.json"
-const PRODUCTION_DEV_NOTES = "https://anoma.ly/hex/files/dev-notes.json"
+
+// The branch's file, or the bucket's copy from before the branch existed. The
+// fallback only covers the first deploy of a commit that predates the branch;
+// the next dev release creates it.
+async function devNotesResponse(env: Env): Promise<Response | undefined> {
+  try {
+    const response = await fetch(DEV_NOTES_URL, {
+      headers: { "User-Agent": "hex-site" },
+      cf: { cacheTtl: 60, cacheEverything: true },
+    })
+    if (response.ok) return response
+  } catch {
+    // GitHub is unreachable: a stale copy still answers.
+  }
+  const object = await env.FILES.get(DEV_NOTES_KEY)
+  if (!object) return undefined
+  const headers = new Headers()
+  object.writeHttpMetadata(headers)
+  headers.set("Content-Length", String(object.size))
+  return new Response(object.body, { headers })
+}
 
 async function devNotes(request: Request, env: Env): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -175,12 +196,8 @@ async function devNotes(request: Request, env: Env): Promise<Response> {
   }
   let value: unknown = undefined
   try {
-    const object = await env.FILES.get(DEV_NOTES_KEY)
-    if (object) value = await object.json()
-    else if (env.CANONICAL_HOST !== "anoma.ly") {
-      const response = await fetch(PRODUCTION_DEV_NOTES, { headers: { "User-Agent": "hex-site" } })
-      if (response.ok) value = await response.json()
-    }
+    const response = await devNotesResponse(env)
+    if (response) value = await response.json()
   } catch {
     value = undefined
   }
@@ -194,6 +211,50 @@ async function devNotes(request: Request, env: Env): Promise<Response> {
   return new Response(body, { headers })
 }
 
+// Files built with the site rather than stored in the bucket. They keep the
+// URLs, Content-Type, and Cache-Control the bucket objects had, so install
+// commands and old clients see no change.
+const STATIC_FILES = new Map([
+  [
+    "install-linux.sh",
+    { asset: "/install-linux.sh", contentType: "text/x-shellscript", cacheControl: "public, max-age=300" },
+  ],
+  [
+    "install-windows.ps1",
+    { asset: "/install-windows.ps1", contentType: "text/plain; charset=utf-8", cacheControl: "public, max-age=300" },
+  ],
+  ["appcast.xml", { asset: "/appcast.xml", contentType: "application/xml", cacheControl: "no-cache" }],
+])
+
+async function staticFile(request: Request, env: Env, file: { asset: string; contentType: string; cacheControl: string }): Promise<Response> {
+  const url = new URL(request.url)
+  url.pathname = file.asset
+  // No conditional or Range headers: the asset is a plain 200, and ranged()
+  // answers the client's Range (or HEAD) from it.
+  const response = await env.ASSETS.fetch(new Request(url))
+  if (!response.ok) return new Response("Not found", { status: 404 })
+  const headers = new Headers(response.headers)
+  headers.set("Content-Type", file.contentType)
+  headers.set("Cache-Control", file.cacheControl)
+  secure(headers)
+  return ranged(request, response, headers)
+}
+
+// The dev notes as JSON, for the app's Restart to update and scripts.
+async function devNotesFile(request: Request, env: Env): Promise<Response> {
+  const response = await devNotesResponse(env)
+  if (!response) return new Response("Not found", { status: 404 })
+  const headers = new Headers({
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "public, max-age=60",
+  })
+  secure(headers)
+  // Not Content-Length: a subrequest may be decoded after the origin set it.
+  const etag = response.headers.get("ETag")
+  if (etag) headers.set("ETag", etag)
+  return new Response(request.method === "HEAD" ? null : response.body, { headers })
+}
+
 // Serves one bucket object with its stored Content-Type, Cache-Control, and
 // Content-Disposition, honouring Range and conditional requests.
 async function file(request: Request, env: Env, key: string): Promise<Response> {
@@ -201,6 +262,9 @@ async function file(request: Request, env: Env, key: string): Promise<Response> 
     return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } })
   }
   if (!key || key.endsWith("/")) return new Response("Not found", { status: 404 })
+  if (key === DEV_NOTES_KEY) return devNotesFile(request, env)
+  const fixed = STATIC_FILES.get(key)
+  if (fixed) return staticFile(request, env, fixed)
   const object =
     request.method === "HEAD"
       ? await env.FILES.head(key)
@@ -234,7 +298,7 @@ async function ranged(request: Request, response: Response, headers: Headers): P
   headers.set("Accept-Ranges", "bytes")
   const match = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("Range") ?? "")
   if (response.status !== 200 || !match || (!match[1] && !match[2])) {
-    return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
+    return new Response(request.method === "HEAD" ? null : response.body, { status: response.status, statusText: response.statusText, headers })
   }
   const body = await response.arrayBuffer()
   const size = body.byteLength

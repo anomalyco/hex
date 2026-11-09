@@ -11,7 +11,8 @@ name: Release
 # - sign and publish jobs run in the release environment. They check out only
 #   .github/release/ and run only those scripts and SHA-pinned actions, on
 #   artifacts they treat as data: they never build, install dependencies, or
-#   execute repository code or the artifacts.
+#   execute repository code or the artifacts. Their credentials come from AWS
+#   Secrets Manager through GitHub OIDC, not repository secrets.
 # - every artifact carries a SHA256SUMS whose digest the job that made it
 #   reports as an output; every job that downloads it checks that digest
 #   (.github/release/verify-artifacts.sh), so nothing swapped in between
@@ -241,6 +242,9 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 90
     environment: release
+    permissions:
+      contents: read
+      id-token: write
     env:
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
       CHANNEL: ${{ needs.plan.outputs.channel }}
@@ -256,11 +260,24 @@ jobs:
           sparse-checkout: /.github/release/
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
+          role-session-name: hex-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: Fetch the release secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
+        with:
+          secret-ids: |
+            APPLE_SIGNING_CERTIFICATE,shared/APPLE_SIGNING_CERTIFICATE
+            APPLE_NOTARY_KEY,shared/APPLE_NOTARY_KEY
+          parse-json-secrets: false
       - id: credentials
         name: Require the Apple values
         env:
-          CERTIFICATE: ${{ secrets.APPLE_SIGNING_CERTIFICATE }}
-          KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          CERTIFICATE: ${{ env.APPLE_SIGNING_CERTIFICATE }}
+          KEY: ${{ env.APPLE_NOTARY_KEY }}
           KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
           ISSUER: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
         run: |
@@ -287,10 +304,6 @@ jobs:
       - name: Import the certificate and notary key
         if: steps.credentials.outputs.available == 'true'
         run: bash .github/release/macos-credentials.sh "$RUNNER_TEMP/credentials"
-        env:
-          APPLE_SIGNING_CERTIFICATE: ${{ secrets.APPLE_SIGNING_CERTIFICATE }}
-          APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
-          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
       - name: Sign, notarize, and staple
         if: steps.credentials.outputs.available == 'true'
         run: bash .github/release/sign-macos.sh "$RUNNER_TEMP/in/build-macos-arm64/Hex.app.zip" "$RUNNER_TEMP/out"
@@ -324,12 +337,12 @@ jobs:
       id-token: write
     env: &windows-sign-env
       CHANNEL: ${{ needs.plan.outputs.channel }}
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
     outputs:
       signed: ${{ steps.credentials.outputs.available }}
       digest: ${{ steps.upload.outputs.digest }}
@@ -541,9 +554,19 @@ jobs:
             sign-windows-installers=${{ needs.sign-windows-installers.outputs.digest }}
       - name: Gather the release files
         run: bash .github/release/assemble.sh "$RUNNER_TEMP/in" "$RUNNER_TEMP/dist"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
+          role-session-name: hex-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: Fetch the release secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
+        with:
+          secret-ids: |
+            HEX_RELEASE_SIGNING_KEY,hex/release/RELEASE_SIGNING_KEY
+          parse-json-secrets: false
       - name: Sign the Linux executables
-        env:
-          HEX_RELEASE_SIGNING_KEY: ${{ secrets.HEX_RELEASE_SIGNING_KEY }}
         run: bash .github/release/sign-linux.sh "$RUNNER_TEMP/dist"
       - id: publish
         name: Publish
@@ -683,15 +706,28 @@ jobs:
     if: ${{ !cancelled() && needs.aur-stage.result == 'success' }}
     runs-on: ubuntu-24.04
     environment: release
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - *checkout-release
       - uses: ./.github/release/download
         with:
           pattern: build-aur
           digests: build-aur=${{ needs.aur-stage.outputs.digest }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
+          role-session-name: hex-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: Fetch the release secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
+        with:
+          secret-ids: |
+            AUR_SSH_PRIVATE_KEY,shared/AUR_SSH_KEY
+          parse-json-secrets: false
       - name: Push to the AUR
-        env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: bash .github/release/push-aur.sh "$RUNNER_TEMP/in/build-aur"
 
   # Tells AUR installs about the version only once the AUR serves it.
@@ -769,6 +805,9 @@ jobs:
     if: ${{ !cancelled() && needs.homebrew-stage.result == 'success' }}
     runs-on: ubuntu-24.04
     environment: release
+    permissions:
+      contents: read
+      id-token: write
     env:
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
     steps:
@@ -777,9 +816,19 @@ jobs:
         with:
           pattern: build-homebrew
           digests: build-homebrew=${{ needs.homebrew-stage.outputs.digest }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
+          role-session-name: hex-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: Fetch the release secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
+        with:
+          secret-ids: |
+            HOMEBREW_TAP_DEPLOY_KEY,shared/HOMEBREW_TAP_DEPLOY_KEY
+          parse-json-secrets: false
       - name: Push to anomalyco/homebrew-tap
-        env:
-          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: bash .github/release/push-homebrew.sh "$RUNNER_TEMP/in/build-homebrew/hex.rb" "$HEX_VERSION"
 
   # Tells Homebrew installs about the version only once the tap serves it.
@@ -827,20 +876,23 @@ jobs:
           name: build-dev-notes
           path: ${{ runner.temp }}/notes
 
-  # Once the build is the dev channel's release, its notes join
-  # https://anoma.ly/hex/files/dev-notes.json, which https://anoma.ly/hex/dev
-  # and the app's update item read.
+  # Once the build is the dev channel's release, its notes replace
+  # dev-notes.json on the one-commit `dev-notes` branch, which
+  # https://anoma.ly/hex/files/dev-notes.json, https://anoma.ly/hex/dev, and
+  # the app's update item read. The job needs only the last commit's
+  # GITHUB_TOKEN, so it runs outside the release environment and holds no
+  # bucket credential.
   dev-notes:
     needs: [plan, publish, dev-notes-stage]
     if: >-
       ${{ !cancelled() && needs.plan.outputs.channel == 'dev'
       && needs.publish.result == 'success' && needs.dev-notes-stage.result == 'success' }}
     runs-on: ubuntu-24.04
-    environment: release
+    permissions:
+      contents: write
     env:
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
       SHA: ${{ needs.plan.outputs.sha }}
-      HEX_RELEASE_BUCKET: hex-production-files
     steps:
       - *checkout-release
       - uses: ./.github/release/download
@@ -849,6 +901,5 @@ jobs:
           digests: build-dev-notes=${{ needs.dev-notes-stage.outputs.digest }}
       - name: Publish the notes
         env:
-          R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          GH_TOKEN: ${{ github.token }}
         run: bash .github/release/publish-dev-notes.sh "$RUNNER_TEMP/in/build-dev-notes/dev-notes.json" "$HEX_VERSION" "$SHA"
