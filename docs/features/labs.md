@@ -784,8 +784,8 @@ dictation shortcut). Off, the persisted normalization clears
 `double_tap_only` for a modifier-only binding exactly as a fresh load does,
 Double-tap is dimmed in the Shortcut mode modal, and `hex settings set
 double_tap_only on` refuses it. Windows and Linux have no modifier-only
-path for this lab: their saved settings, runtime gates, and `hex settings`
-validation are exactly as before, and both keep the key requirement.
+path for this lab: their runtime gates and `hex settings` validation are
+exactly as before, and both keep the key requirement.
 
 Checks: `double_tap_only_with_the_lab_starts_from_a_lone_modifier` (Option
 and Fn), `double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord`,
