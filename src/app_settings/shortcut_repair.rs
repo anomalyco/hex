@@ -1,8 +1,8 @@
 //! Shortcut keys a Labs feature allows, and the repair that puts a saved
 //! shortcut on one back while the feature is off: mouse buttons (Labs ›
 //! Mouse shortcuts, macOS), Menu, Pause, or Scroll Lock (Labs › Special
-//! keys alone, Linux), modifiers held alone (Labs › Double-tap on a lone
-//! modifier, macOS), and the persisted double-tap mode those keys need.
+//! keys alone, Linux), shortcuts without a key (Labs › Double-tap on a
+//! lone modifier, macOS), and the persisted double-tap mode those need.
 
 use super::{AppSettings, HotkeyBinding, HotkeyKey};
 
@@ -90,7 +90,7 @@ impl AppSettings {
     }
 
     /// Whether Labs › Double-tap on a lone modifier is on: Double-tap
-    /// shortcut mode accepts a modifier-only dictation shortcut (macOS).
+    /// shortcut mode accepts a dictation shortcut without a key (macOS).
     pub fn double_tap_modifiers_allowed(&self) -> bool {
         cfg!(target_os = "macos")
             && self.labs.double_tap_modifiers

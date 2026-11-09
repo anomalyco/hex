@@ -1,6 +1,7 @@
 use super::*;
 use crate::app_settings::{
-    COMMAND_KEY_MASK, CONTROL_KEY_MASK, FUNCTION_KEY_MASK, OPTION_KEY_MASK, SHIFT_KEY_MASK,
+    COMMAND_KEY_MASK, CONTROL_KEY_MASK, FUNCTION_KEY_MASK, LEFT_COMMAND_MASK, LEFT_CONTROL_MASK,
+    LEFT_OPTION_MASK, OPTION_KEY_MASK, RIGHT_OPTION_MASK, SHIFT_KEY_MASK,
 };
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -2703,8 +2704,9 @@ fn double_tap_only_timeout_and_unrelated_chord_never_start_capture() {
 fn double_tap_only_with_the_lab_starts_from_a_lone_modifier() {
     let now = capture_time();
     let ms = |millis| now + Duration::from_millis(millis);
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
     for (binding, flags) in [
-        (option_binding(), OPTION_KEY_MASK),
+        (option_binding(), option),
         (function_binding(), FUNCTION_KEY_MASK),
     ] {
         let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
@@ -2745,29 +2747,24 @@ fn double_tap_only_with_the_lab_starts_from_a_lone_modifier() {
 fn double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord() {
     let now = capture_time();
     let ms = |millis| now + Duration::from_millis(millis);
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
     let mut hotkey = DictationHotkey::with_binding(false, now, true, option_binding());
     hotkey.double_tap_modifiers = || true;
     hotkey.set_double_tap_only(true);
 
     // One complete tap.
-    assert_eq!(
-        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(0)),
-        None
-    );
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(0)), None);
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
     // The second press, then a key joining it while Option is held: a chord
     // meant for another app, so the gesture goes dirty and records nothing.
-    assert_eq!(
-        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(120)),
-        None
-    );
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(120)), None);
     for (at, down) in [(ms(140), true), (ms(160), false)] {
         assert_eq!(
             hotkey.process(
                 InputEvent::Key {
                     code: 0,
                     down,
-                    flags: OPTION_KEY_MASK,
+                    flags: option,
                 },
                 at,
             ),
@@ -2776,10 +2773,7 @@ fn double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord() {
     }
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(180)), None);
     // The next complete tap is a fresh first tap, not the second of a pair.
-    assert_eq!(
-        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(220)),
-        None
-    );
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(220)), None);
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(300)), None);
     assert!(!hotkey.is_recording());
 }
@@ -2788,21 +2782,16 @@ fn double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord() {
 fn double_tap_only_with_the_lab_does_not_take_a_held_first_press_as_a_tap() {
     let now = capture_time();
     let ms = |millis| now + Duration::from_millis(millis);
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
     let mut hotkey = DictationHotkey::with_binding(false, now, true, option_binding());
     hotkey.double_tap_modifiers = || true;
     hotkey.set_double_tap_only(true);
 
     // A lone modifier held past the hold threshold is a hold, not a tap.
-    assert_eq!(
-        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(0)),
-        None
-    );
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(0)), None);
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(400)), None);
     // The tap right after it must not complete the held press as a pair.
-    assert_eq!(
-        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(450)),
-        None
-    );
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(450)), None);
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(520)), None);
     assert!(!hotkey.is_recording());
 }
@@ -2811,27 +2800,130 @@ fn double_tap_only_with_the_lab_does_not_take_a_held_first_press_as_a_tap() {
 fn double_tap_only_with_the_lab_discards_a_different_modifier_between_taps() {
     let now = capture_time();
     let ms = |millis| now + Duration::from_millis(millis);
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let command = COMMAND_KEY_MASK | LEFT_COMMAND_MASK;
     let mut hotkey = DictationHotkey::with_binding(false, now, true, option_binding());
     hotkey.double_tap_modifiers = || true;
     hotkey.set_double_tap_only(true);
 
-    assert_eq!(
-        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(0)),
-        None
-    );
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(0)), None);
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
     // Command between the Option taps is a chord, not part of the pair.
-    assert_eq!(
-        hotkey.process(InputEvent::Flags(COMMAND_KEY_MASK), ms(120)),
-        None
-    );
+    assert_eq!(hotkey.process(InputEvent::Flags(command), ms(120)), None);
+    assert!(matches!(hotkey.state, State::Dirty));
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(160)), None);
     // The next Option tap is a fresh first tap, so the pair before Command
     // never locks.
+    assert_eq!(hotkey.process(InputEvent::Flags(option), ms(200)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(280)), None);
+    assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_locks_a_keyless_control_option_chord() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let control = CONTROL_KEY_MASK | LEFT_CONTROL_MASK;
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let binding = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers::control_option(),
+        key_code: None,
+    };
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    // First chord: one flags event per key, released one key at a time.
+    assert_eq!(hotkey.process(InputEvent::Flags(control), ms(0)), None);
     assert_eq!(
-        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(200)),
+        hotkey.process(InputEvent::Flags(control | option), ms(40)),
         None
     );
+    assert_eq!(hotkey.process(InputEvent::Flags(control), ms(90)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(140)), None);
+    assert!(!hotkey.is_recording());
+
+    // The second chord starts with Control alone: it is the binding's own
+    // key, not a different modifier, so the pending tap stays live.
+    assert_eq!(hotkey.process(InputEvent::Flags(control), ms(200)), None);
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(control | option), ms(240)),
+        None
+    );
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(control), ms(280)),
+        Some(HotkeyAction::Start)
+    );
+    assert!(hotkey.is_locked());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_locks_a_both_options_chord() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let left = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let right = OPTION_KEY_MASK | RIGHT_OPTION_MASK;
+    let binding = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers {
+            option: Some(crate::app_settings::ModifierSide::Both),
+            ..Default::default()
+        },
+        key_code: None,
+    };
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    // First chord: both sides go down together, then come up one at a time.
+    assert_eq!(hotkey.process(InputEvent::Flags(left), ms(0)), None);
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(left | right), ms(40)),
+        None
+    );
+    assert_eq!(hotkey.process(InputEvent::Flags(right), ms(90)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(140)), None);
+    assert!(!hotkey.is_recording());
+
+    // The second chord starts on one side: its own key, not a different
+    // modifier.
+    assert_eq!(hotkey.process(InputEvent::Flags(left), ms(200)), None);
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(left | right), ms(240)),
+        None
+    );
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(left), ms(280)),
+        Some(HotkeyAction::Start)
+    );
+    assert!(hotkey.is_locked());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_discards_the_other_option_side_between_taps() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let left = OPTION_KEY_MASK | LEFT_OPTION_MASK;
+    let right = OPTION_KEY_MASK | RIGHT_OPTION_MASK;
+    let binding = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers {
+            option: Some(crate::app_settings::ModifierSide::Right),
+            ..Default::default()
+        },
+        key_code: None,
+    };
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    // A Right Option tap arms the window.
+    assert_eq!(hotkey.process(InputEvent::Flags(right), ms(0)), None);
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
+    // Left Option is a side the binding doesn't name: a chord.
+    assert_eq!(hotkey.process(InputEvent::Flags(left), ms(120)), None);
+    assert!(matches!(hotkey.state, State::Dirty));
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(160)), None);
+    // The next Right Option tap is a fresh first tap, not a second one.
+    assert_eq!(hotkey.process(InputEvent::Flags(right), ms(200)), None);
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(280)), None);
     assert!(!hotkey.is_recording());
 }
@@ -2839,8 +2931,9 @@ fn double_tap_only_with_the_lab_discards_a_different_modifier_between_taps() {
 #[test]
 fn without_the_lab_double_tap_only_stays_off_for_a_lone_modifier() {
     let now = capture_time();
+    let option = OPTION_KEY_MASK | LEFT_OPTION_MASK;
     for (binding, flags) in [
-        (option_binding(), OPTION_KEY_MASK),
+        (option_binding(), option),
         (function_binding(), FUNCTION_KEY_MASK),
     ] {
         let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);

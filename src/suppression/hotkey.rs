@@ -797,12 +797,14 @@ impl DictationHotkey {
                 if unrelated_key_down
                     || extra_modifiers
                     || matches!(event, InputEvent::MouseDown)
-                    // A different modifier between a lone modifier's taps is
-                    // a chord too, such as Option, Command, Option.
+                    // A modifier or side the binding doesn't cover between a
+                    // keyless chord's taps is a chord too, such as Option,
+                    // Command, Option. The binding's own keys may go down and
+                    // up one at a time (⌃ then ⌥, or both Options).
                     || (self.binding.key_code.is_none()
                         && flags.is_some_and(|flags| {
                             flags & HOTKEY_MODIFIERS_MASK != 0
-                                && !self.binding.exact_modifiers(flags)
+                                && !self.binding.covers_modifiers(flags)
                         })) =>
             {
                 self.state = State::Dirty;

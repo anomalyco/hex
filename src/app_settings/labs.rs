@@ -75,8 +75,8 @@ pub struct LabsSettings {
     pub sided_modifier_chords: bool,
     /// In Toggle mode, a press held past the hold threshold dictates until it lifts (macOS, issue 711).
     pub tap_or_hold: bool,
-    /// Double-tap-only accepts a dictation shortcut that is a modifier alone,
-    /// such as Option or Globe (macOS).
+    /// Double-tap-only accepts a dictation shortcut without a key: one or
+    /// more modifiers, such as Option, Globe, or ⌃⌥ (macOS).
     pub double_tap_modifiers: bool,
     /// The picker shows each model's raw error rate, benchmark, source, and conditions (issue 647).
     pub benchmark_details: bool,

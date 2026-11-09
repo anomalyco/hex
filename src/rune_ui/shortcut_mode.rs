@@ -3,7 +3,8 @@
 //! `double_tap_only`). Of their eight combinations only four behave
 //! differently: Toggle ignores both double-tap settings, and double-tap only
 //! needs the lock and a shortcut with a key (or, with Labs › Double-tap on a
-//! lone modifier, a modifier alone). General's row names the choice
+//! lone modifier, a shortcut without a key, one or more modifiers).
+//! General's row names the choice
 //! and opens the modal in `explainer` that makes it.
 
 use rune::El;
@@ -97,8 +98,8 @@ impl Trigger {
         }
     }
 
-    /// Why this shortcut can't trigger this way, if it can't: a lone
-    /// modifier can't tell a double-tap from a chord without
+    /// Why this shortcut can't trigger this way, if it can't: a shortcut
+    /// without a key can't tell a double-tap from a chord without
     /// Labs › Double-tap on a lone modifier.
     pub(super) fn unavailable(self, settings: &AppSettings) -> Option<String> {
         (self == Self::DoubleTap

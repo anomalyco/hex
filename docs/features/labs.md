@@ -56,7 +56,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
-├── Double-tap on a lone modifier no labs.double_tap_modifiers (macOS) Double-tap shortcut mode takes a shortcut that is a modifier alone, such as Option or Globe; two complete taps start hands-free, one tap or a hold does nothing
+├── Double-tap on a lone modifier no labs.double_tap_modifiers (macOS) Double-tap shortcut mode takes a shortcut without a key (one or more modifiers), such as Option, Globe, or ⌃⌥; two complete taps start hands-free, one tap or a hold does nothing
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker rows show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
@@ -761,38 +761,46 @@ and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
 need regenerating with the new row.
 
 Double-tap on a lone modifier (`double-tap-modifiers`, macOS): Double-tap
-shortcut mode works with a dictation shortcut that is a modifier alone, such
-as Option or Globe. The gate is the shortcut machine (`DictationHotkey` in
-[suppression/hotkey.rs](../../src/suppression/hotkey.rs)), which asks
-`labs::double_tap_modifiers()` as the mode is applied; with it on, a
-modifier-only binding keeps `double_tap_only` instead of the mode falling
+shortcut mode works with any dictation shortcut that has no key: one or more
+modifiers, such as Option, Globe, or ⌃⌥. The gate is the shortcut machine
+(`DictationHotkey` in [suppression/hotkey.rs](../../src/suppression/hotkey.rs)),
+which asks `labs::double_tap_modifiers()` as the mode is applied; with it on,
+a shortcut without a key keeps `double_tap_only` instead of the mode falling
 back to Hold or double-tap. The runtime gate,
 `app_settings::double_tap_only()` (filled by `apply_runtime`), also accepts a
-modifier-only binding while the lab is on. The state machine is the existing
+shortcut without a key while the lab is on. The state machine is the existing
 one: the first complete tap arms the window silently; one tap or a hold
 starts nothing; two complete taps inside 300 ms lock a hands-free capture; a
-fresh press finishes it; Escape still reaches the app. For a lone modifier a
-press held 300 ms or longer is a hold, not a tap, so keeping the modifier
-down and then tapping never locks; a key, mouse button, or different
-modifier between the taps (Option, Command, Option) is a chord and the
-machine goes Dirty, as before. Modifier flag events are never suppressed, so
-a lone Option or Globe press and release reach the focused app unchanged;
-macOS's own "press Globe twice" system dictation shortcut may therefore also
-fire while this lab is on. It applies to every `DictationHotkey` that takes
-the mode (the primary shortcut, Dictate without processing, and the second
-dictation shortcut). Off, the persisted normalization clears
-`double_tap_only` for a modifier-only binding exactly as a fresh load does,
-Double-tap is dimmed in the Shortcut mode modal, and `hex settings set
-double_tap_only on` refuses it. Windows and Linux have no modifier-only
-path for this lab: their runtime gates and `hex settings` validation are
-exactly as before, and both keep the key requirement.
+fresh press finishes it; Escape still reaches the app. For a shortcut without
+a key, a press held 300 ms or longer is a hold, not a tap, so keeping the
+modifier down and then tapping never locks. A key, mouse button, or a
+modifier or side the binding doesn't cover is a chord and the machine goes
+Dirty, as before: Option, Command, Option is a chord, and so is Left Option
+between Right Option taps. The binding's own keys may go down and up one at a
+time, so ⌃ then ⌥ (or one Option side then the other) never counts as a
+different modifier. Modifier flag events are never suppressed, so a lone
+Option or Globe press and release reach the focused app unchanged; macOS's
+own "press Globe twice" system dictation shortcut may therefore also fire
+while this lab is on. It applies to every `DictationHotkey` that takes the
+mode (the primary shortcut, Dictate without processing, and the second
+dictation shortcut). Off, the persisted normalization clears `double_tap_only`
+for a shortcut without a key exactly as a fresh load does, Double-tap is
+dimmed in the Shortcut mode modal, and `hex settings set double_tap_only on`
+refuses it. Windows and Linux have no such path for this lab: their runtime
+gates and `hex settings` validation are exactly as before, and both keep the
+key requirement.
 
 Checks: `double_tap_only_with_the_lab_starts_from_a_lone_modifier` (Option
 and Fn), `double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord`,
 `double_tap_only_with_the_lab_does_not_take_a_held_first_press_as_a_tap`,
 `double_tap_only_with_the_lab_discards_a_different_modifier_between_taps`,
+`double_tap_only_with_the_lab_locks_a_keyless_control_option_chord`,
+`double_tap_only_with_the_lab_locks_a_both_options_chord`,
+`double_tap_only_with_the_lab_discards_the_other_option_side_between_taps`,
 and `without_the_lab_double_tap_only_stays_off_for_a_lone_modifier` in
 [suppression/tests.rs](../../src/suppression/tests.rs) (macOS only);
+`a_binding_covers_only_its_own_modifiers_and_sides` in
+[app_settings/hotkeys.rs](../../src/app_settings/hotkeys.rs);
 `double_tap_only_on_a_lone_modifier_needs_the_lab` and
 `turning_the_double_tap_modifiers_lab_off_falls_back_as_a_fresh_load` in
 [app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs);

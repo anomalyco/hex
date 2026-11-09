@@ -429,8 +429,8 @@ const KEYS: &[Key] = &[
     key(
         "labs.double_tap_modifiers",
         Kind::Bool,
-        "Labs: Double-tap shortcut mode accepts a shortcut that is a modifier alone, such as \
-         Option or Globe, with no other key (macOS)",
+        "Labs: Double-tap shortcut mode accepts a shortcut without a key, one or more \
+         modifiers such as Option, Globe, or ⌃⌥ (macOS)",
     ),
     key(
         "labs.benchmark_details",
@@ -1118,7 +1118,7 @@ pub fn apply(
                     && !candidate.double_tap_modifiers_allowed())
             {
                 let modifier_only = if cfg!(target_os = "macos") {
-                    ", or with Labs › Double-tap on a lone modifier on, a modifier alone"
+                    ", or with Labs › Double-tap on a lone modifier on, a shortcut without a key"
                 } else {
                     ""
                 };

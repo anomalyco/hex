@@ -904,7 +904,7 @@ const OPENCODE_IN_WSL: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 const API_PROCESSING: u64 = OPENCODE_IN_WSL << 1;
 
 /// The next bit above OpenCode in WSL's switch: Double-tap accepts a
-/// modifier-only shortcut (macOS).
+/// shortcut without a key (macOS).
 const DOUBLE_TAP_MODIFIERS: u64 = OPENCODE_IN_WSL << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
@@ -1026,8 +1026,9 @@ pub fn tap_or_hold() -> bool {
     on(TAP_OR_HOLD)
 }
 
-/// Double-tap shortcut mode accepts a modifier-only binding, such as Option
-/// or Globe alone (macOS; read as each shortcut machine is configured).
+/// Double-tap shortcut mode accepts a shortcut without a key, such as
+/// Option, Globe, or ⌃⌥ (macOS; read as each shortcut machine is
+/// configured).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn double_tap_modifiers() -> bool {
     on(DOUBLE_TAP_MODIFIERS) && Feature::DoubleTapModifiers.on_this_os()
