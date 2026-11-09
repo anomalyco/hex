@@ -6,7 +6,7 @@ use objc2::msg_send;
 use objc2::runtime::AnyObject;
 use objc2::sel;
 
-use super::MenuTarget;
+use super::main_thread::MenuTarget;
 
 /// Calls the target's `applicationDidBecomeActive:` whenever Hex activates.
 pub(super) fn observe_activation(target: &MenuTarget) {

@@ -24,7 +24,8 @@ use crate::recognition::RecognitionControl;
 use crate::rune_ui::story_link::{self, StoryLink};
 use crate::rune_ui::{Destination, Ui};
 
-use super::{Pump, Request, RuntimeHandle, bring_window_forward, show, window_visible};
+use super::main_thread::{show, window_visible};
+use super::{Pump, Request, RuntimeHandle, bring_window_forward};
 
 /// How long a command waits for the listener's answer.
 const LISTENER_TIMEOUT: Duration = Duration::from_secs(3);

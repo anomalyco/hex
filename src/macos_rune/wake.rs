@@ -10,7 +10,8 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2_foundation::{MainThreadMarker, NSTimer};
 
-use super::{PUMP, Request, WINDOW, refresh_keyboard_layout};
+use super::main_thread::{PUMP, refresh_keyboard_layout};
+use super::{Request, WINDOW};
 
 /// The main-loop timer while the HUD animates: it follows the pointer and
 /// channels drain every frame.

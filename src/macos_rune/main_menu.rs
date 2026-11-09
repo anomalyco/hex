@@ -6,7 +6,7 @@ use objc2::{MainThreadOnly, sel};
 use objc2_app_kit::{NSApplication, NSEventModifierFlags, NSMenu, NSMenuItem};
 use objc2_foundation::{MainThreadMarker, NSString};
 
-use super::MenuTarget;
+use super::main_thread::MenuTarget;
 
 /// The menu bar while the window is active: Hex, File, View (with the
 /// Labs), Window.

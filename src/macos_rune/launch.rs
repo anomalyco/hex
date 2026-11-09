@@ -10,7 +10,7 @@ use objc2::runtime::AnyObject;
 use objc2::sel;
 use objc2_foundation::{NSAppleEventDescriptor, NSAppleEventManager};
 
-use super::MenuTarget;
+use super::main_thread::MenuTarget;
 
 const OPEN_APPLICATION: u32 = u32::from_be_bytes(*b"oapp");
 const PROP_DATA: u32 = u32::from_be_bytes(*b"prdt");

@@ -5,6 +5,8 @@ use super::*;
 use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
 use crate::transcription::preparation::TranscriptionPreparation;
 
+use super::activation::reopen_on_activation;
+
 const WAIT: Duration = Duration::from_secs(3);
 
 /// The pump ticks every frame only while the HUD animates; otherwise it
