@@ -2,7 +2,7 @@
 //! the running Hex's local API, or in this process on Linux and Windows when
 //! Hex is stopped. Nothing is pasted, saved to History, or processed.
 
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::path::Path;
 use std::time::Duration;
 
@@ -27,7 +27,6 @@ struct Transcript {
 #[derive(Debug)]
 struct Job {
     wav: Vec<u8>,
-    file: std::path::PathBuf,
     selection: TranscriptionSelection,
 }
 
@@ -61,36 +60,41 @@ fn prepare(
     language: Option<String>,
 ) -> std::result::Result<Job, ControlReply> {
     if !Feature::TranscribeFiles.on(settings) {
-        return Err(ControlReply::error(
-            "disabled",
-            "Labs › Transcribe files is off; turn it on with `hex labs on transcribe-files`",
-        ));
+        let message = match Feature::TranscribeFiles.managed() {
+            Some(lock) => lock.refusal().to_owned(),
+            None => {
+                "Labs › Transcribe files is off; turn it on with `hex labs on transcribe-files`"
+                    .to_owned()
+            }
+        };
+        return Err(ControlReply::error("disabled", message));
     }
     let wav = read_wav(file)?;
     let model = model.unwrap_or_else(|| settings.transcription.model.as_str().to_owned());
     let selection = model_selection(settings, &model, language.as_deref())?;
-    Ok(Job {
-        wav,
-        file: file.to_path_buf(),
-        selection,
-    })
+    Ok(Job { wav, selection })
 }
 
-/// The whole file in memory, so the size cap and WAV validation come before
+/// The whole file in memory, read through the size cap so a file that grew
+/// after its metadata was read is still refused, and checked as WAV before
 /// anything is sent.
 fn read_wav(path: &Path) -> std::result::Result<Vec<u8>, ControlReply> {
     let name = path.display();
-    let metadata = std::fs::metadata(path)
-        .map_err(|error| ControlReply::error("failed", format!("couldn't read {name}: {error}")))?;
-    if metadata.len() > crate::local_api::MAX_AUDIO_BYTES as u64 {
-        let limit = crate::local_api::MAX_AUDIO_BYTES / (1024 * 1024);
-        return Err(ControlReply::error(
-            "resource-exhausted",
-            format!("{name} is larger than {limit} MiB; transcribe a shorter or lower-rate WAV"),
-        ));
+    let read_error = |error: std::io::Error| {
+        ControlReply::error("failed", format!("couldn't read {name}: {error}"))
+    };
+    let file = std::fs::File::open(path).map_err(read_error)?;
+    let length = file.metadata().map_err(read_error)?.len();
+    if length > crate::local_api::MAX_AUDIO_BYTES as u64 {
+        return Err(too_large(&name));
     }
-    let wav = std::fs::read(path)
-        .map_err(|error| ControlReply::error("failed", format!("couldn't read {name}: {error}")))?;
+    let mut wav = Vec::new();
+    file.take(crate::local_api::MAX_AUDIO_BYTES as u64 + 1)
+        .read_to_end(&mut wav)
+        .map_err(read_error)?;
+    if wav.len() > crate::local_api::MAX_AUDIO_BYTES {
+        return Err(too_large(&name));
+    }
     match AudioClip::decode_wav(Cursor::new(&wav)) {
         Ok(_) => Ok(wav),
         Err(AudioError::ResourceExhausted) => Err(ControlReply::error(
@@ -107,15 +111,24 @@ fn read_wav(path: &Path) -> std::result::Result<Vec<u8>, ControlReply> {
     }
 }
 
+fn too_large(name: &std::path::Display<'_>) -> ControlReply {
+    let limit = crate::local_api::MAX_AUDIO_BYTES / (1024 * 1024);
+    ControlReply::error(
+        "resource-exhausted",
+        format!("{name} is larger than {limit} MiB; transcribe a shorter or lower-rate WAV"),
+    )
+}
+
 fn transcribe(job: &Job) -> ControlReply {
     if crate::local_api::running_pid().is_some() {
         return in_running_hex(job);
     }
-    offline(&job.file, &job.selection)
+    offline(&job.wav, &job.selection)
 }
 
-/// The running Hex transcribes on its dictation engine, whatever model it
-/// has loaded or can load.
+/// The running Hex transcribes with the model the request names: a clip up to
+/// 30 s runs on its dictation engine's loaded copy, and a longer one makes
+/// its transcription service load its own.
 fn in_running_hex(job: &Job) -> ControlReply {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("model", job.selection.model.as_str())
@@ -141,26 +154,72 @@ fn transcript(body: &[u8]) -> ControlReply {
 }
 
 fn refusal(status: u16, code: &str, model: &str) -> ControlReply {
-    match status {
-        401 => ControlReply::error("failed", "Hex rejected the request; restart Hex"),
-        408 => ControlReply::error("failed", "Hex timed out reading the file; try again"),
-        409 => ControlReply::error(
+    match code {
+        "unknown-model" => ControlReply::error(
+            "unknown-model",
+            format!("the running Hex doesn't know `{model}`; run `hex model list`"),
+        ),
+        "unsupported-model" => ControlReply::error(
             "model-unavailable",
-            format!("`{model}` isn't ready in Hex; run `hex model install {model}`"),
+            format!("the running Hex can't use `{model}`; run `hex model list` to see what it has"),
         ),
-        413 => ControlReply::error(
-            "resource-exhausted",
-            "Hex says the file is too large to transcribe",
-        ),
-        429 => ControlReply::error("busy", "Hex is busy with another transcription; try again"),
-        400 | 415 => ControlReply::error(
+        "invalid-request" => ControlReply::error("failed", "Hex refused the request; update Hex"),
+        "unsupported-audio" | "invalid-audio" => ControlReply::error(
             "unsupported",
             "Hex couldn't read the file as WAV; convert it to WAV first",
         ),
-        _ if code.is_empty() => {
-            ControlReply::error("failed", format!("Hex answered HTTP {status}"))
+        "length-required" => ControlReply::error("failed", "Hex refused the upload; update Hex"),
+        "resource-exhausted" => ControlReply::error(
+            "resource-exhausted",
+            "Hex says the file is too large or too long to transcribe",
+        ),
+        "model-not-ready" => ControlReply::error("model-unavailable", not_ready(model)),
+        "queue-full" => {
+            ControlReply::error("busy", "Hex is busy with another transcription; try again")
         }
-        _ => ControlReply::error("failed", format!("Hex answered HTTP {status} ({code})")),
+        "upload-timeout" => {
+            ControlReply::error("failed", "Hex timed out reading the file; try again")
+        }
+        "cancelled" => ControlReply::error("failed", "Hex cancelled the transcription; try again"),
+        "service-gone" => ControlReply::error(
+            "unavailable",
+            "Hex's transcription service stopped; restart Hex",
+        ),
+        "model-load-failed" => ControlReply::error(
+            "failed",
+            format!("Hex couldn't load `{model}`; try again or pick another model"),
+        ),
+        "transcription-failed" => {
+            ControlReply::error("failed", "Hex couldn't transcribe it; try again")
+        }
+        _ => match status {
+            401 => ControlReply::error("failed", "Hex rejected the request; restart Hex"),
+            408 => ControlReply::error("failed", "Hex timed out reading the file; try again"),
+            409 => ControlReply::error("model-unavailable", not_ready(model)),
+            413 => ControlReply::error(
+                "resource-exhausted",
+                "Hex says the file is too large to transcribe",
+            ),
+            415 => ControlReply::error(
+                "unsupported",
+                "Hex couldn't read the file as WAV; convert it to WAV first",
+            ),
+            429 => ControlReply::error("busy", "Hex is busy with another transcription; try again"),
+            _ if code.is_empty() || code.starts_with("http-") => {
+                ControlReply::error("failed", format!("Hex answered HTTP {status}"))
+            }
+            _ => ControlReply::error("failed", format!("Hex answered HTTP {status} ({code})")),
+        },
+    }
+}
+
+/// An imported model has no `hex model install` id, so it is checked where it
+/// was imported instead.
+fn not_ready(model: &str) -> String {
+    if model.starts_with("custom-") {
+        format!("`{model}` isn't ready in the running Hex; check it in Hex's model picker")
+    } else {
+        format!("`{model}` isn't ready in the running Hex; run `hex model install {model}`")
     }
 }
 
@@ -174,8 +233,8 @@ fn no_speech() -> ControlReply {
 /// Without a running Hex, Linux and Windows load the model here as
 /// `hex model transcribe` does; macOS runs models only inside the app.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-fn offline(file: &Path, selection: &TranscriptionSelection) -> ControlReply {
-    match crate::transcription::local_transcriber::transcribe_wav_with_selection(file, selection) {
+fn offline(wav: &[u8], selection: &TranscriptionSelection) -> ControlReply {
+    match crate::transcription::local_transcriber::transcribe_wav_bytes(wav, selection) {
         Ok(text) if text.trim().is_empty() => no_speech(),
         Ok(text) => ControlReply::Transcript { text },
         Err(error) => ControlReply::error("failed", format!("couldn't transcribe it: {error:#}")),
@@ -183,7 +242,7 @@ fn offline(file: &Path, selection: &TranscriptionSelection) -> ControlReply {
 }
 
 #[cfg(target_os = "macos")]
-fn offline(_: &Path, _: &TranscriptionSelection) -> ControlReply {
+fn offline(_: &[u8], _: &TranscriptionSelection) -> ControlReply {
     super::not_running()
 }
 
@@ -270,5 +329,66 @@ mod tests {
             transcript(br#"{"transcript":"  ","durationMs":1000}"#),
             ControlReply::Error { ref code, .. } if code == "no-speech"
         ));
+    }
+
+    fn error(reply: ControlReply) -> (String, String) {
+        match reply {
+            ControlReply::Error { code, message } => (code, message),
+            other => panic!("expected an error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_refusal_follows_hexs_code_rather_than_its_status() {
+        let (code, message) = error(refusal(415, "unsupported-audio", "parakeet_v2"));
+        assert_eq!(code, "unsupported");
+        assert!(
+            message.contains("couldn't read the file as WAV"),
+            "{message}"
+        );
+
+        let (code, message) = error(refusal(400, "invalid-audio", "parakeet_v2"));
+        assert_eq!(code, "unsupported");
+        assert!(
+            message.contains("couldn't read the file as WAV"),
+            "{message}"
+        );
+
+        let (code, message) = error(refusal(400, "unknown-model", "parakeet_v2"));
+        assert_eq!(code, "unknown-model");
+        assert!(message.contains("hex model list"), "{message}");
+
+        let (code, message) = error(refusal(409, "model-not-ready", "parakeet_v2"));
+        assert_eq!(code, "model-unavailable");
+        assert!(
+            message.contains("hex model install parakeet_v2"),
+            "{message}"
+        );
+
+        let (code, message) = error(refusal(409, "model-not-ready", "custom-ab12ab12ab12ab12"));
+        assert_eq!(code, "model-unavailable");
+        assert!(!message.contains("hex model install"), "{message}");
+
+        let (code, message) = error(refusal(429, "queue-full", "parakeet_v2"));
+        assert_eq!(code, "busy");
+        assert!(
+            message.contains("busy with another transcription"),
+            "{message}"
+        );
+
+        let (code, _) = error(refusal(413, "resource-exhausted", "parakeet_v2"));
+        assert_eq!(code, "resource-exhausted");
+
+        let (code, _) = error(refusal(409, "cancelled", "parakeet_v2"));
+        assert_eq!(code, "failed");
+
+        let (code, _) = error(refusal(503, "service-gone", "parakeet_v2"));
+        assert_eq!(code, "unavailable");
+
+        let (code, _) = error(refusal(401, "http-401", "parakeet_v2"));
+        assert_eq!(code, "failed");
+
+        let (code, _) = error(refusal(413, "http-413", "parakeet_v2"));
+        assert_eq!(code, "resource-exhausted");
     }
 }

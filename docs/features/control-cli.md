@@ -46,8 +46,9 @@ Agent or terminal                                  // control.cli; every OS
 ├── hex transcribe <file> [--model <id>] [--language <code>]
 │   ├── Labs › Transcribe files off -> disabled, exit 1; the file is never read
 │   ├── Not WAV, or over 64 MiB -> refused here, before Hex is asked
-│   ├── Hex running -> the file to POST /transcriptions; its dictation engine
-│   │   uses the selection (or the loaded model) and stdout gets the transcript
+│   ├── Hex running -> the file to POST /transcriptions with the model named;
+│   │   ≤30 s runs on the dictation engine's model, longer clips on the
+│   │   transcription service's own copy; stdout gets the transcript
 │   ├── Hex stopped -> Linux/Windows load the model here as `model transcribe`;
 │   │   macOS answers not-running, exit 3
 │   └── No speech -> no-speech, exit 4; nothing pasted, kept, or processed
@@ -94,7 +95,9 @@ explicit settings: no command turns Meetings on as a side effect.
 `hex transcribe` is the one command that doesn't use `/control`: it reads and
 checks the WAV here, then sends it to the same discovery file's
 `POST /transcriptions` (`Content-Type: audio/wav`, 64 MiB cap), so the running
-app's dictation engine transcribes it. Its Labs toggle is read from
+app transcribes it with the model the request names: a clip up to 30 s on its
+dictation engine's model when it holds that one, a longer clip on the
+transcription service's own copy. Its Labs toggle is read from
 `settings.json` (`AppSettings::read`), the same read `hex labs` lists from, so
 the check works with Hex running or stopped; a running Hex saves the toggle
 there at once. Off, nothing is read.

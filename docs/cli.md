@@ -149,8 +149,9 @@ It is refused with `disabled` while the lab is off. The file is read here and
 capped at 64 MiB, and Hex's own WAV decoder checks it first, so a file that
 isn't WAV is refused with `unsupported` (convert it first, for example with
 ffmpeg) before anything else runs. With Hex running, the file goes to its
-local API's `POST /transcriptions` and its dictation engine, which uses
-whatever model it has loaded when the selection matches. With Hex stopped,
+local API's `POST /transcriptions` with that model named: a clip up to 30 s
+runs on Hex's dictation engine when it already holds that model, and a longer
+one makes Hex's transcription service load its own copy. With Hex stopped,
 Linux and Windows load the model in this process, as `hex model transcribe`
 does; macOS answers `not-running`. An empty transcript answers `no-speech`
 (exit 4). It never pastes, records History, or runs mode processing. With
@@ -314,7 +315,7 @@ scrawl-capture-send {capture, to?, always?} | scrawl-capture-route {capture, ask
 Optional fields may be left out. `hex start` and `hex logs` are local and have
 no wire form. `history-clear` has no confirmation field: the CLI asks for
 `--yes` before it sends it. `hex transcribe` also has no `/control` wire form:
-it sends the WAV itself to `POST /transcriptions` (see Transport below).
+it sends the WAV itself to `POST /transcriptions` (see Transport above).
 
 Replies are tagged by `status`:
 
@@ -407,6 +408,7 @@ not-ready              Hex is waiting for setup (permissions or the dictation mo
 meeting-active         quit/restart while a meeting records (pass --force)
 busy                   something is in progress (recording, transcribing, a full queue),
                        or the listener couldn't confirm it's idle
+resource-exhausted     `hex transcribe`'s file is over 64 MiB or too long to decode
 discarded              `stop` dropped the clip: no audio yet, or silent; nothing transcribes
 no-speech              `dictation stop --print` heard no speech; nothing printed (exit 4)
 not-recording          `dictation stop --print` with nothing recording
