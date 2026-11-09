@@ -84,6 +84,11 @@ pub(crate) struct HudSender {
     recording: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     animating: Arc<AtomicBool>,
+    /// `Hud::shown`, so the pump can check the panel's Space without reading
+    /// the overlay's state. It flips when a show or hide is requested, before
+    /// Rune applies the queued one.
+    #[cfg(target_os = "macos")]
+    shown: Arc<AtomicBool>,
     #[cfg(target_os = "windows")]
     watch: Arc<Mutex<Watch>>,
 }
@@ -229,7 +234,10 @@ pub(crate) struct Hud {
     position: IndicatorPosition,
     /// The overlay itself, to show and hide it.
     this: Option<OverlayHandle<Hud>>,
-    shown: bool,
+    /// Whether a show is requested. It flips before Rune applies the queued
+    /// show or hide, so the pump's macOS Space check guards on the panel's
+    /// `isVisible` for that gap.
+    shown: Arc<AtomicBool>,
     /// Rune's Reduce Motion, as of the last frame.
     reduce: bool,
     /// Whether the compositor wants the display's frames.
@@ -261,7 +269,9 @@ impl Hud {
     /// primary.
     #[cfg(not(target_os = "macos"))]
     fn follow_pointer(&mut self, now: Instant) {
-        if !self.shown || self.followed.is_some_and(|at| now < at + FOLLOW_EVERY) {
+        if !self.shown.load(Ordering::Acquire)
+            || self.followed.is_some_and(|at| now < at + FOLLOW_EVERY)
+        {
             return;
         }
         self.followed = Some(now);
@@ -287,7 +297,7 @@ impl Hud {
         let meter = matches!(&event, HudEvent::Meter { .. });
         self.model.handle(event, Instant::now(), self.reduce);
         self.animating.store(true, Ordering::Release);
-        if starts || (self.shown && !meter) {
+        if starts || (self.shown.load(Ordering::Acquire) && !meter) {
             self.show();
         }
     }
@@ -295,7 +305,7 @@ impl Hud {
     #[cfg(not(target_os = "macos"))]
     fn set_position(&mut self, position: IndicatorPosition) {
         self.position = position;
-        if self.shown {
+        if self.shown.load(Ordering::Acquire) {
             self.show();
         }
     }
@@ -339,9 +349,9 @@ impl Hud {
             let past_plate = margin + (WINDOW.1 + PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;
             set_live_text(Spot::Edge(edge, past_plate));
         }
-        if !self.shown {
+        if !self.shown.load(Ordering::Acquire) {
             overlay.show();
-            self.shown = true;
+            self.shown.store(true, Ordering::Release);
         }
     }
 
@@ -351,7 +361,7 @@ impl Hud {
     /// (#1359).
     fn fade_out(&mut self) {
         self.unplace();
-        if std::mem::take(&mut self.shown) {
+        if self.shown.swap(false, Ordering::AcqRel) {
             if let Some(overlay) = &self.this {
                 #[cfg(target_os = "windows")]
                 overlay.fade_out(EXIT_FADE);
@@ -365,7 +375,7 @@ impl Hud {
 
     fn hide(&mut self) {
         self.unplace();
-        if std::mem::take(&mut self.shown) {
+        if self.shown.swap(false, Ordering::AcqRel) {
             if let Some(overlay) = &self.this {
                 overlay.hide();
             }
@@ -457,6 +467,7 @@ fn prebuilt(device: &wgpu::Device, format: wgpu::TextureFormat) -> Option<Painte
 /// sender.
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
     let animating = Arc::new(AtomicBool::new(false));
+    let shown = Arc::new(AtomicBool::new(false));
     let now = Instant::now();
     let model = IndicatorModel::new(dot_scope::lab(), now);
     // The painter the compositor draws with and the HUD lets go of when it
@@ -501,7 +512,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             layout: Layout::default(),
             position: IndicatorPosition::Top,
             this: None,
-            shown: false,
+            shown: shown.clone(),
             reduce: false,
             animating: animating.clone(),
             #[cfg(target_os = "macos")]
@@ -521,6 +532,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
         recording: Arc::default(),
         #[cfg(target_os = "macos")]
         animating,
+        #[cfg(target_os = "macos")]
+        shown,
         #[cfg(target_os = "windows")]
         watch: Arc::default(),
     }
