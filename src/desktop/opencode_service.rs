@@ -331,6 +331,20 @@ fn loopback_address(url: &str) -> Option<SocketAddr> {
 }
 
 impl Service {
+    /// Whether this service's registration and files live in the default WSL
+    /// distribution.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn is_wsl(&self) -> bool {
+        self.wsl.is_some()
+    }
+
+    /// `host` as this service's WSL server sees it, or `None` for a Windows
+    /// service and for a path the distribution can't reach.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn wsl_directory(&self, host: &Path) -> Option<String> {
+        self.wsl.as_ref()?.directory(host)
+    }
+
     /// Hex's OpenCode workspace as this service sees it: a Linux path inside
     /// WSL, else the host path.
     fn workspace(&self, directory: &Path) -> Result<String> {
@@ -970,6 +984,25 @@ pub(crate) mod tests {
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"hello world");
         fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_wsl_service_maps_a_capture_folder_into_its_distribution() {
+        let root = state_root("wsl-directory");
+        let service = Service {
+            wsl: Some(WslHome::for_test(root.join("home"), "/home/dax")),
+            ..fixture("http://127.0.0.1:1/")
+        };
+        assert!(service.is_wsl());
+        assert_eq!(
+            service.wsl_directory(Path::new(r"C:\Users\dax\captures\a.scrawl")),
+            Some("/mnt/c/Users/dax/captures/a.scrawl".into())
+        );
+        assert_eq!(service.wsl_directory(Path::new(r"\\server\share\a")), None);
+        let windows = fixture("http://127.0.0.1:1/");
+        assert!(!windows.is_wsl());
+        assert_eq!(windows.wsl_directory(Path::new(r"C:\a")), None);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

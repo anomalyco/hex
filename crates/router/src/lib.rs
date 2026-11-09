@@ -90,6 +90,12 @@ impl Router {
         self.with(|env| env.summary = Some(summary))
     }
 
+    /// The host's way to OpenCode when this machine's registration isn't where it is (Windows:
+    /// a service in WSL). Without one the router reads this machine's registration.
+    pub fn with_opencode(self, opencode: Arc<dyn env::OpenCode>) -> Self {
+        self.with(|env| env.opencode = Some(opencode))
+    }
+
     /// The `/sdk.js` registration for a tab, when the host serves `/sdk.js`.
     pub fn with_pages(self, pages: env::Pages) -> Self {
         self.with(|env| env.pages = Some(pages))

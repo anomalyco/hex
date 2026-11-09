@@ -1,7 +1,7 @@
 pub use scrawl_router::{
     Action, AutoSend, Decision, DeliverRequest, Delivered, DeliveryMode, OfferRule, Router,
     RouterConfig, RouterDirs, RuleKind, Sent, Target as RouterTarget, UndoReport, Undone, bundle,
-    delivery, model, opencode, router_config_from_scrawl, routing,
+    delivery, env, model, opencode, router_config_from_scrawl, routing,
 };
 
 pub mod agent_context;

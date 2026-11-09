@@ -11,9 +11,7 @@
 //! finds a distribution that has finished starting.
 
 use std::fs;
-#[cfg(target_os = "windows")]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -22,9 +20,8 @@ use color_eyre::eyre::{Result, WrapErr};
 
 use super::{Missing, Service};
 
-/// `/etc/passwd` is tiny; never read more than this.
-#[cfg(target_os = "windows")]
-const MAX_PASSWD_BYTES: u64 = 1024 * 1024;
+/// `/etc/passwd` and `/etc/wsl.conf` are tiny; never read more than this.
+const MAX_ETC_BYTES: u64 = 1024 * 1024;
 /// Both ways Windows exposes a distribution's filesystem; `\\wsl$` is the
 /// older Windows 10 name, tried when `\\wsl.localhost` isn't reachable.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -76,6 +73,8 @@ pub(super) struct WslHome {
     /// `\\wsl.localhost\<distribution><home>` or `\\wsl$\<distribution><home>`,
     /// the same folder Windows can read without running anything itself.
     pub(super) unc: PathBuf,
+    /// `<prefix>\<distribution>\etc`, where `/etc/passwd` and `/etc/wsl.conf` live.
+    etc: PathBuf,
     /// The home's Linux path, such as `/home/dax`.
     pub(super) linux: String,
     /// Set once Hex's workspace was created through `unc`; clones share it,
@@ -103,6 +102,7 @@ impl WslHome {
                 r"{prefix}\{distribution}{}",
                 linux.replace('/', r"\")
             )),
+            etc: etc_dir(prefix, distribution)?,
             linux,
             workspace_ready: Arc::new(AtomicBool::new(false)),
         })
@@ -111,6 +111,7 @@ impl WslHome {
     #[cfg(test)]
     pub(super) fn for_test(unc: PathBuf, linux: &str) -> Self {
         Self {
+            etc: unc.join("etc"),
             unc,
             linux: linux.to_owned(),
             workspace_ready: Arc::new(AtomicBool::new(false)),
@@ -141,6 +142,13 @@ impl WslHome {
     /// Hex's workspace as the service in WSL sees it.
     fn linux_workspace(&self) -> String {
         format!("{}/.local/share/hex/opencode", self.linux)
+    }
+
+    /// `host` as a server in this distribution sees it, following `/etc/wsl.conf`'s
+    /// `[automount]`, or `None` when drives aren't automounted or `host` isn't on one.
+    pub(super) fn directory(&self, host: &Path) -> Option<String> {
+        let conf = read_bounded(&self.etc.join("wsl.conf"));
+        linux_directory(conf.as_deref(), host)
     }
 
     /// Creates the workspace in the distribution once and returns the path
@@ -200,6 +208,105 @@ fn linux_path(value: &str) -> Option<String> {
 /// Whether Windows can't name a folder with `character`.
 fn windows_forbidden(character: char) -> bool {
     character.is_control() || "<>:\"|?*".contains(character)
+}
+
+/// `<prefix>\<distribution>\etc`, where a distribution keeps `/etc/passwd` and
+/// `/etc/wsl.conf`.
+fn etc_dir(prefix: &str, distribution: &str) -> Option<PathBuf> {
+    let distribution = distribution_component(distribution)?;
+    Some(PathBuf::from(format!(r"{prefix}\{distribution}\etc")))
+}
+
+/// `/etc/wsl.conf`'s `[automount]` section: drives are mounted under `root`
+/// unless `enabled` is false. A missing or malformed value keeps WSL's
+/// default.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Automount {
+    enabled: bool,
+    root: String,
+}
+
+impl Default for Automount {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            root: "/mnt/".into(),
+        }
+    }
+}
+
+fn automount(conf: &str) -> Automount {
+    let mut automount = Automount::default();
+    let mut in_automount = false;
+    for line in conf.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with(['#', ';']) {
+            continue;
+        }
+        if let Some(section) = line
+            .strip_prefix('[')
+            .and_then(|line| line.strip_suffix(']'))
+        {
+            in_automount = section.trim().eq_ignore_ascii_case("automount");
+            continue;
+        }
+        if !in_automount {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if key.eq_ignore_ascii_case("enabled") {
+            automount.enabled = !value.eq_ignore_ascii_case("false");
+        } else if key.eq_ignore_ascii_case("root")
+            && let Some(root) = automount_root(value)
+        {
+            automount.root = root;
+        }
+    }
+    automount
+}
+
+/// `root = /mnt/` as a mount point with exactly one trailing `/`; a value
+/// that isn't an absolute Linux path is ignored.
+fn automount_root(value: &str) -> Option<String> {
+    if !value.starts_with('/')
+        || value.contains(['\\', '\0'])
+        || value.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(format!("{}/", value.trim_end_matches('/')))
+}
+
+/// A Windows path as a server in the distribution sees it: `X:\a\b` at the
+/// `[automount]` root (`/mnt/x/a/b` by default), or `None` when drives aren't
+/// automounted or `host` isn't on one (a UNC share or a relative path).
+fn linux_directory(conf: Option<&str>, host: &Path) -> Option<String> {
+    let automount = automount(conf.unwrap_or_default());
+    if !automount.enabled {
+        return None;
+    }
+    let text = host.to_string_lossy();
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+    let bytes = text.as_bytes();
+    let drive = bytes.first().copied().filter(u8::is_ascii_alphabetic)?;
+    if bytes.get(1) != Some(&b':') {
+        return None;
+    }
+    let rest = &text[2..];
+    if !rest.is_empty() && !rest.starts_with(['\\', '/']) {
+        return None;
+    }
+    let rest = rest.replace('\\', "/");
+    let rest = rest.trim_end_matches('/');
+    Some(format!(
+        "{}{}{rest}",
+        automount.root,
+        char::from(drive.to_ascii_lowercase())
+    ))
 }
 
 /// The home `/etc/passwd` gives `uid`, when Windows can reach it. A line is
@@ -458,24 +565,20 @@ fn read_passwd(distribution: &str) -> Option<(&'static str, String)> {
 /// `/etc/passwd` in a distribution, through Windows.
 #[cfg(target_os = "windows")]
 fn passwd_path(prefix: &str, distribution: &str) -> Option<PathBuf> {
-    let distribution = distribution_component(distribution)?;
-    Some(PathBuf::from(format!(
-        r"{prefix}\{distribution}\etc\passwd"
-    )))
+    Some(etc_dir(prefix, distribution)?.join("passwd"))
 }
 
-/// Reads at most [`MAX_PASSWD_BYTES`]; a larger file is refused.
-#[cfg(target_os = "windows")]
+/// Reads at most [`MAX_ETC_BYTES`]; a larger file is refused.
 fn read_bounded(path: &Path) -> Option<String> {
     use std::io::Read;
 
     let mut file = fs::File::open(path).ok()?;
     let mut bytes = Vec::new();
     (&mut file)
-        .take(MAX_PASSWD_BYTES + 1)
+        .take(MAX_ETC_BYTES + 1)
         .read_to_end(&mut bytes)
         .ok()?;
-    if bytes.len() as u64 > MAX_PASSWD_BYTES {
+    if bytes.len() as u64 > MAX_ETC_BYTES {
         return None;
     }
     String::from_utf8(bytes).ok()
@@ -847,5 +950,125 @@ mod tests {
         assert!(!should_lookup(None, &AtomicBool::new(true)));
         assert!(should_lookup(None, &open));
         assert!(should_lookup(Some(Duration::from_millis(1)), &open));
+    }
+
+    #[test]
+    fn the_automount_section_gives_the_root_and_can_be_off() {
+        assert_eq!(automount(""), Automount::default());
+        assert_eq!(
+            automount("[boot]\ncommand = /bin/true\nroot = /ignored/\n"),
+            Automount::default(),
+            "a root outside [automount] is ignored"
+        );
+        assert_eq!(
+            automount("[automount]\nroot = /windir/\n"),
+            Automount {
+                enabled: true,
+                root: "/windir/".into()
+            }
+        );
+        assert_eq!(
+            automount("[automount]\nroot = /windir\nenabled = false\n"),
+            Automount {
+                enabled: false,
+                root: "/windir/".into()
+            }
+        );
+        assert_eq!(
+            automount("[AUTOMOUNT]\nROOT = /x/\nENABLED = TRUE\n"),
+            Automount {
+                enabled: true,
+                root: "/x/".into()
+            },
+            "section and key names are case-insensitive"
+        );
+        assert_eq!(
+            automount("[automount]\n# root = /comment/\nroot = /a/\n; root = /b/\nroot = /c/\n"),
+            Automount {
+                enabled: true,
+                root: "/c/".into()
+            },
+            "the last root wins and comments are skipped"
+        );
+        for invalid in ["relative/", r"\\mnt\\", "mnt"] {
+            assert_eq!(
+                automount(&format!("[automount]\nroot = {invalid}\n")),
+                Automount::default(),
+                "{invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_drives_become_paths_under_the_automount_root() {
+        let map = |conf: Option<&str>, path: &str| linux_directory(conf, Path::new(path));
+        assert_eq!(
+            map(None, r"C:\Users\dax\captures\a.scrawl").as_deref(),
+            Some("/mnt/c/Users/dax/captures/a.scrawl")
+        );
+        assert_eq!(
+            map(None, r"\\?\C:\Users\dax\captures\a.scrawl").as_deref(),
+            Some("/mnt/c/Users/dax/captures/a.scrawl"),
+            "the verbatim prefix canonicalize adds is dropped"
+        );
+        assert_eq!(
+            map(None, "D:/captures/a.scrawl").as_deref(),
+            Some("/mnt/d/captures/a.scrawl"),
+            "forward slashes map too"
+        );
+        assert_eq!(map(None, r"C:\").as_deref(), Some("/mnt/c"));
+        assert_eq!(map(None, "C:").as_deref(), Some("/mnt/c"));
+        let custom = Some("[automount]\nroot = /windir/\n");
+        assert_eq!(
+            map(custom, r"C:\Users\dax\a.scrawl").as_deref(),
+            Some("/windir/c/Users/dax/a.scrawl")
+        );
+        assert_eq!(
+            map(Some("[automount]\nenabled = false\n"), r"C:\a").as_deref(),
+            None,
+            "no drives are mounted"
+        );
+        for path in [
+            r"\\server\share\a",
+            r"\\?\UNC\server\share\a",
+            r"relative\a",
+            "C:relative",
+            "",
+        ] {
+            assert_eq!(map(None, path), None, "{path:?}");
+        }
+    }
+
+    #[test]
+    fn a_capture_folder_follows_the_distributions_wsl_conf() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-wsl-directory-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let home = WslHome::for_test(root.join("home"), "/home/dax");
+        fs::create_dir_all(root.join("home/etc")).unwrap();
+        let conf = root.join("home/etc/wsl.conf");
+        let map = |path: &str| home.directory(Path::new(path));
+
+        assert_eq!(
+            map(r"C:\Users\dax\a.scrawl").as_deref(),
+            Some("/mnt/c/Users/dax/a.scrawl")
+        );
+        fs::write(&conf, "[automount]\nroot = /windir/\n").unwrap();
+        assert_eq!(
+            map(r"C:\Users\dax\a.scrawl").as_deref(),
+            Some("/windir/c/Users/dax/a.scrawl")
+        );
+        fs::write(&conf, "[automount]\nenabled = false\n").unwrap();
+        assert_eq!(map(r"C:\Users\dax\a.scrawl"), None);
+        fs::remove_file(&conf).unwrap();
+        assert_eq!(
+            map(r"C:\Users\dax\a.scrawl").as_deref(),
+            Some("/mnt/c/Users/dax/a.scrawl"),
+            "a missing wsl.conf keeps the default"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

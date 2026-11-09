@@ -776,7 +776,10 @@ What a send carries                      // capture.send (router opencode::send_
 │   capture folder. The picture does not depend on the folder, so an OpenCode
 │   server on another machine reads it; the text only names where it was recorded
 ├── Every request goes to the running local service over HTTP
-│   (service.json); a service that isn't up is never started
+│   (service.json); a service that isn't up is never started. On Windows with
+│   Labs › OpenCode in WSL on, a service in the default WSL distribution
+│   answers instead (capture.route), and the prompt names the capture folder
+│   as its Linux `/mnt/…` path
 ├── With an agent host (routing's agentHost), the request body travels on SSH
 │   stdin to a Python 3 standard-library HTTP client. The contact sheet stays
 │   inline; the bundle copy follows the accepted prompt in the background
@@ -857,9 +860,9 @@ Where it goes                            // capture.route; capture.routing's aut
 │           ~/.local/state/opencode, or OPENCODE_PASSWORD), never the password.
 │           The capture stays saved and copied. Check: capture_host::routing
 │           a_look_that_read_no_sessions_answers_unreachable,
-│           a_failed_send_says_what_went_wrong. Known gap (#1131): Hex on
-│           Windows can't read the registration of an OpenCode running in WSL,
-│           so that setup isn't supported
+│           a_failed_send_says_what_went_wrong. On Windows with Labs ›
+│           OpenCode in WSL on, the capture router reaches the WSL service
+│           too (capture.send)
 ├── An answer for a capsule already closed (dismissed, or past its hold)
 │   leaves it closed; `hex capture list` and `send` still offer the capture
 ├── Starting another capture preserves an older rule's accepted pending send;
