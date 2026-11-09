@@ -103,35 +103,34 @@ impl Trigger {
     /// without a key can't tell a double-tap from a chord without
     /// Labs › Double-tap on a lone modifier.
     pub(super) fn unavailable(self, settings: &AppSettings) -> Option<String> {
+        self.unavailable_for(
+            Some(&settings.dictation_hotkey),
+            settings.double_tap_modifiers_allowed(),
+        )
+    }
+
+    /// [`Self::unavailable`] for a Labs › More dictation shortcuts row, whose
+    /// binding is its own. `modifiers_allowed` is Labs › Double-tap on a lone
+    /// modifier, which the row follows as the dictation shortcut does.
+    pub(super) fn unavailable_for(
+        self,
+        binding: Option<&HotkeyBinding>,
+        modifiers_allowed: bool,
+    ) -> Option<String> {
         (self == Self::DoubleTap
-            && settings.dictation_hotkey.key.is_none()
-            && !settings.double_tap_modifiers_allowed())
+            && !modifiers_allowed
+            && binding.is_none_or(|binding| binding.key.is_none()))
         .then(|| {
-            let mut example = settings.dictation_hotkey.clone();
+            let mut example = binding.cloned().unwrap_or_else(|| HotkeyBinding {
+                modifiers: HotkeyModifiers::option(),
+                key: None,
+            });
             example.key = Some(HotkeyKey::named("space"));
             tr_fill(
                 "Needs a shortcut with a key, like {}",
                 &example.keycaps().join("+"),
             )
         })
-    }
-
-    /// [`Self::unavailable`] for a Labs › More dictation shortcuts row, whose
-    /// binding is its own.
-    pub(super) fn unavailable_for(self, binding: Option<&HotkeyBinding>) -> Option<String> {
-        (self == Self::DoubleTap && binding.is_none_or(|binding| binding.key.is_none())).then(
-            || {
-                let mut example = binding.cloned().unwrap_or_else(|| HotkeyBinding {
-                    modifiers: HotkeyModifiers::option(),
-                    key: None,
-                });
-                example.key = Some(HotkeyKey::named("space"));
-                tr_fill(
-                    "Needs a shortcut with a key, like {}",
-                    &example.keycaps().join("+"),
-                )
-            },
-        )
     }
 
     /// The choice that saves `mode` on a Labs › More dictation shortcuts row.
@@ -286,5 +285,38 @@ mod tests {
         for trigger in [Trigger::HoldOrDoubleTap, Trigger::Hold, Trigger::Tap] {
             assert!(trigger.unavailable(&settings(false)).is_none());
         }
+    }
+
+    /// A Labs › More dictation shortcuts row follows Labs › Double-tap on a
+    /// lone modifier as the dictation shortcut does.
+    #[test]
+    fn a_row_needs_a_key_or_the_lone_modifier_lab() {
+        let lone = HotkeyBinding {
+            modifiers: HotkeyModifiers::option(),
+            key: None,
+        };
+        let keyed = HotkeyBinding {
+            key: Some(HotkeyKey::named("space")),
+            ..lone.clone()
+        };
+        assert!(
+            Trigger::DoubleTap
+                .unavailable_for(Some(&lone), false)
+                .is_some()
+        );
+        assert!(Trigger::DoubleTap.unavailable_for(None, false).is_some());
+        // The lab lets a lone modifier double-tap, and an unbound row keep
+        // the choice until it is bound.
+        assert!(
+            Trigger::DoubleTap
+                .unavailable_for(Some(&lone), true)
+                .is_none()
+        );
+        assert!(Trigger::DoubleTap.unavailable_for(None, true).is_none());
+        assert!(
+            Trigger::DoubleTap
+                .unavailable_for(Some(&keyed), false)
+                .is_none()
+        );
     }
 }

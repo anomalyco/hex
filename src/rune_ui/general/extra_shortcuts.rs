@@ -67,7 +67,8 @@ fn extra_row(ui: &Ui, p: Paint, index: usize, layer: &mut Vec<El>) -> CardRow {
 }
 
 /// Row `index`'s shortcut mode: the choices its binding can trigger, in the
-/// dictation shortcut's order. Double-tap needs a key, as it does there.
+/// dictation shortcut's order. Double-tap needs a key, or Labs › Double-tap
+/// on a lone modifier, as it does there.
 fn mode_select(
     ui: &Ui,
     p: Paint,
@@ -77,9 +78,10 @@ fn mode_select(
 ) -> Option<El> {
     let menu = *MODE_MENUS.get(index)?;
     let trigger = Trigger::from_extra(ui.settings.extra_dictation_mode(index));
+    let modifiers_allowed = ui.settings.double_tap_modifiers_allowed();
     let available: Vec<Trigger> = Trigger::ALL
         .into_iter()
-        .filter(|choice| choice.unavailable_for(binding).is_none())
+        .filter(|choice| choice.unavailable_for(binding, modifiers_allowed).is_none())
         .collect();
     let labels: Vec<&'static str> = available.iter().map(|choice| choice.name()).collect();
     let selected = available

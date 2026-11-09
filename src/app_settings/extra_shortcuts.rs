@@ -21,7 +21,8 @@ pub enum ExtraDictationMode {
     /// Tap to talk hands-free, tap again to paste.
     Tap,
     /// Double-tap to talk hands-free, tap again to paste. Needs a binding
-    /// with a key; a lone modifier folds to [`Self::HoldOrDoubleTap`].
+    /// with a key, or with Labs › Double-tap on a lone modifier, one without
+    /// a key; otherwise it folds to [`Self::HoldOrDoubleTap`].
     DoubleTap,
 }
 
@@ -49,10 +50,14 @@ impl ExtraDictationMode {
     }
 
     /// `self`, folded to a mode its binding can trigger: double-tap only
-    /// needs a shortcut with a key, as `normalize_double_tap_settings` folds
-    /// the dictation shortcut's.
-    pub fn for_binding(self, binding: Option<&HotkeyBinding>) -> Self {
-        if self == Self::DoubleTap && binding.is_none_or(|binding| binding.key.is_none()) {
+    /// needs a shortcut with a key or, with `modifiers_allowed` (Labs ›
+    /// Double-tap on a lone modifier), a shortcut without one, as
+    /// `normalize_double_tap_settings` folds the dictation shortcut's.
+    pub fn for_binding(self, binding: Option<&HotkeyBinding>, modifiers_allowed: bool) -> Self {
+        if self == Self::DoubleTap
+            && !modifiers_allowed
+            && binding.is_none_or(|binding| binding.key.is_none())
+        {
             Self::HoldOrDoubleTap
         } else {
             self
@@ -91,7 +96,8 @@ impl AppSettings {
         self.extra_dictation_hotkeys
             .get(index)
             .map_or_else(ExtraDictationMode::default, |row| {
-                row.mode.for_binding(row.binding.as_ref())
+                row.mode
+                    .for_binding(row.binding.as_ref(), self.double_tap_modifiers_allowed())
             })
     }
 
@@ -159,20 +165,80 @@ mod tests {
         assert_eq!(ExtraDictationMode::ALL.len(), 4);
     }
 
-    /// Double-tap only needs a binding with a key; without one it folds to
-    /// hold-or-double-tap, as the dictation shortcut's mode does.
+    /// Double-tap only needs a binding with a key, or Labs › Double-tap on a
+    /// lone modifier; without either it folds to hold-or-double-tap, as the
+    /// dictation shortcut's mode does.
     #[test]
-    fn double_tap_folds_away_without_a_key() {
+    fn double_tap_folds_away_without_a_key_or_the_lab() {
         for mode in ExtraDictationMode::ALL {
-            assert_eq!(mode.for_binding(Some(&keyed())), mode);
+            assert_eq!(mode.for_binding(Some(&keyed()), false), mode);
+            assert_eq!(mode.for_binding(Some(&keyed()), true), mode);
         }
         assert_eq!(
-            ExtraDictationMode::DoubleTap.for_binding(Some(&modifier_only())),
+            ExtraDictationMode::DoubleTap.for_binding(Some(&modifier_only()), false),
             ExtraDictationMode::HoldOrDoubleTap
         );
         assert_eq!(
-            ExtraDictationMode::DoubleTap.for_binding(None),
+            ExtraDictationMode::DoubleTap.for_binding(None, false),
             ExtraDictationMode::HoldOrDoubleTap
+        );
+        // Labs › Double-tap on a lone modifier keeps Double-tap on a shortcut
+        // without a key, as it does the dictation shortcut's; an unbound row
+        // keeps the choice too, and folds it once it gets a lone modifier
+        // with the lab off.
+        assert_eq!(
+            ExtraDictationMode::DoubleTap.for_binding(Some(&modifier_only()), true),
+            ExtraDictationMode::DoubleTap
+        );
+        assert_eq!(
+            ExtraDictationMode::DoubleTap.for_binding(None, true),
+            ExtraDictationMode::DoubleTap
+        );
+    }
+
+    /// The row reads its mode the way the dictation shortcut does: a lone
+    /// modifier keeps Double-tap exactly while the lab allows it.
+    #[test]
+    fn a_rows_double_tap_follows_the_lone_modifier_lab() {
+        let mut settings = AppSettings::default();
+        let index = settings.add_extra_dictation_hotkey().unwrap();
+        settings.extra_dictation_hotkeys[index] = ExtraDictationHotkey {
+            binding: Some(modifier_only()),
+            mode: ExtraDictationMode::DoubleTap,
+        };
+        assert_eq!(
+            settings.extra_dictation_mode(index),
+            if settings.double_tap_modifiers_allowed() {
+                ExtraDictationMode::DoubleTap
+            } else {
+                ExtraDictationMode::HoldOrDoubleTap
+            }
+        );
+        // Loading folds the same way, as it folds a saved double-tap-only
+        // start.
+        settings.repair_extra_dictation_shortcuts();
+        assert_eq!(
+            settings.extra_dictation_hotkeys[index].mode,
+            ExtraDictationMode::DoubleTap.for_binding(
+                Some(&modifier_only()),
+                settings.double_tap_modifiers_allowed()
+            )
+        );
+        // Turning the lab off folds the saved mode; a keyed row keeps its
+        // own.
+        settings.extra_dictation_hotkeys[index].mode = ExtraDictationMode::DoubleTap;
+        settings.labs.double_tap_modifiers = false;
+        settings.normalize_double_tap_settings();
+        assert_eq!(
+            settings.extra_dictation_hotkeys[index].mode,
+            ExtraDictationMode::HoldOrDoubleTap
+        );
+        settings.extra_dictation_hotkeys[index].binding = Some(keyed());
+        settings.extra_dictation_hotkeys[index].mode = ExtraDictationMode::DoubleTap;
+        settings.normalize_double_tap_settings();
+        assert_eq!(
+            settings.extra_dictation_hotkeys[index].mode,
+            ExtraDictationMode::DoubleTap
         );
     }
 

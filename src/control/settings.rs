@@ -1238,9 +1238,13 @@ pub fn apply(
                     )?;
                 }
             }
-            // A row without a key can't be double-tap only.
+            // A row can't be double-tap only without a key, or with Labs ›
+            // Double-tap on a lone modifier, without a key but modifiers.
+            let modifiers_allowed = candidate.double_tap_modifiers_allowed();
             for row in &mut candidate.extra_dictation_hotkeys {
-                row.mode = row.mode.for_binding(row.binding.as_ref());
+                row.mode = row
+                    .mode
+                    .for_binding(row.binding.as_ref(), modifiers_allowed);
             }
         }
         "keyboard_model_switching.mappings" => {

@@ -800,6 +800,17 @@ fn globe_key_events_are_not_a_chord_with_the_function_shortcut() {
     };
     assert!(!is_chord_evidence(GLOBE_KEY_CODE, FUNCTION_KEY_MASK, extra));
     assert!(is_chord_evidence(0, FUNCTION_KEY_MASK, extra));
+    // Only the dictation shortcuts own Globe: any other shortcut holding Fn
+    // leaves it as chord evidence.
+    let paste_last = RuntimeHotkeys {
+        paste_last: Some(function_binding()),
+        ..RuntimeHotkeys::default()
+    };
+    assert!(is_chord_evidence(
+        GLOBE_KEY_CODE,
+        FUNCTION_KEY_MASK,
+        paste_last
+    ));
 }
 
 #[test]
