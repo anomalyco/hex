@@ -9,7 +9,6 @@
 //! failed stage keeps its input, exactly as a paste's processing does.
 
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use super::HttpResponse;
 
@@ -127,11 +126,11 @@ pub(super) fn wanted(path: &str) -> Result<bool, &'static str> {
 /// personal-commands host apply without a restart.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn dictation_processor(
-    modes: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
-    transformations: Arc<crate::personal_commands::TransformationClient>,
+    processing: crate::dictation::modes::ProcessingState,
 ) -> Processor {
     Arc::new(move |raw, language| {
-        let modes = modes
+        let modes = processing
+            .modes
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .clone();
@@ -140,7 +139,7 @@ pub(crate) fn dictation_processor(
                 raw,
                 language,
                 &crate::dictation::context::ContextSnapshot::default(),
-                &transformations,
+                &processing.transformations,
                 crate::dictation::processor::Source::Dictation,
             )
             .text

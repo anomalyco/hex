@@ -85,6 +85,31 @@ impl ModeRuntime {
     }
 }
 
+/// The live mode runtime and transformation client a listener shares with
+/// the local API's `process=global` processor, so saved settings and the
+/// personal-commands host apply to both.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[derive(Clone)]
+pub struct ProcessingState {
+    pub modes: std::sync::Arc<std::sync::RwLock<ModeRuntime>>,
+    pub transformations: std::sync::Arc<crate::personal_commands::TransformationClient>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+impl ProcessingState {
+    /// Reads `settings` once; a listener replaces `modes` as settings change.
+    pub fn from_settings(settings: &AppSettings) -> Self {
+        Self {
+            modes: std::sync::Arc::new(std::sync::RwLock::new(ModeRuntime::from_settings(
+                settings,
+            ))),
+            transformations: std::sync::Arc::new(
+                crate::personal_commands::TransformationClient::default(),
+            ),
+        }
+    }
+}
+
 /// Whether anything set up in `settings` looks at the focused page: a mode
 /// chosen by website, an OpenCode rewrite (its prompt names the site), or a
 /// script transformation (it receives the page address). Every OS asks the

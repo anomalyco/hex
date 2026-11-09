@@ -236,19 +236,13 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         .map_err(|_| eyre!("the Hex runtime already started"))?;
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
     let (dictation_controls, dictations) = mpsc::sync_channel(8);
-    let mode_runtime = Arc::new(std::sync::RwLock::new(
-        crate::dictation::modes::ModeRuntime::from_settings(&settings),
-    ));
-    let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
+    let processing = crate::dictation::modes::ProcessingState::from_settings(&settings);
     let local_api = crate::local_api::LocalApi::start_for_app(
         &event_path,
         control_calls,
         Some(dictation_controls),
         Some(crate::local_api::Processing::installed(
-            crate::local_api::processing::dictation_processor(
-                mode_runtime.clone(),
-                transformations.clone(),
-            ),
+            crate::local_api::processing::dictation_processor(processing.clone()),
         )),
     );
     let quit = window.clone();
@@ -268,8 +262,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                 hud,
                 runtime_tray.as_deref(),
                 dictations.into(),
-                mode_runtime,
-                transformations,
+                processing,
             );
             quit.quit();
         })?;
@@ -327,8 +320,7 @@ fn run_runtime(
     indicator: crate::rune_hud::HudSender,
     tray: Option<&rune::Tray>,
     dictations: crate::dictation::service::DictationQueue,
-    mode_runtime: Arc<std::sync::RwLock<crate::dictation::modes::ModeRuntime>>,
-    transformations: Arc<crate::personal_commands::TransformationClient>,
+    processing: crate::dictation::modes::ProcessingState,
 ) {
     let mut tray_view = None;
     let mut tray_meetings = None;
@@ -340,8 +332,7 @@ fn run_runtime(
         history,
         indicator,
         dictations,
-        mode_runtime,
-        transformations,
+        processing,
     );
     loop {
         let mut next = match requests.recv_timeout(RUNTIME_TICK) {

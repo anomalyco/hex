@@ -186,13 +186,9 @@ impl DictationOutput {
     /// Reuses the mode runtime and transformation client the local API's
     /// `process=global` reads, so both see the same settings and personal
     /// commands host.
-    pub(crate) fn sharing(
-        mut self,
-        modes: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
-        transformations: Arc<crate::personal_commands::TransformationClient>,
-    ) -> Self {
-        self.modes = modes;
-        self.transformations = transformations;
+    pub(crate) fn sharing(mut self, processing: crate::dictation::modes::ProcessingState) -> Self {
+        self.modes = processing.modes;
+        self.transformations = processing.transformations;
         self
     }
 

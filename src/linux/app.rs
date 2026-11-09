@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -444,19 +444,13 @@ pub(crate) fn run(
     crate::transcription::local_transcriber::initialize_backends();
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
     let (dictation_controls, dictations) = mpsc::sync_channel(8);
-    let modes = Arc::new(RwLock::new(
-        crate::dictation::modes::ModeRuntime::from_settings(&launch.settings),
-    ));
-    let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
+    let processing = crate::dictation::modes::ProcessingState::from_settings(&launch.settings);
     let local_api = crate::local_api::LocalApi::start_for_app(
         &event_path,
         control_calls,
         Some(dictation_controls),
         Some(crate::local_api::Processing::installed(
-            crate::local_api::processing::dictation_processor(
-                modes.clone(),
-                transformations.clone(),
-            ),
+            crate::local_api::processing::dictation_processor(processing.clone()),
         )),
     );
     let enable_on_launch = launch.settings.enable_on_launch;
@@ -464,8 +458,7 @@ pub(crate) fn run(
         event_path,
         launch,
         crate::updater::Updater::start(),
-        modes,
-        transformations,
+        processing,
     );
     host.dictations = dictations.into();
     if enable_on_launch {
@@ -600,8 +593,7 @@ impl LinuxDesktopHost {
         event_path: PathBuf,
         launch: crate::app_settings::LaunchLoad,
         updater: crate::updater::Updater,
-        modes: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
-        transformations: Arc<crate::personal_commands::TransformationClient>,
+        processing: crate::dictation::modes::ProcessingState,
     ) -> Self {
         let crate::app_settings::LaunchLoad { settings, note } = launch;
         let failed = matches!(note, Some(crate::app_settings::LaunchNote::Failed(_)));
@@ -618,7 +610,7 @@ impl LinuxDesktopHost {
                 .ok()
         };
         let output = crate::linux::dictation::DictationOutput::from_settings(&settings, history)
-            .sharing(modes, transformations);
+            .sharing(processing);
         // Known before the first poll, so launching keeps the saved model
         // instead of applying the current layout's mapping.
         let keyboard_switcher = crate::transcription::keyboard_model_switching::Switcher::new(
@@ -1484,16 +1476,12 @@ mod tests {
     };
 
     fn test_host(launch: crate::app_settings::LaunchLoad) -> LinuxDesktopHost {
-        let modes = Arc::new(RwLock::new(
-            crate::dictation::modes::ModeRuntime::from_settings(&launch.settings),
-        ));
-        let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
+        let processing = crate::dictation::modes::ProcessingState::from_settings(&launch.settings);
         LinuxDesktopHost::new(
             PathBuf::new(),
             launch,
             crate::updater::Updater::idle(),
-            modes,
-            transformations,
+            processing,
         )
     }
 

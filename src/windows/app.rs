@@ -197,8 +197,7 @@ impl WindowsDesktopHost {
         history: Option<History>,
         indicator: crate::rune_hud::HudSender,
         dictations: crate::dictation::service::DictationQueue,
-        mode_runtime: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
-        transformations: Arc<crate::personal_commands::TransformationClient>,
+        processing: crate::dictation::modes::ProcessingState,
     ) -> Self {
         crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let mut event_reader = EventReader::open(&event_path);
@@ -233,8 +232,8 @@ impl WindowsDesktopHost {
             history,
             last_dictation: Arc::new(Mutex::new(None)),
             indicator,
-            mode_runtime,
-            transformations,
+            mode_runtime: processing.modes,
+            transformations: processing.transformations,
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
             preparation: TranscriptionPreparation::default(),
