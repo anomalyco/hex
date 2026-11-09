@@ -67,6 +67,9 @@ impl Feature {
             Self::TapOrHold => {
                 "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
             }
+            Self::DoubleTapModifiers => {
+                "Double-tap shortcut mode accepts a shortcut that is a modifier alone, such as Option or Globe"
+            }
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
             }

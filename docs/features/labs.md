@@ -56,6 +56,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Smart spacing   no    labs.smart_spacing           (macOS)   a dictation pasted right after a word gets one leading space (#632)
 ├── Sided modifier chords no labs.sided_modifier_chords (macOS) the recorder keeps each modifier's side in a modifier-only chord: R⌘ R⌥ (#710)
 ├── Tap or hold      no    labs.tap_or_hold             (macOS, Linux) in Toggle mode, a press held past 300 ms dictates until it lifts; a short tap still locks (#711, #1144)
+├── Double-tap on a lone modifier no labs.double_tap_modifiers (macOS, Windows) Double-tap shortcut mode takes a shortcut that is a modifier alone, such as Option or Globe; two complete taps start hands-free, one tap or a hold does nothing
 ├── Sort and filter models no labs.picker_sort_filter   the Local transcription picker sorts by recommendation, size, or name and can show only models for the saved language (#645)
 ├── Benchmark details no  labs.benchmark_details        picker rows show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
@@ -758,6 +759,45 @@ and `tap_or_hold_still_discards_a_chord_and_off_keeps_plain_toggle` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real Mac or Linux desktop
 (X11 grab or Wayland portal) with the toggle on; the Linux Labs page goldens
 need regenerating with the new row.
+
+Double-tap on a lone modifier (`double-tap-modifiers`, macOS and Windows):
+Double-tap shortcut mode works with a dictation shortcut that is a modifier
+alone, such as Option or Globe. On macOS the gate is the shortcut machine
+(`DictationHotkey` in [suppression/hotkey.rs](../../src/suppression/hotkey.rs)),
+which asks `labs::double_tap_modifiers()` as the mode is applied; with it on,
+a modifier-only binding keeps `double_tap_only` instead of the mode falling
+back to Hold or double-tap. The runtime gate,
+`app_settings::double_tap_only()` (filled by `apply_runtime`), also accepts a
+modifier-only binding while the lab is on. The state machine is the existing one: the first
+complete tap arms the window silently, one tap or a hold starts nothing, two
+complete taps inside 300 ms lock a hands-free capture, a fresh press finishes
+it, and Escape still reaches the app. A key, mouse button, or extra modifier
+between the taps makes it a chord and the machine goes Dirty, as before.
+Modifier flag events are never suppressed, so a lone Option or Globe press
+and release reach the focused app unchanged. It applies to every macOS
+`DictationHotkey` that takes the mode (the primary shortcut, Dictate without
+processing, and the second dictation shortcut). On Windows the same saved
+`double_tap_only` reaches the keyboard hook's `CaptureState::press`, whose
+double-tap-only path already handles a modifier-only binding; no new machine
+there. Off, the persisted normalization clears `double_tap_only` for a
+modifier-only binding exactly as a fresh load does, Double-tap is dimmed in
+the Shortcut mode modal, and `hex settings set double_tap_only on` refuses
+it. Linux has no modifier-only dictation shortcuts, so the lab is not listed
+there and its shortcut machine keeps its key requirement.
+
+Checks: `double_tap_only_with_the_lab_starts_from_a_lone_modifier` (Option
+and Fn), `double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord`,
+and `without_the_lab_double_tap_only_stays_off_for_a_lone_modifier` in
+[suppression/tests.rs](../../src/suppression/tests.rs) (macOS only);
+`double_tap_only_on_a_lone_modifier_needs_the_lab` and
+`turning_the_double_tap_modifiers_lab_off_falls_back_as_a_fresh_load` in
+[app_settings.rs](../../src/app_settings.rs);
+`double_tap_only_takes_a_lone_modifier_with_the_lab` in
+[control/settings.rs](../../src/control/settings.rs);
+`double_tap_modifiers_is_its_own_bit_and_macos_or_windows_only` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real double-tap on Option
+or Globe on a Mac or Windows PC; `mac-labs` and `windows-labs` goldens change
+with the new row.
 
 Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
 on, the speech model picker's Every model view shows one row between its

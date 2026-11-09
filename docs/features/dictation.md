@@ -768,7 +768,10 @@ General > Shortcut mode (under Shortcut)               // dictate.shortcut-mode
   Hold or double-tap (default) -> Hold, plus double-tap to lock
   Hold                         -> Hold only
   Tap                          -> Toggle, below
-  Double-tap                   -> Double-tap only; needs a key binding
+  Double-tap                   -> Double-tap only; needs a key binding, or a
+                                  modifier alone with Labs › Double-tap on a
+                                  lone modifier (labs.double_tap_modifiers,
+                                  macOS and Windows, off by default)
 Tap
   Press -> Start (pre-roll as usual) -> Release keeps recording
   -> Fresh shortcut press -> Finish (with the release tail)
@@ -820,7 +823,8 @@ General > Shortcut mode                               // dictate.shortcut-explai
      edge; opening it ends a shortcut recording and closes the model picker
   ├── The current choice has a focus-coloured border
   ├── Double-tap with a lone modifier -> Dimmed, takes no focus or press,
-  │   says "Needs a shortcut with a key, like ⌥Space"
+  │   says "Needs a shortcut with a key, like ⌥Space", unless Labs ›
+  │   Double-tap on a lone modifier is on (macOS and Windows)
   ├── Long chord -> The panel widens (up to the window) so each option's
   │   lanes keep at least 64 pt beside the keycaps
   ├── Pick an option (click, Space) -> Saves the choice
@@ -870,7 +874,8 @@ Shortcut mode = Hold or double-tap or Double-tap     // dictate.lock
     └── Slow second release -> No lock
 
 Shortcut mode = Double-tap                           // dictate.double-tap-only
-  Requires a key binding AND locking enabled
+  Requires a key binding AND locking enabled, or a modifier-only binding
+  with Labs › Double-tap on a lone modifier on (macOS and Windows)
   Single press/hold -> No capture                     // disables hold, not a toggle
   Same two qualifying complete taps -> LOCKED         // same lock, not a third mode
 
@@ -884,6 +889,9 @@ Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `callback_hold_and_double_tap_boundaries_are_milliseconds`,
 `second_tap_finishes_as_press_and_hold_when_double_tap_cannot_lock`,
 `double_tap_only_waits_for_two_complete_key_chord_taps`,
+`double_tap_only_with_the_lab_starts_from_a_lone_modifier`,
+`double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord`,
+`without_the_lab_double_tap_only_stays_off_for_a_lone_modifier`,
 `locked_dictation_finishes_after_a_missing_key_release`.
 These cover gesture decisions, not hardware keyboard-layout or remapping equivalence.
 

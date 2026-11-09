@@ -75,6 +75,9 @@ pub struct LabsSettings {
     pub sided_modifier_chords: bool,
     /// In Toggle mode, a press held past the hold threshold dictates until it lifts (macOS, issue 711).
     pub tap_or_hold: bool,
+    /// Double-tap-only accepts a dictation shortcut that is a modifier alone,
+    /// such as Option or Globe (macOS, Windows).
+    pub double_tap_modifiers: bool,
     /// The picker shows each model's raw error rate, benchmark, source, and conditions (issue 647).
     pub benchmark_details: bool,
     /// Parakeet Ultra joins the Local transcription picker (issue 648).
@@ -187,6 +190,7 @@ impl Default for LabsSettings {
             picker_sort_filter: false,
             sided_modifier_chords: false,
             tap_or_hold: false,
+            double_tap_modifiers: false,
             benchmark_details: false,
             parakeet_ultra: false,
             standalone_special_keys: false,

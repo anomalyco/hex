@@ -2700,6 +2700,104 @@ fn double_tap_only_timeout_and_unrelated_chord_never_start_capture() {
 }
 
 #[test]
+fn double_tap_only_with_the_lab_starts_from_a_lone_modifier() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    for (binding, flags) in [
+        (option_binding(), OPTION_KEY_MASK),
+        (function_binding(), FUNCTION_KEY_MASK),
+    ] {
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+        hotkey.double_tap_modifiers = || true;
+        hotkey.set_double_tap_only(true);
+
+        // One complete tap arms the window and records nothing.
+        assert_eq!(hotkey.process(InputEvent::Flags(flags), ms(0)), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
+        assert!(!hotkey.is_recording());
+
+        // A hold records nothing either, and keeps the modifier's own use.
+        assert_eq!(hotkey.process(InputEvent::Flags(flags), ms(400)), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(1_000)), None);
+        assert!(!hotkey.is_recording());
+
+        // Two complete taps inside the window lock a hands-free capture.
+        assert_eq!(hotkey.process(InputEvent::Flags(flags), ms(1_400)), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(1_480)), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(flags), ms(1_580)), None);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), ms(1_660)),
+            Some(HotkeyAction::Start)
+        );
+        assert!(hotkey.is_locked());
+
+        // A fresh press finishes it.
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(flags), ms(2_200)),
+            Some(HotkeyAction::Finish)
+        );
+        assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(2_280)), None);
+        assert!(!hotkey.is_recording());
+    }
+}
+
+#[test]
+fn double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, option_binding());
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(0)),
+        None
+    );
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
+    // Option plus a key between the taps is a chord meant for another app.
+    for (at, down) in [(ms(120), true), (ms(140), false)] {
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Key {
+                    code: 0,
+                    down,
+                    flags: OPTION_KEY_MASK,
+                },
+                at,
+            ),
+            None
+        );
+    }
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(160)), None);
+    // The next complete tap is a fresh first tap, not a second one.
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(200)),
+        None
+    );
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(280)), None);
+    assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn without_the_lab_double_tap_only_stays_off_for_a_lone_modifier() {
+    let now = capture_time();
+    for (binding, flags) in [
+        (option_binding(), OPTION_KEY_MASK),
+        (function_binding(), FUNCTION_KEY_MASK),
+    ] {
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
+        hotkey.double_tap_modifiers = || false;
+        hotkey.set_double_tap_only(true);
+        // The press is an ordinary hold, exactly as before the lab.
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(flags), now),
+            Some(HotkeyAction::Start)
+        );
+        assert!(!hotkey.is_locked());
+    }
+}
+
+#[test]
 fn modifier_chord_requires_the_exact_binding_to_start() {
     let now = capture_time();
     let binding = RuntimeHotkey {

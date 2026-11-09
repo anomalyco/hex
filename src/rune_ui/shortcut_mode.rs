@@ -2,7 +2,8 @@
 //! of the three saved settings behind it (`shortcut_mode`, `double_tap_lock`,
 //! `double_tap_only`). Of their eight combinations only four behave
 //! differently: Toggle ignores both double-tap settings, and double-tap only
-//! needs the lock and a shortcut with a key. General's row names the choice
+//! needs the lock and a shortcut with a key (or, with Labs › Double-tap on a
+//! lone modifier, a modifier alone). General's row names the choice
 //! and opens the modal in `explainer` that makes it.
 
 use rune::El;
@@ -38,7 +39,9 @@ impl Trigger {
             ShortcutMode::Toggle => Self::Tap,
             ShortcutMode::Hold if !settings.double_tap_lock => Self::Hold,
             ShortcutMode::Hold
-                if settings.double_tap_only && settings.dictation_hotkey.key.is_some() =>
+                if settings.double_tap_only
+                    && (settings.dictation_hotkey.key.is_some()
+                        || settings.double_tap_modifiers_allowed()) =>
             {
                 Self::DoubleTap
             }
@@ -95,9 +98,13 @@ impl Trigger {
     }
 
     /// Why this shortcut can't trigger this way, if it can't: a lone
-    /// modifier can't tell a double-tap from a chord.
+    /// modifier can't tell a double-tap from a chord without
+    /// Labs › Double-tap on a lone modifier.
     pub(super) fn unavailable(self, settings: &AppSettings) -> Option<String> {
-        (self == Self::DoubleTap && settings.dictation_hotkey.key.is_none()).then(|| {
+        (self == Self::DoubleTap
+            && settings.dictation_hotkey.key.is_none()
+            && !settings.double_tap_modifiers_allowed())
+        .then(|| {
             let mut example = settings.dictation_hotkey.clone();
             example.key = Some(HotkeyKey::named("space"));
             tr_fill(

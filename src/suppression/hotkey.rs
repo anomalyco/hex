@@ -117,6 +117,14 @@ const TAP_OR_HOLD: fn() -> bool = if cfg!(test) {
     crate::labs::tap_or_hold
 };
 
+/// Labs › Double-tap on a lone modifier. Unit tests turn it on per machine,
+/// as they do Tap or hold.
+const DOUBLE_TAP_MODIFIERS: fn() -> bool = if cfg!(test) {
+    || false
+} else {
+    crate::labs::double_tap_modifiers
+};
+
 pub struct DictationHotkey {
     state: State,
     pressed_keys: HashSet<u16>,
@@ -127,6 +135,9 @@ pub struct DictationHotkey {
     /// Labs › Tap or hold, read at each Toggle release: a press held past
     /// the hold threshold finishes on release instead of locking.
     tap_or_hold: fn() -> bool,
+    /// Labs › Double-tap on a lone modifier, read as the mode is applied: a
+    /// modifier-only binding may start a double-tap-only capture.
+    double_tap_modifiers: fn() -> bool,
     binding: RuntimeHotkey,
     /// Toggle's cancel shortcut; `None` in Hold mode.
     cancel: Option<RuntimeHotkey>,
@@ -180,6 +191,7 @@ impl DictationHotkey {
             double_tap_only: false,
             toggle: false,
             tap_or_hold: TAP_OR_HOLD,
+            double_tap_modifiers: DOUBLE_TAP_MODIFIERS,
             binding,
             cancel: None,
             ignore_before: None,
@@ -231,8 +243,8 @@ impl DictationHotkey {
     }
 
     pub fn set_double_tap_only(&mut self, enabled: bool) {
-        self.double_tap_only =
-            enabled && self.binding.key_code.is_some() && self.double_tap_enabled;
+        let modifier_only = self.binding.key_code.is_some() || (self.double_tap_modifiers)();
+        self.double_tap_only = enabled && modifier_only && self.double_tap_enabled;
         // Active captures still need their release to reach the audio owner.
         if !self.double_tap_only && self.state.is_pending_gesture() {
             self.state = State::IDLE;
