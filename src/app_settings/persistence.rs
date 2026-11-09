@@ -154,6 +154,7 @@ impl AppSettings {
         #[cfg(target_os = "linux")]
         settings.repair_section_key();
         settings.normalize_double_tap_settings();
+        settings.repair_extra_dictation_shortcuts();
         settings.migrate_legacy_replacements();
         settings.normalize_mode_application_names();
         settings.migrate_disabled_transcription_model();

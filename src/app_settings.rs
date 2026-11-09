@@ -18,6 +18,7 @@ use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection}
 #[cfg(hex_capture)]
 mod capture;
 mod dictation_processing;
+mod extra_shortcuts;
 mod hotkeys;
 mod labs;
 mod meeting_folder;
@@ -34,6 +35,7 @@ pub use capture::*;
 pub use dictation_processing::{
     DictationMode, DictationPostProcessing, DictationProcessingSettings,
 };
+pub use extra_shortcuts::*;
 pub use hotkeys::*;
 pub use labs::*;
 pub use meeting_folder::default_meeting_output_folder;
@@ -285,6 +287,12 @@ pub struct AppSettings {
     /// exactly as `dictation_hotkey` does (macOS). Unbound by default and
     /// ignored while its Labs toggle is off.
     pub second_dictation_hotkey: Option<HotkeyBinding>,
+    /// Labs › More dictation shortcuts (macOS): up to
+    /// [`MAX_EXTRA_DICTATION_SHORTCUTS`] more, each with its own binding and
+    /// activation mode. Saved rows stay while the Lab is off but never
+    /// register or match.
+    #[serde(default)]
+    pub extra_dictation_hotkeys: Vec<ExtraDictationHotkey>,
     /// Labs › Terminal paste shortcut: another shortcut that dictates like
     /// `dictation_hotkey` and always pastes with Ctrl+Shift+V (Windows,
     /// Linux). Unbound by default and ignored while its Labs toggle is off.
@@ -428,6 +436,7 @@ impl Default for AppSettings {
             raw_dictation_hotkey: None,
             typed_text_hotkey: None,
             second_dictation_hotkey: None,
+            extra_dictation_hotkeys: Vec::new(),
             terminal_paste_hotkey: None,
             show_dock_icon: true,
             transcription: default_transcription(),
@@ -1022,6 +1031,11 @@ impl AppSettings {
             second_dictation: self
                 .active_second_dictation_hotkey()
                 .map(HotkeyBinding::runtime),
+            extra_dictation: std::array::from_fn(|index| {
+                self.active_extra_dictation_hotkey(index)
+                    .map(HotkeyBinding::runtime)
+            }),
+            extra_dictation_modes: std::array::from_fn(|index| self.extra_dictation_mode(index)),
             cancel: self.active_cancel_hotkey().map(HotkeyBinding::runtime),
         }
     }
@@ -1168,15 +1182,6 @@ impl AppSettings {
     }
 }
 
-pub fn hotkey_conflicts(
-    candidate: &HotkeyBinding,
-    others: impl IntoIterator<Item = HotkeyBinding>,
-) -> bool {
-    others
-        .into_iter()
-        .any(|binding| candidate.overlaps(&binding))
-}
-
 /// A shortcut Settings and `hex settings` record.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HotkeySlot {
@@ -1192,6 +1197,8 @@ pub enum HotkeySlot {
     CaptureReplay,
     /// Labs › Second dictation shortcut (macOS).
     SecondDictation,
+    /// Labs › More dictation shortcuts (macOS): row `index`'s binding.
+    ExtraDictation(usize),
     /// Labs › Terminal paste shortcut (Windows, Linux).
     TerminalPaste,
     /// Toggle mode's cancel shortcut.
@@ -1200,79 +1207,6 @@ pub enum HotkeySlot {
     Screenshot,
     /// Labs › Screenshots' record shortcut (macOS, with Annotate).
     ScreenshotRecord,
-}
-
-impl AppSettings {
-    /// Whether `binding` overlaps a shortcut `slot` must not share: the other
-    /// active shortcuts and, where meetings exist (macOS), meeting paste. The
-    /// two capture shortcuts never share a key, on or off, since turning
-    /// captures on can't pull them apart.
-    pub fn hotkey_in_use(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
-        let mut others = Vec::new();
-        if slot != HotkeySlot::Dictation {
-            others.push(self.dictation_hotkey.clone());
-        }
-        if slot != HotkeySlot::PasteLast
-            && let Some(paste) = &self.paste_last_hotkey
-        {
-            others.push(paste.clone());
-        }
-        if slot != HotkeySlot::RawDictation
-            && let Some(raw) = &self.raw_dictation_hotkey
-        {
-            others.push(raw.clone());
-        }
-        if slot != HotkeySlot::TypedText
-            && cfg!(target_os = "linux")
-            && self.labs.typed_text
-            && let Some(typed) = &self.typed_text_hotkey
-        {
-            others.push(typed.clone());
-        }
-        if slot != HotkeySlot::Cancel {
-            others.push(self.cancel_hotkey.clone());
-        }
-        if slot != HotkeySlot::SecondDictation
-            && cfg!(target_os = "macos")
-            && self.labs.second_dictation_shortcut
-            && let Some(second) = &self.second_dictation_hotkey
-        {
-            others.push(second.clone());
-        }
-        if slot != HotkeySlot::TerminalPaste
-            && cfg!(any(target_os = "windows", target_os = "linux"))
-            && self.labs.terminal_paste_shortcut
-            && let Some(terminal) = &self.terminal_paste_hotkey
-        {
-            others.push(terminal.clone());
-        }
-        if cfg!(target_os = "macos") && self.meetings.available() {
-            others.push(HotkeyBinding::paste_meeting_default());
-        }
-        #[cfg(hex_capture)]
-        if slot != HotkeySlot::Capture && self.capture_on() {
-            others.push(self.capture.hotkey.clone());
-        }
-        #[cfg(hex_capture)]
-        if slot != HotkeySlot::CaptureReplay
-            && cfg!(target_os = "macos")
-            && self.capture_on()
-            && self.labs.annotate_replay
-            && let Some(replay) = &self.capture.replay_hotkey
-        {
-            others.push(replay.clone());
-        }
-        if slot != HotkeySlot::Screenshot && cfg!(target_os = "macos") && self.labs.screenshots {
-            others.push(self.screenshots.hotkey.clone());
-        }
-        if slot != HotkeySlot::ScreenshotRecord
-            && self.screenshot_recording_available()
-            && let Some(record) = &self.screenshots.record_hotkey
-        {
-            others.push(record.clone());
-        }
-        hotkey_conflicts(binding, others)
-    }
 }
 
 fn set_microphone_selection(device: Option<&str>) {

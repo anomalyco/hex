@@ -21,6 +21,7 @@ fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<Obse
         takes_escape: Arc::new(AtomicBool::new(takes_escape)),
         takes_cancel: Arc::new(AtomicBool::new(false)),
         caps_lock_cancel: Arc::new(AtomicBool::new(false)),
+        extra_cancel: Arc::new(AtomicBool::new(false)),
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
@@ -465,6 +466,26 @@ fn mouse_events_reach_the_filtering_tap_only_while_a_mouse_shortcut_is_bound() {
         assert_eq!(key & KEY_MASK, KEY_MASK);
         assert_eq!(observation & OBSERVATION_MASK, OBSERVATION_MASK);
     }
+
+    // Labs › More dictation shortcuts' mouse buttons filter clicks too.
+    let mut extra_mouse = RuntimeHotkeys::default();
+    extra_mouse.extra_dictation[0] = Some(
+        HotkeyBinding {
+            modifiers: Default::default(),
+            key: crate::app_settings::HotkeyKey::mouse(3),
+        }
+        .runtime(),
+    );
+    assert!(filters_mouse(extra_mouse));
+    let mouse_code = crate::app_settings::HotkeyKey::mouse_code(3).expect("mouse code");
+    assert!(matches!(
+        mouse_input(3, true, 0, extra_mouse),
+        Some(InputEvent::Key {
+            code,
+            down: true,
+            flags: 0,
+        }) if code == mouse_code
+    ));
 }
 
 #[test]
@@ -2569,17 +2590,20 @@ fn a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode() {
         modifiers: crate::app_settings::HotkeyModifiers::default(),
         key_code: Some(1),
     };
-    assert_eq!(tap_cancel_binding(Some(custom), false, true), None);
+    assert_eq!(tap_cancel_binding(Some(custom), false, true, false), None);
     assert_eq!(
-        tap_cancel_binding(Some(custom), true, true),
+        tap_cancel_binding(Some(custom), true, true, false),
         Some(escape),
         "a Caps Lock capture cancels on Escape even with another Toggle cancel"
     );
-    assert_eq!(tap_cancel_binding(Some(custom), true, false), Some(custom));
+    assert_eq!(
+        tap_cancel_binding(Some(custom), true, false, false),
+        Some(custom)
+    );
 
     let mut suppression = ShortcutSuppression::default();
     let armed = RuntimeHotkeys {
-        cancel: tap_cancel_binding(Some(custom), true, true),
+        cancel: tap_cancel_binding(Some(custom), true, true, false),
         ..RuntimeHotkeys::default()
     };
     assert!(suppression.process_all(
@@ -2592,6 +2616,146 @@ fn a_caps_lock_capture_keeps_escape_from_the_app_in_any_mode() {
         true,
         false,
     ));
+}
+
+/// An extra dictation shortcut cancels in its own mode: the tap keeps the
+/// armed cancel if Toggle configured one, else Escape, while it records.
+#[test]
+fn an_extra_capture_keeps_its_cancel_from_the_app() {
+    let escape = HotkeyBinding::cancel_default().runtime();
+    let custom = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers::default(),
+        key_code: Some(1),
+    };
+    assert_eq!(
+        tap_cancel_binding(None, true, false, false),
+        None,
+        "no extra recording: the tap's cancel is unchanged"
+    );
+    assert_eq!(
+        tap_cancel_binding(None, true, false, true),
+        Some(escape),
+        "an extra Hold capture takes Escape with no armed cancel"
+    );
+    assert_eq!(
+        tap_cancel_binding(Some(custom), true, false, true),
+        Some(custom),
+        "a Toggle-mode cancel binding is the extra's too"
+    );
+    assert_eq!(tap_cancel_binding(Some(custom), false, false, true), None);
+
+    let mut suppression = ShortcutSuppression::default();
+    let armed = RuntimeHotkeys {
+        cancel: tap_cancel_binding(None, true, false, true),
+        ..RuntimeHotkeys::default()
+    };
+    assert!(suppression.process_all(
+        InputEvent::Key {
+            code: ESCAPE_KEY_CODE,
+            down: true,
+            flags: NO_FLAGS,
+        },
+        armed,
+        true,
+        false,
+    ));
+}
+
+/// Each extra-mode trigger sets the three switches the dictation shortcut's
+/// own mode sets; double-tap only still needs a keyed binding.
+#[test]
+fn an_extra_mode_sets_its_trigger_switches() {
+    use crate::app_settings::ExtraDictationMode;
+    let now = capture_time();
+    let keyed = RuntimeHotkey {
+        modifiers: crate::app_settings::HotkeyModifiers::option(),
+        key_code: Some(49),
+    };
+    for mode in ExtraDictationMode::ALL {
+        let mut hotkey = DictationHotkey::with_binding(false, now, false, keyed);
+        hotkey.set_trigger(mode);
+        let (toggle, double_tap_enabled, double_tap_only) = mode.switches();
+        assert_eq!(hotkey.toggle, toggle, "{mode:?}");
+        assert_eq!(hotkey.double_tap_enabled, double_tap_enabled, "{mode:?}");
+        assert_eq!(hotkey.double_tap_only, double_tap_only, "{mode:?}");
+    }
+    let mut modifier_only = DictationHotkey::with_binding(false, now, true, option_binding());
+    modifier_only.set_trigger(ExtraDictationMode::DoubleTap);
+    assert!(
+        !modifier_only.double_tap_only,
+        "double-tap only folds away without a key, as the dictation mode does"
+    );
+    modifier_only.set_trigger(ExtraDictationMode::Tap);
+    assert!(modifier_only.toggle);
+    assert!(modifier_only.double_tap_enabled);
+    assert!(!modifier_only.double_tap_only);
+}
+
+/// A machine set to cancel in any mode takes its cancel binding while a
+/// locked Hold-or-double-tap capture records; an ordinary machine keeps
+/// ignoring it.
+#[test]
+fn a_cancel_in_any_mode_machine_takes_its_cancel_in_hold_mode() {
+    let now = capture_time();
+    let escape = |flags| InputEvent::Key {
+        code: ESCAPE_KEY_CODE,
+        down: true,
+        flags,
+    };
+    let cancel = HotkeyBinding::cancel_default().runtime();
+    let option = |hotkey: &mut DictationHotkey, at: CaptureInstant| {
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), at)
+    };
+    let lock = |hotkey: &mut DictationHotkey| {
+        assert_eq!(option(hotkey, now), Some(HotkeyAction::Start));
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_millis(80)),
+            Some(HotkeyAction::Finish)
+        );
+        assert_eq!(
+            option(hotkey, now + Duration::from_millis(180)),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(NO_FLAGS),
+                now + Duration::from_millis(260)
+            ),
+            None
+        );
+        assert!(hotkey.is_locked());
+    };
+
+    // A Hold machine never takes its cancel while the shortcut is held.
+    let mut plain = test_hotkey(false, now);
+    plain.set_cancel(Some(cancel));
+    assert_eq!(option(&mut plain, now), Some(HotkeyAction::Start));
+    assert_eq!(
+        plain.process(escape(OPTION_KEY_MASK), now + Duration::from_millis(50)),
+        None
+    );
+    assert!(plain.is_recording());
+
+    // A lock is hands-free, but only the flag lets a non-toggle machine
+    // take the cancel.
+    let mut locked = test_hotkey(false, now);
+    locked.set_cancel(Some(cancel));
+    lock(&mut locked);
+    assert_eq!(
+        locked.process(escape(NO_FLAGS), now + Duration::from_millis(200)),
+        None
+    );
+    assert!(locked.is_recording());
+
+    let mut extra = test_hotkey(false, now);
+    extra.set_cancel(Some(cancel));
+    extra.set_cancel_in_any_mode(true);
+    lock(&mut extra);
+    assert_eq!(
+        extra.process(escape(NO_FLAGS), now + Duration::from_millis(200)),
+        Some(HotkeyAction::CancelShortcut)
+    );
+    assert!(!extra.is_recording());
 }
 
 #[test]

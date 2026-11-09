@@ -54,6 +54,9 @@ impl Feature {
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
             }
+            Self::MoreDictationShortcuts => {
+                "Up to four more shortcuts that dictate like the main one, each with its own binding and activation mode (extra_dictation_hotkeys)"
+            }
             Self::TerminalPasteShortcut => {
                 "Another dictation shortcut that always pastes with Ctrl+Shift+V (terminal_paste_hotkey)"
             }

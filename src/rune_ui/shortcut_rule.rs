@@ -20,6 +20,13 @@ pub(crate) fn shortcut_rule(slot: HotkeySlot, binding: &HotkeyBinding) -> Result
         HotkeySlot::CaptureReplay => ShortcutTarget::Capture,
         #[cfg(target_os = "macos")]
         HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
+        // Labs › More dictation shortcuts (macOS): each row records under its
+        // own shortcut's rules where they exist, the dictation shortcut's
+        // everywhere else.
+        #[cfg(target_os = "macos")]
+        HotkeySlot::ExtraDictation(index) => ShortcutTarget::ExtraDictation(index),
+        #[cfg(not(target_os = "macos"))]
+        HotkeySlot::ExtraDictation(_) => ShortcutTarget::Dictation,
         #[cfg(target_os = "macos")]
         HotkeySlot::Screenshot => ShortcutTarget::Screenshot,
         #[cfg(target_os = "macos")]

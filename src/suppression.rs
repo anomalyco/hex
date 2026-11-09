@@ -280,6 +280,7 @@ pub struct InputMonitor {
     takes_escape: Arc<AtomicBool>,
     takes_cancel: Arc<AtomicBool>,
     caps_lock_cancel: Arc<AtomicBool>,
+    extra_cancel: Arc<AtomicBool>,
     run_loop: Arc<AtomicPtr<c_void>>,
     worker: Option<JoinHandle<()>>,
     /// Held only so dropping the input monitor stops the HID tracker.
@@ -335,6 +336,8 @@ impl InputMonitor {
         let tap_takes_cancel = takes_cancel.clone();
         let caps_lock_cancel = Arc::new(AtomicBool::new(false));
         let tap_caps_lock_cancel = caps_lock_cancel.clone();
+        let extra_cancel = Arc::new(AtomicBool::new(false));
+        let tap_extra_cancel = extra_cancel.clone();
         let pending = PendingInputEvents::default();
         let tap_pending = pending.clone();
         let worker = thread::spawn(move || {
@@ -345,6 +348,7 @@ impl InputMonitor {
                     takes_escape: tap_takes_escape,
                     takes_cancel: tap_takes_cancel,
                     caps_lock_cancel: tap_caps_lock_cancel,
+                    extra_cancel: tap_extra_cancel,
                 },
                 tap_pending,
                 tap_run_loop,
@@ -365,6 +369,7 @@ impl InputMonitor {
             takes_escape,
             takes_cancel,
             caps_lock_cancel,
+            extra_cancel,
             run_loop,
             worker: Some(worker),
             _physical_keys: physical_keys,
@@ -385,6 +390,13 @@ impl InputMonitor {
     /// Caps Lock dictation records, even in Hold mode.
     pub fn set_caps_lock_cancel(&self, enabled: bool) {
         self.caps_lock_cancel.store(enabled, Ordering::Release);
+    }
+
+    /// Whether the tap also keeps an extra dictation shortcut's cancel key
+    /// (its configured one, or Escape) from the app in front because that
+    /// shortcut records, even in Hold mode.
+    pub fn set_extra_cancel(&self, enabled: bool) {
+        self.extra_cancel.store(enabled, Ordering::Release);
     }
 
     pub fn pending_events(&self) -> PendingInputEvents {
@@ -467,6 +479,7 @@ struct EventTapContext {
     takes_escape: Arc<AtomicBool>,
     takes_cancel: Arc<AtomicBool>,
     caps_lock_cancel: Arc<AtomicBool>,
+    extra_cancel: Arc<AtomicBool>,
     key_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
     physical_tap: AtomicPtr<c_void>,
@@ -755,6 +768,7 @@ unsafe extern "C" fn event_callback(
         hotkeys.cancel,
         context.takes_cancel.load(Ordering::Acquire),
         context.caps_lock_cancel.load(Ordering::Acquire),
+        context.extra_cancel.load(Ordering::Acquire),
     );
     let suppress = suppression.process_all(
         input,
@@ -1032,15 +1046,18 @@ struct ShortcutSuppression {
 
 /// The tap's cancel binding: only while the listener arms it. A Caps Lock
 /// capture always cancels on Escape, even in Hold mode or with a different
-/// Toggle-mode cancel shortcut, so the tap keeps Escape from the app then.
+/// Toggle-mode cancel shortcut, so the tap keeps Escape from the app then. An
+/// extra dictation shortcut likewise cancels in its own mode: the armed
+/// binding if Toggle mode configured one, else Escape.
 fn tap_cancel_binding(
     armed: Option<RuntimeHotkey>,
     takes_cancel: bool,
     caps_lock_cancel: bool,
+    extra_cancel: bool,
 ) -> Option<RuntimeHotkey> {
     if !takes_cancel {
         None
-    } else if caps_lock_cancel {
+    } else if caps_lock_cancel || (extra_cancel && armed.is_none()) {
         Some(HotkeyBinding::cancel_default().runtime())
     } else {
         armed

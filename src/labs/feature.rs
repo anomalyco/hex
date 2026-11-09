@@ -73,6 +73,7 @@ pub enum Feature {
     TranscribeFiles,
     ApiProcessing,
     SpeakersOnly,
+    MoreDictationShortcuts,
 }
 
 impl Feature {
@@ -145,5 +146,6 @@ impl Feature {
         Self::TranscribeFiles,
         Self::ApiProcessing,
         Self::SpeakersOnly,
+        Self::MoreDictationShortcuts,
     ];
 }

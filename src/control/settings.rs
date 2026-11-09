@@ -8,6 +8,7 @@ use serde_json::Value;
 use super::ControlError;
 use crate::app_settings::{
     AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, HotkeyKey, HotkeySlot,
+    MAX_EXTRA_DICTATION_SHORTCUTS,
 };
 
 mod hotkeys;
@@ -224,6 +225,13 @@ const KEYS: &[Key] = &[
          external keyboard (macOS, with labs.second_dictation_shortcut); none (the default) \
          turns it off",
     ),
+    key(
+        "extra_dictation_hotkeys",
+        Kind::Json,
+        "Labs: up to four more dictation shortcuts as a JSON array of \
+         {\"binding\": ..., \"mode\": ...} rows, each with its own activation mode \
+         (macOS, with labs.more_dictation_shortcuts); an empty array (the default) has none",
+    ),
     optional(
         "typed_text_hotkey",
         Kind::Shortcut(HotkeySlot::TypedText),
@@ -398,6 +406,12 @@ const KEYS: &[Key] = &[
         "labs.second_dictation_shortcut",
         Kind::Bool,
         "Labs: second_dictation_hotkey dictates like the dictation shortcut (macOS)",
+    ),
+    key(
+        "labs.more_dictation_shortcuts",
+        Kind::Bool,
+        "Labs: up to four more dictation shortcuts, each with its own binding and activation \
+         mode (extra_dictation_hotkeys, macOS)",
     ),
     key(
         "labs.terminal_paste_shortcut",
@@ -913,6 +927,12 @@ fn unavailable_under(name: &str, policy: crate::policy::Policy) -> Option<Contro
             format!("`{name}` belongs to Labs › Screenshots, which only macOS has"),
         ));
     }
+    if name == "extra_dictation_hotkeys" && !cfg!(target_os = "macos") {
+        return Some(ControlError::new(
+            "unsupported",
+            format!("`{name}` belongs to Labs › More dictation shortcuts, which only macOS has"),
+        ));
+    }
     let capability = needs(name).filter(|capability| !crate::rune_ui::capability(capability))?;
     Some(ControlError::new(
         "unsupported",
@@ -1179,6 +1199,9 @@ pub fn apply(
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
                 HotkeySlot::TypedText => candidate.typed_text_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
+                // Each row of `extra_dictation_hotkeys` is validated from
+                // its own JSON list, not a shortcut key.
+                HotkeySlot::ExtraDictation(_) => None,
                 HotkeySlot::TerminalPaste => candidate.terminal_paste_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
                 HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
@@ -1189,32 +1212,35 @@ pub fn apply(
                 HotkeySlot::CaptureReplay => candidate.capture.replay_hotkey.as_ref(),
             };
             if let Some(binding) = binding {
-                if cfg!(target_os = "macos")
-                    && !candidate.labs.mouse_shortcuts
-                    && binding.key.as_ref().is_some_and(HotkeyKey::is_mouse)
-                {
-                    return Err(invalid(
-                        name,
-                        "mouse buttons need Labs › Mouse shortcuts: hex labs on mouse-shortcuts",
-                    ));
-                }
-                if let Some(why) = special_key_refusal(&candidate, binding) {
-                    return Err(invalid(name, &why));
-                }
-                (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
-                if settings.hotkey_in_use(slot, binding) {
-                    return Err(ControlError::new(
-                        "shortcut-in-use",
-                        format!(
-                            "{} is already in use by another Hex shortcut",
-                            format_hotkey(binding)
-                        ),
-                    ));
-                }
+                check_shortcut(settings, &candidate, name, slot, binding, shortcuts)?;
             }
             if candidate.dictation_hotkey.key.is_none() && !candidate.double_tap_modifiers_allowed()
             {
                 candidate.double_tap_only = false;
+            }
+        }
+        "extra_dictation_hotkeys" => {
+            if candidate.extra_dictation_hotkeys.len() > MAX_EXTRA_DICTATION_SHORTCUTS {
+                return Err(invalid(
+                    name,
+                    &format!("at most {MAX_EXTRA_DICTATION_SHORTCUTS} extra dictation shortcuts"),
+                ));
+            }
+            for (index, row) in candidate.extra_dictation_hotkeys.iter().enumerate() {
+                if let Some(binding) = &row.binding {
+                    check_shortcut(
+                        &candidate,
+                        &candidate,
+                        name,
+                        HotkeySlot::ExtraDictation(index),
+                        binding,
+                        shortcuts,
+                    )?;
+                }
+            }
+            // A row without a key can't be double-tap only.
+            for row in &mut candidate.extra_dictation_hotkeys {
+                row.mode = row.mode.for_binding(row.binding.as_ref());
             }
         }
         "keyboard_model_switching.mappings" => {
@@ -1368,6 +1394,42 @@ fn invalid(name: &str, why: &str) -> ControlError {
         "invalid-value",
         format!("invalid value for `{name}`: {why}"),
     )
+}
+
+/// Applies the checks a recorded shortcut meets: Labs › Mouse shortcuts
+/// where mouse buttons are recorded, the special-key rules, the OS's own
+/// rule for `slot`, and no key shared with another active shortcut.
+fn check_shortcut(
+    settings: &AppSettings,
+    candidate: &AppSettings,
+    name: &str,
+    slot: HotkeySlot,
+    binding: &HotkeyBinding,
+    shortcuts: &ShortcutRules,
+) -> Result<(), ControlError> {
+    if cfg!(target_os = "macos")
+        && !candidate.labs.mouse_shortcuts
+        && binding.key.as_ref().is_some_and(HotkeyKey::is_mouse)
+    {
+        return Err(invalid(
+            name,
+            "mouse buttons need Labs › Mouse shortcuts: hex labs on mouse-shortcuts",
+        ));
+    }
+    if let Some(why) = special_key_refusal(candidate, binding) {
+        return Err(invalid(name, &why));
+    }
+    (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
+    if settings.hotkey_in_use(slot, binding) {
+        return Err(ControlError::new(
+            "shortcut-in-use",
+            format!(
+                "{} is already in use by another Hex shortcut",
+                format_hotkey(binding)
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, ControlError> {
@@ -2015,6 +2077,138 @@ mod tests {
                 .code,
             "invalid-value"
         );
+    }
+
+    /// `extra_dictation_hotkeys` takes up to four rows, each binding meets a
+    /// recorded shortcut's checks, a row's mode folds to one its binding can
+    /// trigger, and the key only works on macOS.
+    #[test]
+    fn extra_dictation_hotkeys_takes_up_to_four_checked_rows() {
+        use crate::app_settings::{
+            ExtraDictationMode, HotkeyModifiers, MAX_EXTRA_DICTATION_SHORTCUTS,
+        };
+        let rules = rules();
+        let binding = |name: &str| {
+            serde_json::to_value(HotkeyBinding {
+                modifiers: HotkeyModifiers::control_option(),
+                key: Some(HotkeyKey::named(name)),
+            })
+            .unwrap()
+        };
+        let rows = |rows: Vec<Value>| Value::Array(rows).to_string();
+
+        let change = apply(
+            &AppSettings::default(),
+            "extra_dictation_hotkeys",
+            &rows(vec![
+                serde_json::json!({"binding": binding("f5"), "mode": "tap"}),
+            ]),
+            &rules,
+        )
+        .unwrap();
+        assert_eq!(change.settings.extra_dictation_hotkeys.len(), 1);
+        assert_eq!(
+            change.settings.extra_dictation_hotkeys[0].mode,
+            ExtraDictationMode::Tap
+        );
+
+        // A row without a key can't be double-tap only.
+        let change = apply(
+            &AppSettings::default(),
+            "extra_dictation_hotkeys",
+            &rows(vec![serde_json::json!({"mode": "double_tap"})]),
+            &rules,
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.extra_dictation_hotkeys[0].mode,
+            ExtraDictationMode::HoldOrDoubleTap
+        );
+
+        // More than four rows are refused.
+        let too_many = rows(
+            (0..=MAX_EXTRA_DICTATION_SHORTCUTS)
+                .map(|_| serde_json::json!({"mode": "hold"}))
+                .collect(),
+        );
+        assert_eq!(
+            apply(
+                &AppSettings::default(),
+                "extra_dictation_hotkeys",
+                &too_many,
+                &rules
+            )
+            .unwrap_err()
+            .code,
+            "invalid-value"
+        );
+
+        // A key that types nothing alone needs its Lab, as a recorded
+        // shortcut does.
+        let menu = serde_json::to_value(HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: Some(HotkeyKey::named("menu")),
+        })
+        .unwrap();
+        assert_eq!(
+            apply(
+                &AppSettings::default(),
+                "extra_dictation_hotkeys",
+                &rows(vec![serde_json::json!({"binding": menu})]),
+                &rules
+            )
+            .unwrap_err()
+            .code,
+            "invalid-value"
+        );
+
+        // The OS's own rule for a recorded shortcut applies to a row too.
+        let refuse = ShortcutRules {
+            key_named: rules.key_named,
+            rule: |_, _| Err("Modifier-only shortcuts aren't supported here".into()),
+        };
+        assert_eq!(
+            apply(
+                &AppSettings::default(),
+                "extra_dictation_hotkeys",
+                &rows(vec![serde_json::json!({"binding": binding("f5")})]),
+                &refuse
+            )
+            .unwrap_err()
+            .code,
+            "invalid-value"
+        );
+
+        // Two rows can't share a key while their Lab is on (macOS).
+        #[cfg(target_os = "macos")]
+        {
+            let mut settings = AppSettings::default();
+            settings.labs.more_dictation_shortcuts = true;
+            assert_eq!(
+                apply(
+                    &settings,
+                    "extra_dictation_hotkeys",
+                    &rows(vec![
+                        serde_json::json!({"binding": binding("f5")}),
+                        serde_json::json!({"binding": binding("f5")}),
+                    ]),
+                    &rules
+                )
+                .unwrap_err()
+                .code,
+                "shortcut-in-use"
+            );
+        }
+
+        // Off macOS the key is refused before it is read.
+        if cfg!(target_os = "macos") {
+            assert!(unavailable("extra_dictation_hotkeys").is_none());
+        } else {
+            assert_eq!(
+                unavailable("extra_dictation_hotkeys").map(|error| error.code),
+                Some("unsupported")
+            );
+        }
     }
 
     #[test]

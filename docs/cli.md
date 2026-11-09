@@ -469,8 +469,15 @@ observe input-source changes or show these controls.
   a key on an external keyboard. It acts only while
   `labs.second_dictation_shortcut` is on (`hex labs on
   second-dictation-shortcut`) and shares no key with another shortcut.
-- `json` settings (modes, meeting providers, excluded calendars) take the JSON
-  value the file stores.
+- `extra_dictation_hotkeys` (macOS, an empty array by default) holds up to
+  four more dictation shortcuts, each `{"binding": ..., "mode": ...}`. A row
+  acts only while `labs.more_dictation_shortcuts` is on (`hex labs on
+  more-dictation-shortcuts`) and shares no key with another active shortcut.
+  `mode` is `hold_or_double_tap` (the default), `hold`, `tap`, or `double_tap`;
+  `double_tap` needs a binding with a key and otherwise reads as
+  `hold_or_double_tap`. Turning the Lab off keeps the rows saved.
+- `json` settings (modes, extra dictation shortcuts, meeting providers,
+  excluded calendars) take the JSON value the file stores.
 - `ui_language` takes `en`, `pl`, `zh` (Simplified Chinese), `zh-Hant`
   (Traditional Chinese), `ja`, `de`, `es`, `uk`, `pt`, `fr`, `ru`, or `none`
   (follow the system language), the same languages Settings offers. Following
@@ -515,7 +522,8 @@ Writable keys: `release_microphone_while_idle`,
 `sound_effects`, `sound_effect_volume`, `sound_theme`, `microphone`,
 `avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`, `raw_dictation_hotkey`,
-`second_dictation_hotkey`, `labs.second_dictation_shortcut`, `labs.standalone_special_keys`, `show_dock_icon`, `vocabulary_boost`,
+`second_dictation_hotkey`, `extra_dictation_hotkeys`, `labs.second_dictation_shortcut`,
+`labs.more_dictation_shortcuts`, `labs.standalone_special_keys`, `show_dock_icon`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,
 `history_retention`, `meetings.enabled`,
 `meetings.output_folder`, `meetings.summaries`, `meetings.opencode_model`,

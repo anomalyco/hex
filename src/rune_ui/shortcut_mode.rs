@@ -3,9 +3,8 @@
 //! `double_tap_only`). Of their eight combinations only four behave
 //! differently: Toggle ignores both double-tap settings, and double-tap only
 //! needs the lock and a shortcut with a key (or, with Labs › Double-tap on a
-//! lone modifier, a shortcut without a key, one or more modifiers).
-//! General's row names the choice
-//! and opens the modal in `explainer` that makes it.
+//! lone modifier, a shortcut without a key, one or more modifiers). General's
+//! row names the choice and opens the modal in `explainer` that makes it.
 
 use rune::El;
 
@@ -14,7 +13,9 @@ use super::controls::value_button;
 use super::controls::{Paint, copy_row};
 use super::explainer::{self, Script};
 use super::icons::HAND;
-use crate::app_settings::{AppSettings, HotkeyKey};
+use crate::app_settings::{
+    AppSettings, ExtraDictationMode, HotkeyBinding, HotkeyKey, HotkeyModifiers,
+};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
 
@@ -113,6 +114,46 @@ impl Trigger {
                 &example.keycaps().join("+"),
             )
         })
+    }
+
+    /// [`Self::unavailable`] for a Labs › More dictation shortcuts row, whose
+    /// binding is its own.
+    pub(super) fn unavailable_for(self, binding: Option<&HotkeyBinding>) -> Option<String> {
+        (self == Self::DoubleTap && binding.is_none_or(|binding| binding.key.is_none())).then(
+            || {
+                let mut example = binding.cloned().unwrap_or_else(|| HotkeyBinding {
+                    modifiers: HotkeyModifiers::option(),
+                    key: None,
+                });
+                example.key = Some(HotkeyKey::named("space"));
+                tr_fill(
+                    "Needs a shortcut with a key, like {}",
+                    &example.keycaps().join("+"),
+                )
+            },
+        )
+    }
+
+    /// The choice that saves `mode` on a Labs › More dictation shortcuts row.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn from_extra(mode: ExtraDictationMode) -> Self {
+        match mode {
+            ExtraDictationMode::HoldOrDoubleTap => Self::HoldOrDoubleTap,
+            ExtraDictationMode::Hold => Self::Hold,
+            ExtraDictationMode::Tap => Self::Tap,
+            ExtraDictationMode::DoubleTap => Self::DoubleTap,
+        }
+    }
+
+    /// The mode a Labs › More dictation shortcuts row saves for `self`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn to_extra(self) -> ExtraDictationMode {
+        match self {
+            Self::HoldOrDoubleTap => ExtraDictationMode::HoldOrDoubleTap,
+            Self::Hold => ExtraDictationMode::Hold,
+            Self::Tap => ExtraDictationMode::Tap,
+            Self::DoubleTap => ExtraDictationMode::DoubleTap,
+        }
     }
 }
 

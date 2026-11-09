@@ -93,6 +93,9 @@ pub struct LabsSettings {
     pub subtitle_export: bool,
     /// `second_dictation_hotkey` dictates like the dictation shortcut (macOS, issue 627).
     pub second_dictation_shortcut: bool,
+    /// Up to four more dictation shortcuts, each with its own activation
+    /// mode (`extra_dictation_hotkeys`, macOS).
+    pub more_dictation_shortcuts: bool,
     /// `terminal_paste_hotkey` dictates like the dictation shortcut and always pastes
     /// with Ctrl+Shift+V (Windows, Linux).
     pub terminal_paste_shortcut: bool,
@@ -227,6 +230,7 @@ impl Default for LabsSettings {
             filler_words: false,
             subtitle_export: false,
             second_dictation_shortcut: false,
+            more_dictation_shortcuts: false,
             terminal_paste_shortcut: false,
             smart_spacing: false,
             spoken_symbols: false,

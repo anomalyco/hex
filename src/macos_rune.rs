@@ -44,8 +44,7 @@ use objc2_foundation::{MainThreadMarker, NSAppleEventManager, NSObject, NSString
 
 use crate::app_settings::AppSettings;
 use crate::desktop::host::{
-    DesktopAction, DesktopListenerSnapshot, DesktopShortcut, DesktopTranscriptionSnapshot,
-    DesktopUpdateStatus,
+    DesktopAction, DesktopListenerSnapshot, DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::dictation::indicator::DictationIndicatorEvent;
 use crate::macos_rune::status_item::StatusItemAction;
@@ -54,12 +53,12 @@ use crate::meeting::watcher::{ControllerEvent, ListenerConfig, MeetingMenuState}
 use crate::recognition::RecognitionControl;
 use crate::rune_hud::DictationIndicatorUi;
 use crate::rune_ui::{Destination, Ui};
-use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 
 mod activation;
 mod control;
 mod launch;
 mod main_menu;
+mod request;
 mod runtime;
 pub(crate) mod status_item;
 mod wake;
@@ -70,6 +69,7 @@ use main_menu::install_main_menu;
 use runtime::run_runtime;
 use wake::{pump_now, relay, start_pump_timer};
 
+pub(crate) use request::{Request, ShortcutTarget};
 pub(crate) use wake::wake_pump;
 
 #[cfg(test)]
@@ -89,59 +89,6 @@ const MEETING_MENU_REFRESH: Duration = Duration::from_millis(500);
 /// opened again while it runs (Dock, Finder, `open`).
 const CORE_EVENT_CLASS: u32 = u32::from_be_bytes(*b"aevt");
 const REOPEN_APPLICATION: u32 = u32::from_be_bytes(*b"rapp");
-
-/// What the window asks the runtime, in the Linux service's vocabulary so
-/// the shared panes send the same requests on every platform.
-#[derive(Clone, Debug)]
-pub(crate) enum Request {
-    /// Update actions go to the updater from the window (`rune_ui::host`).
-    Desktop(#[allow(dead_code)] DesktopAction),
-    /// Handled in the window (`rune_ui::host`): an AppKit event monitor.
-    CaptureShortcutFor(#[allow(dead_code)] ShortcutTarget),
-    CancelShortcut,
-    /// Linux's service registers recorded shortcuts; on macOS the window
-    /// saves them and the listener follows `settings.json`.
-    #[allow(dead_code)]
-    SetShortcut {
-        target: ShortcutTarget,
-        shortcut: DesktopShortcut,
-    },
-    ChooseModel {
-        model: TranscriptionModelId,
-        language: String,
-    },
-    /// The menu bar's model list: only installed models, never a download.
-    SelectInstalledModel(TranscriptionModelId),
-    /// `hex model use`: this exact selection, installed only, never a download.
-    UseInstalledSelection(TranscriptionSelection),
-    /// Snapshot from the main-thread TIS observer, not a shortcut event.
-    InputSourceChanged(Option<String>),
-    CancelModel,
-    /// The window saved `settings.json`; adopt it.
-    ReloadSettings,
-}
-
-/// A shortcut the listener registers.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum ShortcutTarget {
-    #[default]
-    Dictation,
-    PasteLast,
-    #[cfg(hex_capture)]
-    Capture,
-    /// Labs › Annotate 15 s replay shortcut.
-    #[cfg(hex_capture)]
-    CaptureReplay,
-    RawDictation,
-    /// Labs › Second dictation shortcut.
-    SecondDictation,
-    /// Toggle mode's cancel shortcut.
-    Cancel,
-    /// Labs › Screenshots.
-    Screenshot,
-    /// Labs › Screenshots' record shortcut.
-    ScreenshotRecord,
-}
 
 /// What the runtime last published for the window and the menu bar.
 #[derive(Clone, PartialEq)]

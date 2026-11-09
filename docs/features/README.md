@@ -711,6 +711,11 @@ Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
 
+Labs > More dictation shortcuts (macOS, off)   // labs.md
+  -> General shows a row per extra (recorder, shortcut mode, Clear) and Add under four
+  -> each row dictates like the shortcut in its own mode; Escape cancels its capture
+  -> off, the saved rows stay and nothing matches; on, each needs its own keys
+
 Labs > Terminal paste shortcut (Windows, Linux; off)   // labs.md
   -> General shows "Terminal paste shortcut" under Shortcut (unbound, clearable)
   -> it dictates like the shortcut and always pastes with Ctrl+Shift+V

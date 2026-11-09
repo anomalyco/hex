@@ -4,7 +4,7 @@
 //! keys alone, Linux), shortcuts without a key (Labs › Double-tap on a
 //! lone modifier, macOS), and the persisted double-tap mode those need.
 
-use super::{AppSettings, HotkeyBinding, HotkeyKey};
+use super::{AppSettings, HotkeyBinding, HotkeyKey, MAX_EXTRA_DICTATION_SHORTCUTS};
 
 impl HotkeyKey {
     /// Menu, Pause, or Scroll Lock: keys that type nothing, which Labs ›
@@ -161,6 +161,18 @@ impl AppSettings {
         }
     }
 
+    /// Labs › More dictation shortcuts keeps at most
+    /// [`MAX_EXTRA_DICTATION_SHORTCUTS`] rows, and each row's mode folds to
+    /// one its binding can trigger (double-tap only needs a key). The rows
+    /// stay saved while the Lab is off.
+    pub(crate) fn repair_extra_dictation_shortcuts(&mut self) {
+        self.extra_dictation_hotkeys
+            .truncate(MAX_EXTRA_DICTATION_SHORTCUTS);
+        for row in &mut self.extra_dictation_hotkeys {
+            row.mode = row.mode.for_binding(row.binding.as_ref());
+        }
+    }
+
     /// Puts back every shortcut `matches`: dictation, Paste last dictation,
     /// and Annotate to their defaults, the optional ones unbound. Returns
     /// whether any changed.
@@ -185,6 +197,12 @@ impl AppSettings {
         if self.second_dictation_hotkey.as_ref().is_some_and(&matches) {
             self.second_dictation_hotkey = None;
             reset = true;
+        }
+        for row in &mut self.extra_dictation_hotkeys {
+            if row.binding.as_ref().is_some_and(&matches) {
+                row.binding = None;
+                reset = true;
+            }
         }
         if self.terminal_paste_hotkey.as_ref().is_some_and(&matches) {
             self.terminal_paste_hotkey = None;

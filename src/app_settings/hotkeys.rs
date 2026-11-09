@@ -1226,6 +1226,97 @@ pub fn normalized_modifier_flags(flags: u64, physical: Option<PhysicalModifierKe
     })
 }
 
+pub fn hotkey_conflicts(
+    candidate: &HotkeyBinding,
+    others: impl IntoIterator<Item = HotkeyBinding>,
+) -> bool {
+    others
+        .into_iter()
+        .any(|binding| candidate.overlaps(&binding))
+}
+
+impl AppSettings {
+    /// Whether `binding` overlaps a shortcut `slot` must not share: the other
+    /// active shortcuts and, where meetings exist (macOS), meeting paste. The
+    /// two capture shortcuts never share a key, on or off, since turning
+    /// captures on can't pull them apart.
+    pub fn hotkey_in_use(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
+        let mut others = Vec::new();
+        if slot != HotkeySlot::Dictation {
+            others.push(self.dictation_hotkey.clone());
+        }
+        if slot != HotkeySlot::PasteLast
+            && let Some(paste) = &self.paste_last_hotkey
+        {
+            others.push(paste.clone());
+        }
+        if slot != HotkeySlot::RawDictation
+            && let Some(raw) = &self.raw_dictation_hotkey
+        {
+            others.push(raw.clone());
+        }
+        if slot != HotkeySlot::TypedText
+            && cfg!(target_os = "linux")
+            && self.labs.typed_text
+            && let Some(typed) = &self.typed_text_hotkey
+        {
+            others.push(typed.clone());
+        }
+        if slot != HotkeySlot::Cancel {
+            others.push(self.cancel_hotkey.clone());
+        }
+        if slot != HotkeySlot::SecondDictation
+            && cfg!(target_os = "macos")
+            && self.labs.second_dictation_shortcut
+            && let Some(second) = &self.second_dictation_hotkey
+        {
+            others.push(second.clone());
+        }
+        if cfg!(target_os = "macos") && self.labs.more_dictation_shortcuts {
+            for (index, row) in self.extra_dictation_hotkeys.iter().enumerate() {
+                if slot != HotkeySlot::ExtraDictation(index)
+                    && let Some(extra) = &row.binding
+                {
+                    others.push(extra.clone());
+                }
+            }
+        }
+        if slot != HotkeySlot::TerminalPaste
+            && cfg!(any(target_os = "windows", target_os = "linux"))
+            && self.labs.terminal_paste_shortcut
+            && let Some(terminal) = &self.terminal_paste_hotkey
+        {
+            others.push(terminal.clone());
+        }
+        if cfg!(target_os = "macos") && self.meetings.available() {
+            others.push(HotkeyBinding::paste_meeting_default());
+        }
+        #[cfg(hex_capture)]
+        if slot != HotkeySlot::Capture && self.capture_on() {
+            others.push(self.capture.hotkey.clone());
+        }
+        #[cfg(hex_capture)]
+        if slot != HotkeySlot::CaptureReplay
+            && cfg!(target_os = "macos")
+            && self.capture_on()
+            && self.labs.annotate_replay
+            && let Some(replay) = &self.capture.replay_hotkey
+        {
+            others.push(replay.clone());
+        }
+        if slot != HotkeySlot::Screenshot && cfg!(target_os = "macos") && self.labs.screenshots {
+            others.push(self.screenshots.hotkey.clone());
+        }
+        if slot != HotkeySlot::ScreenshotRecord
+            && self.screenshot_recording_available()
+            && let Some(record) = &self.screenshots.record_hotkey
+        {
+            others.push(record.clone());
+        }
+        hotkey_conflicts(binding, others)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeHotkeys {
     pub dictation: RuntimeHotkey,
@@ -1241,6 +1332,12 @@ pub struct RuntimeHotkeys {
     pub typed_text: Option<RuntimeHotkey>,
     /// Labs › Second dictation shortcut (macOS), while it is on and bound.
     pub second_dictation: Option<RuntimeHotkey>,
+    /// Labs › More dictation shortcuts (macOS), while the Lab is on and each
+    /// row is bound and shares no key.
+    pub extra_dictation: [Option<RuntimeHotkey>; MAX_EXTRA_DICTATION_SHORTCUTS],
+    /// Each extra row's activation mode, folded to one its binding can
+    /// trigger.
+    pub extra_dictation_modes: [ExtraDictationMode; MAX_EXTRA_DICTATION_SHORTCUTS],
     /// Toggle mode's cancel shortcut. Not among [`RuntimeHotkeys::all`]:
     /// Hex takes it only while a toggled recording runs.
     pub cancel: Option<RuntimeHotkey>,
@@ -1248,8 +1345,8 @@ pub struct RuntimeHotkeys {
 
 impl RuntimeHotkeys {
     /// Every shortcut Hex matches, for suppression and chord evidence.
-    pub fn all(self) -> [Option<RuntimeHotkey>; 8] {
-        [
+    pub fn all(self) -> [Option<RuntimeHotkey>; 8 + MAX_EXTRA_DICTATION_SHORTCUTS] {
+        let named = [
             Some(self.dictation),
             self.paste_last,
             self.paste_meeting,
@@ -1258,7 +1355,11 @@ impl RuntimeHotkeys {
             self.raw_dictation,
             self.typed_text,
             self.second_dictation,
-        ]
+        ];
+        let mut all = [None; 8 + MAX_EXTRA_DICTATION_SHORTCUTS];
+        all[..named.len()].copy_from_slice(&named);
+        all[named.len()..].copy_from_slice(&self.extra_dictation);
+        all
     }
 }
 
@@ -1274,6 +1375,9 @@ impl Default for RuntimeHotkeys {
             raw_dictation: None,
             typed_text: None,
             second_dictation: None,
+            extra_dictation: [None; MAX_EXTRA_DICTATION_SHORTCUTS],
+            extra_dictation_modes: [ExtraDictationMode::HoldOrDoubleTap;
+                MAX_EXTRA_DICTATION_SHORTCUTS],
             cancel: None,
         }
     }
