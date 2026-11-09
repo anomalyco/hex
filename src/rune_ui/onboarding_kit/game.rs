@@ -1412,8 +1412,12 @@ fn hud<S>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<S>) -> Vec<El> 
     std::iter::once(pill).chain(scope).collect()
 }
 
-/// A zero-bounce spring of `response` seconds, `t` after it sets off.
+/// A zero-bounce spring of `response` seconds, `t` after it sets off; long
+/// settled (or never set off) is `1`.
 fn settled(t: f64, response: f64) -> f32 {
+    if !t.is_finite() || t > 8.0 * response {
+        return 1.0;
+    }
     let w = std::f64::consts::TAU / response;
     (1.0 - (1.0 + w * t) * (-w * t).exp()) as f32
 }
@@ -2238,6 +2242,14 @@ mod tests {
             t += 1.0 / 60.0;
         }
         play
+    }
+
+    #[test]
+    fn the_idle_pill_springs_settle_and_never_go_nan() {
+        assert_eq!(settled(f64::INFINITY, 0.35), 1.0);
+        assert_eq!(settled(0.0, 0.12), 0.0);
+        let half = settled(0.1, 0.35);
+        assert!(half > 0.0 && half < 1.0, "{half}");
     }
 
     #[test]
