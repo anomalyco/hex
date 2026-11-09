@@ -55,6 +55,8 @@ pub(crate) mod finished_events;
 pub(crate) mod generator;
 #[cfg(target_os = "macos")]
 pub(crate) mod import;
+#[cfg(any(target_os = "windows", test))]
+mod loopback_route;
 pub(crate) mod mcp;
 mod notes;
 pub mod query;
@@ -525,8 +527,10 @@ pub fn record(
             start.application.clone(),
             microphone_warnings.clone(),
         );
-        let system_capture =
-            capture::SourceSupervisor::system(sink(MeetingSource::System, &system_drops));
+        let system_capture = capture::SourceSupervisor::system(
+            sink(MeetingSource::System, &system_drops),
+            start.application.clone(),
+        );
         manifest.status = MeetingStatus::Recording;
         if let Err(error) = write_manifest(&meeting_dir, &manifest) {
             drop(system_capture);

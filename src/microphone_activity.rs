@@ -40,6 +40,8 @@ mod os;
 mod os;
 #[cfg(not(target_os = "macos"))]
 pub use os::active_microphone_applications;
+#[cfg(target_os = "windows")]
+pub(crate) use os::{EndpointSessions, active_endpoint_sessions, process_canonical_bundle_id};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActiveMicrophoneApplication {

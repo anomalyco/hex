@@ -120,12 +120,29 @@ System audio                                      // meetings.system-audio
 ├── Linux -> pw-record of the default output's monitor (stream.capture.sink);
 │   the session manager follows a changed default; no pw-record -> recording
 │   refuses with "Install PipeWire's pw-record"
-└── Windows -> WASAPI loopback of every active output (cpal), mixed into the
-    one system track, so a call playing on a headset that isn't the default
-    output is recorded (#1221; audio_on_any_output_reaches_the_system_track,
-    unverified on a real call); silence while nothing plays is padded on
-    resume; a change in the list of outputs reopens it; an output whose
-    loopback fails is dropped while the others keep recording
+└── Windows -> WASAPI loopback (cpal) of the outputs the call app plays on,
+    mixed into the one system track, so a call playing on a headset that
+    isn't the default output is recorded (#1221). A call recording prefers
+    the outputs where the app's own microphone holder also plays, then any
+    output one of its processes plays on, so a virtual mixer's (SteelSeries
+    Sonar, VB-Cable, Voicemeeter) playback of the user's processed
+    microphone and replay of the call is not mixed in; without an app
+    session, or for a manual recording, every active output is heard.
+    Silence while nothing plays is padded on resume. A route check every 2 s
+    reopens on a changed output list while hearing every one, or on changed
+    app outputs (by endpoint id), and keeps the current outputs while the
+    app has no session or the enumeration fails. An output whose loopback
+    fails is dropped while the others keep recording.
+    // checks: the selection is pure and tested in
+    // meeting/loopback_route.rs: the_microphone_holder_s_output_beats_
+    // another_process_of_the_same_app,
+    // a_call_app_without_a_microphone_holder_plays_on_every_endpoint_of_its_
+    // own, inactive_sessions_are_absent_rather_than_guessed,
+    // another_process_on_the_user_s_microphone_selects_nothing,
+    // an_app_with_no_active_render_session_hears_every_output,
+    // a_manual_recording_hears_every_output; the mix still by
+    // audio_on_any_output_reaches_the_system_track (meeting/windows.rs);
+    // unverified on real hardware
 Call detection                                    // meetings.detect
 ├── Linux -> one pw-dump --monitor: running Stream/Input/Audio nodes that are
 │   not monitor captures, by application.process.binary (node or client)

@@ -56,7 +56,10 @@ fn find_executable(name: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-pub(super) fn open_system_audio(_sink: &PacketSink) -> Result<Box<dyn LiveSource>> {
+pub(super) fn open_system_audio(
+    _sink: &PacketSink,
+    _application: Option<&str>,
+) -> Result<Box<dyn LiveSource>> {
     MonitorSource::start().map(|source| Box::new(source) as Box<dyn LiveSource>)
 }
 
