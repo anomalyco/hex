@@ -144,8 +144,8 @@ pub struct LabsSettings {
     /// Calls in more apps (Signal, Telegram, WeChat, LINE, Webex, Element, Phone) and on more websites are offered and named.
     pub more_call_apps: bool,
     /// An OpenCode service running in the default WSL distribution is used
-    /// for Modes rewriting and its model picker when no Windows service
-    /// answers (Windows).
+    /// for Modes rewriting and the Modes model picker when no Windows
+    /// service answers (Windows).
     pub opencode_in_wsl: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.

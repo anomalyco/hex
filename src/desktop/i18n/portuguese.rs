@@ -1201,7 +1201,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Terminal paste shortcut", "Atalho de colar no terminal"),
     ("Another dictation shortcut that always pastes with Ctrl+Shift+V", "Outro atalho de ditado que sempre cola com Ctrl+Shift+V"),
     ("OpenCode in WSL", "OpenCode no WSL"),
-    ("Use an OpenCode service running in your default WSL distribution for Modes rewriting and its model picker. Looking for it can start WSL.", "Use um serviço do OpenCode rodando na sua distribuição WSL padrão para a reescrita de Modos e o seletor de modelos. Procurá-lo pode iniciar o WSL."),
+    ("Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker. Looking for it can start WSL.", "Usa um serviço do OpenCode rodando na sua distribuição WSL padrão para a reescrita de Modos e o seletor de modelos de Modos. Procurá-lo pode iniciar o WSL."),
 ];
 
 #[cfg(test)]

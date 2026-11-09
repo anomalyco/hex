@@ -34,12 +34,18 @@ running service (`src/desktop/opencode_service.rs`):
   user owns with no group or other permissions.
 - On Windows, when no Windows registration answers and Labs › OpenCode in WSL
   is on, it reads the default WSL distribution's registration at
-  `<home>/.local/state/opencode` through `\\wsl.localhost\`. The distribution
-  comes from `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss`, and the
-  home from that distribution's `/etc/passwd` for its `DefaultUid` (at most
-  1 MiB, and only the default distribution; opening another could boot it).
-  WSL2 forwards loopback, so the registered URL is dialed as registered. No
-  `wsl.exe` runs, and passwd contents and passwords are never logged.
+  `<home>/.local/state/opencode` through `\\wsl.localhost\`, or `\\wsl$\` on
+  an older Windows 10. The distribution comes from
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss`, and the home from
+  that distribution's `/etc/passwd` for its `DefaultUid` (at most 1 MiB, and
+  only the default distribution; opening it can start the WSL VM too). The
+  home found is cached for later lookups, and every lookup runs on a helper
+  thread: a rewrite waits only for its remaining deadline or Escape, while
+  Settings and availability wait at most 3 s. A timed-out WSL that is still
+  starting is found on a later try. WSL2 forwards loopback, so the registered
+  URL is dialed as registered. No `wsl.exe` runs, and passwd contents and
+  passwords are never logged. `XDG_STATE_HOME` inside WSL is not read, and a
+  home absent from `/etc/passwd` (LDAP/SSSD) is not found.
 - The registration's `url` must be loopback `http://` (`localhost`, `0.0.0.0`
   and `::` are reached through loopback); anything else is refused.
 - `GET /api/info` with the registration's password (HTTP Basic, user

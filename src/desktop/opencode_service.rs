@@ -948,10 +948,7 @@ pub(crate) mod tests {
         let root = state_root("wsl-workspace");
         let (url, server) = serve(vec![("GET /api/model".into(), 200, "{}".into())]);
         let service = Service {
-            wsl: Some(WslHome {
-                unc: root.join("home"),
-                linux: "/home/dax".into(),
-            }),
+            wsl: Some(WslHome::for_test(root.join("home"), "/home/dax")),
             ..fixture(&url)
         };
         let windows = root.join("windows");
@@ -981,10 +978,10 @@ pub(crate) mod tests {
     fn a_wsl_service_is_a_fallback_only_without_a_windows_one() {
         let service = fixture("http://127.0.0.1:1/");
         let wsl = || Service {
-            wsl: Some(WslHome {
-                unc: PathBuf::from(r"\\wsl.localhost\Ubuntu\home\dax"),
-                linux: "/home/dax".into(),
-            }),
+            wsl: Some(WslHome::for_test(
+                PathBuf::from(r"\\wsl.localhost\Ubuntu\home\dax"),
+                "/home/dax",
+            )),
             ..service.clone()
         };
         assert_ne!(wsl(), service, "a WSL service is not the Windows one");

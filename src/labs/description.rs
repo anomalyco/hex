@@ -166,7 +166,7 @@ impl Feature {
                 "Press Caps Lock to start and stop dictation; its light shows when Hex records and transcribes"
             }
             Self::OpenCodeInWsl => {
-                "Use an OpenCode service running in your default WSL distribution for Modes rewriting and its model picker; looking for it can start WSL"
+                "Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker; looking for it can start WSL"
             }
         }
     }
