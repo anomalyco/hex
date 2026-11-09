@@ -15,6 +15,10 @@ use color_eyre::eyre::WrapErr;
 use color_eyre::eyre::eyre;
 use url::Url;
 
+/// How soon the worker retries a refreshed snapshot the one-slot channel held
+/// back, instead of waiting the whole poll interval.
+const REFRESH_RETRY: Duration = Duration::from_millis(10);
+
 #[cfg(target_os = "macos")]
 use objc2::rc::autoreleasepool;
 #[cfg(target_os = "macos")]
@@ -26,6 +30,55 @@ pub struct ContextSnapshot {
     pub browser_url: Option<Url>,
     pub window_title: Option<String>,
     pub input_revision: Option<u64>,
+}
+
+/// The page refresh one capture owes. A shortcut's press starts it
+/// provisionally: a chord discards it without reading the browser, and only
+/// a capture that becomes real asks for one page read, whose finish then
+/// waits on it. A `hex dictation start` has no hold to judge and asks at once.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[derive(Debug, Default)]
+pub(crate) struct CaptureRefresh {
+    pending: bool,
+    /// The ticket this capture requested, once it was real.
+    ticket: Option<u64>,
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+impl CaptureRefresh {
+    /// A capture started. It asks for no page until it is real.
+    pub(crate) fn begin(&mut self) {
+        self.pending = true;
+        self.ticket = None;
+    }
+
+    /// The capture became real (held past the hold threshold): its ticket,
+    /// requesting one read through `request` on the first call only.
+    pub(crate) fn intend(&mut self, request: impl FnOnce() -> u64) -> Option<u64> {
+        if !self.pending {
+            return None;
+        }
+        if self.ticket.is_none() {
+            self.ticket = Some(request());
+        }
+        self.ticket
+    }
+
+    /// The capture ended without transcribing: nothing waits for its page.
+    pub(crate) fn cancel(&mut self) {
+        self.pending = false;
+        self.ticket = None;
+    }
+
+    /// The capture ended transcribing: the ticket its finish waits on, or
+    /// `None` when no capture was pending. A capture that finished before it
+    /// became real (a short tap) asks for its page now.
+    pub(crate) fn finish(&mut self, request: impl FnOnce() -> u64) -> Option<u64> {
+        let ticket = self.intend(request);
+        self.pending = false;
+        self.ticket = None;
+        ticket
+    }
 }
 
 pub struct ContextMonitor {
@@ -162,18 +215,24 @@ impl ContextMonitor {
                         }
                     };
                     // A refreshed snapshot the full slot held back is
-                    // captured again next poll: a newer value supersedes it,
-                    // and the ticket completes only once one is delivered.
-                    match publish_context(&sender, &mut previous, context) {
+                    // captured again soon: a newer value supersedes it, and
+                    // the ticket completes only once one is delivered.
+                    let blocked_refresh = match publish_context(&sender, &mut previous, context) {
                         Published::Disconnected => break,
-                        Published::Blocked => {}
+                        Published::Blocked => refresh,
                         Published::Sent | Published::Current => {
                             if refresh {
                                 worker_completed.fetch_max(ticket, Ordering::AcqRel);
                             }
+                            false
                         }
-                    }
-                    match refresh_requests.recv_timeout(poll_interval) {
+                    };
+                    let wait = if blocked_refresh {
+                        REFRESH_RETRY
+                    } else {
+                        poll_interval
+                    };
+                    match refresh_requests.recv_timeout(wait) {
                         Ok(()) | Err(RecvTimeoutError::Timeout) => {}
                         Err(RecvTimeoutError::Disconnected) => break,
                     }
@@ -650,6 +709,7 @@ pub(crate) fn browser_hosts_equal(left: &str, right: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicI32, AtomicUsize};
     use std::time::Instant;
 
@@ -658,6 +718,63 @@ mod tests {
             .updates
             .recv_timeout(Duration::from_secs(1))
             .expect("the monitor published nothing")
+    }
+
+    #[test]
+    fn a_press_discarded_as_a_chord_never_reads_the_page() {
+        let mut capture = CaptureRefresh::default();
+        let reads = Cell::new(0);
+        let request = || {
+            reads.set(reads.get() + 1);
+            reads.get()
+        };
+
+        // A provisional press a chord discards ends before it is real.
+        capture.begin();
+        capture.cancel();
+
+        assert_eq!(capture.intend(request), None);
+        assert_eq!(capture.finish(request), None);
+        assert_eq!(reads.get(), 0, "a discarded press read the browser page");
+    }
+
+    #[test]
+    fn a_real_capture_reads_the_page_once() {
+        let mut capture = CaptureRefresh::default();
+        let reads = Cell::new(0);
+        let request = || {
+            reads.set(reads.get() + 1);
+            reads.get()
+        };
+
+        capture.begin();
+        // The hold threshold asks once; later calls only return the ticket.
+        assert_eq!(capture.intend(request), Some(1));
+        assert_eq!(capture.intend(request), Some(1));
+        assert_eq!(capture.finish(request), Some(1));
+        assert_eq!(reads.get(), 1);
+        // The capture is over: later intent asks for nothing.
+        assert_eq!(capture.intend(request), None);
+        assert_eq!(reads.get(), 1);
+    }
+
+    #[test]
+    fn a_finish_before_the_hold_threshold_reads_the_page_then() {
+        let mut capture = CaptureRefresh::default();
+        let reads = Cell::new(0);
+        let request = || {
+            reads.set(reads.get() + 1);
+            reads.get()
+        };
+
+        // A short tap finishes before the loop ever sees it as intentional.
+        capture.begin();
+        assert_eq!(capture.finish(request), Some(1));
+        // The next capture asks for its own page again.
+        capture.begin();
+        assert_eq!(capture.intend(request), Some(2));
+        assert_eq!(capture.finish(request), Some(2));
+        assert_eq!(reads.get(), 2);
     }
 
     #[test]
@@ -778,11 +895,17 @@ mod tests {
     fn a_refresh_the_full_channel_held_back_completes_once_delivered() {
         let phase = Arc::new(AtomicI32::new(0));
         let front_phase = phase.clone();
+        let observed = Arc::new(AtomicUsize::new(0));
+        let front_observed = observed.clone();
         let reads = Arc::new(AtomicUsize::new(0));
         let page_reads = reads.clone();
         let monitor = ContextMonitor::start_with_capture(
             move || {
-                let application = if front_phase.load(Ordering::Relaxed) == 0 {
+                let phase = front_phase.load(Ordering::Relaxed);
+                if phase != 0 {
+                    front_observed.fetch_add(1, Ordering::SeqCst);
+                }
+                let application = if phase == 0 {
                     "Brave Browser"
                 } else {
                     "Brave Browser Beta"
@@ -804,12 +927,21 @@ mod tests {
         let first = next(&monitor);
         assert_eq!(first.browser_url.as_ref().unwrap().path(), "/1");
 
-        // Leave a later snapshot filling the one slot, then refresh into it.
+        // Leave a later snapshot filling the one slot, then refresh into it:
+        // wait until the worker's own read saw the changed app, so the stale
+        // snapshot is published before the refresh is requested.
         phase.store(1, Ordering::Relaxed);
-        thread::sleep(Duration::from_millis(100));
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while observed.load(Ordering::SeqCst) == 0 {
+            assert!(Instant::now() < deadline, "the worker never saw the change");
+            thread::sleep(Duration::from_millis(1));
+        }
         let ticket = monitor.request_refresh();
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(reads.load(Ordering::SeqCst), 2);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while reads.load(Ordering::SeqCst) < 2 {
+            assert!(Instant::now() < deadline, "the refresh never read the page");
+            thread::sleep(Duration::from_millis(1));
+        }
         assert!(
             !monitor.refreshed_since(ticket),
             "a refreshed snapshot still in the full slot is not delivered"

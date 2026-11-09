@@ -1000,8 +1000,6 @@ pub fn listen(
             )?;
             if !accepted {
                 hotkeys.suspend(Shortcut::CapsLock);
-            } else if action == HotkeyAction::Start {
-                context.begin();
             }
         }
         // The capture shortcut ignores keys while shortcuts are suspended or
@@ -1086,10 +1084,6 @@ pub fn listen(
                 )?;
                 if !accepted {
                     hotkeys.suspend(shortcut);
-                } else if action == HotkeyAction::Start {
-                    // This capture's finish waits for its own page, not the
-                    // one the previous dictation saw.
-                    context.begin();
                 }
             }
         }
@@ -1104,9 +1098,14 @@ pub fn listen(
                 &input,
                 microphone_policy.release_while_idle,
             ))?
-            && microphone_policy.release_while_idle
         {
-            feedback::play(Tone::DictationStart);
+            // The press is a real capture now: read its page once, here
+            // rather than on every provisional press. A tap this loop never
+            // sees that way asks when it finishes instead.
+            context.intend();
+            if microphone_policy.release_while_idle {
+                feedback::play(Tone::DictationStart);
+            }
         }
         // Only once every queued edge is handled, so a release already seen
         // ends the press first.
@@ -1204,6 +1203,9 @@ pub fn listen(
         while let Some(audio_event) = input.try_recv_event() {
             match audio_event {
                 DictationAudioEvent::ReadyIntentional { .. } => {
+                    // A released microphone opened after the press already
+                    // counted as intentional: read this capture's page now.
+                    context.intend();
                     if input.is_recording() {
                         feedback::play(Tone::DictationStart);
                     }
@@ -1438,6 +1440,9 @@ fn handle_hotkey_action(
             if !dictation.start(action_at)? {
                 return Ok(false);
             }
+            // The press started a capture, but it may still be provisional:
+            // no page is read until the capture is held past its threshold.
+            context.begin();
             // The tone confirms the press at once; a chord or short tap
             // retracts it. A released microphone confirms only once it opens.
             if release_while_idle {
@@ -1686,7 +1691,10 @@ fn control_dictation(
                 release_while_idle,
             )?;
             if accepted {
-                // A warm start already queued its provisional tone.
+                // A warm start already queued its provisional tone. A control
+                // start has no hold threshold to wait for, so its capture is
+                // real now and reads its page at once.
+                context.intend();
                 make_control_capture_intentional(input, release_while_idle)?;
                 ControlReply::done("Recording; `hex dictation stop` or the shortcut finishes")
             } else {
@@ -1702,8 +1710,8 @@ fn control_dictation(
         false => {
             hotkeys.suspend_recording();
             let printing = print.is_some();
-            // A shortcut's capture waits for its page; a control start never
-            // asked for one, so this returns the loop's context unchanged.
+            // A control capture asked for its page when it started; this
+            // waits for that read if it is still in flight.
             let context = context.finish(events)?;
             let finished = finish_hotkey_dictation(
                 capture_boundary(input, release_while_idle),

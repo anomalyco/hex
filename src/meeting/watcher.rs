@@ -1444,32 +1444,52 @@ mod tests {
             QUERIES.fetch_add(1, Ordering::SeqCst);
             Ok(banshee_tab())
         }
+        // A query runs on its own thread, so wait with a deadline until its
+        // answer is received: polling at the query's own start time can never
+        // start another one, so this only drains the answer.
+        let settle = |probe: &mut TabProbe, at: Instant, expected: usize| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while QUERIES.load(Ordering::SeqCst) < expected || probe.running.is_some() {
+                assert!(Instant::now() < deadline, "the tab query never finished");
+                probe.page("com.brave.Browser", at);
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(QUERIES.load(Ordering::SeqCst), expected);
+        };
         let mut probe = TabProbe::new(counted);
         let started = Instant::now();
-        // The first 30 s ask every second.
+        // The first 30 s ask every second; `started` records the query
+        // synchronously, so a backed-off call is proven by it not moving.
         probe.page("com.brave.Browser", started);
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(QUERIES.load(Ordering::SeqCst), 1);
-        probe.page("com.brave.Browser", started + Duration::from_secs(1));
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(QUERIES.load(Ordering::SeqCst), 2);
+        assert_eq!(probe.started, Some(started));
+        settle(&mut probe, started, 1);
+        let at_1 = started + Duration::from_secs(1);
+        probe.page("com.brave.Browser", at_1);
+        assert_eq!(probe.started, Some(at_1));
+        settle(&mut probe, at_1, 2);
 
         // From then on they are 30 s apart; an answer waits that long.
-        probe.page("com.brave.Browser", started + Duration::from_secs(29));
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(QUERIES.load(Ordering::SeqCst), 3);
+        let at_29 = started + Duration::from_secs(29);
+        probe.page("com.brave.Browser", at_29);
+        assert_eq!(probe.started, Some(at_29));
+        settle(&mut probe, at_29, 3);
         probe.page("com.brave.Browser", started + Duration::from_secs(31));
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(QUERIES.load(Ordering::SeqCst), 3);
-        probe.page("com.brave.Browser", started + Duration::from_secs(59));
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(QUERIES.load(Ordering::SeqCst), 4);
+        assert_eq!(
+            probe.started,
+            Some(at_29),
+            "a backed-off query started early"
+        );
+        let at_59 = started + Duration::from_secs(59);
+        probe.page("com.brave.Browser", at_59);
+        assert_eq!(probe.started, Some(at_59));
+        settle(&mut probe, at_59, 4);
 
         // A reset starts a fresh burst at once.
         probe.reset();
-        probe.page("com.brave.Browser", started + Duration::from_secs(61));
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(QUERIES.load(Ordering::SeqCst), 5);
+        let at_61 = started + Duration::from_secs(61);
+        probe.page("com.brave.Browser", at_61);
+        assert_eq!(probe.started, Some(at_61));
+        settle(&mut probe, at_61, 5);
     }
 
     #[test]

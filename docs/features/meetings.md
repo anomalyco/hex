@@ -390,9 +390,12 @@ recording by hand: the "about 20 s" threshold was 40 loop observations, and each
 loop took about 0.9 s (500 ms sleep plus the browser inspection), so an unknown
 browser page needed about 37 s. The thresholds are now clock time, and the
 foreground context monitor no longer runs an AppleScript read every poll
-(README's website-context section): the watcher's own queries (once a second
-for the first 30 s, then every 30 s) are the only repeated browser reads while
-a call is detected.
+(README's website-context section): it reads a scriptable browser's page when
+the browser comes to the front and once a dictation capture is real (held past
+its hold threshold, or at a finish that lands earlier, or at the control
+command's start). The watcher's own queries (once a second for the first 30 s a
+browser holds the microphone, then every 30 s) keep naming the call, so after
+the first 30 s a tab change can take up to 30 s to be noticed.
 Checks: `a_slow_loop_still_offers_an_unknown_browser_call_after_about_20_seconds`,
 `a_slow_loop_still_ends_a_snooze_after_a_minute`,
 `a_stalled_loop_does_not_count_the_gap_as_time_on_the_microphone`,

@@ -1,6 +1,6 @@
 //! The listener's foreground context: the monitor's latest snapshot, the
-//! page refresh a shortcut's start asks for, and the finish that waits for
-//! it briefly instead of using the previous dictation's page.
+//! page refresh a capture asks for once it is real, and the finish that waits
+//! for it briefly instead of using the previous dictation's page.
 
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 use color_eyre::Result;
 
 use crate::desktop::events::{EventLog, VoiceEvent, now_ms};
-use crate::dictation::context::{ContextMonitor, ContextSnapshot};
+use crate::dictation::context::{CaptureRefresh, ContextMonitor, ContextSnapshot};
 use crate::suppression::InputActivity;
 
-/// How long a finished shortcut waits for the page its start asked to
+/// How long a finished shortcut waits for the page its capture asked to
 /// refresh before handing the worker a context with no page.
 const REFRESH_WAIT: Duration = Duration::from_secs(1);
 /// How often that wait rechecks the completed ticket: a worker stores it
@@ -23,9 +23,8 @@ pub(super) struct ContextWatch {
     monitor: ContextMonitor,
     snapshot: ContextSnapshot,
     activity: InputActivity,
-    /// The refresh ticket for the capture now recording, until it finishes
-    /// or ends.
-    refresh: Option<u64>,
+    /// The one refresh this capture owes, if any.
+    capture: CaptureRefresh,
 }
 
 impl ContextWatch {
@@ -34,7 +33,7 @@ impl ContextWatch {
             monitor: ContextMonitor::start(),
             snapshot: ContextSnapshot::default(),
             activity,
-            refresh: None,
+            capture: CaptureRefresh::default(),
         }
     }
 
@@ -62,22 +61,33 @@ impl ContextWatch {
         Ok(())
     }
 
-    /// A shortcut's capture starts: ask for a page read for its finish.
+    /// A shortcut's press started a capture. It may still be a provisional
+    /// press a chord discards, so nothing reads the page yet.
     pub(super) fn begin(&mut self) {
-        self.refresh = Some(self.monitor.request_refresh());
+        self.capture.begin();
+    }
+
+    /// The capture became real: a control start (no hold to judge), a hold
+    /// past its threshold, or a released microphone finally opening. Ask for
+    /// its page now, once per capture.
+    pub(super) fn intend(&mut self) {
+        let monitor = &self.monitor;
+        self.capture.intend(|| monitor.request_refresh());
     }
 
     /// The capture ended without transcribing: no finish waits for its page.
     pub(super) fn cancel(&mut self) {
-        self.refresh = None;
+        self.capture.cancel();
     }
 
-    /// The context to hand a finished shortcut: the refreshed page when it
+    /// The context to hand a finished capture: the refreshed page when it
     /// arrived in time, else the same context without a page rather than the
-    /// page of a previous dictation. A finish whose start never asked for a
-    /// refresh (a control start) returns the loop's context unchanged.
+    /// page of a previous dictation. A capture that finished before it was
+    /// real asks for its page here, and a finish with no capture at all (the
+    /// loop's own context) returns it unchanged.
     pub(super) fn finish(&mut self, events: &mut EventLog) -> Result<ContextSnapshot> {
-        let Some(ticket) = self.refresh.take() else {
+        let monitor = &self.monitor;
+        let Some(ticket) = self.capture.finish(|| monitor.request_refresh()) else {
             return Ok(self.snapshot.clone());
         };
         let deadline = Instant::now() + REFRESH_WAIT;
@@ -106,10 +116,15 @@ impl ContextWatch {
         }
     }
 
+    /// Hands a capture the same context with no page, and focuses the
+    /// vocabulary there too: the previous dictation's page must not name this
+    /// one's mode.
     fn without_page(&self) -> ContextSnapshot {
-        ContextSnapshot {
+        let snapshot = ContextSnapshot {
             browser_url: None,
             ..self.snapshot.clone()
-        }
+        };
+        crate::dictation::vocabulary::focus(&snapshot);
+        snapshot
     }
 }
