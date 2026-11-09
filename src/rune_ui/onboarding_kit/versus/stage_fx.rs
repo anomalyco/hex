@@ -60,7 +60,9 @@ pub(super) fn camera(s: &Onboard, t: f64) -> (f32, [f32; 2]) {
 
 /// Where the camera zooms to: the draft's field, which stays put.
 pub(super) fn camera_focus() -> [f32; 2] {
-    [CENTRE_X, card_bottom(WITHOUT_LINES) - 24.0]
+    Layout::chosen()
+        .card()
+        .map([CENTRE_X, card_bottom(WITHOUT_LINES) - 24.0])
 }
 
 /// The autocorrect title slamming onto the stage like a fighting game's
@@ -211,7 +213,7 @@ pub(super) fn mode_call(p: Paint, s: &Onboard) -> Option<El> {
         );
     Some(
         el().key("mode-call")
-            .absolute(0.0, HUD_CENTRE[1] - 40.0)
+            .absolute(0.0, hud_centre()[1] - 40.0)
             .size(STAGE_W, 80.0)
             .center()
             .instant_changes()
@@ -260,6 +262,63 @@ pub(super) fn mode_chip(p: Paint, voice: bool) -> El {
                 .font(TextStyle::new(12.0, 650.0).lh(16.0))
                 .color(ink),
         )
+}
+
+/// The laptop layout's lid: a bezel round the conversation, its screen.
+pub(super) fn laptop_lid(p: Paint) -> El {
+    let k = p.k;
+    let [x0, y0, x1, y1] = Layout::Laptop.laptop_lid();
+    let lid = el()
+        .key("laptop-lid")
+        .absolute(x0, y0)
+        .size(x1 - x0, y1 - y0)
+        .radius(22.0)
+        .continuous_corners()
+        .fill(k.c.bg_deep)
+        .border(p.hair, k.c.border_base)
+        .shadow(10.0, 30.0, k.c.black.alpha(0.45))
+        .child(
+            el().key("camera-dot")
+                .absolute((x1 - x0) * 0.5 - 2.5, LAPTOP_BEZEL * 0.5 - 2.5)
+                .size(5.0, 5.0)
+                .radius(2.5)
+                .fill(k.c.border_strong),
+        );
+    lid.transition(Transition::opacity())
+}
+
+/// The laptop layout's deck under the keyboard, seen from above: wider at
+/// the front edge, with the hinge along its back.
+pub(super) fn laptop_deck(p: Paint) -> El {
+    let k = p.k;
+    let [x0, _, x1, y1] = Layout::Laptop.laptop_lid();
+    let top = y1 + 2.0;
+    let bottom = STAGE_H;
+    let flare = 22.0;
+    let deck = rune::Shape::new()
+        .fill(
+            vec![
+                [x0 - 4.0, top],
+                [x1 + 4.0, top],
+                [x1 + flare, bottom],
+                [x0 - flare, bottom],
+            ],
+            k.c.bg_base,
+        )
+        .fill(
+            vec![
+                [x0 - 4.0, top],
+                [x1 + 4.0, top],
+                [x1 + 5.0, top + 3.0],
+                [x0 - 5.0, top + 3.0],
+            ],
+            k.c.border_strong,
+        );
+    rune::canvas(deck)
+        .key("laptop-deck")
+        .absolute(0.0, 0.0)
+        .size(STAGE_W, STAGE_H)
+        .transition(Transition::opacity())
 }
 
 #[cfg(test)]

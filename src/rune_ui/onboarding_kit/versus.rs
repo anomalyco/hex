@@ -40,17 +40,22 @@ use super::stories::{Flow, Onboard, Step};
 use super::triumph::{self, HexBeats, Said};
 use super::typing::{Focus, Glyph, Line, Scene, Timing, Who};
 pub(crate) use stage_fx::VOICE_CALL_AT;
-use stage_fx::{camera, camera_focus, mode_call, mode_chip, slam};
+use stage_fx::{camera, camera_focus, laptop_deck, laptop_lid, mode_call, mode_chip, slam};
 
 mod stage_fx;
 
-const STAGE_W: f32 = 500.0;
-const STAGE_H: f32 = 540.0;
+use super::composition::{LAPTOP_BEZEL, Layout, STAGE_H, STAGE_W, keys_map};
 const CENTRE_X: f32 = STAGE_W * 0.5;
 const CARD_X: f32 = CENTRE_X - CHAT_W * 0.5;
 const CARD_TOP: f32 = 0.0;
-/// Over the keyboard's upper rows, which melt away, above the lit `⌥`.
+/// Over the keyboard's upper rows, which melt away, above the lit `⌥`, where
+/// the keyboard sits today; [`hud_centre`] follows the layout.
 const HUD_CENTRE: [f32; 2] = [CENTRE_X, 416.0];
+
+/// Where the HUD rises on the stage, in this run's layout.
+fn hud_centre() -> [f32; 2] {
+    keys_map(Layout::chosen().keys(), HUD_CENTRE)
+}
 /// The keys behind the HUD go dark around it, this far out from its centre.
 const POCKET: [f32; 2] = [136.0, 58.0];
 /// The HUD has collapsed away this long after the answer's release.
@@ -185,6 +190,8 @@ fn flights_for(
     from: f64,
 ) -> Vec<(Flight, field_text::Slot<'static>)> {
     let origin = field_origin();
+    // The words fly in the conversation's own space, out of the HUD.
+    let hud = Layout::chosen().card().unmap(hud_centre());
     CHAT.slots(take.text())
         .into_iter()
         .zip(heard_for(take, streams))
@@ -192,7 +199,7 @@ fn flights_for(
         .map(|(i, (slot, at))| {
             let to = [origin[0] + slot.centre[0], origin[1] + slot.centre[1]];
             (
-                Flight::new(HUD_CENTRE, to, from + at, CALM, FIELD_FONT.size, i),
+                Flight::new(hud, to, from + at, CALM, FIELD_FONT.size, i),
                 slot,
             )
         })
@@ -368,11 +375,16 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             ),
         ),
         // The chip says it all; the line under it stays, empty, so the
-        // stage doesn't move when `"With Hex"` brings its own.
+        // stage doesn't move when `"With Hex"` brings its own. Composed in
+        // two lines, it says what you do, as `"With Hex"`'s does.
         Step::Parked if !scene_over(s) || s.demo_hears() => (
             "without",
             tr("Without Hex").to_string(),
-            el().key("lead-none"),
+            if Layout::chosen().two_lines() {
+                line("lead-type", tr("Type it by hand.").to_string())
+            } else {
+                el().key("lead-none")
+            },
         ),
         Step::Parked => (
             "with",
@@ -412,6 +424,9 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
         "with" => Some(true),
         _ => None,
     };
+    if Layout::chosen().split() {
+        return split_heading(p, s, key, title, lead, mode);
+    }
     // The first run's download flies up past it from "Setting up Hex".
     after_flight(col(), s)
         .key(key)
@@ -429,6 +444,37 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
         )
         .child(row().key("lead-row").h(24.0).center().child(lead))
 }
+
+/// The split layout's heading, a column left of the stage: the mode, a big
+/// title, then what you do.
+fn split_heading(
+    p: Paint,
+    s: &Onboard,
+    key: &str,
+    title: String,
+    lead: El,
+    mode: Option<bool>,
+) -> El {
+    let big = TextStyle {
+        size: 44.0,
+        line_height: 50.0,
+        ..title_font(p)
+    }
+    .tracking(-0.8);
+    after_flight(col(), s)
+        .key(key.to_string())
+        .w(SPLIT_HEADING_W)
+        .gap(14.0)
+        .items_start()
+        .transition(act_break())
+        .enter_delay(HEADING_GAP)
+        .children(mode.map(|voice| mode_chip(p, voice)))
+        .child(text(title).key("title").font(big).color(p.text()).wrap())
+        .child(row().key("lead-row").min_h(24.0).child(lead))
+}
+
+/// The split layout's heading column.
+pub(super) const SPLIT_HEADING_W: f32 = 320.0;
 
 /// How long the outgoing heading has alone before the next sharpens in.
 const HEADING_GAP: f32 = 0.09;
@@ -632,6 +678,8 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         Some(t) if !reduced && !voice_phase => s.scene.shudder(t),
         _ => [0.0, 0.0],
     };
+    let layout = Layout::chosen();
+    let keys_place = layout.keys();
     let keys_el = el()
         .key("keys")
         .transition(
@@ -639,10 +687,18 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
                 .springs(SpringPair::new(UI_SPRING, Spring::new(s.motion.exit, 0.0))),
         )
         .absolute(deck[0], deck[1])
-        .offset(shudder[0], kb_shift + shudder[1])
+        .offset(
+            shudder[0] + keys_place.at[0],
+            kb_shift + shudder[1] + keys_place.at[1],
+        )
         .size(kw, kh)
-        .offset_motion(Anim::INSTANT)
-        .child(kb_el.motion_intent(MotionIntent::STEP));
+        .offset_motion(Anim::INSTANT);
+    let keys_el = if keys_place.is_identity() {
+        keys_el
+    } else {
+        keys_el.origin(0.5, 0.0).scale(keys_place.k)
+    }
+    .child(kb_el.motion_intent(MotionIntent::STEP));
 
     // Real `Dot scope` phosphor HUD (`rune_hud.wgsl`) during `With Hex`: it
     // unfolds as it rises into the space the keys melted out of, above `⌥`.
@@ -651,8 +707,8 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         .and_then(|_| {
             voice_or_idle_slot(
                 "onboard-dot-hud",
-                HUD_CENTRE,
-                HUD_SCALE,
+                hud_centre(),
+                HUD_SCALE * keys_place.k,
                 s.step == Step::YourTurn,
                 take(),
                 s.take_from,
@@ -710,16 +766,38 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         Some(t) if !voice_phase => camera(s, t),
         _ => (1.0, [0.0, 0.0]),
     };
+    // The conversation, and the words flying into it, as one group the
+    // layout places.
+    let card_place = layout.card();
+    let conversation = [
+        Some(plate(p, opening)),
+        Some(card),
+        pointer,
+        Some(words(p, s, nudge)),
+    ]
+    .into_iter()
+    .flatten();
     let camera = el()
         .key("camera")
         .absolute(0.0, 0.0)
         .size(STAGE_W, STAGE_H)
+        .children((layout == Layout::Laptop).then(|| laptop_deck(p)))
         .child(keys_el)
         .children(hud_el)
-        .child(plate(p, opening))
-        .child(card)
-        .children(pointer)
-        .child(words(p, s, nudge));
+        .children((layout == Layout::Laptop).then(|| laptop_lid(p)));
+    let camera = if card_place.is_identity() {
+        camera.children(conversation)
+    } else {
+        camera.child(
+            el().key("conversation")
+                .absolute(0.0, 0.0)
+                .size(STAGE_W, STAGE_H)
+                .origin(0.5, 0.0)
+                .scale(card_place.k)
+                .offset(card_place.at[0], card_place.at[1])
+                .children(conversation),
+        )
+    };
     // The push in and the blow's shake are the camera's own; at rest it
     // leaves the stage untouched.
     let camera = if zoom != 1.0 || shake != [0.0, 0.0] {

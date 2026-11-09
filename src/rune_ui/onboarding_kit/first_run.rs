@@ -15,6 +15,7 @@ use rune_kit::{Badge, Button, ButtonVariant, RadioItem, TextArea, glyphs};
 use super::super::controls::{DESCRIPTION, KeySize, METRICS, Paint, PushSize, keycap};
 use super::super::found_choice::ChoiceRow;
 use super::super::lists::allowed;
+use super::composition::Layout;
 use super::dictated::Stage;
 use super::field_text::Field;
 use super::fixture::{ANSWER_TRY, Download};
@@ -33,6 +34,8 @@ use super::{live, permissions, versus};
 use crate::desktop::i18n::{tr, tr_fill};
 
 const TOP_BAR: f32 = 48.0;
+/// Between the split layout's heading column and its stage.
+const SPLIT_GAP: f32 = 48.0;
 const ACTION_H: f32 = 32.0;
 
 const TRY_W: f32 = 468.0;
@@ -70,7 +73,8 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     let top = top
         .children(back(p, s))
         .children(reopen(p, s))
-        .children(skip(p, s));
+        .children(skip(p, s))
+        .children(corner_skip(p, s));
     // The real window has no title bar: the top of the page moves it.
     let top = if s.live.is_some() {
         super::super::sidebar::title_bar(top)
@@ -127,6 +131,28 @@ fn skip(p: Paint, s: &Onboard) -> Option<El> {
                     .build_push(p.k)
                     .key("skip"),
             )
+    })
+}
+
+/// `Skip →` in the top-right corner, where a composed layout puts it
+/// rather than under the demo; the real window has its own.
+fn corner_skip(p: Paint, s: &Onboard) -> Option<El> {
+    let on = s.live.is_none()
+        && Layout::chosen().corner_skip()
+        && matches!(
+            s.step,
+            Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard
+        )
+        && versus::skippable(s);
+    on.then(|| {
+        row()
+            .key("skip-corner")
+            .absolute(0.0, 8.0)
+            .w_full()
+            .pr(20.0)
+            .justify_end()
+            .transition(arrives())
+            .child(super::flows::skip_button(p, s))
     })
 }
 
@@ -591,19 +617,31 @@ fn without_model(p: Paint, s: &Onboard) -> Option<El> {
 }
 
 fn demo_page(p: Paint, s: &Onboard) -> El {
-    col()
+    let layout = Layout::chosen();
+    if layout.split() {
+        return row()
+            .key("demo")
+            .gap(SPLIT_GAP)
+            .center_y()
+            .child(versus::heading(p, s))
+            .child(versus::stage(p, s));
+    }
+    let page = col()
         .key("demo")
         .gap(16.0)
         .items_center()
         .child(versus::heading(p, s))
-        .child(versus::stage(p, s))
-        .child(action(if s.step == Step::Done {
-            continue_button(p, s)
-        } else if versus::skippable(s) {
-            super::flows::skip_button(p, s)
-        } else {
-            none()
-        }))
+        .child(versus::stage(p, s));
+    if layout.corner_skip() {
+        return page;
+    }
+    page.child(action(if s.step == Step::Done {
+        continue_button(p, s)
+    } else if versus::skippable(s) {
+        super::flows::skip_button(p, s)
+    } else {
+        none()
+    }))
 }
 
 fn try_heard_at(s: &Onboard) -> Vec<f64> {

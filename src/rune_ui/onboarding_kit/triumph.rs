@@ -263,11 +263,11 @@ pub(crate) struct Celebration {
     pub(crate) over: Vec<El>,
 }
 
-/// One of the fireworks' slots over [`fireworks::AREA`]. It never fades:
+/// One of the fireworks' slots over [`fireworks::area`]. It never fades:
 /// a faded slot is drawn in a layer of its own, where there's nothing for
 /// its light to fall on.
 fn fireworks_slot(mark: u32, key: &str) -> El {
-    let [x, y, w, h] = fireworks::AREA;
+    let [x, y, w, h] = fireworks::area();
     effect(mark)
         .key(key.to_string())
         .absolute(x, y)
@@ -315,6 +315,11 @@ pub(crate) fn effects(
         if !show.lights.is_empty() {
             c.over
                 .push(fireworks_slot(fireworks::LIGHT_MARK, "fireworks-light"));
+        }
+        // The near bursts after their light, so it doesn't brighten them.
+        if !show.near.is_empty() {
+            c.over
+                .push(fireworks_slot(fireworks::NEAR_MARK, "fireworks-near"));
         }
     }
     fireworks::publish(show);

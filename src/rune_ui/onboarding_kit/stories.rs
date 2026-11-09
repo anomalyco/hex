@@ -831,6 +831,7 @@ fn first_run() -> Story<Onboard> {
     Story::new(
         "Prototypes/Onboarding/First run",
         || {
+            super::composition::Layout::Today.choose();
             let mut s = Onboard::new(Flow::FirstRun);
             s.speech = Speech::AfterDownload;
             s.login = super::login::LoginAsk::preview();
@@ -866,6 +867,15 @@ fn first_run() -> Story<Onboard> {
         s.rehearsal = Some(Rehearsal::new(true));
         s.autoplay = true;
     })
+    .variant("Whole run, layout A: tighter centre", |s| {
+        whole_run_in(s, super::composition::Layout::Centre)
+    })
+    .variant("Whole run, layout B: split", |s| {
+        whole_run_in(s, super::composition::Layout::Split)
+    })
+    .variant("Whole run, layout C: laptop", |s| {
+        whole_run_in(s, super::composition::Layout::Laptop)
+    })
     .variant("Whole run, slow download, a sketch", |s| {
         s.rehearsal = Some(Rehearsal::new(true));
         s.autoplay = true;
@@ -890,6 +900,13 @@ fn first_run() -> Story<Onboard> {
         s.motion.keyboard = 0.8;
     })
     .side(side::side)
+}
+
+/// The scripted whole run, composed in `layout`.
+fn whole_run_in(s: &mut Onboard, layout: super::composition::Layout) {
+    layout.choose();
+    s.rehearsal = Some(Rehearsal::new(true));
+    s.autoplay = true;
 }
 
 fn finish_download(s: &mut Onboard, _: &mut Play<'_, Onboard>) {

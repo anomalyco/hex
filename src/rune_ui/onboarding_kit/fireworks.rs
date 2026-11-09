@@ -3,9 +3,10 @@
 //! embers that crackle out, under gravity and air drag. Each burst lights
 //! the page under it for a moment in its colour.
 //!
-//! The view puts two effect slots on the stage ([`SPARKS_MARK`] behind the
-//! conversation, so the card hides what flies behind it and its text stays
-//! clean, and [`LIGHT_MARK`] over everything) and [`publish`]es a [`Show`]
+//! The view puts three effect slots on the stage: [`SPARKS_MARK`] behind
+//! the conversation, for the far bursts the card hides, [`LIGHT_MARK`] over
+//! it, and [`NEAR_MARK`] over that, for the near bursts whose sparks fall
+//! across it and [`publish`]es a [`Show`]
 //! each frame. The window's compositor paints both through [`Painter`]
 //! (`fireworks.wgsl`). The light multiplies what's already drawn, so a
 //! surface brightens by its own colour and the near-black page barely does.
@@ -17,20 +18,29 @@ use rune::Color;
 use rune::render::EffectSite;
 
 use super::super::controls::Paint;
+use super::composition::Layout;
 
 pub(crate) const SPARKS_MARK: u32 = 0x4800_0300;
 pub(crate) const LIGHT_MARK: u32 = 0x4800_0301;
+pub(crate) const NEAR_MARK: u32 = 0x4800_0302;
 
 pub(crate) const fn is_fireworks_mark(mark: u32) -> bool {
-    mark == SPARKS_MARK || mark == LIGHT_MARK
+    mark == SPARKS_MARK || mark == LIGHT_MARK || mark == NEAR_MARK
 }
 
-/// The area both slots cover, in stage points: the stage and the page
-/// around it, out to the window's edges.
-pub(crate) const AREA: [f32; 4] = [-250.0, -160.0, 1000.0, 800.0];
+/// The area the slots cover, in stage points: the stage and the page
+/// around it, out to the window's edges, wherever the layout puts the
+/// stage.
+pub(crate) fn area() -> [f32; 4] {
+    if Layout::chosen().split() {
+        [-434.0, -160.0, 1000.0, 800.0]
+    } else {
+        [-250.0, -160.0, 1000.0, 800.0]
+    }
+}
 
 /// From the first shell going up to the last ember.
-pub(crate) const LIFE: f32 = 3.1;
+pub(crate) const LIFE: f32 = 3.4;
 
 /// A shell climbs this long, slowing under gravity, before it bursts: its
 /// sound's whistle, up to the boom.
@@ -52,10 +62,29 @@ enum Kind {
     Chrysanthemum,
 }
 
+/// Which side of the conversation a shell bursts on.
+#[derive(Clone, Copy, PartialEq)]
+enum Layer {
+    /// Behind it, far off: smaller, dimmer, softer, lighting it a little.
+    Far,
+    /// In front: bigger and brighter, its sparks falling across the card's
+    /// edges and over its text for a moment, lighting it hard.
+    Near,
+}
+
+/// Where a shell bursts.
+#[derive(Clone, Copy)]
+enum Anchor {
+    /// This far out past the conversation's left edge, this far down it.
+    Left(f32, f32),
+    Right(f32, f32),
+    /// A stage point, for the open page beside a split layout.
+    At(f32, f32),
+}
+
 struct Shell {
     delay: f32,
-    /// Where it bursts, in stage points.
-    burst: [f32; 2],
+    at: Anchor,
     /// Where it leaves from, across from the burst.
     drift: f32,
     hue: &'static str,
@@ -64,52 +93,155 @@ struct Shell {
     /// Launch speed of its stars, points per second.
     speed: f32,
     kind: Kind,
+    layer: Layer,
+}
+
+#[allow(clippy::too_many_arguments)]
+const fn shell(
+    delay: f32,
+    at: Anchor,
+    drift: f32,
+    (hue, second): (&'static str, &'static str),
+    sparks: u32,
+    speed: f32,
+    kind: Kind,
+    layer: Layer,
+) -> Shell {
+    Shell {
+        delay,
+        at,
+        drift,
+        hue,
+        second,
+        sparks,
+        speed,
+        kind,
+        layer,
+    }
+}
+
+/// Four shells either side of the conversation, alternating far and near;
+/// the near ones' hot cores stay off its message column.
+const BESIDE: [Shell; 4] = [
+    shell(
+        0.0,
+        Anchor::Left(125.0, 0.22),
+        40.0,
+        ("amber", "yuzu"),
+        170,
+        250.0,
+        Kind::Peony,
+        Layer::Far,
+    ),
+    shell(
+        0.3,
+        Anchor::Right(48.0, 0.1),
+        -30.0,
+        ("cobalt", "cyan"),
+        260,
+        420.0,
+        Kind::Chrysanthemum,
+        Layer::Near,
+    ),
+    shell(
+        0.62,
+        Anchor::Right(135.0, 0.8),
+        -40.0,
+        ("coral", "lilac"),
+        140,
+        230.0,
+        Kind::Peony,
+        Layer::Far,
+    ),
+    shell(
+        0.95,
+        Anchor::Left(52.0, 0.55),
+        35.0,
+        ("yuzu", "amber"),
+        240,
+        400.0,
+        Kind::Peony,
+        Layer::Near,
+    ),
+];
+
+/// The split layout's: the open page on the left has the room, round the
+/// heading rather than over it.
+const OPEN_LEFT: [Shell; 4] = [
+    shell(
+        0.0,
+        Anchor::At(-300.0, -20.0),
+        40.0,
+        ("amber", "yuzu"),
+        170,
+        250.0,
+        Kind::Peony,
+        Layer::Far,
+    ),
+    shell(
+        0.3,
+        Anchor::Left(48.0, 0.12),
+        -30.0,
+        ("cobalt", "cyan"),
+        260,
+        420.0,
+        Kind::Chrysanthemum,
+        Layer::Near,
+    ),
+    shell(
+        0.62,
+        Anchor::At(-130.0, 500.0),
+        -40.0,
+        ("coral", "lilac"),
+        140,
+        230.0,
+        Kind::Peony,
+        Layer::Far,
+    ),
+    shell(
+        0.95,
+        Anchor::At(-330.0, 470.0),
+        35.0,
+        ("yuzu", "amber"),
+        240,
+        400.0,
+        Kind::Peony,
+        Layer::Near,
+    ),
+];
+
+fn shells() -> &'static [Shell] {
+    if Layout::chosen().split() {
+        &OPEN_LEFT
+    } else {
+        &BESIDE
+    }
+}
+
+/// Where `shell` bursts on the stage, beside this layout's conversation.
+fn burst_at(shell: &Shell) -> [f32; 2] {
+    let [x0, y0, x1, y1] = Layout::chosen().card_rect();
+    match shell.at {
+        Anchor::Left(out, down) => [x0 - out, y0 + (y1 - y0) * down],
+        Anchor::Right(out, down) => [x1 + out, y0 + (y1 - y0) * down],
+        Anchor::At(x, y) => [x, y],
+    }
 }
 
 /// When each shell goes up after the first, and how loud its sound is, so
-/// every burst has its boom.
+/// every burst has its boom: the near ones loud, the far ones distant.
 pub(crate) fn launches() -> impl Iterator<Item = (f64, u8)> {
-    SHELLS
-        .iter()
-        .enumerate()
-        .map(|(i, shell)| (f64::from(shell.delay), if i == 0 { 100 } else { 70 }))
+    shells().iter().enumerate().map(|(i, shell)| {
+        let level = match shell.layer {
+            _ if i == 0 => 90,
+            Layer::Near => 100,
+            Layer::Far => 60,
+        };
+        (f64::from(shell.delay), level)
+    })
 }
 
-/// Three shells either side of the conversation, never over its text.
-const SHELLS: [Shell; 3] = [
-    Shell {
-        delay: 0.0,
-        burst: [-105.0, 120.0],
-        drift: 40.0,
-        hue: "amber",
-        second: "yuzu",
-        sparks: 240,
-        speed: 360.0,
-        kind: Kind::Peony,
-    },
-    Shell {
-        delay: 0.34,
-        burst: [585.0, 75.0],
-        drift: -30.0,
-        hue: "cobalt",
-        second: "cyan",
-        sparks: 280,
-        speed: 370.0,
-        kind: Kind::Chrysanthemum,
-    },
-    Shell {
-        delay: 0.78,
-        burst: [600.0, 335.0],
-        drift: -45.0,
-        hue: "coral",
-        second: "lilac",
-        sparks: 180,
-        speed: 300.0,
-        kind: Kind::Peony,
-    },
-];
-
-/// One spark's streak, a burst's halo, or a rising shell, in [`AREA`]'s
+/// One spark's streak, a burst's halo, or a rising shell, in [`area`]'s
 /// points; `color` is linear light, brighter than white when it's hot.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Streak {
@@ -123,7 +255,7 @@ pub(crate) struct Streak {
     pub tail: f32,
 }
 
-/// A burst's light on the page, in [`AREA`]'s points.
+/// A burst's light on the page, in [`area`]'s points.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Light {
     pub at: [f32; 2],
@@ -136,7 +268,10 @@ pub(crate) struct Light {
 #[derive(Clone, Default)]
 pub(crate) struct Show {
     pub dark: bool,
+    /// Behind the conversation.
     pub streaks: Vec<Streak>,
+    /// In front of it.
+    pub near: Vec<Streak>,
     pub lights: Vec<Light>,
 }
 
@@ -177,14 +312,18 @@ fn smooth(e0: f32, e1: f32, x: f32) -> f32 {
     u * u * (3.0 - 2.0 * u)
 }
 
+/// How far drag lets something thrown at 1 pt/s get in `t`.
+fn reach(t: f32) -> f32 {
+    (1.0 - (-DRAG * t).exp()) / DRAG
+}
+
 /// Where a star thrown at `v` from `from` is after `t`: drag slows it to
 /// gravity's terminal fall.
 fn thrown(from: [f32; 2], v: [f32; 2], t: f32) -> [f32; 2] {
-    let reach = (1.0 - (-DRAG * t).exp()) / DRAG;
     let terminal = GRAVITY / DRAG;
     [
-        from[0] + v[0] * reach,
-        from[1] + terminal * t + (v[1] - terminal) * reach,
+        from[0] + v[0] * reach(t),
+        from[1] + terminal * t + (v[1] - terminal) * reach(t),
     ]
 }
 
@@ -194,9 +333,40 @@ fn climb(u: f32) -> f32 {
     1.0 - (1.0 - u) * (1.0 - u)
 }
 
-fn local(at: [f32; 2]) -> [f32; 2] {
-    [at[0] - AREA[0], at[1] - AREA[1]]
+/// How much of its own light a star shows `age` seconds after a break
+/// thrown at `speed`: almost none while a hundred-odd of them overlap at
+/// the centre, all of it once the shell has opened to nearly half its
+/// reach. Steep, because sRGB-encoded blending adds what each star shows,
+/// and many faint stars add up to a white disc.
+fn packed(speed: f32, age: f32) -> f32 {
+    let full = 0.45 * speed / DRAG;
+    (speed * reach(age) / full).powi(6).clamp(0.002, 1.0)
 }
+
+/// How a layer draws its stars: brightness, core width, glow, how hard its
+/// light falls and how far.
+struct Look {
+    bright: f32,
+    half: f32,
+    glow: f32,
+    light: f32,
+    reach: f32,
+}
+
+const FAR: Look = Look {
+    bright: 0.6,
+    half: 0.75,
+    glow: 2.3,
+    light: 1.2,
+    reach: 290.0,
+};
+const NEAR: Look = Look {
+    bright: 1.3,
+    half: 1.25,
+    glow: 1.7,
+    light: 3.2,
+    reach: 400.0,
+};
 
 /// The show `t` seconds after the first shell goes up. Reduce Motion gets
 /// one soft flash of light and no sparks.
@@ -209,57 +379,69 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
         dark,
         ..Show::default()
     };
+    let [ax, ay, _, _] = area();
+    let local = |at: [f32; 2]| [at[0] - ax, at[1] - ay];
     let tone = |name: &str| rgb(rune_theme_opencode::scale(name, true, 9));
     let white = [1.0, 0.97, 0.92];
     let ember = [1.0, 0.36, 0.08];
+    let shells = shells();
     if reduced {
-        let shell = &SHELLS[0];
+        let [x0, y0, x1, y1] = Layout::chosen().card_rect();
         let glow = smooth(0.0, 0.25, t) * (1.0 - smooth(0.35, 0.9, t));
         if glow > 0.0 {
             show.lights.push(Light {
-                at: local([250.0, 160.0]),
-                color: mix3(tone(shell.hue), white, 0.4),
+                at: local([(x0 + x1) * 0.5, y0 + (y1 - y0) * 0.4]),
+                color: mix3(tone(shells[0].hue), white, 0.4),
                 strength: 0.55 * glow,
                 reach: 420.0,
             });
         }
         return Some(show);
     }
-    for (n, shell) in SHELLS.iter().enumerate() {
+    for (n, shell) in shells.iter().enumerate() {
         let t = t - shell.delay;
         if t < 0.0 {
             continue;
         }
+        let look = match shell.layer {
+            Layer::Far => &FAR,
+            Layer::Near => &NEAR,
+        };
+        let layer = match shell.layer {
+            Layer::Far => &mut show.streaks,
+            Layer::Near => &mut show.near,
+        };
         let salt = n as u32 * 7919 + 17;
         let hue = tone(shell.hue);
         let second = tone(shell.second);
-        let from = [shell.burst[0] + shell.drift, LAUNCH_Y];
+        let burst = burst_at(shell);
+        let from = [burst[0] + shell.drift, LAUNCH_Y];
         let at_climb = |t: f32| {
             let u = (t / RISE).clamp(0.0, 1.0);
-            let y = from[1] + (shell.burst[1] - from[1]) * climb(u);
+            let y = from[1] + (burst[1] - from[1]) * climb(u);
             // It weaves a little on the way up.
-            let x = from[0]
-                + (shell.burst[0] - from[0]) * u
-                + 2.0 * (t * 31.0 + n as f32).sin() * (1.0 - u);
+            let x =
+                from[0] + (burst[0] - from[0]) * u + 2.0 * (t * 31.0 + n as f32).sin() * (1.0 - u);
             [x, y]
         };
         if t < RISE {
             // The shell's head on one fading streak: where it was a moment
             // ago to where it is.
             let gold = mix3(tone("amber"), white, 0.5);
-            show.streaks.push(Streak {
+            let k = look.bright.min(1.0);
+            layer.push(Streak {
                 from: local(at_climb((t - 0.14).max(0.0))),
                 to: local(at_climb(t)),
-                color: scaled(gold, 1.1),
-                half: 0.75,
+                color: scaled(gold, 1.1 * k),
+                half: 0.75 * look.half,
                 glow: 2.2,
                 tail: 0.0,
             });
-            show.streaks.push(Streak {
+            layer.push(Streak {
                 from: local(at_climb(t)),
                 to: local(at_climb(t)),
-                color: scaled(white, 1.4),
-                half: 1.1,
+                color: scaled(white, 1.4 * k),
+                half: 1.1 * look.half,
                 glow: 3.5,
                 tail: 1.0,
             });
@@ -277,7 +459,7 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
                 ];
                 let pos = thrown(at, v, age);
                 let left = 1.0 - age / 0.45;
-                show.streaks.push(Streak {
+                layer.push(Streak {
                     from: local(pos),
                     to: local(pos),
                     color: scaled(gold, 0.55 * left * left),
@@ -295,26 +477,26 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
             continue;
         }
         let age = t - RISE;
-        let burst = shell.burst;
         // The page catches the burst, then falls back to dark.
         let flash = smooth(0.0, 0.025, age) * (-age / FLASH).exp();
         if flash > 0.003 {
             show.lights.push(Light {
                 at: local(burst),
                 color: mix3(hue, white, 0.35),
-                strength: 2.6 * flash,
-                reach: 340.0,
+                strength: look.light * flash,
+                reach: look.reach,
             });
         }
-        // The bang: a white pop blooming into the shell's colour.
-        let bang = (-age / 0.07).exp();
+        // The bang: a soft bloom, white going to the shell's colour, with
+        // no hard core.
+        let bang = (-age / 0.08).exp();
         if bang > 0.02 {
-            show.streaks.push(Streak {
+            layer.push(Streak {
                 from: local(burst),
                 to: local(burst),
-                color: scaled(mix3(hue, white, bang), 1.3 * bang),
-                half: 2.0 * bang,
-                glow: 9.0 + 14.0 * (1.0 - bang),
+                color: scaled(mix3(hue, white, bang), 0.8 * look.bright.min(1.1) * bang),
+                half: 0.0,
+                glow: 8.0 + 22.0 * (1.0 - bang),
                 tail: 1.0,
             });
         }
@@ -322,6 +504,9 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
             Kind::Peony => (0.045, 1.55),
             Kind::Chrysanthemum => (0.24, 1.85),
         };
+        // Stars packed close at the break share its light, so it opens as
+        // a bloom, not a white disc, and they brighten as they spread.
+        let packed = packed(shell.speed, age);
         for i in 0..shell.sparks {
             let h = |k| hash(i, salt + k);
             let life = life * (0.75 + 0.45 * h(1));
@@ -342,10 +527,7 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
             let colour = mix3(hue, second, 0.35 * h(5));
             let colour = mix3(colour, white, heat);
             let colour = mix3(colour, ember, smooth(0.55, 1.0, u));
-            // Stars light as they leave the break, so the pile of them at
-            // its centre is the bang's flash, not a white disc.
-            let lit = 0.15 + 0.85 * smooth(0.0, 0.12, age);
-            let mut bright = (1.0 - u).powf(1.3) * (1.0 + 0.5 * heat) * lit;
+            let mut bright = (1.0 - u).powf(1.3) * (1.0 + 0.5 * heat) * packed * look.bright;
             // The last third crackles: stars strobe and pop out.
             let crackles = matches!(shell.kind, Kind::Chrysanthemum) || h(6) < 0.35;
             if crackles && u > 0.62 {
@@ -359,12 +541,12 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
             if bright < 0.01 {
                 continue;
             }
-            show.streaks.push(Streak {
+            layer.push(Streak {
                 from: local(tail),
                 to: local(head),
                 color: scaled(colour, 1.1 * bright),
-                half: 0.35 + 0.5 * (1.0 - u).sqrt(),
-                glow: 1.4 + 0.5 * heat,
+                half: look.half * (0.35 + 0.5 * (1.0 - u).sqrt()),
+                glow: look.glow + 0.5 * heat,
                 tail: match shell.kind {
                     Kind::Peony => 0.5,
                     Kind::Chrysanthemum => 0.0,
@@ -372,6 +554,9 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
             });
         }
     }
+    // The brightest lights win the shader's few slots.
+    show.lights
+        .sort_by(|a, b| b.strength.total_cmp(&a.strength));
     show.lights.truncate(LIGHTS);
     Some(show)
 }
@@ -394,6 +579,8 @@ pub(crate) struct Painter {
     frame: Option<Show>,
     /// Which slots this frame has written into the uniform buffer.
     used: u64,
+    /// How many of the uploaded streaks are behind the conversation.
+    far: u32,
 }
 
 struct Pipes {
@@ -490,6 +677,7 @@ impl Painter {
             bind,
             frame: None,
             used: 0,
+            far: 0,
         }
     }
 
@@ -576,8 +764,11 @@ impl Painter {
         let Some(show) = &self.frame else {
             return;
         };
-        let mut items: Vec<f32> = Vec::with_capacity(show.streaks.len() * ITEM_FLOATS);
-        for s in &show.streaks {
+        // Far streaks first, then near ones: each slot draws its range.
+        self.far = show.streaks.len() as u32;
+        let mut items: Vec<f32> =
+            Vec::with_capacity((show.streaks.len() + show.near.len()) * ITEM_FLOATS);
+        for s in show.streaks.iter().chain(&show.near) {
             let r = s.half + s.glow * 3.0 + 1.0;
             items.extend_from_slice(&[
                 s.from[0],
@@ -620,9 +811,16 @@ impl Painter {
         let Some(show) = self.frame.as_ref() else {
             return;
         };
-        let sparks = site.mark == SPARKS_MARK;
-        let count = show.streaks.len() as u32;
-        if (sparks && count == 0) || (!sparks && show.lights.is_empty()) || self.used >= 4 {
+        let sparks = match site.mark {
+            SPARKS_MARK => Some(0..self.far),
+            NEAR_MARK => Some(self.far..self.far + show.near.len() as u32),
+            _ => None,
+        };
+        let empty = match &sparks {
+            Some(range) => range.is_empty(),
+            None => show.lights.is_empty(),
+        };
+        if empty || self.used >= 4 {
             return;
         }
         let mut slot: Vec<f32> = Vec::with_capacity(SLOT_BYTES as usize / 4);
@@ -654,9 +852,9 @@ impl Painter {
         let dark = show.dark;
         let pipes = self.pipes(device, site.format);
         pass.set_bind_group(0, &bind, &[offset as u32]);
-        if sparks {
+        if let Some(range) = sparks {
             pass.set_pipeline(&pipes.sparks);
-            pass.draw(0..6, 0..count);
+            pass.draw(0..6, range);
         } else {
             pass.set_pipeline(if dark { &pipes.lit } else { &pipes.tinted });
             pass.draw(0..6, 0..1);
@@ -691,9 +889,9 @@ mod tests {
         let rising = show(p, 0.2, false).unwrap();
         assert!(rising.streaks.len() < 50, "one shell on its way up");
         let burst = show(p, RISE + 0.05, false).unwrap();
-        assert!(burst.streaks.len() > 200, "{}", burst.streaks.len());
-        assert!(burst.lights.iter().any(|l| l.strength > 1.0));
-        let last = SHELLS.iter().map(|s| s.delay).fold(0.0, f32::max);
+        assert!(!burst.streaks.is_empty());
+        assert!(burst.lights.iter().any(|l| l.strength > 0.5));
+        let last = shells().iter().map(|s| s.delay).fold(0.0, f32::max);
         let after = show(p, last + RISE + 0.9, false).unwrap();
         assert!(
             after.lights.iter().all(|l| l.strength < 0.2),
@@ -704,11 +902,37 @@ mod tests {
 
     #[test]
     fn bursts_stay_beside_the_conversation() {
-        // The card spans the stage's middle; no burst sits over it.
-        for shell in &SHELLS {
-            let [x, _] = shell.burst;
-            assert!(!(25.0..475.0).contains(&x), "{x}");
+        // The card spans the stage's middle; no burst's core sits over it.
+        let [x0, _, x1, _] = Layout::chosen().card_rect();
+        for shell in shells() {
+            let [x, _] = burst_at(shell);
+            assert!(!(x0 + 10.0..x1 - 10.0).contains(&x), "{x}");
         }
+    }
+
+    #[test]
+    fn near_bursts_reach_over_the_card_and_light_it_hardest() {
+        let p = paint();
+        let [ax, ay, _, _] = area();
+        let [x0, y0, x1, y1] = Layout::chosen().card_rect();
+        let near = shells().iter().find(|s| s.layer == Layer::Near).unwrap();
+        let show = show(p, near.delay + RISE + 0.35, false).unwrap();
+        let over = show
+            .near
+            .iter()
+            .filter(|s| {
+                let [x, y] = [s.to[0] + ax, s.to[1] + ay];
+                (x0..x1).contains(&x) && (y0..y1).contains(&y)
+            })
+            .count();
+        assert!(over > 10, "{over} near sparks over the card");
+    }
+
+    #[test]
+    fn a_break_opens_as_a_bloom() {
+        // At the break the stars share its light; spread out, they shine.
+        let (early, late) = (packed(300.0, 0.05), packed(300.0, 0.45));
+        assert!(early < 0.01 && late == 1.0, "{early} {late}");
     }
 
     #[test]
@@ -717,7 +941,7 @@ mod tests {
         let mut lit = 0.0f32;
         for i in 0..60 {
             let s = show(p, i as f32 * 0.05, true).unwrap_or_default();
-            assert!(s.streaks.is_empty());
+            assert!(s.streaks.is_empty() && s.near.is_empty());
             lit = lit.max(s.lights.iter().map(|l| l.strength).fold(0.0, f32::max));
         }
         assert!(lit > 0.2 && lit < 1.0, "{lit}");
