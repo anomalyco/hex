@@ -496,10 +496,11 @@ pub(crate) fn carried_bubble(
         .font(BUBBLE_FONT)
         .color(p.text())
         .wrap()
-        .shrink();
-    // Its line decides how it enters: a sent line is launched out of the
-    // field at full strength, and a fade of the bubble's own would start it
-    // as a ghost of the text it leaves.
+        .shrink()
+        .transition(Transition::identity());
+    // Its line decides how it enters, words and all: a sent line is
+    // launched out of the field at full strength, and a fade of the
+    // bubble's own would start it as a ghost of the text it leaves.
     let bubble = row()
         .key("bubble")
         .max_w(BUBBLE_MAX)
