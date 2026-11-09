@@ -130,7 +130,9 @@ pub(crate) enum CardKey {
     Edit,
     /// ⌘W or Escape.
     Close,
-    /// Return: the file is already saved, so this closes it.
+    /// Return: the file is already saved, so this closes it. Only the
+    /// macOS session tap sends it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Keep,
     /// The menu's Move to Trash.
     Trash,

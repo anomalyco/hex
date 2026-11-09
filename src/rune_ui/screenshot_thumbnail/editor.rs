@@ -100,6 +100,7 @@ pub(crate) struct Editor {
     shot: Option<Shot>,
     /// The shot's saved file, whose Captures entry keeps the words said
     /// over it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     file: Option<PathBuf>,
     /// A recording open to trim, in place of a shot.
     clip: Option<Clip>,
