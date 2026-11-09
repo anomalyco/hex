@@ -1,5 +1,5 @@
 //! What a staged dev build changed: the dev channel's notes
-//! (`dev-notes.json`, written by the Release workflow's dev-notes jobs) from
+//! (`dev-notes.json`, published by the Release workflow's dev-notes job) from
 //! the offered build back to the running one, shown with Restart to update.
 //! What's new opens the changelog at those builds (`?since=<running>`).
 //! Notes are a nicety: any failure leaves the update without them.

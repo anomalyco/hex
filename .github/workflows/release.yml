@@ -876,42 +876,30 @@ jobs:
           name: build-dev-notes
           path: ${{ runner.temp }}/notes
 
-  # Once the build is the dev channel's release, its notes join
-  # https://anoma.ly/hex/files/dev-notes.json, which https://anoma.ly/hex/dev
-  # and the app's update item read.
+  # Once the build is the dev channel's release, its notes replace
+  # dev-notes.json on the one-commit `dev-notes` branch, which
+  # https://anoma.ly/hex/files/dev-notes.json, https://anoma.ly/hex/dev, and
+  # the app's update item read. The job needs only the last commit's
+  # GITHUB_TOKEN, so it runs outside the release environment and holds no
+  # bucket credential.
   dev-notes:
     needs: [plan, publish, dev-notes-stage]
     if: >-
       ${{ !cancelled() && needs.plan.outputs.channel == 'dev'
       && needs.publish.result == 'success' && needs.dev-notes-stage.result == 'success' }}
     runs-on: ubuntu-24.04
-    environment: release
     permissions:
-      contents: read
-      id-token: write
+      contents: write
     env:
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
       SHA: ${{ needs.plan.outputs.sha }}
-      HEX_RELEASE_BUCKET: hex-production-files
     steps:
       - *checkout-release
       - uses: ./.github/release/download
         with:
           pattern: build-dev-notes
           digests: build-dev-notes=${{ needs.dev-notes-stage.outputs.digest }}
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
-          role-session-name: hex-${{ github.run_id }}
-          aws-region: us-east-1
-      - name: Fetch the release secrets
-        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
-        with:
-          secret-ids: |
-            R2_SECRET_ACCESS_KEY,hex/release/R2_SECRET_ACCESS_KEY
-          parse-json-secrets: false
       - name: Publish the notes
         env:
-          R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
+          GH_TOKEN: ${{ github.token }}
         run: bash .github/release/publish-dev-notes.sh "$RUNNER_TEMP/in/build-dev-notes/dev-notes.json" "$HEX_VERSION" "$SHA"

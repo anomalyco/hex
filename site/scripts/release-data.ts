@@ -1,5 +1,7 @@
 // Writes src/release-data.json, the release the download buttons describe,
-// and copies the installers into public/. The buttons link the site's own
+// and copies the installers and the legacy appcast into public/, where the
+// build serves them at /hex/install-linux.sh, /hex/install-windows.ps1, and
+// /hex/appcast.xml and worker.ts keeps their /hex/files/ URLs. The buttons link the site's own
 // /hex/download/<target> routes (worker.ts), which redirect at request time
 // to the stable release once anoma.ly/release has one and to the newest dev
 // build until then, so links never go stale and need no switch-over. This
@@ -52,4 +54,5 @@ const data = {
 writeFileSync(new URL("src/release-data.json", root), `${JSON.stringify(data, null, 2)}\n`)
 copyFileSync(new URL("../.github/release/install-linux.sh", root), new URL("public/install-linux.sh", root))
 copyFileSync(new URL("../.github/release/install-windows.ps1", root), new URL("public/install-windows.ps1", root))
+copyFileSync(new URL("../packaging/macos/legacy-appcast.xml", root), new URL("public/appcast.xml", root))
 console.log(`Download buttons describe Hex ${data.version} (${channel}).`)

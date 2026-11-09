@@ -1,7 +1,8 @@
 // The dev channel's changelog at /hex/dev: what each dev build changed, from
-// dev-notes.json (written by the Release workflow's dev-notes jobs; see
-// scripts/release-dev-notes.sh). The worker renders it per request, so a new
-// dev build shows without a site deploy.
+// dev-notes.json on the Release workflow's dev-notes branch (see
+// scripts/release-dev-notes.sh and .github/release/publish-dev-notes.sh). The
+// worker fetches and renders it per request, so a new dev build shows without
+// a site deploy.
 
 export type DevNotes = {
   schema: 1

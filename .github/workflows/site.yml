@@ -16,6 +16,7 @@ on:
       - ".github/release/cf/**"
       - ".github/release/install-linux.sh"
       - ".github/release/install-windows.ps1"
+      - "packaging/macos/legacy-appcast.xml"
   workflow_dispatch:
 
 permissions:

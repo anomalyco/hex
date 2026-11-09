@@ -11,12 +11,13 @@ anoma.ly/release/hex/                      the Anomaly release service (docs/rel
 anoma.ly/hex                               the one site: platform-aware download (Worker hex-production-site)
 ├── download/<target>                      302 to anoma.ly/release/hex/desktop/stable/<target> once stable.json
 │                                          exists, else to .../dev/<target> (the newest dev build)
-├── install-linux.sh, install-windows.ps1  installers (once the production site is deployed from production)
-└── files/…                                hex-production-files:
-    ├── install-linux.sh, install-windows.ps1   the current installers (Installers workflow, from dev;
-    │                                           stable, or dev until there is a stable release)
-    ├── linux-update.json, windows-update.json, windows-aarch64-update.json, appcast.xml  frozen for 2.3.1
-    └── releases/HEX-2.3.1-…                    frozen 2.3.1 files
+├── install-linux.sh, install-windows.ps1  installers (copied from .github/release/ at the site build)
+└── files/…                                the one owner of every release file (same Worker)
+    ├── install-linux.sh, install-windows.ps1, appcast.xml  built and served with the site
+    ├── dev-notes.json                                    the Release workflow's dev-notes branch
+    └── linux-update.json, windows-update.json, windows-aarch64-update.json, releases/HEX-2.3.1-…
+                                                          frozen 2.3.1 history in hex-production-files,
+                                                          read-only from the Worker binding
 dev.anoma.ly/hex                           the dev site (reads anoma.ly/release; the service's dev stage
                                            is only for testing the service)
 hex.kitlangton.com, .dev                   Kit's old site (Kit's Cloudflare account); should 301 to

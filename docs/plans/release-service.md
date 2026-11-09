@@ -80,10 +80,10 @@ origin.
 
 ## Old clients (2.3.1 and earlier)
 
-`https://anoma.ly/hex/files/{linux-update.json,windows-update.json,appcast.xml}`
-stay frozen at 2.3.1 in the `hex-production-files` bucket. At the first
-release on the service, the appcast gains one informational item pointing at
-https://anoma.ly/hex (see `docs/releasing.md`).
+`https://anoma.ly/hex/files/{linux-update.json,windows-update.json}` stay
+frozen at 2.3.1 in the `hex-production-files` bucket. `appcast.xml` is
+`packaging/macos/legacy-appcast.xml`, served by the site build: one
+informational item pointing at https://anoma.ly/hex (see `docs/releasing.md`).
 
 ## Client
 
