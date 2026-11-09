@@ -38,8 +38,11 @@ if [ -e "$installed_bundle" ] || [ -L "$installed_bundle" ]; then
       ;;
   esac
 fi
+staged_bundle="$install_dir/.$(basename "$source_bundle").installing"
+rm -rf "$staged_bundle"
+/usr/bin/ditto "$source_bundle" "$staged_bundle"
 stop_bundle "$installed_bundle"
 rm -rf "$installed_bundle"
-/usr/bin/ditto "$source_bundle" "$installed_bundle"
+mv "$staged_bundle" "$installed_bundle"
 /usr/bin/open "$installed_bundle"
 echo "$installed_bundle"
