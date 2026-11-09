@@ -1,8 +1,8 @@
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, TrySendError};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::thread;
 use std::time::Duration;
 #[cfg(target_os = "macos")]
@@ -30,7 +30,29 @@ pub struct ContextSnapshot {
 
 pub struct ContextMonitor {
     pub updates: Receiver<ContextSnapshot>,
+    /// Wakes the worker for a refresh; one pending request is enough.
+    refreshes: SyncSender<()>,
+    requested: Arc<AtomicU64>,
+    completed: Arc<AtomicU64>,
     stop: Arc<AtomicBool>,
+}
+
+/// One cheap, in-process look at the frontmost application. Reading a
+/// scriptable browser's page starts `osascript`, so the monitor keeps that
+/// page between polls instead of reading it every time.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Frontmost {
+    application: Option<String>,
+    bundle_id: Option<String>,
+    pid: i32,
+    window_title: Option<String>,
+    /// The page an in-process Accessibility read found.
+    page: Option<Url>,
+    /// A scriptable browser whose page the monitor reads out of process,
+    /// caches per pid, and reads again only when the browser changes or a
+    /// capture asks for a refresh. False once `reads_browser` turns off, so
+    /// the cached page is dropped.
+    scripted: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,28 +84,73 @@ impl ContextSelector {
 
 impl ContextMonitor {
     pub fn start() -> Self {
-        Self::start_with_capture(ContextSnapshot::capture, Duration::from_millis(500))
+        Self::start_with_capture(frontmost, scripted_page, Duration::from_millis(500))
     }
 
+    /// The ticket of a requested page refresh. Never blocks: the pending
+    /// request wakes the worker, and `refreshed_since` reports when that
+    /// ticket's snapshot is queued for the loop.
+    pub fn request_refresh(&self) -> u64 {
+        let ticket = self.requested.fetch_add(1, Ordering::AcqRel) + 1;
+        let _ = self.refreshes.try_send(());
+        ticket
+    }
+
+    /// Whether the refresh `ticket` completed: its snapshot is queued or was
+    /// already delivered. A refresh whose snapshot the one-slot channel
+    /// held back isn't complete until it is delivered.
+    pub fn refreshed_since(&self, ticket: u64) -> bool {
+        self.completed.load(Ordering::Acquire) >= ticket
+    }
+
+    /// Starts the polling thread over an injected cheap frontmost read and
+    /// page read, so tests can count out-of-process reads without macOS.
     fn start_with_capture(
-        mut capture: impl FnMut() -> Result<ContextSnapshot> + Send + 'static,
+        mut front: impl FnMut() -> Result<Frontmost> + Send + 'static,
+        mut page: impl FnMut(&Frontmost) -> Option<Url> + Send + 'static,
         poll_interval: Duration,
     ) -> Self {
         let (sender, updates) = mpsc::sync_channel(1);
+        let (refreshes, refresh_requests) = mpsc::sync_channel(1);
         let stop = Arc::new(AtomicBool::new(false));
+        let requested = Arc::new(AtomicU64::new(0));
+        let completed = Arc::new(AtomicU64::new(0));
         let worker_stop = stop.clone();
+        let worker_requested = requested.clone();
+        let worker_completed = completed.clone();
         let spawned = thread::Builder::new()
             .name("foreground-context".into())
             .spawn(move || {
                 let mut previous = None;
                 let mut previous_error = None;
+                let mut cached: Option<(i32, u64, Option<Url>)> = None;
                 while !worker_stop.load(Ordering::Acquire) {
-                    match capture() {
-                        Ok(context) => {
+                    let ticket = worker_requested.load(Ordering::Acquire);
+                    let refresh = ticket > worker_completed.load(Ordering::Acquire);
+                    let context = match front() {
+                        Ok(front) => {
                             previous_error = None;
-                            if !publish_context(&sender, &mut previous, context) {
-                                break;
-                            }
+                            let page = if front.scripted {
+                                // One out-of-process read per pid and per
+                                // refresh ticket, even while its snapshot
+                                // waits for the one-slot channel.
+                                let cached_page = cached.as_ref().is_some_and(|(pid, read, _)| {
+                                    *pid == front.pid && *read >= ticket
+                                });
+                                if cached_page {
+                                    cached.as_ref().and_then(|(_, _, page)| page.clone())
+                                } else {
+                                    let page = page(&front);
+                                    cached = Some((front.pid, ticket, page.clone()));
+                                    page
+                                }
+                            } else {
+                                // `reads_browser` is off, or the page is
+                                // read in process: nothing to keep.
+                                cached = None;
+                                None
+                            };
+                            snapshot_of(&front, page)
                         }
                         Err(error) => {
                             let error = error.to_string();
@@ -91,36 +158,77 @@ impl ContextMonitor {
                                 tracing::warn!(%error, "could not capture foreground context");
                                 previous_error = Some(error);
                             }
-                            if !publish_context(&sender, &mut previous, ContextSnapshot::default())
-                            {
-                                break;
+                            ContextSnapshot::default()
+                        }
+                    };
+                    // A refreshed snapshot the full slot held back is
+                    // captured again next poll: a newer value supersedes it,
+                    // and the ticket completes only once one is delivered.
+                    match publish_context(&sender, &mut previous, context) {
+                        Published::Disconnected => break,
+                        Published::Blocked => {}
+                        Published::Sent | Published::Current => {
+                            if refresh {
+                                worker_completed.fetch_max(ticket, Ordering::AcqRel);
                             }
                         }
                     }
-                    thread::sleep(poll_interval);
+                    match refresh_requests.recv_timeout(poll_interval) {
+                        Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    }
                 }
             });
         if let Err(error) = spawned {
             tracing::warn!(%error, "could not start the foreground context monitor");
+            // A monitor with no worker never holds a capture's finish.
+            completed.store(u64::MAX, Ordering::Release);
         }
-        Self { updates, stop }
+        Self {
+            updates,
+            refreshes,
+            requested,
+            completed,
+            stop,
+        }
     }
 }
 
+fn snapshot_of(front: &Frontmost, page: Option<Url>) -> ContextSnapshot {
+    ContextSnapshot {
+        application: front.application.clone(),
+        browser_url: page.or_else(|| front.page.clone()),
+        window_title: front.window_title.clone(),
+        input_revision: None,
+    }
+}
+
+enum Published {
+    Sent,
+    /// The last sent snapshot is this one, so it already sits in the slot or
+    /// was delivered.
+    Current,
+    /// The one-slot channel is full; a later poll tries again.
+    Blocked,
+    Disconnected,
+}
+
 fn publish_context(
-    sender: &mpsc::SyncSender<ContextSnapshot>,
+    sender: &SyncSender<ContextSnapshot>,
     previous: &mut Option<ContextSnapshot>,
     context: ContextSnapshot,
-) -> bool {
+) -> Published {
     if previous.as_ref() == Some(&context) {
-        return true;
+        return Published::Current;
     }
     match sender.try_send(context.clone()) {
-        Ok(()) => *previous = Some(context),
-        Err(TrySendError::Full(_)) => {}
-        Err(TrySendError::Disconnected(_)) => return false,
+        Ok(()) => {
+            *previous = Some(context);
+            Published::Sent
+        }
+        Err(TrySendError::Full(_)) => Published::Blocked,
+        Err(TrySendError::Disconnected(_)) => Published::Disconnected,
     }
-    true
 }
 
 impl Drop for ContextMonitor {
@@ -130,19 +238,6 @@ impl Drop for ContextMonitor {
 }
 
 impl ContextSnapshot {
-    #[cfg(target_os = "macos")]
-    pub fn capture() -> Result<Self> {
-        capture_macos(Reads {
-            page: crate::dictation::config::reads_browser(),
-            window_title: crate::dictation::config::reads_window_title(),
-        })
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub fn capture() -> Result<Self> {
-        Ok(Self::default())
-    }
-
     #[cfg(target_os = "macos")]
     pub fn capture_for_meeting(canonical_bundle_id: &str) -> Result<Self> {
         if let Some(browser) = ScriptableBrowser::from_bundle_id(canonical_bundle_id) {
@@ -198,15 +293,21 @@ impl ContextSnapshot {
                 });
             }
         }
-        capture_macos(Reads {
+        let front = capture_frontmost(Reads {
             page: true,
             window_title: true,
-        })
+        })?;
+        let page = if front.scripted {
+            scripted_page(&front)
+        } else {
+            front.page.clone()
+        };
+        Ok(snapshot_of(&front, page))
     }
 
     #[cfg(not(target_os = "macos"))]
     pub fn capture_for_meeting(_canonical_bundle_id: &str) -> Result<Self> {
-        Self::capture()
+        Ok(Self::default())
     }
 
     pub fn browser_host(&self) -> Option<&str> {
@@ -234,9 +335,9 @@ impl ContextSnapshot {
     }
 }
 
-/// What `capture_macos` reads beyond the front app. Asking a browser for its
-/// page can show an Automation prompt, and a window title can hold an email
-/// subject or a document name, so only callers that use them ask.
+/// What a frontmost read takes beyond the app itself. Asking a browser for
+/// its page can show an Automation prompt, and a window title can hold an
+/// email subject or a document name, so only callers that use them ask.
 #[cfg(target_os = "macos")]
 struct Reads {
     page: bool,
@@ -244,7 +345,20 @@ struct Reads {
 }
 
 #[cfg(target_os = "macos")]
-fn capture_macos(reads: Reads) -> Result<ContextSnapshot> {
+fn frontmost() -> Result<Frontmost> {
+    capture_frontmost(Reads {
+        page: crate::dictation::config::reads_browser(),
+        window_title: crate::dictation::config::reads_window_title(),
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn frontmost() -> Result<Frontmost> {
+    Ok(Frontmost::default())
+}
+
+#[cfg(target_os = "macos")]
+fn capture_frontmost(reads: Reads) -> Result<Frontmost> {
     let (application, bundle_id, pid) = autoreleasepool(|_| {
         let application = NSWorkspace::sharedWorkspace()
             .frontmostApplication()
@@ -256,28 +370,46 @@ fn capture_macos(reads: Reads) -> Result<ContextSnapshot> {
         let bundle_id = application.bundleIdentifier().map(|id| id.to_string());
         Ok::<_, color_eyre::Report>((name, bundle_id, application.processIdentifier()))
     })?;
-    let browser_url = reads
-        .page
-        .then(|| browser_url(bundle_id.as_deref(), pid))
+    // A scriptable browser's page is read out of process and cached, so its
+    // Accessibility fallback runs with that read instead of every poll.
+    let scripted = reads.page
+        && bundle_id
+            .as_deref()
+            .and_then(ScriptableBrowser::from_bundle_id)
+            .is_some();
+    let page = (reads.page && !scripted)
+        .then(|| accessibility_web_url(pid))
         .flatten();
     let window_title = reads
         .window_title
         .then(|| crate::accessibility::focused_window_title(pid))
         .flatten();
-    Ok(ContextSnapshot {
+    Ok(Frontmost {
         application: Some(application),
-        browser_url,
+        bundle_id,
+        pid,
         window_title,
-        input_revision: None,
+        page,
+        scripted,
     })
 }
 
+/// A scriptable browser's page: its front tab over AppleScript, else the
+/// focused web area through Accessibility. Runs only when the browser
+/// changes or a capture asks for a refresh.
 #[cfg(target_os = "macos")]
-fn browser_url(bundle_id: Option<&str>, pid: i32) -> Option<Url> {
-    bundle_id
+fn scripted_page(front: &Frontmost) -> Option<Url> {
+    front
+        .bundle_id
+        .as_deref()
         .and_then(ScriptableBrowser::from_bundle_id)
         .and_then(ScriptableBrowser::active_url)
-        .or_else(|| accessibility_web_url(pid))
+        .or_else(|| accessibility_web_url(front.pid))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn scripted_page(_front: &Frontmost) -> Option<Url> {
+    None
 }
 
 /// The page of the web area holding `pid`'s focused element, through
@@ -518,7 +650,15 @@ pub(crate) fn browser_hosts_equal(left: &str, right: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicI32, AtomicUsize};
+    use std::time::Instant;
+
+    fn next(monitor: &ContextMonitor) -> ContextSnapshot {
+        monitor
+            .updates
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the monitor published nothing")
+    }
 
     #[test]
     fn application_matching_ignores_process_name_capitalization() {
@@ -555,14 +695,20 @@ mod tests {
 
     #[test]
     fn monitor_invalidates_stale_context_after_capture_failure() {
-        let captured = ContextSnapshot {
+        let captured = Frontmost {
+            application: Some("Brave Browser".into()),
+            bundle_id: Some("com.brave.Browser".into()),
+            pid: 10,
+            page: Some(Url::parse("https://x.com/home").unwrap()),
+            ..Frontmost::default()
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let capture_calls = calls.clone();
+        let expected = ContextSnapshot {
             application: Some("Brave Browser".into()),
             browser_url: Some(Url::parse("https://x.com/home").unwrap()),
             ..ContextSnapshot::default()
         };
-        let calls = Arc::new(AtomicUsize::new(0));
-        let capture_calls = calls.clone();
-        let expected = captured.clone();
         let monitor = ContextMonitor::start_with_capture(
             move || {
                 if capture_calls.fetch_add(1, Ordering::Relaxed) == 0 {
@@ -571,23 +717,117 @@ mod tests {
                     Err(eyre!("browser adapter failed"))
                 }
             },
+            |_| unreachable!("an in-process page is never read out of process"),
             Duration::from_millis(1),
         );
 
-        assert_eq!(
-            monitor
-                .updates
-                .recv_timeout(Duration::from_secs(1))
-                .unwrap(),
-            expected
+        assert_eq!(next(&monitor), expected);
+        assert_eq!(next(&monitor), ContextSnapshot::default());
+    }
+
+    #[test]
+    fn the_scripted_page_is_read_once_per_pid_and_on_refresh_only() {
+        let pid = Arc::new(AtomicI32::new(10));
+        let front_pid = pid.clone();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let page_reads = reads.clone();
+        let monitor = ContextMonitor::start_with_capture(
+            move || {
+                Ok(Frontmost {
+                    application: Some("Brave Browser".into()),
+                    bundle_id: Some("com.brave.Browser".into()),
+                    pid: front_pid.load(Ordering::Relaxed),
+                    scripted: true,
+                    ..Frontmost::default()
+                })
+            },
+            move |front| {
+                let read = page_reads.fetch_add(1, Ordering::SeqCst) + 1;
+                Some(Url::parse(&format!("https://x.com/{}/{}", front.pid, read)).unwrap())
+            },
+            Duration::from_millis(1),
         );
-        assert_eq!(
-            monitor
-                .updates
-                .recv_timeout(Duration::from_secs(1))
-                .unwrap(),
-            ContextSnapshot::default()
+
+        let first = next(&monitor);
+        assert_eq!(first.browser_url.as_ref().unwrap().path(), "/10/1");
+
+        // Polling the same frontmost app never asks the browser again.
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        // A new frontmost pid reads once.
+        pid.store(11, Ordering::Relaxed);
+        let changed = next(&monitor);
+        assert_eq!(changed.browser_url.as_ref().unwrap().path(), "/11/2");
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+
+        // An explicit refresh reads again and completes its ticket.
+        let ticket = monitor.request_refresh();
+        let refreshed = next(&monitor);
+        assert_eq!(refreshed.browser_url.as_ref().unwrap().path(), "/11/3");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !monitor.refreshed_since(ticket) {
+            assert!(Instant::now() < deadline, "the refresh never completed");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn a_refresh_the_full_channel_held_back_completes_once_delivered() {
+        let phase = Arc::new(AtomicI32::new(0));
+        let front_phase = phase.clone();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let page_reads = reads.clone();
+        let monitor = ContextMonitor::start_with_capture(
+            move || {
+                let application = if front_phase.load(Ordering::Relaxed) == 0 {
+                    "Brave Browser"
+                } else {
+                    "Brave Browser Beta"
+                };
+                Ok(Frontmost {
+                    application: Some(application.into()),
+                    pid: 10,
+                    scripted: true,
+                    ..Frontmost::default()
+                })
+            },
+            move |_| {
+                let read = page_reads.fetch_add(1, Ordering::SeqCst) + 1;
+                Some(Url::parse(&format!("https://x.com/{read}")).unwrap())
+            },
+            Duration::from_millis(1),
         );
+
+        let first = next(&monitor);
+        assert_eq!(first.browser_url.as_ref().unwrap().path(), "/1");
+
+        // Leave a later snapshot filling the one slot, then refresh into it.
+        phase.store(1, Ordering::Relaxed);
+        thread::sleep(Duration::from_millis(100));
+        let ticket = monitor.request_refresh();
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+        assert!(
+            !monitor.refreshed_since(ticket),
+            "a refreshed snapshot still in the full slot is not delivered"
+        );
+
+        // The stale page first, then the refreshed one; only then is the
+        // refresh complete.
+        let stale = next(&monitor);
+        assert_eq!(stale.application.as_deref(), Some("Brave Browser Beta"));
+        assert_eq!(stale.browser_url.as_ref().unwrap().path(), "/1");
+        let refreshed = next(&monitor);
+        assert_eq!(refreshed.application.as_deref(), Some("Brave Browser Beta"));
+        assert_eq!(refreshed.browser_url.as_ref().unwrap().path(), "/2");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !monitor.refreshed_since(ticket) {
+            assert!(Instant::now() < deadline, "the refresh never completed");
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]

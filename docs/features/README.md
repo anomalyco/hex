@@ -1217,6 +1217,16 @@ something uses the page, macOS asks the front tab of Safari, Orion, Chrome,
 Brave, Edge, Arc, Vivaldi, Opera, Helium, and Chromium over AppleScript (one
 Automation prompt per browser; a refusal keeps the application context) and
 reads any other app's focused AXWebArea `AXURL` (Firefox, Zen, web views).
+That AppleScript read is not part of the 500 ms foreground-context poll: the
+poll reads it once when a scriptable browser becomes the frontmost process
+(caching its address, or no address after a failed read, per pid) and again
+only when a dictation's shortcut starts. A finish waits at most 1 s for the
+refreshed page and otherwise hands its capture the same app and window title
+with no page, never the previous dictation's. Checks:
+`the_scripted_page_is_read_once_per_pid_and_on_refresh_only` and
+`a_refresh_the_full_channel_held_back_completes_once_delivered` in
+[dictation/context.rs](../../src/dictation/context.rs); not run against a live
+browser.
 Linux matches the focused window from X11 or the Wayland foreign-toplevel list
 to an AT-SPI window by title and process and reads its showing web
 document's `DocURL` (Firefox) or `URI` (Chromium, only with

@@ -956,8 +956,16 @@ fn call_app_playing(application: &str) -> bool {
     }
 }
 
-/// How often a browser's tabs are queried while it holds the microphone.
+/// How often a browser's tabs are queried while it has just started holding
+/// the microphone: enough to find a call's site within the 20 s unknown-page
+/// threshold (`detection::BROWSER_STABLE_FOR`).
 const TAB_QUERY_INTERVAL: Duration = Duration::from_secs(1);
+/// How long that one-second burst lasts after a browser starts holding the
+/// microphone.
+const TAB_QUERY_BURST: Duration = Duration::from_secs(30);
+/// How often they are queried after the burst; `BrowserPageMemory` (60 s)
+/// carries the page between answers.
+const TAB_QUERY_BACKOFF: Duration = Duration::from_secs(30);
 /// A tab query that finished longer ago than this no longer says what the
 /// browser shows.
 const TAB_QUERY_MAX_AGE: Duration = Duration::from_secs(5);
@@ -984,6 +992,9 @@ struct TabProbe {
     running: Option<InFlight>,
     generation: u64,
     started: Option<Instant>,
+    /// The browser this watch began for, and when: its first 30 s ask every
+    /// second, then every 30 s.
+    burst: Option<(String, Instant)>,
     latest: Option<(String, ContextSnapshot, Instant)>,
 }
 
@@ -994,6 +1005,7 @@ impl TabProbe {
             running: None,
             generation: 0,
             started: None,
+            burst: None,
             latest: None,
         }
     }
@@ -1016,10 +1028,11 @@ impl TabProbe {
             Some((_, Err(mpsc::TryRecvError::Disconnected))) => self.running = None,
             Some((_, Err(mpsc::TryRecvError::Empty))) | None => {}
         }
+        let interval = self.interval(bundle_id, now);
         if self.running.is_none()
             && self
                 .started
-                .is_none_or(|started| now.saturating_duration_since(started) >= TAB_QUERY_INTERVAL)
+                .is_none_or(|started| now.saturating_duration_since(started) >= interval)
         {
             self.started = Some(now);
             let (sender, receiver) = mpsc::sync_channel(1);
@@ -1058,10 +1071,34 @@ impl TabProbe {
     /// Nothing is watched: an answer, finished or still being read, must not
     /// outlive the call. A query in flight is not abandoned (it ends by its
     /// own timeout, and no second one starts beside it); its answer is
-    /// dropped.
+    /// dropped. The next call starts with a fresh one-second burst.
     fn reset(&mut self) {
         self.latest = None;
+        self.burst = None;
         self.generation += 1;
+    }
+
+    /// How far apart this browser's tab queries are: one second through the
+    /// first 30 s it holds the microphone, then every 30 s.
+    fn interval(&mut self, bundle_id: &str, now: Instant) -> Duration {
+        let bursting = match &self.burst {
+            Some((watching, since)) if watching.as_str() == bundle_id => {
+                now.saturating_duration_since(*since) < TAB_QUERY_BURST
+            }
+            _ => true,
+        };
+        if self
+            .burst
+            .as_ref()
+            .is_none_or(|(watching, _)| watching.as_str() != bundle_id)
+        {
+            self.burst = Some((bundle_id.to_string(), now));
+        }
+        if bursting {
+            TAB_QUERY_INTERVAL
+        } else {
+            TAB_QUERY_BACKOFF
+        }
     }
 }
 
@@ -1397,6 +1434,42 @@ mod tests {
             probe.page("com.brave.Browser", polled),
             ContextSnapshot::default()
         );
+    }
+
+    #[test]
+    fn tab_queries_back_off_after_the_first_thirty_seconds_and_reset() {
+        use std::sync::atomic::AtomicUsize;
+        static QUERIES: AtomicUsize = AtomicUsize::new(0);
+        fn counted(_: &str) -> Result<ContextSnapshot> {
+            QUERIES.fetch_add(1, Ordering::SeqCst);
+            Ok(banshee_tab())
+        }
+        let mut probe = TabProbe::new(counted);
+        let started = Instant::now();
+        // The first 30 s ask every second.
+        probe.page("com.brave.Browser", started);
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(QUERIES.load(Ordering::SeqCst), 1);
+        probe.page("com.brave.Browser", started + Duration::from_secs(1));
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(QUERIES.load(Ordering::SeqCst), 2);
+
+        // From then on they are 30 s apart; an answer waits that long.
+        probe.page("com.brave.Browser", started + Duration::from_secs(29));
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(QUERIES.load(Ordering::SeqCst), 3);
+        probe.page("com.brave.Browser", started + Duration::from_secs(31));
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(QUERIES.load(Ordering::SeqCst), 3);
+        probe.page("com.brave.Browser", started + Duration::from_secs(59));
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(QUERIES.load(Ordering::SeqCst), 4);
+
+        // A reset starts a fresh burst at once.
+        probe.reset();
+        probe.page("com.brave.Browser", started + Duration::from_secs(61));
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(QUERIES.load(Ordering::SeqCst), 5);
     }
 
     #[test]

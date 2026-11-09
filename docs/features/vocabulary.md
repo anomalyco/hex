@@ -99,9 +99,10 @@ A mode's own vocabulary                  // vocabulary.modes; DictationMode::voc
 │   so the 64-term cap keeps them
 ├── OpenCode rewriting -> every OS, the mode chosen for the dictation
 └── Transcription -> macOS dictation only: the mode of the app and page last
-    seen by the context monitor (≤ 0.5 s old) when the stream or whole-clip run
-    starts; meetings, captures, the local API, Linux, and Windows hear with
-    the shared list
+    seen by the context monitor (the app polled every 0.5 s; a scriptable
+    browser's page read when it comes frontmost and refreshed when the
+    shortcut starts) when the stream or whole-clip run starts; meetings,
+    captures, the local API, Linux, and Windows hear with the shared list
 
 OpenCode rewriting (Modes)               // vocabulary.prompt
 └── Prompt gains "Vocabulary (spell these exactly when the speaker means them):
