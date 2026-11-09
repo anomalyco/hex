@@ -136,7 +136,8 @@ On the running desktop app, `client.transcribe({ ..., process: "global" })`
 also asks for the text after your Global mode's output processing (Labs ›
 Process API transcripts) and returns it as `processed`. An embedded
 `hex-service` installs no processor and answers `processing-unavailable`;
-without `process`, results are raw transcripts as before.
+without `process`, results are raw transcripts as before. `capabilities()`
+reports `outputProcessing` when the host supports it; older hosts omit it.
 
 Use `models.list()` to discover available models rather than treating the exported
 `MODEL_IDS` as an availability list. `apple_speech` remains in the public type but

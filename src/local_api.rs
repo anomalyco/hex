@@ -581,18 +581,16 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 content_length,
                 body_prefix,
                 admission,
-                process,
+                processing,
             } => {
                 let response = transcribe_audio(
                     &mut stream,
                     selection,
                     content_length,
                     body_prefix,
-                    &context.transcription,
-                    &context.processing,
-                    process,
-                    &context.shutdown,
                     admission,
+                    processing,
+                    &context,
                 );
                 if let Some(response) = response
                     && let Err(error) = write_response(&mut stream, response)
@@ -778,9 +776,9 @@ fn transcription_action(
     transcription: &crate::transcription::service::TranscriptionServiceHandle,
     processing: &processing::Processing,
 ) -> RequestAction {
-    let process = match processing::wanted(&request.path) {
+    let guard = match processing::wanted(&request.path) {
         Ok(wanted) => match processing::gate(wanted, processing) {
-            Ok(process) => process,
+            Ok(guard) => guard,
             Err(response) => return RequestAction::Respond(response),
         },
         Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
@@ -820,7 +818,7 @@ fn transcription_action(
         content_length,
         body_prefix: request.body_prefix,
         admission,
-        process,
+        processing: guard,
     }
 }
 
@@ -1032,18 +1030,17 @@ fn selection_query(path: &str) -> std::result::Result<SelectionQuery, &'static s
     Ok(selection)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn transcribe_audio(
     stream: &mut TcpStream,
     selection: crate::transcription::models::TranscriptionSelection,
     content_length: usize,
     mut body: Vec<u8>,
-    transcription: &crate::transcription::service::TranscriptionServiceHandle,
-    output: &processing::Processing,
-    process: bool,
-    shutdown: &AtomicBool,
     admission: crate::transcription::service::AudioAdmission,
+    guard: Option<processing::Guard>,
+    context: &HttpContext,
 ) -> Option<HttpResponse> {
+    let transcription = &context.transcription;
+    let shutdown = &context.shutdown;
     if let Err(error) = read_body_bounded(
         stream,
         content_length,
@@ -1088,7 +1085,13 @@ fn transcribe_audio(
                     "transcript": &transcript,
                     "durationMs": duration_ms,
                 });
-                processing::attach(&mut response, process, output, &transcript, &language);
+                processing::attach(
+                    &mut response,
+                    guard.as_ref(),
+                    &transcript,
+                    &language,
+                    &context.shutdown,
+                );
                 return Some(HttpResponse::json(200, &response));
             }
             Ok(Some(Err(error))) | Err(error) => return Some(transcription_error(error)),
@@ -1400,8 +1403,8 @@ enum RequestAction {
         content_length: usize,
         body_prefix: Vec<u8>,
         admission: crate::transcription::service::AudioAdmission,
-        /// `process=global` was asked for and admitted.
-        process: bool,
+        /// `process=global` was asked for; the guard holds its one slot.
+        processing: Option<processing::Guard>,
     },
     DeveloperControl {
         content_length: usize,

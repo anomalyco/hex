@@ -143,10 +143,12 @@ as above.
 `processed` is the paste-ready text. Processing is best-effort and follows
 the paste path: a failed stage keeps its input, so the call still succeeds.
 It never pastes, saves History, updates Paste Last, or touches the clipboard.
-With the lab off the answer is `403 processing-disabled`, checked before any
-work; without an installed processor (for example `hex service`) it is `409
-processing-unavailable`. A refused `finish` leaves the stream running so the
-caller can finish again.
+Without an installed processor (for example `hex service`) the answer is `409
+processing-unavailable`, even while the lab is off; with a processor installed
+and the lab off it is `403 processing-disabled`. Processing runs one at a time
+across the local API; while another holds the slot the answer is `429
+queue-full`. All of these are checked before the stream finishes, and a
+refused `finish` leaves the stream running so the caller can finish again.
 
 No more audio is accepted once finishing. It waits up to 120 s (for example
 behind a long dictation) and then answers `504 stream-finish-timeout`; the
@@ -220,7 +222,7 @@ has no body.
 | 400 | `unknown-model` | `model` isn't a Hex model id. |
 | 400 | `invalid-audio` | Partial sample or non-finite float. |
 | 401 | (no body) | Missing or wrong bearer token. |
-| 403 | `processing-disabled` | `process` was asked for while Labs › Process API transcripts is off. |
+| 403 | `processing-disabled` | `process` was asked for with a processor installed but Labs › Process API transcripts off. |
 | 404 | `stream-not-found` | Unknown id, replaced stream, or wrong stream token. |
 | 409 | `model-mismatch` | Requested model/language isn't the held one. |
 | 409 | `processing-unavailable` | `process` was asked for and no processor is installed (for example `hex service`). |
@@ -232,6 +234,7 @@ has no body.
 | 411 | `length-required` | No `Content-Length`. |
 | 413 | `request-too-large`, `audio-too-large` | Over the limits. |
 | 415 | `unsupported-content-type` | Wrong `Content-Type`. |
+| 429 | `queue-full` | A processing run is already under way; retry after it ends. |
 | 429 | `stream-backlog-full` | 120 s not yet transcribed; slow down or wait. |
 | 503 | `engine-unavailable` | Hex's dictation engine isn't running. |
 | 503 | `model-not-loaded` | Dictation holds no GGUF model (for example Apple Speech). |

@@ -128,11 +128,14 @@ mode corrections, the optional OpenCode rewrite, and Global's selected
 transformations. Processing is best-effort and deadline-bounded like a paste,
 so a failed stage keeps its input and the request still succeeds. It never
 pastes, records History, updates the last dictation, or touches the clipboard.
-Any other value, or a repeated parameter, answers `400 invalid-request`; with
-the lab off the answer is `403 processing-disabled`, checked before the audio
-body is read. `hex service` and `--embedded` install no processor and answer
-`409 processing-unavailable`. `GET /capabilities` reports `outputProcessing`
-only when a processor is installed and the lab is on.
+Any other value, or a repeated parameter, answers `400 invalid-request`.
+`hex service` and `--embedded` install no processor and answer `409
+processing-unavailable`, even while the lab is off; with a processor installed
+and the lab off the answer is `403 processing-disabled`. Processing runs one at
+a time across the local API, so while another holds it the answer is `429
+queue-full`; all three are decided before the audio body is read.
+`GET /capabilities` always includes `outputProcessing`, true only when a
+processor is installed and the lab is on.
 
 `POST /transcriptions` accepts completed PCM WAV audio. The service reads
 request bodies incrementally into a bounded buffer, then validates WAV metadata

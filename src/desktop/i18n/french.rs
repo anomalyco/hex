@@ -1208,7 +1208,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Transcribe files", "Transcrire des fichiers"),
     ("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model.", "Ajoute hex transcribe <file>, qui transforme un enregistrement WAV en texte avec votre modèle de dictée."),
     ("Process API transcripts", "Traiter les transcriptions de l'API"),
-    ("Apps that use Hex's local API can ask for transcripts with your Global mode's corrections, rewrite, and transformations applied", "Les apps qui utilisent l'API locale de Hex peuvent demander des transcriptions avec les corrections, la réécriture et les transformations de votre mode Global appliquées"),
+    ("Apps can ask Hex's local API for transcripts with Global mode's processing applied.", "Les apps peuvent demander à l'API locale de Hex des transcriptions avec le traitement du mode Global appliqué"),
 ];
 
 #[cfg(test)]

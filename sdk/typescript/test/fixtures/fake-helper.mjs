@@ -43,6 +43,7 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
         audioFormats: ["audio/wav"],
         partialTranscripts: false,
         serviceCapture: process.env.HEX_FAKE_SERVICE_CAPTURE === "1",
+        outputProcessing: false,
       }))
       return
     }

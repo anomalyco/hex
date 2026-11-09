@@ -40,6 +40,7 @@ describe("Promise client", () => {
       audioFormats: ["audio/wav"],
       partialTranscripts: false,
       serviceCapture: false,
+      outputProcessing: false,
     })
     expect(await host.client.models.list()).toMatchObject([{ id: "parakeet_v2", installed: true }])
     await host.client.models.prepare("parakeet_v2", {

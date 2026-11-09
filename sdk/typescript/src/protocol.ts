@@ -99,14 +99,25 @@ export const decodeHealth = (value: unknown): Health => {
 
 export const decodeCapabilities = (value: unknown): Capabilities => {
   const input = record(value)
+  const outputProcessing = input && (input.outputProcessing === undefined
+    ? undefined
+    : boolean(input.outputProcessing))
   if (
     !Array.isArray(input?.audioFormats)
     || input.audioFormats.length !== 1
     || input.audioFormats[0] !== "audio/wav"
     || input.partialTranscripts !== false
     || typeof input.serviceCapture !== "boolean"
+    || (input.outputProcessing !== undefined && outputProcessing === undefined)
   ) return invalid("capabilities response")
-  return { audioFormats: ["audio/wav"], partialTranscripts: false, serviceCapture: input.serviceCapture }
+  return outputProcessing === undefined
+    ? { audioFormats: ["audio/wav"], partialTranscripts: false, serviceCapture: input.serviceCapture }
+    : {
+      audioFormats: ["audio/wav"],
+      partialTranscripts: false,
+      serviceCapture: input.serviceCapture,
+      outputProcessing,
+    }
 }
 
 export const decodeDictationStart = (value: unknown): {

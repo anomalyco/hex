@@ -41,8 +41,8 @@ pub(super) enum StreamAction {
     Events(Arc<Stream>),
     Finish {
         stream: Arc<Stream>,
-        /// `process=global` was asked for and admitted.
-        process: bool,
+        /// `process=global` was asked for; the guard holds its one slot.
+        processing: Option<super::processing::Guard>,
     },
 }
 
@@ -105,14 +105,14 @@ pub(super) fn route(
         }
         ("GET", "events") => RequestAction::Stream(StreamAction::Events(stream)),
         ("POST", "finish") => {
-            let process = match super::processing::wanted(&request.path) {
+            let processing = match super::processing::wanted(&request.path) {
                 Ok(wanted) => match super::processing::gate(wanted, &context.processing) {
-                    Ok(process) => process,
+                    Ok(processing) => processing,
                     Err(response) => return respond(response),
                 },
                 Err(code) => return respond(HttpResponse::code(400, code)),
             };
-            RequestAction::Stream(StreamAction::Finish { stream, process })
+            RequestAction::Stream(StreamAction::Finish { stream, processing })
         }
         ("POST", "cancel") => {
             stream.cancel();
@@ -139,7 +139,7 @@ pub(super) fn handle(connection: &mut TcpStream, action: StreamAction, context: 
             body_prefix,
         } => audio(connection, &stream, content_length, body_prefix, context),
         StreamAction::Events(stream) => return events(connection, &stream, context),
-        StreamAction::Finish { stream, process } => finish(&stream, process, context),
+        StreamAction::Finish { stream, processing } => finish(&stream, processing, context),
     };
     if let Err(error) = write_response(connection, response) {
         tracing::debug!(%error, "stream client disconnected");
@@ -265,7 +265,11 @@ fn audio(
     }
 }
 
-fn finish(stream: &Stream, process: bool, context: &HttpContext) -> HttpResponse {
+fn finish(
+    stream: &Stream,
+    guard: Option<super::processing::Guard>,
+    context: &HttpContext,
+) -> HttpResponse {
     let stop = || context.shutdown.load(Ordering::Acquire);
     match stream.finish(FINISH_TIMEOUT, &stop) {
         Some(End::Final {
@@ -280,10 +284,10 @@ fn finish(stream: &Stream, process: bool, context: &HttpContext) -> HttpResponse
             });
             super::processing::attach(
                 &mut response,
-                process,
-                &context.processing,
+                guard.as_ref(),
                 &text,
                 &stream.selection.language,
+                &context.shutdown,
             );
             HttpResponse::json(200, &response)
         }

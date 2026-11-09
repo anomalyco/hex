@@ -33,6 +33,11 @@ export interface Capabilities {
   readonly audioFormats: readonly ["audio/wav"]
   readonly partialTranscripts: false
   readonly serviceCapture: boolean
+  /**
+   * Whether `process: "global"` would run on the running app (Labs › Process
+   * API transcripts). Absent from hosts older than this field.
+   */
+  readonly outputProcessing?: boolean
 }
 
 export interface ModelInfo {

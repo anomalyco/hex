@@ -9,12 +9,15 @@
 //! failed stage keeps its input, exactly as a paste's processing does.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::HttpResponse;
 
-/// The app's processor: a raw transcript and its language, and the text a
-/// paste in Global mode would use. It reads the current settings each call.
-pub type Processor = Arc<dyn Fn(&str, &str) -> String + Send + Sync>;
+/// The app's processor: a raw transcript, its language, and the API's
+/// shutdown flag, and the text a paste in Global mode would use. It reads the
+/// current settings each call and stops at its next stage boundary once
+/// `cancelled` is set.
+pub type Processor = Arc<dyn Fn(&str, &str, &AtomicBool) -> String + Send + Sync>;
 
 /// What this local API can process with, read per request so turning the lab
 /// off stops processing at once.
@@ -22,6 +25,9 @@ pub type Processor = Arc<dyn Fn(&str, &str) -> String + Send + Sync>;
 pub struct Processing {
     processor: Option<Processor>,
     enabled: fn() -> bool,
+    /// One processing run at a time, so a slow rewrite never occupies every
+    /// HTTP worker.
+    busy: Arc<AtomicBool>,
 }
 
 impl Default for Processing {
@@ -29,6 +35,7 @@ impl Default for Processing {
         Self {
             processor: None,
             enabled: crate::labs::api_processing,
+            busy: Arc::default(),
         }
     }
 }
@@ -47,7 +54,11 @@ impl Processing {
     /// state.
     #[cfg(test)]
     pub(super) fn gated(processor: Option<Processor>, enabled: fn() -> bool) -> Self {
-        Self { processor, enabled }
+        Self {
+            processor,
+            enabled,
+            busy: Arc::default(),
+        }
     }
 
     /// Whether a `process` request would run: a processor is installed and
@@ -56,12 +67,37 @@ impl Processing {
         (self.enabled)() && self.processor.is_some()
     }
 
-    /// The processed text for a request that asked for it. Only called once
-    /// [`gate`] admitted the request.
-    pub(super) fn text(&self, raw: &str, language: &str) -> Option<String> {
-        self.processor
-            .as_ref()
-            .map(|processor| processor(raw, language))
+    /// Claims the one processing slot, or `None` while another run holds it.
+    fn begin(&self) -> Option<Guard> {
+        let processor = self.processor.as_ref()?;
+        self.busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Guard {
+                processor: processor.clone(),
+                busy: self.busy.clone(),
+            })
+    }
+}
+
+/// One admitted processing run. Dropping it frees the slot, whether the
+/// processor finished, failed, or the client went away.
+pub(super) struct Guard {
+    processor: Processor,
+    busy: Arc<AtomicBool>,
+}
+
+impl Guard {
+    /// The processed text; every failed stage keeps its input. `cancelled`
+    /// is the API's shutdown flag, so quitting stops at a stage boundary.
+    pub(super) fn text(&self, raw: &str, language: &str, cancelled: &AtomicBool) -> String {
+        (self.processor)(raw, language, cancelled)
+    }
+}
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        self.busy.store(false, Ordering::Release);
     }
 }
 
@@ -69,32 +105,34 @@ impl Processing {
 /// it; every existing field stays as it is.
 pub(super) fn attach(
     body: &mut serde_json::Value,
-    process: bool,
-    processing: &Processing,
+    guard: Option<&Guard>,
     raw: &str,
     language: &str,
+    cancelled: &AtomicBool,
 ) {
-    if !process {
-        return;
-    }
-    if let Some(processed) = processing.text(raw, language) {
-        body["processed"] = serde_json::Value::String(processed);
+    if let Some(guard) = guard {
+        body["processed"] = serde_json::Value::String(guard.text(raw, language, cancelled));
     }
 }
 
-/// The refusal for a request that asked for processing, or whether it may
-/// run. Checks the lab before any audio body is read.
-pub(super) fn gate(wanted: bool, processing: &Processing) -> Result<bool, HttpResponse> {
+/// The refusal for a request that asked for processing, or the slot its run
+/// holds. Checks that a processor exists before the lab, so `hex service`
+/// answers `processing-unavailable` even while the lab is off, and claims the
+/// one slot before any audio body is read or a stream finishes.
+pub(super) fn gate(wanted: bool, processing: &Processing) -> Result<Option<Guard>, HttpResponse> {
     if !wanted {
-        return Ok(false);
-    }
-    if !(processing.enabled)() {
-        return Err(HttpResponse::code(403, "processing-disabled"));
+        return Ok(None);
     }
     if processing.processor.is_none() {
         return Err(HttpResponse::code(409, "processing-unavailable"));
     }
-    Ok(true)
+    if !(processing.enabled)() {
+        return Err(HttpResponse::code(403, "processing-disabled"));
+    }
+    processing
+        .begin()
+        .map(Some)
+        .ok_or_else(|| HttpResponse::code(429, "queue-full"))
 }
 
 /// Whether a request's query asked for output processing. `process=global`
@@ -128,18 +166,19 @@ pub(super) fn wanted(path: &str) -> Result<bool, &'static str> {
 pub(crate) fn dictation_processor(
     processing: crate::dictation::modes::ProcessingState,
 ) -> Processor {
-    Arc::new(move |raw, language| {
+    Arc::new(move |raw, language, cancelled| {
         let modes = processing
             .modes
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .clone();
         modes
-            .process(
+            .process_cancellable(
                 raw,
                 language,
                 &crate::dictation::context::ContextSnapshot::default(),
                 &processing.transformations,
+                cancelled,
                 crate::dictation::processor::Source::Dictation,
             )
             .text
@@ -160,20 +199,19 @@ pub(crate) fn profiles_processing(
 pub(crate) fn profiles_processor(
     transformations: Arc<crate::personal_commands::TransformationClient>,
 ) -> Processor {
-    Arc::new(move |raw, language| {
+    Arc::new(move |raw, language, cancelled| {
         let context = crate::dictation::context::ContextSnapshot::default();
-        let cancelled = std::sync::atomic::AtomicBool::new(false);
         let mut processed = crate::dictation::config::dictation_profiles().process_cancellable(
             raw,
             language,
             &context,
-            &cancelled,
+            cancelled,
             crate::dictation::processor::Source::Dictation,
         );
         processed.apply_transformations(
             &transformations,
             &context,
-            &cancelled,
+            cancelled,
             crate::dictation::processor::Source::Dictation,
         );
         processed.text
@@ -185,7 +223,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::time::Duration;
 
     use super::super::{LocalApi, LocalApiOptions, current_health};
@@ -217,7 +255,9 @@ mod tests {
     }
 
     fn processor() -> Processor {
-        Arc::new(|raw: &str, language: &str| format!("{raw} [{language}] processed"))
+        Arc::new(|raw: &str, language: &str, _cancelled: &AtomicBool| {
+            format!("{raw} [{language}] processed")
+        })
     }
 
     /// Sends one request and returns its status and body.
@@ -370,6 +410,40 @@ mod tests {
         );
         let (status, _) = finish(&api, id, &owner, "");
         assert_eq!(status, 200);
+
+        // `hex service` is this state: no processor and the lab off. The
+        // missing processor is named first, not `processing-disabled`.
+        let api = start(Processing::gated(None, || false));
+        assert_eq!(
+            refused_transcription(&api, "/transcriptions?model=parakeet_v2&process=global"),
+            (409, r#"{"code":"processing-unavailable"}"#.into())
+        );
+        let (id, owner) = created(&api);
+        assert_eq!(
+            finish(&api, id, &owner, "?process=global"),
+            (409, r#"{"code":"processing-unavailable"}"#.into())
+        );
+        let (status, _) = finish(&api, id, &owner, "");
+        assert_eq!(status, 200);
+    }
+
+    #[test]
+    fn a_busy_processor_answers_queue_full_before_the_body_or_finish() {
+        let processing = on();
+        let api = start(processing.clone());
+        let _guard = gate(true, &processing).ok().flatten().unwrap();
+        assert_eq!(
+            refused_transcription(&api, "/transcriptions?model=parakeet_v2&process=global"),
+            (429, r#"{"code":"queue-full"}"#.into())
+        );
+        let (id, owner) = created(&api);
+        assert_eq!(
+            finish(&api, id, &owner, "?process=global"),
+            (429, r#"{"code":"queue-full"}"#.into())
+        );
+        // The refused finish leaves the stream running.
+        let (status, body) = finish(&api, id, &owner, "");
+        assert_eq!(status, 200, "{body}");
     }
 
     #[test]
@@ -447,9 +521,18 @@ mod tests {
 
     #[test]
     fn a_transcriptions_response_gains_only_the_processed_field() {
+        let processing = on();
+        let guard = gate(true, &processing).ok().flatten().unwrap();
+        let cancelled = AtomicBool::new(false);
         let transcript = serde_json::json!({ "transcript": "hello there", "durationMs": 750 });
         let mut processed = transcript.clone();
-        attach(&mut processed, true, &on(), "hello there", "en");
+        attach(
+            &mut processed,
+            Some(&guard),
+            "hello there",
+            "en",
+            &cancelled,
+        );
         assert_eq!(
             processed,
             serde_json::json!({
@@ -459,7 +542,7 @@ mod tests {
             })
         );
         let mut raw = transcript.clone();
-        attach(&mut raw, false, &on(), "hello there", "en");
+        attach(&mut raw, None, "hello there", "en", &cancelled);
         assert_eq!(raw, transcript);
     }
 

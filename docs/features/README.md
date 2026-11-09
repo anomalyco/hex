@@ -2325,8 +2325,9 @@ ask the running app for the text after its Global mode's output processing, on
 ([streams.md](../streams.md#post-streamsidfinish),
 [labs.md](labs.md)). The response keeps its fields and adds `processed`; off,
 or without the parameter, responses are unchanged raw transcripts, and the
-embedded helper installs no processor (`409 processing-unavailable`).
-`/capabilities` reports `outputProcessing`.
+embedded helper installs no processor (`409 processing-unavailable`, even
+with the lab off). Processing runs one at a time (`429 queue-full`).
+`/capabilities` always includes `outputProcessing`.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

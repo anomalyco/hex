@@ -730,7 +730,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         Feature::ApiProcessing,
         None,
         tr("Process API transcripts"),
-        tr("Apps that use Hex's local API can ask for transcripts with your Global mode's corrections, rewrite, and transformations applied"),
+        tr("Apps can ask Hex's local API for transcripts with Global mode's processing applied."),
     ));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
         && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();

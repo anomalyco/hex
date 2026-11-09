@@ -54,12 +54,32 @@ impl ModeRuntime {
         transformations: &crate::personal_commands::TransformationClient,
         source: crate::dictation::processor::Source,
     ) -> Processed {
+        self.process_cancellable(
+            raw_text,
+            language,
+            context,
+            transformations,
+            &AtomicBool::new(false),
+            source,
+        )
+    }
+
+    /// [`Self::process`] with a cancellation flag the stages check, for work
+    /// that ends early when Hex quits.
+    pub fn process_cancellable(
+        &self,
+        raw_text: &str,
+        language: &str,
+        context: &crate::dictation::context::ContextSnapshot,
+        transformations: &crate::personal_commands::TransformationClient,
+        cancelled: &AtomicBool,
+        source: crate::dictation::processor::Source,
+    ) -> Processed {
         let text = self.replacements.replace(raw_text);
         let profile = self.profile(context);
-        let cancelled = AtomicBool::new(false);
-        let mut processed = Profiles::new(profile)
-            .process_cancellable(&text, language, context, &cancelled, source);
-        processed.apply_transformations(transformations, context, &cancelled, source);
+        let mut processed =
+            Profiles::new(profile).process_cancellable(&text, language, context, cancelled, source);
+        processed.apply_transformations(transformations, context, cancelled, source);
         processed
     }
 
