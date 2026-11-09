@@ -376,12 +376,13 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
         ),
         // The chip says it all; the line under it stays, empty, so the
         // stage doesn't move when `"With Hex"` brings its own. Composed in
-        // two lines, it says what you do, as `"With Hex"`'s does.
+        // two lines (the playground's layouts only, so English), it says what you
+        // do, as `"With Hex"`'s does.
         Step::Parked if !scene_over(s) || s.demo_hears() => (
             "without",
             tr("Without Hex").to_string(),
             if Layout::chosen().two_lines() {
-                line("lead-type", tr("Type it by hand.").to_string())
+                line("lead-type", "Type it by hand.".to_string())
             } else {
                 el().key("lead-none")
             },
