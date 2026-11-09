@@ -1998,13 +1998,11 @@ mod tests {
             Some(Detection::Offer(first.clone()))
         );
         assert!(!watch.detector.is_application_snoozed("com.brave.Browser"));
-        // The call was recorded, then stopped by hand.
-        watch.detector.recording_stopped();
         // The same call under another account is still snoozed.
         assert!(watch.run(Some(&again), &[], 5_000).is_empty());
-        // Off the microphone for 3 s after the stop: the next call is offered
-        // (#1594).
-        assert!(watch.run(None, &[], 3_500).is_empty());
+        // The first call ended without a stop by hand, so only its different
+        // code lets the next one through after a short gap (#1594).
+        assert!(watch.run(None, &[], 2_000).is_empty());
         assert_eq!(watch.stable(&second, &[]), Some(Detection::Offer(second)));
     }
 
