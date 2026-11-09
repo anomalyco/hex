@@ -49,9 +49,10 @@ jq -e --arg version "$version" --arg commit "$commit" '
 
 # Replace the branch with one commit that has no parent, so the repository
 # keeps the current file and no history.
+# gh prints the error body to stdout when the branch doesn't exist yet, so only a SHA counts.
 existing=$(gh api "repos/$repository/git/ref/heads/$branch" --jq .object.sha 2> /dev/null || true)
+[[ $existing =~ ^[0-9a-f]{40}$ ]] || existing=
 parents='[]'
-[ -z "$existing" ] || parents=$(jq -cn --arg sha "$existing" '[$sha]')
 blob=$(jq -cn --arg content "$(base64 -w0 < "$canonical")" '{content: $content, encoding: "base64"}' |
   gh api "repos/$repository/git/blobs" --method POST --input - --jq .sha)
 tree=$(jq -cn --arg blob "$blob" --arg path "$path" \
