@@ -902,10 +902,9 @@ const OPENCODE_IN_WSL: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 /// `process=global` returns a transcript after Global mode's output
 /// processing.
 const API_PROCESSING: u64 = OPENCODE_IN_WSL << 1;
-
-/// The next bit above OpenCode in WSL's switch: Double-tap accepts a
+/// The next bit above Process API transcripts' switch: Double-tap accepts a
 /// shortcut without a key (macOS).
-const DOUBLE_TAP_MODIFIERS: u64 = OPENCODE_IN_WSL << 1;
+const DOUBLE_TAP_MODIFIERS: u64 = API_PROCESSING << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
