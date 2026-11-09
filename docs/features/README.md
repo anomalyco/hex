@@ -794,8 +794,9 @@ latency measurement.
 
 ```ts
 Sidebar                                  // settings.nav
-├── General, Output, History, then each feature that is on: Meetings and
-│   Voice Filter (Labs toggles), Annotate, Playground (Labs, an item)
+├── General, Output, History, then each feature that is on: Captures
+│   (Labs › Screenshots, macOS), Meetings and Voice Filter (Labs toggles),
+│   Annotate, Playground (Labs, an item)
 └── Labs -> a store of unfinished features, each off by default: search, categories, cards with their own settings inline; hex://labs/<feature> opens its group (labs.md)
     // Command-1…9 follow the panes' order (labs::order)
 
@@ -1384,7 +1385,8 @@ Menu bar and Settings                    // maintenance
 │   ├── Meetings on or a meeting under way: Recording · <title> · 12:34 (opens
 │   │   the Meetings pane), Stop & Transcribe, Copy Section ▸; idle: Record Meeting
 │   ├── Paste Last Dictation ⌥⇧V (saved binding), Copy Recent Dictation ▸ (Labs),
-│   │   Copy Last Meeting Transcript (Meetings on), Speech Model ▸
+│   │   Copy Last Meeting Transcript (Meetings on), Restore Last Capture (Labs ›
+│   │   Screenshots on; dimmed until a capture card was closed), Speech Model ▸
 │   ├── Settings… ⌘, · Check for Updates… · Quit Hex ⌘Q
 │   │   └── Labs > ⌘Q closes Settings (off, #1473) -> ⌘Q closes the Settings
 │   │       window instead; dictation keeps running, the menu bar icon quits (labs.md)

@@ -477,7 +477,10 @@ pub(super) fn validate_hotkey(
 ) -> Result<(), &'static str> {
     if matches!(
         target,
-        ShortcutTarget::PasteLast | ShortcutTarget::Cancel | ShortcutTarget::Screenshot
+        ShortcutTarget::PasteLast
+            | ShortcutTarget::Cancel
+            | ShortcutTarget::Screenshot
+            | ShortcutTarget::ScreenshotRecord
     ) && binding.key.is_none()
     {
         return Err(tr("Add a key"));

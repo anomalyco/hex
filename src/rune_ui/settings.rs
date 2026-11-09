@@ -407,6 +407,8 @@ pub(super) fn conflicts(
         ShortcutTarget::TerminalPaste => HotkeySlot::TerminalPaste,
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => HotkeySlot::Screenshot,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::ScreenshotRecord => HotkeySlot::ScreenshotRecord,
     };
     settings.hotkey_in_use(slot, binding)
 }
@@ -445,6 +447,8 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey.as_ref(),
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => Some(&settings.screenshots.hotkey),
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::ScreenshotRecord => settings.screenshots.record_hotkey.as_ref(),
     }
 }
 
@@ -470,6 +474,8 @@ pub(super) fn set_binding(
         ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey = Some(binding),
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => settings.screenshots.hotkey = binding,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::ScreenshotRecord => settings.screenshots.record_hotkey = Some(binding),
     }
 }
 
@@ -792,7 +798,9 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::CaptureReplay => return None,
         // macOS has no shortcuts portal.
         #[cfg(target_os = "macos")]
-        ShortcutTarget::SecondDictation | ShortcutTarget::Screenshot => return None,
+        ShortcutTarget::SecondDictation
+        | ShortcutTarget::Screenshot
+        | ShortcutTarget::ScreenshotRecord => return None,
     };
     granted.iter().find(|shortcut| shortcut.name == name)
 }
@@ -1247,6 +1255,8 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
         ShortcutTarget::SecondDictation => "second-dictation-hotkey",
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => "screenshot-hotkey",
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::ScreenshotRecord => "screenshot-record-hotkey",
     }
 }
 

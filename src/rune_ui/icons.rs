@@ -272,3 +272,23 @@ line_icon!(
         "m9 9 6 6"
     ]
 );
+line_icon!(
+    PEN,
+    "hex-row-pen",
+    [
+        "M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4.5 1.5L5 15z",
+        "m13.5 6.5 3 3",
+    ]
+);
+line_icon!(
+    ARROW_TOOL,
+    "hex-row-arrow-tool",
+    ["M5 19 19 5", "M10 5h9v9"]
+);
+line_icon!(BOX_TOOL, "hex-row-box", ["M4 5h16v14H4z"]);
+line_icon!(TEXT_TOOL, "hex-row-text-tool", ["M5 5h14", "M12 5v15"]);
+line_icon!(
+    CROP_TOOL,
+    "hex-row-crop",
+    ["M7 2.5V17h14.5", "M2.5 7H17v14.5"]
+);

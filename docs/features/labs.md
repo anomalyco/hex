@@ -148,7 +148,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        held Annotate key (a tap of it stops the recording)
 │                                        // checks: gnome_annotate_is_its_own_bit_* (labs.rs), meeting capsule xwayland decision reused
 │                                        // (linux/meeting_capsules.rs); Rune's xwayland tests; not run on a GNOME session
-├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.folder (macOS)
+├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.record_hotkey (unbound) + screenshots.folder (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail
 ├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
 │                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
@@ -1324,18 +1324,87 @@ shortcut uses) opens a second copy of Annotate's capture picker
                   ├── PNG (pHYs at the display's scale) -> "Hex Screenshot 2026-11-04 at 14.03.22.png"
                   │   in screenshots.folder (the Desktop when unset); a second shot that second gets " (2)"
                   ├── clipboard -> the PNG and the file's URL, one pasteboard item
-                  └── thumbnail bottom right for 5 s (held while the pointer is on it), 16 pt in,
-                      its corner concentric with the display's (30 pt, a design constant):
-                      slides in from past the right edge on the HUD's spring and out the same way
-                      (Reduce Motion: a fade); ✕ shows inside its top-left corner on hover;
-                      click -> opens it in the editor, drag -> the file, ✕ -> closes
+                  └── a card bottom right, 16 pt in, its corner concentric with the display's
+                      (30 pt, a design constant), staying until it's closed (no timer):
+                      an area or window shot grows in from exactly the rectangle captured, at that
+                      size and place, and springs into its corner slot on one spring that never
+                      overshoots its size; a whole-display shot or a recording slides in from past
+                      the right edge on the HUD's spring; any card leaves past the right edge
+                      (Reduce Motion: a fade either way); ✕ shows inside its top-left corner on hover
+                      a dictation while cards show -> pastes as usual, being no shot's talk-over
                       a failure -> the error tone; there is no success sound (Hex has no shutter cue)
 ```
+
+The cards stack in the corner as CleanShot's Quick Access Overlay does
+(`screenshot_thumbnail.rs`, drawn by `screenshot_thumbnail/card.rs`):
+
+```ts
+cards
+├── a new capture  -> nearest the corner; the older cards rise above it, 12 pt apart, on the
+│                     HUD's spring (Reduce Motion: they move at once); once the stack would pass
+│                     the display's top, the oldest close. The stack follows the newest capture
+│                     to its display
+├── click          -> the editor; that card closes
+├── drag           -> the file, into any app
+├── ✕              -> closes that card; the ones above it move down into its place
+├── right-click    -> Open in Editor, Copy, Show in Finder, Move to Trash, Close
+└── keys, while the pointer is on a card (the session tap takes them; nothing gets focus)
+    ├── ⌘C         -> the file on the clipboard (a shot's picture with it); "Copied" on the card
+    ├── ⌘S         -> the file, already saved, shown in Finder
+    ├── ⌘E         -> the editor
+    ├── ⌘W, Escape -> closes it
+    └── Return     -> keeps it (it's saved) and closes the card
+```
+
+CleanShot's ⌘S saves the capture; every Hex capture is already saved,
+so ⌘S shows it in Finder instead.
+
+Every shot and recording the Lab saves is also listed in the Captures
+pane ([captures.rs](../../src/rune_ui/captures.rs)), which sits under
+History in the sidebar while the Lab is on. It is its own pane rather than
+a part of History: its rows are pictures and movies with their own
+actions, and History's retention menu and Clear all don't apply to them.
+
+```ts
+Captures
+├── search      -> every word in what was said over it, its file name, or its kind
+├── rows        -> newest first, the last 30 days, only files still where they were saved:
+│                  thumbnail · the words said over it (else the file's name) ·
+│                  "Screenshot · 2880 × 1800" or "Screen recording · 0:42" · its age
+├── click       -> the editor (a shot with its words; a recording to trim)
+├── drag        -> the file
+├── hover       -> Copy, Show in Finder, Move to Trash in the age's place
+└── nothing yet -> "No captures yet." and what shows here
+```
+
+The list reads an owner-only index in Application Support
+(`captures/index.json`, 0600 in a 0700 folder) with a 240 px PNG thumbnail
+per entry beside it ([history/captures.rs](../../src/history/captures.rs)),
+never the files themselves. A shot is remembered as it saves, a recording
+once its movie is saved, and words said over a shot in the editor replace
+its entry's words. Entries past 30 days or past 500 entries drop with
+their thumbnails the next time one is added; each keeps at most 4 KiB of
+words. Move to Trash (a card's or the pane's) forgets the entry. The
+editor's Save makes a new file that isn't listed. Writes are atomic, and a
+malformed index is kept aside as `index.json.corrupt`.
+
+The last ten cards closed (by ✕, a key, the menu, opening the editor, or
+the stack reaching the top) are kept in memory. The menu bar's Restore
+Last Capture, shown while the Lab is on and dimmed until a card was
+closed, brings back the newest of them, sliding in from the right edge
+into the corner; one whose file is gone is skipped, and Move to Trash
+keeps none. They don't outlast Hex.
+
+The card's overlay is the whole display under the pointer, click-through
+outside the card, so the card can start anywhere a shot was taken from.
 
 A click on the thumbnail opens the editor
 ([screenshot_thumbnail/editor.rs](../../src/rune_ui/screenshot_thumbnail/editor.rs)), a panel
 centred on the display under the pointer, the capsule's corners and
-shadow, growing in on the HUD's spring (Reduce Motion: a fade). The shot
+shadow, growing in on the HUD's spring (Reduce Motion: a fade). Its tools,
+✕ and microphone are the kit's icon buttons (a picked tool filled, as a
+capsule's expanded one is) and Copy, Save and Send to… are the kit's
+buttons, so it reads as the rest of Hex. The shot
 shows at no more than its own points. It stays until Escape or ✕:
 
 ```ts
@@ -1347,10 +1416,29 @@ editor
 ├── Copy (⌘C)     -> the edited PNG on the clipboard
 ├── Save (⌘S)     -> a new file in screenshots.folder; the first shot is never changed
 ├── Send to…      -> a list of open OpenCode sessions (typing searches title, folder, id,
-│                    as Annotate's; ↑↓ Enter); the PNG goes to the session as an image
+│                    as Annotate's; ↑↓ Enter); the PNG goes to the session as an image,
+│                    with the words said over it as its text ("Screenshot" without any);
+│                    picked while a dictation goes, it waits for the words
+├── dictation (the shortcut, or the microphone under the shot, which starts and finishes
+│   one like `hex dictation toggle`)
+│                 -> talks over the shot: the words show under it (3 lines, then "…"),
+│                    each dictation's added; never pasted; ✕ beside them clears them
 ├── a drag on the panel's edge or the toolbar's gap -> moves it, kept on the display
-└── Escape        -> ends the text, else closes the list, else closes the editor
+└── Escape        -> cancels a dictation over the shot (its words and a waiting send never
+                     land; the panel stays), else ends the text, else closes the list,
+                     else closes the editor
 ```
+
+Talking over a shot
+([screenshots/narration.rs](../../src/screenshots/narration.rs)) is the
+shortcut's own dictation, on the loaded model and through the mode's
+processing; only where its text lands changes. The listener asks at a
+dictation's start whether the shot's editor is open, and at its finish hands
+the transcript to that shot instead of pasting it, as
+`hex dictation stop --print` does. The corner card never takes words: while
+only it shows, a dictation pastes as usual. A short, silent, cancelled, or
+failed clip lands nothing. Dictation never takes Escape, so the editor's
+Escape cancels it through the listener.
 
 The edited shot is drawn on the GPU at the shot's own pixels, the marks
 as the editor draws them (an offscreen Rune view), then cropped; without
@@ -1363,6 +1451,54 @@ Left to do: no blur or highlight tool, colour or stroke choice, moving or
 deleting a single mark, redo, or zoom; a shot larger than the GPU's
 largest texture exports without its marks; Send lists sessions only, not
 Annotate's rules; no Save as or drag out of the editor.
+
+Recording the screen
+([screenshots/recording.rs](../../src/screenshots/recording.rs)) needs
+Annotate on (`capture.enabled`): a recording is an Annotate capture
+(`CaptureCommand::Clip`) on capture-core's recorder, narrated from the
+dictation timeline. Its shortcut (`screenshots.record_hotkey`) is unbound
+until the drawer's Record screen row sets one (a key is required; the
+trash button clears it); without Annotate the row says "Needs Annotate".
+
+```ts
+record shortcut  -> the same picker, "Full screen · Click to record"; area, window (Space), or display
+│                   while an Annotate capture records -> nothing
+├── recording    -> Annotate's capsule shows it recording, as any capture; talk to narrate
+├── record shortcut again (or the capsule's stop) -> stops; the capsule folds unless it failed
+│                   ├── the movie saves itself: "Hex Recording 2026-11-04 at 14.03.22.mp4" in
+│                   │   screenshots.folder (the Desktop when unset), " (2)" on a clash, as a shot's
+│                   │   PNG does; a clone of Annotate's copy, so instant on one volume. A failed save
+│                   │   plays the error tone and the card shows Annotate's copy
+│                   ├── no clipboard, no router: nothing is sent or copied on its own
+│                   └── the corner card, from the first frame, its length in a pill
+│                       click -> the editor; drag -> the saved movie; a dictation never lands on it
+└── editor       -> the saved movie's frame above a filmstrip of 12 frames; a drag on the strip
+                    moves the nearer end of the span kept (never under 0.5 s) and shows the frame
+                    there; the words said inside the span under it, read-only; no marks, no Copy
+                    ├── Save     -> another "Hex Recording … .mp4" in screenshots.folder,
+                    │               copied whole or cut without re-encoding (`scrawl-helper trim`)
+                    └── Send to… -> a contact sheet of up to 4 frames in the span as the image,
+                                    the span's words and "Screen recording (m:ss): <movie>" as text,
+                                    the saved movie itself when nothing was cut
+```
+
+The recording's bundle stays Annotate's (`~/Library/Application
+Support/scrawl/captures/<id>.scrawl`), and Annotate's retention may trash
+its movie; the saved copy is the one the card, the editor, and a drag use.
+Annotate's own captures are not saved anywhere new.
+
+Checks: `the_record_shortcut_records_and_never_while_the_picker_shows` in
+[screenshots.rs](../../src/screenshots.rs),
+`a_recording_saves_beside_the_shots_and_never_over_one` in
+[screenshots/recording.rs](../../src/screenshots/recording.rs),
+`a_stopped_screenshot_recording_folds_the_capsule` in
+[capture_capsule/feed.rs](../../src/rune_ui/capture_capsule/feed.rs), the
+trim, words, sheet, and no-marks tests and the `trim` editor golden in
+[screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
+and the `recording` thumbnail golden. Not yet observed: a real recording
+on a Mac, its card, trimming and saving a movie, and a session receiving
+a sent recording. Left to do: no playback in the editor, no audio-only or
+GIF export, and the recording shows no countdown.
 
 The shortcut is taken in Hex's session tap (`screenshots::key`, called
 from [suppression.rs](../../src/suppression.rs) before the listener's
@@ -1405,18 +1541,37 @@ and `a_large_shot_shrinks_for_its_thumbnail` in
 file in one second, and the PNG's density in
 [screenshots/save.rs](../../src/screenshots/save.rs); the system shortcut
 read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
-`thumbnail_goldens` (rest and hover, light and dark) and the thumbnail's
-timer in [screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
-`editor_goldens` (marks and the Send to… list, light and dark), the
-layout, each tool's drag, text, undo, the list's search, and both exports
+`thumbnail_goldens` (rest, hover, a recording's length, and three stacked,
+light and dark), a card staying until closed, the stack's slots, the
+oldest closing at the top, keys reaching only the hovered card, and
+Restore bringing back the card closed last but never a trashed one in
+[screenshot_thumbnail/tests.rs](../../src/rune_ui/screenshot_thumbnail/tests.rs);
+`a_hovered_card_takes_its_keys_and_only_then` in
+[screenshots.rs](../../src/screenshots.rs);
+`editor_goldens` (marks, the Send to… list, and words while a dictation
+records, light and dark), the layout and the words row's height, words
+landing only while transcribed, Escape dropping them and a waiting send, a
+waiting send going once they land, each tool's drag, text, undo, the
+list's search, and both exports
 (`an_export_draws_the_marks_over_the_shot` renders on a GPU, skipping
 without one) in [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
 and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/screenshot_thumbnail/editor/marks.rs);
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
-its card renders as `--scene mac-labs-screenshots`. Not yet observed: a
+the index's order, reopen, owner-only modes, search, window, caps, forgetting,
+words, and a malformed file in [history/captures.rs](../../src/history/captures.rs);
+the Captures pane as the `captures` golden (light and dark) and
+`--scene captures-empty`;
+its card renders as `--scene mac-labs-screenshots`; the card's entrance
+and the stack's motion are `thumbnail_frames` (`HEX_SCREENSHOT_FRAMES`
+writes them at 60 fps).
+Not yet observed: the card keys and right-click menu on a real Mac, the
+Captures pane over a real index (its thumbnails decoding, a drag out, Copy,
+and Move to Trash), a
 real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
 clipboard paste, the thumbnail's drag, the editor on a real display
-(its keys, Copy, Save, and a session receiving a sent shot), and whether a session
+(its keys, Copy, Save, and a session receiving a sent shot), talking over a
+shot with a real shortcut and microphone, the card growing in from a real
+capture rectangle, and whether a session
 tap can ever see ⌘⇧4 while macOS's shortcut is on (inferred from how
 symbolic hotkeys are dispatched, not tested). The row renders only in
 macOS builds, so the settings goldens don't change.

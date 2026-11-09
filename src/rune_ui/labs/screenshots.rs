@@ -3,7 +3,7 @@
 
 use rune::{El, col, row, text};
 
-use super::super::controls::{ButtonKind, DESCRIPTION, Paint, button};
+use super::super::controls::{ButtonKind, DESCRIPTION, Paint, button, icon_button};
 use super::super::general::keys_button;
 use super::super::{ShortcutTarget, Ui};
 use crate::desktop::i18n::tr;
@@ -22,6 +22,12 @@ pub(super) fn body(ui: &Ui, p: Paint, system_takes_shortcut: bool) -> El {
             "screenshot-shortcut",
             tr("Shortcut"),
             keys_button(ui, p, ShortcutTarget::Screenshot),
+        ))
+        .child(fact(
+            p,
+            "screenshot-record-shortcut",
+            tr("Record screen"),
+            record_control(ui, p),
         ))
         .child(fact(
             p,
@@ -51,6 +57,34 @@ pub(super) fn body(ui: &Ui, p: Paint, system_takes_shortcut: bool) -> El {
         );
     }
     body
+}
+
+/// The record shortcut, unbound until recorded, or why it can't record:
+/// a recording is an Annotate capture.
+fn record_control(ui: &Ui, p: Paint) -> El {
+    if !ui.settings.capture_on() {
+        return text(tr("Needs Annotate"))
+            .key("value")
+            .font(DESCRIPTION)
+            .color(p.muted());
+    }
+    let mut control = row().key("control").gap(4.0).center_y().child(keys_button(
+        ui,
+        p,
+        ShortcutTarget::ScreenshotRecord,
+    ));
+    if ui.settings.screenshots.record_hotkey.is_some() {
+        control = control.child(icon_button(
+            p,
+            "clear-screenshot-record-shortcut",
+            &rune_theme_opencode::icons::TRASH,
+            tr("Clear shortcut"),
+            |ui: &mut Ui| {
+                ui.update(|settings| settings.screenshots.record_hotkey = None);
+            },
+        ));
+    }
+    control
 }
 
 fn fact(p: Paint, key: &str, label: &str, value: El) -> El {

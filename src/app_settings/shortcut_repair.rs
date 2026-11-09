@@ -179,6 +179,15 @@ impl AppSettings {
             self.capture.replay_hotkey = None;
             reset = true;
         }
+        if self
+            .screenshots
+            .record_hotkey
+            .as_ref()
+            .is_some_and(&matches)
+        {
+            self.screenshots.record_hotkey = None;
+            reset = true;
+        }
         reset
     }
 }

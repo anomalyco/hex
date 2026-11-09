@@ -142,6 +142,8 @@ pub(crate) enum ShortcutTarget {
     Cancel,
     /// Labs › Screenshots.
     Screenshot,
+    /// Labs › Screenshots' record shortcut.
+    ScreenshotRecord,
 }
 
 /// What the runtime last published for the window and the menu bar.

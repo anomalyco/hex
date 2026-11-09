@@ -1,11 +1,13 @@
 //! The Meetings pane's listing, read from the meetings store on every OS,
 //! and the meeting requests the Linux and Windows windows perform in their
-//! own process (macOS's go through `macos_host`).
+//! own process (macOS's go through `macos_host`), and what the meeting
+//! capsules and controller tell the window.
 
 #[cfg(not(target_os = "macos"))]
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use super::Ui;
 use super::meetings::{Chapter, Meeting, Status, Transcript, Turn};
 #[cfg(not(target_os = "macos"))]
 use super::platform::MeetingRequest;
@@ -215,6 +217,31 @@ fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
             }
         })
         .collect()
+}
+
+/// A capsule's "Never offer" or "Always record" choice, kept in the window's
+/// live settings so its next save doesn't drop it.
+pub(crate) fn meeting_provider_chosen(
+    ui: &mut Ui,
+    choice: crate::app_settings::MeetingProviderChoice,
+) {
+    crate::app_settings::set_meeting_provider(&mut ui.settings.meetings, choice);
+}
+
+/// The corner the recording capsule was dragged to, kept in the window's live
+/// settings so its next save doesn't move it back.
+pub(crate) fn meeting_corner_moved(
+    ui: &mut Ui,
+    corner: crate::app_settings::MeetingIndicatorCorner,
+) {
+    ui.settings.meetings.recording_indicator_corner = corner;
+}
+
+/// A meeting recording could not start or finish; the Meetings pane says why.
+pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
+    ui.meetings.start_pending = false;
+    ui.meetings.stop_pending = false;
+    ui.meetings.runtime_error = Some(error);
 }
 
 #[cfg(test)]

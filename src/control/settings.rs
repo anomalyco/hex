@@ -245,6 +245,13 @@ const KEYS: &[Key] = &[
          press space to pick a window (macOS, with labs.screenshots)",
     ),
     optional(
+        "screenshots.record_hotkey",
+        Kind::Shortcut(HotkeySlot::ScreenshotRecord),
+        "Labs: records an area or a window, picked like a screenshot, and press it again \
+         to stop; none (the default) turns it off (macOS, with labs.screenshots and \
+         capture.enabled)",
+    ),
+    optional(
         "screenshots.folder",
         Kind::Path,
         "Labs: folder screenshots are saved to; none uses the Desktop (macOS)",
@@ -1116,6 +1123,7 @@ pub fn apply(
         | "terminal_paste_hotkey"
         | "cancel_hotkey"
         | "screenshots.hotkey"
+        | "screenshots.record_hotkey"
         | "capture.hotkey"
         | "capture.replay_hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
@@ -1130,6 +1138,7 @@ pub fn apply(
                 HotkeySlot::TerminalPaste => candidate.terminal_paste_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
                 HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
+                HotkeySlot::ScreenshotRecord => candidate.screenshots.record_hotkey.as_ref(),
                 #[cfg(hex_capture)]
                 HotkeySlot::Capture => Some(&candidate.capture.hotkey),
                 #[cfg(hex_capture)]
