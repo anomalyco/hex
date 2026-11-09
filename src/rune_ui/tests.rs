@@ -1652,6 +1652,7 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("again").is_some());
+    assert!(rt.find("again-play").is_some(), "audio can be played");
     rt.state.history.selected = Some(plain);
     rt.invalidate();
     settle(&mut rt);
@@ -1659,6 +1660,7 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
         rt.find("again").is_none(),
         "an entry without audio has nothing to transcribe"
     );
+    assert!(rt.find("again-play").is_none());
 
     rt.state.history.selected = Some(id);
     rt.state.history.again = Some(history::Again::finished(
@@ -1706,6 +1708,7 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("versions").is_none(), "off, the versions hide");
+    assert!(rt.find("again-play").is_none(), "off, Play hides");
     assert!(
         texts(&rt).iter().any(|text| text == "Parakeet v3"),
         "the model shows either way"
