@@ -31,7 +31,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
-├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the onboarding HUD preview and the Sounds sheet's HUD replay inside the window, and every overlay window, keep following the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 keeps the system's caption background while its text and buttons follow
+├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the onboarding HUD preview and the Sounds sheet's HUD replay inside the window, and every overlay window, keep following the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
@@ -362,11 +362,15 @@ exactly as before. Only the one main window is resolved; the onboarding HUD
 preview and the Sounds sheet's HUD replay inside the window, and every
 overlay (the HUD, meeting capsules, live text, capture capsule, screenshots,
 and playgrounds), keep following the OS. On Windows the native title bar
-follows the window's background and light/dark mode: DWM sets
-`DWMWA_CAPTION_COLOR` and `DWMWA_USE_IMMERSIVE_DARK_MODE`, and the caption is
-re-applied after a system switch, which winit first paints from the OS theme.
-Windows 10 keeps the system's caption background (it has no caption color
-attribute), while the caption's text and buttons follow the forced mode.
+follows the window's background and light/dark mode: Hex sets
+`DWMWA_CAPTION_COLOR` and `DWMWA_USE_IMMERSIVE_DARK_MODE`, and a window
+subclass re-applies the last resolved caption after every
+`WM_SETTINGCHANGE`, because winit repaints the frame from the OS theme on
+each one while only reporting `ThemeChanged` for a real OS theme change.
+Windows 10 has no caption color attribute, so DWM keeps its own light or dark
+caption background from the same flag; builds before 19041 do not recognize
+attribute 20 and keep the OS caption. The caption's text and buttons follow
+the forced mode.
 Settings saves the choice at once, like the Caps Lock light.
 Checks: `the_window_follows_the_os_unless_appearance_forces_it` in
 [labs.rs](../../src/labs.rs), `the_main_window_paints_the_forced_appearance_not_the_os`

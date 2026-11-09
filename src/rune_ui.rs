@@ -1356,8 +1356,9 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     let p = Paint::new(dark, cx.env().scale);
     // The native title bar takes the window's background and light/dark mode,
     // so its text and buttons stay readable while Labs › Appearance forces a
-    // theme; a system switch paints this view again, so the bar is re-applied
-    // after winit copies the OS theme onto the frame.
+    // theme. winit repaints the frame from the OS theme on every settings
+    // broadcast, so `match_title_bar` records this frame's theme and a window
+    // subclass re-applies it after each one.
     #[cfg(target_os = "windows")]
     crate::windows::rune::match_title_bar(p.k.c.bg_deep, dark, cx.system_dark());
     // Menus and popovers mount above the page (rune-kit overlays).
