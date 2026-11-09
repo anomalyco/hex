@@ -54,6 +54,15 @@ running service (`src/desktop/opencode_service.rs`):
   registered. No `wsl.exe` runs, and passwd contents and passwords are never
   logged. `XDG_STATE_HOME` inside WSL is not read, and a home absent from
   `/etc/passwd` (LDAP/SSSD) is not found.
+- Annotate's capture router (`crates/router`) reaches OpenCode through the
+  same Windows discovery. With the lab on and a WSL service, its local
+  requests and session reads go through that service. The prompt's recorded-at
+  line names the capture folder as the Linux server sees it (`X:\a\b` →
+  `/mnt/x/a/b`, following `/etc/wsl.conf`'s `[automount]` root and its
+  `enabled = false`), while the summary header keeps the Windows path. A
+  native Windows service, or a discovery that found none, leaves the router's
+  own `service.json` and loopback path unchanged, and with the lab off nothing
+  changes.
 - The registration's `url` must be loopback `http://` (`localhost`, `0.0.0.0`
   and `::` are reached through loopback); anything else is refused.
 - `GET /api/info` with the registration's password (HTTP Basic, user
