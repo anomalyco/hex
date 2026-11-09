@@ -238,8 +238,10 @@ Settings › Annotate                      // capture.pane
 ├── Screen Recording -> read once a second and again when the pane opens or
 │   the window becomes key, never with a prompt (capture_host::screen_access):
 │   the preflight, which keeps its first answer for the life of the process,
-│   then, while it says no, a fresh `scrawl-helper permissions` at most every
-│   2 s on its own thread and a one-frame probe once that says granted
+│   then, while it says no, a fresh `scrawl-helper permissions` on its own
+│   thread: at most every 60 s while nothing shows it, and every 2 s while
+│   its row or the capsule's permission helper is on screen, plus a one-frame
+│   probe once that says granted
 │   ├── granted -> Allowed, no button
 │   ├── granted in System Settings but unusable until Hex relaunches ->
 │   │   "Turns on when Hex restarts" and Restart Hex, never Allow over a switch
@@ -366,7 +368,7 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   to see your screen · Allow ✕" (Microphone, Accessibility alike)
 │   ├── Allow -> macOS's microphone prompt, else System Settings with the
 │   │   floating guide beside it (permission_guide), never at launch
-│   ├── Followed once a second (feed::watch_grant, screen_access) ->
+│   ├── Followed once a second (feed::watch_grant, screen_access_watched) ->
 │   │   "… is on · Restart Hex" when macOS needs one, then "… is on ·
 │   │   Capture ⌥⇧S"; Capture or the shortcut records the pointer's display
 │   ├── ✕ closes it; unanswered it folds after 2 min; the shortcut brings it
