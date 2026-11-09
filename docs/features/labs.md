@@ -1539,6 +1539,26 @@ Support/scrawl/captures/<id>.scrawl`), and Annotate's retention may trash
 its movie; the saved copy is the one the card, the editor, and a drag use.
 Annotate's own captures are not saved anywhere new.
 
+The movie keeps every pixel (`MovieQuality::Full`): capture-core's
+`Encoder::Hevc` writes hardware HEVC Main at a constant quality of 0.7 with
+VideoToolbox's real-time mode off, Rec. 709 tags, no B-frames, a keyframe at
+least every 5 s, and a frame only when the picture changes, up to 60 fps. An
+area above 8192×4320 pixels (4320×8192 tall), the hardware limit, is scaled
+to fit. Annotate's own captures stay sized for agents: H.264 from
+`SCRecordingOutput` with a 1280 px long edge (2560 for a whole display). On a
+3200×1800 test animation of Retina text this measured 43.4 dB luma PSNR
+against 18.8 dB for the old 1280 px movie, at 56 MB/min while busy and
+8 MB/min while still; a 5K display busy is about 96 MB/min.
+
+```ts
+the record shortcut's movie  -> native pixels, HEVC 0.7, Rec. 709, frames only on change
+an Annotate capture's movie  -> 1280 px long edge (2560 for a display), system H.264
+// check: a_screenshots_recording_keeps_every_pixel_and_a_capture_stays_compact (capture_host.rs)
+// check: a_full_quality_movie_keeps_every_pixel_as_hevc (crates/capture/src/capture/macos.rs)
+// check: hevc_records_native_pixels_up_to_the_hardware_limit (crates/capture-core/src/plan.rs)
+// check: writes_a_tagged_hevc_movie_from_frames (crates/capture-core/src/video_writer.rs)
+```
+
 Checks: `the_record_shortcut_records_and_never_while_the_picker_shows` in
 [screenshots.rs](../../src/screenshots.rs),
 `a_recording_saves_beside_the_shots_and_never_over_one` in

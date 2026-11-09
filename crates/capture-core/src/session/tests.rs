@@ -513,6 +513,21 @@ fn plan(dir: &Path) -> Plan {
 }
 
 #[test]
+fn an_hevc_movie_refuses_a_microphone_device() {
+    let dir = crate::test_dir::tempdir().unwrap();
+    let mut hevc = plan(dir.path());
+    hevc.sources[0].encoder = crate::Encoder::Hevc;
+    hevc.audio.mic = crate::Mic::Device {
+        id: "any".into(),
+        warmup: Duration::ZERO,
+    };
+    assert!(matches!(
+        crate::Recorder::start(hevc),
+        Err(crate::Error::ConfigureRecording(_))
+    ));
+}
+
+#[test]
 fn an_invalid_plan_is_refused_before_touching_the_screen() {
     let dir = crate::test_dir::tempdir().unwrap();
     let mut zero_fps = plan(dir.path());
@@ -575,6 +590,7 @@ fn records_a_region_at_its_long_edge() {
             },
         },
         long_edge: Some(1_280),
+        encoder: crate::Encoder::System,
     }];
     let recording = crate::Recorder::start(plan).unwrap();
     thread::sleep(Duration::from_secs(1));
@@ -582,6 +598,37 @@ fn records_a_region_at_its_long_edge() {
     assert_eq!(finished.error(), None);
     let source = &finished.manifest.sources[0];
     assert!(source.width <= 1_280 && source.width >= source.height * 2 - 2);
+}
+
+/// Needs Screen Recording permission and an awake display; records a region as native HEVC.
+#[test]
+#[ignore = "needs Screen Recording permission (TCC) and a live display"]
+fn records_a_region_as_native_hevc() {
+    let dir = crate::test_dir::tempdir().unwrap();
+    let main = objc2_core_graphics::CGMainDisplayID();
+    let mut plan = plan(dir.path());
+    plan.sources = vec![SourcePlan {
+        source: Source::Region {
+            display: main,
+            rect: crate::Rect {
+                x: 100.0,
+                y: 100.0,
+                width: 800.0,
+                height: 400.0,
+            },
+        },
+        long_edge: None,
+        encoder: crate::Encoder::Hevc,
+    }];
+    let recording = crate::Recorder::start(plan).unwrap();
+    thread::sleep(Duration::from_secs(2));
+    let finished = recording.stop().wait().unwrap();
+    assert_eq!(finished.error(), None);
+    let source = &finished.manifest.sources[0];
+    // Every pixel: 800 points at the display's own scale.
+    let scale = source.scale.unwrap();
+    assert_eq!(f64::from(source.width), (800.0 * scale).round());
+    assert!(source.duration_ms >= 1_500, "{}", source.duration_ms);
 }
 
 /// Needs Screen Recording permission and a display.

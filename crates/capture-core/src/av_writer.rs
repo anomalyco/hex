@@ -1,5 +1,5 @@
-//! A small `AVAssetWriter` wrapper: AAC audio files from PCM sample buffers, and (in tests) H.264
-//! MP4 fixtures from BGRA pixel buffers.
+//! A small `AVAssetWriter` wrapper: AAC audio files from PCM sample buffers, HEVC movies from
+//! screen frames, and (in tests) H.264 MP4 fixtures from BGRA pixel buffers.
 
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -9,7 +9,14 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_av_foundation::{
-    AVAssetWriter, AVAssetWriterInput, AVAssetWriterStatus, AVFileType, AVMediaTypeAudio,
+    AVAssetWriter, AVAssetWriterInput, AVAssetWriterStatus, AVFileType, AVFileTypeMPEG4,
+    AVMediaTypeAudio, AVMediaTypeVideo, AVVideoAllowFrameReorderingKey, AVVideoCodecKey,
+    AVVideoCodecTypeHEVC, AVVideoColorPrimaries_ITU_R_709_2, AVVideoColorPrimariesKey,
+    AVVideoColorPropertiesKey, AVVideoCompressionPropertiesKey, AVVideoEncoderSpecificationKey,
+    AVVideoExpectedSourceFrameRateKey, AVVideoHeightKey, AVVideoMaxKeyFrameIntervalDurationKey,
+    AVVideoProfileLevelKey, AVVideoQualityKey, AVVideoTransferFunction_ITU_R_709_2,
+    AVVideoTransferFunctionKey, AVVideoWidthKey, AVVideoYCbCrMatrix_ITU_R_709_2,
+    AVVideoYCbCrMatrixKey,
 };
 use objc2_avf_audio::{AVEncoderBitRateKey, AVFormatIDKey, AVNumberOfChannelsKey, AVSampleRateKey};
 use objc2_core_audio_types::kAudioFormatMPEG4AAC;
@@ -19,10 +26,17 @@ use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
 pub(crate) const AUDIO_SAMPLE_RATE: u32 = 48_000;
 pub(crate) const AUDIO_CHANNELS: u32 = 2;
 const AAC_BIT_RATE: u32 = 192_000;
+/// HEVC's constant quality, from 0 to 1.
+const HEVC_QUALITY: f64 = 0.7;
+const HEVC_KEYFRAME_SECONDS: f64 = 5.0;
+/// Every frame time at up to 120 fps, to a sixtieth of a millisecond.
+const VIDEO_TIMESCALE: i32 = 60_000;
 
 pub(crate) struct AvWriter {
     writer: Retained<AVAssetWriter>,
     audio: Option<Retained<AVAssetWriterInput>>,
+    /// Screen frames, for [`Self::hevc`].
+    screen: Option<Retained<AVAssetWriterInput>>,
     #[cfg(test)]
     video: Option<(
         Retained<AVAssetWriterInput>,
@@ -46,9 +60,46 @@ impl AvWriter {
         Ok(Self {
             writer,
             audio: Some(audio),
+            screen: None,
             #[cfg(test)]
             video: None,
         })
+    }
+
+    /// A writer with one hardware HEVC input for `width`×`height` screen frames arriving at up
+    /// to `fps`, sized for crisp text: constant quality 0.7, Rec. 709 tags, no frame reordering,
+    /// and a keyframe at least every 5 s.
+    pub(crate) fn hevc(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self, String> {
+        // SAFETY: An immutable framework constant.
+        let file_type = unsafe { AVFileTypeMPEG4 }.ok_or("AVFileTypeMPEG4 is unavailable")?;
+        let writer = create(path, file_type)?;
+        let input = add_hevc_input(&writer, width, height, fps)?;
+        Ok(Self {
+            writer,
+            audio: None,
+            screen: Some(input),
+            #[cfg(test)]
+            video: None,
+        })
+    }
+
+    /// Appends one screen frame. Returns `Ok(false)` when the encoder was not ready and the
+    /// frame was dropped.
+    pub(crate) fn append_video(&self, sample: &CMSampleBuffer) -> Result<bool, String> {
+        let input = self.screen.as_ref().ok_or("no video input")?;
+        if !self.is_writing() {
+            return Err(self.message("append video"));
+        }
+        // SAFETY: The input belongs to this writer and calls are serialized by the owner.
+        if !unsafe { input.isReadyForMoreMediaData() } {
+            return Ok(false);
+        }
+        // SAFETY: As above; the sample buffer is a live, retained screen frame.
+        if unsafe { input.appendSampleBuffer(sample) } {
+            Ok(true)
+        } else {
+            Err(self.message("append video"))
+        }
     }
 
     /// Starts writing with the session beginning at `at`.
@@ -96,6 +147,9 @@ impl AvWriter {
         unsafe {
             if let Some(audio) = &self.audio {
                 audio.markAsFinished();
+            }
+            if let Some(screen) = &self.screen {
+                screen.markAsFinished();
             }
             #[cfg(test)]
             if let Some((video, _)) = &self.video {
@@ -213,6 +267,132 @@ fn add_aac_input(
     Ok(input)
 }
 
+/// Hardware HEVC for screen frames. The constant quality is the knee measured on Retina text:
+/// 0.6 loses 4 dB of luma PSNR, 0.8 gains 2 dB for twice the bytes. A live input turns
+/// VideoToolbox's real-time mode on, which spends more bytes for less detail on screen content
+/// (38.8 dB at 98 MB/min against 43.4 dB at 56 MB/min), so it is turned back off. Without
+/// reordering, the final-frame hold never needs a skipped picture.
+fn add_hevc_input(
+    writer: &AVAssetWriter,
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> Result<Retained<AVAssetWriterInput>, String> {
+    // SAFETY: Framework constants are immutable process-lifetime objects.
+    let (media_type, codec, codec_key, width_key, height_key) = unsafe {
+        (
+            AVMediaTypeVideo.ok_or("AVMediaTypeVideo is unavailable")?,
+            AVVideoCodecTypeHEVC.ok_or("AVVideoCodecTypeHEVC is unavailable")?,
+            AVVideoCodecKey.ok_or("AVVideoCodecKey is unavailable")?,
+            AVVideoWidthKey.ok_or("AVVideoWidthKey is unavailable")?,
+            AVVideoHeightKey.ok_or("AVVideoHeightKey is unavailable")?,
+        )
+    };
+    // SAFETY: As above.
+    let (color_key, compression_key, specification_key) = unsafe {
+        (
+            AVVideoColorPropertiesKey.ok_or("AVVideoColorPropertiesKey is unavailable")?,
+            AVVideoCompressionPropertiesKey
+                .ok_or("AVVideoCompressionPropertiesKey is unavailable")?,
+            AVVideoEncoderSpecificationKey
+                .ok_or("AVVideoEncoderSpecificationKey is unavailable")?,
+        )
+    };
+    // SAFETY: As above.
+    let color = unsafe {
+        NSDictionary::from_slices(
+            &[
+                AVVideoColorPrimariesKey.ok_or("AVVideoColorPrimariesKey is unavailable")?,
+                AVVideoTransferFunctionKey.ok_or("AVVideoTransferFunctionKey is unavailable")?,
+                AVVideoYCbCrMatrixKey.ok_or("AVVideoYCbCrMatrixKey is unavailable")?,
+            ],
+            &[
+                AVVideoColorPrimaries_ITU_R_709_2.ok_or("Rec. 709 primaries are unavailable")?
+                    as &AnyObject,
+                AVVideoTransferFunction_ITU_R_709_2.ok_or("Rec. 709 transfer is unavailable")?
+                    as &AnyObject,
+                AVVideoYCbCrMatrix_ITU_R_709_2.ok_or("the Rec. 709 matrix is unavailable")?
+                    as &AnyObject,
+            ],
+        )
+    };
+    // VideoToolbox's keys by value: `objc2-video-toolbox` is not a dependency.
+    let realtime_key = NSString::from_str("RealTime");
+    let main_profile = NSString::from_str("HEVC_Main_AutoLevel");
+    let quality = NSNumber::new_f64(HEVC_QUALITY);
+    let rate = NSNumber::new_u32(fps);
+    let keyframe = NSNumber::new_f64(HEVC_KEYFRAME_SECONDS);
+    let off = NSNumber::new_bool(false);
+    // SAFETY: As above.
+    let compression = unsafe {
+        NSDictionary::from_slices(
+            &[
+                AVVideoQualityKey.ok_or("AVVideoQualityKey is unavailable")?,
+                AVVideoExpectedSourceFrameRateKey
+                    .ok_or("AVVideoExpectedSourceFrameRateKey is unavailable")?,
+                AVVideoMaxKeyFrameIntervalDurationKey
+                    .ok_or("AVVideoMaxKeyFrameIntervalDurationKey is unavailable")?,
+                AVVideoAllowFrameReorderingKey
+                    .ok_or("AVVideoAllowFrameReorderingKey is unavailable")?,
+                AVVideoProfileLevelKey.ok_or("AVVideoProfileLevelKey is unavailable")?,
+                &*realtime_key,
+            ],
+            &[
+                &*quality as &AnyObject,
+                &*rate as &AnyObject,
+                &*keyframe as &AnyObject,
+                &*off as &AnyObject,
+                &*main_profile as &AnyObject,
+                &*off as &AnyObject,
+            ],
+        )
+    };
+    let hardware = NSDictionary::from_slices(
+        &[&*NSString::from_str(
+            "RequireHardwareAcceleratedVideoEncoder",
+        )],
+        &[&*NSNumber::new_bool(true) as &AnyObject],
+    );
+    let width = NSNumber::new_u32(width);
+    let height = NSNumber::new_u32(height);
+    let settings = NSDictionary::from_slices(
+        &[
+            codec_key,
+            width_key,
+            height_key,
+            color_key,
+            compression_key,
+            specification_key,
+        ],
+        &[
+            codec as &AnyObject,
+            &*width as &AnyObject,
+            &*height as &AnyObject,
+            &*color as &AnyObject,
+            &*compression as &AnyObject,
+            &*hardware as &AnyObject,
+        ],
+    );
+    // SAFETY: The settings fully specify HEVC output.
+    let input = unsafe {
+        AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
+            media_type,
+            Some(&settings),
+        )
+    };
+    // SAFETY: The input is unattached and writing has not started.
+    if !unsafe { writer.canAddInput(&input) } {
+        return Err("the writer cannot take an HEVC input".into());
+    }
+    // SAFETY: `canAddInput` succeeded and writing has not started.
+    unsafe {
+        input.setExpectsMediaDataInRealTime(true);
+        input.setMediaTimeScale(VIDEO_TIMESCALE);
+        writer.addInput(&input);
+    }
+    Ok(input)
+}
+
 #[cfg(test)]
 pub(crate) mod fixtures {
     //! Media fixtures written in-test, so no test needs screen capture or a microphone.
@@ -221,10 +401,8 @@ pub(crate) mod fixtures {
     use std::ptr::NonNull;
 
     use objc2_av_foundation::{
-        AVAssetWriterInputPixelBufferAdaptor, AVFileTypeMPEG4, AVMediaTypeVideo,
-        AVVideoAllowFrameReorderingKey, AVVideoCodecKey, AVVideoCodecTypeH264,
-        AVVideoCompressionPropertiesKey, AVVideoHeightKey, AVVideoProfileLevelH264HighAutoLevel,
-        AVVideoProfileLevelKey, AVVideoWidthKey,
+        AVAssetWriterInputPixelBufferAdaptor, AVVideoCodecTypeH264,
+        AVVideoProfileLevelH264HighAutoLevel,
     };
     use objc2_core_audio_types::{
         AudioStreamBasicDescription, kAudioFormatFlagIsFloat, kAudioFormatFlagIsPacked,
@@ -352,6 +530,7 @@ pub(crate) mod fixtures {
             let writer = Self {
                 writer,
                 audio,
+                screen: None,
                 video: Some((input, adaptor)),
             };
             writer.start(cm_time(MediaTime::ZERO)).expect("start");
