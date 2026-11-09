@@ -300,6 +300,8 @@ General > Dictation > Speech model, then Language below it   // setup.language-s
 │   ├── Model without the saved language -> Row: "Choosing it switches the
 │   │   language to English"
 │   └── Choose it -> ChooseModel(model, model's default: English, else its first)
+│       ├── Warmed on silence without the vocabulary prompt; a warm-up that
+│       │   stops at its output limit still counts as warm (same as the menu bar)
 │       └── Saved -> Language row: "<Model> doesn't support Japanese, so the
 │           language changed to English" until the next choice
 ├── Language -> Select of the saved model's languages (catalog order, Auto first
@@ -529,7 +531,16 @@ every interface language; its headings, buttons, and hints are translated.
 Menu bar > Speech Model                   // setup.quick-model-switch; macOS
 ├── Downloaded models -> Last selected language shown beside each model
 ├── Choose -> Verify installed artifact -> Prewarm -> Save selection
-│   ├── Success -> Checkmark moves; Settings reflects the saved selection
+│   ├── Prewarm runs silence without the vocabulary prompt, so a term list
+│   │   can't be read back to Qwen3-ASR's token cap
+│   ├── Warm-up still stops at its output limit (Qwen3-ASR 1.7B) -> Counts as
+│   │   warm; saved (same as Linux and Windows, and as the Settings picker)
+│   │   // gguf_session::RunKind; checks:
+│   │   // a_warmup_leaves_the_vocabulary_out_and_counts_when_truncated,
+│   │   // a_decode_stopped_at_its_output_limit_is_recognised_through_its_context
+│   │   // Proof limit: the classifier test covers only error recognition and
+│   │   // the warm-up test only the option choice; accepting a Mac prewarm has
+│   │   // no automated check, and no Mac run was observed.
 │   └── Failure -> Previous selection remains; open Settings for the error
 ├── Preparing -> Cancel Model Switch      // never cancels dictation/output jobs
 └── Manage Models… -> Settings picker      // downloads; languages in the Language row

@@ -19,7 +19,7 @@ use crate::paste::{PasteMode, Paster};
 use crate::suppression::InputActivity;
 use crate::transcription::WarmTranscriber;
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
-use crate::transcription::gguf_session::OfflineGgufSession;
+use crate::transcription::gguf_session::{OfflineGgufSession, output_truncated};
 use crate::transcription::models::{
     TranscriptionModelId, TranscriptionSelection, model_path, validate,
 };
@@ -1285,8 +1285,26 @@ impl Parakeet {
         let started = Instant::now();
         let mut silence = Vec::new();
         pad_for_parakeet(&mut silence);
-        self.transcribe(&silence)
-            .wrap_err("could not prewarm transcription model")?;
+        // No vocabulary: with it, a decoder such as Qwen3-ASR 1.7B reads a
+        // long term list back to its output cap on every warm-up (#1568).
+        let result = self
+            .session
+            .warm(&silence, &self.options)
+            .map(drop)
+            .wrap_err("could not prewarm transcription model");
+        match result {
+            // Backstop: a decode that still runs to its generation cap on
+            // silence (Qwen3-ASR 1.7B, #968) ran the whole graph on the
+            // device, so that is a warm model, not a failed selection; Linux
+            // and Windows accept it the same way.
+            Err(error) if output_truncated(&error) => {
+                tracing::info!(
+                    error = format!("{error:#}"),
+                    "the warm-up run on silence hit the output limit; the model is warm"
+                );
+            }
+            result => result?,
+        }
         tracing::info!(
             prewarm_ms = started.elapsed().as_millis(),
             "prewarmed transcription model"

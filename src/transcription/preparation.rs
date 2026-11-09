@@ -196,7 +196,9 @@ fn prepare_selection(
         crate::transcription::Transcriber::load_selection(selection).map(drop)?;
         check_canceled()
     })()
-    .map_err(|error| error.to_string())
+    // The chain reaches the controller's warning and the row's reason, so a
+    // failed prewarm names its cause instead of only "could not prewarm".
+    .map_err(|error| format!("{error:#}"))
 }
 
 #[cfg(test)]

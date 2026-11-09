@@ -1133,7 +1133,10 @@ impl Worker {
                     self.reload_error = None;
                 }
                 Err(error) => {
-                    tracing::warn!(%error, "could not reload the speech model");
+                    tracing::warn!(
+                        error = format!("{error:#}"),
+                        "could not reload the speech model"
+                    );
                     self.reload_error = Some(error.to_string());
                 }
             }
