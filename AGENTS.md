@@ -903,14 +903,16 @@ CoreAudio formats, AppleScript details, or event serialization.
   after the current capture, and opening the replacement must succeed before
   the old stream is dropped; a device that resolves to the one already open is
   kept. An explicit CLI `--device` remains authoritative for that listener
-  process and never falls back. A runtime stream failure cancels an incomplete
-  capture (a programmatic one keeps the audio delivered before the failure for
-  its owner's `/finish`, which answers `microphone-lost` when there is none),
-  discards stale chunks, and retries with bounded backoff; it must not
-  require a settings change or process restart. An initial open failure uses
-  the same bounded recovery without stopping the listener. Cancellation does
-  not stop warm-microphone retries; enabling release-while-idle stops them once
-  capture is idle.
+  process and never falls back. A stream that already failed or delivered
+  digital silence is stopped before its replacement opens, so the replacement
+  starts with no Hex stream on the device, as at launch. A runtime stream
+  failure cancels an incomplete capture (a programmatic one keeps the audio
+  delivered before the failure for its owner's `/finish`, which answers
+  `microphone-lost` when there is none), discards stale chunks, and retries
+  with bounded backoff; it must not require a settings change or process
+  restart. An initial open failure uses the same bounded recovery without
+  stopping the listener. Cancellation does not stop warm-microphone retries;
+  enabling release-while-idle stops them once capture is idle.
 - Feedback volume is persisted from zero through one; zero disables tones.
   Volume changes apply immediately and preview one recording-start tone.
 - Launch at Login uses `SMAppService` for the signed main app. Treat both

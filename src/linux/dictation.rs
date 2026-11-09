@@ -771,7 +771,7 @@ pub(crate) fn run(
                     .is_some_and(|host| host.recording_since(&timeline).is_some());
             match service.control(control, busy, now) {
                 Effect::None => {}
-                Effect::Start if audio_ready && clock.at(now).is_some() => {
+                Effect::Start if audio_ready && input.is_open() && clock.at(now).is_some() => {
                     start_service_capture(
                         &mut capture,
                         &mut service,
