@@ -73,10 +73,11 @@ pub(super) struct WslHome {
     /// `\\wsl.localhost\<distribution><home>` or `\\wsl$\<distribution><home>`,
     /// the same folder Windows can read without running anything itself.
     pub(super) unc: PathBuf,
-    /// `<prefix>\<distribution>\etc`, where `/etc/passwd` and `/etc/wsl.conf` live.
-    etc: PathBuf,
     /// The home's Linux path, such as `/home/dax`.
     pub(super) linux: String,
+    /// `/etc/wsl.conf`'s `[automount]`, read once when the home was looked
+    /// up, so naming a capture folder never reads over UNC again.
+    automount: Automount,
     /// Set once Hex's workspace was created through `unc`; clones share it,
     /// so one success is remembered by every request.
     workspace_ready: Arc<AtomicBool>,
@@ -94,7 +95,12 @@ impl WslHome {
     /// The home `linux_home` names in `distribution`, reached through
     /// `prefix`; everything is checked before it becomes a UNC path.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub(super) fn home(prefix: &str, distribution: &str, linux_home: &str) -> Option<Self> {
+    fn home(
+        prefix: &str,
+        distribution: &str,
+        linux_home: &str,
+        automount: Automount,
+    ) -> Option<Self> {
         let distribution = distribution_component(distribution)?;
         let linux = linux_path(linux_home)?;
         Some(Self {
@@ -102,8 +108,8 @@ impl WslHome {
                 r"{prefix}\{distribution}{}",
                 linux.replace('/', r"\")
             )),
-            etc: etc_dir(prefix, distribution)?,
             linux,
+            automount,
             workspace_ready: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -111,9 +117,9 @@ impl WslHome {
     #[cfg(test)]
     pub(super) fn for_test(unc: PathBuf, linux: &str) -> Self {
         Self {
-            etc: unc.join("etc"),
             unc,
             linux: linux.to_owned(),
+            automount: Automount::default(),
             workspace_ready: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -144,11 +150,11 @@ impl WslHome {
         format!("{}/.local/share/hex/opencode", self.linux)
     }
 
-    /// `host` as a server in this distribution sees it, following `/etc/wsl.conf`'s
-    /// `[automount]`, or `None` when drives aren't automounted or `host` isn't on one.
+    /// `host` as a server in this distribution sees it, using the
+    /// `[automount]` read when this home was looked up: `None` when drives
+    /// aren't automounted or `host` isn't on one.
     pub(super) fn directory(&self, host: &Path) -> Option<String> {
-        let conf = read_bounded(&self.etc.join("wsl.conf"));
-        linux_directory(conf.as_deref(), host)
+        linux_directory(&self.automount, host)
     }
 
     /// Creates the workspace in the distribution once and returns the path
@@ -212,6 +218,7 @@ fn windows_forbidden(character: char) -> bool {
 
 /// `<prefix>\<distribution>\etc`, where a distribution keeps `/etc/passwd` and
 /// `/etc/wsl.conf`.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn etc_dir(prefix: &str, distribution: &str) -> Option<PathBuf> {
     let distribution = distribution_component(distribution)?;
     Some(PathBuf::from(format!(r"{prefix}\{distribution}\etc")))
@@ -233,6 +240,20 @@ impl Default for Automount {
             root: "/mnt/".into(),
         }
     }
+}
+
+/// `/etc/wsl.conf`'s `[automount]`, read once with the home.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn automount_at(etc: &Path) -> Automount {
+    let conf = read_bounded(&etc.join("wsl.conf"));
+    automount(conf.as_deref().unwrap_or_default())
+}
+
+/// The automount settings of `distribution`, read through `prefix` on the
+/// same lookup that reads `/etc/passwd`.
+#[cfg(target_os = "windows")]
+fn read_automount(prefix: &str, distribution: &str) -> Automount {
+    etc_dir(prefix, distribution).map_or_else(Automount::default, |etc| automount_at(&etc))
 }
 
 fn automount(conf: &str) -> Automount {
@@ -257,7 +278,7 @@ fn automount(conf: &str) -> Automount {
             continue;
         };
         let key = key.trim();
-        let value = value.trim();
+        let value = ini_value(value);
         if key.eq_ignore_ascii_case("enabled") {
             automount.enabled = !value.eq_ignore_ascii_case("false");
         } else if key.eq_ignore_ascii_case("root")
@@ -267,6 +288,35 @@ fn automount(conf: &str) -> Automount {
         }
     }
     automount
+}
+
+/// An INI value with one matching pair of surrounding quotes dropped and an
+/// inline ` #` comment removed outside quotes.
+fn ini_value(value: &str) -> &str {
+    let mut quote = None;
+    let mut end = value.len();
+    for (index, character) in value.char_indices() {
+        match (quote, character) {
+            (None, '"' | '\'') => quote = Some(character),
+            (Some(open), character) if character == open => quote = None,
+            (None, '#')
+                if value[..index]
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_whitespace) =>
+            {
+                end = index;
+                break;
+            }
+            _ => {}
+        }
+    }
+    let value = value[..end].trim();
+    let bytes = value.as_bytes();
+    if value.len() >= 2 && matches!(bytes[0], b'"' | b'\'') && bytes[value.len() - 1] == bytes[0] {
+        return value[1..value.len() - 1].trim();
+    }
+    value
 }
 
 /// `root = /mnt/` as a mount point with exactly one trailing `/`; a value
@@ -282,10 +332,9 @@ fn automount_root(value: &str) -> Option<String> {
 }
 
 /// A Windows path as a server in the distribution sees it: `X:\a\b` at the
-/// `[automount]` root (`/mnt/x/a/b` by default), or `None` when drives aren't
-/// automounted or `host` isn't on one (a UNC share or a relative path).
-fn linux_directory(conf: Option<&str>, host: &Path) -> Option<String> {
-    let automount = automount(conf.unwrap_or_default());
+/// cached `[automount]` root (`/mnt/x/a/b` by default), or `None` when drives
+/// aren't automounted or `host` isn't on one (a UNC share or a relative path).
+fn linux_directory(automount: &Automount, host: &Path) -> Option<String> {
     if !automount.enabled {
         return None;
     }
@@ -543,7 +592,9 @@ fn default_home() -> Option<(WslHome, bool)> {
         return Some((home, true));
     }
     let (prefix, passwd) = read_passwd(&distribution)?;
-    let home = WslHome::home(prefix, &distribution, &home_for_uid(&passwd, uid)?)?;
+    let home = home_for_uid(&passwd, uid)?;
+    let automount = read_automount(prefix, &distribution);
+    let home = WslHome::home(prefix, &distribution, &home, automount)?;
     remember_home(&distribution, uid, &home);
     Some((home, false))
 }
@@ -671,15 +722,33 @@ mod tests {
 
     #[test]
     fn both_wsl_prefixes_name_the_distribution() {
-        let localhost = WslHome::home(WSL_PREFIXES[0], "Ubuntu-24.04", "/home/dax").unwrap();
+        let localhost = WslHome::home(
+            WSL_PREFIXES[0],
+            "Ubuntu-24.04",
+            "/home/dax",
+            Automount::default(),
+        )
+        .unwrap();
         assert_eq!(
             localhost.unc,
             PathBuf::from(r"\\wsl.localhost\Ubuntu-24.04\home\dax")
         );
-        let dollar = WslHome::home(WSL_PREFIXES[1], "Ubuntu-24.04", "/home/dax").unwrap();
+        let dollar = WslHome::home(
+            WSL_PREFIXES[1],
+            "Ubuntu-24.04",
+            "/home/dax",
+            Automount::default(),
+        )
+        .unwrap();
         assert_eq!(dollar.unc, PathBuf::from(r"\\wsl$\Ubuntu-24.04\home\dax"));
         assert_eq!(localhost.linux, dollar.linux);
-        let trimmed = WslHome::home(WSL_PREFIXES[0], "Ubuntu-24.04", "/home/dax/").unwrap();
+        let trimmed = WslHome::home(
+            WSL_PREFIXES[0],
+            "Ubuntu-24.04",
+            "/home/dax/",
+            Automount::default(),
+        )
+        .unwrap();
         assert_eq!(trimmed.unc, localhost.unc);
         assert_eq!(trimmed.linux, "/home/dax");
         assert_eq!(
@@ -690,8 +759,10 @@ mod tests {
 
     #[test]
     fn a_distribution_or_home_windows_cant_reach_is_refused() {
-        assert!(WslHome::home(WSL_PREFIXES[0], "Ubuntu", "/home/dax").is_some());
-        assert!(WslHome::home(WSL_PREFIXES[0], "Ubuntu", "/root").is_some());
+        assert!(
+            WslHome::home(WSL_PREFIXES[0], "Ubuntu", "/home/dax", Automount::default()).is_some()
+        );
+        assert!(WslHome::home(WSL_PREFIXES[0], "Ubuntu", "/root", Automount::default()).is_some());
         for (prefix, distribution, home) in [
             (WSL_PREFIXES[0], "", "/home/dax"),
             (WSL_PREFIXES[0], "..", "/home/dax"),
@@ -709,7 +780,7 @@ mod tests {
             (WSL_PREFIXES[0], "Ubuntu", "/home/dax//"),
         ] {
             assert_eq!(
-                WslHome::home(prefix, distribution, home),
+                WslHome::home(prefix, distribution, home, Automount::default()),
                 None,
                 "{prefix:?} {distribution:?} {home:?}"
             );
@@ -990,6 +1061,35 @@ mod tests {
             },
             "the last root wins and comments are skipped"
         );
+        for quoted in [
+            "[automount]\nroot = \"/windir/\"\n",
+            "[automount]\nroot = '/windir/'\n",
+        ] {
+            assert_eq!(
+                automount(quoted),
+                Automount {
+                    enabled: true,
+                    root: "/windir/".into()
+                },
+                "{quoted:?}"
+            );
+        }
+        assert_eq!(
+            automount("[automount]\nroot = /windir/ # a comment\n"),
+            Automount {
+                enabled: true,
+                root: "/windir/".into()
+            },
+            "an inline comment is dropped"
+        );
+        assert_eq!(
+            automount("[automount]\nroot = \"/windir/ # not a comment\"\n"),
+            Automount {
+                enabled: true,
+                root: "/windir/ # not a comment/".into()
+            },
+            "a # inside quotes is part of the root"
+        );
         for invalid in ["relative/", r"\\mnt\\", "mnt"] {
             assert_eq!(
                 automount(&format!("[automount]\nroot = {invalid}\n")),
@@ -1001,7 +1101,9 @@ mod tests {
 
     #[test]
     fn windows_drives_become_paths_under_the_automount_root() {
-        let map = |conf: Option<&str>, path: &str| linux_directory(conf, Path::new(path));
+        let map = |conf: Option<&str>, path: &str| {
+            linux_directory(&automount(conf.unwrap_or_default()), Path::new(path))
+        };
         assert_eq!(
             map(None, r"C:\Users\dax\captures\a.scrawl").as_deref(),
             Some("/mnt/c/Users/dax/captures/a.scrawl")
@@ -1040,32 +1142,42 @@ mod tests {
     }
 
     #[test]
-    fn a_capture_folder_follows_the_distributions_wsl_conf() {
+    fn a_capture_folder_follows_the_automount_read_with_the_home() {
         let root = std::env::temp_dir().join(format!(
             "hex-wsl-directory-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
         let _ = fs::remove_dir_all(&root);
-        let home = WslHome::for_test(root.join("home"), "/home/dax");
-        fs::create_dir_all(root.join("home/etc")).unwrap();
-        let conf = root.join("home/etc/wsl.conf");
-        let map = |path: &str| home.directory(Path::new(path));
+        let etc = root.join("etc");
+        fs::create_dir_all(&etc).unwrap();
+        let conf = etc.join("wsl.conf");
+        fs::write(&conf, "[automount]\nroot = \"/windir/\" # a comment\n").unwrap();
 
+        let home =
+            WslHome::home(WSL_PREFIXES[0], "Ubuntu", "/home/dax", automount_at(&etc)).unwrap();
         assert_eq!(
-            map(r"C:\Users\dax\a.scrawl").as_deref(),
-            Some("/mnt/c/Users/dax/a.scrawl")
-        );
-        fs::write(&conf, "[automount]\nroot = /windir/\n").unwrap();
-        assert_eq!(
-            map(r"C:\Users\dax\a.scrawl").as_deref(),
+            home.directory(Path::new(r"C:\Users\dax\a.scrawl"))
+                .as_deref(),
             Some("/windir/c/Users/dax/a.scrawl")
         );
+
+        // The home keeps what its lookup read, so naming a capture folder is
+        // pure and never opens wsl.conf over UNC again.
         fs::write(&conf, "[automount]\nenabled = false\n").unwrap();
-        assert_eq!(map(r"C:\Users\dax\a.scrawl"), None);
-        fs::remove_file(&conf).unwrap();
         assert_eq!(
-            map(r"C:\Users\dax\a.scrawl").as_deref(),
+            home.directory(Path::new(r"C:\Users\dax\a.scrawl"))
+                .as_deref(),
+            Some("/windir/c/Users/dax/a.scrawl"),
+            "the cached automount is used"
+        );
+        fs::remove_file(&conf).unwrap();
+        let default =
+            WslHome::home(WSL_PREFIXES[0], "Ubuntu", "/home/dax", automount_at(&etc)).unwrap();
+        assert_eq!(
+            default
+                .directory(Path::new(r"C:\Users\dax\a.scrawl"))
+                .as_deref(),
             Some("/mnt/c/Users/dax/a.scrawl"),
             "a missing wsl.conf keeps the default"
         );

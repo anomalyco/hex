@@ -1,23 +1,32 @@
 //! OpenCode in WSL for Annotate's sends: with Labs › OpenCode in WSL on,
 //! the router asks the host's service discovery, so a capture goes to a
 //! service whose registration Windows can't read itself. A native Windows
-//! service answers `None`, leaving the router's own path exactly as it was.
+//! service, or a discovery that found none, answers `None`, leaving the
+//! router's own path exactly as it was.
 
+#[cfg(target_os = "windows")]
 use std::path::Path;
+#[cfg(target_os = "windows")]
 use std::sync::atomic::AtomicBool;
+#[cfg(target_os = "windows")]
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "windows")]
 use scrawl_capture::env::{OpenCode, Reply};
 
-use crate::desktop::opencode_service::{self, Missing};
+#[cfg(target_os = "windows")]
+use crate::desktop::opencode_service;
 
 /// How long naming a capture folder may spend finding the service.
+#[cfg(target_os = "windows")]
 const DIRECTORY_DEADLINE: Duration = Duration::from_secs(3);
 
 /// The default WSL distribution's OpenCode service, when Labs › OpenCode in
 /// WSL is on.
+#[cfg(target_os = "windows")]
 pub(super) struct Wsl;
 
+#[cfg(target_os = "windows")]
 impl OpenCode for Wsl {
     fn request(
         &self,
@@ -31,9 +40,8 @@ impl OpenCode for Wsl {
         }
         let started = Instant::now();
         let cancelled = AtomicBool::new(false);
-        let service = match opencode_service::find_cancellable(timeout, &cancelled) {
-            Ok(service) => service,
-            Err(missing) => return Some(Err(missing_error(missing))),
+        let Ok(service) = opencode_service::find_cancellable(timeout, &cancelled) else {
+            return None;
         };
         if !service.is_wsl() {
             return None;
@@ -49,7 +57,7 @@ impl OpenCode for Wsl {
                     status: response.status,
                     body: response.body,
                 })
-                .map_err(|error| anyhow::anyhow!("{error:#}")),
+                .map_err(|error| anyhow::anyhow!(request_error(&format!("{error:#}")))),
         )
     }
 
@@ -63,11 +71,67 @@ impl OpenCode for Wsl {
     }
 }
 
-/// Why no service answered, in the words the capture capsule already reads
-/// as "OpenCode isn't running" and as the update notice.
-fn missing_error(missing: Missing) -> anyhow::Error {
-    match missing {
-        Missing::NotRunning => anyhow::anyhow!("Could not reach server: {}", missing.message()),
-        Missing::Outdated => anyhow::anyhow!(missing.message()),
+/// A failed `Service::request` from a confirmed WSL service, in the words
+/// the capture capsule already classifies: a timeout is the router's "didn't
+/// answer in time", and anything that couldn't be reached starts with
+/// "Could not reach server" like the router's own request errors.
+#[cfg(any(target_os = "windows", test))]
+fn request_error(error: &str) -> String {
+    let error = error.trim();
+    if error.contains("didn't answer in time")
+        || error.contains("exceeded")
+        || error.contains("was cancelled")
+    {
+        "OpenCode didn't answer in time".to_owned()
+    } else if error.contains("Could not reach server")
+        || error.contains("answered more than")
+        || error.contains("returned invalid HTTP")
+    {
+        error.to_owned()
+    } else {
+        format!("Could not reach server: {error}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::capture_host::routing::{send_why, unreachable_why};
+
+    use super::request_error;
+
+    #[test]
+    fn a_wsl_request_failure_reads_as_the_capsule_expects() {
+        for (raw, sent, unreachable) in [
+            (
+                "OpenCode /api/session exceeded 5 seconds",
+                "OpenCode didn't answer",
+                "didn't answer in time",
+            ),
+            (
+                "OpenCode isn't running",
+                "OpenCode isn't running",
+                "it isn't running",
+            ),
+            (
+                "could not send OpenCode /api/session: Connection reset by peer",
+                "OpenCode isn't running",
+                "it isn't running",
+            ),
+            (
+                "could not reach OpenCode /api/session: Connection refused (os error 10061)",
+                "OpenCode isn't running",
+                "it isn't running",
+            ),
+        ] {
+            let mapped = request_error(raw);
+            assert_eq!(send_why(&mapped, false), sent, "{raw}");
+            assert_eq!(unreachable_why(&mapped), unreachable, "{raw}");
+        }
+        for answered in [
+            "OpenCode /api/session returned invalid HTTP",
+            "OpenCode /api/session answered more than 16 MiB",
+        ] {
+            assert_eq!(request_error(answered), answered, "{answered}");
+        }
     }
 }

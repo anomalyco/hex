@@ -56,11 +56,12 @@ running service (`src/desktop/opencode_service.rs`):
   `/etc/passwd` (LDAP/SSSD) is not found.
 - Annotate's capture router (`crates/router`) reaches OpenCode through the
   same Windows discovery. With the lab on and a WSL service, its local
-  requests and session reads go through that service, and the prompt names
-  the capture folder as the Linux server sees it (`X:\a\b` →
+  requests and session reads go through that service. The prompt's recorded-at
+  line names the capture folder as the Linux server sees it (`X:\a\b` →
   `/mnt/x/a/b`, following `/etc/wsl.conf`'s `[automount]` root and its
-  `enabled = false`). A native Windows service leaves the router's own
-  `service.json` and loopback path unchanged, and with the lab off nothing
+  `enabled = false`), while the summary header keeps the Windows path. A
+  native Windows service, or a discovery that found none, leaves the router's
+  own `service.json` and loopback path unchanged, and with the lab off nothing
   changes.
 - The registration's `url` must be loopback `http://` (`localhost`, `0.0.0.0`
   and `::` are reached through loopback); anything else is refused.

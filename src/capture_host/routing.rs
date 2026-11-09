@@ -25,7 +25,6 @@ use scrawl_capture::{Router, RouterConfig, RouterDirs, RuleKind, Undone};
 
 use super::{SharedOutcomes, lock};
 
-#[cfg(target_os = "windows")]
 mod opencode;
 mod preparation;
 mod session_name;

@@ -160,11 +160,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
                                          // the_workspace_is_created_somewhere_windows_can_write_it,
                                          // the_automount_section_gives_the_root_and_can_be_off,
                                          // windows_drives_become_paths_under_the_automount_root,
-                                         // a_capture_folder_follows_the_distributions_wsl_conf,
+                                         // a_capture_folder_follows_the_automount_read_with_the_home,
                                          // a_wsl_service_gets_the_workspace_its_linux_server_can_use,
                                          // a_wsl_service_maps_a_capture_folder_into_its_distribution,
                                          // a_wsl_service_is_a_fallback_only_without_a_windows_one,
                                          // a_failed_wsl_request_forgets_the_workspace, a_not_found_wsl_request_forgets_the_workspace,
+                                         // a_wsl_request_failure_reads_as_the_capsule_expects,
                                          // opencode_in_wsl_is_its_own_bit_and_windows_only; not run on a real Windows PC with WSL
 
 Settings › Labs                          // labs.page, a store (labs/store.rs)
@@ -1902,15 +1903,17 @@ Settings › Labs › OpenCode in WSL on            // labs.opencode_in_wsl
 ├── Annotate's capture send asks the same lookup first (src/capture_host/routing/opencode.rs)
 │   ├── a WSL service answers the router's local requests; a native Windows one leaves the router's own
 │   │   registration path unchanged
-│   └── the prompt names the capture folder as the WSL server sees it: X:\a\b -> /mnt/x/a/b, following
-│       [automount] root = (one trailing /, else /mnt/); enabled = false, a UNC share, or a relative
-│       path leaves the Windows text
+│   └── the prompt's "Recorded at" line names the capture folder as the WSL server sees it:
+│       X:\a\b -> /mnt/x/a/b, following [automount] root = (one trailing /, else /mnt/);
+│       enabled = false, a UNC share, or a relative path leaves the Windows text. The
+│       summary header keeps the Windows path
 └── Labs off -> nothing reads the registry or any WSL path; Hex is exactly as before
 ```
 
 The pure parts (the passwd line for a uid, a Linux home to its UNC path, the
-Linux workspace string, `wsl.conf`'s `[automount]` and a drive path under its
-root, the cache identity, the shared lookup and its skip window) live in
+Linux workspace string, `wsl.conf`'s `[automount]` (read once with the
+home) and a drive path under its root, the cache identity, the shared lookup
+and its skip window) live in
 [desktop/opencode_service/wsl.rs](../../src/desktop/opencode_service/wsl.rs);
 the registry and `\\wsl.localhost\`/`\\wsl$\` reads are Windows-only. Nothing
 runs `wsl.exe`, and the passwd contents and password are never logged. A zero
@@ -1920,8 +1923,9 @@ next request retries `create_dir_all`.
 
 Limits: `XDG_STATE_HOME` set inside WSL is ignored (Hex always reads
 `<home>/.local/state/opencode`); a home that isn't in `/etc/passwd`, such as
-one from LDAP or SSSD, isn't found; Annotate's send maps only Windows drive
-paths, so a UNC or relative capture folder keeps its Windows text.
+one from LDAP or SSSD, isn't found; Annotate's recorded-at line maps only
+Windows drive paths, so a UNC or relative capture folder keeps its Windows
+text (the summary header always keeps it).
 Checks: `the_passwd_line_for_the_uid_names_its_home`,
 `both_wsl_prefixes_name_the_distribution`,
 `a_distribution_or_home_windows_cant_reach_is_refused`,
@@ -1933,7 +1937,7 @@ Checks: `the_passwd_line_for_the_uid_names_its_home`,
 `the_workspace_is_created_somewhere_windows_can_write_it`,
 `the_automount_section_gives_the_root_and_can_be_off`,
 `windows_drives_become_paths_under_the_automount_root`, and
-`a_capture_folder_follows_the_distributions_wsl_conf` in
+`a_capture_folder_follows_the_automount_read_with_the_home` in
 [wsl.rs](../../src/desktop/opencode_service/wsl.rs);
 `a_wsl_service_gets_the_workspace_its_linux_server_can_use`,
 `a_wsl_service_maps_a_capture_folder_into_its_distribution`,
@@ -1946,6 +1950,8 @@ Checks: `the_passwd_line_for_the_uid_names_its_home`,
 `a_hosts_refusal_keeps_its_http_status_and_what_opencode_said`, and
 `a_sent_prompt_names_the_folder_as_the_hosts_server_sees_it` in
 [crates/router/src/opencode.rs](../../crates/router/src/opencode.rs);
+`a_wsl_request_failure_reads_as_the_capsule_expects` in
+[src/capture_host/routing/opencode.rs](../../src/capture_host/routing/opencode.rs);
 `opencode_in_wsl_is_its_own_bit_and_windows_only` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real Windows PC with a
 running OpenCode inside WSL, including whether the UNC read starts the

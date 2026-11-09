@@ -354,8 +354,9 @@ an unset OpenCode model tries the ranked recommended models before the
 OpenCode default. An OpenCode service running inside WSL2 is found only with
 Labs › OpenCode in WSL on: WSL2 forwards its loopback URL, and the lab adds
 the default distribution's registration and a Linux workspace path for
-`x-opencode-directory`. Annotate's capture sends use the same service, with
-the capture folder named as a Linux `/mnt/…` path. Off, Hex reads only the
+`x-opencode-directory`. Annotate's capture sends use the same service: the
+prompt's "Recorded at" line names the capture folder as a Linux `/mnt/…` path
+while the summary header keeps the Windows path. Off, Hex reads only the
 Windows registration and an OpenCode in WSL isn't found.
 Remaining panes should be added only with their complete Windows behavior;
 empty look-alike screens do not count as parity.

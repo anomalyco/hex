@@ -972,12 +972,16 @@ pub fn send_bundle(bundle_dir: &Path, session: &str) -> Result<Posted> {
         ""
     };
     // A host that reaches OpenCode another way names the folder as its server sees it
-    // (Windows: `/mnt/<drive>/…` for a service in WSL).
-    let recorded = crate::env::get()
-        .opencode
-        .as_ref()
-        .and_then(|opencode| opencode.directory(&directory))
-        .unwrap_or_else(|| directory.display().to_string());
+    // (Windows: `/mnt/<drive>/…` for a service in WSL). SSH sends keep the path as it is.
+    let recorded = if agent_host().is_none() {
+        crate::env::get()
+            .opencode
+            .as_ref()
+            .and_then(|opencode| opencode.directory(&directory))
+            .unwrap_or_else(|| directory.display().to_string())
+    } else {
+        directory.display().to_string()
+    };
     let text = format!(
         "{}\n\n{attached}{availability}\nRecorded at {}.\nThis capture is {} ms long.",
         summary.trim_end(),
@@ -1616,11 +1620,18 @@ mod host_transport {
     use super::*;
     use crate::env::{self, Env, OpenCode, Reply};
 
+    type Seen = Vec<(String, String, Option<Vec<u8>>)>;
+
+    /// The real host's summary header names the capture folder on this machine.
+    fn summary_with_windows_path(_bundle: &ScrawlBundle, directory: &Path) -> String {
+        format!("[scrawl · captured · {}]", directory.display())
+    }
+
     /// A host transport whose answer and directory mapping a test sets.
     struct Fake {
         reply: Option<(u16, &'static str)>,
         directory: Option<String>,
-        seen: Mutex<Vec<(String, String, Option<Vec<u8>>)>>,
+        seen: Mutex<Seen>,
     }
 
     impl Fake {
@@ -1632,7 +1643,7 @@ mod host_transport {
             })
         }
 
-        fn seen(&self) -> Vec<(String, String, Option<Vec<u8>>)> {
+        fn seen(&self) -> Seen {
             self.seen.lock().unwrap().clone()
         }
     }
@@ -1749,7 +1760,6 @@ mod host_transport {
             std::env::temp_dir().join(format!("scrawl-host-{}", crate::util::make_bundle_id()));
         let bundle = root.join("fixture.scrawl");
         std::fs::create_dir_all(&bundle).unwrap();
-        std::fs::write(bundle.join("summary.md"), "A capture").unwrap();
         std::fs::write(
             bundle.join("scrawl.json"),
             serde_json::to_vec(&serde_json::json!({
@@ -1768,6 +1778,7 @@ mod host_transport {
             let hook = Fake::new(Some((200, r#"{"data":{"id":"msg_fixture"}}"#)), mapped);
             let _entered = env::enter(Arc::new(Env {
                 opencode: Some(hook.clone()),
+                summary: Some(summary_with_windows_path),
                 ..Default::default()
             }));
             let posted = send_bundle(&bundle, "ses_fixture").unwrap();
@@ -1784,8 +1795,8 @@ mod host_transport {
             assert!(text.contains(expected), "{text}");
             if mapped.is_some() {
                 assert!(
-                    !text.contains(&canonical),
-                    "the Windows path stays out: {text}"
+                    text.contains(&canonical),
+                    "the summary header keeps the Windows path: {text}"
                 );
             }
         }
