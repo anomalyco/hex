@@ -351,7 +351,11 @@ through the same `dictation/processor` and `personal_commands` modules as
 macOS, and Windows reaches the running OpenCode service the same way: its
 registration file and loopback HTTP, never a CLI. Like macOS,
 an unset OpenCode model tries the ranked recommended models before the
-OpenCode default.
+OpenCode default. An OpenCode service running inside WSL2 is found only with
+Labs › OpenCode in WSL on: WSL2 forwards its loopback URL, and the lab adds
+the default distribution's registration and a Linux workspace path for
+`x-opencode-directory`. Off, Hex reads only the Windows registration and an
+OpenCode in WSL isn't found.
 Remaining panes should be added only with their complete Windows behavior;
 empty look-alike screens do not count as parity.
 

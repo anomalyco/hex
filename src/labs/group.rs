@@ -73,7 +73,8 @@ impl Feature {
             | Self::GnomeClipboardRestore
             | Self::TypedText
             | Self::TerminalPaste
-            | Self::OutputFixes => Group::Output,
+            | Self::OutputFixes
+            | Self::OpenCodeInWsl => Group::Output,
             Self::KeepRecordings | Self::HistoryStats | Self::RecentDictations => Group::History,
             Self::Meetings
             | Self::LiveChapters

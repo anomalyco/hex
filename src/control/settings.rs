@@ -394,6 +394,12 @@ const KEYS: &[Key] = &[
          with Ctrl+Shift+V (Windows, Linux)",
     ),
     key(
+        "labs.opencode_in_wsl",
+        Kind::Bool,
+        "Labs: use an OpenCode service running in the default WSL distribution for Modes \
+         rewriting and the Modes model picker; looking for it can start WSL (Windows)",
+    ),
+    key(
         "labs.smart_spacing",
         Kind::Bool,
         "Labs: add a space before a dictation pasted right after a word (macOS)",

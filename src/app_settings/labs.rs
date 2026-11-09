@@ -143,6 +143,10 @@ pub struct LabsSettings {
     pub annotate_replay: bool,
     /// Calls in more apps (Signal, Telegram, WeChat, LINE, Webex, Element, Phone) and on more websites are offered and named.
     pub more_call_apps: bool,
+    /// An OpenCode service running in the default WSL distribution is used
+    /// for Modes rewriting and the Modes model picker when no Windows
+    /// service answers (Windows).
+    pub opencode_in_wsl: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -204,6 +208,7 @@ impl Default for LabsSettings {
             meeting_finished_event: false,
             annotate_replay: false,
             more_call_apps: false,
+            opencode_in_wsl: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,
