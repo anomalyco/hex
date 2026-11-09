@@ -1931,14 +1931,14 @@ fn voice_filter_sliders_set_the_filter_from_the_pointer() {
 fn sound_volume_slider_sets_the_level_and_zero_turns_tones_off() {
     let mut rt = runtime("mac-settings-advanced", true, (980.0, 1500.0));
     let (x, y) = rt.find("sound-volume-slider/track").unwrap();
-    rt.pointer_down(x + 95.0, y);
-    rt.pointer_up(x + 95.0, y);
+    rt.pointer_down(x + 75.0, y);
+    rt.pointer_up(x + 75.0, y);
     settle(&mut rt);
     assert!(rt.state.settings.sound_effects);
     assert_eq!(rt.state.settings.sound_effect_volume, 1.0);
 
-    rt.pointer_down(x - 95.0, y);
-    rt.pointer_up(x - 95.0, y);
+    rt.pointer_down(x - 75.0, y);
+    rt.pointer_up(x - 75.0, y);
     settle(&mut rt);
     assert!(!rt.state.settings.sound_effects);
     assert_eq!(
