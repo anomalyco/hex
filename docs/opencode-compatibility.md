@@ -41,13 +41,16 @@ running service (`src/desktop/opencode_service.rs`):
   rebuilt from that distribution's `/etc/passwd` (at most 1 MiB, and only the
   default distribution; opening it can start the WSL VM too). One lookup
   runs at a time on a shared helper thread with a fixed 3 s discover budget.
-  Each caller waits for that answer only for its own deadline or Escape, and
-  Settings and availability wait at most 3 s; a timeout or cancel returns
-  "OpenCode isn't running" without aborting the shared lookup. A lookup that
-  used its full cap without finding a service pauses new lookups for 10 s.
-  The cached home is dropped when its state directory can't be read, when
-  the default distribution or uid changes, and whenever a lookup runs with
-  the lab off. WSL2 forwards loopback, so the registered URL is dialed as
+  Its starter waits for its own remaining deadline or Escape; a joiner waits
+  at most the smaller of its own budget and the cap minus the lookup's age,
+  and returns "OpenCode isn't running" at once once that lookup is older
+  than the cap. A timeout or cancel never aborts the shared lookup. A lookup
+  that used its full cap without finding a service pauses new lookups for
+  10 s. The cached home is dropped when its state directory can't be read,
+  when the default distribution or uid changes, and on the next search that
+  runs with the lab off. A scoped request to a WSL service that fails (a
+  transport error or 404) forgets the workspace so the next one retries
+  creating it. WSL2 forwards loopback, so the registered URL is dialed as
   registered. No `wsl.exe` runs, and passwd contents and passwords are never
   logged. `XDG_STATE_HOME` inside WSL is not read, and a home absent from
   `/etc/passwd` (LDAP/SSSD) is not found.

@@ -144,9 +144,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
                                          // checks: the_passwd_line_for_the_uid_names_its_home, both_wsl_prefixes_name_the_distribution,
                                          // a_distribution_or_home_windows_cant_reach_is_refused, a_zero_budget_or_cancellation_skips_the_lookup,
                                          // the_cache_follows_the_default_distribution_and_uid, one_lookup_serves_every_caller_and_a_short_wait_stops,
-                                         // a_timed_out_lookup_defers_the_next_one, the_workspace_is_created_somewhere_windows_can_write_it,
+                                         // a_joiner_does_not_wait_for_a_lookup_older_than_its_cap, a_timed_out_lookup_defers_the_next_one,
+                                         // the_workspace_is_created_somewhere_windows_can_write_it,
                                          // a_wsl_service_gets_the_workspace_its_linux_server_can_use,
                                          // a_wsl_service_is_a_fallback_only_without_a_windows_one,
+                                         // a_failed_wsl_request_forgets_the_workspace, a_not_found_wsl_request_forgets_the_workspace,
                                          // opencode_in_wsl_is_its_own_bit_and_windows_only; not run on a real Windows PC with WSL
 
 Settings › Labs                          // labs.page, a store (labs/store.rs)
@@ -1871,11 +1873,12 @@ Settings › Labs › OpenCode in WSL on            // labs.opencode_in_wsl
 │   ├── state dir -> <home>/.local/state/opencode; same service.json order, cap, loopback, /api/info, password
 │   ├── found -> Hex's workspace is created at <home>/.local/share/hex/opencode once, and every
 │   │   x-opencode-directory names the Linux path <home>/.local/share/hex/opencode
-│   └── the cache is dropped when its state dir can't be read, when the lab turns off, or when the
-│       default distribution or uid changes
+│   └── the cache is dropped when its state dir can't be read, when the default distribution or
+│       uid changes, and on the next search that runs with the lab off
 ├── one lookup runs at a time on a shared helper thread, with its own WSL_LOOKUP_CAP (3 s) budget.
-│   Each caller waits for that one answer in WAIT_SLICE slices, bounded by its own deadline, Escape,
-│   or the Settings cap; a timeout or cancel is "OpenCode isn't running" and never aborts the others
+│   Its starter keeps its full budget; a joiner waits at most min(its own budget, the cap minus the
+│   lookup's age) and returns "OpenCode isn't running" at once once the lookup is older than the cap.
+│   Each wait checks Escape in WAIT_SLICE slices; a timeout or cancel never aborts the others
 ├── a lookup that ran into its cap without a service pauses new lookups for 10 s, so a hung WSL
 │   doesn't make every rewrite wait out its deadline; a later try finds it once it starts
 ├── no registration or no home -> OpenCode isn't running, or the update notice when one answered /api/info with 404
@@ -1888,7 +1891,9 @@ window) live in
 [desktop/opencode_service/wsl.rs](../../src/desktop/opencode_service/wsl.rs);
 the registry and `\\wsl.localhost\`/`\\wsl$\` reads are Windows-only. Nothing
 runs `wsl.exe`, and the passwd contents and password are never logged. A zero
-budget is refused before any registry or UNC read.
+budget is refused before any registry or UNC read. A scoped request to a WSL
+service that fails (a transport error or 404) forgets the workspace, so the
+next request retries `create_dir_all`.
 
 Limits: `XDG_STATE_HOME` set inside WSL is ignored (Hex always reads
 `<home>/.local/state/opencode`); a home that isn't in `/etc/passwd`, such as
@@ -1899,11 +1904,14 @@ Checks: `the_passwd_line_for_the_uid_names_its_home`,
 `a_zero_budget_or_cancellation_skips_the_lookup`,
 `the_cache_follows_the_default_distribution_and_uid`,
 `one_lookup_serves_every_caller_and_a_short_wait_stops`,
+`a_joiner_does_not_wait_for_a_lookup_older_than_its_cap`,
 `a_timed_out_lookup_defers_the_next_one`, and
 `the_workspace_is_created_somewhere_windows_can_write_it` in
 [wsl.rs](../../src/desktop/opencode_service/wsl.rs);
-`a_wsl_service_gets_the_workspace_its_linux_server_can_use` and
-`a_wsl_service_is_a_fallback_only_without_a_windows_one` in
+`a_wsl_service_gets_the_workspace_its_linux_server_can_use`,
+`a_wsl_service_is_a_fallback_only_without_a_windows_one`,
+`a_failed_wsl_request_forgets_the_workspace`, and
+`a_not_found_wsl_request_forgets_the_workspace` in
 [opencode_service.rs](../../src/desktop/opencode_service.rs);
 `opencode_in_wsl_is_its_own_bit_and_windows_only` in
 [labs.rs](../../src/labs.rs). Not yet observed: a real Windows PC with a

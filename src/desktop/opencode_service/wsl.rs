@@ -32,6 +32,7 @@ const WSL_PREFIXES: [&str; 2] = [r"\\wsl.localhost", r"\\wsl$"];
 /// Settings and availability checks have no deadline of their own. A cold
 /// WSL boot can take a few seconds; after this they see "OpenCode isn't
 /// running" and a later try finds a distribution that has finished starting.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const WSL_LOOKUP_CAP: Duration = Duration::from_secs(3);
 /// A lookup that ran into its cap without finding a service makes new
 /// lookups wait this long, so rewrites during a hung WSL stop paying the
@@ -53,6 +54,7 @@ struct CachedHome {
 }
 
 struct Pending {
+    started: Instant,
     result: Mutex<Option<Result<Service, Missing>>>,
     ready: Condvar,
 }
@@ -60,6 +62,7 @@ struct Pending {
 impl Pending {
     fn new() -> Self {
         Self {
+            started: Instant::now(),
             result: Mutex::new(None),
             ready: Condvar::new(),
         }
@@ -127,6 +130,12 @@ impl WslHome {
             .join("share")
             .join("hex")
             .join("opencode")
+    }
+
+    /// Makes the next request create the workspace again after this one
+    /// failed over the same path.
+    pub(super) fn forget_workspace(&self) {
+        self.workspace_ready.store(false, Ordering::Release);
     }
 
     /// Hex's workspace as the service in WSL sees it.
@@ -349,10 +358,11 @@ impl Drop for ClearOnDrop<'_> {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn run_shared_lookup(
     lookup: impl FnOnce() -> Result<Service, Missing> + Send + 'static,
+    lookup_cap: Duration,
     budget: Option<Duration>,
     cancelled: &AtomicBool,
 ) -> Result<Service, Missing> {
-    let cap = budget.unwrap_or(WSL_LOOKUP_CAP);
+    let own_cap = budget.unwrap_or(lookup_cap);
     let (pending, spawn) = {
         let mut slot = IN_FLIGHT
             .lock()
@@ -367,6 +377,16 @@ fn run_shared_lookup(
             }
         }
     };
+    let wait_cap = if spawn {
+        own_cap
+    } else {
+        // A joiner never waits for longer than the shared lookup has left.
+        let left = lookup_cap.saturating_sub(pending.started.elapsed());
+        if left.is_zero() {
+            return Err(Missing::NotRunning);
+        }
+        own_cap.min(left)
+    };
     if spawn {
         let helper = Arc::clone(&pending);
         let spawned = std::thread::Builder::new()
@@ -375,20 +395,20 @@ fn run_shared_lookup(
                 let _clear = ClearOnDrop(&helper);
                 let started = Instant::now();
                 let result = lookup();
-                let timed_out = started.elapsed() >= WSL_LOOKUP_CAP;
+                let timed_out = started.elapsed() >= lookup_cap;
                 let failed = result.is_err();
                 publish(&helper, result);
-                finish(&helper);
                 if timed_out && failed {
                     defer_lookups();
                 }
+                finish(&helper);
             });
         if spawned.is_err() {
             finish(&pending);
             return Err(Missing::NotRunning);
         }
     }
-    wait_for_pending(&pending, cap, cancelled)
+    wait_for_pending(&pending, wait_cap, cancelled)
 }
 
 /// The default distribution's name and uid from WSL's registry entry. Local
@@ -498,6 +518,7 @@ pub(super) fn discover(
     }
     run_shared_lookup(
         || lookup_home_and_service(Some(WSL_LOOKUP_CAP)),
+        WSL_LOOKUP_CAP,
         budget,
         cancelled,
     )
@@ -663,6 +684,7 @@ mod tests {
                         release_rx.recv().unwrap();
                         Ok(service)
                     },
+                    WSL_LOOKUP_CAP,
                     Some(Duration::from_secs(10)),
                     &AtomicBool::new(false),
                 )
@@ -678,6 +700,7 @@ mod tests {
                     short_calls.fetch_add(1, Ordering::SeqCst);
                     Err(Missing::NotRunning)
                 },
+                WSL_LOOKUP_CAP,
                 Some(Duration::from_millis(50)),
                 &AtomicBool::new(false),
             ),
@@ -695,6 +718,7 @@ mod tests {
                         calls.fetch_add(1, Ordering::SeqCst);
                         Err(Missing::NotRunning)
                     },
+                    WSL_LOOKUP_CAP,
                     Some(Duration::from_secs(10)),
                     &AtomicBool::new(false),
                 );
@@ -721,6 +745,68 @@ mod tests {
     }
 
     #[test]
+    fn a_joiner_does_not_wait_for_a_lookup_older_than_its_cap() {
+        let _guard = LOOKUP_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        clear_lookup_state();
+        let cap = Duration::from_millis(100);
+        let (started, started_rx) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let service = super::super::tests::fixture("http://127.0.0.1:1/");
+        let first = {
+            let service = service.clone();
+            let calls = Arc::clone(&calls);
+            std::thread::spawn(move || {
+                run_shared_lookup(
+                    move || {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        started.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        Ok(service)
+                    },
+                    cap,
+                    Some(Duration::from_secs(10)),
+                    &AtomicBool::new(false),
+                )
+            })
+        };
+        started_rx.recv().unwrap();
+        std::thread::sleep(cap + Duration::from_millis(50));
+
+        let second_started = Instant::now();
+        let second_calls = Arc::clone(&calls);
+        assert_eq!(
+            run_shared_lookup(
+                move || {
+                    second_calls.fetch_add(1, Ordering::SeqCst);
+                    Err(Missing::NotRunning)
+                },
+                cap,
+                Some(Duration::from_secs(30)),
+                &AtomicBool::new(false),
+            ),
+            Err(Missing::NotRunning),
+            "a lookup past its cap is not joined"
+        );
+        assert!(
+            second_started.elapsed() < Duration::from_millis(500),
+            "the joiner returned without waiting: {:?}",
+            second_started.elapsed()
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the stale lookup's caller still owns the only lookup"
+        );
+
+        release.send(()).unwrap();
+        assert_eq!(first.join().unwrap(), Ok(service));
+        clear_lookup_state();
+    }
+
+    #[test]
     fn a_timed_out_lookup_defers_the_next_one() {
         let _guard = LOOKUP_TEST_LOCK
             .lock()
@@ -740,6 +826,7 @@ mod tests {
                     called.fetch_add(1, Ordering::SeqCst);
                     Err(Missing::NotRunning)
                 },
+                WSL_LOOKUP_CAP,
                 Some(Duration::from_secs(1)),
                 &AtomicBool::new(false),
             ),

@@ -342,8 +342,33 @@ impl Service {
 
     /// One request. `directory` scopes it to an OpenCode workspace (created
     /// when first used). HTTP error statuses return normally; transport
-    /// failures, cancellation and the deadline are errors.
+    /// failures, cancellation and the deadline are errors. A scoped request
+    /// to a WSL service that fails makes the next one create the workspace
+    /// again.
     pub(crate) fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&[u8]>,
+        directory: Option<&Path>,
+        deadline: Duration,
+        cancelled: &AtomicBool,
+    ) -> Result<Response> {
+        let scoped = directory.is_some();
+        let result = self.request_inner(method, path, body, directory, deadline, cancelled);
+        if scoped
+            && let Some(wsl) = &self.wsl
+            && match &result {
+                Ok(response) => response.status == 404,
+                Err(_) => true,
+            }
+        {
+            wsl.forget_workspace();
+        }
+        result
+    }
+
+    fn request_inner(
         &self,
         method: &str,
         path: &str,
@@ -975,6 +1000,74 @@ pub(crate) mod tests {
         assert!(root.join("home/.local/share/hex/opencode").is_dir());
         assert!(!windows.exists(), "the Windows workspace stays untouched");
         assert_eq!(response.status, 200);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_wsl_request_forgets_the_workspace() {
+        let root = state_root("wsl-retry-error");
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", closed.local_addr().unwrap());
+        drop(closed);
+        let service = Service {
+            wsl: Some(WslHome::for_test(root.join("home"), "/home/dax")),
+            ..fixture(&url)
+        };
+        let windows = root.join("windows");
+        let request = || {
+            service.request(
+                "GET",
+                "/api/model",
+                None,
+                Some(&windows),
+                Duration::from_millis(500),
+                &AtomicBool::new(false),
+            )
+        };
+        assert!(request().is_err());
+        let workspace = root.join("home/.local/share/hex/opencode");
+        assert!(workspace.is_dir());
+        fs::remove_dir_all(&workspace).unwrap();
+        assert!(request().is_err());
+        assert!(
+            workspace.is_dir(),
+            "a failed request creates the workspace again"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_not_found_wsl_request_forgets_the_workspace() {
+        let root = state_root("wsl-retry-404");
+        let (url, server) = serve(vec![
+            ("GET /api/model".into(), 404, "{}".into()),
+            ("GET /api/model".into(), 404, "{}".into()),
+        ]);
+        let service = Service {
+            wsl: Some(WslHome::for_test(root.join("home"), "/home/dax")),
+            ..fixture(&url)
+        };
+        let windows = root.join("windows");
+        let request = || {
+            service
+                .request(
+                    "GET",
+                    "/api/model",
+                    None,
+                    Some(&windows),
+                    Duration::from_secs(5),
+                    &AtomicBool::new(false),
+                )
+                .unwrap()
+                .status
+        };
+        assert_eq!(request(), 404);
+        let workspace = root.join("home/.local/share/hex/opencode");
+        assert!(workspace.is_dir());
+        fs::remove_dir_all(&workspace).unwrap();
+        assert_eq!(request(), 404);
+        assert!(workspace.is_dir(), "a 404 creates the workspace again");
+        server.join().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
