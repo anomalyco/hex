@@ -42,8 +42,8 @@ strip = true
 # its keep-alive runs out (branch hex/metal-idle-residency). Drop this once a
 # transcribe.cpp release carries them.
 [patch.crates-io]
-transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "fe3df304762664cc67e7944c480afd95b44815cd" }
-transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "fe3df304762664cc67e7944c480afd95b44815cd" }
+transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "33b36a4469c4ad03b9b0054ab77a42cfbf410e7e" }
+transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "33b36a4469c4ad03b9b0054ab77a42cfbf410e7e" }
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
