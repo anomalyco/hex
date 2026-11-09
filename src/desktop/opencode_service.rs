@@ -108,8 +108,12 @@ fn with_wsl(
     cancelled: &AtomicBool,
 ) -> Result<Service, Missing> {
     #[cfg(target_os = "windows")]
-    if found.is_err() && crate::labs::opencode_in_wsl() {
-        return prefer_wsl(found, wsl::discover(budget, cancelled));
+    if crate::labs::opencode_in_wsl() {
+        if found.is_err() {
+            return prefer_wsl(found, wsl::discover(budget, cancelled));
+        }
+    } else {
+        wsl::clear_cache();
     }
     let _ = (budget, cancelled);
     found

@@ -35,17 +35,22 @@ running service (`src/desktop/opencode_service.rs`):
 - On Windows, when no Windows registration answers and Labs › OpenCode in WSL
   is on, it reads the default WSL distribution's registration at
   `<home>/.local/state/opencode` through `\\wsl.localhost\`, or `\\wsl$\` on
-  an older Windows 10. The distribution comes from
-  `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss`, and the home from
-  that distribution's `/etc/passwd` for its `DefaultUid` (at most 1 MiB, and
-  only the default distribution; opening it can start the WSL VM too). The
-  home found is cached for later lookups, and every lookup runs on a helper
-  thread: a rewrite waits only for its remaining deadline or Escape, while
-  Settings and availability wait at most 3 s. A timed-out WSL that is still
-  starting is found on a later try. WSL2 forwards loopback, so the registered
-  URL is dialed as registered. No `wsl.exe` runs, and passwd contents and
-  passwords are never logged. `XDG_STATE_HOME` inside WSL is not read, and a
-  home absent from `/etc/passwd` (LDAP/SSSD) is not found.
+  an older Windows 10. `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss`
+  is read on every lookup; a remembered home is reused only while its
+  `DistributionName` and `DefaultUid` still match, otherwise the home is
+  rebuilt from that distribution's `/etc/passwd` (at most 1 MiB, and only the
+  default distribution; opening it can start the WSL VM too). One lookup
+  runs at a time on a shared helper thread with a fixed 3 s discover budget.
+  Each caller waits for that answer only for its own deadline or Escape, and
+  Settings and availability wait at most 3 s; a timeout or cancel returns
+  "OpenCode isn't running" without aborting the shared lookup. A lookup that
+  used its full cap without finding a service pauses new lookups for 10 s.
+  The cached home is dropped when its state directory can't be read, when
+  the default distribution or uid changes, and whenever a lookup runs with
+  the lab off. WSL2 forwards loopback, so the registered URL is dialed as
+  registered. No `wsl.exe` runs, and passwd contents and passwords are never
+  logged. `XDG_STATE_HOME` inside WSL is not read, and a home absent from
+  `/etc/passwd` (LDAP/SSSD) is not found.
 - The registration's `url` must be loopback `http://` (`localhost`, `0.0.0.0`
   and `::` are reached through loopback); anything else is refused.
 - `GET /api/info` with the registration's password (HTTP Basic, user

@@ -143,9 +143,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
                                          running in the default WSL distribution when no Windows registration answers; looking for it can start WSL
                                          // checks: the_passwd_line_for_the_uid_names_its_home, both_wsl_prefixes_name_the_distribution,
                                          // a_distribution_or_home_windows_cant_reach_is_refused, a_zero_budget_or_cancellation_skips_the_lookup,
-                                         // a_found_home_is_cached, a_lookup_wait_returns_the_helpers_answer_or_stops_at_its_cap,
-                                         // a_lookup_wait_stops_at_once_when_the_caller_cancels,
-                                         // the_workspace_is_created_somewhere_windows_can_write_it,
+                                         // the_cache_follows_the_default_distribution_and_uid, one_lookup_serves_every_caller_and_a_short_wait_stops,
+                                         // a_timed_out_lookup_defers_the_next_one, the_workspace_is_created_somewhere_windows_can_write_it,
                                          // a_wsl_service_gets_the_workspace_its_linux_server_can_use,
                                          // a_wsl_service_is_a_fallback_only_without_a_windows_one,
                                          // opencode_in_wsl_is_its_own_bit_and_windows_only; not run on a real Windows PC with WSL
@@ -1864,23 +1863,28 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 ```ts
 Settings › Labs › OpenCode in WSL on            // labs.opencode_in_wsl
 ├── a Windows registration answers /api/info -> it wins, exactly as before
-├── none answers -> read HKCU\…\Lxss\DefaultDistribution, its DistributionName and DefaultUid
-│   ├── \\wsl.localhost\<distribution>\etc\passwd, else \\wsl$\<distribution>\etc\passwd on older
-│   │   Windows 10 (at most 1 MiB) -> the line whose uid is DefaultUid -> its (one trailing / trimmed) home
+├── none answers -> read HKCU\…\Lxss\DefaultDistribution, DistributionName and DefaultUid on every lookup
+│   ├── a cached home is reused only when DistributionName and DefaultUid still match; otherwise
+│   │   rebuild it from passwd: \\wsl.localhost\<distribution>\etc\passwd, else \\wsl$\<distribution>\etc\passwd
+│   │   on older Windows 10 (at most 1 MiB) -> the line whose uid is DefaultUid -> its (one trailing / trimmed) home
 │   ├── only the default distribution is opened; opening it can start the WSL VM too
 │   ├── state dir -> <home>/.local/state/opencode; same service.json order, cap, loopback, /api/info, password
-│   ├── the home found is remembered, so later lookups skip the registry and passwd
-│   └── found -> Hex's workspace is created at <home>/.local/share/hex/opencode once, and every
-│       x-opencode-directory names the Linux path <home>/.local/share/hex/opencode
-├── the lookup runs on a helper thread: a rewrite waits only for its deadline, Escape stops it,
-│   and Settings or availability waits at most WSL_LOOKUP_CAP (3 s). A timed-out WSL that is still
-│   starting is found on a later try; its helper finishes in the background and is dropped
+│   ├── found -> Hex's workspace is created at <home>/.local/share/hex/opencode once, and every
+│   │   x-opencode-directory names the Linux path <home>/.local/share/hex/opencode
+│   └── the cache is dropped when its state dir can't be read, when the lab turns off, or when the
+│       default distribution or uid changes
+├── one lookup runs at a time on a shared helper thread, with its own WSL_LOOKUP_CAP (3 s) budget.
+│   Each caller waits for that one answer in WAIT_SLICE slices, bounded by its own deadline, Escape,
+│   or the Settings cap; a timeout or cancel is "OpenCode isn't running" and never aborts the others
+├── a lookup that ran into its cap without a service pauses new lookups for 10 s, so a hung WSL
+│   doesn't make every rewrite wait out its deadline; a later try finds it once it starts
 ├── no registration or no home -> OpenCode isn't running, or the update notice when one answered /api/info with 404
 └── Labs off -> nothing reads the registry or any WSL path; Hex is exactly as before
 ```
 
 The pure parts (the passwd line for a uid, a Linux home to its UNC path, the
-Linux workspace string) live in
+Linux workspace string, the cache identity, the shared lookup and its skip
+window) live in
 [desktop/opencode_service/wsl.rs](../../src/desktop/opencode_service/wsl.rs);
 the registry and `\\wsl.localhost\`/`\\wsl$\` reads are Windows-only. Nothing
 runs `wsl.exe`, and the passwd contents and password are never logged. A zero
@@ -1892,9 +1896,10 @@ one from LDAP or SSSD, isn't found; Annotate's capture send is not covered.
 Checks: `the_passwd_line_for_the_uid_names_its_home`,
 `both_wsl_prefixes_name_the_distribution`,
 `a_distribution_or_home_windows_cant_reach_is_refused`,
-`a_zero_budget_or_cancellation_skips_the_lookup`, `a_found_home_is_cached`,
-`a_lookup_wait_returns_the_helpers_answer_or_stops_at_its_cap`,
-`a_lookup_wait_stops_at_once_when_the_caller_cancels`, and
+`a_zero_budget_or_cancellation_skips_the_lookup`,
+`the_cache_follows_the_default_distribution_and_uid`,
+`one_lookup_serves_every_caller_and_a_short_wait_stops`,
+`a_timed_out_lookup_defers_the_next_one`, and
 `the_workspace_is_created_somewhere_windows_can_write_it` in
 [wsl.rs](../../src/desktop/opencode_service/wsl.rs);
 `a_wsl_service_gets_the_workspace_its_linux_server_can_use` and

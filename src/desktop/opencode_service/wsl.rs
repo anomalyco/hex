@@ -5,18 +5,17 @@
 //! files and the workspace header need translating.
 //!
 //! Opening a distribution's files can start the WSL VM and take seconds, so
-//! every lookup runs on a helper thread and the caller waits only for its
-//! own deadline (or a short cap); a timeout, Escape, or a zero budget is
-//! "OpenCode isn't running", and a later try finds a distribution that has
-//! finished starting.
+//! one lookup runs at a time on a helper thread; every caller waits for that
+//! one answer only as long as its own deadline (or a short cap). A timeout,
+//! Escape, or a zero budget is "OpenCode isn't running", and a later try
+//! finds a distribution that has finished starting.
 
 use std::fs;
 #[cfg(target_os = "windows")]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr};
@@ -33,10 +32,39 @@ const WSL_PREFIXES: [&str; 2] = [r"\\wsl.localhost", r"\\wsl$"];
 /// Settings and availability checks have no deadline of their own. A cold
 /// WSL boot can take a few seconds; after this they see "OpenCode isn't
 /// running" and a later try finds a distribution that has finished starting.
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const WSL_LOOKUP_CAP: Duration = Duration::from_secs(3);
-/// The home found last, so later lookups skip the registry and `/etc/passwd`.
-static CACHED_HOME: Mutex<Option<WslHome>> = Mutex::new(None);
+/// A lookup that ran into its cap without finding a service makes new
+/// lookups wait this long, so rewrites during a hung WSL stop paying the
+/// wait over and over.
+const WSL_SKIP_AFTER_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The home last resolved, with the default distribution and uid it came
+/// from; a changed default rebuilds it from `/etc/passwd`.
+static CACHED_HOME: Mutex<Option<CachedHome>> = Mutex::new(None);
+/// No new lookup starts before this instant after one timed out.
+static SKIP_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+/// The one lookup in flight, shared by every caller.
+static IN_FLIGHT: Mutex<Option<Arc<Pending>>> = Mutex::new(None);
+
+struct CachedHome {
+    distribution: String,
+    uid: u32,
+    home: WslHome,
+}
+
+struct Pending {
+    result: Mutex<Option<Result<Service, Missing>>>,
+    ready: Condvar,
+}
+
+impl Pending {
+    fn new() -> Self {
+        Self {
+            result: Mutex::new(None),
+            ready: Condvar::new(),
+        }
+    }
+}
 
 /// The default distribution's home, as Windows reads it and as its server
 /// sees it.
@@ -112,12 +140,15 @@ impl WslHome {
     pub(super) fn workspace(&self) -> Result<String> {
         if !self.workspace_ready.load(Ordering::Acquire) {
             let directory = self.unc_workspace();
-            fs::create_dir_all(&directory).wrap_err_with(|| {
-                format!(
-                    "could not create OpenCode workspace {}",
-                    directory.display()
-                )
-            })?;
+            if let Err(error) = fs::create_dir_all(&directory) {
+                self.workspace_ready.store(false, Ordering::Release);
+                return Err(error).wrap_err_with(|| {
+                    format!(
+                        "could not create OpenCode workspace {}",
+                        directory.display()
+                    )
+                });
+            }
             self.workspace_ready.store(true, Ordering::Release);
         }
         Ok(self.linux_workspace())
@@ -185,55 +216,185 @@ pub(super) fn home_for_uid(passwd: &str, uid: u32) -> Option<String> {
     None
 }
 
-/// The home found last, if any.
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn cached_home() -> Option<WslHome> {
-    CACHED_HOME.lock().ok()?.clone()
+/// The cached home only when it belongs to the current default distribution
+/// and uid.
+fn matching_home(cache: &Option<CachedHome>, distribution: &str, uid: u32) -> Option<WslHome> {
+    cache
+        .as_ref()
+        .filter(|cached| cached.distribution == distribution && cached.uid == uid)
+        .map(|cached| cached.home.clone())
 }
 
-/// Remembers a home for later lookups, which then skip the registry and
-/// `/etc/passwd`.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn remember_home(home: &WslHome) {
-    if let Ok(mut cache) = CACHED_HOME.lock() {
-        *cache = Some(home.clone());
-    }
+fn cached_home(distribution: &str, uid: u32) -> Option<WslHome> {
+    let cache = CACHED_HOME
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    matching_home(&cache, distribution, uid)
 }
 
-/// Waits in slices for the helper thread's answer, so a rewrite's deadline
-/// and Escape stay responsive while the thread blocks opening WSL. A timeout
-/// or a cancelled caller is "OpenCode isn't running"; the helper finishes in
-/// the background and its answer is dropped.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn wait_for_lookup(
-    responses: &Receiver<Result<Service, Missing>>,
+fn remember_home(distribution: &str, uid: u32, home: &WslHome) {
+    let mut cache = CACHED_HOME
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    *cache = Some(CachedHome {
+        distribution: distribution.to_owned(),
+        uid,
+        home: home.clone(),
+    });
+}
+
+fn clear_cached_home() {
+    let mut cache = CACHED_HOME
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    *cache = None;
+}
+
+/// Drops the remembered home, called whenever a lookup runs with the lab
+/// off and when a cached home's registrations can't be read.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(super) fn clear_cache() {
+    clear_cached_home();
+}
+
+/// Whether this instant is still inside the pause after a timed-out lookup.
+fn still_deferred(until: Option<Instant>, now: Instant) -> bool {
+    until.is_some_and(|until| now < until)
+}
+
+fn skip_active() -> bool {
+    let until = *SKIP_UNTIL
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    still_deferred(until, Instant::now())
+}
+
+fn defer_lookups() {
+    let mut until = SKIP_UNTIL
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    *until = Some(Instant::now() + WSL_SKIP_AFTER_TIMEOUT);
+}
+
+/// Waits as a caller for the shared lookup's answer. A short caller returns
+/// "isn't running" without disturbing the lookup the others share.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn wait_for_pending(
+    pending: &Pending,
     cap: Duration,
     cancelled: &AtomicBool,
-    abort: &AtomicBool,
 ) -> Result<Service, Missing> {
     let started = Instant::now();
+    let mut result = pending
+        .result
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     loop {
+        if let Some(result) = result.as_ref() {
+            return result.clone();
+        }
         if cancelled.load(Ordering::Acquire) {
-            abort.store(true, Ordering::Release);
             return Err(Missing::NotRunning);
         }
         let left = cap.saturating_sub(started.elapsed());
         if left.is_zero() {
-            abort.store(true, Ordering::Release);
             return Err(Missing::NotRunning);
         }
-        match responses.recv_timeout(left.min(super::WAIT_SLICE)) {
-            Ok(result) => return result,
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return Err(Missing::NotRunning),
-        }
+        let (next, _) = pending
+            .ready
+            .wait_timeout(result, left.min(super::WAIT_SLICE))
+            .unwrap_or_else(|poison| poison.into_inner());
+        result = next;
     }
 }
 
-/// The default distribution's home from WSL's own registration and its
-/// `/etc/passwd`.
+/// Publishes the helper's answer and wakes every caller waiting on it.
+fn publish(pending: &Pending, result: Result<Service, Missing>) {
+    let mut slot = pending
+        .result
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    *slot = Some(result);
+    drop(slot);
+    pending.ready.notify_all();
+}
+
+/// Clears the in-flight slot if it is still this lookup.
+fn finish(pending: &Arc<Pending>) {
+    let mut slot = IN_FLIGHT
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if slot
+        .as_ref()
+        .is_some_and(|in_flight| Arc::ptr_eq(in_flight, pending))
+    {
+        *slot = None;
+    }
+}
+
+/// Clears the shared slot if the helper unwinds before finishing.
+struct ClearOnDrop<'a>(&'a Arc<Pending>);
+
+impl Drop for ClearOnDrop<'_> {
+    fn drop(&mut self) {
+        finish(self.0);
+    }
+}
+
+/// Runs `lookup` on the one helper thread and publishes its answer. A caller
+/// joins an existing lookup instead of spawning a second one; its own
+/// timeout or cancellation only stops its wait.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn run_shared_lookup(
+    lookup: impl FnOnce() -> Result<Service, Missing> + Send + 'static,
+    budget: Option<Duration>,
+    cancelled: &AtomicBool,
+) -> Result<Service, Missing> {
+    let cap = budget.unwrap_or(WSL_LOOKUP_CAP);
+    let (pending, spawn) = {
+        let mut slot = IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        match slot.as_ref() {
+            Some(pending) => (Arc::clone(pending), false),
+            None if skip_active() => return Err(Missing::NotRunning),
+            None => {
+                let pending = Arc::new(Pending::new());
+                *slot = Some(Arc::clone(&pending));
+                (pending, true)
+            }
+        }
+    };
+    if spawn {
+        let helper = Arc::clone(&pending);
+        let spawned = std::thread::Builder::new()
+            .name("hex-wsl-opencode".into())
+            .spawn(move || {
+                let _clear = ClearOnDrop(&helper);
+                let started = Instant::now();
+                let result = lookup();
+                let timed_out = started.elapsed() >= WSL_LOOKUP_CAP;
+                let failed = result.is_err();
+                publish(&helper, result);
+                finish(&helper);
+                if timed_out && failed {
+                    defer_lookups();
+                }
+            });
+        if spawned.is_err() {
+            finish(&pending);
+            return Err(Missing::NotRunning);
+        }
+    }
+    wait_for_pending(&pending, cap, cancelled)
+}
+
+/// The default distribution's name and uid from WSL's registry entry. Local
+/// and cheap; it never opens the distribution's files.
 #[cfg(target_os = "windows")]
-fn default_home() -> Option<WslHome> {
+fn default_identity() -> Option<(String, u32)> {
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
 
@@ -244,19 +405,34 @@ fn default_home() -> Option<WslHome> {
     let distribution = lxss.open_subkey_with_flags(&distribution, KEY_READ).ok()?;
     let name: String = distribution.get_value("DistributionName").ok()?;
     let uid: u32 = distribution.get_value("DefaultUid").ok()?;
-    // `\\wsl.localhost` needs a newer Windows 10; `\\wsl$` works on older ones.
-    let mut found = None;
+    Some((name, uid))
+}
+
+/// The default distribution's home, and whether it came from the cache.
+#[cfg(target_os = "windows")]
+fn default_home() -> Option<(WslHome, bool)> {
+    let (distribution, uid) = default_identity()?;
+    if let Some(home) = cached_home(&distribution, uid) {
+        return Some((home, true));
+    }
+    let (prefix, passwd) = read_passwd(&distribution)?;
+    let home = WslHome::home(prefix, &distribution, &home_for_uid(&passwd, uid)?)?;
+    remember_home(&distribution, uid, &home);
+    Some((home, false))
+}
+
+/// The first of `\\wsl.localhost` and `\\wsl$` whose `/etc/passwd` opens.
+#[cfg(target_os = "windows")]
+fn read_passwd(distribution: &str) -> Option<(&'static str, String)> {
     for prefix in WSL_PREFIXES {
-        let Some(path) = passwd_path(prefix, &name) else {
+        let Some(path) = passwd_path(prefix, distribution) else {
             continue;
         };
         if let Some(passwd) = read_bounded(&path) {
-            found = Some((prefix, passwd));
-            break;
+            return Some((prefix, passwd));
         }
     }
-    let (prefix, passwd) = found?;
-    WslHome::home(prefix, &name, &home_for_uid(&passwd, uid)?)
+    None
 }
 
 /// `/etc/passwd` in a distribution, through Windows.
@@ -285,31 +461,21 @@ fn read_bounded(path: &Path) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// The helper thread's whole lookup: a remembered home, else the default
-/// distribution's home, then its registrations.
+/// The helper's whole lookup: the current default's home, then its
+/// registrations. A cached home whose registrations can't be read is
+/// forgotten so the next lookup rebuilds it.
 #[cfg(target_os = "windows")]
-fn lookup_home_and_service(
-    budget: Option<Duration>,
-    cancelled: &AtomicBool,
-) -> Result<Service, Missing> {
-    if cancelled.load(Ordering::Acquire) {
+fn lookup_home_and_service(budget: Option<Duration>) -> Result<Service, Missing> {
+    let Some((home, from_cache)) = default_home() else {
+        tracing::debug!("the default WSL distribution or its home could not be found");
         return Err(Missing::NotRunning);
-    }
-    let home = match cached_home() {
-        Some(home) => home,
-        None => {
-            let Some(home) = default_home() else {
-                tracing::debug!("the default WSL distribution or its home could not be found");
-                return Err(Missing::NotRunning);
-            };
-            remember_home(&home);
-            home
-        }
     };
-    if cancelled.load(Ordering::Acquire) {
-        return Err(Missing::NotRunning);
+    let state = home.state_dir();
+    let result = super::discover(&state, budget, &AtomicBool::new(false), Some(&home));
+    if result.is_err() && from_cache && fs::read_dir(&state).is_err() {
+        clear_cached_home();
     }
-    super::discover(&home.state_dir(), budget, cancelled, Some(&home))
+    result
 }
 
 /// Whether a lookup may start: a zero budget or a cancelled caller touches
@@ -320,8 +486,8 @@ fn should_lookup(budget: Option<Duration>, cancelled: &AtomicBool) -> bool {
 }
 
 /// A service whose registration lives in the default WSL distribution, or
-/// why there is none. The lookup runs on a helper thread so opening WSL never
-/// outlives the caller's deadline, Escape, or the Settings cap.
+/// why there is none. One lookup is shared by every caller; each waits only
+/// for its own deadline, Escape, or the Settings cap.
 #[cfg(target_os = "windows")]
 pub(super) fn discover(
     budget: Option<Duration>,
@@ -330,27 +496,30 @@ pub(super) fn discover(
     if !should_lookup(budget, cancelled) {
         return Err(Missing::NotRunning);
     }
-    let cap = budget.unwrap_or(WSL_LOOKUP_CAP);
-    let abort = Arc::new(AtomicBool::new(false));
-    let worker_abort = Arc::clone(&abort);
-    let (sender, responses) = std::sync::mpsc::channel();
-    let spawned = std::thread::Builder::new()
-        .name("hex-wsl-opencode".into())
-        .spawn(move || {
-            let _ = sender.send(lookup_home_and_service(Some(cap), &worker_abort));
-        });
-    if spawned.is_err() {
-        return Err(Missing::NotRunning);
-    }
-    let result = wait_for_lookup(&responses, cap, cancelled, &abort);
-    // A timed-out or cancelled helper stops between registrations.
-    abort.store(true, Ordering::Release);
-    result
+    run_shared_lookup(
+        || lookup_home_and_service(Some(WSL_LOOKUP_CAP)),
+        budget,
+        cancelled,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::mpsc;
+
+    /// Serializes the tests that share the in-flight and skip statics.
+    static LOOKUP_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn clear_lookup_state() {
+        *IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = None;
+        *SKIP_UNTIL
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = None;
+    }
 
     #[test]
     fn the_passwd_line_for_the_uid_names_its_home() {
@@ -448,74 +617,148 @@ mod tests {
     }
 
     #[test]
+    fn the_cache_follows_the_default_distribution_and_uid() {
+        let first = WslHome::for_test(PathBuf::from("/cache/one"), "/home/one");
+        let second = WslHome::for_test(PathBuf::from("/cache/two"), "/home/two");
+        let cache = Some(CachedHome {
+            distribution: "Ubuntu".into(),
+            uid: 1000,
+            home: first.clone(),
+        });
+        assert_eq!(matching_home(&cache, "Ubuntu", 1000), Some(first.clone()));
+        assert_eq!(matching_home(&cache, "Debian", 1000), None);
+        assert_eq!(matching_home(&cache, "Ubuntu", 1001), None);
+        assert_eq!(matching_home(&None, "Ubuntu", 1000), None);
+
+        clear_cached_home();
+        remember_home("Ubuntu", 1000, &first);
+        assert_eq!(cached_home("Ubuntu", 1000), Some(first.clone()));
+        assert_eq!(cached_home("Debian", 1000), None);
+        assert_eq!(cached_home("Ubuntu", 1001), None);
+        remember_home("Debian", 1001, &second);
+        assert_eq!(cached_home("Ubuntu", 1000), None);
+        assert_eq!(cached_home("Debian", 1001), Some(second.clone()));
+        clear_cache();
+        assert_eq!(cached_home("Debian", 1001), None);
+    }
+
+    #[test]
+    fn one_lookup_serves_every_caller_and_a_short_wait_stops() {
+        let _guard = LOOKUP_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        clear_lookup_state();
+        let (started, started_rx) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let service = super::super::tests::fixture("http://127.0.0.1:1/");
+        let first = {
+            let service = service.clone();
+            let calls = Arc::clone(&calls);
+            std::thread::spawn(move || {
+                run_shared_lookup(
+                    move || {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        started.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        Ok(service)
+                    },
+                    Some(Duration::from_secs(10)),
+                    &AtomicBool::new(false),
+                )
+            })
+        };
+        started_rx.recv().unwrap();
+
+        let short = Instant::now();
+        let short_calls = Arc::clone(&calls);
+        assert_eq!(
+            run_shared_lookup(
+                move || {
+                    short_calls.fetch_add(1, Ordering::SeqCst);
+                    Err(Missing::NotRunning)
+                },
+                Some(Duration::from_millis(50)),
+                &AtomicBool::new(false),
+            ),
+            Err(Missing::NotRunning),
+            "a short caller stops while the shared lookup runs"
+        );
+        assert!(short.elapsed() < Duration::from_secs(1));
+
+        let (third_tx, third_rx) = mpsc::channel();
+        let third = {
+            let calls = Arc::clone(&calls);
+            std::thread::spawn(move || {
+                let result = run_shared_lookup(
+                    move || {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Err(Missing::NotRunning)
+                    },
+                    Some(Duration::from_secs(10)),
+                    &AtomicBool::new(false),
+                );
+                third_tx.send(result).unwrap();
+            })
+        };
+        assert!(
+            third_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "the second long caller waits for the first lookup"
+        );
+
+        release.send(()).unwrap();
+        let first_result = first.join().unwrap();
+        let third_result = third_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        third.join().unwrap();
+        assert_eq!(first_result, Ok(service.clone()));
+        assert_eq!(third_result, Ok(service));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "only the first caller's lookup ran"
+        );
+        clear_lookup_state();
+    }
+
+    #[test]
+    fn a_timed_out_lookup_defers_the_next_one() {
+        let _guard = LOOKUP_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        clear_lookup_state();
+        let now = Instant::now();
+        assert!(still_deferred(Some(now + WSL_SKIP_AFTER_TIMEOUT), now));
+        assert!(!still_deferred(Some(now), now));
+        assert!(!still_deferred(None, now));
+
+        defer_lookups();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let called = Arc::clone(&calls);
+        assert_eq!(
+            run_shared_lookup(
+                move || {
+                    called.fetch_add(1, Ordering::SeqCst);
+                    Err(Missing::NotRunning)
+                },
+                Some(Duration::from_secs(1)),
+                &AtomicBool::new(false),
+            ),
+            Err(Missing::NotRunning)
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "the paused window starts nothing"
+        );
+        clear_lookup_state();
+    }
+
+    #[test]
     fn a_zero_budget_or_cancellation_skips_the_lookup() {
         let open = AtomicBool::new(false);
         assert!(!should_lookup(Some(Duration::ZERO), &open));
         assert!(!should_lookup(None, &AtomicBool::new(true)));
         assert!(should_lookup(None, &open));
         assert!(should_lookup(Some(Duration::from_millis(1)), &open));
-    }
-
-    #[test]
-    fn a_found_home_is_cached() {
-        CACHED_HOME.lock().unwrap().take();
-        let root = std::env::temp_dir().join(format!("hex-wsl-cache-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let home = WslHome::for_test(root.join("home"), "/home/dax");
-        assert_eq!(cached_home(), None);
-        remember_home(&home);
-        let cached = cached_home().unwrap();
-        assert_eq!(cached, home);
-        // The cached copy shares the workspace success with the original.
-        let workspace = root.join("home/.local/share/hex/opencode");
-        cached.workspace().unwrap();
-        assert!(workspace.is_dir());
-        fs::remove_dir_all(&workspace).unwrap();
-        home.workspace().unwrap();
-        assert!(!workspace.exists());
-        CACHED_HOME.lock().unwrap().take();
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn a_lookup_wait_returns_the_helpers_answer_or_stops_at_its_cap() {
-        let (sender, responses) = std::sync::mpsc::channel();
-        let cancelled = AtomicBool::new(false);
-        let abort = AtomicBool::new(false);
-        let service = super::super::tests::fixture("http://127.0.0.1:1/");
-        sender.send(Ok(service.clone())).unwrap();
-        assert_eq!(
-            wait_for_lookup(&responses, Duration::from_secs(1), &cancelled, &abort),
-            Ok(service)
-        );
-        sender.send(Err(Missing::Outdated)).unwrap();
-        assert_eq!(
-            wait_for_lookup(&responses, Duration::from_secs(1), &cancelled, &abort),
-            Err(Missing::Outdated)
-        );
-
-        // Nothing answers: the wait ends at its cap, not the sender's life.
-        let started = Instant::now();
-        assert_eq!(
-            wait_for_lookup(&responses, Duration::from_millis(100), &cancelled, &abort),
-            Err(Missing::NotRunning)
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert!(abort.load(Ordering::Acquire));
-        drop(sender);
-    }
-
-    #[test]
-    fn a_lookup_wait_stops_at_once_when_the_caller_cancels() {
-        let (_sender, responses) = std::sync::mpsc::channel();
-        let cancelled = AtomicBool::new(true);
-        let abort = AtomicBool::new(false);
-        let started = Instant::now();
-        assert_eq!(
-            wait_for_lookup(&responses, Duration::from_secs(30), &cancelled, &abort),
-            Err(Missing::NotRunning)
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert!(abort.load(Ordering::Acquire));
     }
 }
