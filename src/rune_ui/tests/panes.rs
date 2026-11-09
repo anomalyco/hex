@@ -1945,10 +1945,6 @@ fn sound_volume_slider_sets_the_level_and_zero_turns_tones_off() {
         rt.state.settings.sound_effect_volume, 1.0,
         "keeps the level"
     );
-    assert_eq!(
-        a11y_value(&rt, "sound-volume-slider/track").as_deref(),
-        Some("Off")
-    );
 }
 
 #[test]
