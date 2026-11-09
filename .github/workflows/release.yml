@@ -565,7 +565,7 @@ jobs:
         uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
         with:
           secret-ids: |
-            HEX_RELEASE_SIGNING_KEY,hex/release/HEX_RELEASE_SIGNING_KEY
+            HEX_RELEASE_SIGNING_KEY,hex/release/RELEASE_SIGNING_KEY
           parse-json-secrets: false
       - name: Sign the Linux executables
         run: bash .github/release/sign-linux.sh "$RUNNER_TEMP/dist"
