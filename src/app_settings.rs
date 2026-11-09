@@ -1168,15 +1168,7 @@ impl AppSettings {
             tracing::warn!("cleared a left-click capture replay shortcut");
             self.capture.replay_hotkey = None;
         }
-        if self
-            .screenshots
-            .record_hotkey
-            .as_ref()
-            .is_some_and(HotkeyBinding::is_bare_primary_click)
-        {
-            tracing::warn!("cleared a left-click screenshot record shortcut");
-            self.screenshots.record_hotkey = None;
-        }
+        self.screenshots.clear_left_click_record();
     }
 }
 

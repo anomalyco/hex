@@ -29,8 +29,6 @@ pub enum StatusItemAction {
     StartMeeting,
     StopMeeting,
     CopyLastMeetingTranscript,
-    /// Labs › Screenshots: the capture card closed last, back in the corner.
-    RestoreCapture,
     /// Copy chapter `n` of the recording meeting (Labs).
     CopyChapter(usize),
     /// The recording row: the Meetings pane.
@@ -91,9 +89,12 @@ objc2::define_class!(
             }
         }
 
+        /// Labs › Screenshots: the capture card closed last, back in the
+        /// corner, at once (it's safe from any thread).
         #[unsafe(method(restoreCapture:))]
         fn restore_capture(&self, _sender: &AnyObject) {
-            let _ = self.ivars().actions.try_send(StatusItemAction::RestoreCapture);
+            #[cfg(hex_capture)]
+            crate::screenshots::restore_last();
         }
 
         /// The status menu's delegate: it is about to open.

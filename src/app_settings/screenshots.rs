@@ -26,6 +26,18 @@ impl Default for ScreenshotSettings {
 }
 
 impl ScreenshotSettings {
+    /// A left click can't be the record shortcut: it would take every click.
+    pub(super) fn clear_left_click_record(&mut self) {
+        if self
+            .record_hotkey
+            .as_ref()
+            .is_some_and(HotkeyBinding::is_bare_primary_click)
+        {
+            tracing::warn!("cleared a left-click screenshot record shortcut");
+            self.record_hotkey = None;
+        }
+    }
+
     /// The folder screenshots go to.
     pub fn folder(&self) -> PathBuf {
         self.folder
