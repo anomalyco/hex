@@ -488,6 +488,16 @@ const KEYS: &[Key] = &[
         "Labs: whether the Caps Lock light stays solid or blinks slowly while recording (macOS)",
     ),
     key(
+        "labs.appearance",
+        Kind::Bool,
+        "Labs: force the main window to light or dark instead of following the system appearance",
+    ),
+    key(
+        "labs.appearance_theme",
+        Kind::Choice(&["system", "light", "dark"]),
+        "Labs: the appearance the main window uses while Labs › Appearance is on",
+    ),
+    key(
         "labs.notch_indicator",
         Kind::Bool,
         "Labs: on a screen with a notch, the recording indicator grows out of the notch at either visible position; Hidden still hides it, and flat screens keep the Top or Bottom setting (macOS)",
@@ -1702,6 +1712,7 @@ mod tests {
             ("meetings.calendar.lead_minutes", "3"),
             ("meetings.output_folder", "relative/path"),
             ("labs.caps_lock_light", "fast"),
+            ("labs.appearance_theme", "sepia"),
             ("dictation_processing.modes", "[{"),
         ] {
             assert_eq!(
@@ -1735,6 +1746,15 @@ mod tests {
         assert_eq!(
             get(&change.settings, "labs.caps_lock_light").unwrap()[0].value,
             Value::String("slow_blink".into())
+        );
+        let change = apply(&settings, "labs.appearance_theme", "dark", &rules()).unwrap();
+        assert_eq!(
+            change.settings.labs.appearance_theme,
+            crate::app_settings::AppearanceTheme::Dark
+        );
+        assert_eq!(
+            get(&change.settings, "labs.appearance_theme").unwrap()[0].value,
+            Value::String("dark".into())
         );
         let change = apply(&settings, "ui_language", "none", &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);

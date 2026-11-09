@@ -1352,7 +1352,10 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
 // View
 
 fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
-    let p = Paint::new(cx.system_dark(), cx.env().scale);
+    let p = Paint::new(
+        crate::labs::window_dark(&ui.settings.labs, cx.system_dark()),
+        cx.env().scale,
+    );
     // The native title bar takes the window's background, so it follows a
     // system theme switch along with the rest of the window.
     #[cfg(target_os = "windows")]

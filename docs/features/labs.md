@@ -31,6 +31,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
+├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)
+│                                        the main window is forced light or dark instead of following the system; the HUD and other overlays still follow the system
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
@@ -197,9 +199,11 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   ├── A pane feature on -> its pane is a normal top-level sidebar item; off -> hidden entirely
 │   └── Voice Filter while its driver is installed, or a managed or locked lab -> its switch is disabled
 ├── A lab's own settings show on its card while it's on -> Unload model when idle: Unload after (5/15/30/60 min);
+│   Appearance: Theme (System, Light mode, Dark mode);
 │   Screenshots: its shortcut, Saves to, and the macOS-takes-this-shortcut note with Open Keyboard Settings.
 │   Annotate 15 s replay's shortcut lives in Annotate's pane
-│   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on; scenes mac-labs-settings, mac-labs-screenshots
+│   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on,
+│   // appearance_shows_its_theme_on_its_card_while_on; scenes mac-labs-settings, mac-labs-screenshots
 ├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<group id> and ?search=<text>
 │   set the store; hex://labs/<lab> also selects that lab's group chip (unless ?category names one). It never turns a lab on. An unknown
 │   or absent name -> the page opens and process.log notes it. hex://settings/<pane>
@@ -349,6 +353,21 @@ and What's new keeps its place under a staged update. Checks:
 `release_notes_link_shows_only_with_its_lab` in
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed in a
 real window.
+
+Appearance (`appearance`, every OS): while on, its card shows "Theme"
+(System, Light mode, Dark mode; default System). `labs::window_dark` resolves
+the main window's paint from `labs.appearance_theme` and the OS appearance
+for each view: System follows the OS live, Light mode always draws light, and
+Dark mode always draws dark. Off, or with System chosen, the window is
+exactly as before. Only the one main window is resolved; the HUD, meeting
+capsules, live text, capture capsule, screenshots, and playgrounds keep
+following the OS. Settings saves the choice at once, like the Caps Lock light.
+Checks: `the_window_follows_the_os_unless_appearance_forces_it` in
+[labs.rs](../../src/labs.rs), `appearance_shows_its_theme_on_its_card_while_on`
+in [tests/panes.rs](../../src/rune_ui/tests/panes.rs), and
+`an_invalid_appearance_theme_resets_only_that_field` in
+[persistence/tests.rs](../../src/app_settings/persistence/tests.rs). Not yet
+observed in a real window.
 
 Keep dictation on clipboard (`keep-on-clipboard`, issue 200, macOS and
 Windows): while on, a pasted dictation stays on the clipboard. `paste::Paster`

@@ -28,6 +28,34 @@ impl CapsLockLight {
     }
 }
 
+/// The main window's appearance: the OS's, or one forced on it (Labs ›
+/// Appearance).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppearanceTheme {
+    /// Follow the OS.
+    #[default]
+    System,
+    /// Always light, whatever the OS shows.
+    Light,
+    /// Always dark, whatever the OS shows.
+    Dark,
+}
+
+impl AppearanceTheme {
+    /// Every choice, in the order the window shows them.
+    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
+
+    /// The English label the window shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::System => "System",
+            Self::Light => "Light mode",
+            Self::Dark => "Dark mode",
+        }
+    }
+}
+
 /// The `labs` switches (`crate::labs`), each off by default; older Labs features keep their own keys, and retired switches (`labs.enabled`, `labs.collapsible_meeting_sections`, `labs.meeting_platform_icons`) are ignored.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
@@ -114,6 +142,11 @@ pub struct LabsSettings {
     /// Whether that light stays solid or blinks slowly while recording
     /// (macOS).
     pub caps_lock_light: CapsLockLight,
+    /// The main window is forced light or dark instead of following the OS
+    /// (Labs › Appearance).
+    pub appearance: bool,
+    /// Which appearance the window shows while `appearance` is on.
+    pub appearance_theme: AppearanceTheme,
     pub movable_meeting_capsules: bool,
     /// A paste restores the clipboard through a running XWayland on Wayland desktops without data-control, such as GNOME (Linux, issue 1111).
     pub gnome_clipboard_restore: bool,
@@ -210,6 +243,8 @@ impl Default for LabsSettings {
             quit_closes_window: false,
             caps_lock_dictation: false,
             caps_lock_light: CapsLockLight::Steady,
+            appearance: false,
+            appearance_theme: AppearanceTheme::System,
             movable_meeting_capsules: false,
             gnome_clipboard_restore: false,
             typed_text: false,
