@@ -96,6 +96,7 @@ impl Feature {
             | Self::TerminalPasteShortcut
             | Self::SidedChords
             | Self::TapOrHold
+            | Self::DoubleTapModifiers
             | Self::RestoreShortcutDefault
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone

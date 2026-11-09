@@ -427,6 +427,12 @@ const KEYS: &[Key] = &[
         "Labs: in Toggle mode, a press held past the hold threshold dictates until it lifts; a short tap still starts and stops (macOS)",
     ),
     key(
+        "labs.double_tap_modifiers",
+        Kind::Bool,
+        "Labs: Double-tap shortcut mode accepts a shortcut without a key, one or more \
+         modifiers such as Option, Globe, or ⌃⌥ (macOS)",
+    ),
+    key(
         "labs.benchmark_details",
         Kind::Bool,
         "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",
@@ -1107,14 +1113,25 @@ pub fn apply(
         }
         "double_tap_lock" if !candidate.double_tap_lock => candidate.double_tap_only = false,
         "double_tap_only" if candidate.double_tap_only => {
-            if !candidate.double_tap_lock || candidate.dictation_hotkey.key.is_none() {
+            if !candidate.double_tap_lock
+                || (candidate.dictation_hotkey.key.is_none()
+                    && !candidate.double_tap_modifiers_allowed())
+            {
+                let modifier_only = if cfg!(target_os = "macos") {
+                    ", or with Labs › Double-tap on a lone modifier on, a shortcut without a key"
+                } else {
+                    ""
+                };
                 return Err(invalid(
                     name,
-                    "a double-tap-only start needs double_tap_lock on and a dictation shortcut \
-                     with a key, such as option+space",
+                    &format!(
+                        "a double-tap-only start needs double_tap_lock on and a dictation \
+                         shortcut with a key, such as option+space{modifier_only}"
+                    ),
                 ));
             }
         }
+        "labs.double_tap_modifiers" => candidate.normalize_double_tap_settings(),
         "dictation_hotkey"
         | "paste_last_hotkey"
         | "raw_dictation_hotkey"
@@ -1168,7 +1185,8 @@ pub fn apply(
                     ));
                 }
             }
-            if candidate.dictation_hotkey.key.is_none() {
+            if candidate.dictation_hotkey.key.is_none() && !candidate.double_tap_modifiers_allowed()
+            {
                 candidate.double_tap_only = false;
             }
         }
@@ -1991,6 +2009,38 @@ mod tests {
         assert!(change.settings.double_tap_only);
         let change = apply(&change.settings, "double_tap_lock", "off", &rules()).unwrap();
         assert!(!change.settings.double_tap_only);
+    }
+
+    #[test]
+    fn double_tap_only_takes_a_lone_modifier_with_the_lab() {
+        let settings = AppSettings {
+            dictation_hotkey: parse_hotkey("option", rules().key_named).unwrap(),
+            ..AppSettings::default()
+        };
+        let refused = apply(&settings, "double_tap_only", "on", &rules()).unwrap_err();
+        assert_eq!(refused.code, "invalid-value");
+        // Only macOS has the lab, so only there does the refusal name it.
+        assert_eq!(
+            refused
+                .message
+                .contains("Labs › Double-tap on a lone modifier"),
+            cfg!(target_os = "macos"),
+            "{}",
+            refused.message
+        );
+        let mut with_lab = settings.clone();
+        with_lab.labs.double_tap_modifiers = true;
+        if with_lab.double_tap_modifiers_allowed() {
+            let change = apply(&with_lab, "double_tap_only", "on", &rules()).unwrap();
+            assert!(change.settings.double_tap_only);
+        } else {
+            assert!(apply(&with_lab, "double_tap_only", "on", &rules()).is_err());
+        }
+        // Turning the lab off clears a modifier-only double-tap-only start.
+        with_lab.double_tap_only = true;
+        let change = apply(&with_lab, "labs.double_tap_modifiers", "off", &rules()).unwrap();
+        assert!(!change.settings.double_tap_only);
+        assert!(change.settings.double_tap_lock);
     }
 
     #[test]

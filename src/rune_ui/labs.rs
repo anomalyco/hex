@@ -496,6 +496,15 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Put the dictation on the clipboard instead of pasting it"),
         ));
     }
+    // macOS's shortcut machine takes a shortcut without a key.
+    if caps.os == super::platform::Os::Macos {
+        rows.push(row(
+            Feature::DoubleTapModifiers,
+            Some(&KEYBOARD),
+            tr("Double-tap on a lone modifier"),
+            tr("Let Double-tap shortcut mode work when the shortcut has no key, such as Option, Globe, or ⌃⌥"),
+        ));
+    }
     if caps.os == super::platform::Os::Macos {
         rows.push(row(
             Feature::MouseShortcuts,
@@ -838,6 +847,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::PickerSortFilter => "lab-picker-sort-filter",
         Feature::SidedChords => "lab-sided-modifier-chords",
         Feature::TapOrHold => "lab-tap-or-hold",
+        Feature::DoubleTapModifiers => "lab-double-tap-modifiers",
         Feature::BenchmarkDetails => "lab-benchmark-details",
         Feature::ParakeetUltra => "lab-parakeet-ultra",
         Feature::StandaloneSpecialKeys => "lab-special-keys",

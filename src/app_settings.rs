@@ -568,12 +568,6 @@ impl AppSettings {
         Ok(())
     }
 
-    fn normalize_double_tap_settings(&mut self) {
-        if !self.double_tap_lock || self.dictation_hotkey.key.is_none() {
-            self.double_tap_only = false;
-        }
-    }
-
     pub fn load() -> Result<Self> {
         let path = path()?;
         #[cfg_attr(not(hex_capture), allow(unused_mut))]
@@ -762,7 +756,9 @@ impl AppSettings {
         PAUSE_BROWSER_MEDIA.store(self.pause_browser_media, Ordering::Relaxed);
         DOUBLE_TAP_LOCK.store(self.double_tap_lock, Ordering::Relaxed);
         DOUBLE_TAP_ONLY.store(
-            self.double_tap_lock && self.double_tap_only && self.dictation_hotkey.key.is_some(),
+            self.double_tap_lock
+                && self.double_tap_only
+                && (self.dictation_hotkey.key.is_some() || self.double_tap_modifiers_allowed()),
             Ordering::Relaxed,
         );
         SHORTCUT_TOGGLE.store(

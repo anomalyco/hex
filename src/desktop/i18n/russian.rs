@@ -116,6 +116,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Shortcut side", "Сторона сочетания клавиш"),
     ("Labs", "Лаборатория"),
     ("Tap or hold", "Нажать или удерживать"),
+    ("Double-tap on a lone modifier", "Двойное нажатие на одиночный модификатор"),
+    ("Let Double-tap shortcut mode work when the shortcut has no key, such as Option, Globe, or ⌃⌥", "Позволяет режиму сочетания «Двойное нажатие» работать, когда у сочетания нет клавиши, например Option, Globe или ⌃⌥"),
     ("Skip long pauses", "Пропускать длинные паузы"),
     ("Shorten long pauses before a whole dictation goes to the model, so slow computers paste sooner", "Сокращает длинные паузы перед отправкой всей диктовки в модель, чтобы медленные компьютеры вставляли текст быстрее"),
     ("In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops", "В режиме переключения удерживайте сочетание клавиш, чтобы диктовать, пока не отпустите; короткое нажатие по-прежнему запускает и останавливает"),
