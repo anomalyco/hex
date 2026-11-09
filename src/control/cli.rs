@@ -3,10 +3,12 @@
 //!
 //! Exit codes: 0 when the command ran (or there was nothing to change), 1
 //! when Hex refused or failed it, 2 for usage errors (clap), 3 when Hex
-//! isn't running, and 4 when `dictation stop --print` heard no speech. Nothing here launches Hex except `start` and `restart`.
+//! isn't running, and 4 when `dictation stop --print` or `hex transcribe`
+//! heard no speech. Nothing here launches Hex except `start` and `restart`.
 
 use std::io::Write;
 mod human;
+mod transcribe;
 
 use clap::{Args, Subcommand};
 
@@ -89,6 +91,22 @@ pub enum ControlCli {
     ///
     /// Sends Ctrl+A and Ctrl+C, so it is not meant for terminals.
     TypedText {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Transcribe a WAV file with the selected model and print it
+    /// (Labs › Transcribe files).
+    ///
+    /// Nothing is pasted, saved to History, or processed.
+    Transcribe {
+        /// The WAV file to transcribe.
+        file: std::path::PathBuf,
+        /// A model id from `hex model list` (default: the selected model).
+        #[arg(long)]
+        model: Option<String>,
+        /// A language the model supports (default: the saved language).
+        #[arg(long)]
+        language: Option<String>,
         #[command(flatten)]
         output: Output,
     },
@@ -436,6 +454,12 @@ pub fn run(command: ControlCli) -> u8 {
         }
         ControlCli::PasteLast { output } => send(ControlCommand::PasteLast, output),
         ControlCli::TypedText { output } => send(ControlCommand::TypedText, output),
+        ControlCli::Transcribe {
+            file,
+            model,
+            language,
+            output,
+        } => transcribe::run(file, model, language, output),
         ControlCli::Screenshot { pick, output } => {
             send(ControlCommand::Screenshot { pick }, output)
         }

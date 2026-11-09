@@ -107,7 +107,8 @@ impl Feature {
             | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::PickerDownloaded
-            | Self::ParakeetUltra => Group::Models,
+            | Self::ParakeetUltra
+            | Self::TranscribeFiles => Group::Models,
         }
     }
 }

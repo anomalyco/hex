@@ -247,7 +247,7 @@ pub enum ControlReply {
     ScrawlCaptureRoute {
         explanation: String,
     },
-    /// `hex dictation stop --print`: the processed transcript.
+    /// `hex dictation stop --print` or `hex transcribe`: the transcript.
     Transcript {
         text: String,
     },

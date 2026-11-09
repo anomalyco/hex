@@ -41,7 +41,9 @@ default) shows each model's raw WER or CER with its language, dataset, source,
 and conditions (#647); its Settings search toggle (off by default) puts a
 search field at the top of General that filters its rows; its Release notes
 link toggle (off by default) puts a link to this build's release notes in the
-sidebar footer.
+sidebar footer; its Transcribe files toggle (off by default) adds
+`hex transcribe <file>`, which prints a saved WAV recording's transcript from
+the selected model ([control-cli.md](control-cli.md)).
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
 used for any French system language (#892), and Русский, used for any

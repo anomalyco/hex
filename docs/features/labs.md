@@ -71,6 +71,15 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
+├── Transcribe files no   labs.transcribe_files        (every OS) `hex transcribe <file>` prints a saved WAV recording's transcript
+│                                        from the selected model (or --model); Hex running sends it to POST /transcriptions and its
+│                                        dictation engine, Hex stopped loads the model here on Linux and Windows (macOS answers
+│                                        not-running); the file is capped at 64 MiB and checked as WAV here; no paste, History, or processing
+│                                        // checks: the_lab_off_refuses_and_names_its_toggle,
+│                                        // a_file_that_is_not_wav_is_refused_before_any_transcription,
+│                                        // a_wav_uses_the_selected_model_and_language, an_empty_transcript_is_no_speech
+│                                        // (control/cli/transcribe.rs); a running service answered model-unavailable for an uninstalled
+│                                        // model, but no transcript answer or offline model load was observed, and nothing ran on macOS or Windows
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── ⌘Q closes Settings no labs.quit_closes_window      (macOS) the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, the menu bar icon still quits (#1473)

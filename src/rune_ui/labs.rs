@@ -720,6 +720,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Downloaded models only"),
         tr("Show only downloaded speech models in the picker, with the space they take"),
     ));
+    rows.push(row(
+        Feature::TranscribeFiles,
+        None,
+        tr("Transcribe files"),
+        tr("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model."),
+    ));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
         && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     let ultra = row(Feature::ParakeetUltra, None, tr("Parakeet Ultra"), "");
@@ -855,6 +861,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingDescriptiveFilenames => "lab-meeting-descriptive-filenames",
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
+        Feature::TranscribeFiles => "lab-transcribe-files",
     }
 }
 

@@ -9,7 +9,8 @@
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard or only copying it (macOS), a second dictation shortcut
 //! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
-//! recording when its call ends (macOS), and Terminal paste, shortcut sharing
+//! recording when its call ends (macOS), transcribing a saved WAV file from a
+//! terminal, and Terminal paste, shortcut sharing
 //! on Windows, and a terminal-paste dictation shortcut on Windows and Linux)
 //! is just its toggle.
 //!
@@ -125,10 +126,11 @@ pub enum Feature {
     ExpireMeetingAudio,
     CapsLockDictation,
     OpenCodeInWsl,
+    TranscribeFiles,
 }
 
 impl Feature {
-    pub const ALL: [Self; 61] = [
+    pub const ALL: [Self; 62] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -190,6 +192,7 @@ impl Feature {
         Self::ExpireMeetingAudio,
         Self::CapsLockDictation,
         Self::OpenCodeInWsl,
+        Self::TranscribeFiles,
     ];
 
     /// The features this OS and build have.
@@ -275,7 +278,8 @@ impl Feature {
             | Self::QuitClosesWindow
             | Self::GnomeAnnotate
             | Self::CapsLockDictation
-            | Self::OpenCodeInWsl => Audience::Everyone,
+            | Self::OpenCodeInWsl
+            | Self::TranscribeFiles => Audience::Everyone,
         }
     }
 
@@ -341,6 +345,7 @@ impl Feature {
             | Self::TerminalPasteShortcut
             | Self::ReleaseNotesLink
             | Self::OpenCodeInWsl => 20261108,
+            Self::TranscribeFiles => 20261109,
         }
     }
 
@@ -445,7 +450,8 @@ impl Feature {
             | Self::ExpireMeetingAudio
             | Self::SettingsSearch
             | Self::ReleaseNotesLink
-            | Self::FillerWords => true,
+            | Self::FillerWords
+            | Self::TranscribeFiles => true,
         }
     }
 
@@ -513,6 +519,7 @@ impl Feature {
             Self::ExpireMeetingAudio => "expire-meeting-audio",
             Self::CapsLockDictation => "caps-lock-dictation",
             Self::OpenCodeInWsl => "opencode-in-wsl",
+            Self::TranscribeFiles => "transcribe-files",
         }
     }
 
@@ -580,6 +587,7 @@ impl Feature {
             Self::ExpireMeetingAudio => "labs.expire_meeting_audio",
             Self::CapsLockDictation => "labs.caps_lock_dictation",
             Self::OpenCodeInWsl => "labs.opencode_in_wsl",
+            Self::TranscribeFiles => "labs.transcribe_files",
         }
     }
 
@@ -651,6 +659,7 @@ impl Feature {
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation,
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl,
+            Self::TranscribeFiles => settings.labs.transcribe_files,
         }
     }
 
@@ -720,6 +729,7 @@ impl Feature {
             &mut labs.expire_meeting_audio,
             &mut labs.caps_lock_dictation,
             &mut labs.opencode_in_wsl,
+            &mut labs.transcribe_files,
         ]
     }
 
@@ -789,6 +799,7 @@ impl Feature {
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation = on,
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl = on,
+            Self::TranscribeFiles => settings.labs.transcribe_files = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;

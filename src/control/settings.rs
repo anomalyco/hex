@@ -580,6 +580,11 @@ const KEYS: &[Key] = &[
         "Labs: the speech model picker's All speech models view offers Only downloaded models, with the space they take",
     ),
     key(
+        "labs.transcribe_files",
+        Kind::Bool,
+        "Labs: hex transcribe <file> turns a WAV recording into text with the selected dictation model",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

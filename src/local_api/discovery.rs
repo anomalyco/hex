@@ -127,6 +127,26 @@ pub(super) fn post_json(
     read_timeout: Duration,
     max_response: usize,
 ) -> Result<(u16, Vec<u8>)> {
+    post(path, "application/json", body, read_timeout, max_response)
+}
+
+/// Sends one WAV to the running Hex's `POST /transcriptions`.
+pub(crate) fn post_wav(
+    path: &str,
+    body: &[u8],
+    read_timeout: Duration,
+    max_response: usize,
+) -> Result<(u16, Vec<u8>)> {
+    post(path, "audio/wav", body, read_timeout, max_response)
+}
+
+fn post(
+    path: &str,
+    content_type: &str,
+    body: &[u8],
+    read_timeout: Duration,
+    max_response: usize,
+) -> Result<(u16, Vec<u8>)> {
     let document = live_discovery()?;
     let address = SocketAddr::from(([127, 0, 0, 1], document.port));
     let mut stream = TcpStream::connect_timeout(&address, CONNECTION_TIMEOUT)
@@ -135,18 +155,22 @@ pub(super) fn post_json(
     stream.set_write_timeout(Some(CONNECTION_TIMEOUT))?;
     write!(
         stream,
-        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         document.token,
         body.len(),
     )?;
-    stream.write_all(body)?;
-    stream.flush()?;
-
+    // Hex answers before reading a body it rejects (an unknown model, a full
+    // queue); keep that answer when the connection then resets.
+    let upload = stream.write_all(body).and_then(|()| stream.flush());
     let mut response = Vec::new();
-    (&mut stream)
+    let read = (&mut stream)
         .take(max_response as u64 + 1)
-        .read_to_end(&mut response)
-        .wrap_err("Hex didn't answer")?;
+        .read_to_end(&mut response);
+    if response.is_empty() {
+        read.wrap_err("Hex didn't answer")?;
+        upload.wrap_err("Hex didn't take the upload")?;
+        bail!("Hex didn't answer");
+    }
     if response.len() > max_response {
         bail!("Hex's response is too large");
     }
@@ -163,7 +187,7 @@ pub(super) fn post_json(
     Ok((status, response.split_off(header_end + 4)))
 }
 
-pub(super) fn error_code(status: u16, body: &[u8]) -> String {
+pub(crate) fn error_code(status: u16, body: &[u8]) -> String {
     serde_json::from_slice::<serde_json::Value>(body)
         .ok()
         .and_then(|value| value.get("code")?.as_str().map(str::to_owned))

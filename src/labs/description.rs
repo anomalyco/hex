@@ -168,6 +168,9 @@ impl Feature {
             Self::OpenCodeInWsl => {
                 "Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker; looking for it can start WSL"
             }
+            Self::TranscribeFiles => {
+                "Turn a WAV recording into text with hex transcribe <file> and your dictation model"
+            }
         }
     }
 }
