@@ -336,10 +336,15 @@ app (new updater, and on macOS a new bundle ID), so:
   whose signer is `AUTHENTICODE_SIGNER` in `src/updater/windows.rs` (OpenCode's
   Artifact Signing subject). Check the first Azure-signed Hex build's subject
   against it before a stable release; unsigned builds never update.
-- **Linux and Windows:** the feeds stay at 2.3.1; the site and README tell
-  users to reinstall. `HEX_RELEASE_SIGNING_KEY` (the ed25519 key 2.3.1's
-  feeds were signed with) now signs every Linux executable Release publishes
-  (`.github/release/sign-linux.sh`).
+- **Linux and Windows:** `HEX_RELEASE_SIGNING_KEY` (the ed25519 key 2.3.1's
+  feeds were signed with) signs every Linux executable Release publishes
+  (`.github/release/sign-linux.sh`) and the 2.3.1 feeds. After a stable
+  release, the Legacy feeds workflow (`.github/workflows/legacy-feeds.yml`,
+  `check` first, then `publish`) points all three feeds at it: 2.3.1 installs
+  it into its `voice-control` folder, and its first launch moves it into the
+  managed layout (`src/updater/legacy.rs`, `setup.legacy-adopt`). The
+  workflow refuses a version that is not current stable or lacks that move.
+  The installer also takes over a 2.3.1 install's unit, link, and entries.
 
 ### Transition from Kit's hosting
 
