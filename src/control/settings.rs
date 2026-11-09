@@ -370,6 +370,11 @@ const KEYS: &[Key] = &[
         "Labs: put the dictation on the clipboard instead of pasting it (macOS and Windows)",
     ),
     key(
+        "labs.return_to_app",
+        Kind::Bool,
+        "Labs: switch back to the app a dictation started in before pasting (macOS)",
+    ),
+    key(
         "labs.spoken_formatting",
         Kind::Bool,
         "Labs: turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks",

@@ -71,6 +71,7 @@ impl Feature {
             | Self::FillerWords
             | Self::KeepOnClipboard
             | Self::CopyOnly
+            | Self::ReturnToApp
             | Self::GnomeClipboardRestore
             | Self::TypedText
             | Self::TerminalPaste

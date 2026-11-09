@@ -39,6 +39,9 @@ impl Feature {
                 "Leave the dictation on the clipboard after pasting instead of restoring what was there"
             }
             Self::CopyOnly => "Put the dictation on the clipboard instead of pasting it",
+            Self::ReturnToApp => {
+                "If another app comes to the front while you dictate, switch back to the app you started in before pasting"
+            }
             Self::SpokenFormatting => {
                 "Turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks"
             }

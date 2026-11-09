@@ -408,6 +408,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-pause-browser",
         "lab-keep-on-clipboard",
         "lab-copy-only",
+        "lab-return-to-app",
         "lab-spoken-formatting",
         "lab-filler-words",
         "lab-spoken-symbols",
@@ -434,6 +435,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.copy_only);
     tap(&mut rt, "lab-copy-only");
     assert!(rt.state.settings.labs.copy_only);
+    assert!(!rt.state.settings.labs.return_to_app);
+    tap(&mut rt, "lab-return-to-app");
+    assert!(rt.state.settings.labs.return_to_app);
     assert!(!rt.state.settings.labs.caps_lock_dictation);
     tap(&mut rt, "lab-caps-lock-dictation");
     assert!(rt.state.settings.labs.caps_lock_dictation);
@@ -2058,6 +2062,7 @@ fn labs_lists_every_toggle_off_by_default() {
         ("lab-live-text", settings.labs.live_text),
         ("lab-live-chapters", settings.labs.live_chapters),
         ("lab-vocabulary-biasing", settings.labs.vocabulary_biasing),
+        ("lab-return-to-app", settings.labs.return_to_app),
     ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
         assert!(!on, "{row} is on");
@@ -2082,6 +2087,7 @@ fn labs_lists_every_toggle_off_by_default() {
     let mut rt = runtime("windows-settings", true, (980.0, 2000.0));
     assert!(rt.find("terminal-paste").is_none());
     open_labs(&mut rt);
+    assert!(rt.find("lab-return-to-app").is_none(), "macOS only");
     tap(&mut rt, "lab-terminal-paste");
     assert!(rt.state.settings.paste_with_shift);
     assert!(
