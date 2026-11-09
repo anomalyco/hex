@@ -64,6 +64,7 @@ impl Feature {
             | Self::SettingsSearch
             | Self::Appearance
             | Self::ReleaseNotesLink
+            | Self::SpeakersOnly
             | Self::Playground => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting

@@ -181,6 +181,9 @@ impl Feature {
             Self::ApiProcessing => {
                 "Let apps using Hex's local API ask for transcripts with your Global mode's corrections, rewrite, and transformations applied"
             }
+            Self::SpeakersOnly => {
+                "Apply \"While dictating\" only when sound plays through speakers; headphones are left alone"
+            }
         }
     }
 }

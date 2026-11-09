@@ -763,6 +763,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Process API transcripts"),
         tr("Apps can ask Hex's local API for transcripts with Global mode's processing applied."),
     ));
+    rows.push(row(
+        Feature::SpeakersOnly,
+        None,
+        tr("Only on speakers"),
+        tr("Apply \"While dictating\" only when sound plays through speakers. Headphones are left alone."),
+    ));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
         && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     let ultra = row(Feature::ParakeetUltra, None, tr("Parakeet Ultra"), "");
@@ -903,6 +909,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::TranscribeFiles => "lab-transcribe-files",
         Feature::ApiProcessing => "lab-api-processing",
+        Feature::SpeakersOnly => "lab-speakers-only",
     }
 }
 

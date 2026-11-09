@@ -11,8 +11,8 @@
 //! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
 //! recording when its call ends (macOS), transcribing a saved WAV file from a
 //! terminal, and Terminal paste, shortcut sharing
-//! on Windows, and a terminal-paste dictation shortcut on Windows and Linux)
-//! is just its toggle.
+//! on Windows, and a terminal-paste dictation shortcut on Windows and Linux,
+//! and applying While dictating only on speakers) is just its toggle.
 //!
 //! Each feature has an audience (`Feature::audience`): `Everyone` ships in
 //! every build; `Dev` exists only in dev builds (`dev_build::is_dev_build`:
@@ -28,9 +28,11 @@ use crate::app_settings::{AppSettings, AppearanceTheme, CapsLockLight, LabsSetti
 
 mod cli;
 mod description;
+mod feature;
 mod group;
 
 pub use self::cli::{LabsCommand, run, run_retired_experiments};
+pub use self::feature::Feature;
 pub use self::group::Group;
 
 /// Where people send feedback on Labs features.
@@ -62,148 +64,7 @@ impl Audience {
     }
 }
 
-/// One Labs feature.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Feature {
-    Meetings,
-    VoiceFilter,
-    Playground,
-    LiveText,
-    FailureNotices,
-    LiveTyping,
-    LiveChapters,
-    VocabularyBiasing,
-    TerminalPaste,
-    KeyboardModelSwitching,
-    MouseShortcuts,
-    PauseBrowser,
-    ShareShortcut,
-    UnloadIdle,
-    RestoreShortcutDefault,
-    KeepOnClipboard,
-    CopyOnly,
-    ReturnToApp,
-    SpokenFormatting,
-    FillerWords,
-    SubtitleExport,
-    SecondDictationShortcut,
-    TerminalPasteShortcut,
-    SmartSpacing,
-    SpokenSymbols,
-    PickerSortFilter,
-    SidedChords,
-    TapOrHold,
-    DoubleTapModifiers,
-    BenchmarkDetails,
-    ParakeetUltra,
-    StandaloneSpecialKeys,
-    HistoryStats,
-    RecentDictations,
-    SkipPauses,
-    StopWhenCallEnds,
-    OutputFixes,
-    PickerActiveFirst,
-    ModelInPlace,
-    PickerDownloaded,
-    SectionKeyAlone,
-    KeepRecordings,
-    SettingsSearch,
-    Appearance,
-    ReleaseNotesLink,
-    HideMenuBarIcon,
-    MovableMeetingCapsules,
-    GnomeClipboardRestore,
-    TypedText,
-    MeetingNotesVocabulary,
-    NotchIndicator,
-    MeetingFinishedEvent,
-    GnomeMeetingCapsules,
-    GnomeAnnotate,
-    Screenshots,
-    FollowLiveTranscript,
-    MoreCallApps,
-    AnnotateReplay,
-    MeetingImport,
-    MeetingDescriptiveFilenames,
-    QuitClosesWindow,
-    ExpireMeetingAudio,
-    CapsLockDictation,
-    OpenCodeInWsl,
-    TranscribeFiles,
-    ApiProcessing,
-}
-
 impl Feature {
-    pub const ALL: [Self; 66] = [
-        Self::Meetings,
-        Self::VoiceFilter,
-        Self::Playground,
-        Self::LiveText,
-        Self::FailureNotices,
-        Self::LiveTyping,
-        Self::LiveChapters,
-        Self::VocabularyBiasing,
-        Self::TerminalPaste,
-        Self::KeyboardModelSwitching,
-        Self::MouseShortcuts,
-        Self::PauseBrowser,
-        Self::ShareShortcut,
-        Self::UnloadIdle,
-        Self::RestoreShortcutDefault,
-        Self::KeepOnClipboard,
-        Self::CopyOnly,
-        Self::ReturnToApp,
-        Self::SpokenFormatting,
-        Self::FillerWords,
-        Self::SubtitleExport,
-        Self::SecondDictationShortcut,
-        Self::TerminalPasteShortcut,
-        Self::SmartSpacing,
-        Self::SpokenSymbols,
-        Self::PickerSortFilter,
-        Self::SidedChords,
-        Self::TapOrHold,
-        Self::DoubleTapModifiers,
-        Self::BenchmarkDetails,
-        Self::ParakeetUltra,
-        Self::StandaloneSpecialKeys,
-        Self::HistoryStats,
-        Self::RecentDictations,
-        Self::SkipPauses,
-        Self::StopWhenCallEnds,
-        Self::OutputFixes,
-        Self::PickerActiveFirst,
-        Self::ModelInPlace,
-        Self::PickerDownloaded,
-        Self::SectionKeyAlone,
-        Self::KeepRecordings,
-        Self::SettingsSearch,
-        Self::Appearance,
-        Self::ReleaseNotesLink,
-        Self::HideMenuBarIcon,
-        Self::MovableMeetingCapsules,
-        Self::GnomeClipboardRestore,
-        Self::TypedText,
-        Self::MeetingNotesVocabulary,
-        Self::NotchIndicator,
-        Self::MeetingFinishedEvent,
-        Self::GnomeMeetingCapsules,
-        Self::GnomeAnnotate,
-        Self::Screenshots,
-        Self::FollowLiveTranscript,
-        Self::MoreCallApps,
-        Self::AnnotateReplay,
-        Self::MeetingImport,
-        Self::MeetingDescriptiveFilenames,
-        Self::QuitClosesWindow,
-        Self::ExpireMeetingAudio,
-        Self::CapsLockDictation,
-        Self::OpenCodeInWsl,
-        Self::TranscribeFiles,
-        Self::ApiProcessing,
-    ];
-
-    /// The features this OS and build have.
     pub fn available() -> impl Iterator<Item = Self> {
         Self::available_where(Self::shipped)
     }
@@ -291,7 +152,8 @@ impl Feature {
             | Self::CapsLockDictation
             | Self::OpenCodeInWsl
             | Self::TranscribeFiles
-            | Self::ApiProcessing => Audience::Everyone,
+            | Self::ApiProcessing
+            | Self::SpeakersOnly => Audience::Everyone,
         }
     }
 
@@ -361,7 +223,8 @@ impl Feature {
             | Self::ApiProcessing
             | Self::Appearance
             | Self::DoubleTapModifiers
-            | Self::ReturnToApp => 20261109,
+            | Self::ReturnToApp
+            | Self::SpeakersOnly => 20261109,
         }
     }
 
@@ -474,7 +337,8 @@ impl Feature {
             | Self::ReleaseNotesLink
             | Self::FillerWords
             | Self::TranscribeFiles
-            | Self::ApiProcessing => true,
+            | Self::ApiProcessing
+            | Self::SpeakersOnly => true,
         }
     }
 
@@ -547,6 +411,7 @@ impl Feature {
             Self::OpenCodeInWsl => "opencode-in-wsl",
             Self::TranscribeFiles => "transcribe-files",
             Self::ApiProcessing => "api-processing",
+            Self::SpeakersOnly => "speakers-only",
         }
     }
 
@@ -619,6 +484,7 @@ impl Feature {
             Self::OpenCodeInWsl => "labs.opencode_in_wsl",
             Self::TranscribeFiles => "labs.transcribe_files",
             Self::ApiProcessing => "labs.api_processing",
+            Self::SpeakersOnly => "labs.speakers_only",
         }
     }
 
@@ -695,6 +561,7 @@ impl Feature {
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl,
             Self::TranscribeFiles => settings.labs.transcribe_files,
             Self::ApiProcessing => settings.labs.api_processing,
+            Self::SpeakersOnly => settings.labs.speakers_only,
         }
     }
 
@@ -769,6 +636,7 @@ impl Feature {
             &mut labs.opencode_in_wsl,
             &mut labs.transcribe_files,
             &mut labs.api_processing,
+            &mut labs.speakers_only,
         ]
     }
 
@@ -848,6 +716,7 @@ impl Feature {
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl = on,
             Self::TranscribeFiles => settings.labs.transcribe_files = on,
             Self::ApiProcessing => settings.labs.api_processing = on,
+            Self::SpeakersOnly => settings.labs.speakers_only = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -933,6 +802,9 @@ const DOUBLE_TAP_MODIFIERS: u64 = API_PROCESSING << 1;
 /// The next bit above Double-tap on a lone modifier's switch: a dictation
 /// pastes into the app its capture started in (macOS).
 const RETURN_TO_APP: u64 = DOUBLE_TAP_MODIFIERS << 1;
+/// The next bit above Return to app's switch: "While dictating" applies only
+/// when the default output is speakers.
+const SPEAKERS_ONLY: u64 = RETURN_TO_APP << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1248,6 +1120,14 @@ pub fn api_processing() -> bool {
     on(API_PROCESSING) && Feature::ApiProcessing.on_this_os()
 }
 
+/// "While dictating" applies only while the default output is speakers
+/// (read as each dictation or screen capture starts: by the recording
+/// environment on macOS, and by the audio-control worker on Linux and
+/// Windows).
+pub fn speakers_only() -> bool {
+    on(SPEAKERS_ONLY) && Feature::SpeakersOnly.on_this_os()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).
@@ -1453,6 +1333,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             settings.api_processing,
             API_PROCESSING,
         ),
+        (Feature::SpeakersOnly, settings.speakers_only, SPEAKERS_ONLY),
         (
             Feature::GnomeMeetingCapsules,
             settings.gnome_meeting_capsules,
@@ -2061,6 +1942,25 @@ mod tests {
         assert_eq!(state & TYPED_TEXT, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert!(Feature::ApiProcessing.on_this_os());
+    }
+
+    #[test]
+    fn speakers_only_is_its_own_bit_and_off_by_default() {
+        assert_eq!(SPEAKERS_ONLY, 1 << 57);
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & SPEAKERS_ONLY, 0);
+        labs.speakers_only = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & SPEAKERS_ONLY, 0);
+        assert_eq!(state & API_PROCESSING, 0);
+        assert_eq!(state & DOUBLE_TAP_MODIFIERS, 0);
+        assert_eq!(state & RETURN_TO_APP, 0);
+        assert_eq!(state & TYPED_TEXT, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(Feature::SpeakersOnly.on_this_os());
+        assert_eq!(Feature::SpeakersOnly.added(), 20261109);
+        assert_eq!(Feature::SpeakersOnly.audience(), Audience::Everyone);
     }
 
     #[test]

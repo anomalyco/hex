@@ -17,6 +17,7 @@ use objc2_core_audio::{
 
 use crate::app_settings::{self, RecordingAudioBehavior};
 use crate::audio::browser_media::{self, NativeBrowserAudio, PausedBrowser};
+use crate::audio::output_route;
 
 mod ducking;
 
@@ -382,6 +383,18 @@ fn paused_guard(players: Vec<MediaPlayer>, browser: Option<PausedBrowser>) -> Au
 
 impl AudioBehaviorGuard {
     fn start(behavior: RecordingAudioBehavior) -> Self {
+        // Read once per recording, here on the environment worker thread, so
+        // the event tap never waits on CoreAudio. With Labs › Only on
+        // speakers on, headphones leave the output and media alone for this
+        // session; idle sleep is not part of this guard. With the lab off,
+        // or with nothing to do, CoreAudio is never asked.
+        if crate::labs::speakers_only()
+            && behavior != RecordingAudioBehavior::DoNothing
+            && !output_route::applies(output_route::default_output_route())
+        {
+            tracing::info!("left output and media alone while dictating on headphones");
+            return Self::None;
+        }
         match behavior {
             RecordingAudioBehavior::Mute => {
                 mute_output().map_or(Self::None, |(device, previous)| {

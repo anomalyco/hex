@@ -619,6 +619,12 @@ const KEYS: &[Key] = &[
          rewrite, and transformations applied (process=global)",
     ),
     key(
+        "labs.speakers_only",
+        Kind::Bool,
+        "Labs: While dictating applies only while the default output is speakers; headphones are \
+         left alone, and outputs Hex can't classify count as speakers",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

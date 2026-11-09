@@ -704,6 +704,47 @@ audio/output_ducking.rs, and
 [dictation.rs](../../src/dictation.rs) (constructed audio; not run on a device
 or physical output).
 
+**Added November 9, 2026 (Labs › Only on speakers):** with the lab on
+(`labs.speakers_only`), "While dictating" applies only while the default
+output is speakers. The route is read once per recording or screen capture on
+the recording environment's worker thread (macOS) or the audio-control worker
+(Linux and Windows), and with headphones the session holds no audio effect at
+all (no mute, lower, or media pause); dictation still prevents idle sleep and
+screen captures never do. On macOS an overlapping session that shares an
+already-held effect reuses the first session's decision. Speakers and anything
+unclassified count as speakers, and with the lab off nothing changes and the
+output is never read.
+Screen-capture sessions go through the same guard: macOS's `begin_capture`
+uses the recording environment, and Linux and Windows' capture host uses the
+same audio suppressor as dictation. On macOS
+[audio/output_route.rs](../../src/audio/output_route.rs) reads the default
+output's CoreAudio transport (Bluetooth and Bluetooth LE are headphones), a
+built-in device's output-scope data source (`hdpn` when the jack is in use),
+and its UID (`BuiltInHeadphoneOutputDevice`). Linux reads `pactl
+get-default-sink` and `pactl -f json list sinks`: headphones or a headset in
+the default sink's active port (`analog-output-headphones`, `[Out] Headset`)
+or its `device.form_factor`, and a Bluetooth sink (`device.api` `bluez5`) is
+headphones unless it says speaker. Windows reads the default output's WASAPI
+form factor through cpal: headphones, headset, earpiece, and handset are
+headphones. Limits: Bluetooth speakers read as headphones on macOS and on
+Linux unless PipeWire names them speakers, an external USB headphone DAC
+reads as speakers, a Linux session with only `wpctl` and no `pactl` reads
+unknown (so "While dictating" applies), and the pre-roll still follows the
+setting rather than the route. Checks:
+`bluetooth_outputs_are_headphones`,
+`a_built_in_output_on_its_headphone_jack_is_headphones`,
+`apples_wired_headphone_device_is_headphones`,
+`everything_else_is_speakers`,
+`an_analog_sink_is_headphones_only_on_a_headphone_port`,
+`a_headset_port_is_headphones`,
+`bluetooth_sinks_are_headphones_unless_they_say_speakers`,
+`a_sink_the_sound_server_does_not_name_is_unknown`,
+`a_non_string_property_does_not_hide_the_others`, and
+`cpal_headphone_types_are_headphones` in audio/output_route.rs;
+`speakers_only_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed on a real Mac or a real Linux
+or Windows desktop with headphones.
+
 **Fixed November 2, 2026 (issue 978):** a Windows paste refused to run when
 the clipboard held only a format Hex can't snapshot (an app's private
 format), failing every dictation with "the current clipboard format cannot be
