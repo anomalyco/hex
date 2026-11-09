@@ -212,3 +212,107 @@ fn tag_srgb(image: &objc2_core_video::CVImageBuffer) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ptr::NonNull;
+
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2_av_foundation::{AVMediaTypeVideo, AVURLAsset};
+    use objc2_core_foundation::{CFRetained, CFString};
+    use objc2_core_media::{
+        CMSampleTimingInfo, CMVideoFormatDescriptionCreateForImageBuffer,
+        kCMFormatDescriptionExtension_ColorPrimaries, kCMTimeInvalid,
+    };
+    use objc2_foundation::{NSString, NSURL};
+
+    use super::*;
+    use crate::av_writer::fixtures::bgra;
+    use crate::probe::probe;
+
+    /// A screen frame as `ScreenCaptureKit` would hand it over, untagged.
+    fn frame(index: usize) -> CFRetained<objc2_core_media::CMSampleBuffer> {
+        let buffer = bgra(640, 360, |x, y| {
+            let on = (x / 8 + y / 8 + index) % 2 == 0;
+            if on {
+                [20, 30, 200, 255]
+            } else {
+                [235, 235, 240, 255]
+            }
+        });
+        tag_srgb(&buffer);
+        let mut format = std::ptr::null();
+        // SAFETY: A live pixel buffer; CoreMedia writes a +1 description.
+        let status = unsafe {
+            CMVideoFormatDescriptionCreateForImageBuffer(None, &buffer, NonNull::from(&mut format))
+        };
+        assert_eq!(status, 0);
+        // SAFETY: A successful create returned a non-null +1 description.
+        let format = unsafe { CFRetained::from_raw(NonNull::new(format.cast_mut()).unwrap()) };
+        let timing = CMSampleTimingInfo {
+            // SAFETY: Exact positive times.
+            duration: unsafe { objc2_core_media::CMTime::new(1_000, 60_000) },
+            presentationTimeStamp: unsafe {
+                objc2_core_media::CMTime::new(i64::try_from(index * 1_000).unwrap(), 60_000)
+            },
+            // SAFETY: An immutable CoreMedia constant, copied by value.
+            decodeTimeStamp: unsafe { kCMTimeInvalid },
+        };
+        let mut sample = std::ptr::null_mut();
+        // SAFETY: The buffer matches its description; CoreMedia writes a +1 sample buffer.
+        let status = unsafe {
+            objc2_core_media::CMSampleBuffer::create_ready_with_image_buffer(
+                None,
+                &buffer,
+                &format,
+                NonNull::from(&timing),
+                NonNull::from(&mut sample),
+            )
+        };
+        assert_eq!(status, 0);
+        // SAFETY: A successful create returned a non-null +1 sample buffer.
+        unsafe { CFRetained::from_raw(NonNull::new(sample).unwrap()) }
+    }
+
+    #[test]
+    fn writes_a_tagged_hevc_movie_from_frames() {
+        let dir = crate::test_dir::tempdir().unwrap();
+        let path = dir.path().join("recording.mp4");
+        let writer = AvWriter::hevc(&path, 640, 360, 60).unwrap();
+        // SAFETY: Exact times.
+        writer
+            .start(unsafe { objc2_core_media::CMTime::new(0, 60_000) })
+            .unwrap();
+        for index in 0..30 {
+            let sample = frame(index);
+            while !writer.append_video(&sample).unwrap() {
+                thread::sleep(Duration::from_millis(2));
+            }
+        }
+        // SAFETY: Exact times.
+        let end = unsafe { objc2_core_media::CMTime::new(30_000, 60_000) };
+        writer.finish(Some(end), FINISH_TIMEOUT).unwrap();
+
+        assert_eq!(probe(&path).unwrap().video_end(), MediaTime::new(1, 2));
+        let url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().unwrap()));
+        // SAFETY: A local file asset, read synchronously; the format description outlives the
+        // track array it came from.
+        unsafe {
+            let asset = AVURLAsset::URLAssetWithURL_options(&url, None);
+            #[allow(deprecated)]
+            let tracks = asset.tracksWithMediaType(AVMediaTypeVideo.unwrap());
+            let track = tracks.firstObject().unwrap();
+            let formats: Retained<objc2_foundation::NSArray> = track.formatDescriptions();
+            let format: Retained<AnyObject> = formats.firstObject().unwrap();
+            let format =
+                &*(Retained::as_ptr(&format).cast::<objc2_core_media::CMFormatDescription>());
+            assert_eq!(format.media_sub_type(), u32::from_be_bytes(*b"hvc1"));
+            let primaries = format
+                .extension(kCMFormatDescriptionExtension_ColorPrimaries)
+                .unwrap();
+            let primaries = &*(CFRetained::as_ptr(&primaries).as_ptr().cast::<CFString>());
+            assert_eq!(primaries.to_string(), "ITU_R_709_2");
+        }
+    }
+}

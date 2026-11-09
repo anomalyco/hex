@@ -420,8 +420,10 @@ fn scrawl_engine(
 }
 
 /// What the capture asks for: `target`, on the clock the dictation timeline
-/// shares, with Hex's audio and Hex's folder.
-fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target) -> Start {
+/// shares, with Hex's audio and Hex's folder. A Screenshots recording is for
+/// people, so its movie keeps every pixel; an Annotate capture's stays sized
+/// for agents.
+fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target, clip: bool) -> Start {
     Start {
         t0_boot_ns: t0.as_nanos(),
         target,
@@ -429,7 +431,11 @@ fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target) -> Start {
         audio: AudioIn::External,
         window_log: true,
         note: None,
-        movie: MovieQuality::Compact,
+        movie: if clip {
+            MovieQuality::Full
+        } else {
+            MovieQuality::Compact
+        },
     }
 }
 
@@ -2050,7 +2056,7 @@ impl CaptureHost {
                 .spawn(move || {
                     let start = engine
                         .target(target)
-                        .map(|target| start_request(now, recording.clone(), target));
+                        .map(|target| start_request(now, recording.clone(), target, clip));
                     collect(
                         &*engine, start, &recording, chunks, sealed, &jobs, &outcomes, &input,
                     );
@@ -3809,6 +3815,14 @@ mod tests {
     }
 
     #[test]
+    fn a_screenshots_recording_keeps_every_pixel_and_a_capture_stays_compact() {
+        let t0 = CaptureInstant::now();
+        let movie = |clip| start_request(t0, PathBuf::new(), Target::ActiveDisplay, clip).movie;
+        assert_eq!(movie(true), MovieQuality::Full);
+        assert_eq!(movie(false), MovieQuality::Compact);
+    }
+
+    #[test]
     fn the_timeline_resamples_pads_gaps_and_ends_at_the_stop() {
         let mut timeline = Timeline::new(t(0));
         // Audio starts 100 ms in (a cold microphone).
@@ -4158,6 +4172,7 @@ mod tests {
         // Hex's audio, on Hex's clock, into Hex's folder; nothing else.
         let start = engine.starts.lock().unwrap()[0].clone();
         assert_eq!(start.audio, AudioIn::External);
+        assert_eq!(start.movie, MovieQuality::Compact);
         assert!(matches!(start.target, Target::ActiveDisplay));
         assert_eq!(start.bundle_dir.as_ref(), Some(&bundle));
         assert_eq!(start.t0_boot_ns, t0.as_nanos());

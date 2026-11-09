@@ -362,12 +362,10 @@ pub enum AudioIn {
 /// How a screen capture's movie is recorded (macOS; elsewhere always compact).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum MovieQuality {
-    /// Sized for agents: H.264 with a 1280 px long edge, 2560 for a whole display so a crop to
-    /// part of it stays sharp.
+    /// Sized for agents: H.264, 1280 px long edge (2560 for a whole display, for crops).
     #[default]
     Compact,
-    /// For people: every pixel, as hardware HEVC at a constant quality
-    /// (`capture_core::Encoder::Hevc`).
+    /// For people: every pixel, as hardware HEVC (`capture_core::Encoder::Hevc`).
     Full,
 }
 
@@ -399,15 +397,10 @@ impl Default for Start {
 
 impl Start {
     pub fn screen(target: TargetInfo) -> Self {
-        let window_log = target.mode == CaptureMode::Display;
         Self {
-            t0_boot_ns: boot_time_ns(),
+            window_log: target.mode == CaptureMode::Display,
             target: Target::Screen(target),
-            bundle_dir: None,
-            audio: AudioIn::External,
-            window_log,
-            note: None,
-            movie: MovieQuality::Compact,
+            ..Self::default()
         }
     }
 
@@ -422,13 +415,10 @@ impl Start {
 
     pub fn phone(device: Option<String>, name: Option<String>) -> Self {
         Self {
-            t0_boot_ns: boot_time_ns(),
             target: Target::Phone { device, name },
-            bundle_dir: None,
             audio: AudioIn::None,
             window_log: false,
-            note: None,
-            movie: MovieQuality::Compact,
+            ..Self::default()
         }
     }
 }
