@@ -231,6 +231,11 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
         .iter()
         .any(|arg| arg == "--snap" || arg == "--video" || arg == "--list-scenes");
     onboarding_kit::set_live_window(playground && !headless);
+    // A render is in English unless `HEX_RENDER_LANGUAGE` names an
+    // interface language (`ru`, `pl`, …) to check its copy in.
+    if let Ok(code) = std::env::var("HEX_RENDER_LANGUAGE") {
+        crate::desktop::i18n::apply(Some(&code));
+    }
     // Fixtures only: a render never reads, migrates, or saves the user's
     // settings, History, or anything else in the data folder.
     let app = build(

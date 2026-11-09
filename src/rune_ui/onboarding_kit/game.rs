@@ -75,9 +75,25 @@ const SHARE_HOLD: f64 = 2.8;
 const AUTOPLAY_CARDS: usize = 4;
 /// Keep playing folds the share card into the score pill.
 const FOLD: f32 = 0.45;
-/// The score pill's top-left, level with Done, and its size.
+/// The score pill's top-left, level with Done, its height, and its padding
+/// and gap; it's as wide as its number and label need ([`pill_size`]).
 const SCORE_AT: [f32; 2] = [24.0, 18.0];
-const PILL: [f32; 2] = [112.0, 30.0];
+const PILL_H: f32 = 30.0;
+const PILL_PAD: f32 = 12.0;
+const PILL_GAP: f32 = 8.0;
+
+/// The score pill's number.
+fn score_font() -> TextStyle {
+    TextStyle::new(14.0, 640.0).lh(18.0).features("'tnum' 1")
+}
+
+/// The score pill hugging `destroyed` and its label, with the same padding
+/// either side in every language.
+fn pill_size(p: Paint, destroyed: usize) -> [f32; 2] {
+    let number = rune::text::advance(&destroyed.to_string(), score_font());
+    let label = rune::text::advance(tr("destroyed"), p.k.ty.small);
+    [2.0 * PILL_PAD + number + PILL_GAP + label, PILL_H]
+}
 const SHARE_W: f32 = 432.0;
 const SHARE_PAD: f32 = 24.0;
 const SHARE_GAP: f32 = 16.0;
@@ -1248,7 +1264,7 @@ fn header<S: 'static>(
     };
     let number = text(destroyed.to_string())
         .key(format!("n{destroyed}"))
-        .font(TextStyle::new(14.0, 640.0).lh(18.0).features("'tnum' 1"))
+        .font(score_font())
         .color(if destroyed > 0 {
             ember_tone(p, 0.7)
         } else {
@@ -1266,9 +1282,9 @@ fn header<S: 'static>(
         .opacity(pill)
         .scale_motion(Anim::INSTANT)
         .opacity_motion(Anim::INSTANT)
-        .size(PILL[0], PILL[1])
-        .px(12.0)
-        .gap(8.0)
+        .size(pill_size(p, destroyed)[0], PILL_H)
+        .px(PILL_PAD)
+        .gap(PILL_GAP)
         .center_y()
         .radius(15.0)
         .fill(k.c.surface_raised)

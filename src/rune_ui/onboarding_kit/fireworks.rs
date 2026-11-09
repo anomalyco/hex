@@ -488,15 +488,19 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
             });
         }
         // The bang: a soft bloom, white going to the shell's colour, with
-        // no hard core.
+        // no hard core. It stays compact as it fades: a wide, faint,
+        // whitish glow reads as grey smoke on the dark page.
         let bang = (-age / 0.08).exp();
         if bang > 0.02 {
             layer.push(Streak {
                 from: local(burst),
                 to: local(burst),
-                color: scaled(mix3(hue, white, bang), 0.8 * look.bright.min(1.1) * bang),
+                color: scaled(
+                    mix3(hue, white, bang * bang),
+                    0.8 * look.bright.min(1.1) * bang,
+                ),
                 half: 0.0,
-                glow: 8.0 + 22.0 * (1.0 - bang),
+                glow: 8.0 + 6.0 * (1.0 - bang),
                 tail: 1.0,
             });
         }

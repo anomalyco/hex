@@ -337,13 +337,10 @@ pub(super) fn share<S: 'static>(
                         .key("continue"),
                 ),
         );
-    // The surface, from the card's rect to the pill's.
-    let pill_rect = [
-        SCORE_AT[0] - home[0],
-        SCORE_AT[1] - home[1],
-        PILL[0],
-        PILL[1],
-    ];
+    // The surface, from the card's rect to the pill's, as wide as the pill
+    // it folds into.
+    let [pill_w, pill_h] = pill_size(p, destroyed);
+    let pill_rect = [SCORE_AT[0] - home[0], SCORE_AT[1] - home[1], pill_w, pill_h];
     let card_rect = [0.0, 0.0, w, share_h];
     let [sx, sy, sw, sh]: [f32; 4] =
         std::array::from_fn(|n| lerp(card_rect[n], pill_rect[n], morph));
@@ -356,7 +353,7 @@ pub(super) fn share<S: 'static>(
         .key("surface")
         .absolute(sx, sy)
         .size(sw, sh)
-        .radius(lerp(20.0, PILL[1] * 0.5, morph))
+        .radius(lerp(20.0, pill_h * 0.5, morph))
         .continuous_corners()
         .fill(fill)
         .radial_gradient(
@@ -377,8 +374,8 @@ pub(super) fn share<S: 'static>(
     let tiny = 14.0 / BIG_SIZE;
     let num_from = [SHARE_PAD, SHARE_PAD + SHARE_ROWS[0] + SHARE_GAP];
     let num_to = [
-        SCORE_AT[0] + 12.0 - home[0],
-        SCORE_AT[1] + (PILL[1] - BIG_LINE * tiny) * 0.5 - home[1],
+        SCORE_AT[0] + PILL_PAD - home[0],
+        SCORE_AT[1] + (pill_h - BIG_LINE * tiny) * 0.5 - home[1],
     ];
     let flying_number = folding.then(|| {
         number("number-fold", ember_tone(p, lerp(0.85, 0.7, morph)))
