@@ -16,7 +16,7 @@ use super::controls::{
     pressable_row, row_switch, value_button, value_font,
 };
 use super::icons::*;
-use super::lists::{PermissionControl, permission_control, slider};
+use super::lists::{PermissionControl, inline_slider, permission_control, slider};
 use super::platform::PlatformRequest;
 use super::settings::{self as s, Capture, Face};
 use super::{Menu, Pane, Request, ShortcutTarget, Ui};
@@ -1023,7 +1023,7 @@ pub(super) fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -
             &VOLUME,
             tr("Sound volume"),
             None,
-            slider(
+            inline_slider(
                 p,
                 "sound-volume-slider",
                 tr("Sound volume"),
@@ -1033,7 +1033,7 @@ pub(super) fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -
                 } else {
                     tr("Off").to_owned()
                 },
-                200.0,
+                160.0,
                 |ui, value, done| {
                     let volume = (value * 100.0).round() / 100.0;
                     ui.sound_volume_drag = if done { None } else { Some(volume) };
