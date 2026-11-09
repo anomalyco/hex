@@ -272,10 +272,11 @@ hex app
   own dark or light caption from `DWMWA_USE_IMMERSIVE_DARK_MODE`, and builds
   before 19041 keep the OS caption) and draws its text and buttons in the
   window's light or dark mode. The view re-applies both when the window's
-  theme changes, and a window subclass re-applies the last resolved caption
-  after every `WM_SETTINGCHANGE`: winit repaints the frame from the OS theme
-  on each one, and only reports `ThemeChanged` when the OS theme actually
-  changed.
+  theme changes, and a window subclass re-applies that caption after a
+  `WM_SETTINGCHANGE` while Appearance forces a theme different from the OS:
+  winit repaints the frame from the OS theme on each one, and only reports
+  `ThemeChanged` when the OS theme actually changed. The subclass removes
+  itself when the window is destroyed.
 - Without a tray (creation failed) closing the window quits Hex.
   See the [single-process plan](plans/single-process.md#windows-under-rune).
 

@@ -26,11 +26,11 @@ use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
     DWMWA_CAPTION_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
 };
-use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GWLP_HINSTANCE, GetSystemMetrics, GetWindowLongPtrW, ICON_BIG, ICON_SMALL, IMAGE_ICON,
     LR_DEFAULTCOLOR, LoadImageW, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SendMessageW,
-    WM_SETICON, WM_SETTINGCHANGE,
+    WM_NCDESTROY, WM_SETICON, WM_SETTINGCHANGE,
 };
 
 use crate::app_settings::AppSettings;
@@ -644,9 +644,9 @@ static CAPTION: Mutex<Option<Caption>> = Mutex::new(None);
 ///
 /// The OS theme is part of the key because winit repaints the native frame
 /// from it on every `WM_SETTINGCHANGE` (`dark_mode.rs`'s `try_theme`), not
-/// only when the OS theme changed, so [`keep_caption`] writes this theme back
-/// after each one. When the OS theme does change, the key changes too, and
-/// the next frame repaints the caption for the new pair.
+/// only when the OS theme changed, so [`keep_caption`] writes a forced theme
+/// back after each one. When the OS theme does change, the key changes too,
+/// and the next frame repaints the caption for the new pair.
 #[derive(Clone, Copy, PartialEq)]
 struct Caption {
     color: u32,
@@ -664,8 +664,9 @@ const CAPTION_SUBCLASS: usize = 1;
 fn blend_title_bar(hwnd: HWND) {
     TITLED_WINDOW.store(hwnd, Ordering::Relaxed);
     // SAFETY: `hwnd` is the settings window Rune just created, and the proc
-    // outlives it. A second install with the same id is refused, and
-    // re-applying the caption is idempotent besides.
+    // outlives it. Installing the same proc and id on the same window again
+    // replaces the reference data instead of being refused, which is harmless:
+    // it carries none, and re-applying the caption is idempotent besides.
     unsafe {
         SetWindowSubclass(hwnd, Some(keep_caption), CAPTION_SUBCLASS, 0);
     }
@@ -675,7 +676,8 @@ fn blend_title_bar(hwnd: HWND) {
     }
 }
 
-/// Puts the caption back after a settings broadcast.
+/// Puts a forced caption back after a settings broadcast, and drops this
+/// subclass when the window goes away.
 ///
 /// winit handles `WM_SETTINGCHANGE` by repainting the frame from the OS theme
 /// (`dark_mode.rs`'s `try_theme`) on every broadcast, not only when the theme
@@ -683,9 +685,11 @@ fn blend_title_bar(hwnd: HWND) {
 /// broadcast (an accent colour, region, or environment change) therefore
 /// leaves a forced appearance overwritten: the view's cached theme did not
 /// change, so it does not re-apply it. Running after the next proc, which is
-/// winit's, gives the last word to the theme the view last resolved: the OS's
-/// when Appearance follows it (so writing it back changes nothing), and the
-/// forced one when it does not.
+/// winit's, gives the last word back to the theme the view last resolved. The
+/// caption is written only while Appearance forces a theme different from the
+/// OS (`dark` against `system_dark`); when it follows the OS, or is off, the
+/// frame winit just painted is already the one asked for, and a real OS theme
+/// change repaints it from the next frame, whose key changed.
 unsafe extern "system" fn keep_caption(
     hwnd: HWND,
     message: u32,
@@ -694,11 +698,26 @@ unsafe extern "system" fn keep_caption(
     _subclass: usize,
     _data: usize,
 ) -> LRESULT {
+    if message == WM_NCDESTROY {
+        // SAFETY: `keep_caption` was installed under `CAPTION_SUBCLASS` on
+        // `hwnd`, which still exists while its window procedure handles the
+        // destroy notification, so this removes exactly this proc's entry
+        // before the chain forwards it. comctl32 also frees the chain with the
+        // window; removing it first just does that while the handle is usable.
+        unsafe {
+            RemoveWindowSubclass(hwnd, Some(keep_caption), CAPTION_SUBCLASS);
+        }
+    }
     // SAFETY: Windows passes this window's message and parameters, and the
     // next proc in the chain is the one winit installed for it.
     let result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
     if message == WM_SETTINGCHANGE {
-        if let Some(caption) = *lock(&CAPTION) {
+        // Copy the theme out before DWM is asked: a guard taken in an `if`'s
+        // condition would be held until that statement ends.
+        let caption = *lock(&CAPTION);
+        if let Some(caption) = caption
+            && caption.dark != caption.system_dark
+        {
             set_title_bar(hwnd, caption);
         }
     }

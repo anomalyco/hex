@@ -364,9 +364,10 @@ overlay (the HUD, meeting capsules, live text, capture capsule, screenshots,
 and playgrounds), keep following the OS. On Windows the native title bar
 follows the window's background and light/dark mode: Hex sets
 `DWMWA_CAPTION_COLOR` and `DWMWA_USE_IMMERSIVE_DARK_MODE`, and a window
-subclass re-applies the last resolved caption after every
-`WM_SETTINGCHANGE`, because winit repaints the frame from the OS theme on
-each one while only reporting `ThemeChanged` for a real OS theme change.
+subclass re-applies that caption after a `WM_SETTINGCHANGE` while Appearance
+forces a theme different from the OS, because winit repaints the frame from
+the OS theme on each one while only reporting `ThemeChanged` for a real OS
+theme change.
 Windows 10 has no caption color attribute, so DWM keeps its own light or dark
 caption background from the same flag; builds before 19041 do not recognize
 attribute 20 and keep the OS caption. The caption's text and buttons follow
