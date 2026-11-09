@@ -597,8 +597,8 @@ a stop sound marks the end of a retained recording (not completed transcription
 or paste), and a cancel sound acknowledges cancellation of an active capture.
 Brief taps still play the start sound, but recordings shorter than 300 ms remain
 discarded and do not play the stop sound. **Sound volume** in Settings
-offers Off, 25%, 50%, 75%, and 100%; changes save immediately without restarting
-the listener and preview the start sound unless set to Off. `hex dictate` uses
+is a slider from Off to 100%; releasing it saves without restarting the
+listener and previews the start sound unless it is at Off. `hex dictate` uses
 the same saved volume. Playback uses the default audio output through a bounded
 background worker; unavailable audio output does not prevent dictation.
 

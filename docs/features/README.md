@@ -1025,7 +1025,7 @@ General                                  // settings
 │       ├── Turning it on without System Audio Recording -> ask now, never while dictating
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
-├── Sound volume -> immediate feedback; zero suppresses tones
+├── Sound volume -> slider 0-100%; release saves and previews the start sound; zero suppresses tones
 │   └── A saved zero displays Off; enabling sounds through the CLI restores the default level
 │   └── Default output changes or disappears (macOS) -> next tone reopens on the current default
 ├── Sounds -> Sheet: hear each set on Hex's real HUD, pick one
@@ -2429,8 +2429,8 @@ or physical logout, Wayland, or signed cross-version update proof.
 ```ts
 Linux General > Sound volume              // dictate.feedback.linux; X11 + Wayland
 ├── Default / older settings -> 50%
-├── Off -> No recording tones
-└── 25% / 50% / 75% / 100% -> Save and apply live; preview the start sound
+├── Slider at 0 -> No recording tones; the last level is kept
+└── Release above 0 -> Save and apply live; preview the start sound
 Linux General > Sounds                    // dictate.sound-theme
 └── Signature / Classic -> Save and apply live; preview the start sound
 
