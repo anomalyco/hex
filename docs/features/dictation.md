@@ -1826,8 +1826,12 @@ the old mask, and re-setting an unchanged mask does nothing. Rune repairs that
 only as its panel shows, so while the HUD is shown Hex also checks each pump
 turn that the panel is on the active Space, and re-homes it when a Space switch
 or a full-screen exit left it behind: it orders the panel out, clears and
-restores the mask, and orders it back in, leaving Rune's ordering and alpha
-alone. Not yet observed on hardware; only the macOS compile is checked.
+restores the mask, and orders it back in. That reorders the panel but leaves
+Rune's presence state and alpha alone. It is attempted once per show, and once
+more for each later Space change after the panel has been seen on the active
+Space, so a repair that did not take cannot loop. The live-text plate beside
+the HUD is a separate panel and does not get this repair yet. Not yet observed
+on hardware; only the macOS compile is checked.
 
 At the top position the HUD sits 6 pt below the menu bar (`rune_hud::hud_placement::TOP_OFFSET`), or below the
 notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar

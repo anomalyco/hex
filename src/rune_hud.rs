@@ -85,7 +85,8 @@ pub(crate) struct HudSender {
     #[cfg(target_os = "macos")]
     animating: Arc<AtomicBool>,
     /// `Hud::shown`, so the pump can check the panel's Space without reading
-    /// the overlay's state.
+    /// the overlay's state. It flips when a show or hide is requested, before
+    /// Rune applies the queued one.
     #[cfg(target_os = "macos")]
     shown: Arc<AtomicBool>,
     #[cfg(target_os = "windows")]
@@ -233,8 +234,9 @@ pub(crate) struct Hud {
     position: IndicatorPosition,
     /// The overlay itself, to show and hide it.
     this: Option<OverlayHandle<Hud>>,
-    /// Whether the overlay is ordered in, shared with the pump (macOS), which
-    /// checks the panel's Space while it shows.
+    /// Whether a show is requested. It flips before Rune applies the queued
+    /// show or hide, so the pump's macOS Space check guards on the panel's
+    /// `isVisible` for that gap.
     shown: Arc<AtomicBool>,
     /// Rune's Reduce Motion, as of the last frame.
     reduce: bool,
