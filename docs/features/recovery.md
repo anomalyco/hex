@@ -301,6 +301,7 @@ virtual input or iPhone Continuity microphone (macOS: ccwd/ccwl transport) // #1
 warm stream keeps running but delivers only exact zeros (macOS and Linux hotkey dictation, #1122)
   -> that dictation is discarded as near-silent, as before
   -> its finish reopens the microphone like a stream failure // logged once
+     -> the dead stream is closed first, so the replacement opens cold as at launch
   -> next dictation records from a fresh stream
 
 meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
@@ -347,7 +348,8 @@ Checks in [audio.rs](../../src/audio.rs):
 values; no iPhone observed with the lid closed),
 `where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
 `only_an_idle_capture_lets_the_microphone_switch`,
-`a_stream_that_stops_delivering_audio_is_reopened`;
+`a_stream_that_stops_delivering_audio_is_reopened`,
+`a_dead_stream_is_stopped_before_its_replacement_opens`;
 [dictation/audio.rs](../../src/dictation/audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
 `microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,
@@ -468,8 +470,9 @@ after a WhatsApp desktop call ended, the warm built-in microphone stream kept
 running without an error but delivered only exact zeros, so every dictation
 was discarded as near-silent (`zero_fraction` 1.0) until Hex restarted. A
 finished dictation whose audio through the release is exactly zero now
-reopens the stream the way a stream failure does; a cold microphone
-(release-while-idle) already opens fresh for each press. Linux hotkey
+reopens the stream the way a stream failure does, closing the dead stream
+before its replacement opens so the new one starts cold as at launch; a cold
+microphone (release-while-idle) already opens fresh for each press. Linux hotkey
 dictation does the same for a warm microphone; service and programmatic
 captures do not check it, and one released while idle opens fresh. The
 first such dictation is still discarded. Not verified with a real WhatsApp
