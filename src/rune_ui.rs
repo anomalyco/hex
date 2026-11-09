@@ -670,6 +670,7 @@ pub(crate) struct Ui {
     /// When a text field last changed without being saved.
     draft_since: Option<Instant>,
     duck_volume_drag: Option<f32>,
+    sound_volume_drag: Option<f32>,
     models: models::Models,
     history: history::HistoryPane,
     #[cfg(hex_capture)]
@@ -796,6 +797,7 @@ impl Ui {
             preparing: None,
             draft_since: None,
             duck_volume_drag: None,
+            sound_volume_drag: None,
             models: models::Models::default(),
             history: history::HistoryPane::default(),
             #[cfg(hex_capture)]
