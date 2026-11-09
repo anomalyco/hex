@@ -475,7 +475,8 @@ observe input-source changes or show these controls.
   more-dictation-shortcuts`) and shares no key with another active shortcut.
   `mode` is `hold_or_double_tap` (the default), `hold`, `tap`, or `double_tap`;
   `double_tap` needs a binding with a key and otherwise reads as
-  `hold_or_double_tap`. Turning the Lab off keeps the rows saved.
+  `hold_or_double_tap`, except that Labs › Double-tap on a lone modifier also
+  allows a binding without one. Turning the Lab off keeps the rows saved.
 - `json` settings (modes, extra dictation shortcuts, meeting providers,
   excluded calendars) take the JSON value the file stores.
 - `ui_language` takes `en`, `pl`, `zh` (Simplified Chinese), `zh-Hant`

@@ -37,7 +37,9 @@ pub(super) fn capture_refusal(other_recording: bool, suspended: bool) -> Option<
     }
 }
 
-/// Why Paste Last can't paste now, if it can't.
+/// A `hex paste-last` (or the menu bar's Paste Last Dictation) waits for
+/// every capture and shortcut gesture to end: pasting cancels the audio
+/// owner's capture, which would strand the machine that started it.
 pub(super) fn paste_last_refusal(capture_active: bool) -> Option<ControlReply> {
     capture_active.then(|| {
         ControlReply::error(
