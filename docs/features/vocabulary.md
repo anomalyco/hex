@@ -48,13 +48,16 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too) 
 │   the local API, dictation that falls back to the whole clip
 │   └── The greedy words stand; where the audio could also spell a term, the
 │       decoder follows the term alongside them, and the term replaces them
-│       only when its score plus the boost per term piece beats theirs at the
-│       word boundary (0.6 × the boost when the words don't sound like it)
+│       when its score plus the boost per term piece beats theirs at the word
+│       boundary (0.6 × the boost when the words don't sound like it), or when
+│       the words exactly match one of the term's "sounds like" spellings (at
+│       least 2 letters)
 ├── Live stream or TDT model -> after the greedy decode, spans of up to 4 words
 │   that look or sound like a term (or match a "sounds like" spelling) are
 │   rescored on the same audio frames from the same decoder state: the term
-│   replaces the span only when its score plus the boost per term piece beats
-│   the heard words'
+│   replaces the span when its score plus the boost per term piece beats the
+│   heard words', and always when the span exactly matches one of the term's
+│   "sounds like" spellings (at least 2 letters)
 ├── Left alone: case-only differences, inflections ("Cappuccinos"), and addresses
 │   and paths ("opencode.ai"); rescoring also skips terms under 5 letters
 │   without a spelling, which the RNN-T decoder can still write ("Kip" -> Kit)
@@ -143,12 +146,13 @@ or migrate settings.
 Short names with few consonant sounds (Rune, Dax) would sound like too many
 words, so search finds their mis-transcriptions only through "sounds like"
 spellings, and rescoring changes them only where a spelling matches.
-Transcription never replaces text blindly: a term goes in only when the model
-scores it close to what it heard on the same audio. Both live in Hex's
-transcribe.cpp fork (branch `hex/parakeet-vocabulary-tree`:
-`decode_rnnt_tree` in `src/arch/parakeet/decoder.cpp`, rescoring in
-`vocabulary.cpp`); measurements are in
-[vocabulary-boost-results.md](../research/vocabulary-boost-results.md).
+An exact match of one of your "sounds like" spellings (at least 2 letters) is
+replaced by the term; other near matches still go in only when the model scores
+the term close to what it heard on the same audio. Both live in Hex's
+transcribe.cpp fork (branch `hex/parakeet-vocabulary-tree`, with exact-spelling
+replacement on `hex/vocabulary-sounds-like`: `decode_rnnt_tree` in
+`src/arch/parakeet/decoder.cpp`, rescoring in `vocabulary.cpp`); measurements
+are in [vocabulary-boost-results.md](../research/vocabulary-boost-results.md).
 
 Provisional defaults, each changed in one place:
 
