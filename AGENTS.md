@@ -905,7 +905,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   kept. An explicit CLI `--device` remains authoritative for that listener
   process and never falls back. A stream that already failed or delivered
   digital silence is stopped before its replacement opens, so the replacement
-  starts with no Hex stream on the device, as at launch. A runtime stream
+  starts with no dictation stream on the device, as at launch. A runtime stream
   failure cancels an incomplete capture (a programmatic one keeps the audio
   delivered before the failure for its owner's `/finish`, which answers
   `microphone-lost` when there is none), discards stale chunks, and retries
