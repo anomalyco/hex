@@ -51,19 +51,22 @@ Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too) 
 │   │   when its score plus the boost per term piece beats theirs at the word
 │   │   boundary (0.6 × the boost when the words don't sound like it)
 │   └── After the tree decode, a separate pass replaces exact "sounds like"
-│       spelling matches with their term, with no scoring
+│       spelling matches with their term, with no scoring; a longer spelling
+│       is not split by a shorter spelling of the same term inside it
 ├── Live stream or TDT model -> after the greedy decode, spans of up to 4 words
 │   that look or sound like a term are rescored on the same audio frames from
 │   the same decoder state: the term replaces the span when its score plus the
 │   boost per term piece beats the heard words'
 │   └── Exact "sounds like" spellings resolve first with no scoring (longest
-│       span, then earliest; ordinary candidates overlapping one are skipped),
-│       and the pass runs even when a stream kept no frames
+│       span, then earliest; a longer spelling is not split by a shorter
+│       spelling of the same term inside it; ordinary candidates overlapping
+│       one are skipped), and the pass runs even when a stream kept no frames
 ├── Left alone: case-only differences, inflections ("Cappuccinos"), addresses
 │   and paths ("opencode.ai"), and "sounds like" spellings under 2 characters
-│   (Unicode code points), which are ignored entirely; rescoring also skips
-│   terms under 5 letters without a spelling, which the RNN-T decoder can still
-│   write ("Kip" -> Kit)
+│   (Unicode code points, counted after lowercasing and dropping ASCII spaces
+│   and punctuation), which are ignored entirely; rescoring also skips terms
+│   under 5 letters without a spelling, which the RNN-T decoder can still write
+│   ("Kip" -> Kit)
 └── SenseVoice, Cohere, GigaAM, Granite, Apple Speech -> no vocabulary in transcription
 
 Context prompt (Whisper incl. ivrit.ai and NB-Whisper, Qwen3-ASR, QwenCleo)  // vocabulary.prompt-transcription; transcription::gguf_session::with_vocabulary
@@ -153,8 +156,9 @@ An exact match of one of your "sounds like" spellings (at least 2 characters) is
 replaced by the term in a separate pass after decoding, with no acoustic
 scoring; other near matches still go in only when the model scores the term
 close to what it heard on the same audio. Because that pass never asks how the
-term sounds, a spelling that is also an ordinary word is replaced every time it
-is heard, so keep spellings distinctive. Both live in Hex's transcribe.cpp fork
+term sounds, a spelling that is also an ordinary word is replaced whenever it's
+heard, so keep spellings distinctive. Exact spellings count toward the 16
+candidate spans per decode and sort first. Both live in Hex's transcribe.cpp fork
 (branch `hex/vocabulary-sounds-like`: `decode_rnnt_tree` and
 `rescore_vocabulary` in `src/arch/parakeet/decoder.cpp`, while `vocabulary.cpp`
 finds candidates, classifies spans, and runs the exact-spelling pass,
