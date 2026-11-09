@@ -596,6 +596,8 @@ struct Look<'a, S> {
     caps: &'a [String],
     /// Hex's Dot scope, the words' launch pad.
     hud: Option<&'a DotFrame>,
+    /// When the scope last came or went, on the game's clock.
+    hud_changed: f64,
     /// The heading over the cards.
     title: &'static str,
     /// The shortcut starts and stops dictation instead of being held.
@@ -954,6 +956,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
         let look = Look::<Ui> {
             caps: &s.caps,
             hud,
+            hud_changed: session.hud.changed,
             title,
             toggle: s.toggle,
             warming,
@@ -976,6 +979,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> Option<El> {
         let look = Look::<Onboard> {
             caps: &s.caps,
             hud,
+            hud_changed: session.hud.changed,
             title,
             toggle: s.toggle,
             warming: false,
@@ -1111,6 +1115,7 @@ fn view(g: &Game, cx: &mut Cx<Game>) -> El {
         &Look::<Game> {
             caps: &caps,
             hud: g.hud.frame(),
+            hud_changed: g.hud.changed,
             title: "Clear your messages",
             toggle: false,
             warming: false,
@@ -1367,19 +1372,50 @@ fn header<S: 'static>(
 /// lands; between takes, a pill that says nothing is recording and asks for
 /// the shortcut. Both step aside for the score card.
 fn hud<S>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<S>) -> Vec<El> {
-    if chrome(g, t) <= 0.5 {
+    let chrome = chrome(g, t);
+    if chrome <= 0.01 {
         return Vec::new();
     }
     let scope = look
         .hud
+        .filter(|_| chrome > 0.5)
         .map(|frame| frame_slot("game-dot-hud", HUD_AT, HUD_SCALE, frame));
-    let waiting = scope.is_none();
+    // The stage lands every change at once, so the pill's fade and settle
+    // are worked out on the game's clock: it gives way fast as the scope
+    // opens, comes back slower once it has gone, and steps aside with the
+    // rest of the chrome for the score card.
+    let waiting = look.hud.is_none();
+    let since = (t - look.hud_changed).max(0.0);
+    let shown = if waiting {
+        settled(since, 0.35)
+    } else {
+        1.0 - settled(since, 0.12)
+    };
+    let scale = if reduced {
+        1.0
+    } else {
+        0.92 + 0.08
+            * if waiting {
+                settled(since, 0.3)
+            } else {
+                1.0 - settled(since, 0.3)
+            }
+    };
+    if shown * chrome <= 0.002 {
+        return scope.into_iter().collect();
+    }
     let pill = idle_pill(p, look.caps, look.toggle, t, reduced)
-        .opacity(if waiting { 1.0 } else { 0.0 })
-        .opacity_motion(Spring::new(if waiting { 0.35 } else { 0.12 }, 0.0))
-        .scale(if waiting || reduced { 1.0 } else { 0.92 })
-        .scale_motion(Spring::new(0.3, 0.0));
+        .opacity(shown * chrome)
+        .scale(scale)
+        .opacity_motion(Anim::INSTANT)
+        .scale_motion(Anim::INSTANT);
     std::iter::once(pill).chain(scope).collect()
+}
+
+/// A zero-bounce spring of `response` seconds, `t` after it sets off.
+fn settled(t: f64, response: f64) -> f32 {
+    let w = std::f64::consts::TAU / response;
+    (1.0 - (1.0 + w * t) * (-w * t).exp()) as f32
 }
 
 /// Seconds between the idle pill's invitations to press the shortcut.
@@ -1451,6 +1487,8 @@ fn idle_pill(p: Paint, caps: &[String], toggle: bool, t: f64, reduced: bool) -> 
 struct GameHud {
     hud: LiveHud,
     landed: usize,
+    /// When the scope last came or went, on the game's clock.
+    changed: f64,
 }
 
 impl Default for GameHud {
@@ -1458,6 +1496,7 @@ impl Default for GameHud {
         Self {
             hud: LiveHud::until_pressed(),
             landed: 0,
+            changed: f64::NEG_INFINITY,
         }
     }
 }
@@ -1466,7 +1505,11 @@ impl GameHud {
     fn step(&mut self, play: &Play, now: f64, held: bool, peak: Option<f32>, reduced: bool) {
         let landed = play.landed != self.landed;
         self.landed = play.landed;
+        let shown = self.hud.frame().is_some();
         self.hud.step(now, held, peak, landed, reduced);
+        if self.hud.frame().is_some() != shown {
+            self.changed = now;
+        }
     }
 
     fn frame(&self) -> Option<&DotFrame> {
