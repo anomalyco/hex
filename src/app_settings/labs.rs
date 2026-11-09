@@ -150,6 +150,9 @@ pub struct LabsSettings {
     /// `hex transcribe <file>` turns a WAV recording into text with the
     /// dictation model.
     pub transcribe_files: bool,
+    /// The local API's `process=global` returns transcripts after Global
+    /// mode's output processing.
+    pub api_processing: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -213,6 +216,7 @@ impl Default for LabsSettings {
             more_call_apps: false,
             opencode_in_wsl: false,
             transcribe_files: false,
+            api_processing: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,

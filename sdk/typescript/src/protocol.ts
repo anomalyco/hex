@@ -183,10 +183,16 @@ export const decodeTranscription = (value: unknown): TranscriptionResult => {
   const input = record(value)
   const transcript = input && string(input.transcript)
   const durationMs = input && number(input.durationMs)
-  if (transcript === undefined || durationMs === undefined || durationMs < 0) {
+  const processed = input && (input.processed === undefined ? undefined : string(input.processed))
+  if (
+    transcript === undefined
+    || durationMs === undefined
+    || durationMs < 0
+    || (input?.processed !== undefined && processed === undefined)
+  ) {
     return invalid("transcription response")
   }
-  return { transcript, durationMs }
+  return processed === undefined ? { transcript, durationMs } : { transcript, durationMs, processed }
 }
 
 export const decodeProgress = (value: unknown): ModelProgress | "ok" => {

@@ -18,7 +18,9 @@ The code is `src/local_api/streams.rs` (routes) and `src/transcription/stream.rs
 
 - The running Hex app on macOS, Linux, and Windows, with a GGUF model loaded
   by dictation (on Linux and Windows, once the listener is on).
-- `GET /capabilities` reports `"streams": true` when the routes exist.
+- `GET /capabilities` reports `"streams": true` when the routes exist, and
+  `"outputProcessing": true` when `process=global` would run (Labs › Process
+  API transcripts on, and the running app installed its processor).
 - Streams never load, download, or switch a model. They use whatever model
   and language dictation holds; if there is none, creating a stream answers
   `503 model-not-loaded`.
@@ -126,6 +128,26 @@ Transcribes what's left and answers with the final, as the `final` event:
 { "text": "…", "segments": [{ "segment": 0, "startMs": 0, "endMs": 7420, "text": "…" }], "durationMs": 31250 }
 ```
 
+`?process=global` (Labs › Process API transcripts) adds the text after Hex's
+Global-mode output processing, exactly as a paste with no matching app or
+website mode gets it: global replacements, Global mode corrections, the
+optional OpenCode rewrite, and Global's selected transformations. `true` and
+`1` are aliases for `global`; any other value, or a repeated parameter,
+answers `400 invalid-request`. Without the parameter the response is exactly
+as above.
+
+```json
+{ "text": "…", "segments": [ … ], "durationMs": 31250, "processed": "…" }
+```
+
+`processed` is the paste-ready text. Processing is best-effort and follows
+the paste path: a failed stage keeps its input, so the call still succeeds.
+It never pastes, saves History, updates Paste Last, or touches the clipboard.
+With the lab off the answer is `403 processing-disabled`, checked before any
+work; without an installed processor (for example `hex service`) it is `409
+processing-unavailable`. A refused `finish` leaves the stream running so the
+caller can finish again.
+
 No more audio is accepted once finishing. It waits up to 120 s (for example
 behind a long dictation) and then answers `504 stream-finish-timeout`; the
 stream keeps going, so call `finish` again or read the events. A stream that
@@ -192,14 +214,16 @@ has no body.
 
 | Status | Code | When |
 | --- | --- | --- |
-| 400 | `invalid-request` | Create body isn't the JSON above. |
+| 400 | `invalid-request` | Create body isn't the JSON above, or `process` is not `global`, `true`, or `1` (or is repeated). |
 | 400 | `unsupported-sample-rate` | `sampleRate` isn't 16000. |
 | 400 | `unsupported-sample-format` | Not `f32le` or `s16le`. |
 | 400 | `unknown-model` | `model` isn't a Hex model id. |
 | 400 | `invalid-audio` | Partial sample or non-finite float. |
 | 401 | (no body) | Missing or wrong bearer token. |
+| 403 | `processing-disabled` | `process` was asked for while Labs › Process API transcripts is off. |
 | 404 | `stream-not-found` | Unknown id, replaced stream, or wrong stream token. |
 | 409 | `model-mismatch` | Requested model/language isn't the held one. |
+| 409 | `processing-unavailable` | `process` was asked for and no processor is installed (for example `hex service`). |
 | 409 | `stream-busy` | Another stream is live. |
 | 409 | `stream-ended` | Audio or heartbeat after the end. |
 | 409 | `stream-finishing` | Audio after `finish`. |

@@ -197,6 +197,8 @@ impl WindowsDesktopHost {
         history: Option<History>,
         indicator: crate::rune_hud::HudSender,
         dictations: crate::dictation::service::DictationQueue,
+        mode_runtime: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
+        transformations: Arc<crate::personal_commands::TransformationClient>,
     ) -> Self {
         crate::desktop::i18n::apply(settings.ui_language.as_deref());
         let mut event_reader = EventReader::open(&event_path);
@@ -204,9 +206,6 @@ impl WindowsDesktopHost {
         activity.refresh(&mut event_reader);
         let last_completed_at = last_completed_at(event_reader.events().iter());
         let started_at = crate::desktop::events::now_ms();
-        let mode_runtime = Arc::new(RwLock::new(
-            crate::dictation::modes::ModeRuntime::from_settings(&settings),
-        ));
         // Known before the first poll, so launching keeps the saved model
         // instead of applying the current layout's mapping.
         let keyboard_switcher = crate::transcription::keyboard_model_switching::Switcher::new(
@@ -235,7 +234,7 @@ impl WindowsDesktopHost {
             last_dictation: Arc::new(Mutex::new(None)),
             indicator,
             mode_runtime,
-            transformations: Arc::new(crate::personal_commands::TransformationClient::default()),
+            transformations,
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
             preparation: TranscriptionPreparation::default(),

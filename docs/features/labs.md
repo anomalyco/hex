@@ -68,6 +68,12 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── More call apps no    labs.more_call_apps             (every OS with Meetings) Signal, Telegram, WeChat, LINE, Webex, Element, and Phone calls are offered,
 │                                        and calls on Google Voice, Messenger, Teams, FaceTime, GroupMe, and Webex pages are named
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
+├── Process API transcripts no labs.api_processing       (every OS) apps using Hex's local API can add process=global to
+│                                        POST /transcriptions and POST /streams/{id}/finish to get the text after Global
+│                                        mode's replacements, corrections, rewrite, and transformations; off, responses
+│                                        stay raw transcripts as before
+│                                        // checks: local_api::processing route tests (403, 409, 400, processed, absent);
+│                                        // not observed on macOS or Windows, and no /transcriptions success without a model
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
@@ -1478,6 +1484,48 @@ per-meeting context field, or adding terms to retranscription. Checks:
 [labs.rs](../../src/labs.rs). Not yet observed: real notes written with the
 toggle on; the Labs page goldens that show Meetings rows need regenerating
 with the new row.
+
+Process API transcripts (`api-processing`; every OS; its row is Output's): for
+a host app that wants what a person would paste, not just the raw transcript.
+While on, the authenticated local API's `POST /transcriptions` and
+`POST /streams/{id}/finish` accept `process=global` (`true` and `1` are
+aliases); the response keeps its existing fields and adds `processed`, the
+text after exactly what a paste with no matching app or website mode gets:
+global replacements, Global mode corrections, the optional OpenCode rewrite,
+and Global's selected transformations
+([streams.md](../streams.md#post-streamsidfinish),
+[local-transcription-service.md](../specs/local-transcription-service.md)).
+The context is `ContextSnapshot::default()`, so no app or website mode
+applies, and the transform `source` is `dictation`. It never pastes, writes
+History, updates Paste Last, or touches the clipboard, and like a paste it is
+best-effort: a failed stage keeps its input and the call still succeeds.
+
+An absent parameter leaves the response byte-for-byte as before. Any other
+value, or a repeated parameter, is `400 invalid-request`. With the lab off,
+`process` answers `403 processing-disabled`; `/transcriptions` checks it
+before reading the audio body, and a refused `/finish` leaves the stream
+running. A process with no installed processor, such as `hex service` or
+`--embedded`, answers `409 processing-unavailable`.
+`GET /capabilities` adds `outputProcessing`, true only with the lab on and a
+processor installed. `API_VERSION` stays `2`.
+
+The running app installs one processor built from its dictation pipeline:
+macOS reads the live profiles snapshot in
+[dictation/config.rs](../../src/dictation/config.rs) and the recognition
+loop's transformation client; Linux and Windows read the listener's live
+`ModeRuntime` and transformation client. Both are the objects settings saves
+already update, so edits and the personal-commands approval gate apply
+without a restart, and processing keeps its existing deadlines. The seam is
+`Processing` in [local_api/processing.rs](../../src/local_api/processing.rs),
+passed through `LocalApiOptions` like `control` and `dictation_control`.
+`hex service` installs none. Checks: `local_api::processing` route tests cover
+the 403 before the body, the 409, invalid and repeated values, the aliases,
+`processed` present with the existing fields unchanged, absent responses, and
+`outputProcessing`; `api_processing_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not observed: a real `/transcriptions` success
+needs an installed model, so its `processed` field is covered through the
+shared seam and the `/streams` finish route rather than an end-to-end
+transcription; nothing ran on macOS or Windows.
 
 Meeting finished event (`meeting-finished-event`, issue 964; every OS with
 Meetings; its row shows wherever Meetings does): for a companion app that

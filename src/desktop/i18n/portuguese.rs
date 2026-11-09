@@ -1204,6 +1204,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker. Looking for it can start WSL.", "Usa um serviço do OpenCode rodando na sua distribuição WSL padrão para a reescrita de Modos e o seletor de modelos de Modos. Procurá-lo pode iniciar o WSL."),
     ("Transcribe files", "Transcrever arquivos"),
     ("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model.", "Adiciona hex transcribe <file> para transformar uma gravação WAV em texto com seu modelo de ditado."),
+    ("Process API transcripts", "Processar transcrições da API"),
+    ("Apps that use Hex's local API can ask for transcripts with your Global mode's corrections, rewrite, and transformations applied", "Apps que usam a API local do Hex podem pedir transcrições com as correções, a reescrita e as transformações do seu modo Global aplicadas"),
 ];
 
 #[cfg(test)]

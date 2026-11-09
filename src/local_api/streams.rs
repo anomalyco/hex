@@ -39,7 +39,11 @@ pub(super) enum StreamAction {
         body_prefix: Vec<u8>,
     },
     Events(Arc<Stream>),
-    Finish(Arc<Stream>),
+    Finish {
+        stream: Arc<Stream>,
+        /// `process=global` was asked for and admitted.
+        process: bool,
+    },
 }
 
 pub(super) fn create_action(request: HttpRequest) -> RequestAction {
@@ -100,7 +104,16 @@ pub(super) fn route(
             })
         }
         ("GET", "events") => RequestAction::Stream(StreamAction::Events(stream)),
-        ("POST", "finish") => RequestAction::Stream(StreamAction::Finish(stream)),
+        ("POST", "finish") => {
+            let process = match super::processing::wanted(&request.path) {
+                Ok(wanted) => match super::processing::gate(wanted, &context.processing) {
+                    Ok(process) => process,
+                    Err(response) => return respond(response),
+                },
+                Err(code) => return respond(HttpResponse::code(400, code)),
+            };
+            RequestAction::Stream(StreamAction::Finish { stream, process })
+        }
         ("POST", "cancel") => {
             stream.cancel();
             respond(HttpResponse::empty(204))
@@ -126,7 +139,7 @@ pub(super) fn handle(connection: &mut TcpStream, action: StreamAction, context: 
             body_prefix,
         } => audio(connection, &stream, content_length, body_prefix, context),
         StreamAction::Events(stream) => return events(connection, &stream, context),
-        StreamAction::Finish(stream) => finish(&stream, context),
+        StreamAction::Finish { stream, process } => finish(&stream, process, context),
     };
     if let Err(error) = write_response(connection, response) {
         tracing::debug!(%error, "stream client disconnected");
@@ -252,21 +265,28 @@ fn audio(
     }
 }
 
-fn finish(stream: &Stream, context: &HttpContext) -> HttpResponse {
+fn finish(stream: &Stream, process: bool, context: &HttpContext) -> HttpResponse {
     let stop = || context.shutdown.load(Ordering::Acquire);
     match stream.finish(FINISH_TIMEOUT, &stop) {
         Some(End::Final {
             text,
             segments,
             duration_ms,
-        }) => HttpResponse::json(
-            200,
-            &serde_json::json!({
-                "text": text,
+        }) => {
+            let mut response = serde_json::json!({
+                "text": &text,
                 "segments": segments,
                 "durationMs": duration_ms,
-            }),
-        ),
+            });
+            super::processing::attach(
+                &mut response,
+                process,
+                &context.processing,
+                &text,
+                &stream.selection.language,
+            );
+            HttpResponse::json(200, &response)
+        }
         Some(End::Failed { code, message }) => HttpResponse::json(
             409,
             &serde_json::json!({ "code": code, "message": message }),

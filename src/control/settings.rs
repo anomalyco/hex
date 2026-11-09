@@ -585,6 +585,12 @@ const KEYS: &[Key] = &[
         "Labs: hex transcribe <file> turns a WAV recording into text with the selected dictation model",
     ),
     key(
+        "labs.api_processing",
+        Kind::Bool,
+        "Labs: apps using Hex's local API can ask for transcripts with Global mode's corrections, \
+         rewrite, and transformations applied (process=global)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

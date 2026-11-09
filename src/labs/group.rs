@@ -74,7 +74,8 @@ impl Feature {
             | Self::TypedText
             | Self::TerminalPaste
             | Self::OutputFixes
-            | Self::OpenCodeInWsl => Group::Output,
+            | Self::OpenCodeInWsl
+            | Self::ApiProcessing => Group::Output,
             Self::KeepRecordings | Self::HistoryStats | Self::RecentDictations => Group::History,
             Self::Meetings
             | Self::LiveChapters

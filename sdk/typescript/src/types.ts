@@ -79,11 +79,19 @@ export interface TranscriptionRequest extends RequestOptions {
   readonly audio: AudioClip
   readonly model: ModelId
   readonly language?: string
+  /**
+   * Ask the running desktop app for the text after its Global mode's output
+   * processing (Labs › Process API transcripts). Absent, the transcript is
+   * raw as before.
+   */
+  readonly process?: "global"
 }
 
 export interface TranscriptionResult {
   readonly transcript: string
   readonly durationMs: number
+  /** Present only when the request asked for `process: "global"`. */
+  readonly processed?: string
 }
 
 export interface DictationStartOptions {

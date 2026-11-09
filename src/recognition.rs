@@ -406,8 +406,8 @@ pub fn listen(
     indicator: Option<DictationIndicatorSender>,
     history: Option<crate::history::History>,
     controls: Option<Receiver<RecognitionControl>>,
+    transformations: Arc<crate::personal_commands::TransformationClient>,
 ) -> Result<()> {
-    let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
     shutdown.store(false, Ordering::Relaxed);
     // Feedback admission is advisory: a cold audio stack can exceed the
     // preload timeout, and missing tones must not stop desktop recognition.

@@ -183,6 +183,19 @@ impl DictationOutput {
         }
     }
 
+    /// Reuses the mode runtime and transformation client the local API's
+    /// `process=global` reads, so both see the same settings and personal
+    /// commands host.
+    pub(crate) fn sharing(
+        mut self,
+        modes: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
+        transformations: Arc<crate::personal_commands::TransformationClient>,
+    ) -> Self {
+        self.modes = modes;
+        self.transformations = transformations;
+        self
+    }
+
     /// Processes (unless raw) and pastes one transcript, or only
     /// processes it when there is no paster (a printing stop), then records
     /// it.
