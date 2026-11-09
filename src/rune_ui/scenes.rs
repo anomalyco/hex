@@ -591,6 +591,12 @@ pub(super) const SCENES: &[Scene] = &[
     #[cfg(hex_capture)]
     ("mac-scrawl", |ui| scrawl_fixture(ui, true, |_| {})),
     #[cfg(hex_capture)]
+    ("mac-scrawl-open", |ui| {
+        scrawl_fixture(ui, true, |view| view.how_it_works = true);
+        ui.advanced.push(Pane::Annotate);
+        ui.settings.labs.annotate_replay = true;
+    }),
+    #[cfg(hex_capture)]
     ("mac-scrawl-running", |ui| {
         scrawl_fixture(ui, true, |view| view.scrawl_running = true)
     }),
