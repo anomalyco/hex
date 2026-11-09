@@ -24,7 +24,7 @@ use crate::app_settings::RuntimeHotkey;
 use crate::capture_host::{CaptureNeed, CaptureTarget};
 use crate::rune_ui::capture_capsule::flow::{Action, Mode};
 use crate::rune_ui::capture_capsule::picker::{PickerOverlay, PickerRole};
-use crate::rune_ui::screenshot_thumbnail::Thumbnail;
+use crate::rune_ui::screenshot_thumbnail::{CardKey, Thumbnail};
 
 struct Overlays {
     picker: PickerOverlay,
@@ -371,6 +371,8 @@ enum Effect {
     Record,
     Cancel,
     Toggle,
+    /// A key for the card under the pointer.
+    Card(CardKey),
 }
 
 /// The two shortcuts the tap matches: a screenshot, and a recording.
@@ -382,6 +384,27 @@ struct Shortcuts {
 
 const ESCAPE: u16 = 53;
 const SPACE: u16 = 49;
+const RETURN: u16 = 36;
+const KEY_C: u16 = 8;
+const KEY_S: u16 = 1;
+const KEY_E: u16 = 14;
+const KEY_W: u16 = 13;
+/// Command, Shift, Control, and Option in a key's flags.
+const COMMAND: u64 = 0x10_0000;
+const MODIFIERS: u64 = 0x1E_0000;
+
+/// What a key does to the card under the pointer, as CleanShot's overlay
+/// takes them: ⌘C, ⌘S, ⌘E, ⌘W, and Escape and Return alone.
+fn card_key(code: u16, flags: u64) -> Option<CardKey> {
+    match (code, flags & MODIFIERS) {
+        (KEY_C, COMMAND) => Some(CardKey::Copy),
+        (KEY_S, COMMAND) => Some(CardKey::Reveal),
+        (KEY_E, COMMAND) => Some(CardKey::Edit),
+        (KEY_W, COMMAND) | (ESCAPE, 0) => Some(CardKey::Close),
+        (RETURN, 0) => Some(CardKey::Keep),
+        _ => None,
+    }
+}
 
 /// The keys this took the press of, so their releases go too.
 #[derive(Default)]
@@ -393,6 +416,7 @@ impl Taken {
         key: Key,
         shortcuts: Shortcuts,
         picking: bool,
+        card: bool,
         recording_shortcut: bool,
     ) -> (Take, Effect) {
         let Some(bit) = 1u128.checked_shl(u32::from(key.code)) else {
@@ -421,6 +445,10 @@ impl Taken {
             _ if record => Effect::Record,
             ESCAPE if picking => Effect::Cancel,
             SPACE if picking => Effect::Toggle,
+            code if card && !picking => match card_key(code, key.flags) {
+                Some(card) => Effect::Card(card),
+                None => return (Take::No, Effect::None),
+            },
             _ => return (Take::No, Effect::None),
         };
         self.0 |= bit;
@@ -455,6 +483,7 @@ pub(crate) fn key(key: Key) -> Take {
         key,
         shortcuts,
         picking,
+        crate::rune_ui::screenshot_thumbnail::hovered(),
         crate::app_settings::hotkey_capture_active(),
     );
     drop(taken);
@@ -468,6 +497,11 @@ pub(crate) fn key(key: Key) -> Take {
         }
         Effect::Cancel => cancel(),
         Effect::Toggle => toggle(),
+        Effect::Card(card) => {
+            if let Some(overlays) = OVERLAYS.get() {
+                overlays.thumbnail.key(card);
+            }
+        }
     }
     take
 }
@@ -528,11 +562,11 @@ mod tests {
     fn the_shortcut_opens_the_picker_and_its_release_stays_with_it() {
         let mut taken = Taken::default();
         assert_eq!(
-            taken.decide(press(21, COMMAND_SHIFT), hotkey(), false, false),
+            taken.decide(press(21, COMMAND_SHIFT), hotkey(), false, false, false),
             (Take::AfterListener, Effect::Begin)
         );
         assert_eq!(
-            taken.decide(release(21), hotkey(), true, false),
+            taken.decide(release(21), hotkey(), true, false, false),
             (Take::AfterListener, Effect::None)
         );
         assert_eq!(taken.0, 0);
@@ -543,9 +577,9 @@ mod tests {
         let mut taken = Taken::default();
         let mut repeat = press(21, COMMAND_SHIFT);
         repeat.repeat = true;
-        taken.decide(press(21, COMMAND_SHIFT), hotkey(), false, false);
+        taken.decide(press(21, COMMAND_SHIFT), hotkey(), false, false, false);
         assert_eq!(
-            taken.decide(repeat, hotkey(), true, false),
+            taken.decide(repeat, hotkey(), true, false, false),
             (Take::AfterListener, Effect::None)
         );
     }
@@ -554,20 +588,20 @@ mod tests {
     fn escape_and_space_belong_to_the_open_picker_only() {
         let mut taken = Taken::default();
         assert_eq!(
-            taken.decide(press(ESCAPE, 0), hotkey(), false, false),
+            taken.decide(press(ESCAPE, 0), hotkey(), false, false, false),
             (Take::No, Effect::None)
         );
         assert_eq!(
-            taken.decide(press(SPACE, 0), hotkey(), true, false),
+            taken.decide(press(SPACE, 0), hotkey(), true, false, false),
             (Take::AfterListener, Effect::Toggle)
         );
         assert_eq!(
-            taken.decide(press(ESCAPE, 0), hotkey(), true, false),
+            taken.decide(press(ESCAPE, 0), hotkey(), true, false, false),
             (Take::Only, Effect::Cancel)
         );
         // Escape's release goes with it even once the picker closed.
         assert_eq!(
-            taken.decide(release(ESCAPE), hotkey(), false, false),
+            taken.decide(release(ESCAPE), hotkey(), false, false, false),
             (Take::Only, Effect::None)
         );
     }
@@ -576,15 +610,21 @@ mod tests {
     fn other_keys_and_other_chords_pass() {
         let mut taken = Taken::default();
         assert_eq!(
-            taken.decide(press(21, 0x10_0000), hotkey(), false, false),
+            taken.decide(press(21, 0x10_0000), hotkey(), false, false, false),
             (Take::No, Effect::None)
         );
         assert_eq!(
-            taken.decide(press(0, 0), hotkey(), true, false),
+            taken.decide(press(0, 0), hotkey(), true, false, false),
             (Take::No, Effect::None)
         );
         assert_eq!(
-            taken.decide(press(21, COMMAND_SHIFT), Shortcuts::default(), false, false),
+            taken.decide(
+                press(21, COMMAND_SHIFT),
+                Shortcuts::default(),
+                false,
+                false,
+                false
+            ),
             (Take::No, Effect::None)
         );
     }
@@ -597,13 +637,50 @@ mod tests {
             shot: None,
         };
         assert_eq!(
-            taken.decide(press(21, COMMAND_SHIFT), shortcuts, false, false),
+            taken.decide(press(21, COMMAND_SHIFT), shortcuts, false, false, false),
             (Take::AfterListener, Effect::Record)
         );
-        taken.decide(release(21), shortcuts, false, false);
+        taken.decide(release(21), shortcuts, false, false, false);
         assert_eq!(
-            taken.decide(press(21, COMMAND_SHIFT), shortcuts, true, false),
+            taken.decide(press(21, COMMAND_SHIFT), shortcuts, true, false, false),
             (Take::AfterListener, Effect::None)
+        );
+    }
+
+    #[test]
+    fn a_hovered_card_takes_its_keys_and_only_then() {
+        let mut taken = Taken::default();
+        let command = |code| press(code, COMMAND | 0x8);
+        assert_eq!(
+            taken.decide(command(KEY_C), hotkey(), false, true, false),
+            (Take::AfterListener, Effect::Card(CardKey::Copy))
+        );
+        taken.decide(release(KEY_C), hotkey(), false, true, false);
+        assert_eq!(
+            taken.decide(command(KEY_W), hotkey(), false, true, false),
+            (Take::AfterListener, Effect::Card(CardKey::Close))
+        );
+        assert_eq!(
+            taken.decide(press(ESCAPE, 0), hotkey(), false, true, false),
+            (Take::Only, Effect::Card(CardKey::Close))
+        );
+        assert_eq!(
+            taken.decide(press(RETURN, 0), hotkey(), false, true, false),
+            (Take::AfterListener, Effect::Card(CardKey::Keep))
+        );
+        // Off the cards, with another modifier, or while picking: not ours.
+        let mut taken = Taken::default();
+        assert_eq!(
+            taken.decide(command(KEY_C), hotkey(), false, false, false),
+            (Take::No, Effect::None)
+        );
+        assert_eq!(
+            taken.decide(press(KEY_C, COMMAND_SHIFT), hotkey(), false, true, false),
+            (Take::No, Effect::None)
+        );
+        assert_eq!(
+            taken.decide(press(ESCAPE, 0), hotkey(), true, true, false),
+            (Take::Only, Effect::Cancel)
         );
     }
 
@@ -611,7 +688,7 @@ mod tests {
     fn recording_a_shortcut_takes_nothing() {
         let mut taken = Taken::default();
         assert_eq!(
-            taken.decide(press(21, COMMAND_SHIFT), hotkey(), false, true),
+            taken.decide(press(21, COMMAND_SHIFT), hotkey(), false, false, true),
             (Take::No, Effect::None)
         );
     }

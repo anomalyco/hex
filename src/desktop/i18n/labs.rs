@@ -26,4 +26,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Screen recording", ["Nagranie ekranu", "屏幕录制", "画面収録", "Bildschirmaufnahme", "Grabación de pantalla", "Запис екрана"]),
     ("Nothing was said", ["Nic nie powiedziano", "没有说话", "何も話されていません", "Nichts gesagt", "No se dijo nada", "Нічого не сказано"]),
     ("Trim", ["Przytnij", "修剪", "トリム", "Kürzen", "Recortar", "Обрізати"]),
+    ("Open in Editor", ["Otwórz w edytorze", "在编辑器中打开", "エディタで開く", "Im Editor öffnen", "Abrir en el editor", "Відкрити в редакторі"]),
+    ("Show in Finder", ["Pokaż w Finderze", "在访达中显示", "Finder に表示", "Im Finder zeigen", "Mostrar en Finder", "Показати у Finder"]),
+    ("Move to Trash", ["Przenieś do kosza", "移到废纸篓", "ゴミ箱に入れる", "In den Papierkorb legen", "Trasladar a la papelera", "Перемістити в смітник"]),
 ];

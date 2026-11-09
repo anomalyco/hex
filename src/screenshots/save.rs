@@ -139,6 +139,49 @@ pub(crate) fn copy(png: &[u8], file: Option<&Path>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A saved capture on the clipboard, as a card's ⌘C puts it: a shot's
+/// picture and its file, or a recording's file alone.
+pub(crate) fn copy_saved(path: &Path, recording: bool) -> anyhow::Result<()> {
+    if recording {
+        return copy_file(path);
+    }
+    copy(&std::fs::read(path)?, Some(path))
+}
+
+/// Just `path` on the clipboard, so a paste into Finder or a chat gets the
+/// file.
+fn copy_file(path: &Path) -> anyhow::Result<()> {
+    use objc2::runtime::ProtocolObject;
+    use objc2_app_kit::NSPasteboard;
+    use objc2_foundation::{NSArray, NSURL};
+
+    let url = NSURL::from_file_path(path)
+        .ok_or_else(|| anyhow::anyhow!("not a file path: {}", path.display()))?;
+    let pasteboard = NSPasteboard::generalPasteboard();
+    pasteboard.clearContents();
+    let objects = NSArray::from_retained_slice(&[ProtocolObject::from_retained(url)]);
+    anyhow::ensure!(
+        pasteboard.writeObjects(&objects),
+        "could not put the recording on the clipboard"
+    );
+    Ok(())
+}
+
+/// Moves `path` to the Trash, as Finder does.
+pub(crate) fn trash(path: &Path) -> anyhow::Result<()> {
+    use objc2_foundation::{NSFileManager, NSString, NSURL};
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+    NSFileManager::defaultManager()
+        .trashItemAtURL_resultingItemURL_error(&url, None)
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "could not move {} to the Trash: {}",
+                path.display(),
+                error.localizedDescription()
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1166,17 +1166,40 @@ shortcut uses) opens a second copy of Annotate's capture picker
                   ├── PNG (pHYs at the display's scale) -> "Hex Screenshot 2026-11-04 at 14.03.22.png"
                   │   in screenshots.folder (the Desktop when unset); a second shot that second gets " (2)"
                   ├── clipboard -> the PNG and the file's URL, one pasteboard item
-                  └── thumbnail bottom right for 5 s (held while the pointer is on it), 16 pt in,
-                      its corner concentric with the display's (30 pt, a design constant):
+                  └── a card bottom right, 16 pt in, its corner concentric with the display's
+                      (30 pt, a design constant), staying until it's closed (no timer):
                       an area or window shot grows in from exactly the rectangle captured, at that
                       size and place, and springs into its corner slot on one spring that never
-                      overshoots its size, leaving the same way; a whole-display shot slides in from
-                      past the right edge on the HUD's spring (Reduce Motion: a fade either way);
-                      ✕ shows inside its top-left corner on hover;
-                      click -> opens it in the editor, drag -> the file, ✕ -> closes
-                      a dictation while it shows -> pastes as usual, being no shot's talk-over
+                      overshoots its size; a whole-display shot or a recording slides in from past
+                      the right edge on the HUD's spring; any card leaves past the right edge
+                      (Reduce Motion: a fade either way); ✕ shows inside its top-left corner on hover
+                      a dictation while cards show -> pastes as usual, being no shot's talk-over
                       a failure -> the error tone; there is no success sound (Hex has no shutter cue)
 ```
+
+The cards stack in the corner as CleanShot's Quick Access Overlay does
+(`screenshot_thumbnail.rs`, drawn by `screenshot_thumbnail/card.rs`):
+
+```ts
+cards
+├── a new capture  -> nearest the corner; the older cards rise above it, 12 pt apart, on the
+│                     HUD's spring (Reduce Motion: they move at once); once the stack would pass
+│                     the display's top, the oldest close. The stack follows the newest capture
+│                     to its display
+├── click          -> the editor; that card closes
+├── drag           -> the file, into any app
+├── ✕              -> closes that card; the ones above it move down into its place
+├── right-click    -> Open in Editor, Copy, Show in Finder, Move to Trash, Close
+└── keys, while the pointer is on a card (the session tap takes them; nothing gets focus)
+    ├── ⌘C         -> the file on the clipboard (a shot's picture with it); "Copied" on the card
+    ├── ⌘S         -> the file, already saved, shown in Finder
+    ├── ⌘E         -> the editor
+    ├── ⌘W, Escape -> closes it
+    └── Return     -> keeps it (it's saved) and closes the card
+```
+
+CleanShot's ⌘S saves the capture; every Hex capture is already saved,
+so ⌘S shows it in Finder instead.
 
 The card's overlay is the whole display under the pointer, click-through
 outside the card, so the card can start anywhere a shot was taken from.
@@ -1324,9 +1347,12 @@ and `a_large_shot_shrinks_for_its_thumbnail` in
 file in one second, and the PNG's density in
 [screenshots/save.rs](../../src/screenshots/save.rs); the system shortcut
 read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
-`thumbnail_goldens` (rest, hover, and a recording's length, light and dark)
-and the thumbnail's timer in
-[screenshot_thumbnail.rs](../../src/rune_ui/screenshot_thumbnail.rs);
+`thumbnail_goldens` (rest, hover, a recording's length, and three stacked,
+light and dark), a card staying until closed, the stack's slots, the
+oldest closing at the top, and keys reaching only the hovered card in
+[screenshot_thumbnail/tests.rs](../../src/rune_ui/screenshot_thumbnail/tests.rs);
+`a_hovered_card_takes_its_keys_and_only_then` in
+[screenshots.rs](../../src/screenshots.rs);
 `editor_goldens` (marks, the Send to… list, and words while a dictation
 records, light and dark), the layout and the words row's height, words
 landing only while transcribed, Escape dropping them and a waiting send, a
@@ -1337,8 +1363,9 @@ without one) in [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screens
 and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/screenshot_thumbnail/editor/marks.rs);
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
 its card renders as `--scene mac-labs-screenshots`; the card's entrance
-is `thumbnail_frames` (`HEX_SCREENSHOT_FRAMES` writes it at 60 fps).
-Not yet observed: a
+and the stack's motion are `thumbnail_frames` (`HEX_SCREENSHOT_FRAMES`
+writes them at 60 fps).
+Not yet observed: the card keys and right-click menu on a real Mac, a
 real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
 clipboard paste, the thumbnail's drag, the editor on a real display
 (its keys, Copy, Save, and a session receiving a sent shot), talking over a
