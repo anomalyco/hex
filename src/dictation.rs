@@ -51,6 +51,40 @@ pub fn hotkey_pre_roll(behavior: crate::app_settings::RecordingAudioBehavior) ->
         DoNothing => PRE_ROLL_DURATION,
     }
 }
+/// What started a dictation, and so how its transcript is handled: the
+/// dictation shortcut and a local API client dictate normally, Dictate
+/// without processing skips Output, and Labs › Terminal paste always pastes
+/// with Ctrl+Shift+V. Only the Windows and Linux listeners use it.
+#[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DictationFlavour {
+    #[default]
+    Normal,
+    /// Dictate without processing: the transcript is pasted as heard.
+    Raw,
+    /// Labs › Terminal paste shortcut: processed like a normal dictation,
+    /// but pasted with Ctrl+Shift+V whatever Terminal paste says.
+    TerminalPaste,
+}
+
+#[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
+impl DictationFlavour {
+    /// Whether Output's steps are skipped and History says Raw.
+    pub fn raw(self) -> bool {
+        self == Self::Raw
+    }
+
+    /// Whether this paste always sends Ctrl+Shift+V.
+    pub fn terminal_paste(self) -> bool {
+        self == Self::TerminalPaste
+    }
+
+    /// Whether the plain dictation shortcut owns the capture.
+    pub fn normal(self) -> bool {
+        self == Self::Normal
+    }
+}
+
 pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
 /// Audio kept after a shortcut release that finishes a capture, because a
 /// release often lands while the last word is still sounding.

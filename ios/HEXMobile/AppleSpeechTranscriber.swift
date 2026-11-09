@@ -212,6 +212,10 @@ actor AppleSpeechTranscriber: LocalTranscribing {
     }
 
     func transcribe(_ audioURL: URL) async throws -> String {
+        try await transcribe(audioURL, vocabulary: [])
+    }
+
+    func transcribe(_ audioURL: URL, vocabulary: [String]) async throws -> String {
         guard let locale else {
             throw TranscriberError.unavailable
         }
@@ -229,6 +233,15 @@ actor AppleSpeechTranscriber: LocalTranscribing {
         }
 
         let audioFile = try AVAudioFile(forReading: audioURL)
+
+        // Each analyzer handles one dictation and is then discarded, so a context
+        // cannot leak into a later capture with an empty list.
+        if !vocabulary.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings[.general] = vocabulary
+            try? await analyzer.setContext(context)
+        }
+
         try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
 
         var transcript = AttributedString()

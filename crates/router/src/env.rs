@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use crate::config::{RouterConfig, RouterDirs};
 use crate::model::ScrawlBundle;
@@ -23,6 +24,33 @@ pub type Summary = fn(&ScrawlBundle, &Path) -> String;
 /// The `/sdk.js` registration for a tab's URL, when the host serves `/sdk.js`.
 pub type Pages = fn(&str) -> Option<Registration>;
 
+/// One answer from a host's OpenCode transport.
+#[derive(Clone, Debug)]
+pub struct Reply {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
+/// Where OpenCode answers when the host knows better than this machine's registration
+/// (Windows: a service in WSL). `None` from every method leaves the router's own local
+/// server path exactly as it was.
+pub trait OpenCode: Send + Sync {
+    /// One request to the host's OpenCode server, or `None` to use the router's own local
+    /// server. A non-2xx [`Reply`] is the caller's to classify, like the router's own.
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Option<anyhow::Result<Reply>>;
+
+    /// How the host's OpenCode server sees `host`, or `None` when it can't say.
+    fn directory(&self, _host: &Path) -> Option<String> {
+        None
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Env {
     #[cfg(test)]
@@ -32,6 +60,8 @@ pub struct Env {
     pub log: Option<Log>,
     pub summary: Option<Summary>,
     pub pages: Option<Pages>,
+    /// Configured by a host that reaches OpenCode another way (Windows: a service in WSL).
+    pub opencode: Option<Arc<dyn OpenCode>>,
     /// Configured by a host: reads this Mac's OpenCode history and sessions' last lines. Off
     /// when nothing configured the router (tests).
     pub live: bool,

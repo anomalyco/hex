@@ -158,6 +158,76 @@ fn onboarding_continue_without_model() {
     assert!(rt.state.first_run.is_none(), "onboarding closed");
 }
 
+/// The language capsule on the download page: English systems have no
+/// other language, and a later setup replaces the earlier setup's label.
+/// A test's own preferred language keeps both cases independent of the
+/// host locale.
+#[test]
+fn the_language_capsule_switches_only_between_different_languages() {
+    let setup = |model: TranscriptionModelId, language: &str| {
+        let mut ui = portal_fixture();
+        ui.settings.transcription = TranscriptionSelection {
+            model,
+            language: language.into(),
+        };
+        ui.preferred_language = Some("en".into());
+        super::super::onboarding::fixture(&mut ui, Step::Setup, true);
+        super::super::onboarding_kit::live::fixture(&mut ui, Page::Download);
+        runtime_for(ui, false, PANE_SIZE)
+    };
+
+    // An English system has no other language to offer.
+    let mut rt = setup(TranscriptionModelId::ParakeetUnifiedEnglish, "en");
+    let before = sent(&rt).len();
+    tap(&mut rt, "language-capsule");
+    assert_eq!(sent(&rt).len(), before, "nothing downloads");
+
+    // Neither has another English model, such as a Cohere English pick.
+    let mut rt = setup(TranscriptionModelId::CohereTranscribe, "en");
+    let before = sent(&rt).len();
+    tap(&mut rt, "language-capsule");
+    assert_eq!(sent(&rt).len(), before, "English to English is no switch");
+
+    // A French setup switches to the recommended English model and back.
+    let mut rt = setup(TranscriptionModelId::ParakeetV3, "fr");
+    assert!(
+        matches!(
+            sent(&rt),
+            [Request::ChooseModel { model: TranscriptionModelId::ParakeetV3, language }] if language == "fr"
+        ),
+        "{:?}",
+        sent(&rt)
+    );
+    tap(&mut rt, "language-capsule");
+    assert!(matches!(
+        sent(&rt),
+        [
+            Request::ChooseModel { model: TranscriptionModelId::ParakeetV3, language: started },
+            Request::ChooseModel { model: TranscriptionModelId::ParakeetUnifiedEnglish, language },
+        ] if started == "fr" && language == "en"
+    ));
+    tap(&mut rt, "language-capsule");
+    assert!(
+        matches!(
+            sent(&rt).last(),
+            Some(Request::ChooseModel { model: TranscriptionModelId::ParakeetV3, language }) if language == "fr"
+        ),
+        "the toggle swaps back to the saved selection"
+    );
+
+    // Running setup again for Japanese replaces the earlier French label.
+    let rt = setup(
+        crate::transcription::models::recommended_selection("ja").model,
+        "ja",
+    );
+    let shown = texts(&rt);
+    assert!(shown.contains(&"Japanese".to_owned()), "{shown:?}");
+    assert!(
+        !shown.contains(&"French".to_owned()),
+        "the previous setup's label is gone: {shown:?}"
+    );
+}
+
 #[test]
 fn onboarding_goldens() {
     let _goldens = Goldens::collect();

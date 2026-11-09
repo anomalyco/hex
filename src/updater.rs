@@ -16,7 +16,7 @@
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod legacy;
-mod notes;
+pub(crate) mod notes;
 #[cfg_attr(target_os = "linux", path = "updater/linux.rs")]
 #[cfg_attr(target_os = "macos", path = "updater/macos.rs")]
 #[cfg_attr(target_os = "windows", path = "updater/windows.rs")]

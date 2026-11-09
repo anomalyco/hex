@@ -20,14 +20,18 @@ pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) ->
     let saving = list.always.as_ref().is_some_and(|(_, shift)| *shift);
     // Over the suggestions, the header's right says what ⇧ does (the
     // search's footer says it there).
-    let remembers = (suggesting && list.always.is_some()).then(|| {
-        label(
-            tr("⇧ remembers"),
-            k.ty.small_medium,
-            if saving { p.accent() } else { p.faint() },
-        )
-        .key("remembers")
-    });
+    let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX - measure(list.title, small()) - 16.0;
+    let shift_hint = match (&list.always, suggesting) {
+        (Some((site, _)), true) => Some(
+            label(
+                &shift_hint(list, site, room),
+                k.ty.small_medium,
+                if saving { p.accent() } else { p.faint() },
+            )
+            .key("shift-hint"),
+        ),
+        _ => None,
+    };
     if headed(list) {
         body = body.child(
             row()
@@ -38,7 +42,7 @@ pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) ->
                 .pb(HEADER_PB)
                 .child(label(list.title, k.ty.small_medium, p.faint()))
                 .child(el().grow(1.0))
-                .children(remembers)
+                .children(shift_hint)
                 .transition(in_place),
         );
     }
@@ -57,7 +61,6 @@ pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) ->
             .px(ROW_PX)
             .gap(ROW_PX)
             .radius(ROW_RADIUS)
-            .hover(k.c.hover)
             .press(k.c.pressed)
             .child(label(
                 &ellipsize(&dest.name, medium(), max),
@@ -66,12 +69,18 @@ pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) ->
             ))
             .child(el().grow(1.0))
             // The best suggestion is marked by its reason, on the
-            // name's baseline; Shift down, so is where a rule would send.
+            // name's baseline; Shift down, only where a rule would send.
             .child(
                 label(
                     &why,
                     small(),
-                    if (suggesting && n == 0) || saving && n == list.selected {
+                    if saving {
+                        if list.target == Some(n) {
+                            p.accent()
+                        } else {
+                            p.muted()
+                        }
+                    } else if suggesting && n == 0 {
                         p.accent()
                     } else {
                         p.muted()
@@ -83,10 +92,23 @@ pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) ->
             .label(dest.name.clone())
             .hit()
             .on_press_tx(press(Id::Row(n)))
+            // The row the pointer moves on is where a Shift pick goes.
+            .on_pointer_move_local(move |s: &mut CapsuleState, _, tx| s.point(n, true, tx))
+            .on_hover_change(move |s: &mut CapsuleState, on, tx| {
+                if on {
+                    tx.live_only();
+                } else {
+                    s.point(n, false, tx);
+                }
+            })
             .transition(in_place);
         // The suggestions mark only the best, by its reason: a click
-        // picks, so no row is "selected" until the search opens.
-        if n == list.selected && !suggesting {
+        // picks, so no row is "selected" until the search opens. There
+        // the highlight follows the pointer and the arrows alike, so it
+        // is the row's only fill.
+        if suggesting {
+            entry = entry.hover(k.c.hover);
+        } else if n == list.selected {
             entry = entry.fill(k.c.layer_02);
         }
         body = body.child(entry);
@@ -150,12 +172,46 @@ pub(super) fn search_hints(p: Paint, remember: bool, send: bool, w: f32) -> El {
         .children(capture.then(|| hint(p, tr("New capture"), &shortcut).key("capture")))
 }
 
+/// The suggestions' header line for what ⇧ does, cut to `room`: before
+/// Shift, how to save a rule; with it, where the rule would send `site`,
+/// following the row under the pointer.
+pub(super) fn shift_hint(list: &List, site: &str, room: f32) -> String {
+    let style = small();
+    let shift = list.always.as_ref().is_some_and(|(_, shift)| *shift);
+    let to = list.target_dest().map(|dest| dest.name.as_str());
+    let template = match (shift, to) {
+        (false, _) => "⇧-click to always send {site} here",
+        (true, Some(_)) => "Always send {site} to {name}",
+        (true, None) => "Always send {site} to…",
+    };
+    let words = measure(
+        &crate::desktop::i18n::tr_named(template, &[("site", ""), ("name", "")]),
+        style,
+    );
+    let left = (room - words).max(0.0);
+    let to = to.filter(|_| shift).unwrap_or("");
+    let (site_w, to_w) = (measure(site, style), measure(to, style));
+    let (site_room, to_room) = if site_w + to_w <= left {
+        (site_w, to_w)
+    } else {
+        let to_room = to_w.min(left * 0.4);
+        (left - to_room, to_room)
+    };
+    crate::desktop::i18n::tr_named(
+        template,
+        &[
+            ("site", &ellipsize(site, style, site_room)),
+            ("name", &ellipsize(to, style, to_room)),
+        ],
+    )
+}
+
 /// Shift down: the footer says where the rule will send `site`, each in
 /// a badge with its kind's icon: "Always send [🌐 site] to [💬 SEER]",
-/// following the highlighted row.
+/// following the row under the pointer, else the highlighted one.
 pub(super) fn saving_hint(p: Paint, list: &List, site: &str, w: f32) -> El {
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX;
-    let to = list.selected_dest().map(|dest| dest.name.as_str());
+    let to = list.target_dest().map(|dest| dest.name.as_str());
     let words = measure(tr("Always send"), small()) + measure(tr("to"), small()) + 3.0 * BADGE_GAP;
     let badges =
         if to.is_some() { 2.0 } else { 1.0 } * (2.0 * BADGE_PX + BADGE_ICON + BADGE_ICON_GAP);

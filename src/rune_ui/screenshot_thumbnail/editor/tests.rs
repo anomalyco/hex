@@ -28,6 +28,97 @@ pub(super) fn shot(size: [u32; 2], scale: f32) -> Shot {
     }
 }
 
+/// A 12.4 s recording: [`clip::FRAMES`] frames and a few words.
+fn clip() -> Clip {
+    let duration_ms = 12_400;
+    let frames = (0..clip::FRAMES as u64)
+        .map(|i| {
+            (
+                duration_ms * i / (clip::FRAMES as u64 - 1),
+                shot([960, 600], 1.0),
+            )
+        })
+        .collect();
+    let words = [
+        (500, 900, "This"),
+        (900, 1_300, "opens"),
+        (3_000, 3_400, "and"),
+        (3_400, 3_900, "the"),
+        (3_900, 4_500, "picker"),
+        (4_500, 5_200, "jumps"),
+        (10_000, 10_600, "anyway"),
+    ]
+    .into_iter()
+    .map(|(t0, t1, text)| clip::Word {
+        t0,
+        t1,
+        text: text.into(),
+    })
+    .collect();
+    Clip::new("/tmp/recording.mp4".into(), duration_ms, frames, words)
+}
+
+#[test]
+fn a_trim_keeps_the_words_inside_it_and_shows_the_frame_at_its_handle() {
+    let mut recording = clip();
+    assert!(!recording.trimmed());
+    assert_eq!(
+        recording.words_in_trim(),
+        "This opens and the picker jumps anyway"
+    );
+    recording.drag(clip::Handle::Start, 2_000);
+    recording.drag(clip::Handle::End, 9_000);
+    assert!(recording.trimmed());
+    assert_eq!(recording.trim, [2_000, 9_000]);
+    assert_eq!(recording.words_in_trim(), "and the picker jumps");
+    assert_eq!(recording.shown, recording.frame_at(9_000));
+    // The handles never cross or come closer than half a second.
+    recording.drag(clip::Handle::Start, 12_000);
+    assert_eq!(recording.trim, [8_500, 9_000]);
+    recording.drag(clip::Handle::End, 0);
+    assert_eq!(recording.trim, [8_500, 9_000]);
+    recording.drag(clip::Handle::End, 99_000);
+    assert_eq!(recording.trim[1], 12_400);
+    assert_eq!(recording.nearer(12_000), clip::Handle::End);
+}
+
+#[test]
+fn a_recording_sends_a_sheet_of_the_frames_it_keeps() {
+    let mut recording = clip();
+    recording.drag(clip::Handle::End, 3_000);
+    let frames = recording.sheet_frames();
+    assert_eq!(frames.len(), 3);
+    let (w, h, rgba) = clip::sheet(&frames).unwrap();
+    assert_eq!((w, h), (1920, 1200));
+    assert_eq!(rgba.len(), (w * h * 4) as usize);
+    assert_eq!(clip::sheet(&recording.sheet_frames()[..1]).unwrap().0, 960);
+    assert_eq!(clip::duration_label(12_400), "0:13");
+    assert_eq!(clip::duration_label(725_000), "12:05");
+}
+
+#[test]
+fn a_recording_has_no_marks_and_no_copy() {
+    let mut editor = Editor {
+        clip: Some(clip()),
+        screen: [960.0, 640.0],
+        on: true,
+        ..Editor::default()
+    };
+    let layout = editor.layout();
+    assert!(layout.strip[3] > 0.0, "the filmstrip has room");
+    assert!(layout.words[1] >= layout.strip[1] + layout.strip[3]);
+    editor.draw(Phase::Down, [10.0, 10.0]);
+    assert!(
+        editor.draft.is_none(),
+        "nothing draws on a recording's frame"
+    );
+    let mut tx = Tx::default();
+    assert!(
+        !on_key(&mut editor, &key(Key::Command('c')), &mut tx),
+        "⌘C copies nothing"
+    );
+}
+
 #[test]
 fn the_shot_fits_the_display_and_never_grows_past_its_points() {
     let editor = Editor::still(shot([1440, 900], 2.0), [1470.0, 956.0]);
@@ -399,10 +490,11 @@ fn editor_goldens() {
     const SCREEN: [f32; 2] = [960.0, 640.0];
     let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
     let mut misses = Vec::new();
-    for (name, send, words) in [
-        ("marks", false, false),
-        ("send", true, false),
-        ("words", false, true),
+    for (name, send, words, trim) in [
+        ("marks", false, false, false),
+        ("send", true, false, false),
+        ("words", false, true, false),
+        ("trim", false, false, true),
     ] {
         for dark in [false, true] {
             let theme = if dark { "dark" } else { "light" };
@@ -424,6 +516,14 @@ fn editor_goldens() {
                 },
             ];
             editor.crop = Some([160.0, 120.0, 1180.0, 720.0]);
+            if trim {
+                editor.marks.clear();
+                editor.crop = None;
+                let mut recording = clip();
+                recording.drag(clip::Handle::Start, 2_000);
+                recording.drag(clip::Handle::End, 9_000);
+                editor.clip = Some(recording);
+            }
             if words {
                 editor.words = WORDS.into();
                 editor.listen = Listen::Recording;

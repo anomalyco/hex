@@ -5,6 +5,7 @@
 //! card's corner.
 
 use rune::{Align, El, Icon, col, el, icon, row, text};
+use rune_kit::ScrollBar;
 
 use super::Ui;
 use super::controls::{DESCRIPTION, METRICS, Paint, raised};
@@ -18,6 +19,11 @@ const LIST_W: f32 = 316.0;
 const LIST_FADE: (f32, f32) = (18.0, 28.0);
 /// Room the card's text leaves for its scroll bar.
 const SCROLL_BAR: f32 = 12.0;
+
+/// The pane bar's thumb: 8 pt at rest and 10 under the pointer, so it stays
+/// inside the card's 12 pt scroll-bar room.
+const PANE_THUMB: f32 = 8.0;
+const PANE_THUMB_HOVER: f32 = 10.0;
 
 pub(super) static COPY_ICON: &Icon = &rune_theme_opencode::icons::OUTLINE_COPY;
 pub(super) static TRASH_ICON: &Icon = &rune_theme_opencode::icons::TRASH;
@@ -272,13 +278,18 @@ pub(super) fn faded_body_sticky(
     stick_bottom: bool,
 ) -> El {
     // Both shrink below their content in a fixed-height parent (#906).
-    let viewport = col().grow(1.0).shrink().min_h(0.0);
+    let viewport = col().key(key).grow(1.0).shrink().min_h(0.0);
     let viewport = viewport
         .clip_fade(0.0, top, 0.0, bottom)
         .scroll(super::ScrollSpec { stick_bottom })
         .child(col().key("inset").pt(top).pb(bottom).child(content));
-    let area = format!("{key}-area");
-    rune_kit::scroll_bar(k, &area, key, viewport)
+    let style = rune_kit::ScrollBarStyle::from_kit(k)
+        .thumb(k.c.text_faint)
+        .thumb_hover(k.c.text_muted)
+        .width(PANE_THUMB)
+        .hover_width(PANE_THUMB_HOVER);
+    viewport
+        .scroll_bar_styled(style)
         .grow(1.0)
         .shrink()
         .min_h(0.0)

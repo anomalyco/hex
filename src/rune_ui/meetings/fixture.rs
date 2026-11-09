@@ -70,6 +70,7 @@ impl MeetingsPane {
                 export_error: None,
                 notes_error: None,
                 live_error: None,
+                microphone_warning: None,
                 transcript: Transcript::Loaded(Vec::new()),
                 chapters: Vec::new(),
                 imported: false,

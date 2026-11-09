@@ -253,6 +253,11 @@ pub fn recorded_screen() -> Option<(u32, u32)> {
 /// shows the screen is scaled.
 static RECORDED_POINTS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
 
+/// The output the portal says it records, by its connector name (`mapping_id`, such as
+/// `DP-3`), while a screen recording runs. Only some portals name it, and only for a monitor
+/// pick; a window has no output.
+static RECORDED_OUTPUT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 /// The size of the screen being recorded in the desktop's logical points, as the screen-cast
 /// portal reported it (Wayland). A host drawing over the screen uses it rather than dividing
 /// the pixels by its own scale, which a fractional scale (1.5, 1.33) rounds up to a whole
@@ -261,6 +266,15 @@ pub fn recorded_screen_points() -> Option<(f64, f64)> {
     *RECORDED_POINTS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The Wayland output the portal records, by connector name, while a screen recording runs.
+/// `None` when the portal didn't name one.
+pub fn recorded_output() -> Option<String> {
+    RECORDED_OUTPUT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
 }
 
 /// The screen's logical size from the portal's stream `size`, when it is smaller than the
@@ -283,6 +297,9 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     *RECORDED_POINTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *RECORDED_OUTPUT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     match recorded {
@@ -348,12 +365,15 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
             Some((format.width, format.height));
         let points = logical_screen(cast.size, (format.width, format.height));
         scrawl_log(format!(
-            "Screen size from the portal: {:?}, in points: {points:?}",
-            cast.size
+            "Screen size from the portal: {:?}, in points: {points:?}, output: {:?}",
+            cast.size, cast.mapping_id
         ));
         *RECORDED_POINTS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = points;
+        *RECORDED_OUTPUT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = cast.mapping_id.clone();
     }
     let edge = if source == Source::Window {
         WINDOW_EDGE

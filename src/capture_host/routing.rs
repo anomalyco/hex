@@ -25,6 +25,7 @@ use scrawl_capture::{Router, RouterConfig, RouterDirs, RuleKind, Undone};
 
 use super::{SharedOutcomes, lock};
 
+mod opencode;
 mod preparation;
 mod session_name;
 
@@ -175,7 +176,7 @@ pub fn router() -> Router {
         Some(support.join("routing-decisions.jsonl")),
         Some(settings.captures_dir()),
     );
-    Router::new(config, dirs)
+    let router = Router::new(config, dirs)
         .with_log(|line| {
             if line.starts_with("deliver:") || line.starts_with("routing time:") {
                 tracing::info!(line, "capture router");
@@ -183,7 +184,10 @@ pub fn router() -> Router {
                 tracing::debug!(line, "capture router");
             }
         })
-        .with_summary(scrawl_capture::sketch::summary_markdown)
+        .with_summary(scrawl_capture::sketch::summary_markdown);
+    #[cfg(target_os = "windows")]
+    let router = router.with_opencode(std::sync::Arc::new(opencode::Wsl));
+    router
 }
 
 fn sends(config: &RouterConfig) -> bool {
@@ -1122,9 +1126,8 @@ const AUTH_REFUSED: &str = "OpenCode needs a password Hex doesn't have";
 /// password itself.
 const AUTH_HINT: &str = "OpenCode refused Hex's password. Hex reads it from OpenCode's \
                          service.json under this user's ~/.local/state/opencode (or \
-                         OPENCODE_PASSWORD); an OpenCode running in WSL keeps its registration \
-                         inside WSL, which Hex on Windows can't read. The capture is saved and \
-                         copied either way";
+                         OPENCODE_PASSWORD); on Windows, turn on Labs › OpenCode in WSL \
+                         when OpenCode runs there. The capture is saved and copied either way";
 
 /// Whether a failed request (`{err:#}`) was OpenCode refusing the
 /// credentials.

@@ -396,10 +396,13 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
                     .font(LEAD)
                     .color(p.muted()),
             )
-            .child(if s.live.is_some() {
-                language_capsule(p, d.language, live::cycle_language)
+            .child(if s.live.is_none() {
+                // The story's prototype has its other language by design.
+                language_capsule(p, d.language, Some(Onboard::cycle_language))
+            } else if s.live.as_ref().is_some_and(Live::switches_language) {
+                language_capsule(p, d.language, Some(live::cycle_language))
             } else {
-                language_capsule(p, d.language, Onboard::cycle_language)
+                language_capsule::<Onboard>(p, d.language, None)
             })
             .child(
                 text(tr("speech model"))

@@ -170,8 +170,10 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
                 id: id.clone(),
                 title: title.clone(),
                 chapters: Vec::new(),
+                warning: None,
             };
         }
+        ControllerEvent::SourceWarning { warning } => state.source_warning(*warning),
         ControllerEvent::Retitled { title } => {
             if let MeetingMenuState::Recording { title: shown, .. } = &mut *state {
                 shown.clone_from(title);

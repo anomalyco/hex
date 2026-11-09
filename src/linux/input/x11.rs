@@ -165,6 +165,10 @@ impl Backend {
             options
                 .raw_dictation
                 .map(|key| (Shortcut::RawDictation, key)),
+            options.typed_text.map(|key| (Shortcut::TypedText, key)),
+            options
+                .terminal_paste
+                .map(|key| (Shortcut::TerminalPaste, key)),
         ];
         for (shortcut, key) in requested.into_iter().flatten() {
             let mouse = mouse_button(&key.key);

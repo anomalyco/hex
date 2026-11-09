@@ -18,7 +18,7 @@ use crate::meeting::detection::{
     AutoStop, BrowserPageMemory, CallPresence, Detection, MeetingCandidate, MeetingDetector,
     candidate_from_microphone,
 };
-use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart};
+use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
 
 pub(crate) enum ControllerCommand {
@@ -75,6 +75,10 @@ pub(crate) enum ControllerEvent {
     },
     /// The recording's live chapters so far (Labs).
     Chapters(Vec<meeting::Chapter>),
+    /// The microphone became digitally silent, or its audio returned.
+    SourceWarning {
+        warning: Option<TrackWarning>,
+    },
     OpenMeeting(String),
     Transcribing,
     /// `auto_stop` when the recording stops on its own after
@@ -122,8 +126,20 @@ pub enum MeetingMenuState {
         title: String,
         /// Live chapters, for Copy Section (Labs).
         chapters: Vec<meeting::Chapter>,
+        /// The microphone is digitally silent, as a call app holding it with
+        /// voice processing leaves it (#1518).
+        warning: Option<TrackWarning>,
     },
     Transcribing,
+}
+
+impl MeetingMenuState {
+    /// Sets the recording's microphone warning; other states have none.
+    pub(crate) fn source_warning(&mut self, warning: Option<TrackWarning>) {
+        if let Self::Recording { warning: shown, .. } = self {
+            *shown = warning;
+        }
+    }
 }
 
 pub struct ListenerConfig {
@@ -806,6 +822,9 @@ fn poll_recording(
                 meeting::RecordingUpdate::Chapters(chapters) => {
                     let _ = events.send(ControllerEvent::Chapters(chapters));
                 }
+                meeting::RecordingUpdate::SourceWarning { warning } => {
+                    let _ = events.send(ControllerEvent::SourceWarning { warning });
+                }
                 meeting::RecordingUpdate::Transcribing => {
                     if !active.stop.swap(true, Ordering::Relaxed) {
                         let _ = events.send(ControllerEvent::Transcribing);
@@ -937,8 +956,16 @@ fn call_app_playing(application: &str) -> bool {
     }
 }
 
-/// How often a browser's tabs are queried while it holds the microphone.
+/// How often a browser's tabs are queried while it has just started holding
+/// the microphone: enough to find a call's site within the 20 s unknown-page
+/// threshold (`detection::BROWSER_STABLE_FOR`).
 const TAB_QUERY_INTERVAL: Duration = Duration::from_secs(1);
+/// How long that one-second burst lasts after a browser starts holding the
+/// microphone.
+const TAB_QUERY_BURST: Duration = Duration::from_secs(30);
+/// How often they are queried after the burst; `BrowserPageMemory` (60 s)
+/// carries the page between answers.
+const TAB_QUERY_BACKOFF: Duration = Duration::from_secs(30);
 /// A tab query that finished longer ago than this no longer says what the
 /// browser shows.
 const TAB_QUERY_MAX_AGE: Duration = Duration::from_secs(5);
@@ -965,6 +992,9 @@ struct TabProbe {
     running: Option<InFlight>,
     generation: u64,
     started: Option<Instant>,
+    /// The browser this watch began for, and when: its first 30 s ask every
+    /// second, then every 30 s.
+    burst: Option<(String, Instant)>,
     latest: Option<(String, ContextSnapshot, Instant)>,
 }
 
@@ -975,6 +1005,7 @@ impl TabProbe {
             running: None,
             generation: 0,
             started: None,
+            burst: None,
             latest: None,
         }
     }
@@ -997,10 +1028,11 @@ impl TabProbe {
             Some((_, Err(mpsc::TryRecvError::Disconnected))) => self.running = None,
             Some((_, Err(mpsc::TryRecvError::Empty))) | None => {}
         }
+        let interval = self.interval(bundle_id, now);
         if self.running.is_none()
             && self
                 .started
-                .is_none_or(|started| now.saturating_duration_since(started) >= TAB_QUERY_INTERVAL)
+                .is_none_or(|started| now.saturating_duration_since(started) >= interval)
         {
             self.started = Some(now);
             let (sender, receiver) = mpsc::sync_channel(1);
@@ -1039,10 +1071,34 @@ impl TabProbe {
     /// Nothing is watched: an answer, finished or still being read, must not
     /// outlive the call. A query in flight is not abandoned (it ends by its
     /// own timeout, and no second one starts beside it); its answer is
-    /// dropped.
+    /// dropped. The next call starts with a fresh one-second burst.
     fn reset(&mut self) {
         self.latest = None;
+        self.burst = None;
         self.generation += 1;
+    }
+
+    /// How far apart this browser's tab queries are: one second through the
+    /// first 30 s it holds the microphone, then every 30 s.
+    fn interval(&mut self, bundle_id: &str, now: Instant) -> Duration {
+        let bursting = match &self.burst {
+            Some((watching, since)) if watching.as_str() == bundle_id => {
+                now.saturating_duration_since(*since) < TAB_QUERY_BURST
+            }
+            _ => true,
+        };
+        if self
+            .burst
+            .as_ref()
+            .is_none_or(|(watching, _)| watching.as_str() != bundle_id)
+        {
+            self.burst = Some((bundle_id.to_string(), now));
+        }
+        if bursting {
+            TAB_QUERY_INTERVAL
+        } else {
+            TAB_QUERY_BACKOFF
+        }
     }
 }
 
@@ -1378,6 +1434,62 @@ mod tests {
             probe.page("com.brave.Browser", polled),
             ContextSnapshot::default()
         );
+    }
+
+    #[test]
+    fn tab_queries_back_off_after_the_first_thirty_seconds_and_reset() {
+        use std::sync::atomic::AtomicUsize;
+        static QUERIES: AtomicUsize = AtomicUsize::new(0);
+        fn counted(_: &str) -> Result<ContextSnapshot> {
+            QUERIES.fetch_add(1, Ordering::SeqCst);
+            Ok(banshee_tab())
+        }
+        // A query runs on its own thread, so wait with a deadline until its
+        // answer is received: polling at the query's own start time can never
+        // start another one, so this only drains the answer.
+        let settle = |probe: &mut TabProbe, at: Instant, expected: usize| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while QUERIES.load(Ordering::SeqCst) < expected || probe.running.is_some() {
+                assert!(Instant::now() < deadline, "the tab query never finished");
+                probe.page("com.brave.Browser", at);
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(QUERIES.load(Ordering::SeqCst), expected);
+        };
+        let mut probe = TabProbe::new(counted);
+        let started = Instant::now();
+        // The first 30 s ask every second; `started` records the query
+        // synchronously, so a backed-off call is proven by it not moving.
+        probe.page("com.brave.Browser", started);
+        assert_eq!(probe.started, Some(started));
+        settle(&mut probe, started, 1);
+        let at_1 = started + Duration::from_secs(1);
+        probe.page("com.brave.Browser", at_1);
+        assert_eq!(probe.started, Some(at_1));
+        settle(&mut probe, at_1, 2);
+
+        // From then on they are 30 s apart; an answer waits that long.
+        let at_29 = started + Duration::from_secs(29);
+        probe.page("com.brave.Browser", at_29);
+        assert_eq!(probe.started, Some(at_29));
+        settle(&mut probe, at_29, 3);
+        probe.page("com.brave.Browser", started + Duration::from_secs(31));
+        assert_eq!(
+            probe.started,
+            Some(at_29),
+            "a backed-off query started early"
+        );
+        let at_59 = started + Duration::from_secs(59);
+        probe.page("com.brave.Browser", at_59);
+        assert_eq!(probe.started, Some(at_59));
+        settle(&mut probe, at_59, 4);
+
+        // A reset starts a fresh burst at once.
+        probe.reset();
+        let at_61 = started + Duration::from_secs(61);
+        probe.page("com.brave.Browser", at_61);
+        assert_eq!(probe.started, Some(at_61));
+        settle(&mut probe, at_61, 5);
     }
 
     #[test]

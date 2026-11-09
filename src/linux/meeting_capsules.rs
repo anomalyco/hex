@@ -9,19 +9,28 @@
 /// Whether the meeting capsules may float on XWayland, read as each capsule
 /// shows.
 pub(crate) fn on_xwayland() -> bool {
+    on_xwayland_for(crate::labs::gnome_meeting_capsules())
+}
+
+/// Whether a Labs overlay this user opted into may float on XWayland: only on
+/// a Wayland compositor without layer-shell (GNOME), and only while this
+/// user's XWayland already runs. Each check runs only when the ones before
+/// pass, so with the lab off Hex never looks for layer-shell or XWayland.
+pub(super) fn on_xwayland_for(opted_in: bool) -> bool {
     floats_on_xwayland(
-        crate::labs::gnome_meeting_capsules(),
-        || {
-            crate::linux::session::LinuxSession::detect().is_wayland()
-                && !crate::linux::paste::wayland_offers(crate::linux::rune_hud::LAYER_SHELL)
-        },
+        opted_in,
+        without_layer_shell,
         crate::linux::clipboard::xwayland_running,
     )
 }
 
-/// Only with the lab on, on a Wayland compositor without layer-shell, and
-/// while XWayland already runs. Each check runs only when the ones before
-/// pass, so with the lab off Hex never looks for layer-shell or XWayland.
+/// Whether this session is Wayland on a compositor without layer-shell
+/// (GNOME), where an overlay that takes clicks can only show on XWayland.
+pub(super) fn without_layer_shell() -> bool {
+    crate::linux::session::LinuxSession::detect().is_wayland()
+        && !crate::linux::paste::wayland_offers(crate::linux::rune_hud::LAYER_SHELL)
+}
+
 fn floats_on_xwayland(
     opted_in: bool,
     without_layer_shell: impl FnOnce() -> bool,

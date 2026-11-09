@@ -127,26 +127,68 @@ pub(super) fn post_json(
     read_timeout: Duration,
     max_response: usize,
 ) -> Result<(u16, Vec<u8>)> {
+    post(path, "application/json", body, read_timeout, max_response)
+}
+
+/// Sends one WAV to the running Hex's `POST /transcriptions`.
+pub(crate) fn post_wav(
+    path: &str,
+    body: &[u8],
+    read_timeout: Duration,
+    max_response: usize,
+) -> Result<(u16, Vec<u8>)> {
+    post(path, "audio/wav", body, read_timeout, max_response)
+}
+
+fn post(
+    path: &str,
+    content_type: &str,
+    body: &[u8],
+    read_timeout: Duration,
+    max_response: usize,
+) -> Result<(u16, Vec<u8>)> {
     let document = live_discovery()?;
-    let address = SocketAddr::from(([127, 0, 0, 1], document.port));
+    send(
+        SocketAddr::from(([127, 0, 0, 1], document.port)),
+        &document.token,
+        path,
+        content_type,
+        body,
+        read_timeout,
+        max_response,
+    )
+}
+
+fn send(
+    address: SocketAddr,
+    token: &str,
+    path: &str,
+    content_type: &str,
+    body: &[u8],
+    read_timeout: Duration,
+    max_response: usize,
+) -> Result<(u16, Vec<u8>)> {
     let mut stream = TcpStream::connect_timeout(&address, CONNECTION_TIMEOUT)
         .wrap_err("could not connect to Hex's local API")?;
     stream.set_read_timeout(Some(read_timeout))?;
     stream.set_write_timeout(Some(CONNECTION_TIMEOUT))?;
     write!(
         stream,
-        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        document.token,
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len(),
     )?;
-    stream.write_all(body)?;
-    stream.flush()?;
-
+    // Hex answers before reading a body it rejects (an unknown model, a full
+    // queue); keep that answer when the connection then resets.
+    let upload = stream.write_all(body).and_then(|()| stream.flush());
     let mut response = Vec::new();
-    (&mut stream)
+    let read = (&mut stream)
         .take(max_response as u64 + 1)
-        .read_to_end(&mut response)
-        .wrap_err("Hex didn't answer")?;
+        .read_to_end(&mut response);
+    if response.is_empty() {
+        read.wrap_err("Hex didn't answer")?;
+        upload.wrap_err("Hex didn't take the upload")?;
+        bail!("Hex didn't answer");
+    }
     if response.len() > max_response {
         bail!("Hex's response is too large");
     }
@@ -163,7 +205,7 @@ pub(super) fn post_json(
     Ok((status, response.split_off(header_end + 4)))
 }
 
-pub(super) fn error_code(status: u16, body: &[u8]) -> String {
+pub(crate) fn error_code(status: u16, body: &[u8]) -> String {
     serde_json::from_slice::<serde_json::Value>(body)
         .ok()
         .and_then(|value| value.get("code")?.as_str().map(str::to_owned))
@@ -281,5 +323,57 @@ pub(super) fn process_is_alive(pid: u32) -> bool {
         let alive = GetExitCodeProcess(process, &mut code) != 0 && code == STILL_ACTIVE as u32;
         CloseHandle(process);
         alive
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::io::{BufRead, BufReader, Write as _};
+    use std::net::{Ipv4Addr, TcpListener};
+    use std::thread;
+    use std::time::Duration;
+
+    use super::send;
+
+    /// Hex answers before reading a body it rejects and closes; the answer
+    /// must survive a body too large for the socket buffers.
+    #[test]
+    fn a_refusal_survives_a_large_upload() {
+        const BODY: &[u8] = br#"{"code":"model-not-ready"}"#;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).unwrap() <= 2 {
+                    break;
+                }
+            }
+            let mut response = format!(
+                "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n",
+                BODY.len()
+            )
+            .into_bytes();
+            response.extend_from_slice(BODY);
+            stream.write_all(&response).unwrap();
+        });
+        let upload = vec![0_u8; 4 * 1024 * 1024];
+        let (status, body) = send(
+            address,
+            "hex_test",
+            "/transcriptions?model=parakeet_v2",
+            "audio/wav",
+            &upload,
+            Duration::from_secs(10),
+            1024 * 1024,
+        )
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(status, 409);
+        assert_eq!(body, BODY);
     }
 }

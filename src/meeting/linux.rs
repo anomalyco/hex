@@ -188,7 +188,7 @@ pub(crate) fn reveal(path: &Path) {
 
 /// Moves `path` to the home Trash as the freedesktop.org Trash
 /// specification lays it out, so file managers can restore it.
-pub(super) fn move_to_trash(path: &Path) -> Result<()> {
+pub(crate) fn move_to_trash(path: &Path) -> Result<()> {
     let data = dirs::data_dir().ok_or_else(|| eyre!("no data directory for the Trash"))?;
     move_to_trash_in(&data.join("Trash"), path, SystemTime::now())
 }

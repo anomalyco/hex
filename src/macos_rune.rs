@@ -142,6 +142,8 @@ pub(crate) enum ShortcutTarget {
     Cancel,
     /// Labs › Screenshots.
     Screenshot,
+    /// Labs › Screenshots' record shortcut.
+    ScreenshotRecord,
 }
 
 /// What the runtime last published for the window and the menu bar.
@@ -373,6 +375,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let event_path = listener.event_path.clone();
     let event_log = crate::desktop::events::EventLog::create(&event_path)?;
     let drained_event_log = event_log.clone();
+    let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
     let (developer_sender, developer_receiver) = mpsc::sync_channel(8);
     let (control_sender, control_receiver) = mpsc::sync_channel(8);
     let (recognition_controls, recognition_control_receiver) = mpsc::sync_channel(8);
@@ -382,6 +385,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
             developer_control: crate::DEVELOPER_FEATURES_ENABLED.then(|| developer_sender.clone()),
             dictation_control: Some(recognition_controls.clone()),
             control: Some(control_sender),
+            processing: crate::local_api::processing::profiles_processing(transformations.clone()),
             ..Default::default()
         },
     )?;
@@ -389,7 +393,6 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     let (controller_commands, controller_command_receiver) = mpsc::sync_channel(8);
     let (meeting_requests, meeting_request_receiver) = mpsc::sync_channel(8);
     let (indicator, indicator_events) = crate::dictation::indicator::channel();
-
     // The controller idles without inspecting microphone activity until the
     // user opts in to meetings (always available in developer builds).
     let controller = thread::Builder::new()
@@ -440,6 +443,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
                     Some(recognition_indicator.clone()),
                     recognition_history,
                     Some(recognition_control_receiver),
+                    transformations,
                 )
             }));
             let failure = match result {
@@ -1279,7 +1283,11 @@ impl Pump {
                     id,
                     title,
                     chapters: Vec::new(),
+                    warning: None,
                 };
+            }
+            ControllerEvent::SourceWarning { warning } => {
+                self.meeting_state.source_warning(warning)
             }
             ControllerEvent::Chapters(chapters) => {
                 if let MeetingMenuState::Recording {

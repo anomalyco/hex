@@ -297,10 +297,11 @@ impl LiveSource for LoopbackSource {
 
 /// Opens Explorer with `path` selected.
 pub(crate) fn reveal(path: &Path) {
-    let mut select = std::ffi::OsString::from("/select,");
-    select.push(path);
+    use std::os::windows::process::CommandExt;
+
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     if let Err(error) = std::process::Command::new("explorer.exe")
-        .arg(select)
+        .raw_arg(super::explorer_select(&path))
         .spawn()
     {
         tracing::error!(%error, "could not reveal meeting file");

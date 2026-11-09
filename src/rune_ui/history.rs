@@ -13,7 +13,7 @@ use rune_kit::{Menu as KitMenu, MenuItem, Placement, Select, SelectAppearance, T
 
 use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
 use super::list_detail::{self as ld, Item};
-use super::lists::{error_panel, section_label};
+use super::lists::{Tone, error_panel, section_label};
 use super::{Menu, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::stats::{AppCount, HistoryStats};
@@ -498,6 +498,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             "history-error",
             tr("History could not be loaded."),
             error,
+            Tone::Danger,
         ));
     }
     let searching = !pane.searched.trim().is_empty();

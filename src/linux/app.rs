@@ -58,6 +58,11 @@ pub(crate) enum ShortcutTarget {
     PasteLast,
     Capture,
     RawDictation,
+    /// Labs › Transform typed text.
+    TypedText,
+    /// Labs › Terminal paste shortcut: dictates like the dictation shortcut
+    /// and always pastes with Ctrl+Shift+V.
+    TerminalPaste,
     /// Toggle mode's cancel shortcut.
     Cancel,
 }
@@ -439,13 +444,22 @@ pub(crate) fn run(
     crate::transcription::local_transcriber::initialize_backends();
     let (control_calls, control_receiver) = mpsc::sync_channel(8);
     let (dictation_controls, dictations) = mpsc::sync_channel(8);
+    let processing = crate::dictation::modes::ProcessingState::from_settings(&launch.settings);
     let local_api = crate::local_api::LocalApi::start_for_app(
         &event_path,
         control_calls,
         Some(dictation_controls),
+        Some(crate::local_api::Processing::installed(
+            crate::local_api::processing::dictation_processor(processing.clone()),
+        )),
     );
     let enable_on_launch = launch.settings.enable_on_launch;
-    let mut host = LinuxDesktopHost::new(event_path, launch, crate::updater::Updater::start());
+    let mut host = LinuxDesktopHost::new(
+        event_path,
+        launch,
+        crate::updater::Updater::start(),
+        processing,
+    );
     host.dictations = dictations.into();
     if enable_on_launch {
         host.start();
@@ -579,6 +593,7 @@ impl LinuxDesktopHost {
         event_path: PathBuf,
         launch: crate::app_settings::LaunchLoad,
         updater: crate::updater::Updater,
+        processing: crate::dictation::modes::ProcessingState,
     ) -> Self {
         let crate::app_settings::LaunchLoad { settings, note } = launch;
         let failed = matches!(note, Some(crate::app_settings::LaunchNote::Failed(_)));
@@ -594,7 +609,8 @@ impl LinuxDesktopHost {
                 .inspect_err(|error| tracing::warn!(%error, "could not open retained history"))
                 .ok()
         };
-        let output = crate::linux::dictation::DictationOutput::from_settings(&settings, history);
+        let output = crate::linux::dictation::DictationOutput::from_settings(&settings, history)
+            .sharing(processing);
         // Known before the first poll, so launching keeps the saved model
         // instead of applying the current layout's mapping.
         let keyboard_switcher = crate::transcription::keyboard_model_switching::Switcher::new(
@@ -799,12 +815,7 @@ impl LinuxDesktopHost {
         let Some(wanted) = crate::linux::gnome_shortcuts::wanted(requested, shortcuts) else {
             return;
         };
-        let key = format!(
-            "{wanted} {:?} {:?} {:?}",
-            self.settings.dictation_hotkey,
-            self.settings.paste_last_hotkey,
-            capture_shortcut(&self.settings)
-        );
+        let key = gnome_shortcuts_key(&self.settings, wanted);
         if self.gnome_shortcuts.as_deref() == Some(key.as_str()) {
             return;
         }
@@ -1098,6 +1109,10 @@ impl LinuxDesktopHost {
                         ShortcutTarget::RawDictation => {
                             settings.raw_dictation_hotkey = Some(binding)
                         }
+                        ShortcutTarget::TypedText => settings.typed_text_hotkey = Some(binding),
+                        ShortcutTarget::TerminalPaste => {
+                            settings.terminal_paste_hotkey = Some(binding)
+                        }
                         ShortcutTarget::Cancel => settings.cancel_hotkey = binding,
                     }
                 })
@@ -1282,6 +1297,19 @@ fn capture_shortcut(settings: &AppSettings) -> Option<&crate::app_settings::Hotk
     None
 }
 
+/// What the GNOME custom shortcuts were last synced for: a new key means an
+/// entry was added, removed, or rebound. Typed text is included while its
+/// lab is on and its shortcut is bound, so toggling either resyncs.
+fn gnome_shortcuts_key(settings: &AppSettings, wanted: bool) -> String {
+    format!(
+        "{wanted} {:?} {:?} {:?} {:?}",
+        settings.dictation_hotkey,
+        settings.paste_last_hotkey,
+        capture_shortcut(settings),
+        settings.active_typed_text_hotkey()
+    )
+}
+
 fn settings_modified() -> Option<std::time::SystemTime> {
     let path = crate::app_settings::path().ok()?;
     std::fs::metadata(path)
@@ -1447,6 +1475,16 @@ mod tests {
         ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
     };
 
+    fn test_host(launch: crate::app_settings::LaunchLoad) -> LinuxDesktopHost {
+        let processing = crate::dictation::modes::ProcessingState::from_settings(&launch.settings);
+        LinuxDesktopHost::new(
+            PathBuf::new(),
+            launch,
+            crate::updater::Updater::idle(),
+            processing,
+        )
+    }
+
     fn host_for_edit(running: bool) -> LinuxDesktopHost {
         let settings = AppSettings {
             transcription: TranscriptionSelection {
@@ -1456,14 +1494,10 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut host = LinuxDesktopHost::new(
-            PathBuf::new(),
-            crate::app_settings::LaunchLoad {
-                settings,
-                note: None,
-            },
-            crate::updater::Updater::idle(),
-        );
+        let mut host = test_host(crate::app_settings::LaunchLoad {
+            settings,
+            note: None,
+        });
         if running {
             host.listener = Some(Listener {
                 worker: std::thread::spawn(|| Ok(())),
@@ -1529,10 +1563,52 @@ mod tests {
         assert_eq!(*published.lock().unwrap(), Some(2));
     }
 
+    /// The GNOME sync cache key must move when the typed-text lab or its
+    /// binding changes, or stale `hex-typed-text` entries stay behind.
+    #[test]
+    fn the_gnome_shortcut_key_tracks_typed_text() {
+        use crate::app_settings::{HotkeyKey, HotkeyModifiers};
+
+        let binding = HotkeyBinding {
+            modifiers: HotkeyModifiers::control_option(),
+            key: Some(HotkeyKey::named("t")),
+        };
+        let mut settings = AppSettings {
+            typed_text_hotkey: Some(binding.clone()),
+            ..AppSettings::default()
+        };
+        let lab_off = gnome_shortcuts_key(&settings, true);
+
+        settings.labs.typed_text = true;
+        let bound = gnome_shortcuts_key(&settings, true);
+        assert_ne!(lab_off, bound, "turning the lab on adds an entry");
+
+        settings.typed_text_hotkey = Some(HotkeyBinding {
+            modifiers: HotkeyModifiers::control(),
+            ..binding
+        });
+        let rebound = gnome_shortcuts_key(&settings, true);
+        assert_ne!(bound, rebound, "changing the binding rewrites it");
+
+        settings.typed_text_hotkey = None;
+        let unbound = gnome_shortcuts_key(&settings, true);
+        assert_ne!(rebound, unbound, "unbinding removes it");
+        assert_eq!(
+            lab_off, unbound,
+            "no bound typed-text shortcut means no entry either way"
+        );
+
+        settings.labs.typed_text = false;
+        assert_eq!(
+            gnome_shortcuts_key(&settings, true),
+            lab_off,
+            "turning the lab off returns to the lab-off key"
+        );
+    }
+
     #[test]
     fn a_settings_parse_note_does_not_block_capture() {
-        let mut host = LinuxDesktopHost::new(
-            PathBuf::new(),
+        let mut host = test_host(
             // A model never installed on Linux keeps `start` from opening a
             // real microphone while still proving the validity gate passed.
             crate::app_settings::LaunchLoad {
@@ -1541,7 +1617,6 @@ mod tests {
                     "Hex couldn't read settings.json and started with defaults.".into(),
                 )),
             },
-            crate::updater::Updater::idle(),
         );
         assert!(host.settings_valid);
         assert!(host.settings_error.is_some());
@@ -1553,8 +1628,7 @@ mod tests {
 
     #[test]
     fn malformed_settings_cannot_start_even_after_dismissing_the_error() {
-        let mut host = LinuxDesktopHost::new(
-            PathBuf::new(),
+        let mut host = test_host(
             // A model never installed on Linux, so the resumed start below
             // cannot open the microphone where the real model is installed.
             crate::app_settings::LaunchLoad {
@@ -1563,7 +1637,6 @@ mod tests {
                     "Could not load Linux settings: invalid JSON".into(),
                 )),
             },
-            crate::updater::Updater::idle(),
         );
         host.start();
         assert!(!host.is_running());
@@ -1915,14 +1988,10 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut host = LinuxDesktopHost::new(
-            PathBuf::new(),
-            crate::app_settings::LaunchLoad {
-                settings,
-                note: None,
-            },
-            crate::updater::Updater::idle(),
-        );
+        let mut host = test_host(crate::app_settings::LaunchLoad {
+            settings,
+            note: None,
+        });
         host.transcription_preparation = Some(TranscriptionPreparation {
             canceled: Arc::new(AtomicBool::new(false)),
             model: TranscriptionModelId::default(),
