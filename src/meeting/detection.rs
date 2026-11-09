@@ -1033,12 +1033,20 @@ fn clean_google_meet_title(title: &str) -> String {
 
 /// A Meet call's code from its address: the path segment shaped like one, so
 /// query strings (`?authuser=0`) and the `/meet/` prefix Arc adds when it
-/// opens a Calendar link never make one call look like two. A path without a
-/// code-shaped segment names no code, like a title that isn't one.
+/// opens a Calendar link never make one call look like two. A nickname path
+/// without a code-shaped segment (`/team-sync`) is its own code, as before.
 fn google_meet_url_code(url: &Url) -> Option<String> {
-    url.path_segments()?
-        .map(str::to_ascii_lowercase)
-        .find(|segment| is_google_meet_code(segment))
+    let mut fallback = None;
+    for segment in url.path_segments()?.map(str::to_ascii_lowercase) {
+        if segment.is_empty() {
+            continue;
+        }
+        if is_google_meet_code(&segment) {
+            return Some(segment);
+        }
+        fallback.get_or_insert(segment);
+    }
+    fallback
 }
 
 /// A Meet call's code from a tab title that shows only the code
@@ -1887,16 +1895,16 @@ mod tests {
             Some("abc-defg-hij")
         );
 
-        // No code-shaped segment names no code, so pages without one count as
-        // the snoozed call rather than as a code of their own.
-        for address in [
-            "https://meet.google.com/meet/",
-            "https://meet.google.com/lookup",
-            "https://meet.google.com/",
+        // A nickname path without a code-shaped segment is its own code, as
+        // before; only a path with no segment at all names none.
+        for (address, code) in [
+            ("https://meet.google.com/team-sync", Some("team-sync")),
+            ("https://meet.google.com/lookup", Some("lookup")),
+            ("https://meet.google.com/", None),
         ] {
             assert_eq!(
-                google_meet_url_code(&Url::parse(address).unwrap()),
-                None,
+                google_meet_url_code(&Url::parse(address).unwrap()).as_deref(),
+                code,
                 "{address}"
             );
         }
@@ -1990,10 +1998,13 @@ mod tests {
             Some(Detection::Offer(first.clone()))
         );
         assert!(!watch.detector.is_application_snoozed("com.brave.Browser"));
+        // The call was recorded, then stopped by hand.
+        watch.detector.recording_stopped();
         // The same call under another account is still snoozed.
         assert!(watch.run(Some(&again), &[], 5_000).is_empty());
-        // A different call a few seconds later is offered (#1113).
-        assert!(watch.run(None, &[], 2_000).is_empty());
+        // Off the microphone for 3 s after the stop: the next call is offered
+        // (#1594).
+        assert!(watch.run(None, &[], 3_500).is_empty());
         assert_eq!(watch.stable(&second, &[]), Some(Detection::Offer(second)));
     }
 
