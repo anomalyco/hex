@@ -492,6 +492,15 @@ impl Feature {
         Self::ALL.into_iter().find(|feature| feature.name() == name)
     }
 
+    /// Whether saved `settings` turn this on in this build, without applying
+    /// them to this process's switches (`labs::apply`). A read-only command
+    /// that never loads settings reads the saved file this way instead; the
+    /// reader has already enforced any managed lock, and it is checked here
+    /// as `encode` does.
+    pub fn saved_on(self, settings: &AppSettings) -> bool {
+        self.on(settings) && self.shipped() && self.managed().is_none()
+    }
+
     /// Whether `settings` turn it on.
     pub fn on(self, settings: &AppSettings) -> bool {
         match self {

@@ -59,12 +59,28 @@ impl Playback {
         }
     }
 
-    /// A playback that never started, with its reason.
+    /// A playback that never started, with its reason. It still takes the
+    /// output from whatever played before, which goes quiet at its next
+    /// check.
     pub fn failed(id: u64, error: &'static str) -> Self {
+        GENERATION.fetch_add(1, Ordering::AcqRel);
         Self {
             id,
             worker: None,
             error: Some(error),
+        }
+    }
+
+    /// A playback that never opened a device, for the pane's tests: it keeps
+    /// its worker answer open, so the card shows Stop until `stop`.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn test_playing(id: u64) -> Self {
+        let (sender, receiver) = channel();
+        std::mem::forget(sender);
+        Self {
+            id,
+            worker: Some(receiver),
+            error: None,
         }
     }
 

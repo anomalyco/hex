@@ -8,6 +8,7 @@ use clap::{Args, Subcommand};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
+use crate::app_settings::AppSettings;
 use crate::dictation::vocabulary::VocabularyEntry;
 use crate::history::stats::HistoryStats;
 use crate::history::{HistoryEntry, HistoryKind, HistoryRetention, recordings};
@@ -405,6 +406,13 @@ fn stats_text(stats: &HistoryStats) -> String {
     text
 }
 
+/// Labs › Keep recordings for `hex history`, read from the saved settings:
+/// this command never applies them to the process, so the runtime switch
+/// (`crate::labs::keep_recordings`) can read off while the lab is on.
+fn keep_recordings(settings: &AppSettings) -> bool {
+    crate::labs::Feature::KeepRecordings.saved_on(settings)
+}
+
 pub fn history(args: &HistoryArgs) -> Result<()> {
     if let Some(HistoryAction::Stats { since, until, json }) = &args.action {
         return history_stats(since.as_deref(), until.as_deref(), *json);
@@ -413,7 +421,8 @@ pub fn history(args: &HistoryArgs) -> Result<()> {
     let history = root.join("history.json");
     let entries =
         crate::history::read_snapshot(&history).wrap_err("could not read history.json")?;
-    let recordings = crate::labs::keep_recordings().then(|| {
+    let settings = AppSettings::read().wrap_err("could not read settings.json")?;
+    let recordings = keep_recordings(&settings).then(|| {
         let directory = recordings::directory(&history);
         std::path::absolute(&directory).unwrap_or(directory)
     });

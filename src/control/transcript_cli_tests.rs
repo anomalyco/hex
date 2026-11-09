@@ -296,6 +296,21 @@ fn history_json_contract_snapshot() {
 }
 
 #[test]
+fn keep_recordings_follows_the_saved_switch_not_the_process() {
+    let mut settings = AppSettings::default();
+    settings.labs.keep_recordings = false;
+    let off = keep_recordings(&settings);
+    settings.labs.keep_recordings = true;
+    let on = keep_recordings(&settings);
+    assert!(!off, "off by default");
+    assert!(on, "a saved on switch while this build has the feature");
+    assert_ne!(
+        off, on,
+        "the saved switch decides, not the process's runtime state"
+    );
+}
+
+#[test]
 fn history_json_names_a_recording_only_where_one_is_kept() {
     let root = temp();
     let recordings = crate::history::recordings::directory(&root.join("history.json"));

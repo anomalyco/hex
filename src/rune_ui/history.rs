@@ -148,13 +148,17 @@ impl HistoryPane {
     /// searches again only when the query or the store's revision changed,
     /// and sums the stats again when the entries or the toggle changed, or
     /// once when the dialog closes because the stats emptied.
-    pub(super) fn poll(&mut self, visible: bool) -> bool {
+    pub(super) fn poll(&mut self, visible: bool, keep_audio: bool) -> bool {
         let answered = self.poll_again();
-        let mut changed = self.poll_playback();
+        // Playback's answer returns the card to Play; it is not a reason to
+        // read the stats again.
+        let played = self.poll_playback();
+        let mut changed = false;
         // A playback belongs to the card that shows its Stop: leaving the
-        // entry or History quietly ends it.
+        // entry or History, turning the lab off, or hiding the window
+        // quietly ends it.
         let left = self.playback.as_ref().is_some_and(|playback| {
-            playback.playing() && (!visible || self.selected != Some(playback.id))
+            playback.playing() && (!visible || !keep_audio || self.selected != Some(playback.id))
         });
         if left {
             if let Some(playback) = &mut self.playback {
@@ -176,7 +180,7 @@ impl HistoryPane {
             changed = true;
         }
         let Some(store) = self.store.as_ref().filter(|_| visible) else {
-            return answered || changed;
+            return answered || played || changed;
         };
         let stale = self.search.text != self.searched || self.revision != Some(store.revision());
         if stale {
@@ -188,7 +192,7 @@ impl HistoryPane {
             self.reload_stats();
             return true;
         }
-        answered || changed
+        answered || played || changed
     }
 
     /// Takes Transcribe again's answer once its worker sends it.

@@ -1321,8 +1321,9 @@ Labs › Keep recordings on                     // labs.keep-recordings
 ├── History card, entry with audio -> "Saved recording" + Play + "Transcribe again" menu
 │   ├── Play -> the clip through the default output device, on a worker; one
 │   │   playback at a time: Play on another entry, Stop, selecting another
-│   │   entry, or leaving History stops it. Stop shows while it plays and Play
-│   │   returns when it ends or fails (history/playback.rs)
+│   │   entry, leaving History, turning the lab off, or hiding the window
+│   │   stops it. Stop shows while it plays and Play returns when it ends or
+│   │   fails (history/playback.rs)
 │   ├── Failed -> "Could not play: <why>" (the file is gone, no output device)
 │   ├── Lists every available model installed for the language it would use
 │   ├── A model that takes a language hint (not Parakeet v3/Ultra, GigaAM,
@@ -1347,8 +1348,13 @@ Labs › Keep recordings on                     // labs.keep-recordings
 
 `hex history --json` names each kept recording's absolute path in `recording`
 while the lab is on and the file is still there; every other row omits the
-field. Off, History and dictation are exactly as before: no copy of the clip
-is made. Checks: `a_kept_recording_is_an_owner_only_wav_that_reads_back`,
+field. `hex history` reads the saved `labs.keep_recordings` switch with
+`AppSettings::read` instead of the process's runtime switches, which that
+read-only command never sets; a managed lock and the build's audience keep it
+off as `labs::encode` does. Turning the lab off, leaving the entry or History,
+or hiding the window stops playback. Off, History and dictation are exactly
+as before: no copy of the clip is made. Checks:
+`a_kept_recording_is_an_owner_only_wav_that_reads_back`,
 `recordings_leave_with_their_entries`,
 `the_recordings_byte_cap_drops_the_oldest_audio_but_keeps_the_text`,
 `a_recording_another_process_has_not_saved_yet_survives_a_sweep`,
@@ -1358,10 +1364,12 @@ is made. Checks: `a_kept_recording_is_an_owner_only_wav_that_reads_back`,
 `a_kept_recording_decodes_into_its_own_clip` and
 `a_worker_answer_returns_the_card_to_play_and_keeps_a_failure` in
 [history/playback.rs](../../src/history/playback.rs);
+`keep_recordings_follows_the_saved_switch_not_the_process` and
 `history_json_names_a_recording_only_where_one_is_kept` in
 [transcript_cli_tests.rs](../../src/control/transcript_cli_tests.rs);
-`transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry` and
-`transcribe_again_offers_a_language_only_for_models_that_take_one` in
+`transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry`,
+`transcribe_again_offers_a_language_only_for_models_that_take_one`, and
+`leaving_an_entry_or_turning_off_keep_recordings_stops_playback` in
 [tests.rs](../../src/rune_ui/tests.rs);
 `keep_recordings_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs); the tests in
