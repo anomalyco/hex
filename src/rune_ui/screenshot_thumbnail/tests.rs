@@ -313,6 +313,20 @@ fn the_newest_rests_in_the_corner_and_the_older_ones_above_it() {
 }
 
 #[test]
+fn cards_of_any_shape_share_the_corners_right_edge() {
+    let cards = stack();
+    let slots = cards.slots();
+    let right = STACK_SCREEN.0 - INSET;
+    for (_, [x, _, w, _]) in &slots {
+        assert_eq!(x + w, right);
+    }
+    // Each keeps its shot's shape inside the same largest size: a 4:3 shot
+    // is narrower than a 16:10 one.
+    assert_eq!(slots[0].1[2..], [224.0, 168.0]);
+    assert_eq!(slots[2].1[2..], [240.0, 150.0]);
+}
+
+#[test]
 fn the_oldest_cards_close_once_the_stack_reaches_the_top() {
     let mut cards = Cards::still(Vec::new(), (800.0, 400.0), None);
     let ids: Vec<u64> = (0..4)
