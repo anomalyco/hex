@@ -594,6 +594,9 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   pill `.hit()`); the window is as wide as the open pill, and clicks
      │   in its transparent rest reach the app beneath (#1305; not observed
      │   on a real Mac)
+     ├── Windows: each capsule's window is only as wide as the drawn pill,
+     │   so the area around it stays clickable (not verified on a real
+     │   Windows machine)
      ├── In the saved recording_indicator_corner
      ├── Compact: pulsing red dot · title · mm:ss, plus "+N" when turns wait
      ├── Hover -> widens toward the screen with the actions below; pointer
