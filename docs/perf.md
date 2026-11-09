@@ -147,7 +147,20 @@ keyboard hook and loads the default English model, which
 `perf/seeds/listening.ts` copies from this machine's own Hex install into
 `perf/seeds/.generated`. strobe shares a seed file this large (64 MB and up)
 read only between launches instead of copying it into each private home. The warm profile opens the machine's real microphone; neither records.
-Leave the dictation shortcut alone while it runs.
+
+Setup waits until the copy's event log shows `session_started`, which
+Windows and Linux write once the model has loaded and warmed, then 2 s
+more, and at least 10 s in all. A new build's first launch compiles the GPU
+driver's shaders during that load: about 5 s of CPU on an idle machine, and
+over 10 s on a busy one. A fixed 10 s wait let that compile run into the
+measured runs, which then read 1 to 2.5 s of `cpu.work` instead of about
+10 ms.
+
+As in the dictation cases, the profiles move the copy's shortcuts to F19
+and F18 and unbind Paste Last, so a key pressed while a bench runs on a
+machine in use starts nothing. The copy's keyboard and mouse hooks still
+see every key and mouse move, so input on the bench machine adds
+`cpu.work` and `cpu.wakes`: compare runs from an idle machine.
 
 ## Dictation cases
 
