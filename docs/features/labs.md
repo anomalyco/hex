@@ -1321,7 +1321,7 @@ Labs › Keep recordings on                     // labs.keep-recordings
 ├── History card, entry with audio -> "Saved recording" + Play + "Transcribe again" menu
 │   ├── Play -> the clip through the default output device, on a worker; one
 │   │   playback at a time: Play on another entry, Stop, selecting another
-│   │   entry, leaving History, turning the lab off, or hiding the window
+│   │   entry, leaving History, turning the lab off, or closing the window
 │   │   stops it. Stop shows while it plays and Play returns when it ends or
 │   │   fails (history/playback.rs)
 │   ├── Failed -> "Could not play: <why>" (the file is gone, no output device)
@@ -1352,8 +1352,9 @@ field. `hex history` reads the saved `labs.keep_recordings` switch with
 `AppSettings::read` instead of the process's runtime switches, which that
 read-only command never sets; a managed lock and the build's audience keep it
 off as `labs::encode` does. Turning the lab off, leaving the entry or History,
-or hiding the window stops playback. Off, History and dictation are exactly
-as before: no copy of the clip is made. Checks:
+or closing the window stops playback; closing stops it directly in `on_close`,
+since a hidden window only polls when woken. Off, History and dictation are
+exactly as before: no copy of the clip is made. Checks:
 `a_kept_recording_is_an_owner_only_wav_that_reads_back`,
 `recordings_leave_with_their_entries`,
 `the_recordings_byte_cap_drops_the_oldest_audio_but_keeps_the_text`,

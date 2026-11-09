@@ -361,6 +361,11 @@ fn build(init: impl FnOnce() -> Ui + 'static, playground: PlaygroundMode) -> run
 fn on_close(ui: &mut Ui, _: &mut Tx) {
     ui.flush_drafts();
     settings::cancel_capture(ui);
+    // A hidden window only polls when woken, so poll's visibility check
+    // cannot stop a playback that was running when it closed.
+    if let Some(playback) = &mut ui.history.playback {
+        playback.stop();
+    }
     ui.open = None;
     models::close(ui);
     ui.close_dialogs();

@@ -1797,6 +1797,12 @@ fn leaving_an_entry_or_turning_off_keep_recordings_stops_playback() {
     rt.invalidate();
     settle(&mut rt);
     play(&rt);
+
+    // Closing the window: a hidden window only polls when woken, so on_close
+    // stops the playback itself.
+    start(&mut rt);
+    on_close(&mut rt.state, &mut rune::Tx::default());
+    stopped(&rt);
 }
 
 #[test]
