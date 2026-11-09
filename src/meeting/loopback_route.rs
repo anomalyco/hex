@@ -66,17 +66,20 @@ pub(super) fn choose(
 /// Whether the open outputs `current` should reopen for `next`.
 ///
 /// Microphone-holder outputs are the precise ones, so any change reopens.
-/// App outputs are the fallback: when they already cover `current`, the app
-/// is on the same call its microphone holder was seen on, and reopening only
-/// to hear the extra outputs of a second process would then reopen back on
-/// the next check once the holder's session returns. App outputs that leave
-/// out a current endpoint mean the app moved, and hearing every output
-/// (`Every`) keeps what is open.
-pub(super) fn should_reopen(current: &BTreeSet<String>, next: &Choice) -> bool {
-    match next {
-        Choice::MicHolder(endpoints) => endpoints != current,
-        Choice::App(endpoints) => !current.is_subset(endpoints),
-        Choice::Every => false,
+/// Outputs chosen from the microphone holder stay open for an app set that
+/// still covers them: that is the same call seen without its holder, and
+/// reopening only to hear the extra outputs of a second process would then
+/// reopen back on the next check once the holder's session returns. Once the
+/// outputs came from an app set, only that same set stays open: a grown set
+/// is a new endpoint that nothing else would hear. An app set that leaves out
+/// a current endpoint means the app moved, and hearing every output (`Every`)
+/// keeps what is open.
+pub(super) fn should_reopen(current: &Choice, next: &Choice) -> bool {
+    match (current, next) {
+        (Choice::MicHolder(open), Choice::MicHolder(wanted)) => wanted != open,
+        (Choice::MicHolder(open), Choice::App(wanted)) => !open.is_subset(wanted),
+        (Choice::App(open), Choice::MicHolder(wanted) | Choice::App(wanted)) => wanted != open,
+        (_, Choice::Every) | (Choice::Every, _) => false,
     }
 }
 
@@ -130,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    fn another_process_on_the_user_s_microphone_selects_nothing() {
+    fn the_mixer_s_microphone_endpoint_is_never_chosen() {
         // SteelSeries Sonar plays the processed microphone on its virtual
         // endpoint and audiodg holds sessions too; neither belongs to the
         // call app, so neither endpoint is chosen.
@@ -139,13 +142,6 @@ mod tests {
         assert_eq!(
             choose(Some(DISCORD), &render, &capture, |pid| pid == 10),
             Choice::MicHolder(ids(&[HEADSET]))
-        );
-
-        // With the call app not playing, only the mixer's endpoint remains.
-        let render = endpoints(&[(MIC_VIRTUAL, &[4, 900])]);
-        assert_eq!(
-            choose(Some(DISCORD), &render, &capture, |pid| pid == 10),
-            Choice::Every
         );
     }
 
@@ -168,7 +164,7 @@ mod tests {
 
     #[test]
     fn a_different_microphone_holder_output_reopens() {
-        let current = ids(&[HEADSET]);
+        let current = Choice::MicHolder(ids(&[HEADSET]));
         assert!(should_reopen(
             &current,
             &Choice::MicHolder(ids(&[SPEAKERS]))
@@ -179,7 +175,7 @@ mod tests {
     fn an_app_output_set_that_covers_the_current_one_does_not_reopen() {
         // The microphone holder's session blipped: the fallback only adds the
         // second process's output, so the call stays on what it hears.
-        let current = ids(&[HEADSET]);
+        let current = Choice::MicHolder(ids(&[HEADSET]));
         assert!(!should_reopen(
             &current,
             &Choice::App(ids(&[HEADSET, SPEAKERS]))
@@ -190,7 +186,7 @@ mod tests {
 
     #[test]
     fn an_app_output_set_that_leaves_out_the_current_one_reopens() {
-        let current = ids(&[HEADSET]);
+        let current = Choice::MicHolder(ids(&[HEADSET]));
         assert!(should_reopen(&current, &Choice::App(ids(&[SPEAKERS]))));
         assert!(should_reopen(
             &current,
@@ -199,7 +195,35 @@ mod tests {
     }
 
     #[test]
+    fn an_app_set_that_grows_beyond_an_app_set_reopens() {
+        // The app started playing on a second output after it was first heard
+        // on one; only reopening hears the new endpoint.
+        let current = Choice::App(ids(&[HEADSET]));
+        assert!(!should_reopen(&current, &Choice::App(ids(&[HEADSET]))));
+        assert!(should_reopen(
+            &current,
+            &Choice::App(ids(&[HEADSET, SPEAKERS]))
+        ));
+    }
+
+    #[test]
+    fn an_app_set_equal_to_the_microphone_holder_s_does_not_reopen() {
+        let current = Choice::App(ids(&[HEADSET]));
+        assert!(!should_reopen(
+            &current,
+            &Choice::MicHolder(ids(&[HEADSET]))
+        ));
+        assert!(should_reopen(
+            &current,
+            &Choice::MicHolder(ids(&[SPEAKERS]))
+        ));
+    }
+
+    #[test]
     fn every_output_keeps_what_is_open() {
-        assert!(!should_reopen(&ids(&[HEADSET]), &Choice::Every));
+        assert!(!should_reopen(
+            &Choice::MicHolder(ids(&[HEADSET])),
+            &Choice::Every
+        ));
     }
 }

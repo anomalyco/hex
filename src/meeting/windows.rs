@@ -109,13 +109,13 @@ fn output_endpoints(devices: &[OutputDevice]) -> Vec<String> {
     endpoints
 }
 
-/// The outputs to loop back: those of `endpoints`, or every one.
+/// The outputs to loop back: those of `chosen`, or every one.
 fn selected_outputs<'a>(
     devices: &'a [OutputDevice],
-    endpoints: Option<&BTreeSet<String>>,
+    chosen: Option<&Choice>,
 ) -> Vec<&'a OutputDevice> {
-    match endpoints {
-        Some(endpoints) => devices
+    match chosen {
+        Some(Choice::MicHolder(endpoints) | Choice::App(endpoints)) => devices
             .iter()
             .filter(|device| {
                 device
@@ -124,7 +124,7 @@ fn selected_outputs<'a>(
                     .is_some_and(|id| endpoints.contains(id))
             })
             .collect(),
-        None => devices.iter().collect(),
+        Some(Choice::Every) | None => devices.iter().collect(),
     }
 }
 
@@ -189,8 +189,9 @@ struct LoopbackSource {
     listed: Vec<String>,
     /// The call app's canonical bundle identifier, for a call recording.
     application: Option<String>,
-    /// The app's own endpoints; `None` hears every output.
-    chosen: Option<BTreeSet<String>>,
+    /// What the app is following: its own endpoints, or `None` for every
+    /// output.
+    chosen: Option<Choice>,
     /// Whether hearing every output should still reopen when the app plays.
     watch_app: bool,
     route_checked: Instant,
@@ -212,11 +213,11 @@ impl LoopbackSource {
         if let Some(application) = application.as_deref() {
             match app_route(application) {
                 Some(Choice::MicHolder(endpoints)) => {
-                    chosen = Some(endpoints);
+                    chosen = Some(Choice::MicHolder(endpoints));
                     reason = "the call app's microphone holder";
                 }
                 Some(Choice::App(endpoints)) => {
-                    chosen = Some(endpoints);
+                    chosen = Some(Choice::App(endpoints));
                     reason = "the call app";
                 }
                 // The app plays nothing yet: hear every output until it does.

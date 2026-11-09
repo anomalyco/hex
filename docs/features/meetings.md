@@ -134,21 +134,29 @@ System audio                                      // meetings.system-audio
     for that source. Silence while nothing plays is padded on resume. A
     route check every 2 s reopens on a changed output list while hearing
     every one, or when the app's outputs move (by endpoint id): a changed
-    microphone-holder set, or an app set that leaves out a current endpoint.
-    An app set that still covers the current endpoints is the same call seen
-    without its holder, so it keeps them instead of reopening back and
-    forth, as does a temporarily absent session or a failed enumeration. An
-    output whose loopback fails is dropped while the others keep recording.
+    microphone-holder set, or any change between app sets. Outputs chosen
+    from the microphone holder stay open for an app set that still covers
+    them: that is the same call seen without its holder, so reopening only
+    for a second process's extra outputs would reopen back on the next
+    check once the holder returns. Once the outputs came from an app set,
+    only that same set stays open, because a new endpoint would otherwise
+    never be heard. A temporarily absent session or a failed enumeration
+    keeps the current outputs too. A source that stopped following the app
+    because none of its outputs would open follows it again when a changed
+    output list reopens it. An output whose loopback fails is dropped while
+    the others keep recording.
     // checks: the selection is pure and tested in
     // meeting/loopback_route.rs: the_microphone_holder_s_output_beats_
     // another_process_of_the_same_app,
     // a_microphone_holder_that_plays_nothing_falls_back_to_the_app_s_outputs,
-    // another_process_on_the_user_s_microphone_selects_nothing,
+    // the_mixer_s_microphone_endpoint_is_never_chosen,
     // an_app_with_no_active_render_session_hears_every_output,
     // a_manual_recording_hears_every_output, and its route changes by
     // a_different_microphone_holder_output_reopens,
     // an_app_output_set_that_covers_the_current_one_does_not_reopen,
     // an_app_output_set_that_leaves_out_the_current_one_reopens,
+    // an_app_set_that_grows_beyond_an_app_set_reopens,
+    // an_app_set_equal_to_the_microphone_holder_s_does_not_reopen,
     // every_output_keeps_what_is_open; the mix still by
     // audio_on_any_output_reaches_the_system_track (meeting/windows.rs);
     // unverified on real hardware
