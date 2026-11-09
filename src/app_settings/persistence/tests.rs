@@ -103,6 +103,21 @@ fn invalid_enum_resets_only_that_field_and_leaves_disk_alone() {
 }
 
 #[test]
+fn an_invalid_appearance_theme_resets_only_that_field() {
+    let original = br#"{"labs":{"appearance":true,"appearance_theme":"sepia","live_text":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(settings.labs.appearance);
+    assert_eq!(
+        settings.labs.appearance_theme,
+        crate::app_settings::AppearanceTheme::default()
+    );
+    assert!(settings.labs.live_text);
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+}
+
+#[test]
 fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     let settings = AppSettings {
         paste_last_hotkey: None,

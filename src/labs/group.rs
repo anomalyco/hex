@@ -62,6 +62,7 @@ impl Feature {
             | Self::HideMenuBarIcon
             | Self::QuitClosesWindow
             | Self::SettingsSearch
+            | Self::Appearance
             | Self::ReleaseNotesLink
             | Self::Playground => Group::Dictation,
             Self::SmartSpacing

@@ -111,6 +111,7 @@ impl Feature {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
             }
             Self::SettingsSearch => "Find any setting in General with a search field",
+            Self::Appearance => "Use light or dark for the main window instead of the system's",
             Self::ReleaseNotesLink => {
                 "Show a link to this build's release notes in the sidebar footer"
             }

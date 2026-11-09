@@ -1352,11 +1352,15 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
 // View
 
 fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
-    let p = Paint::new(cx.system_dark(), cx.env().scale);
-    // The native title bar takes the window's background, so it follows a
-    // system theme switch along with the rest of the window.
+    let dark = crate::labs::window_dark(&ui.settings.labs, cx.system_dark());
+    let p = Paint::new(dark, cx.env().scale);
+    // The native title bar takes the window's background and light/dark mode,
+    // so its text and buttons stay readable while Labs › Appearance forces a
+    // theme. winit repaints the frame from the OS theme on every settings
+    // broadcast, so `match_title_bar` records this frame's theme and a window
+    // subclass re-applies it after each one while a theme is forced.
     #[cfg(target_os = "windows")]
-    crate::windows::rune::match_title_bar(p.k.c.bg_deep);
+    crate::windows::rune::match_title_bar(p.k.c.bg_deep, dark, cx.system_dark());
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {

@@ -2208,6 +2208,50 @@ fn caps_lock_light_shows_its_choices_on_its_card_while_on() {
 }
 
 #[test]
+fn appearance_shows_its_theme_on_its_card_while_on() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(crate::labs::Feature::Appearance.group()));
+    settle(&mut rt);
+    assert!(rt.find("appearance-theme").is_none(), "hidden while off");
+    assert_eq!(
+        rt.state.settings.labs.appearance_theme,
+        crate::app_settings::AppearanceTheme::System
+    );
+    tap(&mut rt, "lab-appearance");
+    assert!(rt.state.settings.labs.appearance);
+    assert!(rt.find("appearance-theme").is_some());
+    tap(&mut rt, "segment2");
+    assert_eq!(
+        rt.state.settings.labs.appearance_theme,
+        crate::app_settings::AppearanceTheme::Dark
+    );
+}
+
+#[test]
+fn the_main_window_paints_the_forced_appearance_not_the_os() {
+    use crate::app_settings::AppearanceTheme;
+    let mut rt = runtime("mac-settings", false, (980.0, 4000.0));
+    let fill = |rt: &Runtime<Ui>| {
+        rt.elements()
+            .into_iter()
+            .find(|element| element.key.as_deref() == Some("window"))
+            .expect("the window paints its background")
+            .fill
+    };
+    assert_eq!(fill(&rt), rune_theme_opencode::kit(false).c.bg_deep);
+    rt.update(|ui, _| {
+        ui.settings.labs.appearance = true;
+        ui.settings.labs.appearance_theme = AppearanceTheme::Dark;
+    });
+    refresh(&mut rt);
+    assert_eq!(
+        fill(&rt),
+        rune_theme_opencode::kit(true).c.bg_deep,
+        "the OS is light, so only the lab's Dark paints the window dark"
+    );
+}
+
+#[test]
 fn the_labs_store_filters_by_tab_chip_and_search() {
     let mut rt = runtime("mac-labs-on", true, (980.0, 2000.0));
     assert!(rt.find("lab-card-live-text").is_some());

@@ -1230,6 +1230,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model.", "Ajoute hex transcribe <file>, qui transforme un enregistrement WAV en texte avec votre modèle de dictée."),
     ("Process API transcripts", "Traiter les transcriptions de l'API"),
     ("Apps can ask Hex's local API for transcripts with Global mode's processing applied.", "Les apps peuvent demander à l'API locale de Hex des transcriptions avec le traitement du mode Global appliqué"),
+    ("Appearance", "Apparence"),
+    ("Use light or dark for the main window instead of the system's", "Utilise le clair ou le sombre pour la fenêtre principale au lieu du système"),
+    ("Theme", "Thème"),
+    ("Light mode", "Clair"),
+    ("Dark mode", "Sombre"),
 ];
 
 #[cfg(test)]

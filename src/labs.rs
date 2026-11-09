@@ -24,7 +24,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::app_settings::{AppSettings, CapsLockLight, LabsSettings};
+use crate::app_settings::{AppSettings, AppearanceTheme, CapsLockLight, LabsSettings};
 
 mod cli;
 mod description;
@@ -107,6 +107,7 @@ pub enum Feature {
     SectionKeyAlone,
     KeepRecordings,
     SettingsSearch,
+    Appearance,
     ReleaseNotesLink,
     HideMenuBarIcon,
     MovableMeetingCapsules,
@@ -132,7 +133,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 64] = [
+    pub const ALL: [Self; 65] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -175,6 +176,7 @@ impl Feature {
         Self::SectionKeyAlone,
         Self::KeepRecordings,
         Self::SettingsSearch,
+        Self::Appearance,
         Self::ReleaseNotesLink,
         Self::HideMenuBarIcon,
         Self::MovableMeetingCapsules,
@@ -264,6 +266,7 @@ impl Feature {
             | Self::SectionKeyAlone
             | Self::KeepRecordings
             | Self::SettingsSearch
+            | Self::Appearance
             | Self::ReleaseNotesLink
             | Self::HideMenuBarIcon
             | Self::MovableMeetingCapsules
@@ -351,7 +354,10 @@ impl Feature {
             | Self::TerminalPasteShortcut
             | Self::ReleaseNotesLink
             | Self::OpenCodeInWsl => 20261108,
-            Self::TranscribeFiles | Self::ApiProcessing | Self::DoubleTapModifiers => 20261109,
+            Self::TranscribeFiles
+            | Self::ApiProcessing
+            | Self::Appearance
+            | Self::DoubleTapModifiers => 20261109,
         }
     }
 
@@ -374,6 +380,9 @@ impl Feature {
         }
         if key == "labs.caps_lock_light" {
             return Some(Self::CapsLockDictation);
+        }
+        if key == "labs.appearance_theme" {
+            return Some(Self::Appearance);
         }
         if key == "capture.replay_hotkey" {
             return Some(Self::AnnotateReplay);
@@ -456,6 +465,7 @@ impl Feature {
             | Self::MoreCallApps
             | Self::ExpireMeetingAudio
             | Self::SettingsSearch
+            | Self::Appearance
             | Self::ReleaseNotesLink
             | Self::FillerWords
             | Self::TranscribeFiles
@@ -508,6 +518,7 @@ impl Feature {
             Self::SectionKeyAlone => "section-key",
             Self::KeepRecordings => "keep-recordings",
             Self::SettingsSearch => "settings-search",
+            Self::Appearance => "appearance",
             Self::ReleaseNotesLink => "release-notes-link",
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
             Self::MovableMeetingCapsules => "movable-meeting-capsules",
@@ -578,6 +589,7 @@ impl Feature {
             Self::SectionKeyAlone => "labs.section_key_alone",
             Self::KeepRecordings => "labs.keep_recordings",
             Self::SettingsSearch => "labs.settings_search",
+            Self::Appearance => "labs.appearance",
             Self::ReleaseNotesLink => "labs.release_notes_link",
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
             Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
@@ -652,6 +664,7 @@ impl Feature {
             Self::SectionKeyAlone => settings.labs.section_key_alone,
             Self::KeepRecordings => settings.labs.keep_recordings,
             Self::SettingsSearch => settings.labs.settings_search,
+            Self::Appearance => settings.labs.appearance,
             Self::ReleaseNotesLink => settings.labs.release_notes_link,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
@@ -724,6 +737,7 @@ impl Feature {
             &mut labs.section_key_alone,
             &mut labs.keep_recordings,
             &mut labs.settings_search,
+            &mut labs.appearance,
             &mut labs.release_notes_link,
             &mut labs.hide_menu_bar_icon,
             &mut labs.movable_meeting_capsules,
@@ -801,6 +815,7 @@ impl Feature {
             Self::PickerDownloaded => settings.labs.picker_downloaded = on,
             Self::KeepRecordings => settings.labs.keep_recordings = on,
             Self::SettingsSearch => settings.labs.settings_search = on,
+            Self::Appearance => settings.labs.appearance = on,
             Self::ReleaseNotesLink => settings.labs.release_notes_link = on,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
@@ -1227,6 +1242,21 @@ pub fn unload_idle() -> Option<std::time::Duration> {
         .then(|| std::time::Duration::from_secs(((state >> MINUTES_SHIFT) & MINUTES_MASK) * 60))
 }
 
+/// Whether the main window draws dark: the OS's appearance, unless Labs ›
+/// Appearance is on and names one. Resolved for each view, so System keeps
+/// following the OS live. Overlay windows (the HUD, capsules, live text) keep
+/// following the OS themselves.
+pub fn window_dark(labs: &LabsSettings, system_dark: bool) -> bool {
+    if !Feature::Appearance.shipped() || !labs.appearance {
+        return system_dark;
+    }
+    match labs.appearance_theme {
+        AppearanceTheme::System => system_dark,
+        AppearanceTheme::Light => false,
+        AppearanceTheme::Dark => true,
+    }
+}
+
 /// Records the switches the loaded or saved settings hold.
 pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
@@ -1551,6 +1581,10 @@ mod tests {
             Feature::for_settings_key("labs.caps_lock_light"),
             Some(Feature::CapsLockDictation)
         );
+        assert_eq!(
+            Feature::for_settings_key("labs.appearance_theme"),
+            Some(Feature::Appearance)
+        );
         assert_eq!(Feature::for_settings_key("dictation_hotkey"), None);
     }
 
@@ -1565,6 +1599,22 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & UNLOAD_IDLE, 0);
         assert_eq!(state >> MINUTES_SHIFT, 30);
+    }
+
+    #[test]
+    fn the_window_follows_the_os_unless_appearance_forces_it() {
+        let labs = LabsSettings::default();
+        assert!(window_dark(&labs, true));
+        assert!(!window_dark(&labs, false));
+        let appearance = |theme| LabsSettings {
+            appearance: true,
+            appearance_theme: theme,
+            ..LabsSettings::default()
+        };
+        assert!(window_dark(&appearance(AppearanceTheme::System), true));
+        assert!(!window_dark(&appearance(AppearanceTheme::System), false));
+        assert!(!window_dark(&appearance(AppearanceTheme::Light), true));
+        assert!(window_dark(&appearance(AppearanceTheme::Dark), false));
     }
 
     #[test]
