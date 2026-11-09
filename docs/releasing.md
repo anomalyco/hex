@@ -382,16 +382,16 @@ Release secrets live in AWS Secrets Manager (account `anomaly-secrets`), managed
 [anomalyco/secrets](https://github.com/anomalyco/secrets). Jobs in the `release` environment
 (limited to `dev` and `production`; `dev` is allowed because dev-channel builds and dev site
 deploys run from it, and no reviewer is required) assume `role/github/hex-release` with
-GitHub OIDC and fetch only what they use. That role can read `hex/release/*` and the two
-shared Apple secrets. Set a value with `bun set hex release <NAME>` in that repo.
+GitHub OIDC and fetch only what they use. That role can read `hex/release/*` and the shared Apple, AUR and Homebrew
+secrets. Set a value with `bun set hex release <NAME>` in that repo.
 
 | Secret | Use |
 | --- | --- |
 | (none) | publishing to the release service: the job's GitHub OIDC token |
 | `hex/release/CLOUDFLARE_API_TOKEN`, var `CLOUDFLARE_ACCOUNT_ID` | site deploys (`hex-site-deploy`, used only by `deploy-site.sh`) |
 | `hex/release/R2_SECRET_ACCESS_KEY`, var `R2_ACCESS_KEY_ID` | uploads to `hex-production-files` (`hex-r2-production-files`): the installers, the legacy appcast, and `dev-notes.json` |
-| `hex/release/AUR_SSH_KEY` | pushes `hex-bin` (key `github-actions-hex-aur`) |
-| `hex/release/HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb` (deploy key `github-actions-hex-homebrew`, write access on `anomalyco/homebrew-tap` only) |
+| `shared/AUR_SSH_KEY` | pushes `hex-bin`; one key for every Anomaly AUR package (`github-actions-hex-aur`) |
+| `shared/HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb`; one deploy key on `anomalyco/homebrew-tap` for every app (`github-actions-hex-homebrew`) |
 | vars `AZURE_*` | Authenticode (docs/windows-signing.md); not secrets, `azure/login` uses OIDC |
 | `shared/APPLE_SIGNING_CERTIFICATE`, `shared/APPLE_NOTARY_KEY`, vars `APPLE_NOTARY_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
 | `hex/release/RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |

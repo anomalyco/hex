@@ -31,7 +31,7 @@ jobs:
         uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
         with:
           secret-ids: |
-            AUR_SSH_PRIVATE_KEY,hex/release/AUR_SSH_KEY
+            AUR_SSH_PRIVATE_KEY,shared/AUR_SSH_KEY
           parse-json-secrets: false
       - name: List the AUR account's packages with the key
         shell: bash
