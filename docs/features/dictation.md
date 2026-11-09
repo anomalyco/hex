@@ -328,11 +328,14 @@ Output > Typed text                        // labs.md
     │   become Ctrl+Shift+V; the job logs why and sends nothing
     ├── take the clipboard for the job: cancel any paste restore still pending
     │   and keep the clipboard that paste replaced, else snapshot it now
-    ├── clear the clipboard, then Ctrl+A and Ctrl+C in the focused app
+    ├── clear the clipboard, then Ctrl+A and Ctrl+C in the focused app,
+    │   pausing 30 ms so the selection settles before the copy
     │   ├── GNOME without data-control clears through `wl-copy --clear`
     │   └── a clear that fails, or leaves text behind, aborts before copying
     │       and restores
-    ├── poll the clipboard for text, up to 500 ms, honoring Cancel
+    ├── pause 40 ms, then poll the clipboard for text, up to 600 ms, honoring
+    │   Cancel; a read that races the copy can take the focus it needs on
+    │   GNOME, where every read runs `wl-paste`
     ├── read the selection as text/plain, bounded to 1 MiB and one second
     ├── no text, or only whitespace -> error tone, clipboard restored, nothing pasted
     ├── run the matching mode's Output steps, with transformation context

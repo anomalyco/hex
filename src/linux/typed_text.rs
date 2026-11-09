@@ -14,11 +14,19 @@ use crate::dictation::processor::Source;
 use crate::linux::clipboard::Snapshot;
 use crate::linux::paste::LinuxPaster;
 
+/// How long the focused app gets to apply Ctrl+A before Ctrl+C follows.
+/// Sending both in one breath can start the copy before the selection settles.
+const SELECT_SETTLE: Duration = Duration::from_millis(30);
+/// How long the target gets to take Ctrl+C before the job reads the
+/// clipboard. On GNOME every read spawns `wl-paste`, which briefly maps its
+/// own surface; a read that starts with the copy can take the focus the copy
+/// needs, so the clipboard stays empty.
+const COPY_SETTLE: Duration = Duration::from_millis(40);
 /// How long the focused app gets to put the selection on the clipboard.
 /// The job polls until text appears, so a fast app is not held back.
-const COPY_DEADLINE: Duration = Duration::from_millis(500);
+const COPY_DEADLINE: Duration = Duration::from_millis(600);
 /// How often the job re-reads the clipboard while it waits.
-const COPY_POLL: Duration = Duration::from_millis(100);
+const COPY_POLL: Duration = Duration::from_millis(40);
 /// Typed text has no spoken language. The only language-sensitive step is
 /// the dictation-only filler-word filter, which skips typed text, so this
 /// value never changes the result.
@@ -156,6 +164,7 @@ where
     // trusted, so the job stops before it reads or pastes anything.
     clear(clipboard, "before copying the selection")?;
     clipboard.select_all()?;
+    settle(stop, SELECT_SETTLE)?;
     clipboard.copy_selection()?;
     let Some(text) = wait_for_text(clipboard, stop)? else {
         return Err(eyre!("no text was selected"));
@@ -210,8 +219,10 @@ fn clear<C: ClipboardJob>(clipboard: &mut C, when: &str) -> Result<()> {
 }
 
 /// Reads the clipboard until the target has put text on it or
-/// [`COPY_DEADLINE`] passes, checking the stop flag between reads.
+/// [`COPY_DEADLINE`] passes, checking the stop flag between reads. Waits
+/// [`COPY_SETTLE`] first so the first read cannot race the copy.
 fn wait_for_text<C: ClipboardJob>(clipboard: &mut C, stop: &AtomicBool) -> Result<Option<String>> {
+    settle(stop, COPY_SETTLE)?;
     let deadline = Instant::now() + COPY_DEADLINE;
     loop {
         if stop.load(Ordering::Acquire) {
@@ -226,6 +237,22 @@ fn wait_for_text<C: ClipboardJob>(clipboard: &mut C, stop: &AtomicBool) -> Resul
             return Ok(None);
         }
         thread::sleep(COPY_POLL);
+    }
+}
+
+/// Sleeps up to `duration`, checking the stop flag between sleeps so a
+/// cancel still ends the job promptly.
+fn settle(stop: &AtomicBool, duration: Duration) -> Result<()> {
+    let deadline = Instant::now() + duration;
+    loop {
+        if stop.load(Ordering::Acquire) {
+            return Err(eyre!("typed text cancelled while stopping the listener"));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(());
+        }
+        thread::sleep(remaining.min(COPY_POLL));
     }
 }
 
