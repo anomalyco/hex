@@ -61,6 +61,7 @@ mod scrawl;
 pub(crate) mod screenshot_thumbnail;
 mod settings;
 mod shortcut_mode;
+mod shortcut_rule;
 mod sidebar;
 mod sidebar_update;
 mod sound_sets;
@@ -88,6 +89,7 @@ use host::{Backend, Request, ShortcutTarget};
 use onboarding_kit::live::Page;
 use scenes::{SCENES, Scene, fixture, mac_fixture, portal_fixture};
 use settings::Capture;
+pub(crate) use shortcut_rule::shortcut_rule;
 use sidebar::{BuildKind, Pane, pane_header, sidebar};
 
 /// How long typing pauses before a text field's edit is saved.
@@ -457,36 +459,6 @@ pub(crate) fn current_pane(ui: &Ui) -> &'static str {
     }
 }
 
-/// The OS's rules for a shortcut, as Settings records it and `hex settings set`.
-pub(crate) fn shortcut_rule(
-    slot: crate::app_settings::HotkeySlot,
-    binding: &HotkeyBinding,
-) -> Result<(), &'static str> {
-    use crate::app_settings::HotkeySlot;
-    let target = match slot {
-        HotkeySlot::Dictation => ShortcutTarget::Dictation,
-        HotkeySlot::PasteLast => ShortcutTarget::PasteLast,
-        HotkeySlot::RawDictation => ShortcutTarget::RawDictation,
-        HotkeySlot::Cancel => ShortcutTarget::Cancel,
-        #[cfg(hex_capture)]
-        HotkeySlot::Capture => ShortcutTarget::Capture,
-        #[cfg(all(hex_capture, target_os = "macos"))]
-        HotkeySlot::CaptureReplay => ShortcutTarget::CaptureReplay,
-        #[cfg(all(hex_capture, not(target_os = "macos")))]
-        HotkeySlot::CaptureReplay => ShortcutTarget::Capture,
-        #[cfg(target_os = "macos")]
-        HotkeySlot::SecondDictation => ShortcutTarget::SecondDictation,
-        #[cfg(target_os = "macos")]
-        HotkeySlot::Screenshot => ShortcutTarget::Screenshot,
-        #[cfg(target_os = "macos")]
-        HotkeySlot::ScreenshotRecord => ShortcutTarget::ScreenshotRecord,
-        // Labs' shortcuts are macOS's; elsewhere a saved one meets dictation's rules.
-        #[cfg(not(target_os = "macos"))]
-        _ => ShortcutTarget::Dictation,
-    };
-    host::validate_hotkey(target, binding)
-}
-
 /// The key `name` names on the active keyboard layout ("v", "space", "f5").
 #[cfg(target_os = "macos")]
 pub(crate) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
@@ -634,6 +606,9 @@ enum Menu {
 
 pub(crate) struct Ui {
     settings: AppSettings,
+    /// A test's preferred system language, instead of the host locale.
+    #[cfg(test)]
+    preferred_language: Option<String>,
     service: Service,
     /// This window's app, to know whether it shows (`app` sets it).
     window: Option<rune::AppHandle<Ui>>,
@@ -773,6 +748,8 @@ impl Ui {
         let vocabulary = vocabulary::VocabularyEditor::new(&settings.vocabulary);
         Self {
             settings,
+            #[cfg(test)]
+            preferred_language: None,
             service,
             view: None,
             error: None,
@@ -830,6 +807,16 @@ impl Ui {
     /// A scene or test: nothing here runs on real time.
     fn is_fixture(&self) -> bool {
         matches!(self.service, Service::Fixture(_))
+    }
+
+    /// The person's first preferred system language: a test's when it sets
+    /// one, else the host locale.
+    fn preferred_language(&self) -> String {
+        #[cfg(test)]
+        if let Some(language) = &self.preferred_language {
+            return language.clone();
+        }
+        crate::desktop::i18n::preferred_language()
     }
 
     fn send(&mut self, request: Request) {

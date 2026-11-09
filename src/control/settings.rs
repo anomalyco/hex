@@ -7,9 +7,13 @@ use serde_json::Value;
 
 use super::ControlError;
 use crate::app_settings::{
-    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, HotkeyKey, HotkeyModifiers, HotkeySlot,
-    ModifierSide,
+    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, HotkeyKey, HotkeySlot,
 };
+
+mod hotkeys;
+
+use hotkeys::special_key_refusal;
+pub use hotkeys::{format_hotkey, parse_hotkey};
 
 /// One setting as `hex settings get` reports it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -220,6 +224,20 @@ const KEYS: &[Key] = &[
          external keyboard (macOS, with labs.second_dictation_shortcut); none (the default) \
          turns it off",
     ),
+    optional(
+        "typed_text_hotkey",
+        Kind::Shortcut(HotkeySlot::TypedText),
+        "Labs: the shortcut that runs the focused app's Output steps on the text already \
+         typed in the focused field and replaces it (Linux, with labs.typed_text); none \
+         (the default) turns it off",
+    ),
+    optional(
+        "terminal_paste_hotkey",
+        Kind::Shortcut(HotkeySlot::TerminalPaste),
+        "Labs: another shortcut that dictates like dictation_hotkey and always pastes with \
+         Ctrl+Shift+V (Windows, Linux, with labs.terminal_paste_shortcut); none (the default) \
+         turns it off",
+    ),
     key(
         "screenshots.hotkey",
         Kind::Shortcut(HotkeySlot::Screenshot),
@@ -302,6 +320,11 @@ const KEYS: &[Key] = &[
         "Labs: a search field at the top of General that filters its rows",
     ),
     key(
+        "labs.release_notes_link",
+        Kind::Bool,
+        "Labs: a link to this build's release notes in the sidebar footer",
+    ),
+    key(
         "labs.live_chapters",
         Kind::Bool,
         "Labs: chapter meeting transcripts while recording",
@@ -339,12 +362,12 @@ const KEYS: &[Key] = &[
     key(
         "labs.keep_on_clipboard",
         Kind::Bool,
-        "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there (macOS)",
+        "Labs: leave the dictation on the clipboard after pasting instead of restoring what was there (macOS and Windows)",
     ),
     key(
         "labs.copy_only",
         Kind::Bool,
-        "Labs: put the dictation on the clipboard instead of pasting it (macOS)",
+        "Labs: put the dictation on the clipboard instead of pasting it (macOS and Windows)",
     ),
     key(
         "labs.spoken_formatting",
@@ -370,6 +393,18 @@ const KEYS: &[Key] = &[
         "labs.second_dictation_shortcut",
         Kind::Bool,
         "Labs: second_dictation_hotkey dictates like the dictation shortcut (macOS)",
+    ),
+    key(
+        "labs.terminal_paste_shortcut",
+        Kind::Bool,
+        "Labs: terminal_paste_hotkey dictates like the dictation shortcut and always pastes \
+         with Ctrl+Shift+V (Windows, Linux)",
+    ),
+    key(
+        "labs.opencode_in_wsl",
+        Kind::Bool,
+        "Labs: use an OpenCode service running in the default WSL distribution for Modes \
+         rewriting and the Modes model picker; looking for it can start WSL (Windows)",
     ),
     key(
         "labs.smart_spacing",
@@ -442,6 +477,11 @@ const KEYS: &[Key] = &[
         "Labs: a Caps Lock press starts and stops dictation hands-free, and its light shows when Hex records and transcribes; Caps Lock stays off so typing is unchanged (macOS)",
     ),
     key(
+        "labs.caps_lock_light",
+        Kind::Choice(&["steady", "slow_blink"]),
+        "Labs: whether the Caps Lock light stays solid or blinks slowly while recording (macOS)",
+    ),
+    key(
         "labs.notch_indicator",
         Kind::Bool,
         "Labs: on a screen with a notch, the recording indicator grows out of the notch at either visible position; Hidden still hides it, and flat screens keep the Top or Bottom setting (macOS)",
@@ -492,9 +532,19 @@ const KEYS: &[Key] = &[
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",
     ),
     key(
+        "labs.typed_text",
+        Kind::Bool,
+        "Labs: Output shows a Typed text section whose shortcut runs the focused app's Output steps on the text already typed in the focused field and replaces it (Linux)",
+    ),
+    key(
         "labs.gnome_meeting_capsules",
         Kind::Bool,
         "Labs: on Wayland desktops without layer-shell, such as GNOME, the meeting capsules float over the call through XWayland while it is already running (Linux)",
+    ),
+    key(
+        "labs.gnome_annotate",
+        Kind::Bool,
+        "Labs: on Wayland desktops without layer-shell, such as GNOME, Annotate's capsule and ink float over the screen through XWayland while it is already running; Esc can't stop drawing there, so use the capsule's pen button or let go of a held Annotate key (Linux)",
     ),
     key(
         "labs.follow_live_transcript",
@@ -535,6 +585,11 @@ const KEYS: &[Key] = &[
         "labs.picker_downloaded",
         Kind::Bool,
         "Labs: the speech model picker's All speech models view offers Only downloaded models, with the space they take",
+    ),
+    key(
+        "labs.transcribe_files",
+        Kind::Bool,
+        "Labs: hex transcribe <file> turns a WAV recording into text with the selected dictation model",
     ),
     key(
         "meetings.enabled",
@@ -769,6 +824,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.meeting_descriptive_filenames", "meetings"),
     ("labs.follow_live_transcript", "meetings"),
     ("experimental.hex_microphone", "fun"),
+    ("typed_text_hotkey", "typed_text"),
     ("show_dock_icon", "dock_icon"),
     ("labs.hide_menu_bar_icon", "dock_icon"),
     ("labs.quit_closes_window", "dock_icon"),
@@ -1056,7 +1112,9 @@ pub fn apply(
         "dictation_hotkey"
         | "paste_last_hotkey"
         | "raw_dictation_hotkey"
+        | "typed_text_hotkey"
         | "second_dictation_hotkey"
+        | "terminal_paste_hotkey"
         | "cancel_hotkey"
         | "screenshots.hotkey"
         | "screenshots.record_hotkey"
@@ -1069,7 +1127,9 @@ pub fn apply(
                 HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
                 HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
+                HotkeySlot::TypedText => candidate.typed_text_hotkey.as_ref(),
                 HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
+                HotkeySlot::TerminalPaste => candidate.terminal_paste_hotkey.as_ref(),
                 HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
                 HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
                 HotkeySlot::ScreenshotRecord => candidate.screenshots.record_hotkey.as_ref(),
@@ -1333,170 +1393,10 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
     }
 }
 
-/// Reads a shortcut such as `option`, `right-command`, `fn`, `f5`,
-/// `left-option+right-option` (both Options), or `control+option+space`:
-/// modifiers, then at most one key.
-pub fn parse_hotkey(
-    text: &str,
-    key_named: fn(&str) -> Result<HotkeyKey, String>,
-) -> Result<HotkeyBinding, String> {
-    let mut modifiers = HotkeyModifiers::default();
-    let mut key = None;
-    let mut sided = false;
-    let parts: Vec<&str> = text.split('+').map(str::trim).collect();
-    if parts.iter().any(|part| part.is_empty()) {
-        return Err("expected modifiers and a key joined by +, such as option+space".into());
-    }
-    for part in parts {
-        let lower = part.to_ascii_lowercase();
-        let (side, name) = if let Some(rest) =
-            lower.strip_prefix("left-").or(lower.strip_prefix("left"))
-        {
-            (Some(ModifierSide::Left), rest.to_string())
-        } else if let Some(rest) = lower.strip_prefix("right-").or(lower.strip_prefix("right")) {
-            (Some(ModifierSide::Right), rest.to_string())
-        } else {
-            (None, lower.clone())
-        };
-        let slot = match name.as_str() {
-            "control" | "ctrl" => Some(&mut modifiers.control),
-            "option" | "opt" | "alt" => Some(&mut modifiers.option),
-            "shift" => Some(&mut modifiers.shift),
-            "command" | "cmd" | "super" | "win" | "meta" => Some(&mut modifiers.command),
-            _ => None,
-        };
-        match slot {
-            Some(slot) => {
-                sided |= side.is_some();
-                *slot = Some(match (*slot, side) {
-                    (None, side) => side.unwrap_or(ModifierSide::Either),
-                    (Some(ModifierSide::Left), Some(ModifierSide::Right))
-                    | (Some(ModifierSide::Right), Some(ModifierSide::Left)) => ModifierSide::Both,
-                    _ => return Err(format!("{part} appears twice")),
-                });
-            }
-            None if side.is_none() && matches!(name.as_str(), "fn" | "function" | "globe") => {
-                if modifiers.function {
-                    return Err(format!("{part} appears twice"));
-                }
-                modifiers.function = true;
-            }
-            None if side.is_some() && name.is_empty() => {
-                // "left" or "right" alone is the arrow key.
-                if key.is_some() {
-                    return Err("a shortcut has at most one key".into());
-                }
-                key = Some(key_named(&lower)?);
-            }
-            None => {
-                if key.is_some() {
-                    return Err("a shortcut has at most one key".into());
-                }
-                key = Some(key_named(part)?);
-            }
-        }
-    }
-    let binding = HotkeyBinding { modifiers, key };
-    if let Some(key) = &binding.key {
-        if sided {
-            return Err("left- and right- apply only to shortcuts without a key".into());
-        }
-        if modifiers.function {
-            return Err("fn can't be combined with a key".into());
-        }
-        if binding.is_bare_primary_click() {
-            return Err("mouse1 (left click) needs a modifier, such as option+mouse1".into());
-        }
-        // Menu, Pause, and Scroll Lock alone, and on Windows the navigation
-        // keys alone, are checked against their Labs toggle when set
-        // (`special_key_refusal`).
-        if modifiers.is_empty()
-            && !is_function_key(&key.label)
-            && !key.is_mouse()
-            && !HotkeyKey::special_name(&key.label)
-            && !(cfg!(target_os = "windows") && HotkeyKey::navigation_name(&key.label))
-            && !(cfg!(target_os = "linux") && HotkeyKey::section_name(&key.label))
-        {
-            return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
-        }
-    } else if modifiers.is_empty() {
-        return Err("expected at least one modifier or key".into());
-    }
-    Ok(binding)
-}
-
-/// Why `binding` can't be saved for its Menu, Pause, or Scroll Lock key: on
-/// Linux they need Labs › Special keys alone; Windows takes them alone, and
-/// a navigation key alone needs the toggle there; elsewhere one alone still
-/// needs a modifier.
-fn special_key_refusal(settings: &AppSettings, binding: &HotkeyBinding) -> Option<String> {
-    // The § key alone needs Labs › Section key alone (Linux).
-    if cfg!(target_os = "linux") && binding.is_lone_section_key() && !settings.section_key_allowed()
-    {
-        return Some("section needs Labs › Section key alone: hex labs on section-key".into());
-    }
-    if cfg!(target_os = "windows") {
-        let key = binding.key.as_ref()?;
-        return (binding.is_lone_navigation_key() && !settings.special_keys_allowed()).then(|| {
-            format!(
-                "{} alone needs Labs › Special keys alone: hex labs on special-keys",
-                key.label.to_lowercase().replace(' ', "")
-            )
-        });
-    }
-    let key = binding.key.as_ref().filter(|key| key.is_special())?;
-    if settings.special_keys_allowed() {
-        return None;
-    }
-    let name = key.label.to_lowercase().replace(' ', "");
-    if cfg!(target_os = "linux") {
-        return Some(format!(
-            "{name} needs Labs › Special keys alone: hex labs on special-keys"
-        ));
-    }
-    binding
-        .modifiers
-        .is_empty()
-        .then(|| format!("add a modifier, such as option+{name}"))
-}
-
-fn is_function_key(label: &str) -> bool {
-    label
-        .strip_prefix(['F', 'f'])
-        .and_then(|number| number.parse::<u8>().ok())
-        .is_some_and(|number| (1..=20).contains(&number))
-}
-
-/// The text `parse_hotkey` reads back: `left-option`, `option+shift+v`,
-/// `left-option+right-option`.
-pub fn format_hotkey(binding: &HotkeyBinding) -> String {
-    let modifiers = binding.modifiers;
-    let side = |side: Option<ModifierSide>, name: &str| match side {
-        Some(ModifierSide::Left) => Some(format!("left-{name}")),
-        Some(ModifierSide::Right) => Some(format!("right-{name}")),
-        Some(ModifierSide::Either) => Some(name.to_string()),
-        Some(ModifierSide::Both) => Some(format!("left-{name}+right-{name}")),
-        None => None,
-    };
-    let mut parts: Vec<String> = [
-        modifiers.function.then(|| "fn".to_string()),
-        side(modifiers.control, "control"),
-        side(modifiers.option, "option"),
-        side(modifiers.shift, "shift"),
-        side(modifiers.command, "command"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    if let Some(key) = &binding.key {
-        parts.push(key.label.to_lowercase().replace(' ', ""));
-    }
-    parts.join("+")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_settings::ModifierSide;
 
     #[test]
     fn a_managed_setting_is_refused() {
@@ -1777,6 +1677,7 @@ mod tests {
             ("shortcut_mode", "tap"),
             ("meetings.calendar.lead_minutes", "3"),
             ("meetings.output_folder", "relative/path"),
+            ("labs.caps_lock_light", "fast"),
             ("dictation_processing.modes", "[{"),
         ] {
             assert_eq!(
@@ -1802,6 +1703,15 @@ mod tests {
         );
         let change = apply(&settings, "meetings.calendar.lead_minutes", "5", &rules()).unwrap();
         assert_eq!(change.settings.meetings.calendar.lead_minutes, 5);
+        let change = apply(&settings, "labs.caps_lock_light", "slow_blink", &rules()).unwrap();
+        assert_eq!(
+            change.settings.labs.caps_lock_light,
+            crate::app_settings::CapsLockLight::SlowBlink
+        );
+        assert_eq!(
+            get(&change.settings, "labs.caps_lock_light").unwrap()[0].value,
+            Value::String("slow_blink".into())
+        );
         let change = apply(&settings, "ui_language", "none", &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);
         let change = apply(

@@ -394,6 +394,8 @@ pub(super) fn conflicts(
         ShortcutTarget::Dictation => HotkeySlot::Dictation,
         ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
         ShortcutTarget::RawDictation => HotkeySlot::RawDictation,
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::TypedText => HotkeySlot::TypedText,
         ShortcutTarget::Cancel => HotkeySlot::Cancel,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => HotkeySlot::Capture,
@@ -401,6 +403,8 @@ pub(super) fn conflicts(
         ShortcutTarget::CaptureReplay => HotkeySlot::CaptureReplay,
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => HotkeySlot::SecondDictation,
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => HotkeySlot::TerminalPaste,
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => HotkeySlot::Screenshot,
         #[cfg(target_os = "macos")]
@@ -430,6 +434,8 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::Dictation => Some(&settings.dictation_hotkey),
         ShortcutTarget::PasteLast => settings.paste_last_hotkey.as_ref(),
         ShortcutTarget::RawDictation => settings.raw_dictation_hotkey.as_ref(),
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::TypedText => settings.typed_text_hotkey.as_ref(),
         ShortcutTarget::Cancel => Some(&settings.cancel_hotkey),
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => Some(&settings.capture.hotkey),
@@ -437,6 +443,8 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey.as_ref(),
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey.as_ref(),
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey.as_ref(),
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => Some(&settings.screenshots.hotkey),
         #[cfg(target_os = "macos")]
@@ -453,6 +461,8 @@ pub(super) fn set_binding(
         ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
         ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = Some(binding),
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::TypedText => settings.typed_text_hotkey = Some(binding),
         ShortcutTarget::Cancel => settings.cancel_hotkey = binding,
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => settings.capture.hotkey = binding,
@@ -460,6 +470,8 @@ pub(super) fn set_binding(
         ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey = Some(binding),
         #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey = Some(binding),
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey = Some(binding),
         #[cfg(target_os = "macos")]
         ShortcutTarget::Screenshot => settings.screenshots.hotkey = binding,
         #[cfg(target_os = "macos")]
@@ -773,6 +785,10 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::Dictation => "Dictation",
         ShortcutTarget::PasteLast => "Paste last dictation",
         ShortcutTarget::RawDictation => "Dictate without processing",
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::TypedText => "Transform typed text",
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => "Terminal paste shortcut",
         // The portal never holds the cancel key.
         ShortcutTarget::Cancel => return None,
         // The portal lists Annotate's shortcut under that name.
@@ -1226,6 +1242,10 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
         ShortcutTarget::Dictation => "dictation-hotkey",
         ShortcutTarget::PasteLast => "paste-last-hotkey",
         ShortcutTarget::RawDictation => "raw-dictation-hotkey",
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::TypedText => "typed-text-hotkey",
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => "terminal-paste-hotkey",
         ShortcutTarget::Cancel => "cancel-hotkey",
         #[cfg(hex_capture)]
         ShortcutTarget::Capture => "capture-hotkey",

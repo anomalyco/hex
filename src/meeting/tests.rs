@@ -339,6 +339,42 @@ fn finished_meeting(name: &str, title: &str) -> (PathBuf, PathBuf) {
 }
 
 #[test]
+fn a_meeting_manifest_round_trips_a_microphone_warning_and_old_ones_have_none() {
+    let mut manifest: MeetingManifest = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "id": "1760000000000-1",
+        "title": "Old meeting",
+        "status": "complete",
+        "created_at_ms": 1_760_000_000_000_u64,
+        "ended_at_ms": 1_760_000_060_000_u64,
+        "duration_ms": 60_000,
+        "system": {"file": "system.wav", "samples": 0, "dropped_packets": 0},
+        "microphone": {"file": "microphone.wav", "samples": 0, "dropped_packets": 0},
+        "error": null,
+    }))
+    .unwrap();
+    assert_eq!(manifest.microphone.warning, None);
+    assert!(
+        serde_json::to_value(&manifest).unwrap()["microphone"]
+            .get("warning")
+            .is_none(),
+        "an unset warning is not written"
+    );
+
+    manifest.microphone.warning = Some(TrackWarning::DigitalSilence);
+    let stored = serde_json::to_value(&manifest).unwrap();
+    assert_eq!(
+        stored["microphone"]["warning"],
+        serde_json::json!("digital_silence")
+    );
+    let parsed: MeetingManifest = serde_json::from_value(stored).unwrap();
+    assert_eq!(
+        parsed.microphone.warning,
+        Some(TrackWarning::DigitalSilence)
+    );
+}
+
+#[test]
 fn renaming_updates_the_manifest_and_an_unedited_markdown_heading() {
     let (base, directory) = finished_meeting("rename", "Meeting — 2:18 PM");
     let export = read_manifest(&directory).unwrap().export_path.unwrap();
@@ -529,6 +565,26 @@ fn the_exported_markdown_is_the_reveal_target_only_while_it_exists() {
         RevealTarget::Folder(directory.clone())
     );
     fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn explorer_selects_the_meeting_file_with_the_switch_outside_the_quotes() {
+    assert_eq!(
+        explorer_select(Path::new(
+            r"C:\Users\dax\Documents\Hex Meetings\Design sync.md"
+        ))
+        .as_os_str(),
+        std::ffi::OsStr::new(r#"/select,"C:\Users\dax\Documents\Hex Meetings\Design sync.md""#)
+    );
+    assert_eq!(
+        explorer_select(Path::new(
+            r"C:\Users\dax\Documents\Hex Meetings\Design sync, notes.md"
+        ))
+        .as_os_str(),
+        std::ffi::OsStr::new(
+            r#"/select,"C:\Users\dax\Documents\Hex Meetings\Design sync, notes.md""#
+        )
+    );
 }
 
 #[test]

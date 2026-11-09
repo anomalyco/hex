@@ -445,11 +445,20 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("share-dictation-shortcut").is_none());
     open_labs(&mut rt);
     assert!(rt.find("lab-mouse-shortcuts").is_none(), "macOS only");
-    assert!(rt.find("lab-keep-on-clipboard").is_none(), "macOS only");
-    assert!(rt.find("lab-copy-only").is_none(), "macOS only");
+    assert!(
+        rt.find("lab-keep-on-clipboard").is_some(),
+        "macOS and Windows"
+    );
+    assert!(rt.find("lab-copy-only").is_some(), "macOS and Windows");
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
     assert!(rt.find("lab-spoken-symbols").is_some(), "every OS");
+    assert!(!rt.state.settings.labs.keep_on_clipboard);
+    tap(&mut rt, "lab-keep-on-clipboard");
+    assert!(rt.state.settings.labs.keep_on_clipboard);
+    assert!(!rt.state.settings.labs.copy_only);
+    tap(&mut rt, "lab-copy-only");
+    assert!(rt.state.settings.labs.copy_only);
     assert!(!rt.state.settings.share_dictation_shortcut);
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);
@@ -976,6 +985,59 @@ fn the_practice_game_follows_hex_s_own_dictation_on_every_os() {
     }
 }
 
+/// The practice waits for the listener: while it warms up, the page says Hex
+/// is getting ready instead of inviting a hold that does nothing.
+#[test]
+fn the_practice_page_waits_for_the_listener() {
+    let warming = "Getting Hex ready to listen…";
+    let warming_state = |rt: &mut Runtime<Ui>, warming: bool| {
+        if let Some(view) = &mut rt.state.view {
+            view.listener.warming = warming;
+        }
+        refresh(rt);
+    };
+    for scene in ["mac-onboarding-try", "onboarding-try"] {
+        let mut rt = runtime(scene, true, PANE_SIZE);
+        warming_state(&mut rt, true);
+        let shown = texts(&rt);
+        assert!(
+            shown.iter().any(|text| text == warming),
+            "{scene}: {shown:?}"
+        );
+        assert!(
+            !shown
+                .iter()
+                .any(|text| text == "and answer the one that's lit"),
+            "{scene}: no hold prompt while warming: {shown:?}"
+        );
+        warming_state(&mut rt, false);
+        let shown = texts(&rt);
+        assert!(
+            shown
+                .iter()
+                .any(|text| text == "and answer the one that's lit"),
+            "{scene}: the hold prompt returns: {shown:?}"
+        );
+        assert!(
+            !shown.iter().any(|text| text == warming),
+            "{scene}: {shown:?}"
+        );
+    }
+
+    // The plain practice field, without the game, says the same.
+    let mut rt = runtime("onboarding-try", true, PANE_SIZE);
+    if let Some(s) = rt.state.first_run.as_mut() {
+        s.practice_field = true;
+    }
+    warming_state(&mut rt, true);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == warming), "{shown:?}");
+    assert!(
+        !shown.iter().any(|text| text == "and say anything."),
+        "{shown:?}"
+    );
+}
+
 /// Shortcut mode's options, by key.
 const TRIGGERS: [&str; 4] = [
     "trigger-hold-or-double-tap",
@@ -1199,6 +1261,31 @@ fn an_update_is_a_secondary_button_with_a_dot_and_its_own_label() {
     }
     refresh(&mut rt);
     assert!(texts(&rt).iter().any(|text| text == "Download update"));
+}
+
+#[test]
+fn release_notes_link_shows_only_with_its_lab() {
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    rt.state.build_preview = Some(BuildKind::Release);
+    refresh(&mut rt);
+    assert!(
+        rt.find("release-notes").is_none(),
+        "off, the footer is unchanged"
+    );
+
+    rt.state.settings.labs.release_notes_link = true;
+    refresh(&mut rt);
+    assert!(rt.find("release-notes").is_some());
+    assert!(texts(&rt).iter().any(|text| text == "Release notes"));
+
+    for (kind, name) in [(BuildKind::Local, "local"), (BuildKind::Test, "test")] {
+        rt.state.build_preview = Some(kind);
+        refresh(&mut rt);
+        assert!(
+            rt.find("release-notes").is_none(),
+            "the lab is on, but a {name} build has no published notes"
+        );
+    }
 }
 
 #[test]
@@ -2106,6 +2193,21 @@ fn unload_when_idle_shows_its_minutes_on_its_card_while_on() {
 }
 
 #[test]
+fn caps_lock_light_shows_its_choices_on_its_card_while_on() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(crate::labs::Feature::CapsLockDictation.group()));
+    settle(&mut rt);
+    assert!(rt.find("caps-lock-light").is_none(), "hidden while off");
+    assert_eq!(
+        rt.state.settings.labs.caps_lock_light,
+        crate::app_settings::CapsLockLight::Steady
+    );
+    tap(&mut rt, "lab-caps-lock-dictation");
+    assert!(rt.state.settings.labs.caps_lock_dictation);
+    assert!(rt.find("caps-lock-light").is_some());
+}
+
+#[test]
 fn the_labs_store_filters_by_tab_chip_and_search() {
     let mut rt = runtime("mac-labs-on", true, (980.0, 2000.0));
     assert!(rt.find("lab-card-live-text").is_some());
@@ -2559,7 +2661,10 @@ fn a_long_transcript_scrolls_by_dragging_its_scroll_bar() {
             .unwrap_or_else(|| panic!("no {path}"))
             .rect
     };
-    let thumb = at(&rt, "meeting-transcript-area/scroll-bar/thumb-slot/thumb");
+    let thumb = at(
+        &rt,
+        "meeting-transcript-scroll-area/scroll-bar/thumb-slot/thumb",
+    );
     assert!(thumb[3] > 0.0, "the transcript overflows, so its bar shows");
     let top = at(&rt, "meeting-transcript/inset")[1];
     let (x, y) = (thumb[0] + thumb[2] / 2.0, thumb[1] + 4.0);
@@ -2572,7 +2677,49 @@ fn a_long_transcript_scrolls_by_dragging_its_scroll_bar() {
         at(&rt, "meeting-transcript/inset")[1] < top - 60.0,
         "dragging the thumb scrolled the transcript"
     );
-    assert!(at(&rt, "meeting-transcript-area/scroll-bar/thumb-slot/thumb")[1] > thumb[1] + 59.0);
+    assert!(
+        at(
+            &rt,
+            "meeting-transcript-scroll-area/scroll-bar/thumb-slot/thumb"
+        )[1] > thumb[1] + 59.0
+    );
+}
+
+/// The Labs store uses the same clearly visible pane thumb, and dragging it
+/// scrolls the store.
+#[test]
+fn a_long_labs_store_scrolls_by_dragging_its_scroll_bar() {
+    let mut rt = runtime("linux-labs", true, PANE_SIZE);
+    unfold_labs(&mut rt);
+    settle(&mut rt);
+    let at = |rt: &Runtime<Ui>, path: &str| {
+        rt.elements()
+            .into_iter()
+            .find(|e| e.path.ends_with(path))
+            .unwrap_or_else(|| panic!("no {path}"))
+    };
+    let thumb = at(&rt, "scroll-scroll-area/scroll-bar/thumb-slot/thumb");
+    assert_eq!(thumb.fill, rune_theme_opencode::kit(true).c.text_faint);
+    assert_eq!(thumb.opacity, 1.0);
+    assert!(thumb.rect[2] >= 8.0, "the pane thumb is wide enough to see");
+    assert!(
+        thumb.rect[3] > 0.0,
+        "the Labs store overflows with every group open"
+    );
+    let top = at(&rt, "scroll-scroll-area/scroll/inset").rect[1];
+    let (x, y) = (thumb.rect[0] + thumb.rect[2] / 2.0, thumb.rect[1] + 4.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_move(x, y + 60.0);
+    rt.pointer_up(x, y + 60.0);
+    settle(&mut rt);
+    assert!(
+        at(&rt, "scroll-scroll-area/scroll/inset").rect[1] < top - 60.0,
+        "dragging the thumb scrolled the Labs store"
+    );
+    assert!(
+        at(&rt, "scroll-scroll-area/scroll-bar/thumb-slot/thumb").rect[1] > thumb.rect[1] + 59.0
+    );
 }
 
 /// A touchscreen taps like a click and a finger drag pans a long transcript
@@ -2595,7 +2742,7 @@ fn a_finger_pans_the_transcript_and_taps_the_sidebar() {
         .into_iter()
         .find(|e| {
             e.path
-                .ends_with("meeting-transcript-area/scroll-bar/thumb-slot/thumb")
+                .ends_with("meeting-transcript-scroll-area/scroll-bar/thumb-slot/thumb")
         })
         .expect("the transcript's bar")
         .rect;

@@ -47,6 +47,9 @@ const STALL_AFTER: f64 = 30.0;
 pub(crate) struct Live {
     /// Hex's own dictation records.
     pub(crate) listening: bool,
+    /// The listener runs but its model, microphone, and shortcuts aren't up
+    /// yet, so the practice waits instead of inviting a hold.
+    pub(crate) warming: bool,
     /// The model download stopped with an error.
     pub(crate) failed: bool,
     /// Why, in one line, such as a proxy or certificate (#894).
@@ -88,6 +91,9 @@ pub(crate) struct Live {
     pub(crate) practice: Practice,
     /// The model and language this run downloads.
     choice: TranscriptionSelection,
+    /// The other selection the language capsule switches to; `None` when
+    /// the system language recommends English.
+    alternate: Option<TranscriptionSelection>,
     granted_at: Option<f64>,
     checked: Option<Checked>,
     /// Dictation streams send their live words to the practice field.
@@ -115,6 +121,12 @@ impl Live {
                 ModelStep::Choosing => true,
                 ModelStep::Chosen => !self.pick_started,
             }
+    }
+
+    /// The language capsule switches languages only when the system
+    /// language recommends a model other than English.
+    pub(crate) fn switches_language(&self) -> bool {
+        self.alternate.is_some()
     }
 }
 
@@ -160,29 +172,30 @@ fn granted(status: SetupStatus, paste: Option<PasteAccess>) -> bool {
         && paste.is_none_or(PasteAccess::settled)
 }
 
-fn english(selection: &TranscriptionSelection) -> bool {
-    selection.model == TranscriptionModelId::ParakeetUnifiedEnglish
+fn english_language(selection: &TranscriptionSelection) -> bool {
+    selection.language == "en"
 }
 
-/// The selection the language capsule switches to.
-fn other_selection(current: &TranscriptionSelection) -> TranscriptionSelection {
-    if english(current) {
-        let v3 = transcription_models::definition(TranscriptionModelId::ParakeetV3);
-        let preferred = crate::desktop::i18n::preferred_language();
-        let language = if preferred != "en" && v3.supports_language(&preferred) {
-            preferred
-        } else {
-            "fr".to_owned()
-        };
-        TranscriptionSelection {
-            model: TranscriptionModelId::ParakeetV3,
-            language,
-        }
+fn english_selection() -> TranscriptionSelection {
+    TranscriptionSelection {
+        model: TranscriptionModelId::ParakeetUnifiedEnglish,
+        language: "en".into(),
+    }
+}
+
+/// The other selection the language capsule offers: the model recommended
+/// for the person's language while English is selected, English otherwise.
+/// `None` when that recommendation is English too, so an English system has
+/// nothing to switch to.
+fn alternate_selection(
+    current: &TranscriptionSelection,
+    preferred: &str,
+) -> Option<TranscriptionSelection> {
+    if english_language(current) {
+        let recommended = transcription_models::recommended_selection(preferred);
+        (!english_language(&recommended)).then_some(recommended)
     } else {
-        TranscriptionSelection {
-            model: TranscriptionModelId::ParakeetUnifiedEnglish,
-            language: "en".into(),
-        }
+        Some(english_selection())
     }
 }
 
@@ -201,17 +214,19 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         return;
     }
     let choice = ui.settings.transcription.clone();
-    let wants = if english(&choice) {
+    let wants = if english_language(&choice) {
         Language::English
     } else {
         Language::Other
     };
-    let other = if english(&choice) {
-        other_selection(&choice)
+    let alternate = alternate_selection(&choice, &ui.preferred_language());
+    let other = if english_language(&choice) {
+        alternate.as_ref()
     } else {
-        choice.clone()
+        Some(&choice)
     };
-    set_other_label(transcription_models::language_name(&other.language));
+    // Replaces the previous run's label; an English-only run clears it.
+    set_other_label(other.map(|other| transcription_models::language_name(&other.language)));
     let had_model = installed(ui, &choice);
     let status = ui.platform.setup_status(had_model);
     let granted = granted(status, ui.platform.paste);
@@ -229,6 +244,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
     };
     s.live = Some(Live {
         listening: false,
+        warming: false,
         failed: false,
         failure: None,
         stalled: false,
@@ -249,6 +265,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         scanning: false,
         practice: Practice::Waiting,
         choice,
+        alternate,
         granted_at: None,
         checked: None,
         _live_words: crate::dictation::live_text::demand(),
@@ -398,6 +415,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         return false;
     };
     let model = transcription_models::validate(&choice).ok();
+    let warming = ui.view.as_ref().is_some_and(|view| view.listener.warming);
     let (preparing, downloaded_bytes, errored) =
         ui.view.as_ref().map_or((false, 0, false), |view| {
             let t = &view.transcription;
@@ -455,6 +473,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let Some(live) = s.live.as_mut() else {
         return false;
     };
+    live.warming = warming;
     live.checked = Some(checked);
     // Linux and Windows ask for no permissions: both rows are ready.
     if !asks_permissions {
@@ -626,11 +645,14 @@ pub(super) fn cycle_language(ui: &mut Ui) {
     let Some(s) = ui.first_run.as_mut() else {
         return;
     };
+    let Some(next) = s.live.as_ref().and_then(|live| live.alternate.clone()) else {
+        return;
+    };
     s.cycle_language();
     let Some(live) = s.live.as_mut() else {
         return;
     };
-    live.choice = other_selection(&live.choice);
+    live.alternate = Some(std::mem::replace(&mut live.choice, next));
     live.failed = false;
     live.stalled = false;
     live.progress = None;
@@ -732,6 +754,12 @@ pub(super) fn practice_changed(ui: &mut Ui, tx: &mut Tx) {
     }
 }
 
+/// What the practice says in place of the shortcut invitation while the
+/// listener loads its model, microphone, and shortcuts.
+pub(super) fn warming_copy() -> &'static str {
+    tr("Getting Hex ready to listen…")
+}
+
 /// What the practice dictation's last try needs said.
 pub(super) fn hint_copy(live: &Live) -> Option<&'static str> {
     Some(match live.practice {
@@ -753,4 +781,71 @@ pub(super) fn hint(p: Paint, live: &Live) -> Option<El> {
             .color(p.muted())
             .transition(Transition::opacity()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn selection(model: TranscriptionModelId, language: &str) -> TranscriptionSelection {
+        TranscriptionSelection {
+            model,
+            language: language.into(),
+        }
+    }
+
+    #[test]
+    fn the_language_switch_follows_the_system_language() {
+        let english = english_selection();
+        assert_eq!(
+            alternate_selection(&english, "en"),
+            None,
+            "an English system has no other language"
+        );
+
+        for model in [
+            TranscriptionModelId::CohereTranscribe,
+            TranscriptionModelId::WhisperLargeV3Turbo,
+            TranscriptionModelId::ParakeetV3,
+        ] {
+            let current = selection(model, "en");
+            assert_eq!(
+                alternate_selection(&current, "en"),
+                None,
+                "{model:?} is English on an English system"
+            );
+            assert_eq!(
+                alternate_selection(&current, "fr"),
+                Some(transcription_models::recommended_selection("fr")),
+                "{model:?} still switches to the system's French recommendation"
+            );
+        }
+
+        for language in ["fr", "de"] {
+            let alternate =
+                alternate_selection(&english, language).expect("a v3-supported alternate");
+            assert_eq!(
+                alternate,
+                transcription_models::recommended_selection(language),
+                "{language} gets its own recommendation"
+            );
+            assert_eq!(alternate.model, TranscriptionModelId::ParakeetV3);
+            assert_eq!(alternate.language, language);
+        }
+
+        let japanese = alternate_selection(&english, "ja").expect("a Japanese alternate");
+        assert_eq!(
+            japanese,
+            transcription_models::recommended_selection("ja"),
+            "Japanese gets its own recommendation, not French"
+        );
+        assert_eq!(japanese.language, "ja");
+        assert_eq!(japanese.model, TranscriptionModelId::WhisperLargeV3Turbo);
+
+        assert_eq!(
+            alternate_selection(&japanese, "ja"),
+            Some(english),
+            "a non-English selection switches back to English"
+        );
+    }
 }

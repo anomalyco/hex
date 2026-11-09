@@ -58,6 +58,11 @@ pub(crate) enum ShortcutTarget {
     PasteLast,
     Capture,
     RawDictation,
+    /// Labs › Transform typed text.
+    TypedText,
+    /// Labs › Terminal paste shortcut: dictates like the dictation shortcut
+    /// and always pastes with Ctrl+Shift+V.
+    TerminalPaste,
     /// Toggle mode's cancel shortcut.
     Cancel,
 }
@@ -799,12 +804,7 @@ impl LinuxDesktopHost {
         let Some(wanted) = crate::linux::gnome_shortcuts::wanted(requested, shortcuts) else {
             return;
         };
-        let key = format!(
-            "{wanted} {:?} {:?} {:?}",
-            self.settings.dictation_hotkey,
-            self.settings.paste_last_hotkey,
-            capture_shortcut(&self.settings)
-        );
+        let key = gnome_shortcuts_key(&self.settings, wanted);
         if self.gnome_shortcuts.as_deref() == Some(key.as_str()) {
             return;
         }
@@ -1098,6 +1098,10 @@ impl LinuxDesktopHost {
                         ShortcutTarget::RawDictation => {
                             settings.raw_dictation_hotkey = Some(binding)
                         }
+                        ShortcutTarget::TypedText => settings.typed_text_hotkey = Some(binding),
+                        ShortcutTarget::TerminalPaste => {
+                            settings.terminal_paste_hotkey = Some(binding)
+                        }
                         ShortcutTarget::Cancel => settings.cancel_hotkey = binding,
                     }
                 })
@@ -1282,6 +1286,19 @@ fn capture_shortcut(settings: &AppSettings) -> Option<&crate::app_settings::Hotk
     None
 }
 
+/// What the GNOME custom shortcuts were last synced for: a new key means an
+/// entry was added, removed, or rebound. Typed text is included while its
+/// lab is on and its shortcut is bound, so toggling either resyncs.
+fn gnome_shortcuts_key(settings: &AppSettings, wanted: bool) -> String {
+    format!(
+        "{wanted} {:?} {:?} {:?} {:?}",
+        settings.dictation_hotkey,
+        settings.paste_last_hotkey,
+        capture_shortcut(settings),
+        settings.active_typed_text_hotkey()
+    )
+}
+
 fn settings_modified() -> Option<std::time::SystemTime> {
     let path = crate::app_settings::path().ok()?;
     std::fs::metadata(path)
@@ -1332,6 +1349,9 @@ impl LinuxDesktopHost {
             activity: self.activity.clone(),
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
+                warming: self.listener.as_ref().is_some_and(|listener| {
+                    matches!(listener.startup, ListenerStartup::Awaiting { .. })
+                }),
                 status: self.status.clone(),
                 notice: crate::linux::paste::listener_warning(self.is_running()),
                 shortcuts: self
@@ -1526,6 +1546,49 @@ mod tests {
         assert_eq!(*published.lock().unwrap(), Some(2));
     }
 
+    /// The GNOME sync cache key must move when the typed-text lab or its
+    /// binding changes, or stale `hex-typed-text` entries stay behind.
+    #[test]
+    fn the_gnome_shortcut_key_tracks_typed_text() {
+        use crate::app_settings::{HotkeyKey, HotkeyModifiers};
+
+        let binding = HotkeyBinding {
+            modifiers: HotkeyModifiers::control_option(),
+            key: Some(HotkeyKey::named("t")),
+        };
+        let mut settings = AppSettings {
+            typed_text_hotkey: Some(binding.clone()),
+            ..AppSettings::default()
+        };
+        let lab_off = gnome_shortcuts_key(&settings, true);
+
+        settings.labs.typed_text = true;
+        let bound = gnome_shortcuts_key(&settings, true);
+        assert_ne!(lab_off, bound, "turning the lab on adds an entry");
+
+        settings.typed_text_hotkey = Some(HotkeyBinding {
+            modifiers: HotkeyModifiers::control(),
+            ..binding
+        });
+        let rebound = gnome_shortcuts_key(&settings, true);
+        assert_ne!(bound, rebound, "changing the binding rewrites it");
+
+        settings.typed_text_hotkey = None;
+        let unbound = gnome_shortcuts_key(&settings, true);
+        assert_ne!(rebound, unbound, "unbinding removes it");
+        assert_eq!(
+            lab_off, unbound,
+            "no bound typed-text shortcut means no entry either way"
+        );
+
+        settings.labs.typed_text = false;
+        assert_eq!(
+            gnome_shortcuts_key(&settings, true),
+            lab_off,
+            "turning the lab off returns to the lab-off key"
+        );
+    }
+
     #[test]
     fn a_settings_parse_note_does_not_block_capture() {
         let mut host = LinuxDesktopHost::new(
@@ -1601,6 +1664,18 @@ mod tests {
             assert!(listener.stop.load(Ordering::Relaxed));
             listener.finish().unwrap();
         }
+    }
+
+    #[test]
+    fn a_listener_still_starting_is_warming_until_its_session_begins() {
+        let mut host = host_for_edit(true);
+        assert!(!host.snapshot().listener.warming);
+        host.listener.as_mut().unwrap().startup = ListenerStartup::Awaiting {
+            previous_session: None,
+        };
+        assert!(host.snapshot().listener.warming);
+        host.listener.as_mut().unwrap().startup = ListenerStartup::Observed;
+        assert!(!host.snapshot().listener.warming);
     }
 
     #[test]

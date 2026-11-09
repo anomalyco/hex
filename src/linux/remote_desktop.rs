@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use zbus::{OwnedObjectPath, Variant};
 
+use crate::linux::paste::Chord;
 use crate::linux::portal::{Event, PortalBus};
 
 pub(crate) const INTERFACE: &str = "org.freedesktop.portal.RemoteDesktop";
@@ -25,6 +26,8 @@ const KEYBOARD: u32 = 1;
 const PERSIST_UNTIL_REVOKED: u32 = 2;
 const XK_CONTROL_L: i32 = 0xffe3;
 const XK_SHIFT_L: i32 = 0xffe1;
+const XK_A: i32 = 0x61;
+const XK_C: i32 = 0x63;
 const XK_V: i32 = 0x76;
 const PRESSED: u32 = 1;
 const RELEASED: u32 = 0;
@@ -149,9 +152,10 @@ impl RemoteDesktop {
         self.ended
     }
 
-    /// Presses and releases Ctrl+V, or Ctrl+Shift+V for terminals.
-    pub(crate) fn paste(&self, with_shift: bool) -> Result<()> {
-        send_keys(&paste_keys(with_shift), |keysym, state| {
+    /// Presses and releases a clipboard chord: Ctrl+A, Ctrl+C, or Ctrl+V
+    /// (Ctrl+Shift+V for terminals).
+    pub(crate) fn send(&self, chord: Chord, with_shift: bool) -> Result<()> {
+        send_keys(&chord_keys(chord, with_shift), |keysym, state| {
             self.bus.call_portal(
                 "NotifyKeyboardKeysym",
                 &(
@@ -214,13 +218,18 @@ impl Drop for RemoteDesktop {
     }
 }
 
-fn paste_keys(with_shift: bool) -> Vec<(i32, u32)> {
+fn chord_keys(chord: Chord, with_shift: bool) -> Vec<(i32, u32)> {
+    let (key, shift) = match chord {
+        Chord::SelectAll => (XK_A, false),
+        Chord::Copy => (XK_C, false),
+        Chord::Paste => (XK_V, with_shift),
+    };
     let mut keys = vec![(XK_CONTROL_L, PRESSED)];
-    if with_shift {
+    if shift {
         keys.push((XK_SHIFT_L, PRESSED));
     }
-    keys.extend([(XK_V, PRESSED), (XK_V, RELEASED)]);
-    if with_shift {
+    keys.extend([(key, PRESSED), (key, RELEASED)]);
+    if shift {
         keys.push((XK_SHIFT_L, RELEASED));
     }
     keys.push((XK_CONTROL_L, RELEASED));
@@ -264,7 +273,7 @@ mod tests {
     #[test]
     fn paste_keys_balance_their_modifiers() {
         assert_eq!(
-            paste_keys(false),
+            chord_keys(Chord::Paste, false),
             [
                 (XK_CONTROL_L, PRESSED),
                 (XK_V, PRESSED),
@@ -273,7 +282,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            paste_keys(true),
+            chord_keys(Chord::Paste, true),
             [
                 (XK_CONTROL_L, PRESSED),
                 (XK_SHIFT_L, PRESSED),
@@ -285,61 +294,88 @@ mod tests {
         );
     }
 
+    /// Select-all and copy never take the terminal paste's Shift.
+    #[test]
+    fn select_all_and_copy_ignore_the_terminal_paste_preference() {
+        assert_eq!(
+            chord_keys(Chord::SelectAll, true),
+            [
+                (XK_CONTROL_L, PRESSED),
+                (XK_A, PRESSED),
+                (XK_A, RELEASED),
+                (XK_CONTROL_L, RELEASED)
+            ]
+        );
+        assert_eq!(
+            chord_keys(Chord::Copy, true),
+            [
+                (XK_CONTROL_L, PRESSED),
+                (XK_C, PRESSED),
+                (XK_C, RELEASED),
+                (XK_CONTROL_L, RELEASED)
+            ]
+        );
+    }
+
     #[test]
     fn a_successful_paste_sends_each_key_once() {
-        for with_shift in [false, true] {
-            let keys = paste_keys(with_shift);
-            let mut sent = Vec::new();
-            send_keys(&keys, |keysym, state| {
-                sent.push((keysym, state));
-                Ok(())
-            })
-            .unwrap();
-            assert_eq!(sent, keys);
+        for chord in [Chord::Paste, Chord::SelectAll, Chord::Copy] {
+            for with_shift in [false, true] {
+                let keys = chord_keys(chord, with_shift);
+                let mut sent = Vec::new();
+                send_keys(&keys, |keysym, state| {
+                    sent.push((keysym, state));
+                    Ok(())
+                })
+                .unwrap();
+                assert_eq!(sent, keys);
+            }
         }
     }
 
     #[test]
     fn a_failed_paste_releases_the_keys_it_still_holds() {
-        for with_shift in [false, true] {
-            let keys = paste_keys(with_shift);
-            for fail_at in 0..keys.len() {
-                let mut sent = Vec::new();
-                let result = send_keys(&keys, |keysym, state| {
-                    sent.push((keysym, state));
-                    if sent.len() == fail_at + 1 {
-                        return Err(eyre!("injected failure"));
+        for chord in [Chord::Paste, Chord::SelectAll, Chord::Copy] {
+            for with_shift in [false, true] {
+                let keys = chord_keys(chord, with_shift);
+                for fail_at in 0..keys.len() {
+                    let mut sent = Vec::new();
+                    let result = send_keys(&keys, |keysym, state| {
+                        sent.push((keysym, state));
+                        if sent.len() == fail_at + 1 {
+                            return Err(eyre!("injected failure"));
+                        }
+                        Ok(())
+                    });
+                    assert!(result.is_err());
+                    // Cleanup releases every key still held: each press up to and
+                    // including the failed call, minus keys whose release already
+                    // succeeded before it. A failed release stays in, since it may
+                    // not have reached the desktop.
+                    let mut held: Vec<_> = keys[..=fail_at]
+                        .iter()
+                        .filter(|(_, state)| *state == PRESSED)
+                        .map(|(keysym, _)| *keysym)
+                        .collect();
+                    for (keysym, state) in &keys[..fail_at] {
+                        if *state == RELEASED
+                            && let Some(index) = held.iter().rposition(|held| held == keysym)
+                        {
+                            held.remove(index);
+                        }
                     }
-                    Ok(())
-                });
-                assert!(result.is_err());
-                // Cleanup releases every key still held: each press up to and
-                // including the failed call, minus keys whose release already
-                // succeeded before it. A failed release stays in, since it may
-                // not have reached the desktop.
-                let mut held: Vec<_> = keys[..=fail_at]
-                    .iter()
-                    .filter(|(_, state)| *state == PRESSED)
-                    .map(|(keysym, _)| *keysym)
-                    .collect();
-                for (keysym, state) in &keys[..fail_at] {
-                    if *state == RELEASED
-                        && let Some(index) = held.iter().rposition(|held| held == keysym)
-                    {
-                        held.remove(index);
-                    }
+                    let mut expected: Vec<_> =
+                        held.into_iter().map(|keysym| (keysym, RELEASED)).collect();
+                    expected.reverse();
+                    assert_eq!(&sent[fail_at + 1..], expected, "failed at {fail_at}");
                 }
-                let mut expected: Vec<_> =
-                    held.into_iter().map(|keysym| (keysym, RELEASED)).collect();
-                expected.reverse();
-                assert_eq!(&sent[fail_at + 1..], expected, "failed at {fail_at}");
             }
         }
     }
 
     #[test]
     fn a_failed_cleanup_release_keeps_the_original_error() {
-        let keys = paste_keys(true);
+        let keys = chord_keys(Chord::Paste, true);
         let mut sent = Vec::new();
         let error = send_keys(&keys, |keysym, state| {
             sent.push((keysym, state));

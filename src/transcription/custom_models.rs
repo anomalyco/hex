@@ -342,7 +342,10 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         runtime: ModelRuntime::Gguf(artifact),
         languages,
         accepts_language_hint: takes_language_hint(architecture),
-        supports_language_detection: manifest.detects_language && takes_language_hint(architecture),
+        // The header's lang_detect decides Auto. A no-hint family (Parakeet,
+        // GigaAM) hears the language itself without a hint, the way the
+        // catalog's v3-type entries do.
+        supports_language_detection: manifest.detects_language,
     }))
 }
 
@@ -1228,9 +1231,25 @@ mod tests {
         };
         let definition = build(CustomModelId::from_sha256(&manifest.sha256), &manifest);
         assert!(!definition.accepts_language_hint);
-        assert!(!definition.supports_language_detection);
+        assert!(
+            definition.supports_language_detection,
+            "a no-hint import whose header detects the language offers Auto"
+        );
         assert!(takes_language_hint("whisper"));
         assert!(!takes_language_hint("parakeet"));
+        // A hint-taking family still needs the header's detection.
+        let whisper = build(
+            CustomModelId::from_sha256(&manifest.sha256),
+            &Manifest {
+                architecture: "whisper".into(),
+                variant: "whisper-large-v3-turbo".into(),
+                languages: vec!["en".into()],
+                detects_language: false,
+                ..manifest
+            },
+        );
+        assert!(whisper.accepts_language_hint);
+        assert!(!whisper.supports_language_detection);
     }
 
     #[test]

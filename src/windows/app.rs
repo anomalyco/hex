@@ -700,6 +700,7 @@ impl WindowsDesktopHost {
             activity: self.activity.state,
             listener: DesktopListenerSnapshot {
                 running: self.is_running(),
+                warming: self.is_running() && self.awaiting_session_start,
                 status: self.status.clone(),
                 warning: self.indicator.failure(),
                 last_failure: self

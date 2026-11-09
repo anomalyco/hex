@@ -8,13 +8,14 @@
 //! Linux, and WASAPI loopback on Windows.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
+use super::warning::{SilenceAction, SilencePolicy, TrackWarnings};
 use super::{AudioPacket, MeetingSource, SAMPLE_RATE};
 use crate::dictation::StreamingResampler;
 
@@ -71,11 +72,18 @@ impl SourceSupervisor {
     /// Records the input the call app `application` (a canonical bundle
     /// identifier) records from where the OS reports it, else the
     /// configured microphone.
-    pub(super) fn microphone(sink: PacketSink, application: Option<String>) -> Self {
+    pub(super) fn microphone(
+        sink: PacketSink,
+        application: Option<String>,
+        warnings: TrackWarnings,
+    ) -> Self {
+        let reopens = Arc::new(AtomicU8::new(0));
         Self::spawn(sink, move || {
             MicrophoneSource::open(
                 crate::app_settings::microphone_selection(),
                 application.clone(),
+                reopens.clone(),
+                warnings.clone(),
             )
             .map(|source| Box::new(source) as Box<dyn LiveSource>)
         })
@@ -240,6 +248,12 @@ fn follow_call_input(current: Option<String>, reported: Vec<String>) -> Option<S
     }
 }
 
+/// Whether `opened`, the input a meeting records from, is one the call app
+/// reports recording from.
+fn call_app_reports_input(opened: Option<&str>, reported: &[String]) -> bool {
+    opened.is_some_and(|opened| reported.iter().any(|reported| reported == opened))
+}
+
 /// The UIDs of the inputs the call app records from; none where the OS
 /// does not report them.
 fn call_app_inputs(application: &str) -> Vec<String> {
@@ -257,15 +271,15 @@ fn call_app_inputs(application: &str) -> Vec<String> {
     }
 }
 
-/// The input the call app `application` records from, following `current`.
-fn current_call_input(application: Option<&str>, current: Option<String>) -> Option<String> {
-    application.and_then(|application| follow_call_input(current, call_app_inputs(application)))
-}
-
 struct MicrophoneSource {
     input: crate::audio::AudioInput,
     resample: To16k,
     last_audio: Instant,
+    /// The per-chunk digital silence decision, sharing this recording's
+    /// reopen budget with every reopened stream.
+    silence: SilencePolicy,
+    /// The controller-visible warning, shared across reopened streams.
+    warnings: TrackWarnings,
     selected: Option<String>,
     /// The [`crate::app_settings::microphone_selection`] revision of `selected`.
     selection_revision: u64,
@@ -276,6 +290,10 @@ struct MicrophoneSource {
     application: Option<String>,
     /// The UID of the input the call app records from.
     call_input: Option<String>,
+    /// The input UIDs the call app last reported recording from.
+    call_inputs: Vec<String>,
+    /// The UID of this stream's input.
+    opened_uid: Option<String>,
     call_input_checked: Instant,
 }
 
@@ -283,15 +301,22 @@ impl MicrophoneSource {
     fn open(
         (selection_revision, selected): (u64, Option<String>),
         application: Option<String>,
+        silence_reopens: Arc<AtomicU8>,
+        warnings: TrackWarnings,
     ) -> Result<Self> {
         let route_generation = crate::audio::input_route_generation();
-        let call_input = current_call_input(application.as_deref(), None);
+        let call_inputs = application
+            .as_deref()
+            .map(call_app_inputs)
+            .unwrap_or_default();
+        let call_input = follow_call_input(None, call_inputs.clone());
         let crate::audio::Opened::Input(input) =
             crate::audio::open_meeting_input(selected.as_deref(), call_input.as_deref(), None)?
         else {
             unreachable!("nothing to keep");
         };
         let input = *input;
+        let opened_uid = input.uid.clone();
         let resample = To16k::new(input.sample_rate)?;
         tracing::info!(
             device = input.device_name,
@@ -301,8 +326,11 @@ impl MicrophoneSource {
         );
         let mut retry = UnopenableRetry::default();
         retry.resolved(input.selection, Instant::now());
+        let warning = warnings.live().is_some();
         Ok(Self {
             input,
+            silence: SilencePolicy::new(resample.rate, silence_reopens, warning),
+            warnings,
             resample,
             last_audio: Instant::now(),
             selected,
@@ -311,8 +339,17 @@ impl MicrophoneSource {
             retry,
             application,
             call_input,
+            call_inputs,
+            opened_uid,
             call_input_checked: Instant::now(),
         })
+    }
+
+    /// Whether the call app records from the input this stream opened, which
+    /// is when another app's voice processing can leave it digitally silent.
+    /// A manual recording has no call app and never holds the device.
+    fn call_app_holds_device(&self) -> bool {
+        call_app_reports_input(self.opened_uid.as_deref(), &self.call_inputs)
     }
 
     /// Follows a change of the input the call app records from, of the
@@ -327,8 +364,12 @@ impl MicrophoneSource {
             && now.duration_since(self.call_input_checked) >= CALL_INPUT_INTERVAL
         {
             self.call_input_checked = now;
-            let call_input =
-                current_call_input(self.application.as_deref(), self.call_input.clone());
+            self.call_inputs = self
+                .application
+                .as_deref()
+                .map(call_app_inputs)
+                .unwrap_or_default();
+            let call_input = follow_call_input(self.call_input.clone(), self.call_inputs.clone());
             call_input_changed = call_input != self.call_input;
             self.call_input = call_input;
         }
@@ -381,6 +422,10 @@ impl MicrophoneSource {
             "meeting microphone switched"
         );
         self.retry.resolved(input.selection, now);
+        // A new device starts a fresh zero count, but a warning raised by the
+        // old one stays until real audio clears it.
+        self.silence.reset(input.sample_rate);
+        self.opened_uid = input.uid.clone();
         self.input = input;
         self.last_audio = Instant::now();
     }
@@ -392,7 +437,44 @@ impl LiveSource for MicrophoneSource {
         match self.input.recv_timeout(POLL_INTERVAL) {
             crate::audio::AudioInputEvent::Chunk { samples, .. } => {
                 self.last_audio = Instant::now();
+                let action = self.silence.observe(&samples, self.call_app_holds_device());
                 sink.send(SAMPLE_RATE, self.resample.push(&samples), None);
+                match action {
+                    SilenceAction::Reopen => {
+                        tracing::warn!(
+                            device = %self.input.device_name,
+                            "meeting microphone delivered digital silence; reopening it"
+                        );
+                        return Err("microphone delivered digital silence".into());
+                    }
+                    SilenceAction::Gated => {
+                        tracing::info!(
+                            device = %self.input.device_name,
+                            device_uid = ?self.opened_uid,
+                            call_app_inputs = ?self.call_inputs,
+                            "meeting microphone is digitally silent but the call app does not report recording from it; not reopening or warning"
+                        );
+                    }
+                    SilenceAction::Warn => {
+                        if self.warnings.warn() {
+                            self.silence.applied(SilenceAction::Warn);
+                            tracing::warn!(
+                                device = %self.input.device_name,
+                                "meeting microphone is still digitally silent; keeping the stream open"
+                            );
+                        }
+                    }
+                    SilenceAction::Clear => {
+                        if self.warnings.clear() {
+                            self.silence.applied(SilenceAction::Clear);
+                            tracing::info!(
+                                device = %self.input.device_name,
+                                "meeting microphone audio returned"
+                            );
+                        }
+                    }
+                    SilenceAction::Nothing => {}
+                }
                 Ok(())
             }
             crate::audio::AudioInputEvent::Timeout if self.last_audio.elapsed() > STALL_TIMEOUT => {
@@ -462,5 +544,15 @@ mod tests {
         assert!(retry.due.is_none());
         retry.resolved(Selection::Unlisted, start);
         assert!(retry.due.is_none());
+    }
+
+    #[test]
+    fn only_an_input_the_call_app_reports_counts_as_held() {
+        let reported = ["BuiltIn".to_owned()];
+        assert!(call_app_reports_input(Some("BuiltIn"), &reported));
+        assert!(!call_app_reports_input(Some("Jabra"), &reported));
+        // A manual recording, or an app macOS reports no inputs for.
+        assert!(!call_app_reports_input(None, &reported));
+        assert!(!call_app_reports_input(Some("BuiltIn"), &[]));
     }
 }

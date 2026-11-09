@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use super::artifacts::{
     COHERE_ARTIFACT, COHERE_LANGUAGES, GIGAAM_V3_E2E_RNNT_ARTIFACT, GRANITE_SPEECH_5_ARTIFACT,
     GRANITE_SPEECH_5_LANGUAGES, IVRIT_WHISPER_ARTIFACT, NB_WHISPER_MEDIUM_ARTIFACT,
-    NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES,
+    NEMOTRON_3_5_ASR_ARTIFACT, NEMOTRON_3_5_LANGUAGES, NEMOTRON_3_5_LOCALES, ORUKEET_ARTIFACT,
     PARAKEET_ULTRA_ARTIFACT, PARAKEET_UNIFIED_ENGLISH_ARTIFACT, PARAKEET_V2_ARTIFACT,
     PARAKEET_V3_ARTIFACT, PARAKEET_V3_LANGUAGES, QWEN_ARTIFACT, QWEN_LANGUAGES, QWENCLEO_ARTIFACT,
     SENSEVOICE_ARTIFACT, UNDERDOG_BARK_3_CLEAN_ARTIFACT, UNDERDOG_BARK_3_PRO_ARTIFACT,
@@ -36,6 +36,7 @@ pub enum TranscriptionModelId {
     ParakeetUnifiedEnglish,
     ParakeetV2,
     ParakeetV3,
+    Orukeet,
     WhisperLargeV3Turbo,
     Qwen3Asr06B,
     QwenCleoAsr17B,
@@ -72,6 +73,7 @@ impl TranscriptionModelId {
             Self::ParakeetUnifiedEnglish => "parakeet_unified_en",
             Self::ParakeetV2 => "parakeet_v2",
             Self::ParakeetV3 => "parakeet_v3",
+            Self::Orukeet => "orukeet",
             Self::WhisperLargeV3Turbo => "whisper_large_v3_turbo",
             Self::Qwen3Asr06B => "qwen3_asr06_b",
             Self::QwenCleoAsr17B => "qwencleo_asr_1_7b",
@@ -110,6 +112,7 @@ impl FromStr for TranscriptionModelId {
             "parakeet_unified_en" => Ok(Self::ParakeetUnifiedEnglish),
             "parakeet_v2" => Ok(Self::ParakeetV2),
             "parakeet_v3" => Ok(Self::ParakeetV3),
+            "orukeet" => Ok(Self::Orukeet),
             "whisper_large_v3_turbo" => Ok(Self::WhisperLargeV3Turbo),
             "qwen3_asr06_b" => Ok(Self::Qwen3Asr06B),
             "qwencleo_asr_1_7b" => Ok(Self::QwenCleoAsr17B),
@@ -428,9 +431,28 @@ pub const MODELS: &[ModelDefinition] = &[
         streams: false,
         runtime: ModelRuntime::Gguf(&PARAKEET_V3_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
-        // The pinned v3 artifact detects language from audio and has no prompt input.
+        // The pinned v3 artifact detects the language from audio and has no
+        // prompt input, so it is offered under Auto.
         accepts_language_hint: false,
-        supports_language_detection: false,
+        supports_language_detection: true,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::Orukeet,
+        name: "Orukeet",
+        // The card says it runs as fast as Parakeet v3, and transcribe.cpp's
+        // catalog puts its Q8_0 file beside v3's on the same machines, so it
+        // keeps v3's figure.
+        realtime: "~33x",
+        // LibriSpeech test-clean, transcribe.cpp's published conversion
+        // benchmark (`catalog/orukeet.json`); not measured in Hex.
+        word_error_rate: Some(1.86),
+        streams: false,
+        runtime: ModelRuntime::Gguf(&ORUKEET_ARTIFACT),
+        languages: PARAKEET_V3_LANGUAGES,
+        // Like v3, its base: it detects the language from the audio and has
+        // no language input, so it is offered under Auto.
+        accepts_language_hint: false,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::WhisperLargeV3Turbo,
@@ -540,9 +562,9 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&PARAKEET_ULTRA_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
         // Like v3, its base: it detects the language from the audio and has
-        // no language input.
+        // no language input, so it is offered under Auto.
         accepts_language_hint: false,
-        supports_language_detection: false,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::Nemotron35Asr,
@@ -608,9 +630,10 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&GRANITE_SPEECH_5_ARTIFACT),
         languages: GRANITE_SPEECH_5_LANGUAGES,
         // A CTC head with no language input: it transcribes whichever of
-        // its seven languages it hears.
+        // its seven languages it hears, so it is offered under Auto even
+        // though its pinned file leaves stt.capability.lang_detect off.
         accepts_language_hint: false,
-        supports_language_detection: false,
+        supports_language_detection: true,
     },
     ModelDefinition {
         id: TranscriptionModelId::AppleSpeech,
@@ -1418,6 +1441,28 @@ mod tests {
     }
 
     #[test]
+    fn orukeet_is_offered_for_exactly_parakeet_v3s_languages_and_never_badged() {
+        let orukeet = definition(TranscriptionModelId::Orukeet);
+        let v3 = definition(TranscriptionModelId::ParakeetV3);
+        assert_eq!(orukeet.languages, PARAKEET_V3_LANGUAGES);
+        assert_eq!(orukeet.language_choices(), v3.language_choices());
+        assert!(!orukeet.streams);
+        assert!(!orukeet.accepts_language_hint);
+        assert!(orukeet.supports_language_detection);
+        assert!(!orukeet.id.is_labs_gated());
+        assert!(orukeet.available());
+        assert!(super::super::model_details::details(orukeet.id).is_some());
+        for language in v3.languages.iter().copied().chain([AUTO_LANGUAGE]) {
+            assert!(
+                choices_for_runtime(language)
+                    .iter()
+                    .all(|choice| choice.model.id != orukeet.id),
+                "Orukeet is never recommended ({language})"
+            );
+        }
+    }
+
+    #[test]
     fn parakeet_ultra_is_offered_only_with_its_lab_and_a_saved_choice_survives() {
         let ultra = definition(TranscriptionModelId::ParakeetUltra);
         assert_eq!(ultra.available(), crate::labs::parakeet_ultra());
@@ -1704,6 +1749,7 @@ mod tests {
             ),
             (TranscriptionModelId::ParakeetV2, "parakeet_v2"),
             (TranscriptionModelId::ParakeetV3, "parakeet_v3"),
+            (TranscriptionModelId::Orukeet, "orukeet"),
             (
                 TranscriptionModelId::WhisperLargeV3Turbo,
                 "whisper_large_v3_turbo",
@@ -1782,6 +1828,24 @@ mod tests {
             })
             .is_ok()
         );
+    }
+
+    #[test]
+    fn models_that_detect_language_without_a_hint_offer_auto() {
+        for model in [
+            TranscriptionModelId::ParakeetV3,
+            TranscriptionModelId::GraniteSpeech5,
+        ] {
+            let definition = definition(model);
+            assert!(!definition.accepts_language_hint, "{model:?}");
+            assert!(definition.supports_language_detection, "{model:?}");
+            assert!(definition.language_choices().contains(&AUTO_LANGUAGE));
+            assert_eq!(definition.language_for(AUTO_LANGUAGE), AUTO_LANGUAGE);
+        }
+        let v2 = definition(TranscriptionModelId::ParakeetV2);
+        assert!(!v2.supports_language_detection);
+        assert!(!v2.language_choices().contains(&AUTO_LANGUAGE));
+        assert_eq!(v2.language_for(AUTO_LANGUAGE), "en");
     }
 
     #[test]
@@ -2066,6 +2130,7 @@ mod tests {
                 ParakeetUnifiedEnglish,
                 ParakeetV2,
                 ParakeetV3,
+                Orukeet,
                 UnderdogBark3Pro,
                 UnderdogBark3Clean,
                 ParakeetUltra,

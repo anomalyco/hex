@@ -9,8 +9,10 @@
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard or only copying it (macOS), a second dictation shortcut
 //! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
-//! recording when its call ends (macOS), and Terminal paste
-//! and shortcut sharing on Windows) is just its toggle.
+//! recording when its call ends (macOS), transcribing a saved WAV file from a
+//! terminal, and Terminal paste, shortcut sharing
+//! on Windows, and a terminal-paste dictation shortcut on Windows and Linux)
+//! is just its toggle.
 //!
 //! Each feature has an audience (`Feature::audience`): `Everyone` ships in
 //! every build; `Dev` exists only in dev builds (`dev_build::is_dev_build`:
@@ -22,7 +24,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::app_settings::{AppSettings, LabsSettings};
+use crate::app_settings::{AppSettings, CapsLockLight, LabsSettings};
 
 mod cli;
 mod description;
@@ -84,6 +86,7 @@ pub enum Feature {
     FillerWords,
     SubtitleExport,
     SecondDictationShortcut,
+    TerminalPasteShortcut,
     SmartSpacing,
     SpokenSymbols,
     PickerSortFilter,
@@ -103,13 +106,16 @@ pub enum Feature {
     SectionKeyAlone,
     KeepRecordings,
     SettingsSearch,
+    ReleaseNotesLink,
     HideMenuBarIcon,
     MovableMeetingCapsules,
     GnomeClipboardRestore,
+    TypedText,
     MeetingNotesVocabulary,
     NotchIndicator,
     MeetingFinishedEvent,
     GnomeMeetingCapsules,
+    GnomeAnnotate,
     Screenshots,
     FollowLiveTranscript,
     MoreCallApps,
@@ -119,10 +125,12 @@ pub enum Feature {
     QuitClosesWindow,
     ExpireMeetingAudio,
     CapsLockDictation,
+    OpenCodeInWsl,
+    TranscribeFiles,
 }
 
 impl Feature {
-    pub const ALL: [Self; 56] = [
+    pub const ALL: [Self; 62] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -144,6 +152,7 @@ impl Feature {
         Self::FillerWords,
         Self::SubtitleExport,
         Self::SecondDictationShortcut,
+        Self::TerminalPasteShortcut,
         Self::SmartSpacing,
         Self::SpokenSymbols,
         Self::PickerSortFilter,
@@ -163,13 +172,16 @@ impl Feature {
         Self::SectionKeyAlone,
         Self::KeepRecordings,
         Self::SettingsSearch,
+        Self::ReleaseNotesLink,
         Self::HideMenuBarIcon,
         Self::MovableMeetingCapsules,
         Self::GnomeClipboardRestore,
+        Self::TypedText,
         Self::MeetingNotesVocabulary,
         Self::NotchIndicator,
         Self::MeetingFinishedEvent,
         Self::GnomeMeetingCapsules,
+        Self::GnomeAnnotate,
         Self::Screenshots,
         Self::FollowLiveTranscript,
         Self::MoreCallApps,
@@ -179,6 +191,8 @@ impl Feature {
         Self::QuitClosesWindow,
         Self::ExpireMeetingAudio,
         Self::CapsLockDictation,
+        Self::OpenCodeInWsl,
+        Self::TranscribeFiles,
     ];
 
     /// The features this OS and build have.
@@ -225,6 +239,7 @@ impl Feature {
             | Self::FillerWords
             | Self::SubtitleExport
             | Self::SecondDictationShortcut
+            | Self::TerminalPasteShortcut
             | Self::SmartSpacing
             | Self::SpokenSymbols
             | Self::PickerSortFilter
@@ -244,9 +259,11 @@ impl Feature {
             | Self::SectionKeyAlone
             | Self::KeepRecordings
             | Self::SettingsSearch
+            | Self::ReleaseNotesLink
             | Self::HideMenuBarIcon
             | Self::MovableMeetingCapsules
             | Self::GnomeClipboardRestore
+            | Self::TypedText
             | Self::MeetingNotesVocabulary
             | Self::MeetingFinishedEvent
             | Self::GnomeMeetingCapsules
@@ -259,7 +276,10 @@ impl Feature {
             | Self::ExpireMeetingAudio
             | Self::NotchIndicator
             | Self::QuitClosesWindow
-            | Self::CapsLockDictation => Audience::Everyone,
+            | Self::GnomeAnnotate
+            | Self::CapsLockDictation
+            | Self::OpenCodeInWsl
+            | Self::TranscribeFiles => Audience::Everyone,
         }
     }
 
@@ -319,7 +339,13 @@ impl Feature {
             | Self::QuitClosesWindow
             | Self::CapsLockDictation
             | Self::ExpireMeetingAudio
-            | Self::FailureNotices => 20261107,
+            | Self::FailureNotices
+            | Self::TypedText => 20261107,
+            Self::GnomeAnnotate
+            | Self::TerminalPasteShortcut
+            | Self::ReleaseNotesLink
+            | Self::OpenCodeInWsl => 20261108,
+            Self::TranscribeFiles => 20261109,
         }
     }
 
@@ -340,6 +366,9 @@ impl Feature {
         if key == "labs.unload_idle_minutes" {
             return Some(Self::UnloadIdle);
         }
+        if key == "labs.caps_lock_light" {
+            return Some(Self::CapsLockDictation);
+        }
         if key == "capture.replay_hotkey" {
             return Some(Self::AnnotateReplay);
         }
@@ -358,18 +387,20 @@ impl Feature {
             | Self::MovableMeetingCapsules
             | Self::MeetingImport => cfg!(target_os = "macos"),
             Self::VoiceFilter => cfg!(any(target_os = "macos", target_os = "linux")),
-            Self::TerminalPaste | Self::ShareShortcut => cfg!(target_os = "windows"),
+            Self::TerminalPaste | Self::ShareShortcut | Self::OpenCodeInWsl => {
+                cfg!(target_os = "windows")
+            }
             Self::SectionKeyAlone
             | Self::GnomeClipboardRestore
+            | Self::TypedText
             | Self::GnomeMeetingCapsules
+            | Self::GnomeAnnotate
             | Self::LiveTyping => cfg!(target_os = "linux"),
-            Self::StandaloneSpecialKeys | Self::SkipPauses => {
+            Self::StandaloneSpecialKeys | Self::SkipPauses | Self::TerminalPasteShortcut => {
                 cfg!(any(target_os = "linux", target_os = "windows"))
             }
             Self::MouseShortcuts
             | Self::PauseBrowser
-            | Self::KeepOnClipboard
-            | Self::CopyOnly
             | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SidedChords
@@ -379,6 +410,9 @@ impl Feature {
             | Self::NotchIndicator
             | Self::Screenshots
             | Self::CapsLockDictation => cfg!(target_os = "macos"),
+            Self::KeepOnClipboard | Self::CopyOnly => {
+                cfg!(any(target_os = "macos", target_os = "windows"))
+            }
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::AnnotateReplay => {
@@ -415,7 +449,9 @@ impl Feature {
             | Self::MoreCallApps
             | Self::ExpireMeetingAudio
             | Self::SettingsSearch
-            | Self::FillerWords => true,
+            | Self::ReleaseNotesLink
+            | Self::FillerWords
+            | Self::TranscribeFiles => true,
         }
     }
 
@@ -443,6 +479,7 @@ impl Feature {
             Self::FillerWords => "filler-words",
             Self::SubtitleExport => "subtitle-export",
             Self::SecondDictationShortcut => "second-dictation-shortcut",
+            Self::TerminalPasteShortcut => "terminal-paste-shortcut",
             Self::SmartSpacing => "smart-spacing",
             Self::SpokenSymbols => "spoken-symbols",
             Self::PickerSortFilter => "picker-sort-filter",
@@ -462,13 +499,16 @@ impl Feature {
             Self::SectionKeyAlone => "section-key",
             Self::KeepRecordings => "keep-recordings",
             Self::SettingsSearch => "settings-search",
+            Self::ReleaseNotesLink => "release-notes-link",
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
             Self::MovableMeetingCapsules => "movable-meeting-capsules",
             Self::GnomeClipboardRestore => "gnome-clipboard-restore",
+            Self::TypedText => "typed-text",
             Self::MeetingNotesVocabulary => "meeting-notes-vocabulary",
             Self::NotchIndicator => "notch-indicator",
             Self::MeetingFinishedEvent => "meeting-finished-event",
             Self::GnomeMeetingCapsules => "gnome-meeting-capsules",
+            Self::GnomeAnnotate => "gnome-annotate",
             Self::Screenshots => "screenshots",
             Self::FollowLiveTranscript => "follow-live-transcript",
             Self::MoreCallApps => "more-call-apps",
@@ -478,6 +518,8 @@ impl Feature {
             Self::QuitClosesWindow => "quit-closes-window",
             Self::ExpireMeetingAudio => "expire-meeting-audio",
             Self::CapsLockDictation => "caps-lock-dictation",
+            Self::OpenCodeInWsl => "opencode-in-wsl",
+            Self::TranscribeFiles => "transcribe-files",
         }
     }
 
@@ -505,6 +547,7 @@ impl Feature {
             Self::FillerWords => "labs.filler_words",
             Self::SubtitleExport => "labs.subtitle_export",
             Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
+            Self::TerminalPasteShortcut => "labs.terminal_paste_shortcut",
             Self::SmartSpacing => "labs.smart_spacing",
             Self::SpokenSymbols => "labs.spoken_symbols",
             Self::PickerSortFilter => "labs.picker_sort_filter",
@@ -524,13 +567,16 @@ impl Feature {
             Self::SectionKeyAlone => "labs.section_key_alone",
             Self::KeepRecordings => "labs.keep_recordings",
             Self::SettingsSearch => "labs.settings_search",
+            Self::ReleaseNotesLink => "labs.release_notes_link",
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
             Self::MovableMeetingCapsules => "labs.movable_meeting_capsules",
             Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
+            Self::TypedText => "labs.typed_text",
             Self::MeetingNotesVocabulary => "labs.meeting_notes_vocabulary",
             Self::NotchIndicator => "labs.notch_indicator",
             Self::MeetingFinishedEvent => "labs.meeting_finished_event",
             Self::GnomeMeetingCapsules => "labs.gnome_meeting_capsules",
+            Self::GnomeAnnotate => "labs.gnome_annotate",
             Self::Screenshots => "labs.screenshots",
             Self::FollowLiveTranscript => "labs.follow_live_transcript",
             Self::MoreCallApps => "labs.more_call_apps",
@@ -540,6 +586,8 @@ impl Feature {
             Self::QuitClosesWindow => "labs.quit_closes_window",
             Self::ExpireMeetingAudio => "labs.expire_meeting_audio",
             Self::CapsLockDictation => "labs.caps_lock_dictation",
+            Self::OpenCodeInWsl => "labs.opencode_in_wsl",
+            Self::TranscribeFiles => "labs.transcribe_files",
         }
     }
 
@@ -571,6 +619,7 @@ impl Feature {
             Self::FillerWords => settings.labs.filler_words,
             Self::SubtitleExport => settings.labs.subtitle_export,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
+            Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut,
             Self::SmartSpacing => settings.labs.smart_spacing,
             Self::SpokenSymbols => settings.labs.spoken_symbols,
             Self::PickerSortFilter => settings.labs.picker_sort_filter,
@@ -590,13 +639,16 @@ impl Feature {
             Self::SectionKeyAlone => settings.labs.section_key_alone,
             Self::KeepRecordings => settings.labs.keep_recordings,
             Self::SettingsSearch => settings.labs.settings_search,
+            Self::ReleaseNotesLink => settings.labs.release_notes_link,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
+            Self::TypedText => settings.labs.typed_text,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary,
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
+            Self::GnomeAnnotate => settings.labs.gnome_annotate,
             Self::Screenshots => settings.labs.screenshots,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript,
             Self::MoreCallApps => settings.labs.more_call_apps,
@@ -606,6 +658,8 @@ impl Feature {
             Self::QuitClosesWindow => settings.labs.quit_closes_window,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation,
+            Self::OpenCodeInWsl => settings.labs.opencode_in_wsl,
+            Self::TranscribeFiles => settings.labs.transcribe_files,
         }
     }
 
@@ -635,6 +689,7 @@ impl Feature {
             &mut labs.filler_words,
             &mut labs.subtitle_export,
             &mut labs.second_dictation_shortcut,
+            &mut labs.terminal_paste_shortcut,
             &mut labs.smart_spacing,
             &mut labs.spoken_symbols,
             &mut labs.picker_sort_filter,
@@ -654,13 +709,16 @@ impl Feature {
             &mut labs.section_key_alone,
             &mut labs.keep_recordings,
             &mut labs.settings_search,
+            &mut labs.release_notes_link,
             &mut labs.hide_menu_bar_icon,
             &mut labs.movable_meeting_capsules,
             &mut labs.gnome_clipboard_restore,
+            &mut labs.typed_text,
             &mut labs.meeting_notes_vocabulary,
             &mut labs.notch_indicator,
             &mut labs.meeting_finished_event,
             &mut labs.gnome_meeting_capsules,
+            &mut labs.gnome_annotate,
             &mut labs.screenshots,
             &mut labs.follow_live_transcript,
             &mut labs.more_call_apps,
@@ -670,6 +728,8 @@ impl Feature {
             &mut labs.quit_closes_window,
             &mut labs.expire_meeting_audio,
             &mut labs.caps_lock_dictation,
+            &mut labs.opencode_in_wsl,
+            &mut labs.transcribe_files,
         ]
     }
 
@@ -701,6 +761,7 @@ impl Feature {
             Self::FillerWords => settings.labs.filler_words = on,
             Self::SubtitleExport => settings.labs.subtitle_export = on,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
+            Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut = on,
             Self::SmartSpacing => settings.labs.smart_spacing = on,
             Self::SpokenSymbols => settings.labs.spoken_symbols = on,
             Self::PickerSortFilter => settings.labs.picker_sort_filter = on,
@@ -718,13 +779,16 @@ impl Feature {
             Self::PickerDownloaded => settings.labs.picker_downloaded = on,
             Self::KeepRecordings => settings.labs.keep_recordings = on,
             Self::SettingsSearch => settings.labs.settings_search = on,
+            Self::ReleaseNotesLink => settings.labs.release_notes_link = on,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             Self::MovableMeetingCapsules => settings.labs.movable_meeting_capsules = on,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
+            Self::TypedText => settings.labs.typed_text = on,
             Self::MeetingNotesVocabulary => settings.labs.meeting_notes_vocabulary = on,
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::MeetingFinishedEvent => settings.labs.meeting_finished_event = on,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
+            Self::GnomeAnnotate => settings.labs.gnome_annotate = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::FollowLiveTranscript => settings.labs.follow_live_transcript = on,
             Self::MoreCallApps => settings.labs.more_call_apps = on,
@@ -734,6 +798,8 @@ impl Feature {
             Self::QuitClosesWindow => settings.labs.quit_closes_window = on,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation = on,
+            Self::OpenCodeInWsl => settings.labs.opencode_in_wsl = on,
+            Self::TranscribeFiles => settings.labs.transcribe_files = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -799,6 +865,16 @@ const MEETING_DESCRIPTIVE_FILENAMES: u64 = LIVE_TYPING << 1;
 const FAILURE_NOTICES: u64 = MEETING_DESCRIPTIVE_FILENAMES << 1;
 /// The next bit above Failure notices' switch.
 const CAPS_LOCK_DICTATION: u64 = FAILURE_NOTICES << 1;
+/// The next bit above Caps Lock dictation's switch.
+const GNOME_ANNOTATE: u64 = CAPS_LOCK_DICTATION << 1;
+/// The next bit above Annotate on GNOME's switch.
+const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
+/// The next bit above Typed text's switch: Caps Lock dictation's recording
+/// light blinks slowly instead of staying solid.
+const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
+/// The next bit above Caps Lock's slow blink: an OpenCode service in WSL is
+/// found when no Windows one answers (Windows).
+const OPENCODE_IN_WSL: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -860,15 +936,15 @@ pub fn mouse_shortcuts() -> bool {
 }
 
 /// A pasted dictation stays on the clipboard rather than the previous
-/// clipboard being restored (macOS; read as each paste commits).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// clipboard being restored (macOS and Windows; read as each paste commits).
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn keep_on_clipboard() -> bool {
     on(KEEP_ON_CLIPBOARD)
 }
 
-/// A dictation goes to the clipboard and is never pasted (macOS; read as
-/// each dictation's output commits).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// A dictation goes to the clipboard and is never pasted (macOS and
+/// Windows; read as each dictation's output commits).
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn copy_only() -> bool {
     on(COPY_ONLY)
 }
@@ -1009,11 +1085,27 @@ pub fn gnome_clipboard_restore() -> bool {
     on(GNOME_CLIPBOARD_RESTORE) && Feature::GnomeClipboardRestore.on_this_os()
 }
 
+/// A shortcut runs the focused app's Output steps on the text already typed
+/// there and replaces it (Linux; read as each shortcut press starts and by
+/// the Output pane's row).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn typed_text() -> bool {
+    on(TYPED_TEXT) && Feature::TypedText.on_this_os()
+}
+
 /// On a Wayland desktop without layer-shell (GNOME), the meeting capsules
 /// float on an already running XWayland (Linux; read as each capsule shows).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn gnome_meeting_capsules() -> bool {
     on(GNOME_MEETING_CAPSULES) && Feature::GnomeMeetingCapsules.on_this_os()
+}
+
+/// On a Wayland desktop without layer-shell (GNOME), Annotate's capsule and
+/// ink float on an already running XWayland (Linux; read as each overlay
+/// shows).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn gnome_annotate() -> bool {
+    on(GNOME_ANNOTATE) && Feature::GnomeAnnotate.on_this_os()
 }
 
 /// The local API's `GET /meetings/events` serves, and a meeting's final
@@ -1058,6 +1150,21 @@ pub fn meeting_descriptive_filenames() -> bool {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn caps_lock_dictation() -> bool {
     on(CAPS_LOCK_DICTATION) && Feature::CapsLockDictation.on_this_os()
+}
+
+/// Whether the Caps Lock light blinks slowly while recording instead of
+/// staying solid (macOS; read by the light model for each pattern).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn caps_lock_slow_blink() -> bool {
+    on(CAPS_LOCK_SLOW_BLINK) && Feature::CapsLockDictation.on_this_os()
+}
+
+/// An OpenCode service running in the default WSL distribution is used when
+/// no Windows registration answers (Windows; read as each service search
+/// starts).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn opencode_in_wsl() -> bool {
+    on(OPENCODE_IN_WSL) && Feature::OpenCodeInWsl.on_this_os()
 }
 
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
@@ -1183,6 +1290,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             settings.gnome_clipboard_restore,
             GNOME_CLIPBOARD_RESTORE,
         ),
+        (Feature::TypedText, settings.typed_text, TYPED_TEXT),
         (
             Feature::MeetingNotesVocabulary,
             settings.meeting_notes_vocabulary,
@@ -1219,6 +1327,16 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             CAPS_LOCK_DICTATION,
         ),
         (
+            Feature::CapsLockDictation,
+            settings.caps_lock_light == CapsLockLight::SlowBlink,
+            CAPS_LOCK_SLOW_BLINK,
+        ),
+        (
+            Feature::OpenCodeInWsl,
+            settings.opencode_in_wsl,
+            OPENCODE_IN_WSL,
+        ),
+        (
             Feature::QuitClosesWindow,
             settings.quit_closes_window,
             QUIT_CLOSES_WINDOW,
@@ -1232,6 +1350,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::GnomeMeetingCapsules,
             settings.gnome_meeting_capsules,
             GNOME_MEETING_CAPSULES,
+        ),
+        (
+            Feature::GnomeAnnotate,
+            settings.gnome_annotate,
+            GNOME_ANNOTATE,
         ),
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
     ]
@@ -1255,6 +1378,7 @@ pub fn log_launch() {
         failure_notices = failure_notices(),
         live_typing = live_typing(),
         live_chapters = live_chapters(),
+        typed_text = typed_text(),
         playground = playground(),
         vocabulary_biasing = vocabulary_biasing(),
         "labs"
@@ -1367,6 +1491,10 @@ mod tests {
         assert_eq!(
             Feature::for_settings_key("labs.unload_idle_minutes"),
             Some(Feature::UnloadIdle)
+        );
+        assert_eq!(
+            Feature::for_settings_key("labs.caps_lock_light"),
+            Some(Feature::CapsLockDictation)
         );
         assert_eq!(Feature::for_settings_key("dictation_hotkey"), None);
     }
@@ -1604,6 +1732,19 @@ mod tests {
     }
 
     #[test]
+    fn typed_text_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & TYPED_TEXT, 0);
+        labs.typed_text = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & TYPED_TEXT, 0);
+        assert_eq!(state & GNOME_CLIPBOARD_RESTORE, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(Feature::TypedText.on_this_os(), cfg!(target_os = "linux"));
+    }
+
+    #[test]
     fn meeting_finished_event_is_its_own_bit_and_off_by_default() {
         let mut labs = LabsSettings::default();
         assert_eq!(encode_where(&labs, |_| true) & MEETING_FINISHED_EVENT, 0);
@@ -1637,6 +1778,19 @@ mod tests {
         assert_ne!(state & GNOME_MEETING_CAPSULES, 0);
         assert_eq!(state & GNOME_CLIPBOARD_RESTORE, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn gnome_annotate_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & GNOME_ANNOTATE, 0);
+        labs.gnome_annotate = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & GNOME_ANNOTATE, 0);
+        assert_eq!(state & GNOME_MEETING_CAPSULES, 0);
+        assert_eq!(state & CAPS_LOCK_DICTATION, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
     }
 
     #[test]
@@ -1717,6 +1871,57 @@ mod tests {
         assert_eq!(
             Feature::CapsLockDictation.on_this_os(),
             cfg!(target_os = "macos")
+        );
+    }
+
+    #[test]
+    fn caps_lock_light_carries_its_slow_blink_choice() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(labs.caps_lock_light, CapsLockLight::Steady);
+        labs.caps_lock_dictation = true;
+        assert_eq!(encode_where(&labs, |_| true) & CAPS_LOCK_SLOW_BLINK, 0);
+        labs.caps_lock_light = CapsLockLight::SlowBlink;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & CAPS_LOCK_SLOW_BLINK, 0);
+        assert_ne!(state & CAPS_LOCK_DICTATION, 0);
+        assert_eq!(state & GNOME_ANNOTATE, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 15);
+    }
+
+    #[test]
+    fn opencode_in_wsl_is_its_own_bit_and_windows_only() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & OPENCODE_IN_WSL, 0);
+        labs.opencode_in_wsl = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & OPENCODE_IN_WSL, 0);
+        assert_eq!(state & CAPS_LOCK_SLOW_BLINK, 0);
+        assert_eq!(state & TYPED_TEXT, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::OpenCodeInWsl.on_this_os(),
+            cfg!(target_os = "windows")
+        );
+    }
+
+    #[test]
+    fn clipboard_labs_are_macos_or_windows_only() {
+        assert_eq!(
+            Feature::KeepOnClipboard.on_this_os(),
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
+        assert_eq!(
+            Feature::CopyOnly.on_this_os(),
+            cfg!(any(target_os = "macos", target_os = "windows"))
+        );
+    }
+
+    #[test]
+    fn terminal_paste_shortcut_is_windows_or_linux_only() {
+        assert_eq!(
+            Feature::TerminalPasteShortcut.on_this_os(),
+            cfg!(any(target_os = "windows", target_os = "linux"))
         );
     }
 

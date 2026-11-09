@@ -277,10 +277,18 @@ pub struct AppSettings {
     /// Dictate without processing: records like the dictation shortcut and
     /// pastes the transcript as heard. Unbound by default.
     pub raw_dictation_hotkey: Option<HotkeyBinding>,
+    /// Labs › Transform typed text (Linux): runs the focused app's Output
+    /// steps on the text already typed in the focused field and replaces it.
+    /// Unbound by default and ignored while its Labs toggle is off.
+    pub typed_text_hotkey: Option<HotkeyBinding>,
     /// Labs › Second dictation shortcut: another shortcut that dictates
     /// exactly as `dictation_hotkey` does (macOS). Unbound by default and
     /// ignored while its Labs toggle is off.
     pub second_dictation_hotkey: Option<HotkeyBinding>,
+    /// Labs › Terminal paste shortcut: another shortcut that dictates like
+    /// `dictation_hotkey` and always pastes with Ctrl+Shift+V (Windows,
+    /// Linux). Unbound by default and ignored while its Labs toggle is off.
+    pub terminal_paste_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     /// Where the speech model runs (Linux and Windows).
@@ -418,7 +426,9 @@ impl Default for AppSettings {
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
             cancel_hotkey: HotkeyBinding::cancel_default(),
             raw_dictation_hotkey: None,
+            typed_text_hotkey: None,
             second_dictation_hotkey: None,
+            terminal_paste_hotkey: None,
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_device: TranscriptionDevice::Auto,
@@ -1012,6 +1022,7 @@ impl AppSettings {
                 .raw_dictation_hotkey
                 .as_ref()
                 .map(HotkeyBinding::runtime),
+            typed_text: self.active_typed_text_hotkey().map(HotkeyBinding::runtime),
             second_dictation: self
                 .active_second_dictation_hotkey()
                 .map(HotkeyBinding::runtime),
@@ -1036,6 +1047,34 @@ impl AppSettings {
         self.second_dictation_hotkey
             .as_ref()
             .filter(|binding| !self.hotkey_in_use(HotkeySlot::SecondDictation, binding))
+    }
+
+    /// Labs › Transform typed text's binding while it takes effect: Linux,
+    /// its toggle on, bound, and sharing no key with another active
+    /// shortcut. Otherwise the listener registers nothing for it.
+    pub fn active_typed_text_hotkey(&self) -> Option<&HotkeyBinding> {
+        if !cfg!(target_os = "linux") || !self.labs.typed_text {
+            return None;
+        }
+        self.typed_text_hotkey
+            .as_ref()
+            .filter(|binding| !self.hotkey_in_use(HotkeySlot::TypedText, binding))
+    }
+
+    /// Labs › Terminal paste shortcut's binding while it takes effect:
+    /// Windows or Linux, its toggle on, bound, and sharing no key with
+    /// another active shortcut. Otherwise Hex registers, matches, and
+    /// checks nothing for it.
+    #[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
+    pub fn active_terminal_paste_hotkey(&self) -> Option<&HotkeyBinding> {
+        if !cfg!(any(target_os = "windows", target_os = "linux"))
+            || !self.labs.terminal_paste_shortcut
+        {
+            return None;
+        }
+        self.terminal_paste_hotkey
+            .as_ref()
+            .filter(|binding| !self.hotkey_in_use(HotkeySlot::TerminalPaste, binding))
     }
 
     /// Annotate is on: the person hasn't turned it off.
@@ -1091,12 +1130,28 @@ impl AppSettings {
             self.raw_dictation_hotkey = None;
         }
         if self
+            .typed_text_hotkey
+            .as_ref()
+            .is_some_and(HotkeyBinding::is_bare_primary_click)
+        {
+            tracing::warn!("cleared a left-click typed text shortcut");
+            self.typed_text_hotkey = None;
+        }
+        if self
             .second_dictation_hotkey
             .as_ref()
             .is_some_and(HotkeyBinding::is_bare_primary_click)
         {
             tracing::warn!("cleared a left-click second dictation shortcut");
             self.second_dictation_hotkey = None;
+        }
+        if self
+            .terminal_paste_hotkey
+            .as_ref()
+            .is_some_and(HotkeyBinding::is_bare_primary_click)
+        {
+            tracing::warn!("cleared a left-click terminal paste shortcut");
+            self.terminal_paste_hotkey = None;
         }
         #[cfg(hex_capture)]
         if self.capture.hotkey.is_bare_primary_click() {
@@ -1140,6 +1195,8 @@ pub enum HotkeySlot {
     Dictation,
     PasteLast,
     RawDictation,
+    /// Labs › Transform typed text's shortcut (Linux).
+    TypedText,
     #[cfg(hex_capture)]
     Capture,
     /// Labs › Annotate 15 s replay shortcut (macOS 27+).
@@ -1147,6 +1204,8 @@ pub enum HotkeySlot {
     CaptureReplay,
     /// Labs › Second dictation shortcut (macOS).
     SecondDictation,
+    /// Labs › Terminal paste shortcut (Windows, Linux).
+    TerminalPaste,
     /// Toggle mode's cancel shortcut.
     Cancel,
     /// Labs › Screenshots (macOS).
@@ -1175,6 +1234,13 @@ impl AppSettings {
         {
             others.push(raw.clone());
         }
+        if slot != HotkeySlot::TypedText
+            && cfg!(target_os = "linux")
+            && self.labs.typed_text
+            && let Some(typed) = &self.typed_text_hotkey
+        {
+            others.push(typed.clone());
+        }
         if slot != HotkeySlot::Cancel {
             others.push(self.cancel_hotkey.clone());
         }
@@ -1184,6 +1250,13 @@ impl AppSettings {
             && let Some(second) = &self.second_dictation_hotkey
         {
             others.push(second.clone());
+        }
+        if slot != HotkeySlot::TerminalPaste
+            && cfg!(any(target_os = "windows", target_os = "linux"))
+            && self.labs.terminal_paste_shortcut
+            && let Some(terminal) = &self.terminal_paste_hotkey
+        {
+            others.push(terminal.clone());
         }
         if cfg!(target_os = "macos") && self.meetings.available() {
             others.push(HotkeyBinding::paste_meeting_default());
@@ -1662,6 +1735,91 @@ mod tests {
         assert!(settings.hotkey_in_use(HotkeySlot::SecondDictation, &dictation));
         settings.second_dictation_hotkey = Some(dictation);
         assert_eq!(settings.runtime_hotkeys().second_dictation, None);
+    }
+
+    /// Labs › Transform typed text: its binding takes effect only on Linux
+    /// with its toggle on, never sharing a key with another shortcut, and
+    /// the other shortcuts' checks count it while it is active.
+    #[test]
+    fn the_typed_text_shortcut_needs_its_lab_and_its_own_keys() {
+        let function = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                function: true,
+                ..HotkeyModifiers::default()
+            },
+            key: None,
+        };
+        let mut settings = AppSettings {
+            typed_text_hotkey: Some(function.clone()),
+            ..AppSettings::default()
+        };
+        assert!(!settings.labs.typed_text);
+        assert_eq!(settings.runtime_hotkeys().typed_text, None);
+        assert!(!settings.hotkey_in_use(HotkeySlot::RawDictation, &function));
+
+        settings.labs.typed_text = true;
+        let active = settings.runtime_hotkeys().typed_text;
+        if cfg!(target_os = "linux") {
+            assert_eq!(active, Some(function.runtime()));
+            assert!(settings.hotkey_in_use(HotkeySlot::RawDictation, &function));
+            assert!(settings.hotkey_in_use(HotkeySlot::Dictation, &function));
+        } else {
+            assert_eq!(active, None);
+        }
+
+        // The dictation shortcut's own keys are refused, and a saved overlap
+        // is dropped rather than matched twice.
+        let dictation = settings.dictation_hotkey.clone();
+        assert!(settings.hotkey_in_use(HotkeySlot::TypedText, &dictation));
+        settings.typed_text_hotkey = Some(dictation);
+        assert_eq!(settings.runtime_hotkeys().typed_text, None);
+    }
+
+    /// Labs › Terminal paste shortcut: its binding takes effect only on
+    /// Windows and Linux with its toggle on, never sharing a key with
+    /// another shortcut, and off it stays saved but inactive.
+    #[test]
+    fn the_terminal_paste_shortcut_needs_its_lab_and_its_own_keys() {
+        let binding = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                control: Some(crate::app_settings::ModifierSide::Either),
+                shift: Some(crate::app_settings::ModifierSide::Either),
+                ..HotkeyModifiers::default()
+            },
+            key: Some(crate::app_settings::HotkeyKey::named("t")),
+        };
+        let mut settings = AppSettings {
+            terminal_paste_hotkey: Some(binding.clone()),
+            ..AppSettings::default()
+        };
+        assert!(!settings.labs.terminal_paste_shortcut);
+        assert_eq!(settings.active_terminal_paste_hotkey(), None);
+        assert!(!settings.hotkey_in_use(HotkeySlot::RawDictation, &binding));
+
+        settings.labs.terminal_paste_shortcut = true;
+        let active = settings.active_terminal_paste_hotkey();
+        if cfg!(any(target_os = "windows", target_os = "linux")) {
+            assert_eq!(active, Some(&binding));
+            assert!(settings.hotkey_in_use(HotkeySlot::RawDictation, &binding));
+            assert!(settings.hotkey_in_use(HotkeySlot::Dictation, &binding));
+        } else {
+            assert_eq!(active, None);
+        }
+
+        // The dictation shortcut's own keys are refused, and a saved overlap
+        // is dropped rather than matched twice.
+        let dictation = settings.dictation_hotkey.clone();
+        assert!(settings.hotkey_in_use(HotkeySlot::TerminalPaste, &dictation));
+        settings.terminal_paste_hotkey = Some(dictation);
+        assert_eq!(settings.active_terminal_paste_hotkey(), None);
+
+        // The binding survives a save and load while the lab is off.
+        settings.labs.terminal_paste_shortcut = false;
+        settings.terminal_paste_hotkey = Some(binding.clone());
+        let decoded: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(decoded.terminal_paste_hotkey, Some(binding));
+        assert_eq!(decoded.active_terminal_paste_hotkey(), None);
     }
 
     #[test]
@@ -2450,6 +2608,30 @@ mod tests {
             settings.dictation_processing.default_mode.name,
             "Unsaved mode"
         );
+    }
+
+    #[test]
+    fn saving_a_selection_persists_it_and_keeps_other_settings() {
+        let dir = TestSettingsDir::new("save-selection");
+        let mut settings = AppSettings {
+            sound_effects: false,
+            microphone: Some("Test microphone".into()),
+            ..AppSettings::default()
+        };
+        let previous = settings.transcription.clone();
+        let selection = TranscriptionSelection {
+            model: TranscriptionModelId::WhisperLargeV3Turbo,
+            language: "fr".into(),
+        };
+        settings
+            .save_transcription_with(selection.clone(), |next| next.write_to(&dir.path))
+            .unwrap();
+
+        let (persisted, _) = AppSettings::read_from(&dir.path).unwrap();
+        assert_eq!(persisted.transcription, selection);
+        assert_eq!(persisted.microphone.as_deref(), Some("Test microphone"));
+        assert!(!persisted.sound_effects);
+        assert!(persisted.transcription_recents.contains(&previous));
     }
 
     #[test]

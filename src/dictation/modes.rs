@@ -52,13 +52,14 @@ impl ModeRuntime {
         language: &str,
         context: &crate::dictation::context::ContextSnapshot,
         transformations: &crate::personal_commands::TransformationClient,
+        source: crate::dictation::processor::Source,
     ) -> Processed {
         let text = self.replacements.replace(raw_text);
         let profile = self.profile(context);
         let cancelled = AtomicBool::new(false);
-        let mut processed =
-            Profiles::new(profile).process_cancellable(&text, language, context, &cancelled);
-        processed.apply_transformations(transformations, context, &cancelled);
+        let mut processed = Profiles::new(profile)
+            .process_cancellable(&text, language, context, &cancelled, source);
+        processed.apply_transformations(transformations, context, &cancelled, source);
         processed
     }
 
@@ -311,7 +312,13 @@ mod tests {
         };
         let transformations = crate::personal_commands::TransformationClient::default();
 
-        let processed = runtime.process("Use open code in hex.", "en", &context, &transformations);
+        let processed = runtime.process(
+            "Use open code in hex.",
+            "en",
+            &context,
+            &transformations,
+            crate::dictation::processor::Source::Dictation,
+        );
 
         assert_eq!(processed.text, "Use OpenCode in Hex.");
         assert!(processed.observation.is_none());
@@ -329,6 +336,7 @@ mod tests {
             "en",
             &crate::dictation::context::ContextSnapshot::default(),
             &transformations,
+            crate::dictation::processor::Source::Dictation,
         );
 
         assert_eq!(processed.text, "keep opencode exact.");

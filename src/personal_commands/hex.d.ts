@@ -109,6 +109,8 @@ declare module "@hex/commands" {
   >(...members: Members): UnionCapture<readonly Extract<FlattenedUnionMember<Members[number]>, AtomicCaptureDescriptor>[]>
 
   export interface HandlerContext {
+    /** Where a transformed dictation came from: speech or typed text. */
+    readonly source?: 'dictation' | 'typed-text'
     readonly application?: string
     readonly browserHost?: string
     readonly browserUrl?: string
