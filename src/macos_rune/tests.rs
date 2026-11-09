@@ -1,5 +1,6 @@
 //! Runtime request/scheduling regressions; no native model loading or settings writes.
 
+use super::runtime::Runtime;
 use super::*;
 use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
 
