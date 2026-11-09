@@ -391,7 +391,7 @@ secrets. Set a value with `bun set hex release <NAME>` in that repo.
 | `hex/release/CLOUDFLARE_API_TOKEN`, var `CLOUDFLARE_ACCOUNT_ID` | site deploys (`hex-site-deploy`, used only by `deploy-site.sh`) |
 | `hex/release/R2_SECRET_ACCESS_KEY`, var `R2_ACCESS_KEY_ID` | uploads to `hex-production-files` (`hex-r2-production-files`): the installers, the legacy appcast, and `dev-notes.json` |
 | `shared/AUR_SSH_KEY` | pushes `hex-bin`; one key for every Anomaly AUR package (`github-actions-hex-aur`) |
-| `shared/HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb`; one deploy key on `anomalyco/homebrew-tap` for every app (`github-actions-hex-homebrew`) |
+| `shared/HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb`; one deploy key on `anomalyco/homebrew-tap` for every app (`anomaly-release`) |
 | vars `AZURE_*` | Authenticode (docs/windows-signing.md); not secrets, `azure/login` uses OIDC |
 | `shared/APPLE_SIGNING_CERTIFICATE`, `shared/APPLE_NOTARY_KEY`, vars `APPLE_NOTARY_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
 | `hex/release/RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |
