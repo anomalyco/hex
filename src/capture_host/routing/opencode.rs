@@ -72,15 +72,18 @@ impl OpenCode for Wsl {
 }
 
 /// A failed `Service::request` from a confirmed WSL service, in the words
-/// the capture capsule already classifies: a timeout is the router's "didn't
-/// answer in time", and anything that couldn't be reached starts with
-/// "Could not reach server" like the router's own request errors.
+/// the capture capsule already classifies: a timeout, or a request dropped
+/// after the connection was made, is the router's "didn't answer in time";
+/// anything that couldn't be reached starts with "Could not reach server"
+/// like the router's own request errors.
 #[cfg(any(target_os = "windows", test))]
 fn request_error(error: &str) -> String {
     let error = error.trim();
     if error.contains("didn't answer in time")
         || error.contains("exceeded")
         || error.contains("was cancelled")
+        || error.contains("could not read OpenCode")
+        || error.contains("could not send OpenCode")
     {
         "OpenCode didn't answer in time".to_owned()
     } else if error.contains("Could not reach server")
@@ -101,29 +104,37 @@ mod tests {
 
     #[test]
     fn a_wsl_request_failure_reads_as_the_capsule_expects() {
+        // The send and read lines match opencode_service's `wrap_err_with`
+        // formats; the reach line matches the request loop's own error.
+        let path = "/api/session";
         for (raw, sent, unreachable) in [
             (
-                "OpenCode /api/session exceeded 5 seconds",
+                format!("OpenCode {path} exceeded 5 seconds"),
                 "OpenCode didn't answer",
                 "didn't answer in time",
             ),
             (
-                "OpenCode isn't running",
-                "OpenCode isn't running",
-                "it isn't running",
-            ),
-            (
-                "could not send OpenCode /api/session: Connection reset by peer",
+                "OpenCode isn't running".to_owned(),
                 "OpenCode isn't running",
                 "it isn't running",
             ),
             (
-                "could not reach OpenCode /api/session: Connection refused (os error 10061)",
+                format!("could not send OpenCode {path}: Connection reset by peer"),
+                "OpenCode didn't answer",
+                "didn't answer in time",
+            ),
+            (
+                format!("could not read OpenCode {path}: Connection reset by peer"),
+                "OpenCode didn't answer",
+                "didn't answer in time",
+            ),
+            (
+                format!("could not reach OpenCode {path}: Connection refused (os error 10061)"),
                 "OpenCode isn't running",
                 "it isn't running",
             ),
         ] {
-            let mapped = request_error(raw);
+            let mapped = request_error(&raw);
             assert_eq!(send_why(&mapped, false), sent, "{raw}");
             assert_eq!(unreachable_why(&mapped), unreachable, "{raw}");
         }
