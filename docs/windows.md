@@ -268,8 +268,11 @@ hex app
   (its HWND through `WindowHandle::with_raw_handle`) for the taskbar,
   Alt-Tab, and the caption. The native title bar keeps its icon and title,
   blended into the window: DWM paints the caption the theme's `bg_deep`
-  (`DWMWA_CAPTION_COLOR`, Windows 11; Windows 10 keeps its own caption
-  color). The view repaints it when the system theme switches.
+  (`DWMWA_CAPTION_COLOR`, Windows 11; Windows 10 keeps the system's caption
+  background) and draws its text and buttons in the window's light or dark
+  mode (`DWMWA_USE_IMMERSIVE_DARK_MODE`). The view re-applies both when the
+  window's theme changes and when the system theme switches, because winit
+  repaints the frame from the OS theme on `WM_SETTINGCHANGE`.
 - Without a tray (creation failed) closing the window quits Hex.
   See the [single-process plan](plans/single-process.md#windows-under-rune).
 

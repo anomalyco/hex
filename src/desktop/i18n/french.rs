@@ -1231,7 +1231,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Process API transcripts", "Traiter les transcriptions de l'API"),
     ("Apps can ask Hex's local API for transcripts with Global mode's processing applied.", "Les apps peuvent demander à l'API locale de Hex des transcriptions avec le traitement du mode Global appliqué"),
     ("Appearance", "Apparence"),
-    ("Force the main window to light or dark instead of following the system; other Hex windows still follow it", "Force la fenêtre principale en clair ou en sombre au lieu de suivre le système ; les autres fenêtres de Hex suivent toujours le système"),
+    ("Use light or dark for the main window instead of the system's", "Utilise le clair ou le sombre pour la fenêtre principale au lieu du système"),
     ("Theme", "Thème"),
     ("Light mode", "Clair"),
     ("Dark mode", "Sombre"),

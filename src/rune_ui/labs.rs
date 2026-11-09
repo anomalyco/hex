@@ -389,7 +389,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         Feature::Appearance,
         Some(&PANEL),
         tr("Appearance"),
-        tr("Force the main window to light or dark instead of following the system; other Hex windows still follow it"),
+        tr("Use light or dark for the main window instead of the system's"),
     ));
     rows.push(row(
         Feature::ReleaseNotesLink,

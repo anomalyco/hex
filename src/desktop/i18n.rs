@@ -1813,6 +1813,25 @@ mod tests {
         }
     }
 
+    /// The Appearance lab's theme picker translates each choice's name, which
+    /// is not a literal at the call.
+    #[test]
+    fn every_appearance_theme_string_has_every_language() {
+        use crate::app_settings::AppearanceTheme;
+        let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
+        for english in AppearanceTheme::ALL.into_iter().map(AppearanceTheme::name) {
+            let translations = table
+                .get(english)
+                .unwrap_or_else(|| panic!("{english:?} has no translations"));
+            assert!(
+                translations
+                    .iter()
+                    .all(|translation| !translation.is_empty()),
+                "{english:?} is missing a language"
+            );
+        }
+    }
+
     #[test]
     fn named_placeholders_survive_translation() {
         for (english, translated) in all_translations() {

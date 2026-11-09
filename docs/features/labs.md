@@ -31,8 +31,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
-├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)
-│                                        the main window is forced light or dark instead of following the system; the HUD and other overlays still follow the system
+├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the onboarding HUD preview and the Sounds sheet's HUD replay inside the window, and every overlay window, keep following the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 keeps the system's caption background while its text and buttons follow
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
@@ -359,15 +358,26 @@ Appearance (`appearance`, every OS): while on, its card shows "Theme"
 the main window's paint from `labs.appearance_theme` and the OS appearance
 for each view: System follows the OS live, Light mode always draws light, and
 Dark mode always draws dark. Off, or with System chosen, the window is
-exactly as before. Only the one main window is resolved; the HUD, meeting
-capsules, live text, capture capsule, screenshots, and playgrounds keep
-following the OS. Settings saves the choice at once, like the Caps Lock light.
+exactly as before. Only the one main window is resolved; the onboarding HUD
+preview and the Sounds sheet's HUD replay inside the window, and every
+overlay (the HUD, meeting capsules, live text, capture capsule, screenshots,
+and playgrounds), keep following the OS. On Windows the native title bar
+follows the window's background and light/dark mode: DWM sets
+`DWMWA_CAPTION_COLOR` and `DWMWA_USE_IMMERSIVE_DARK_MODE`, and the caption is
+re-applied after a system switch, which winit first paints from the OS theme.
+Windows 10 keeps the system's caption background (it has no caption color
+attribute), while the caption's text and buttons follow the forced mode.
+Settings saves the choice at once, like the Caps Lock light.
 Checks: `the_window_follows_the_os_unless_appearance_forces_it` in
-[labs.rs](../../src/labs.rs), `appearance_shows_its_theme_on_its_card_while_on`
-in [tests/panes.rs](../../src/rune_ui/tests/panes.rs), and
+[labs.rs](../../src/labs.rs), `the_main_window_paints_the_forced_appearance_not_the_os`
+and `appearance_shows_its_theme_on_its_card_while_on` in
+[tests/panes.rs](../../src/rune_ui/tests/panes.rs), and
 `an_invalid_appearance_theme_resets_only_that_field` in
-[persistence/tests.rs](../../src/app_settings/persistence/tests.rs). Not yet
-observed in a real window.
+[persistence/tests.rs](../../src/app_settings/persistence/tests.rs);
+`every_appearance_theme_string_has_every_language` in
+[i18n.rs](../../src/desktop/i18n.rs) covers the three names in every
+language. The Windows title bar change is only type-checked; no person has
+seen it on Windows yet. Not yet observed in a real window.
 
 Keep dictation on clipboard (`keep-on-clipboard`, issue 200, macOS and
 Windows): while on, a pasted dictation stays on the clipboard. `paste::Paster`
