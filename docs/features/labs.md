@@ -1529,7 +1529,7 @@ without a restart, and processing keeps its existing deadlines. The seam is
 `Processing` in [local_api/processing.rs](../../src/local_api/processing.rs),
 passed through `LocalApiOptions` like `control` and `dictation_control`.
 `hex service` installs none. Checks: `local_api::processing` route tests cover
-the 409 before a missing processor and the 403 before the body, invalid and
+the 409 for a missing processor and the 403 before the body, invalid and
 repeated values, the aliases, `429 queue-full` while one run holds the slot,
 `processed` present with the existing fields unchanged, absent responses, and
 `outputProcessing`; `api_processing_is_its_own_bit_and_off_by_default` in
