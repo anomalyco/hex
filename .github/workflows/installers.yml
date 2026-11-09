@@ -45,6 +45,9 @@ jobs:
     needs: check
     runs-on: ubuntu-24.04
     environment: release
+    permissions:
+      contents: read
+      id-token: write
     env:
       HEX_RELEASE_BUCKET: hex-production-files
     steps:
@@ -54,10 +57,21 @@ jobs:
           sparse-checkout: /.github/release/
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
+          role-session-name: hex-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: Fetch the release secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
+        with:
+          secret-ids: |
+            R2_SECRET_ACCESS_KEY,hex/release/R2_SECRET_ACCESS_KEY
+          parse-json-secrets: false
       - name: Upload them
         env:
           R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           in=.github/release
           sh .github/release/r2-put.sh install-linux.sh "$in/install-linux.sh" text/x-shellscript "public, max-age=300"

@@ -7,11 +7,11 @@ name: Site deploy
 # - build runs repository code (bun install, site/scripts/build.ts) with no
 #   environment and no secrets, and uploads the Worker's Build Output with a
 #   SHA256SUMS whose digest it reports.
-# - deploy runs in the release environment, which holds the hex-site-deploy
-#   token. It checks out only .github/release/, verifies the artifact against
-#   that digest, and runs only .github/release/deploy-site.sh, which pins the
-#   Worker, routes, and bindings and deploys with the cf CLI locked in
-#   .github/release/cf/.
+# - deploy runs in the release environment, which reads the hex-site-deploy
+#   token from AWS Secrets Manager. It checks out only .github/release/,
+#   verifies the artifact against that digest, and runs only
+#   .github/release/deploy-site.sh, which pins the Worker, routes, and
+#   bindings and deploys with the cf CLI locked in .github/release/cf/.
 # - verify checks the live site and every download link without secrets.
 on:
   workflow_call:
@@ -57,6 +57,9 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     environment: release
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: site-deploy-${{ inputs.mode }}
       cancel-in-progress: false
@@ -88,10 +91,21 @@ jobs:
         with:
           pattern: site-${{ inputs.mode }}
           digests: site-${{ inputs.mode }}=${{ needs.build.outputs.digest }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
+          role-session-name: hex-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: Fetch the release secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
+        with:
+          secret-ids: |
+            CLOUDFLARE_API_TOKEN,hex/release/CLOUDFLARE_API_TOKEN
+          parse-json-secrets: false
       - name: Deploy
         env:
           MODE: ${{ inputs.mode }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: bash .github/release/deploy-site.sh "$MODE" "$RUNNER_TEMP/in/site-$MODE"
 
