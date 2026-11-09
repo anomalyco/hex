@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun scripts/release-data.ts --mode dev && vite",
     "build": "bun scripts/build.ts",
+    "test": "bun test",
     "preview": "vite preview",
     "check:downloads": "bun scripts/check-downloads.ts",
     "generate:og": "bun scripts/generate-og.ts",

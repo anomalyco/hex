@@ -7,3 +7,4 @@ dist-server/
 src/release-data.json
 public/install-linux.sh
 public/install-windows.ps1
+public/appcast.xml
