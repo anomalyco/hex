@@ -70,7 +70,7 @@ fn shown() -> std::sync::MutexGuard<'static, Option<PathBuf>> {
 
 /// The shot the card shows.
 pub(crate) struct Shot {
-    /// The PNG, or a recording's capture folder.
+    /// The PNG, or a recording's movie, both in the screenshots folder.
     pub(crate) path: PathBuf,
     pub(crate) image: rune::Image,
     /// Its size in pixels.
@@ -81,8 +81,9 @@ pub(crate) struct Shot {
 /// What a recording's card adds to its first frame.
 #[derive(Clone, Debug)]
 pub(crate) struct Recording {
-    pub(crate) movie: PathBuf,
     pub(crate) duration_ms: u64,
+    /// The words said over it, for the editor.
+    pub(crate) words: Vec<editor::clip::Word>,
 }
 
 #[derive(Default)]
@@ -128,7 +129,11 @@ impl Card {
 
     fn open(&mut self, tx: &mut Tx) {
         match &self.shot {
-            Some(shot) if shot.recording.is_some() => editor::open_recording(shot.path.clone()),
+            Some(Shot {
+                path,
+                recording: Some(recording),
+                ..
+            }) => editor::open_recording(path.clone(), recording.words.clone()),
             Some(shot) => editor::open(shot.path.clone()),
             None => {}
         }
@@ -225,19 +230,19 @@ impl Thumbnail {
         self.present(path, None, width, height, rgba, screen, capture);
     }
 
-    /// Shows the recording in the capture folder `bundle`, from its first
-    /// frame, as [`Self::show`] does a shot. Nothing talks over it: it
-    /// already has its words.
+    /// Shows the recording saved at `movie`, from its first frame, as
+    /// [`Self::show`] does a shot. Nothing talks over it: it already has its
+    /// words.
     pub(crate) fn show_recording(
         &self,
-        bundle: PathBuf,
+        movie: PathBuf,
         recording: Recording,
         width: u32,
         height: u32,
         rgba: Vec<u8>,
         screen: (f32, f32),
     ) {
-        self.present(bundle, Some(recording), width, height, rgba, screen, None);
+        self.present(movie, Some(recording), width, height, rgba, screen, None);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -308,13 +313,9 @@ pub(crate) fn view(s: &Card, cx: &mut Cx<Card>) -> El {
         .cursor(Cursor::Pointer)
         .on_press_tx(|s: &mut Card, tx| s.open(tx))
         .drag_out(|s: &Card| {
-            s.shot.as_ref().map(|shot| {
-                let file = shot
-                    .recording
-                    .as_ref()
-                    .map_or(&shot.path, |recording| &recording.movie);
-                rune::DragItem::new().file(file.clone())
-            })
+            s.shot
+                .as_ref()
+                .map(|shot| rune::DragItem::new().file(shot.path.clone()))
         })
         .child(
             el().absolute(0.0, 0.0)
@@ -509,8 +510,8 @@ mod tests {
                 let name = format!("screenshot-thumbnail-{name}-{theme}");
                 let mut shot = desktop([1440, 900]);
                 shot.recording = recording.then(|| Recording {
-                    movie: PathBuf::from("/tmp/recording.mp4"),
                     duration_ms: 12_400,
+                    words: Vec::new(),
                 });
                 let card = Card::still(shot, hovered);
                 let (w, h, pixels) = render(&gpu, card, dark);

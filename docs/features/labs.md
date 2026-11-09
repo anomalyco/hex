@@ -1248,20 +1248,32 @@ record shortcut  -> the same picker, "Full screen · Click to record"; area, win
 │                   while an Annotate capture records -> nothing
 ├── recording    -> Annotate's capsule shows it recording, as any capture; talk to narrate
 ├── record shortcut again (or the capsule's stop) -> stops; the capsule folds unless it failed
+│                   ├── the movie saves itself: "Hex Recording 2026-11-04 at 14.03.22.mp4" in
+│                   │   screenshots.folder (the Desktop when unset), " (2)" on a clash, as a shot's
+│                   │   PNG does; a clone of Annotate's copy, so instant on one volume. A failed save
+│                   │   plays the error tone and the card shows Annotate's copy
 │                   ├── no clipboard, no router: nothing is sent or copied on its own
 │                   └── the corner card, from the first frame, its length in a pill
-│                       click -> the editor; drag -> the movie; a dictation never lands on it
-└── editor       -> the frame above a filmstrip of 12 frames; a drag on the strip moves the
-                    nearer end of the span kept (never under 0.5 s) and shows the frame there;
-                    the words said inside the span under it, read-only; no marks, no Copy
-                    ├── Save     -> "Hex Recording 2026-11-04 at 14.03.22.mp4" in screenshots.folder,
+│                       click -> the editor; drag -> the saved movie; a dictation never lands on it
+└── editor       -> the saved movie's frame above a filmstrip of 12 frames; a drag on the strip
+                    moves the nearer end of the span kept (never under 0.5 s) and shows the frame
+                    there; the words said inside the span under it, read-only; no marks, no Copy
+                    ├── Save     -> another "Hex Recording … .mp4" in screenshots.folder,
                     │               copied whole or cut without re-encoding (`scrawl-helper trim`)
                     └── Send to… -> a contact sheet of up to 4 frames in the span as the image,
-                                    the span's words and "Screen recording (m:ss): <movie>" as text
+                                    the span's words and "Screen recording (m:ss): <movie>" as text,
+                                    the saved movie itself when nothing was cut
 ```
+
+The recording's bundle stays Annotate's (`~/Library/Application
+Support/scrawl/captures/<id>.scrawl`), and Annotate's retention may trash
+its movie; the saved copy is the one the card, the editor, and a drag use.
+Annotate's own captures are not saved anywhere new.
 
 Checks: `the_record_shortcut_records_and_never_while_the_picker_shows` in
 [screenshots.rs](../../src/screenshots.rs),
+`a_recording_saves_beside_the_shots_and_never_over_one` in
+[screenshots/recording.rs](../../src/screenshots/recording.rs),
 `a_stopped_screenshot_recording_folds_the_capsule` in
 [capture_capsule/feed.rs](../../src/rune_ui/capture_capsule/feed.rs), the
 trim, words, sheet, and no-marks tests and the `trim` editor golden in

@@ -721,20 +721,21 @@ pub(crate) fn open(path: PathBuf) {
     open_with(path, String::new());
 }
 
-/// Opens the Screenshots recording in `bundle` to trim, in place of
-/// anything open. Safe from any thread; reads its frames on its own.
+/// Opens the Screenshots recording `movie`, with the `words` said over it,
+/// to trim, in place of anything open. Safe from any thread; reads its
+/// frames on its own.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn open_recording(bundle: PathBuf) {
+pub(crate) fn open_recording(movie: PathBuf, words: Vec<clip::Word>) {
     let Some(overlay) = EDITOR.get().cloned() else {
         return;
     };
     let spawned = std::thread::Builder::new()
         .name("hex-recording-editor".into())
         .spawn(move || {
-            let clip = match clip::load(&bundle) {
+            let clip = match clip::load(movie.clone(), words) {
                 Ok(clip) => clip,
                 Err(error) => {
-                    tracing::warn!(%error, bundle = %bundle.display(), "could not open the recording");
+                    tracing::warn!(%error, movie = %movie.display(), "could not open the recording");
                     return;
                 }
             };

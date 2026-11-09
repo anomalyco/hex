@@ -200,9 +200,16 @@ impl ClipExport {
                 super::clip::write_span(&self.movie, self.trim, &save::recording_path(&folder))
             }
             Out::Send(dest) => {
+                // The whole recording is already saved; only a cut is new.
                 let folder = std::env::temp_dir().join("hex-screenshots");
-                let movie = save::recording_path(&folder);
-                super::clip::write_span(&self.movie, self.trim, &movie)?;
+                let movie = match self.trim {
+                    Some(_) => {
+                        let movie = save::recording_path(&folder);
+                        super::clip::write_span(&self.movie, self.trim, &movie)?;
+                        movie
+                    }
+                    None => self.movie.clone(),
+                };
                 let (w, h, rgba) = self
                     .sheet
                     .as_ref()

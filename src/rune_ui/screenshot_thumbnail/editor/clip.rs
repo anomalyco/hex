@@ -173,11 +173,10 @@ pub(super) fn sheet(frames: &[&Shot]) -> Option<(u32, u32, Vec<u8>)> {
     Some((sw, sh, out))
 }
 
-/// Reads the recording in `bundle`: its movie, length, filmstrip, and
-/// words. Takes a second or so; off the main thread.
+/// The movie in the Annotate capture `bundle` a recording was written to,
+/// and the words said over it on the movie's clock.
 #[cfg(target_os = "macos")]
-pub(super) fn load(bundle: &std::path::Path) -> anyhow::Result<Clip> {
-    use scrawl_capture::helper::{self, FrameTimes};
+pub(crate) fn recorded(bundle: &std::path::Path) -> anyhow::Result<(PathBuf, Vec<Word>)> {
     let (_, loaded) = scrawl_capture::bundle::load_bundle_in(None, bundle)?;
     let movie = bundle.join(
         loaded
@@ -185,6 +184,25 @@ pub(super) fn load(bundle: &std::path::Path) -> anyhow::Result<Clip> {
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("the recording has no movie"))?,
     );
+    let offset = loaded.video_offset_ms;
+    let words = loaded
+        .transcript
+        .words
+        .into_iter()
+        .map(|word| Word {
+            t0: word.t0.saturating_sub(offset),
+            t1: word.t1.saturating_sub(offset),
+            text: word.text,
+        })
+        .collect();
+    Ok((movie, words))
+}
+
+/// Reads the recording `movie`, with the `words` said over it: its length
+/// and filmstrip. Takes a second or so; off the main thread.
+#[cfg(target_os = "macos")]
+pub(super) fn load(movie: PathBuf, words: Vec<Word>) -> anyhow::Result<Clip> {
+    use scrawl_capture::helper::{self, FrameTimes};
     let duration_ms = helper::probe(&movie)?.duration_ms.max(1);
     let last = duration_ms.saturating_sub(100);
     let times: Vec<u64> = (0..FRAMES as u64)
@@ -214,22 +232,11 @@ pub(super) fn load(bundle: &std::path::Path) -> anyhow::Result<Clip> {
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     anyhow::ensure!(!frames.is_empty(), "the recording has no frames");
-    let offset = loaded.video_offset_ms;
-    let words = loaded
-        .transcript
-        .words
-        .into_iter()
-        .map(|word| Word {
-            t0: word.t0.saturating_sub(offset),
-            t1: word.t1.saturating_sub(offset),
-            text: word.text,
-        })
-        .collect();
     Ok(Clip::new(movie, duration_ms, frames, words))
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn load(_: &std::path::Path) -> anyhow::Result<Clip> {
+pub(super) fn load(_: PathBuf, _: Vec<Word>) -> anyhow::Result<Clip> {
     anyhow::bail!("recordings open on macOS only")
 }
 
