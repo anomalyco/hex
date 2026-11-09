@@ -82,6 +82,7 @@ pub enum Feature {
     RestoreShortcutDefault,
     KeepOnClipboard,
     CopyOnly,
+    ReturnToApp,
     SpokenFormatting,
     FillerWords,
     SubtitleExport,
@@ -133,7 +134,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 65] = [
+    pub const ALL: [Self; 66] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -151,6 +152,7 @@ impl Feature {
         Self::RestoreShortcutDefault,
         Self::KeepOnClipboard,
         Self::CopyOnly,
+        Self::ReturnToApp,
         Self::SpokenFormatting,
         Self::FillerWords,
         Self::SubtitleExport,
@@ -241,6 +243,7 @@ impl Feature {
             | Self::RestoreShortcutDefault
             | Self::KeepOnClipboard
             | Self::CopyOnly
+            | Self::ReturnToApp
             | Self::SpokenFormatting
             | Self::FillerWords
             | Self::SubtitleExport
@@ -357,7 +360,8 @@ impl Feature {
             Self::TranscribeFiles
             | Self::ApiProcessing
             | Self::Appearance
-            | Self::DoubleTapModifiers => 20261109,
+            | Self::DoubleTapModifiers
+            | Self::ReturnToApp => 20261109,
         }
     }
 
@@ -429,6 +433,7 @@ impl Feature {
             Self::KeepOnClipboard | Self::CopyOnly => {
                 cfg!(any(target_os = "macos", target_os = "windows"))
             }
+            Self::ReturnToApp => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::AnnotateReplay => {
@@ -493,6 +498,7 @@ impl Feature {
             Self::RestoreShortcutDefault => "restore-shortcut-default",
             Self::KeepOnClipboard => "keep-on-clipboard",
             Self::CopyOnly => "copy-only",
+            Self::ReturnToApp => "return-to-app",
             Self::SpokenFormatting => "spoken-formatting",
             Self::FillerWords => "filler-words",
             Self::SubtitleExport => "subtitle-export",
@@ -564,6 +570,7 @@ impl Feature {
             Self::RestoreShortcutDefault => "labs.restore_shortcut_default",
             Self::KeepOnClipboard => "labs.keep_on_clipboard",
             Self::CopyOnly => "labs.copy_only",
+            Self::ReturnToApp => "labs.return_to_app",
             Self::SpokenFormatting => "labs.spoken_formatting",
             Self::FillerWords => "labs.filler_words",
             Self::SubtitleExport => "labs.subtitle_export",
@@ -639,6 +646,7 @@ impl Feature {
             Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default,
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard,
             Self::CopyOnly => settings.labs.copy_only,
+            Self::ReturnToApp => settings.labs.return_to_app,
             Self::SpokenFormatting => settings.labs.spoken_formatting,
             Self::FillerWords => settings.labs.filler_words,
             Self::SubtitleExport => settings.labs.subtitle_export,
@@ -712,6 +720,7 @@ impl Feature {
             &mut labs.restore_shortcut_default,
             &mut labs.keep_on_clipboard,
             &mut labs.copy_only,
+            &mut labs.return_to_app,
             &mut labs.spoken_formatting,
             &mut labs.filler_words,
             &mut labs.subtitle_export,
@@ -787,6 +796,7 @@ impl Feature {
             Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default = on,
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard = on,
             Self::CopyOnly => settings.labs.copy_only = on,
+            Self::ReturnToApp => settings.labs.return_to_app = on,
             Self::SpokenFormatting => settings.labs.spoken_formatting = on,
             Self::FillerWords => settings.labs.filler_words = on,
             Self::SubtitleExport => settings.labs.subtitle_export = on,
@@ -920,6 +930,9 @@ const API_PROCESSING: u64 = OPENCODE_IN_WSL << 1;
 /// The next bit above Process API transcripts' switch: Double-tap accepts a
 /// shortcut without a key (macOS).
 const DOUBLE_TAP_MODIFIERS: u64 = API_PROCESSING << 1;
+/// The next bit above Double-tap on a lone modifier's switch: a dictation
+/// pastes into the app its capture started in (macOS).
+const RETURN_TO_APP: u64 = DOUBLE_TAP_MODIFIERS << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -992,6 +1005,14 @@ pub fn keep_on_clipboard() -> bool {
 #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn copy_only() -> bool {
     on(COPY_ONLY)
+}
+
+/// A dictation pastes into the app its capture started in, bringing it back
+/// to the front first if another app came forward while the person talked
+/// (macOS; read as each capture starts and again before its paste).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn return_to_app() -> bool {
+    on(RETURN_TO_APP) && Feature::ReturnToApp.on_this_os()
 }
 
 /// Spoken formatting phrases become line breaks and quotation marks (read
@@ -1300,6 +1321,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             KEEP_ON_CLIPBOARD,
         ),
         (Feature::CopyOnly, settings.copy_only, COPY_ONLY),
+        (Feature::ReturnToApp, settings.return_to_app, RETURN_TO_APP),
         (
             Feature::SpokenFormatting,
             settings.spoken_formatting,
@@ -2051,6 +2073,21 @@ mod tests {
             Feature::CopyOnly.on_this_os(),
             cfg!(any(target_os = "macos", target_os = "windows"))
         );
+    }
+
+    #[test]
+    fn return_to_app_is_its_own_bit_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & RETURN_TO_APP, 0);
+        labs.return_to_app = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & RETURN_TO_APP, 0);
+        assert_eq!(state & DOUBLE_TAP_MODIFIERS, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(Feature::ReturnToApp.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::ReturnToApp.audience(), Audience::Everyone);
+        assert_eq!(Feature::ReturnToApp.group(), Group::Output);
     }
 
     #[test]

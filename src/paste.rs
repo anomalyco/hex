@@ -1,3 +1,5 @@
+pub(crate) mod return_to_app;
+
 use std::ffi::{c_char, c_void};
 use std::fs;
 use std::ops::RangeInclusive;

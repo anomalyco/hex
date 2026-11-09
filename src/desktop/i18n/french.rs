@@ -1235,6 +1235,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Theme", "Thème"),
     ("Light mode", "Clair"),
     ("Dark mode", "Sombre"),
+    ("Return to app", "Revenir à l'app"),
+    ("If another app comes to the front while you dictate, Hex switches back to the app you started in before pasting. If it can't, nothing is pasted and Paste last dictation has the text.", "Si une autre app passe au premier plan pendant que vous dictez, Hex revient à l'app où vous avez commencé avant de coller. S'il n'y arrive pas, rien n'est collé et Coller la dernière dictée garde le texte."),
 ];
 
 #[cfg(test)]

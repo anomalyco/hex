@@ -45,6 +45,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (macOS, Windows) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
+├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote", "quote … unquote" become line breaks and quotation marks; Spanish "nuevo párrafo", "nueva línea", "abre/cierra comillas", … too (#630, #1040)
 ├── Spoken symbols  no    labs.spoken_symbols          spoken "hashtag", "underscore", "comma", … become symbols joined to their words: "#release", "my_variable", "done, thanks"; Spanish "arroba", "guion bajo", "coma", … too (#678, #1040)
 ├── Remove filler words no labs.filler_words          English dictations lose um, umm, uh, uhh, erm, er, ah, with no model (#631)
@@ -431,6 +432,35 @@ on macOS too). Off, output is exactly as before. Checks:
 `contributed_options_are_labs_toggles_off_by_default` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation on a Mac or Windows PC with the toggle on.
+
+Return to app (`return-to-app`, macOS): while on, a dictation pastes into the
+app its capture started in. `handle_hotkey_action`'s Start (shared by the
+dictation shortcuts, Caps Lock dictation, and `hex dictation start`) records
+the frontmost application's pid once the capture starts
+(`paste::return_to_app::capture_start`, which reads `labs::return_to_app()`
+and never Hex's own pid), and the job carries it through inference and
+processing to `parakeet::finish_output`. Right before a Paste or RawPaste
+dictation commits, `paste::return_to_app::bring_to_front` compares that pid
+with the app in front now: the same app pastes as usual, and a different one
+is activated (`NSRunningApplication`,
+`NSApplicationActivationOptions::ActivateIgnoringOtherApps`) and polled every
+10 ms for up to 500 ms until it is frontmost, then given 50 ms so its key
+window takes the paste. When the app is gone or focus can't be confirmed in
+time, nothing is pasted: the job fails with "couldn't switch back to the app
+you started in; use Paste last dictation" (error tone and HUD as any failure),
+the text becomes the last transcript so Paste last dictation pastes it unless
+the job was cancelled, and History, which records only pasted output, records
+nothing. Paste last dictation, meetings, and Labs › Copy dictation only never
+switch.
+Off, no pid is read and output is exactly as before. Checks:
+`only_a_different_recorded_app_needs_a_switch` and
+`only_the_recorded_pid_is_the_app_that_arrived` in
+[paste/return_to_app.rs](../../src/paste/return_to_app.rs) cover the pure
+decision and poll (macOS only), and `return_to_app_is_its_own_bit_and_macos_only`
+in [labs.rs](../../src/labs.rs). Not yet observed: a real Mac with another app
+taking focus mid-dictation. The `mac-labs` and `mac-labs-link` goldens moved
+with the Labs and Output card counts and were regenerated on Linux; the card
+itself sits in a folded group there.
 
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in

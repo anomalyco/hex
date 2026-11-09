@@ -1235,6 +1235,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Theme", "Тема"),
     ("Light mode", "Светлая"),
     ("Dark mode", "Тёмная"),
+    ("Return to app", "Вернуться в приложение"),
+    ("If another app comes to the front while you dictate, Hex switches back to the app you started in before pasting. If it can't, nothing is pasted and Paste last dictation has the text.", "Если во время диктовки на передний план выходит другое приложение, Hex перед вставкой возвращается в приложение, где вы начали. Если это не удаётся, ничего не вставляется, а текст остаётся в «Вставить последнюю диктовку»."),
 ];
 
 #[cfg(test)]

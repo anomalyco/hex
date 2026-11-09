@@ -1440,6 +1440,9 @@ fn handle_hotkey_action(
             if !dictation.start(action_at)? {
                 return Ok(false);
             }
+            // Labs › Return to app: this paste goes back to the app in front
+            // now, even if another one comes forward while the person talks.
+            worker.remember_return_to_app();
             // The press started a capture, but it may still be provisional:
             // no page is read until the capture is held past its threshold.
             context.begin();
