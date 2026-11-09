@@ -60,10 +60,9 @@ by Release: after a stable release, run **Site** with `mode: production` from
 
 ### Signing values (`release` environment)
 
-- macOS: secret `APPLE_SIGNING_CERTIFICATE` (base64 `.p12` with the Developer
-  ID Application identity for team `5NZ4Q7NXJ4`; optional secret
-  `APPLE_SIGNING_CERTIFICATE_PASSWORD` if the `.p12` has one), secret
-  `APPLE_NOTARY_KEY` (the App Store Connect API `.p8`), and variables
+- macOS: secret `shared/APPLE_SIGNING_CERTIFICATE` (base64 `.p12`, no password,
+  with the Developer ID Application identity for team `5NZ4Q7NXJ4`), secret
+  `shared/APPLE_NOTARY_KEY` (the App Store Connect API `.p8`), and variables
   `APPLE_NOTARY_KEY_ID` and `APPLE_NOTARY_ISSUER_ID`. `macos-credentials.sh`
   imports them into a throwaway keychain and prints nothing secret.
 - Windows: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
@@ -377,21 +376,25 @@ the release service compile `https://anoma.ly/release`.
 - Without the redirect, 2.3.1 Macs read the bucket's own `appcast.xml` and
   never see the informational item.
 
-## Secrets (`release` environment, limited to `dev` and `production`)
+## Secrets
 
-`dev` is allowed because dev-channel builds and dev site deploys run from
-it. No reviewer is required.
+Release secrets live in AWS Secrets Manager (account `anomaly-secrets`), managed from
+[anomalyco/secrets](https://github.com/anomalyco/secrets). Jobs in the `release` environment
+(limited to `dev` and `production`; `dev` is allowed because dev-channel builds and dev site
+deploys run from it, and no reviewer is required) assume `role/github/hex-release` with
+GitHub OIDC and fetch only what they use. That role can read `hex/release/*` and the two
+shared Apple secrets. Set a value with `bun set hex release <NAME>` in that repo.
 
-| Name | Use |
+| Secret | Use |
 | --- | --- |
 | (none) | publishing to the release service: the job's GitHub OIDC token |
-| `CLOUDFLARE_API_TOKEN`, var `CLOUDFLARE_ACCOUNT_ID` | site deploys (`hex-site-deploy`, used only by `deploy-site.sh`) |
-| `R2_SECRET_ACCESS_KEY`, var `R2_ACCESS_KEY_ID` | uploads to `hex-production-files` (`hex-r2-production-files`): the installers, the legacy appcast, and `dev-notes.json` |
-| `AUR_SSH_PRIVATE_KEY` | pushes `hex-bin` (key `github-actions-hex-aur`) |
-| `HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb` (deploy key `github-actions-hex-homebrew`, write access on `anomalyco/homebrew-tap` only) |
-| `AZURE_*` | Authenticode (docs/windows-signing.md) |
-| `APPLE_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
-| `HEX_RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |
+| `hex/release/CLOUDFLARE_API_TOKEN`, var `CLOUDFLARE_ACCOUNT_ID` | site deploys (`hex-site-deploy`, used only by `deploy-site.sh`) |
+| `hex/release/R2_SECRET_ACCESS_KEY`, var `R2_ACCESS_KEY_ID` | uploads to `hex-production-files` (`hex-r2-production-files`): the installers, the legacy appcast, and `dev-notes.json` |
+| `hex/release/AUR_SSH_KEY` | pushes `hex-bin` (key `github-actions-hex-aur`) |
+| `hex/release/HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb` (deploy key `github-actions-hex-homebrew`, write access on `anomalyco/homebrew-tap` only) |
+| vars `AZURE_*` | Authenticode (docs/windows-signing.md); not secrets, `azure/login` uses OIDC |
+| `shared/APPLE_SIGNING_CERTIFICATE`, `shared/APPLE_NOTARY_KEY`, vars `APPLE_NOTARY_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
+| `hex/release/RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |
 | `SPARKLE_ED_PRIVATE_KEY` | old 2.3.1 appcast key; unused, kept for old clients |
 
 ## Linux packages
