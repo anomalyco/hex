@@ -266,7 +266,9 @@ substitute for source inspection or a second roadmap.
   (so switching away and back reads it again) and read once more when a
   capture is real, not on every press: the shortcut held past its hold
   threshold, a finish that lands earlier, or a control start asks for one
-  refresh; `windows/context` reads any browser through UI Automation and
+  refresh, while a press a chord discards before that threshold reads nothing
+  (holding past the threshold first still reads the page once);
+  `windows/context` reads any browser through UI Automation and
   `linux/atspi` through AT-SPI.
 - `application_catalog`: cached installed-application discovery for the Modes
   picker, one module per OS: macOS bundles, Windows executables from Start menu

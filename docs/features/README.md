@@ -1223,7 +1223,9 @@ poll reads it once when a scriptable browser becomes the frontmost process
 switching away and back reads the page again. A capture asks for one more
 read only once it is real, never on every press: the shortcut held past its
 hold threshold, a finish that lands before that, or a control start
-(`hex dictation start`); a provisional press a chord discards reads nothing.
+(`hex dictation start`). A press a chord discards before that hold threshold
+reads nothing; holding the shortcut past the threshold first still reads the
+page once.
 A finish waits at most 1 s for the refreshed page and otherwise hands its
 capture the same app and window title with no page, never the previous
 dictation's. Checks:
@@ -1231,7 +1233,9 @@ dictation's. Checks:
 `a_refresh_the_full_channel_held_back_completes_once_delivered`, and
 `a_press_discarded_as_a_chord_never_reads_the_page` in
 [dictation/context.rs](../../src/dictation/context.rs); not run against a live
-browser.
+browser, and the recognition loop's wiring of that refresh
+([recognition/context_watch.rs](../../src/recognition/context_watch.rs)) is
+covered only by the macOS build, not by a test.
 Linux matches the focused window from X11 or the Wayland foreign-toplevel list
 to an AT-SPI window by title and process and reads its showing web
 document's `DocURL` (Firefox) or `URI` (Chromium, only with
