@@ -214,9 +214,20 @@ pub fn transcribe_wav_with_selection(
     LocalTranscriber::load(selection)?.transcribe(&samples)
 }
 
+/// A WAV already in memory, as `hex transcribe` read it.
+pub fn transcribe_wav_bytes(wav: &[u8], selection: &TranscriptionSelection) -> Result<String> {
+    let samples = read_wav(std::io::Cursor::new(wav))?;
+    LocalTranscriber::load(selection)?.transcribe(&samples)
+}
+
 pub fn read_wav_for_parakeet(path: &Path) -> Result<Vec<f32>> {
-    let mut reader = hound::WavReader::open(path)
-        .wrap_err_with(|| format!("could not open {}", path.display()))?;
+    let file =
+        std::fs::File::open(path).wrap_err_with(|| format!("could not open {}", path.display()))?;
+    read_wav(std::io::BufReader::new(file))
+}
+
+fn read_wav(reader: impl std::io::Read + std::io::Seek) -> Result<Vec<f32>> {
+    let mut reader = hound::WavReader::new(reader)?;
     let spec = reader.spec();
     let samples = match spec.sample_format {
         hound::SampleFormat::Float => reader

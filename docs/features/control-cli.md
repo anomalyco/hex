@@ -43,6 +43,15 @@ Agent or terminal                                  // control.cli; every OS
 │   ├── Setup gates the listener -> not-ready
 │   └── Recording, a pending start, or a capture still finishing -> done,
 │       but the listener drops the job: no keys are sent and no state changes
+├── hex transcribe <file> [--model <id>] [--language <code>]
+│   ├── Labs › Transcribe files off -> disabled, exit 1; the file is never read
+│   ├── Not WAV, or over 64 MiB -> refused here, before Hex is asked
+│   ├── Hex running -> the file to POST /transcriptions with the model named;
+│   │   ≤30 s runs on the dictation engine's model, longer clips on the
+│   │   transcription service's own copy; stdout gets the transcript
+│   ├── Hex stopped -> Linux/Windows load the model here as `model transcribe`;
+│   │   macOS answers not-running, exit 3
+│   └── No speech -> no-speech, exit 4; nothing pasted, kept, or processed
 ├── hex meetings record [--title] | stop | copy-last
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
@@ -82,6 +91,16 @@ the local API's owner-only discovery file and the bearer-authenticated
 `POST /control` route. Commands dispatch before logging and the instance lock on every OS,
 so they never compete with the running app for its files. Opt-ins stay
 explicit settings: no command turns Meetings on as a side effect.
+
+`hex transcribe` is the one command that doesn't use `/control`: it reads and
+checks the WAV here, then sends it to the same discovery file's
+`POST /transcriptions` (`Content-Type: audio/wav`, 64 MiB cap), so the running
+app transcribes it with the model the request names: a clip up to 30 s on its
+dictation engine's model when it holds that one, a longer clip on the
+transcription service's own copy. Its Labs toggle is read from
+`settings.json` (`AppSettings::read`), the same read `hex labs` lists from, so
+the check works with Hex running or stopped; a running Hex saves the toggle
+there at once. Off, nothing is read.
 
 On Linux and Windows `control::host::answer` carries every command out through
 the OS's adapter (`linux::app::LinuxControl`, `windows::rune::WindowsControl`):
@@ -126,7 +145,9 @@ the quit refusal, printing stops, and runtime `unsupported` replies;
 `linux::tests` parse the shared tree beside Linux's own commands;
 `rune_ui::platform::parity_tests` fail when a capability differs across OSes
 without a recorded reason; `settings_name_real_capabilities_and_keys` checks
-the settings-to-capability table.
+the settings-to-capability table; `control::cli::transcribe::tests` cover the
+lab-off refusal, a non-WAV file refused before any transcription, the selected
+model and language, and an empty transcript as `no-speech`.
 
 Observed (Oct 30, apollo, an isolated data root and `hex service` without a
 display): status, settings get/set (and refusing `show_dock_icon`), vocabulary
@@ -142,4 +163,7 @@ has no end-to-end test. A CLI volume change does not preview a tone as the windo
 permission prompts, calendar connection, and meeting deletion or renaming have
 no command. Linux and Windows dictation through the CLI has not run with a
 microphone, and meeting recording through the CLI has not run on Linux or
-Windows.
+Windows. `hex transcribe`'s gate-off refusal, its non-WAV refusal, and a
+running headless service's `model-unavailable` answer were observed on Linux;
+no model was installed, so its transcript answer was not observed end to end,
+and it has not run on macOS or Windows.
