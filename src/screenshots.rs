@@ -123,6 +123,21 @@ fn open(record: bool) -> bool {
     spawned.is_ok()
 }
 
+/// Restore Last Capture: brings back the card closed last. Safe from any
+/// thread.
+pub(crate) fn restore_last() {
+    if crate::labs::screenshots()
+        && let Some(overlays) = OVERLAYS.get()
+    {
+        overlays.thumbnail.restore();
+    }
+}
+
+/// Whether Restore Last Capture has a card to bring back.
+pub(crate) fn can_restore() -> bool {
+    crate::labs::screenshots() && crate::rune_ui::screenshot_thumbnail::restorable()
+}
+
 /// Closes the picker without a shot.
 pub(crate) fn cancel() {
     PICKING.store(false, Ordering::Release);

@@ -340,3 +340,35 @@ fn a_key_goes_to_the_card_under_the_pointer_only() {
     // The card under the pointer went, so the keys stop.
     assert!(cards.hovered.is_none() && !hovered());
 }
+
+#[test]
+fn restore_brings_back_the_card_closed_last_but_never_a_trashed_one() {
+    let file = std::env::temp_dir().join(format!("hex-card-{}.png", std::process::id()));
+    std::fs::write(&file, b"png").unwrap();
+    let on_disk = || {
+        let mut shot = shot([800, 600]);
+        shot.path = file.clone();
+        shot
+    };
+    let mut cards = Cards::still(vec![on_disk(), on_disk()], (800.0, 600.0), None);
+    let mut tx = Tx::default();
+    let (first, second) = (cards.cards[0].id, cards.cards[1].id);
+    assert!(!cards.restore());
+    cards.close(first, &mut tx);
+    cards.close(second, &mut tx);
+    assert!(restorable());
+    assert!(cards.restore());
+    assert_eq!(cards.cards.len(), 1);
+    assert!(cards.restore());
+    assert_eq!(cards.cards.len(), 2);
+    assert!(!cards.restore() && !restorable());
+
+    // A trashed card is gone for good, and one whose file went is skipped.
+    let id = cards.cards[1].id;
+    cards.discard(id, &mut tx);
+    assert!(!restorable());
+    let id = cards.cards[0].id;
+    cards.close(id, &mut tx);
+    std::fs::remove_file(&file).unwrap();
+    assert!(!cards.restore());
+}

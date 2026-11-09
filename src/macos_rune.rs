@@ -1196,6 +1196,10 @@ impl Pump {
                     .runtime
                     .recognition(RecognitionControl::PasteLast { reply: None });
             }
+            StatusItemAction::RestoreCapture => {
+                #[cfg(hex_capture)]
+                crate::screenshots::restore_last();
+            }
             // Labs › Copy recent dictations: copied, never pasted.
             StatusItemAction::CopyRecentDictation(id) => {
                 if !crate::labs::recent_dictations() {

@@ -29,6 +29,8 @@ pub enum StatusItemAction {
     StartMeeting,
     StopMeeting,
     CopyLastMeetingTranscript,
+    /// Labs › Screenshots: the capture card closed last, back in the corner.
+    RestoreCapture,
     /// Copy chapter `n` of the recording meeting (Labs).
     CopyChapter(usize),
     /// The recording row: the Meetings pane.
@@ -89,10 +91,23 @@ objc2::define_class!(
             }
         }
 
+        #[unsafe(method(restoreCapture:))]
+        fn restore_capture(&self, _sender: &AnyObject) {
+            let _ = self.ivars().actions.try_send(StatusItemAction::RestoreCapture);
+        }
+
         /// The status menu's delegate: it is about to open.
         #[unsafe(method(menuNeedsUpdate:))]
         fn menu_needs_update(&self, _menu: &NSMenu) {
             refresh_recent_dictations();
+            refresh_restore_capture();
+        }
+
+        /// Restore Last Capture is dimmed while no closed card can come
+        /// back; every other item stays enabled.
+        #[unsafe(method(validateMenuItem:))]
+        fn validate_menu_item(&self, item: &NSMenuItem) -> bool {
+            item.action() != Some(sel!(restoreCapture:)) || restore_capture_enabled()
         }
 
         #[unsafe(method(startMeeting:))]
@@ -160,6 +175,8 @@ enum Row {
     /// Labs › Copy recent dictations: hidden until the menu opens with it on.
     CopyRecentDictation,
     CopyLastMeetingTranscript,
+    /// Labs › Screenshots: hidden until the menu opens with it on.
+    RestoreCapture,
     SpeechModel,
     Separator,
     Settings,
@@ -167,7 +184,7 @@ enum Row {
     Quit,
 }
 
-const ROWS: [Row; 13] = [
+const ROWS: [Row; 14] = [
     Row::MeetingStatus,
     Row::StopMeeting,
     Row::CopySection,
@@ -176,6 +193,7 @@ const ROWS: [Row; 13] = [
     Row::PasteLast,
     Row::CopyRecentDictation,
     Row::CopyLastMeetingTranscript,
+    Row::RestoreCapture,
     Row::SpeechModel,
     Row::Separator,
     Row::Settings,
@@ -195,6 +213,7 @@ impl Row {
             Row::PasteLast => "Paste Last Dictation",
             Row::CopyRecentDictation => "Copy Recent Dictation",
             Row::CopyLastMeetingTranscript => "Copy Last Meeting Transcript",
+            Row::RestoreCapture => "Restore Last Capture",
             Row::SpeechModel => "Speech Model",
             Row::Settings => "Settings…",
             Row::Update => "Check for Updates…",
@@ -210,6 +229,7 @@ impl Row {
             Row::RecordMeeting => sel!(startMeeting:),
             Row::PasteLast => sel!(pasteLast:),
             Row::CopyLastMeetingTranscript => sel!(copyLastMeetingTranscript:),
+            Row::RestoreCapture => sel!(restoreCapture:),
             Row::Settings => sel!(openSettings:),
             Row::Update => sel!(checkForUpdates:),
             Row::Quit => sel!(quit:),
@@ -242,6 +262,7 @@ impl Row {
                 | Row::MeetingSeparator
                 | Row::CopyRecentDictation
                 | Row::CopyLastMeetingTranscript
+                | Row::RestoreCapture
         )
     }
 }
@@ -310,6 +331,7 @@ struct StatusItemController {
     paste_last_key: RefCell<Option<KeyEquivalent>>,
     recent: Retained<NSMenuItem>,
     recent_menu: Retained<NSMenu>,
+    restore_capture: Retained<NSMenuItem>,
     update: Option<Retained<NSMenuItem>>,
     update_title: RefCell<String>,
     _menu: Retained<NSMenu>,
@@ -458,6 +480,7 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             paste_last_key: RefCell::new(None),
             recent: row(Row::CopyRecentDictation),
             recent_menu,
+            restore_capture: row(Row::RestoreCapture),
             update: (!update_managed).then(|| row(Row::Update)),
             update_title: RefCell::new("Check for Updates…".into()),
             _menu: menu,
@@ -701,6 +724,27 @@ fn refresh_recent_dictations() {
     });
 }
 
+/// Shows Restore Last Capture while Labs › Screenshots is on, as the menu
+/// opens.
+fn refresh_restore_capture() {
+    let shown = crate::labs::screenshots();
+    STATUS_ITEM.with(|controller| {
+        if let Some(controller) = controller.borrow().as_ref() {
+            controller.restore_capture.setHidden(!shown);
+        }
+    });
+}
+
+#[cfg(hex_capture)]
+fn restore_capture_enabled() -> bool {
+    crate::screenshots::can_restore()
+}
+
+#[cfg(not(hex_capture))]
+fn restore_capture_enabled() -> bool {
+    false
+}
+
 fn update_title(status: &crate::desktop::host::DesktopUpdateStatus) -> String {
     use crate::desktop::host::DesktopUpdateStatus;
     match status {
@@ -898,6 +942,7 @@ mod tests {
                 "Paste Last Dictation".into(),
                 "Copy Recent Dictation".into(),
                 "Copy Last Meeting Transcript".into(),
+                "Restore Last Capture".into(),
                 "Speech Model".into(),
                 "—".into(),
                 "Settings…".into(),

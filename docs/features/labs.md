@@ -1201,6 +1201,13 @@ cards
 CleanShot's ⌘S saves the capture; every Hex capture is already saved,
 so ⌘S shows it in Finder instead.
 
+The last ten cards closed (by ✕, a key, the menu, opening the editor, or
+the stack reaching the top) are kept in memory. The menu bar's Restore
+Last Capture, shown while the Lab is on and dimmed until a card was
+closed, brings back the newest of them, sliding in from the right edge
+into the corner; one whose file is gone is skipped, and Move to Trash
+keeps none. They don't outlast Hex.
+
 The card's overlay is the whole display under the pointer, click-through
 outside the card, so the card can start anywhere a shot was taken from.
 
@@ -1349,7 +1356,8 @@ file in one second, and the PNG's density in
 read in [screenshots/system_shortcut.rs](../../src/screenshots/system_shortcut.rs);
 `thumbnail_goldens` (rest, hover, a recording's length, and three stacked,
 light and dark), a card staying until closed, the stack's slots, the
-oldest closing at the top, and keys reaching only the hovered card in
+oldest closing at the top, keys reaching only the hovered card, and
+Restore bringing back the card closed last but never a trashed one in
 [screenshot_thumbnail/tests.rs](../../src/rune_ui/screenshot_thumbnail/tests.rs);
 `a_hovered_card_takes_its_keys_and_only_then` in
 [screenshots.rs](../../src/screenshots.rs);

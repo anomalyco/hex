@@ -11,6 +11,9 @@
 //!
 //! A Screenshots recording lands here too, as its first frame with its
 //! length; a click opens it in the editor to trim.
+//!
+//! The cards closed last are kept, so the menu bar's Restore Last Capture
+//! brings the newest of them back ([`Thumbnail::restore`]).
 
 mod card;
 pub(crate) mod editor;
@@ -63,8 +66,20 @@ const NOTE_S: f64 = 1.6;
 /// The recording pill's height, inside the card's bottom-left corner.
 const PILL_H: f32 = 24.0;
 
+/// How many closed cards Restore Last Capture can bring back.
+const RECENT: usize = 10;
+
 /// Whether the pointer is on a card, for the session tap's thread.
 static HOVERED: AtomicBool = AtomicBool::new(false);
+/// Whether a closed card can come back, for the menu bar.
+static RESTORABLE: AtomicBool = AtomicBool::new(false);
+
+/// Whether Restore Last Capture has a card to bring back. Safe from any
+/// thread.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn restorable() -> bool {
+    RESTORABLE.load(Ordering::Acquire)
+}
 
 /// Whether the pointer is on a card, so its keys go to it. Safe from any
 /// thread.
@@ -125,6 +140,8 @@ pub(crate) enum CardKey {
 pub(crate) struct Cards {
     /// Oldest first; the last is nearest the corner.
     cards: Vec<Entry>,
+    /// The cards closed last, the newest last, at most [`RECENT`].
+    closed: Vec<Entry>,
     /// The display's size in points, where the cards rest in its corner.
     screen: (f32, f32),
     /// The card under the pointer.
@@ -178,9 +195,41 @@ impl Cards {
         let room = self.screen.1 - 2.0 * INSET;
         while self.cards.len() > 1 && self.stack_height() > room {
             let oldest = self.cards[0].id;
-            self.remove(oldest);
+            self.retire(oldest);
         }
         id
+    }
+
+    /// Brings the card closed last back, nearest the corner, unless its
+    /// file is gone; false when there's none.
+    fn restore(&mut self) -> bool {
+        while let Some(card) = self.closed.pop() {
+            if card.shot.path.exists() {
+                self.push(card.shot, None);
+                self.restorable();
+                return true;
+            }
+        }
+        self.restorable();
+        false
+    }
+
+    fn restorable(&self) {
+        RESTORABLE.store(!self.closed.is_empty(), Ordering::Release);
+    }
+
+    /// Takes card `id` out of the stack, keeping it for Restore.
+    fn retire(&mut self, id: u64) {
+        if let Some(mut card) = self.remove(id) {
+            card.note = None;
+            card.capture = None;
+            card.born = None;
+            self.closed.push(card);
+            if self.closed.len() > RECENT {
+                self.closed.remove(0);
+            }
+            self.restorable();
+        }
     }
 
     /// The stack's height, cards and gaps.
@@ -228,7 +277,17 @@ impl Cards {
     }
 
     /// Closes card `id`: it leaves, and the cards above it move down.
+    /// Restore Last Capture can bring it back.
     fn close(&mut self, id: u64, tx: &mut Tx) {
+        if self.get(id).is_some() {
+            self.retire(id);
+            tx.animated();
+            tx.wake_after(Duration::ZERO);
+        }
+    }
+
+    /// Takes card `id` away for good, its file going to the Trash.
+    fn discard(&mut self, id: u64, tx: &mut Tx) {
         if self.remove(id).is_some() {
             tx.animated();
             tx.wake_after(Duration::ZERO);
@@ -260,7 +319,7 @@ impl Cards {
             }
             CardKey::Reveal => files::reveal(&path),
             CardKey::Trash => {
-                self.close(id, tx);
+                self.discard(id, tx);
                 files::trash(path);
             }
         }
@@ -392,6 +451,19 @@ impl Thumbnail {
         screen: (f32, f32),
     ) {
         self.present(movie, Some(recording), width, height, rgba, screen, None);
+    }
+
+    /// Brings back the card closed last, nearest the corner of the display
+    /// the cards were last on. Safe from any thread.
+    pub(crate) fn restore(&self) {
+        let handle = self.overlay.clone();
+        self.overlay.update(move |s, tx| {
+            if s.restore() {
+                handle.show();
+                tx.animated();
+                tx.wake_after(Duration::ZERO);
+            }
+        });
     }
 
     /// What `key` does to the card under the pointer, if any. Safe from
