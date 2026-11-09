@@ -89,9 +89,13 @@ impl SourceSupervisor {
         })
     }
 
-    pub(super) fn system(sink: PacketSink) -> Self {
+    /// Records the system audio of the call app `application` (a canonical
+    /// bundle identifier), or of every output for a manual recording.
+    pub(super) fn system(sink: PacketSink, application: Option<String>) -> Self {
         let source_sink = sink.clone();
-        Self::spawn(sink, move || super::os::open_system_audio(&source_sink))
+        Self::spawn(sink, move || {
+            super::os::open_system_audio(&source_sink, application.as_deref())
+        })
     }
 
     fn spawn(

@@ -113,7 +113,10 @@ pub(super) fn move_to_trash(path: &Path) -> Result<()> {
         })
 }
 
-pub(super) fn open_system_audio(sink: &PacketSink) -> Result<Box<dyn LiveSource>> {
+pub(super) fn open_system_audio(
+    sink: &PacketSink,
+    _application: Option<&str>,
+) -> Result<Box<dyn LiveSource>> {
     let authorization = system_audio_authorization();
     let screen_permitted = screen_recording_permitted();
     let prefer_tap = match authorization {
