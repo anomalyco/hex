@@ -272,8 +272,9 @@ impl LoopbackSource {
 
     /// Why this source should reopen on a route check, if it should: the
     /// listed outputs changed while hearing every one, or the app's own
-    /// endpoints changed. A temporary absence of the app's sessions, or an
-    /// enumeration failure, keeps the current outputs.
+    /// endpoints changed (see `loopback_route::should_reopen`). A temporary
+    /// absence of the app's sessions, or an enumeration failure, keeps the
+    /// current outputs.
     fn route_change(&self) -> Option<&'static str> {
         let outputs_changed = || {
             outputs()
@@ -290,11 +291,8 @@ impl LoopbackSource {
             }),
             Some(chosen) => {
                 let choice = self.application.as_deref().and_then(app_route)?;
-                let endpoints = match choice {
-                    Choice::MicHolder(endpoints) | Choice::App(endpoints) => endpoints,
-                    Choice::Every => return None,
-                };
-                (endpoints != *chosen).then_some("the call app's outputs changed")
+                loopback_route::should_reopen(chosen, &choice)
+                    .then_some("the call app's outputs changed")
             }
         }
     }

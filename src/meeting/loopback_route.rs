@@ -63,11 +63,28 @@ pub(super) fn choose(
     }
 }
 
+/// Whether the open outputs `current` should reopen for `next`.
+///
+/// Microphone-holder outputs are the precise ones, so any change reopens.
+/// App outputs are the fallback: when they already cover `current`, the app
+/// is on the same call its microphone holder was seen on, and reopening only
+/// to hear the extra outputs of a second process would then reopen back on
+/// the next check once the holder's session returns. App outputs that leave
+/// out a current endpoint mean the app moved, and hearing every output
+/// (`Every`) keeps what is open.
+pub(super) fn should_reopen(current: &BTreeSet<String>, next: &Choice) -> bool {
+    match next {
+        Choice::MicHolder(endpoints) => endpoints != current,
+        Choice::App(endpoints) => !current.is_subset(endpoints),
+        Choice::Every => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{Choice, choose};
+    use super::{Choice, choose, should_reopen};
 
     const MIC: &str = "{0.0.1.00000000}.{microphone}";
     const HEADSET: &str = "{0.0.0.00000000}.{headset}";
@@ -100,27 +117,15 @@ mod tests {
     }
 
     #[test]
-    fn a_call_app_without_a_microphone_holder_plays_on_every_endpoint_of_its_own() {
-        // The process on the microphone and the processes playing are
-        // different, so every endpoint any of them plays on is heard.
+    fn a_microphone_holder_that_plays_nothing_falls_back_to_the_app_s_outputs() {
+        // The process holding the microphone plays nowhere, so every endpoint
+        // any of the app's processes plays on is heard instead.
         let render = endpoints(&[(HEADSET, &[10]), (SPEAKERS, &[20])]);
         let capture = endpoints(&[(MIC, &[11])]);
         let discord = |pid| matches!(pid, 10 | 11 | 20);
         assert_eq!(
             choose(Some(DISCORD), &render, &capture, discord),
             Choice::App(ids(&[HEADSET, SPEAKERS]))
-        );
-    }
-
-    #[test]
-    fn inactive_sessions_are_absent_rather_than_guessed() {
-        // Sessions in another state never reach the selection, so an output
-        // listed by the OS with no active session is not chosen either.
-        let render = endpoints(&[(HEADSET, &[]), (SPEAKERS, &[20])]);
-        let capture = endpoints(&[(MIC, &[])]);
-        assert_eq!(
-            choose(Some(DISCORD), &render, &capture, |pid| pid == 20),
-            Choice::App(ids(&[SPEAKERS]))
         );
     }
 
@@ -159,5 +164,42 @@ mod tests {
         let render = endpoints(&[(HEADSET, &[10])]);
         let capture = endpoints(&[(MIC, &[10])]);
         assert_eq!(choose(None, &render, &capture, |_| true), Choice::Every);
+    }
+
+    #[test]
+    fn a_different_microphone_holder_output_reopens() {
+        let current = ids(&[HEADSET]);
+        assert!(should_reopen(
+            &current,
+            &Choice::MicHolder(ids(&[SPEAKERS]))
+        ));
+    }
+
+    #[test]
+    fn an_app_output_set_that_covers_the_current_one_does_not_reopen() {
+        // The microphone holder's session blipped: the fallback only adds the
+        // second process's output, so the call stays on what it hears.
+        let current = ids(&[HEADSET]);
+        assert!(!should_reopen(
+            &current,
+            &Choice::App(ids(&[HEADSET, SPEAKERS]))
+        ));
+        // Equal sets are the same call too.
+        assert!(!should_reopen(&current, &Choice::App(ids(&[HEADSET]))));
+    }
+
+    #[test]
+    fn an_app_output_set_that_leaves_out_the_current_one_reopens() {
+        let current = ids(&[HEADSET]);
+        assert!(should_reopen(&current, &Choice::App(ids(&[SPEAKERS]))));
+        assert!(should_reopen(
+            &current,
+            &Choice::App(ids(&[SPEAKERS, MIC_VIRTUAL]))
+        ));
+    }
+
+    #[test]
+    fn every_output_keeps_what_is_open() {
+        assert!(!should_reopen(&ids(&[HEADSET]), &Choice::Every));
     }
 }

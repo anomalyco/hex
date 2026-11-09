@@ -23,12 +23,16 @@ pub(crate) struct EndpointSessions {
 /// Every active endpoint of `flow` and the pids with an active
 /// (`AudioSessionStateActive`) session on it, its own pid excluded.
 pub(crate) fn active_endpoint_sessions(flow: EDataFlow) -> Result<Vec<EndpointSessions>> {
-    // SAFETY: Joins this thread to the multithreaded apartment; a thread
-    // already in it gets `S_FALSE`, which is fine.
+    // SAFETY: Joins this thread to the multithreaded apartment. A thread
+    // already in it gets `S_FALSE` and a thread already in a single-threaded
+    // apartment gets `RPC_E_CHANGED_MODE`; both are fine, because the calls
+    // below need no message pump and do not depend on the apartment.
     let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     let own_pid = std::process::id();
     let endpoints = (|| -> windows::core::Result<Vec<EndpointSessions>> {
-        // SAFETY: Plain COM calls on interfaces this function owns.
+        // SAFETY: Plain COM calls on interfaces this function owns. `GetId`
+        // hands back a `CoTaskMemAlloc` string that is read once into a
+        // `String` and freed once with `CoTaskMemFree`, never used after.
         unsafe {
             let enumerator: IMMDeviceEnumerator =
                 CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
@@ -115,7 +119,7 @@ pub(crate) fn process_canonical_bundle_id(pid: u32) -> Option<&'static str> {
     canonical_bundle_id_for(&executable, name.as_deref())
 }
 
-pub(crate) fn process_path(pid: u32) -> Option<std::path::PathBuf> {
+fn process_path(pid: u32) -> Option<std::path::PathBuf> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,

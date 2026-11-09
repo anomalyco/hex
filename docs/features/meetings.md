@@ -126,21 +126,30 @@ System audio                                      // meetings.system-audio
     the outputs where the app's own microphone holder also plays, then any
     output one of its processes plays on, so a virtual mixer's (SteelSeries
     Sonar, VB-Cable, Voicemeeter) playback of the user's processed
-    microphone and replay of the call is not mixed in; without an app
-    session, or for a manual recording, every active output is heard.
-    Silence while nothing plays is padded on resume. A route check every 2 s
-    reopens on a changed output list while hearing every one, or on changed
-    app outputs (by endpoint id), and keeps the current outputs while the
-    app has no session or the enumeration fails. An output whose loopback
-    fails is dropped while the others keep recording.
+    microphone and replay of the call is not mixed in; for a manual
+    recording, every active output is heard. While a detected call app has
+    no playback session yet, or its sessions can't be read, every output is
+    heard until the 2 s check finds the app's outputs. When none of the
+    app's outputs open, Hex hears every output and stops following the app
+    for that source. Silence while nothing plays is padded on resume. A
+    route check every 2 s reopens on a changed output list while hearing
+    every one, or when the app's outputs move (by endpoint id): a changed
+    microphone-holder set, or an app set that leaves out a current endpoint.
+    An app set that still covers the current endpoints is the same call seen
+    without its holder, so it keeps them instead of reopening back and
+    forth, as does a temporarily absent session or a failed enumeration. An
+    output whose loopback fails is dropped while the others keep recording.
     // checks: the selection is pure and tested in
     // meeting/loopback_route.rs: the_microphone_holder_s_output_beats_
     // another_process_of_the_same_app,
-    // a_call_app_without_a_microphone_holder_plays_on_every_endpoint_of_its_
-    // own, inactive_sessions_are_absent_rather_than_guessed,
+    // a_microphone_holder_that_plays_nothing_falls_back_to_the_app_s_outputs,
     // another_process_on_the_user_s_microphone_selects_nothing,
     // an_app_with_no_active_render_session_hears_every_output,
-    // a_manual_recording_hears_every_output; the mix still by
+    // a_manual_recording_hears_every_output, and its route changes by
+    // a_different_microphone_holder_output_reopens,
+    // an_app_output_set_that_covers_the_current_one_does_not_reopen,
+    // an_app_output_set_that_leaves_out_the_current_one_reopens,
+    // every_output_keeps_what_is_open; the mix still by
     // audio_on_any_output_reaches_the_system_track (meeting/windows.rs);
     // unverified on real hardware
 Call detection                                    // meetings.detect
