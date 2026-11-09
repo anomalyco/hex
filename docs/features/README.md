@@ -693,7 +693,7 @@ Saved shortcut                           // dictation; Option by default; Window
 General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
   -> Modal: each choice with its keys and a looping key/recording timeline
   -> Double-tap needs a key binding; with a lone modifier it says so, unless
-     Labs > Double-tap on a lone modifier is on (macOS, Windows)
+     Labs > Double-tap on a lone modifier is on (macOS)
 
 Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)

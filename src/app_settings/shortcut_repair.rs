@@ -1,7 +1,8 @@
 //! Shortcut keys a Labs feature allows, and the repair that puts a saved
 //! shortcut on one back while the feature is off: mouse buttons (Labs ›
-//! Mouse shortcuts, macOS) and Menu, Pause, or Scroll Lock (Labs › Special
-//! keys alone, Linux).
+//! Mouse shortcuts, macOS), Menu, Pause, or Scroll Lock (Labs › Special
+//! keys alone, Linux), modifiers held alone (Labs › Double-tap on a lone
+//! modifier, macOS), and the persisted double-tap mode those keys need.
 
 use super::{AppSettings, HotkeyBinding, HotkeyKey};
 
@@ -86,6 +87,26 @@ impl AppSettings {
         cfg!(target_os = "linux")
             && self.labs.section_key_alone
             && crate::labs::Feature::SectionKeyAlone.shipped()
+    }
+
+    /// Whether Labs › Double-tap on a lone modifier is on: Double-tap
+    /// shortcut mode accepts a modifier-only dictation shortcut (macOS).
+    pub fn double_tap_modifiers_allowed(&self) -> bool {
+        cfg!(target_os = "macos")
+            && self.labs.double_tap_modifiers
+            && crate::labs::Feature::DoubleTapModifiers.shipped()
+    }
+
+    /// Clears a double-tap-only choice a shortcut can't support: the lock
+    /// is off, or a lone modifier is not allowed by its Labs switch. With
+    /// the lab off, a modifier-only binding falls back exactly as a fresh
+    /// load does (`shortcut_mode` stays Hold, `double_tap_lock` stays on).
+    pub(crate) fn normalize_double_tap_settings(&mut self) {
+        if !self.double_tap_lock
+            || (self.dictation_hotkey.key.is_none() && !self.double_tap_modifiers_allowed())
+        {
+            self.double_tap_only = false;
+        }
     }
 
     /// With Labs › Section key alone off, a Linux shortcut on § alone goes
@@ -195,12 +216,64 @@ impl AppSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_settings::HotkeyModifiers;
 
     fn menu() -> HotkeyBinding {
         HotkeyBinding {
             modifiers: Default::default(),
             key: Some(HotkeyKey::named("menu")),
         }
+    }
+
+    #[test]
+    fn double_tap_only_on_a_lone_modifier_needs_the_lab() {
+        let binding = |key: Option<HotkeyKey>| HotkeyBinding {
+            modifiers: HotkeyModifiers::option(),
+            key,
+        };
+        let mut settings = AppSettings {
+            dictation_hotkey: binding(None),
+            double_tap_only: true,
+            ..Default::default()
+        };
+        settings.normalize_double_tap_settings();
+        assert!(!settings.double_tap_only);
+        settings.labs.double_tap_modifiers = true;
+        settings.double_tap_only = true;
+        settings.normalize_double_tap_settings();
+        // Modifier-only dictation exists on macOS.
+        assert_eq!(
+            settings.double_tap_only,
+            settings.double_tap_modifiers_allowed()
+        );
+        // A keyed binding keeps the choice with the lab off.
+        settings.labs.double_tap_modifiers = false;
+        settings.dictation_hotkey = binding(Some(HotkeyKey::named("space")));
+        settings.double_tap_only = true;
+        settings.normalize_double_tap_settings();
+        assert!(settings.double_tap_only);
+    }
+
+    #[test]
+    fn turning_the_double_tap_modifiers_lab_off_falls_back_as_a_fresh_load() {
+        let mut settings = AppSettings {
+            dictation_hotkey: HotkeyBinding {
+                modifiers: HotkeyModifiers::option(),
+                key: None,
+            },
+            double_tap_only: true,
+            ..Default::default()
+        };
+        settings.labs.double_tap_modifiers = true;
+        settings.normalize_double_tap_settings();
+        crate::labs::Feature::DoubleTapModifiers.set(&mut settings, false);
+        assert!(!settings.double_tap_only);
+        assert!(settings.double_tap_lock, "the lock stays on");
+        assert_eq!(
+            settings.shortcut_mode,
+            crate::dictation::ShortcutMode::Hold,
+            "the mode returns to Hold or double-tap"
+        );
     }
 
     #[test]

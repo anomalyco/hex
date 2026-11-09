@@ -2060,7 +2060,7 @@ fn programmatic_ownership_disarms_pending_double_taps_without_losing_held_keys()
         flags: 0,
     };
     assert_eq!(hotkey.process(key(97, true), now), None);
-    assert!(matches!(hotkey.state, State::FirstTapPressed));
+    assert!(matches!(hotkey.state, State::FirstTapPressed { .. }));
     hotkey.disarm_pending_gesture();
     assert!(hotkey.pressed_keys.contains(&97));
     hotkey.track_key_state(key(97, false), now + Duration::from_millis(80));
@@ -2160,7 +2160,7 @@ fn stale_key_recovery_never_polls_holds_or_pending_gestures() {
             started_at: now,
             previous_release: None,
         },
-        State::FirstTapPressed,
+        State::FirstTapPressed { started_at: now },
         State::AwaitingSecondTap { released_at: now },
         State::SecondTapPressed {
             first_released_at: now,
@@ -2749,13 +2749,19 @@ fn double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord() {
     hotkey.double_tap_modifiers = || true;
     hotkey.set_double_tap_only(true);
 
+    // One complete tap.
     assert_eq!(
         hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(0)),
         None
     );
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
-    // Option plus a key between the taps is a chord meant for another app.
-    for (at, down) in [(ms(120), true), (ms(140), false)] {
+    // The second press, then a key joining it while Option is held: a chord
+    // meant for another app, so the gesture goes dirty and records nothing.
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(120)),
+        None
+    );
+    for (at, down) in [(ms(140), true), (ms(160), false)] {
         assert_eq!(
             hotkey.process(
                 InputEvent::Key {
@@ -2768,8 +2774,60 @@ fn double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord() {
             None
         );
     }
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(180)), None);
+    // The next complete tap is a fresh first tap, not the second of a pair.
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(220)),
+        None
+    );
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(300)), None);
+    assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_does_not_take_a_held_first_press_as_a_tap() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, option_binding());
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    // A lone modifier held past the hold threshold is a hold, not a tap.
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(0)),
+        None
+    );
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(400)), None);
+    // The tap right after it must not complete the held press as a pair.
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(450)),
+        None
+    );
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(520)), None);
+    assert!(!hotkey.is_recording());
+}
+
+#[test]
+fn double_tap_only_with_the_lab_discards_a_different_modifier_between_taps() {
+    let now = capture_time();
+    let ms = |millis| now + Duration::from_millis(millis);
+    let mut hotkey = DictationHotkey::with_binding(false, now, true, option_binding());
+    hotkey.double_tap_modifiers = || true;
+    hotkey.set_double_tap_only(true);
+
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(0)),
+        None
+    );
+    assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(80)), None);
+    // Command between the Option taps is a chord, not part of the pair.
+    assert_eq!(
+        hotkey.process(InputEvent::Flags(COMMAND_KEY_MASK), ms(120)),
+        None
+    );
     assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), ms(160)), None);
-    // The next complete tap is a fresh first tap, not a second one.
+    // The next Option tap is a fresh first tap, so the pair before Command
+    // never locks.
     assert_eq!(
         hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), ms(200)),
         None

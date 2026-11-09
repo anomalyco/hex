@@ -771,7 +771,7 @@ General > Shortcut mode (under Shortcut)               // dictate.shortcut-mode
   Double-tap                   -> Double-tap only; needs a key binding, or a
                                   modifier alone with Labs › Double-tap on a
                                   lone modifier (labs.double_tap_modifiers,
-                                  macOS and Windows, off by default)
+                                  macOS, off by default)
 Tap
   Press -> Start (pre-roll as usual) -> Release keeps recording
   -> Fresh shortcut press -> Finish (with the release tail)
@@ -824,7 +824,7 @@ General > Shortcut mode                               // dictate.shortcut-explai
   ├── The current choice has a focus-coloured border
   ├── Double-tap with a lone modifier -> Dimmed, takes no focus or press,
   │   says "Needs a shortcut with a key, like ⌥Space", unless Labs ›
-  │   Double-tap on a lone modifier is on (macOS and Windows)
+  │   Double-tap on a lone modifier is on (macOS)
   ├── Long chord -> The panel widens (up to the window) so each option's
   │   lanes keep at least 64 pt beside the keycaps
   ├── Pick an option (click, Space) -> Saves the choice
@@ -875,7 +875,7 @@ Shortcut mode = Hold or double-tap or Double-tap     // dictate.lock
 
 Shortcut mode = Double-tap                           // dictate.double-tap-only
   Requires a key binding AND locking enabled, or a modifier-only binding
-  with Labs › Double-tap on a lone modifier on (macOS and Windows)
+  with Labs › Double-tap on a lone modifier on (macOS)
   Single press/hold -> No capture                     // disables hold, not a toggle
   Same two qualifying complete taps -> LOCKED         // same lock, not a third mode
 

@@ -34,7 +34,9 @@ enum State {
         // still pair the next press with it.
         last_release_at: Option<CaptureInstant>,
     },
-    FirstTapPressed,
+    FirstTapPressed {
+        started_at: CaptureInstant,
+    },
     AwaitingSecondTap {
         released_at: CaptureInstant,
     },
@@ -58,7 +60,9 @@ impl State {
     fn is_pending_gesture(&self) -> bool {
         matches!(
             self,
-            Self::FirstTapPressed | Self::AwaitingSecondTap { .. } | Self::SecondTapPressed { .. }
+            Self::FirstTapPressed { .. }
+                | Self::AwaitingSecondTap { .. }
+                | Self::SecondTapPressed { .. }
         )
     }
 }
@@ -243,8 +247,8 @@ impl DictationHotkey {
     }
 
     pub fn set_double_tap_only(&mut self, enabled: bool) {
-        let modifier_only = self.binding.key_code.is_some() || (self.double_tap_modifiers)();
-        self.double_tap_only = enabled && modifier_only && self.double_tap_enabled;
+        let allowed = self.binding.key_code.is_some() || (self.double_tap_modifiers)();
+        self.double_tap_only = enabled && allowed && self.double_tap_enabled;
         // Active captures still need their release to reach the audio owner.
         if !self.double_tap_only && self.state.is_pending_gesture() {
             self.state = State::IDLE;
@@ -753,11 +757,19 @@ impl DictationHotkey {
 
         let action = match self.state {
             State::Idle { .. } if self.double_tap_only && !self.toggle && trigger_pressed => {
-                self.state = State::FirstTapPressed;
+                self.state = State::FirstTapPressed { started_at: now };
                 None
             }
-            State::FirstTapPressed if trigger_released => {
-                self.state = State::AwaitingSecondTap { released_at: now };
+            State::FirstTapPressed { started_at } if trigger_released => {
+                // A lone modifier held past the hold threshold is a hold,
+                // not a tap: it neither arms the double tap nor records.
+                if self.binding.key_code.is_none()
+                    && now.duration_since(started_at) >= MINIMUM_HOLD_DURATION
+                {
+                    self.state = State::IDLE;
+                } else {
+                    self.state = State::AwaitingSecondTap { released_at: now };
+                }
                 None
             }
             State::AwaitingSecondTap { released_at }
@@ -780,11 +792,18 @@ impl DictationHotkey {
                 None
             }
             State::AwaitingSecondTap { .. }
-            | State::FirstTapPressed
+            | State::FirstTapPressed { .. }
             | State::SecondTapPressed { .. }
                 if unrelated_key_down
                     || extra_modifiers
-                    || matches!(event, InputEvent::MouseDown) =>
+                    || matches!(event, InputEvent::MouseDown)
+                    // A different modifier between a lone modifier's taps is
+                    // a chord too, such as Option, Command, Option.
+                    || (self.binding.key_code.is_none()
+                        && flags.is_some_and(|flags| {
+                            flags & HOTKEY_MODIFIERS_MASK != 0
+                                && !self.binding.exact_modifiers(flags)
+                        })) =>
             {
                 self.state = State::Dirty;
                 None
@@ -793,7 +812,7 @@ impl DictationHotkey {
                 if now.duration_since(released_at) >= DOUBLE_TAP_WINDOW =>
             {
                 self.state = if trigger_pressed {
-                    State::FirstTapPressed
+                    State::FirstTapPressed { started_at: now }
                 } else {
                     State::IDLE
                 };

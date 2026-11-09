@@ -415,8 +415,9 @@ impl Feature {
             | Self::QuitClosesWindow
             | Self::NotchIndicator
             | Self::Screenshots
-            | Self::CapsLockDictation => cfg!(target_os = "macos"),
-            Self::KeepOnClipboard | Self::CopyOnly | Self::DoubleTapModifiers => {
+            | Self::CapsLockDictation
+            | Self::DoubleTapModifiers => cfg!(target_os = "macos"),
+            Self::KeepOnClipboard | Self::CopyOnly => {
                 cfg!(any(target_os = "macos", target_os = "windows"))
             }
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
@@ -903,7 +904,7 @@ const OPENCODE_IN_WSL: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 const API_PROCESSING: u64 = OPENCODE_IN_WSL << 1;
 
 /// The next bit above OpenCode in WSL's switch: Double-tap accepts a
-/// modifier-only shortcut (macOS, Windows).
+/// modifier-only shortcut (macOS).
 const DOUBLE_TAP_MODIFIERS: u64 = OPENCODE_IN_WSL << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
@@ -1026,8 +1027,7 @@ pub fn tap_or_hold() -> bool {
 }
 
 /// Double-tap shortcut mode accepts a modifier-only binding, such as Option
-/// or Globe alone (macOS reads it as each shortcut machine is configured;
-/// Windows reads the saved switch instead).
+/// or Globe alone (macOS; read as each shortcut machine is configured).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn double_tap_modifiers() -> bool {
     on(DOUBLE_TAP_MODIFIERS) && Feature::DoubleTapModifiers.on_this_os()
@@ -1652,7 +1652,7 @@ mod tests {
     }
 
     #[test]
-    fn double_tap_modifiers_is_its_own_bit_and_macos_or_windows_only() {
+    fn double_tap_modifiers_is_its_own_bit_and_macos_only() {
         let mut labs = LabsSettings::default();
         assert_eq!(encode_where(&labs, |_| true) & DOUBLE_TAP_MODIFIERS, 0);
         labs.double_tap_modifiers = true;
@@ -1663,7 +1663,7 @@ mod tests {
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert_eq!(
             Feature::DoubleTapModifiers.on_this_os(),
-            cfg!(any(target_os = "macos", target_os = "windows"))
+            cfg!(target_os = "macos")
         );
         assert_eq!(Feature::DoubleTapModifiers.group(), Group::Shortcuts);
     }

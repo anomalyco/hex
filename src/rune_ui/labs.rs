@@ -496,11 +496,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Put the dictation on the clipboard instead of pasting it"),
         ));
     }
-    // macOS's shortcut machine and Windows' hook both take a modifier alone.
-    if matches!(
-        caps.os,
-        super::platform::Os::Macos | super::platform::Os::Windows
-    ) {
+    // macOS's shortcut machine takes a modifier alone.
+    if caps.os == super::platform::Os::Macos {
         rows.push(row(
             Feature::DoubleTapModifiers,
             Some(&KEYBOARD),

@@ -430,7 +430,7 @@ const KEYS: &[Key] = &[
         "labs.double_tap_modifiers",
         Kind::Bool,
         "Labs: Double-tap shortcut mode accepts a shortcut that is a modifier alone, such as \
-         Option or Globe, with no other key (macOS, Windows)",
+         Option or Globe, with no other key (macOS)",
     ),
     key(
         "labs.benchmark_details",
@@ -1117,11 +1117,17 @@ pub fn apply(
                 || (candidate.dictation_hotkey.key.is_none()
                     && !candidate.double_tap_modifiers_allowed())
             {
+                let modifier_only = if cfg!(target_os = "macos") {
+                    ", or with Labs › Double-tap on a lone modifier on, a modifier alone"
+                } else {
+                    ""
+                };
                 return Err(invalid(
                     name,
-                    "a double-tap-only start needs double_tap_lock on and a dictation shortcut \
-                     with a key, such as option+space, or with Labs › Double-tap on a lone \
-                     modifier on, a modifier alone",
+                    &format!(
+                        "a double-tap-only start needs double_tap_lock on and a dictation \
+                         shortcut with a key, such as option+space{modifier_only}"
+                    ),
                 ));
             }
         }
@@ -2011,11 +2017,16 @@ mod tests {
             dictation_hotkey: parse_hotkey("option", rules().key_named).unwrap(),
             ..AppSettings::default()
         };
+        let refused = apply(&settings, "double_tap_only", "on", &rules()).unwrap_err();
+        assert_eq!(refused.code, "invalid-value");
+        // Only macOS has the lab, so only there does the refusal name it.
         assert_eq!(
-            apply(&settings, "double_tap_only", "on", &rules())
-                .unwrap_err()
-                .code,
-            "invalid-value"
+            refused
+                .message
+                .contains("Labs › Double-tap on a lone modifier"),
+            cfg!(target_os = "macos"),
+            "{}",
+            refused.message
         );
         let mut with_lab = settings.clone();
         with_lab.labs.double_tap_modifiers = true;
