@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use crate::app_settings::RuntimeHotkey;
 use crate::capture_host::{CaptureNeed, CaptureTarget};
+use crate::history::captures::{self, CaptureDraft, CaptureKind, CaptureWord};
 use crate::rune_ui::capture_capsule::flow::{Action, Mode};
 use crate::rune_ui::capture_capsule::picker::{PickerOverlay, PickerRole};
 use crate::rune_ui::screenshot_thumbnail::{CardKey, Thumbnail};
@@ -215,8 +216,18 @@ fn take(target: CaptureTarget) -> anyhow::Result<std::path::PathBuf> {
     }
     save::copy(&png, path.as_deref().ok())?;
     let path = path?;
+    let (width, height, small) = shrink(image.width, image.height, &image.rgba, THUMB_PX);
+    remember(
+        Remembered {
+            kind: CaptureKind::Shot,
+            file: &path,
+            size: [image.width, image.height],
+            duration_ms: 0,
+            timed: Vec::new(),
+        },
+        (width, height, &small),
+    );
     if let Some(overlays) = OVERLAYS.get() {
-        let (width, height, small) = shrink(image.width, image.height, &image.rgba, THUMB_PX);
         overlays.thumbnail.show(
             path.clone(),
             width,
@@ -227,6 +238,55 @@ fn take(target: CaptureTarget) -> anyhow::Result<std::path::PathBuf> {
         );
     }
     Ok(path)
+}
+
+/// A saved capture for Captures to list.
+struct Remembered<'a> {
+    kind: CaptureKind,
+    file: &'a std::path::Path,
+    size: [u32; 2],
+    duration_ms: u64,
+    timed: Vec<CaptureWord>,
+}
+
+/// Remembers a saved capture in Captures, with a thumbnail shrunk from
+/// `rgba` (`width` × `height`).
+fn remember(capture: Remembered, (width, height, rgba): (u32, u32, &[u8])) {
+    let (w, h, small) = shrink(width, height, rgba, captures::THUMB_PX);
+    let thumbnail_png = match save::encode(w, h, &small, 1.0) {
+        Ok(png) => png,
+        Err(error) => {
+            tracing::warn!(%error, "could not make the capture's thumbnail");
+            return;
+        }
+    };
+    let words = capture
+        .timed
+        .iter()
+        .map(|word| word.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    captures::record(CaptureDraft {
+        kind: capture.kind,
+        file: capture.file.to_owned(),
+        size: capture.size,
+        duration_ms: capture.duration_ms,
+        words,
+        timed: capture.timed,
+        thumbnail_png,
+    });
+}
+
+/// What was said over the shot saved at `file` in the editor, for
+/// Captures' search. Off the caller's thread.
+pub(crate) fn remember_words(file: std::path::PathBuf, words: String) {
+    let spawned = std::thread::Builder::new()
+        .name("hex-capture-words".into())
+        .spawn(move || captures::set_words(&file, &words));
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "could not keep the words said over the shot");
+    }
 }
 
 /// The display under the pointer, in points, where a recording's card rests.

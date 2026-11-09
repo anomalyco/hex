@@ -1688,6 +1688,8 @@ mod tests {
         #[cfg(hex_capture)]
         include_str!("../rune_ui/screenshot_thumbnail/card.rs"),
         #[cfg(hex_capture)]
+        include_str!("../rune_ui/captures.rs"),
+        #[cfg(hex_capture)]
         include_str!("../rune_ui/screenshot_thumbnail/editor.rs"),
         #[cfg(hex_capture)]
         include_str!("../rune_ui/screenshot_thumbnail/editor/view.rs"),

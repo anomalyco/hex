@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::history::captures::{CaptureKind, CaptureWord};
 use crate::rune_ui::screenshot_thumbnail::Recording;
 use crate::rune_ui::screenshot_thumbnail::editor::clip;
 
@@ -42,11 +43,30 @@ fn show(bundle: &Path) -> anyhow::Result<()> {
             recorded
         }
     };
-    let duration_ms = helper::probe(&movie)?.duration_ms;
+    let probe = helper::probe(&movie)?;
+    let duration_ms = probe.duration_ms;
     let frame = helper::frames(&movie, FrameTimes::At(&[0]), super::THUMB_PX)?
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("the recording has no frames"))?;
+    let timed = words
+        .iter()
+        .map(|word| CaptureWord {
+            t0: word.t0,
+            t1: word.t1,
+            text: word.text.clone(),
+        })
+        .collect();
+    super::remember(
+        super::Remembered {
+            kind: CaptureKind::Recording,
+            file: &movie,
+            size: [probe.width, probe.height],
+            duration_ms,
+            timed,
+        },
+        (frame.width, frame.height, &frame.rgba),
+    );
     if let Some(overlays) = super::OVERLAYS.get() {
         let screen = super::screen_under_pointer();
         overlays.thumbnail.show_recording(

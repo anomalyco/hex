@@ -98,6 +98,9 @@ pub(crate) enum Listen {
 #[derive(Default)]
 pub(crate) struct Editor {
     shot: Option<Shot>,
+    /// The shot's saved file, whose Captures entry keeps the words said
+    /// over it.
+    file: Option<PathBuf>,
     /// A recording open to trim, in place of a shot.
     clip: Option<Clip>,
     /// The display's size in points.
@@ -387,6 +390,10 @@ impl Editor {
                 self.words.push(' ');
             }
             self.words.push_str(words);
+            #[cfg(target_os = "macos")]
+            if let Some(file) = &self.file {
+                crate::screenshots::remember_words(file.clone(), self.words.clone());
+            }
         }
         self.listen(Listen::Idle, tx);
     }
@@ -775,6 +782,7 @@ pub(crate) fn open_with(path: PathBuf, words: String) {
             let handle = overlay.clone();
             overlay.update(move |s, tx| {
                 s.load(shot, screen);
+                s.file = Some(path);
                 s.words = words;
                 s.listen = Listen::Idle;
                 s.waiting = None;

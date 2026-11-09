@@ -1201,6 +1201,35 @@ cards
 CleanShot's ⌘S saves the capture; every Hex capture is already saved,
 so ⌘S shows it in Finder instead.
 
+Every shot and recording the Lab saves is also listed in the Captures
+pane ([captures.rs](../../src/rune_ui/captures.rs)), which sits under
+History in the sidebar while the Lab is on. It is its own pane rather than
+a part of History: its rows are pictures and movies with their own
+actions, and History's retention menu and Clear all don't apply to them.
+
+```ts
+Captures
+├── search      -> every word in what was said over it, its file name, or its kind
+├── rows        -> newest first, the last 30 days, only files still where they were saved:
+│                  thumbnail · the words said over it (else the file's name) ·
+│                  "Screenshot · 2880 × 1800" or "Screen recording · 0:42" · its age
+├── click       -> the editor (a shot with its words; a recording to trim)
+├── drag        -> the file
+├── hover       -> Copy, Show in Finder, Move to Trash in the age's place
+└── nothing yet -> "No captures yet." and what shows here
+```
+
+The list reads an owner-only index in Application Support
+(`captures/index.json`, 0600 in a 0700 folder) with a 240 px PNG thumbnail
+per entry beside it ([history/captures.rs](../../src/history/captures.rs)),
+never the files themselves. A shot is remembered as it saves, a recording
+once its movie is saved, and words said over a shot in the editor replace
+its entry's words. Entries past 30 days or past 500 entries drop with
+their thumbnails the next time one is added; each keeps at most 4 KiB of
+words. Move to Trash (a card's or the pane's) forgets the entry. The
+editor's Save makes a new file that isn't listed. Writes are atomic, and a
+malformed index is kept aside as `index.json.corrupt`.
+
 The last ten cards closed (by ✕, a key, the menu, opening the editor, or
 the stack reaching the top) are kept in memory. The menu bar's Restore
 Last Capture, shown while the Lab is on and dimmed until a card was
@@ -1370,10 +1399,16 @@ list's search, and both exports
 without one) in [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
 and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/screenshot_thumbnail/editor/marks.rs);
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
+the index's order, reopen, owner-only modes, search, window, caps, forgetting,
+words, and a malformed file in [history/captures.rs](../../src/history/captures.rs);
+the Captures pane as the `captures` golden (light and dark) and
+`--scene captures-empty`;
 its card renders as `--scene mac-labs-screenshots`; the card's entrance
 and the stack's motion are `thumbnail_frames` (`HEX_SCREENSHOT_FRAMES`
 writes them at 60 fps).
-Not yet observed: the card keys and right-click menu on a real Mac, a
+Not yet observed: the card keys and right-click menu on a real Mac, the
+Captures pane over a real index (its thumbnails decoding, a drag out, Copy,
+and Move to Trash), a
 real ⌘⇧4 on a Mac (with macOS's shortcut off), a shot of each kind, the
 clipboard paste, the thumbnail's drag, the editor on a real display
 (its keys, Copy, Save, and a session receiving a sent shot), talking over a

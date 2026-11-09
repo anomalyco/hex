@@ -29,4 +29,9 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Open in Editor", ["Otwórz w edytorze", "在编辑器中打开", "エディタで開く", "Im Editor öffnen", "Abrir en el editor", "Відкрити в редакторі"]),
     ("Show in Finder", ["Pokaż w Finderze", "在访达中显示", "Finder に表示", "Im Finder zeigen", "Mostrar en Finder", "Показати у Finder"]),
     ("Move to Trash", ["Przenieś do kosza", "移到废纸篓", "ゴミ箱に入れる", "In den Papierkorb legen", "Trasladar a la papelera", "Перемістити в смітник"]),
+    ("Captures", ["Zrzuty i nagrania", "截图与录屏", "キャプチャ", "Aufnahmen", "Capturas", "Знімки й записи"]),
+    ("No captures yet.", ["Nie ma jeszcze zrzutów ani nagrań.", "还没有截图或录屏。", "キャプチャはまだありません。", "Noch keine Aufnahmen.", "Aún no hay capturas.", "Ще немає знімків чи записів."]),
+    ("Shots and recordings from the last 30 days show here.", ["Tu pojawiają się zrzuty i nagrania z ostatnich 30 dni.", "这里显示最近 30 天的截图和录屏。", "過去 30 日間のスクリーンショットと収録がここに表示されます。", "Hier erscheinen Bildschirmfotos und Aufnahmen der letzten 30 Tage.", "Aquí aparecen las capturas y grabaciones de los últimos 30 días.", "Тут з’являються знімки й записи за останні 30 днів."]),
+    ("No captures match.", ["Brak pasujących zrzutów i nagrań.", "没有匹配的截图或录屏。", "一致するキャプチャはありません。", "Keine passenden Aufnahmen.", "Ninguna captura coincide.", "Немає відповідних знімків чи записів."]),
+    ("Search captures", ["Szukaj zrzutów i nagrań", "搜索截图与录屏", "キャプチャを検索", "Aufnahmen durchsuchen", "Buscar capturas", "Шукати знімки й записи"]),
 ];

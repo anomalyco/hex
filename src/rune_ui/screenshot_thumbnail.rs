@@ -513,7 +513,7 @@ impl Thumbnail {
 }
 
 /// What a card does with its file, off the main thread.
-mod files {
+pub(crate) mod files {
     use std::path::{Path, PathBuf};
 
     use rune::OverlayHandle;
@@ -557,12 +557,15 @@ mod files {
         }
     }
 
-    pub(super) fn trash(path: PathBuf) {
+    pub(crate) fn trash(path: PathBuf) {
         spawn("hex-card-trash", move || {
             #[cfg(target_os = "macos")]
-            if let Err(error) = crate::screenshots::save::trash(&path) {
-                tracing::warn!(%error, path = %path.display(), "could not trash the capture");
-                crate::feedback::play(crate::feedback::Tone::Error);
+            match crate::screenshots::save::trash(&path) {
+                Ok(()) => crate::history::captures::forget(&path),
+                Err(error) => {
+                    tracing::warn!(%error, path = %path.display(), "could not trash the capture");
+                    crate::feedback::play(crate::feedback::Tone::Error);
+                }
             }
             #[cfg(not(target_os = "macos"))]
             let _ = path;
