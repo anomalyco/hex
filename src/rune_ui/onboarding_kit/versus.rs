@@ -750,7 +750,13 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         )))
         .child(
             card.offset(nudge[0] + knock, nudge[1])
-                .offset_motion(Anim::INSTANT),
+                .offset_motion(Anim::INSTANT)
+                // Each landing word, or a blow, knocks the card: kicks.
+                .motion_intent(if nudge != [0.0, 0.0] || knock != 0.0 {
+                    MotionIntent::KICK
+                } else {
+                    MotionIntent::NONE
+                }),
         );
 
     // The pointer stays to lift off the row it clicked, unless the user's
