@@ -127,10 +127,11 @@ pub enum Feature {
     CapsLockDictation,
     OpenCodeInWsl,
     TranscribeFiles,
+    ApiProcessing,
 }
 
 impl Feature {
-    pub const ALL: [Self; 62] = [
+    pub const ALL: [Self; 63] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -193,6 +194,7 @@ impl Feature {
         Self::CapsLockDictation,
         Self::OpenCodeInWsl,
         Self::TranscribeFiles,
+        Self::ApiProcessing,
     ];
 
     /// The features this OS and build have.
@@ -279,7 +281,8 @@ impl Feature {
             | Self::GnomeAnnotate
             | Self::CapsLockDictation
             | Self::OpenCodeInWsl
-            | Self::TranscribeFiles => Audience::Everyone,
+            | Self::TranscribeFiles
+            | Self::ApiProcessing => Audience::Everyone,
         }
     }
 
@@ -345,7 +348,7 @@ impl Feature {
             | Self::TerminalPasteShortcut
             | Self::ReleaseNotesLink
             | Self::OpenCodeInWsl => 20261108,
-            Self::TranscribeFiles => 20261109,
+            Self::TranscribeFiles | Self::ApiProcessing => 20261109,
         }
     }
 
@@ -451,7 +454,8 @@ impl Feature {
             | Self::SettingsSearch
             | Self::ReleaseNotesLink
             | Self::FillerWords
-            | Self::TranscribeFiles => true,
+            | Self::TranscribeFiles
+            | Self::ApiProcessing => true,
         }
     }
 
@@ -520,6 +524,7 @@ impl Feature {
             Self::CapsLockDictation => "caps-lock-dictation",
             Self::OpenCodeInWsl => "opencode-in-wsl",
             Self::TranscribeFiles => "transcribe-files",
+            Self::ApiProcessing => "api-processing",
         }
     }
 
@@ -588,6 +593,7 @@ impl Feature {
             Self::CapsLockDictation => "labs.caps_lock_dictation",
             Self::OpenCodeInWsl => "labs.opencode_in_wsl",
             Self::TranscribeFiles => "labs.transcribe_files",
+            Self::ApiProcessing => "labs.api_processing",
         }
     }
 
@@ -660,6 +666,7 @@ impl Feature {
             Self::CapsLockDictation => settings.labs.caps_lock_dictation,
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl,
             Self::TranscribeFiles => settings.labs.transcribe_files,
+            Self::ApiProcessing => settings.labs.api_processing,
         }
     }
 
@@ -730,6 +737,7 @@ impl Feature {
             &mut labs.caps_lock_dictation,
             &mut labs.opencode_in_wsl,
             &mut labs.transcribe_files,
+            &mut labs.api_processing,
         ]
     }
 
@@ -800,6 +808,7 @@ impl Feature {
             Self::CapsLockDictation => settings.labs.caps_lock_dictation = on,
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl = on,
             Self::TranscribeFiles => settings.labs.transcribe_files = on,
+            Self::ApiProcessing => settings.labs.api_processing = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -875,6 +884,10 @@ const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
 /// The next bit above Caps Lock's slow blink: an OpenCode service in WSL is
 /// found when no Windows one answers (Windows).
 const OPENCODE_IN_WSL: u64 = CAPS_LOCK_SLOW_BLINK << 1;
+/// The next bit above OpenCode in WSL's switch: the local API's
+/// `process=global` returns a transcript after Global mode's output
+/// processing.
+const API_PROCESSING: u64 = OPENCODE_IN_WSL << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1167,6 +1180,13 @@ pub fn opencode_in_wsl() -> bool {
     on(OPENCODE_IN_WSL) && Feature::OpenCodeInWsl.on_this_os()
 }
 
+/// The local API's `POST /transcriptions` and `POST /streams/{id}/finish`
+/// accept `process=global` (read where each request's route starts and by
+/// the capabilities answer).
+pub fn api_processing() -> bool {
+    on(API_PROCESSING) && Feature::ApiProcessing.on_this_os()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).
@@ -1345,6 +1365,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::ExpireMeetingAudio,
             settings.expire_meeting_audio,
             EXPIRE_MEETING_AUDIO,
+        ),
+        (
+            Feature::ApiProcessing,
+            settings.api_processing,
+            API_PROCESSING,
         ),
         (
             Feature::GnomeMeetingCapsules,
@@ -1903,6 +1928,20 @@ mod tests {
             Feature::OpenCodeInWsl.on_this_os(),
             cfg!(target_os = "windows")
         );
+    }
+
+    #[test]
+    fn api_processing_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & API_PROCESSING, 0);
+        labs.api_processing = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & API_PROCESSING, 0);
+        assert_eq!(state & OPENCODE_IN_WSL, 0);
+        assert_eq!(state & TYPED_TEXT, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(Feature::ApiProcessing.on_this_os());
     }
 
     #[test]

@@ -2270,7 +2270,8 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 ├── Caller streams audio -> Running app's /streams -> Partials, segments, final
 │   └── Dictation first; uses the loaded model only (docs/streams.md)
 ├── Running app's /transcriptions -> Listener's engine when it holds the model
-│   └── Otherwise the service's own copy of the requested model
+│   ├── Otherwise the service's own copy of the requested model
+│   └── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No silence gate                  // model output, unlike hotkey dictation;
 │   │                                     // only recognition-hint echoes are dropped
@@ -2317,6 +2318,16 @@ dictation ends; it is provisional, and `/finish` returns the transcript.
 `/capabilities` reports `dictationPartials`. Checked live on Windows x64
 (start, partials subscription, finish, a silent room's empty transcript);
 not run on Linux.
+
+`process=global` (Labs › Process API transcripts, off by default) lets a host
+ask the running app for the text after its Global mode's output processing, on
+`POST /transcriptions` and `POST /streams/{id}/finish`
+([streams.md](../streams.md#post-streamsidfinish),
+[labs.md](labs.md)). The response keeps its fields and adds `processed`; off,
+or without the parameter, responses are unchanged raw transcripts, and the
+embedded helper installs no processor (`409 processing-unavailable`, even
+with the lab off). Processing runs one at a time (`429 queue-full`).
+`/capabilities` always includes `outputProcessing`.
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

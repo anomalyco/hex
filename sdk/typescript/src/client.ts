@@ -157,6 +157,7 @@ export const makeClient = (
   const transcribe = async (input: TranscriptionRequest) => {
     const query = new URLSearchParams({ model: input.model })
     if (input.language !== undefined) query.set("language", input.language)
+    if (input.process !== undefined) query.set("process", input.process)
     let body: ArrayBuffer
     if (input.audio.data instanceof ArrayBuffer) {
       body = input.audio.data

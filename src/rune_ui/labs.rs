@@ -726,6 +726,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Transcribe files"),
         tr("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model."),
     ));
+    rows.push(row(
+        Feature::ApiProcessing,
+        None,
+        tr("Process API transcripts"),
+        tr("Apps can ask Hex's local API for transcripts with Global mode's processing applied."),
+    ));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
         && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     let ultra = row(Feature::ParakeetUltra, None, tr("Parakeet Ultra"), "");
@@ -862,6 +868,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::TranscribeFiles => "lab-transcribe-files",
+        Feature::ApiProcessing => "lab-api-processing",
     }
 }
 

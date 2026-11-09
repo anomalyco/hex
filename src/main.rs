@@ -411,7 +411,15 @@ fn main() -> Result<()> {
                     None
                 }
             };
-            recognition::listen(events, device.as_deref(), &SHUTDOWN, None, history, None)
+            recognition::listen(
+                events,
+                device.as_deref(),
+                &SHUTDOWN,
+                None,
+                history,
+                None,
+                std::sync::Arc::new(personal_commands::TransformationClient::default()),
+            )
         }
         Command::Service { embedded } => {
             if !embedded {

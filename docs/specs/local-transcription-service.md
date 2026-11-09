@@ -41,7 +41,7 @@ appear as Electron. The embedded helper never opens the microphone.
 | Model preparation is explicit | A transcription call never hides a large network download. |
 | Installed-but-cold models may reload automatically | A request for a different model in the same helper replaces its warm runtime. |
 | No product duration limit | Hotkey capture and service transcription end explicitly; operational resource exhaustion remains a typed failure. |
-| Raw transcripts only | The host owns meaning, rewriting, and insertion. |
+| Raw transcripts only | The host owns meaning, rewriting, and insertion. The running desktop app's authenticated API can apply Global mode's output processing when a request explicitly asks with `process=global` (opt-in); the embedded helper has no processor. |
 | Trusted Node/Electron main process | Ordinary browser code and untrusted renderers must not receive native process authority or service credentials. |
 | Host-spawned helper | The host owns the process, endpoint, and lifetime instead of discovering an independently elected service. |
 | Shared model artifacts, private warm runtime | Hosts reuse verified downloads without coupling their model choice or process lifecycle. |
@@ -119,6 +119,24 @@ transcription accept an optional `language` query parameter, defaulting to `en`.
 the returned catalog. Transcription requires `Content-Length`; chunked transfer
 encoding is not supported.
 
+`POST /transcriptions` accepts an optional `process=global` query parameter on
+the running desktop app's authenticated API (Labs › Process API transcripts,
+off by default; `true` and `1` are aliases). When present, the response keeps
+`transcript` and `durationMs` and adds `processed`: the same text a paste with
+no matching app or website mode would use, after global replacements, Global
+mode corrections, the optional OpenCode rewrite, and Global's selected
+transformations. Processing is best-effort and deadline-bounded like a paste,
+so a failed stage keeps its input and the request still succeeds. It never
+pastes, records History, updates the last dictation, or touches the clipboard.
+Any other value, or a repeated parameter, answers `400 invalid-request`.
+`hex service` and `--embedded` install no processor and answer `409
+processing-unavailable`, even while the lab is off; with a processor installed
+and the lab off the answer is `403 processing-disabled`. Processing runs one at
+a time across the local API, so while another holds it the answer is `429
+queue-full`; all three are decided before the audio body is read.
+`GET /capabilities` always includes `outputProcessing`, true only when a
+processor is installed and the lab is on.
+
 `POST /transcriptions` accepts completed PCM WAV audio. The service reads
 request bodies incrementally into a bounded buffer, then validates WAV metadata
 before allocating decoded samples and running inference. It downmixes and
@@ -157,6 +175,7 @@ export interface Capabilities {
   audioFormats: readonly ["audio/wav"];
   partialTranscripts: false;
   serviceCapture: false;
+  outputProcessing: boolean;
   developerControl: false;
 }
 ```
@@ -164,6 +183,9 @@ export interface Capabilities {
 These capability values describe the embedded helper. The desktop local API can
 advertise capture and debug-only developer control. The SDK exposes
 `serviceCapture` as a boolean and omits the native-only `developerControl` field.
+`outputProcessing` is `false` from the embedded helper (it installs no
+processor) and true from the running app only while Labs › Process API
+transcripts is on.
 
 ### Models
 

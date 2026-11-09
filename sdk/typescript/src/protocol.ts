@@ -99,14 +99,25 @@ export const decodeHealth = (value: unknown): Health => {
 
 export const decodeCapabilities = (value: unknown): Capabilities => {
   const input = record(value)
+  const outputProcessing = input && (input.outputProcessing === undefined
+    ? undefined
+    : boolean(input.outputProcessing))
   if (
     !Array.isArray(input?.audioFormats)
     || input.audioFormats.length !== 1
     || input.audioFormats[0] !== "audio/wav"
     || input.partialTranscripts !== false
     || typeof input.serviceCapture !== "boolean"
+    || (input.outputProcessing !== undefined && outputProcessing === undefined)
   ) return invalid("capabilities response")
-  return { audioFormats: ["audio/wav"], partialTranscripts: false, serviceCapture: input.serviceCapture }
+  return outputProcessing === undefined
+    ? { audioFormats: ["audio/wav"], partialTranscripts: false, serviceCapture: input.serviceCapture }
+    : {
+      audioFormats: ["audio/wav"],
+      partialTranscripts: false,
+      serviceCapture: input.serviceCapture,
+      outputProcessing,
+    }
 }
 
 export const decodeDictationStart = (value: unknown): {
@@ -183,10 +194,16 @@ export const decodeTranscription = (value: unknown): TranscriptionResult => {
   const input = record(value)
   const transcript = input && string(input.transcript)
   const durationMs = input && number(input.durationMs)
-  if (transcript === undefined || durationMs === undefined || durationMs < 0) {
+  const processed = input && (input.processed === undefined ? undefined : string(input.processed))
+  if (
+    transcript === undefined
+    || durationMs === undefined
+    || durationMs < 0
+    || (input?.processed !== undefined && processed === undefined)
+  ) {
     return invalid("transcription response")
   }
-  return { transcript, durationMs }
+  return processed === undefined ? { transcript, durationMs } : { transcript, durationMs, processed }
 }
 
 export const decodeProgress = (value: unknown): ModelProgress | "ok" => {
