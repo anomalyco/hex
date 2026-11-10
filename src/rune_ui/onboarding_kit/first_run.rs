@@ -313,7 +313,7 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
             .items_center()
             .child(core)
             .children(
-                login_ask(p, &s.login, s.now, s.reduced.get(), login::toggle)
+                login_ask(p, &s.login, s.now, s.reduced.get(), false, login::toggle)
                     .map(|ask| ask.transition(arrives())),
             )
             .child(
@@ -339,16 +339,23 @@ fn ready_page(p: Paint, s: &Onboard) -> El {
                     ),
             );
     }
-    let ask = login_ask(p, &s.login, s.now, s.reduced.get(), |s: &mut Onboard| {
-        let next = if s.login.login == Login::On {
-            Login::Off
-        } else {
-            Login::On
-        };
-        if s.login.set(next, s.now) {
-            s.sfx.on_login(s.now);
-        }
-    });
+    let ask = login_ask(
+        p,
+        &s.login,
+        s.now,
+        s.reduced.get(),
+        true,
+        |s: &mut Onboard| {
+            let next = if s.login.login == Login::On {
+                Login::Off
+            } else {
+                Login::On
+            };
+            if s.login.set(next, s.now) {
+                s.sfx.on_login(s.now);
+            }
+        },
+    );
     if !is_live_window() {
         return col()
             .key("ready-live-wrap")

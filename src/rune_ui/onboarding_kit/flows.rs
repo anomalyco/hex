@@ -104,6 +104,13 @@ pub(super) fn skip_button(p: Paint, s: &Onboard) -> El {
     button
         .build_small_push(p.k)
         .key("skip")
+        // The camera's push in swells the keyboard down over it.
+        .opacity(if super::versus::pushed_in(s) {
+            0.0
+        } else {
+            1.0
+        })
+        .opacity_motion(rune::Spring::new(0.2, 0.0))
         .transition(Transition::opacity().springs(rune::SpringPair::new(
             rune::Spring::new(0.6, 0.0),
             rune::Spring::new(0.2, 0.0),

@@ -265,6 +265,12 @@ pub(super) fn skippable(s: &Onboard) -> bool {
     playing && (s.had_model && s.granted || s.now - from >= SKIP_AFTER)
 }
 
+/// The camera is pushed in on the draft (autocorrect's slow motion), the
+/// stage larger than its place on the page.
+pub(super) fn pushed_in(s: &Onboard) -> bool {
+    s.step == Step::Parked && scene_time(s).is_some_and(|t| camera(s, t).0 > 1.0)
+}
+
 /// `"With Hex"`'s answer has left the field.
 pub(crate) fn hex_sent(s: &Onboard) -> bool {
     take_time(s).is_some_and(|t| t >= hex_beats(s.streams(), &s.timing).send)

@@ -87,6 +87,10 @@ fn transcript(p: Paint, g: &Play, layout: &ShareLayout) -> El {
     }
 }
 
+/// What lifts the score's two lines to the middle of the number beside
+/// them: the lines are 40 pt tall together in the row's [`SHARE_ROWS`] 78.
+const WHAT_PB: f32 = 19.0;
+
 /// The score's second line: the best so far, or a new one.
 fn best_copy(score: Score) -> String {
     let Score { destroyed, best } = score;
@@ -256,7 +260,8 @@ pub(super) fn share<S: 'static>(
                 .child(
                     col()
                         .key("what")
-                        .pb(14.0)
+                        // Centred on the number's cap height.
+                        .pb(WHAT_PB)
                         .gap(2.0)
                         .child(
                             text(tr("messages destroyed"))

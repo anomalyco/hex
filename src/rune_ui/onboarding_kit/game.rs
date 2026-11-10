@@ -75,10 +75,10 @@ const SHARE_HOLD: f64 = 2.8;
 const AUTOPLAY_CARDS: usize = 4;
 /// Keep playing folds the share card into the score pill.
 const FOLD: f32 = 0.45;
-/// The score pill's top-left, level with Done, its height, and its padding
-/// and gap; it's as wide as its number and label need ([`pill_size`]).
+/// The score pill's top-left, level with Done, its height (Done's), and its
+/// padding and gap; it's as wide as its number and label need ([`pill_size`]).
 const SCORE_AT: [f32; 2] = [24.0, 18.0];
-const PILL_H: f32 = 30.0;
+const PILL_H: f32 = 28.0;
 const PILL_PAD: f32 = 12.0;
 const PILL_GAP: f32 = 8.0;
 
@@ -1286,7 +1286,7 @@ fn header<S: 'static>(
         .px(PILL_PAD)
         .gap(PILL_GAP)
         .center_y()
-        .radius(15.0)
+        .radius(PILL_H * 0.5)
         .fill(k.c.surface_raised)
         .border(p.hair, k.c.border_weak)
         .child(number)

@@ -141,11 +141,14 @@ fn burst(p: Paint, ask: &LoginAsk, now: f64, reduced: bool) -> Option<El> {
 }
 
 /// `"Open Hex when your Mac starts?"`, its button, and a line under it.
+/// The button is the page's main action only when it is `alone`: beside
+/// Start using Hex it is a neutral one.
 pub(crate) fn login_ask<S: 'static>(
     p: Paint,
     ask: &LoginAsk,
     now: f64,
     reduced: bool,
+    alone: bool,
     press: impl Fn(&mut S) + 'static,
 ) -> Option<El> {
     let k = p.k;
@@ -155,7 +158,11 @@ pub(crate) fn login_ask<S: 'static>(
             "Open Hex when your Mac starts?",
             Button::new("Launch at login")
                 .rolling("login-label")
-                .variant(ButtonVariant::Contrast),
+                .variant(if alone {
+                    ButtonVariant::Contrast
+                } else {
+                    ButtonVariant::Neutral
+                }),
             "It's tiny. It naps in your menu bar until you hold the key.",
         ),
         Login::On => (
