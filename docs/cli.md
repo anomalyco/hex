@@ -464,11 +464,12 @@ observe input-source changes or show these controls.
   Off, they are refused with `invalid-value`, and turning the toggle off puts
   a shortcut on one back to its default. Elsewhere one alone still needs a
   modifier.
-- `second_dictation_hotkey` (macOS, unbound by default; `none` clears it) is
-  a second shortcut that dictates exactly as `dictation_hotkey` does, such as
-  a key on an external keyboard. It acts only while
+- `second_dictation_hotkey` (unbound by default; `none` clears it) is a
+  second shortcut that dictates exactly as `dictation_hotkey` does, such as a
+  key on an external keyboard. It acts only while
   `labs.second_dictation_shortcut` is on (`hex labs on
-  second-dictation-shortcut`) and shares no key with another shortcut.
+  second-dictation-shortcut`) and shares no key with another shortcut. Linux
+  and Windows need a key in it, as every shortcut there does.
 - `extra_dictation_hotkeys` (macOS, an empty array by default) holds up to
   four more dictation shortcuts, each `{"binding": ..., "mode": ...}`. A row
   acts only while `labs.more_dictation_shortcuts` is on (`hex labs on

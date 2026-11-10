@@ -549,12 +549,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         ));
         // macOS's listener only, so Linux renders of macOS scenes leave it out.
         if cfg!(target_os = "macos") {
-            rows.push(row(
-                Feature::SecondDictationShortcut,
-                Some(&KEYBOARD),
-                tr("Second dictation shortcut"),
-                tr("Another shortcut that dictates like the main one, such as a key on an external keyboard"),
-            ));
             // Up to four more, each with its own activation mode.
             rows.push(row(
                 Feature::MoreDictationShortcuts,
@@ -821,6 +815,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker. Looking for it can start WSL."),
         ));
     }
+    // Another shortcut dictates exactly like the main one, on every OS (#627).
+    rows.push(row(
+        Feature::SecondDictationShortcut,
+        Some(&KEYBOARD),
+        tr("Second dictation shortcut"),
+        tr("Another shortcut that dictates like the main one, such as a key on an external keyboard"),
+    ));
     if caps.os != super::platform::Os::Macos {
         rows.push(row(
             Feature::TerminalPasteShortcut,

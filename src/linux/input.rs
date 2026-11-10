@@ -269,7 +269,8 @@ const PORTAL_READY_TIMEOUT: Duration = Duration::from_secs(65);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum HotkeyEvent {
     /// `flavour` is the shortcut that started the capture: dictation,
-    /// Dictate without processing, or Labs › Terminal paste.
+    /// Dictate without processing, Labs › Terminal paste, or Labs › Second
+    /// dictation.
     Start {
         flavour: DictationFlavour,
     },
@@ -338,6 +339,9 @@ pub(crate) struct HotkeyOptions {
     pub(crate) typed_text: Option<LinuxHotkey>,
     /// Labs › Terminal paste shortcut, while the lab is on and it is bound.
     pub(crate) terminal_paste: Option<LinuxHotkey>,
+    /// Labs › Second dictation shortcut, while the lab is on and it is bound:
+    /// another key that dictates exactly like the dictation shortcut.
+    pub(crate) second_dictation: Option<LinuxHotkey>,
     /// Annotate's one key, while Annotate is on: tap to start and stop,
     /// hold to draw.
     pub(crate) capture: Option<LinuxHotkey>,
@@ -569,16 +573,19 @@ enum Shortcut {
     Capture,
     RawDictation,
     TerminalPaste,
+    /// Labs › Second dictation shortcut.
+    SecondDictation,
 }
 
 impl Shortcut {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Dictation,
         Self::PasteLast,
         Self::TypedText,
         Self::Capture,
         Self::RawDictation,
         Self::TerminalPaste,
+        Self::SecondDictation,
     ];
 
     fn index(self) -> usize {
@@ -592,6 +599,7 @@ impl Shortcut {
             Self::Dictation => Some(DictationFlavour::Normal),
             Self::RawDictation => Some(DictationFlavour::Raw),
             Self::TerminalPaste => Some(DictationFlavour::TerminalPaste),
+            Self::SecondDictation => Some(DictationFlavour::Second),
             Self::PasteLast | Self::TypedText | Self::Capture => None,
         }
     }
@@ -602,6 +610,7 @@ impl Shortcut {
             DictationFlavour::Normal => Self::Dictation,
             DictationFlavour::Raw => Self::RawDictation,
             DictationFlavour::TerminalPaste => Self::TerminalPaste,
+            DictationFlavour::Second => Self::SecondDictation,
         }
     }
 
@@ -614,6 +623,7 @@ impl Shortcut {
             Self::Capture => ("capture", "Annotate"),
             Self::RawDictation => ("raw-dictation", "Dictate without processing"),
             Self::TerminalPaste => ("terminal-paste", "Terminal paste shortcut"),
+            Self::SecondDictation => ("second-dictation", "Second dictation shortcut"),
         }
     }
 }
@@ -665,7 +675,8 @@ struct ShortcutState {
     /// stop mean its keys came up.
     repeating: bool,
     /// The shortcut that owns the capture (or the last one): dictation,
-    /// Dictate without processing, or Labs › Terminal paste.
+    /// Dictate without processing, Labs › Terminal paste, or Labs › Second
+    /// dictation.
     flavour: DictationFlavour,
 }
 
@@ -783,7 +794,10 @@ impl ShortcutState {
             Input::Cancel if self.wants_cancel() => self.cancel(),
             Input::Cancel => None,
             Input::Pressed(
-                shortcut @ (Shortcut::Dictation | Shortcut::RawDictation | Shortcut::TerminalPaste),
+                shortcut @ (Shortcut::Dictation
+                | Shortcut::RawDictation
+                | Shortcut::TerminalPaste
+                | Shortcut::SecondDictation),
             ) => {
                 let Some(flavour) = shortcut.flavour() else {
                     unreachable!("a dictation shortcut has a flavour");
@@ -838,7 +852,10 @@ impl ShortcutState {
                 }
             }
             Input::Released(
-                shortcut @ (Shortcut::Dictation | Shortcut::RawDictation | Shortcut::TerminalPaste),
+                shortcut @ (Shortcut::Dictation
+                | Shortcut::RawDictation
+                | Shortcut::TerminalPaste
+                | Shortcut::SecondDictation),
             ) => {
                 if shortcut.flavour() != Some(self.flavour) {
                     return None;
@@ -1227,6 +1244,10 @@ impl Backend {
                 .terminal_paste
                 .as_ref()
                 .map(|key| (Shortcut::TerminalPaste, key)),
+            options
+                .second_dictation
+                .as_ref()
+                .map(|key| (Shortcut::SecondDictation, key)),
         ];
         let desktop_assigns = crate::linux::portal::desktop_assigns_triggers();
         let mut shortcuts = Vec::new();
@@ -1522,6 +1543,30 @@ mod tests {
             test.events,
             [TERMINAL, Finish, START, Finish, TERMINAL, Finish]
         );
+    }
+
+    #[test]
+    fn second_dictation_shortcut_owns_the_capture_it_starts() {
+        const SECOND: HotkeyEvent = HotkeyEvent::Start {
+            flavour: DictationFlavour::Second,
+        };
+        let mut test = Test::new(true);
+        test.press(Shortcut::SecondDictation);
+        // The dictation and raw shortcuts can't finish or join its capture.
+        test.tap();
+        test.press(Shortcut::RawDictation);
+        test.release(Shortcut::RawDictation);
+        test.release(Shortcut::SecondDictation);
+        assert_eq!(test.events, [SECOND, Finish]);
+        // A dictation tap right after is not its second tap either, and the
+        // second shortcut starts and finishes a later capture of its own.
+        test.now += Duration::from_millis(20);
+        test.tap();
+        assert_eq!(test.events, [SECOND, Finish, START, Finish]);
+        test.now += Duration::from_millis(400);
+        test.press(Shortcut::SecondDictation);
+        test.release(Shortcut::SecondDictation);
+        assert_eq!(test.events, [SECOND, Finish, START, Finish, SECOND, Finish]);
     }
 
     /// #786: only the shortcuts Hex asked for show; a key the desktop still

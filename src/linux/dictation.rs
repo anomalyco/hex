@@ -1967,6 +1967,43 @@ mod tests {
     }
 
     #[test]
+    fn second_dictation_is_registered_only_while_its_lab_is_on() {
+        use crate::app_settings::{HotkeyBinding, HotkeyKey, HotkeyModifiers};
+        let binding = HotkeyBinding {
+            modifiers: HotkeyModifiers::default(),
+            key: Some(HotkeyKey::named("f7")),
+        };
+        let mut settings = AppSettings {
+            second_dictation_hotkey: Some(binding.clone()),
+            ..AppSettings::default()
+        };
+        let (_, options) = shortcuts(&settings);
+        assert!(
+            options.second_dictation.is_none(),
+            "the lab off registers nothing"
+        );
+
+        settings.labs.second_dictation_shortcut = true;
+        assert_eq!(
+            shortcuts(&settings).1.second_dictation,
+            Some(LinuxHotkey::from(&binding))
+        );
+
+        // A shortcut without a key never runs on Linux.
+        settings.second_dictation_hotkey = Some(HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                control: Some(crate::app_settings::ModifierSide::Either),
+                ..HotkeyModifiers::default()
+            },
+            key: None,
+        });
+        assert!(shortcuts(&settings).1.second_dictation.is_none());
+
+        settings.second_dictation_hotkey = None;
+        assert!(shortcuts(&settings).1.second_dictation.is_none());
+    }
+
+    #[test]
     fn cancelled_capture_keeps_pending_output_visible() {
         assert_eq!(active_state(true, 2), VoiceState::Dictating);
         assert_eq!(active_state(false, 2), VoiceState::Transcribing);

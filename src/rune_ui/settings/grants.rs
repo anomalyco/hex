@@ -58,10 +58,14 @@ pub(in crate::rune_ui) fn portal_grant(
         ShortcutTarget::Capture => "Annotate",
         #[cfg(all(hex_capture, target_os = "macos"))]
         ShortcutTarget::CaptureReplay => return None,
-        // macOS has no shortcuts portal.
+        // Only Linux lists this one under its own name; macOS and Windows
+        // have no shortcuts portal.
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::SecondDictation => "Second dictation shortcut",
+        #[cfg(not(target_os = "linux"))]
+        ShortcutTarget::SecondDictation => return None,
         #[cfg(target_os = "macos")]
-        ShortcutTarget::SecondDictation
-        | ShortcutTarget::Screenshot
+        ShortcutTarget::Screenshot
         | ShortcutTarget::ScreenshotRecord
         | ShortcutTarget::ExtraDictation(_) => return None,
     };

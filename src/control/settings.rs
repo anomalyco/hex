@@ -222,8 +222,8 @@ const KEYS: &[Key] = &[
         "second_dictation_hotkey",
         Kind::Shortcut(HotkeySlot::SecondDictation),
         "Labs: another shortcut that dictates like dictation_hotkey, such as a key on an \
-         external keyboard (macOS, with labs.second_dictation_shortcut); none (the default) \
-         turns it off",
+         external keyboard (with labs.second_dictation_shortcut; Linux and Windows need a key); \
+         none (the default) turns it off",
     ),
     key(
         "extra_dictation_hotkeys",
@@ -405,7 +405,7 @@ const KEYS: &[Key] = &[
     key(
         "labs.second_dictation_shortcut",
         Kind::Bool,
-        "Labs: second_dictation_hotkey dictates like the dictation shortcut (macOS)",
+        "Labs: second_dictation_hotkey dictates like the dictation shortcut",
     ),
     key(
         "labs.more_dictation_shortcuts",

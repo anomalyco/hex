@@ -24,6 +24,11 @@ pub(super) fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) 
         terminal_paste: settings
             .active_terminal_paste_hotkey()
             .map(LinuxHotkey::from),
+        // Labs › Second dictation shortcut: off registers nothing, and a
+        // keyless saved binding never runs on Linux.
+        second_dictation: settings
+            .active_second_dictation_hotkey()
+            .map(LinuxHotkey::from),
         capture: settings
             .capture
             .enabled

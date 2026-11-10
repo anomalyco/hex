@@ -1269,9 +1269,11 @@ impl AppSettings {
             others.push(self.cancel_hotkey.clone());
         }
         if slot != HotkeySlot::SecondDictation
-            && cfg!(target_os = "macos")
             && self.labs.second_dictation_shortcut
             && let Some(second) = &self.second_dictation_hotkey
+            // Linux and Windows register a key, so a keyless binding never
+            // runs there and takes no key from another shortcut.
+            && (cfg!(target_os = "macos") || second.key.is_some())
         {
             others.push(second.clone());
         }
@@ -1331,7 +1333,7 @@ pub struct RuntimeHotkeys {
     pub raw_dictation: Option<RuntimeHotkey>,
     /// Labs › Transform typed text (Linux), while it is on and bound.
     pub typed_text: Option<RuntimeHotkey>,
-    /// Labs › Second dictation shortcut (macOS), while it is on and bound.
+    /// Labs › Second dictation shortcut, while it is on and bound.
     pub second_dictation: Option<RuntimeHotkey>,
     /// Labs › More dictation shortcuts (macOS), while the Lab is on and each
     /// row is bound and shares no key.

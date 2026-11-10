@@ -706,10 +706,14 @@ General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
      more modifiers) it says so, unless Labs > Double-tap on a lone modifier
      is on (macOS)
 
-Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
+Labs > Second dictation shortcut (off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)
   -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
+  -> Linux: an X11 grab or the shortcuts portal's "Second dictation shortcut"
+     entry while on and bound; needs a key, as every Linux shortcut does
+  -> Windows: the hook's second trigger, with the same rules; needs a key
+     (Windows registers none without one)
 
 Labs > More dictation shortcuts (macOS, off)   // labs.md
   -> General shows a numbered row per extra (recorder, shortcut mode, Remove) and Add shortcut under four
