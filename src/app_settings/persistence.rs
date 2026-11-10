@@ -54,7 +54,12 @@ impl AppSettings {
     /// Launch stays available even when the data folder itself cannot be
     /// resolved. Invalid settings are recovered by `load_from` in place.
     pub(crate) fn load_for_launch() -> LaunchLoad {
-        match path().and_then(|path| Self::load_checked_from(&path)) {
+        Self::load_for_launch_at(path())
+    }
+
+    /// `load_for_launch` from `path`, so a test can use its own folder.
+    fn load_for_launch_at(path: Result<PathBuf>) -> LaunchLoad {
+        let launch = match path.and_then(|path| Self::load_checked_from(&path)) {
             Ok((settings, issue)) => {
                 let note = match issue {
                     Some(LoadIssue::Unparseable(reason)) => {
@@ -73,7 +78,10 @@ impl AppSettings {
                     ))),
                 }
             }
-        }
+        };
+        // Launch has no other load that publishes, so the saved runtime state (or the defaults) goes live here, before any listener or worker starts.
+        launch.settings.apply_runtime();
+        launch
     }
 
     pub(crate) fn load_from(path: &Path) -> Result<Self> {

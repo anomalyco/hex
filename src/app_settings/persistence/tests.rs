@@ -2,6 +2,7 @@ use super::*;
 use crate::app_settings::{
     MeetingRetention, MeetingSettings, MeetingSummaries, RecordingAudioBehavior,
 };
+use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -49,6 +50,15 @@ fn launch_note(path: &Path) -> Option<String> {
     match AppSettings::load_checked_from(path).unwrap().1 {
         Some(LoadIssue::Unparseable(reason)) => Some(reason.launch_note()),
         Some(LoadIssue::Unreadable) | None => None,
+    }
+}
+
+/// `load_for_launch` publishes process-global runtime state; restore the defaults afterwards.
+struct RestoredRuntime;
+
+impl Drop for RestoredRuntime {
+    fn drop(&mut self) {
+        AppSettings::default().apply_runtime();
     }
 }
 
@@ -339,6 +349,32 @@ fn a_broken_settings_file_is_named_at_launch_with_its_parse_error() {
 
     let file = SettingsFile::new(b"{}");
     assert!(launch_note(&file.path).is_none());
+}
+
+#[test]
+fn launch_publishes_the_saved_selection_before_the_worker_starts() {
+    let _restore = RestoredRuntime;
+    let file = SettingsFile::new(b"{}");
+    let saved = TranscriptionSelection {
+        model: TranscriptionModelId::WhisperLargeV3Turbo,
+        language: "fr".into(),
+    };
+    AppSettings {
+        transcription: saved.clone(),
+        ..AppSettings::default()
+    }
+    .write_to(&file.path)
+    .unwrap();
+
+    AppSettings::load_for_launch_at(Ok(file.path.clone()));
+    assert_eq!(crate::app_settings::transcription_selection().1, saved);
+
+    // The defaults fallback publishes too, so a launch that can't read settings starts from defaults.
+    AppSettings::load_for_launch_at(Err(eyre!("settings path unavailable")));
+    assert_eq!(
+        crate::app_settings::transcription_selection().1,
+        TranscriptionSelection::default()
+    );
 }
 
 #[test]
