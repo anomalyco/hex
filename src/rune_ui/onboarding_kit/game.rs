@@ -11,6 +11,7 @@
 //! answer. The first run's `"Your turn"` feeds it Hex's own dictation; the
 //! playground story feeds it scripted answers.
 
+mod certificate;
 pub(crate) mod fx;
 mod lines;
 mod share;
@@ -22,7 +23,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use rune::{
-    Anim, Color, Cx, El, MotionIntent, Playground, ScrollSpec, Spring, Story, TextEdit, TextStyle,
+    Anim, Color, Cx, El, MotionIntent, Playground, ScrollSpec, Story, TextEdit, TextStyle,
     Transition, Tx, col, effect, el, row, text,
 };
 use rune_kit::{Button, ButtonVariant, TextInput};
@@ -42,6 +43,7 @@ use super::sparks::impacts;
 use super::stories::{Onboard, physical_shortcut_held};
 use crate::desktop::onboarding::Practice;
 use crate::dictation::indicator::DotFrame;
+use certificate::certificate;
 use fx::{BURN, BURN_MARK, Bolt, Burn, Fx, Mote, STRIKE_MARK, Tones};
 
 const STAGE_W: f32 = 880.0;
@@ -1745,60 +1747,6 @@ fn card(p: Paint, r: &Round, t: f64, reduced: bool, clear: f32) -> Option<El> {
 
 /// How far the card swells into the hit-stop.
 const SWELL: f32 = 1.035;
-
-fn certificate(p: Paint, targeted: bool, signed: bool) -> El {
-    let k = p.k;
-    let line = el()
-        .key("sign-line")
-        .absolute(CERT_PAD, SIGN_Y + SIGN.line + 2.0)
-        .size(CARD_W - 2.0 * CERT_PAD, p.hair.max(1.0))
-        .fill(if targeted {
-            k.c.border_focus
-        } else {
-            k.c.border_base
-        });
-    let hint = (!signed).then(|| {
-        text(tr("Sign by saying your name"))
-            .key("hint")
-            .font(k.ty.ui)
-            .color(p.faint())
-            .absolute(CERT_PAD, SIGN_Y + 6.0)
-            .transition(Transition::opacity())
-    });
-    let card = el()
-        .key("certificate")
-        .size(CARD_W, CERT_H)
-        .radius(16.0)
-        .continuous_corners()
-        .fill(if k.dark {
-            k.c.surface_raised
-        } else {
-            k.c.bg_base
-        })
-        .border(p.hair, k.c.border_weak)
-        .child(
-            col()
-                .key("copy")
-                .absolute(CERT_PAD, CERT_PAD - 2.0)
-                .gap(2.0)
-                .child(text("Hex").key("app").font(k.ty.small).color(p.muted()))
-                .child(
-                    text(tr("Certificate of completion"))
-                        .key("title")
-                        .font(k.ty.ui_medium)
-                        .color(p.text()),
-                )
-                .child(
-                    text(tr("I hereby certify that I have completed Hex onboarding."))
-                        .key("body")
-                        .font(k.ty.ui)
-                        .color(p.text()),
-                ),
-        )
-        .child(line)
-        .children(hint);
-    k.elevate(card, &k.elevation.floating)
-}
 
 fn words(p: Paint, g: &Play, t: f64, reduced: bool) -> El {
     let mut out = el().key("words").absolute(0.0, 0.0).size(STAGE_W, STAGE_H);
