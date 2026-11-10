@@ -358,7 +358,7 @@ fn build(init: impl FnOnce() -> Ui + 'static, playground: PlaygroundMode) -> run
 
 /// Closing the window saves pending text edits and stops a shortcut
 /// recording, as leaving a pane does. Hex keeps running.
-fn on_close(ui: &mut Ui, _: &mut Tx) {
+fn on_close(ui: &mut Ui, tx: &mut Tx) {
     ui.flush_drafts();
     settings::cancel_capture(ui);
     ui.open = None;
@@ -373,8 +373,13 @@ fn on_close(ui: &mut Ui, _: &mut Tx) {
     if let Service::Live(backend) = &mut ui.service {
         backend.closed();
     }
+    // Windows destroys the closed window, so the next open makes a new one.
+    #[cfg(target_os = "windows")]
+    crate::windows::rune::keep_window_size(tx);
     #[cfg(target_os = "macos")]
     crate::macos_rune::window_closed();
+    #[cfg(not(target_os = "windows"))]
+    let _ = tx;
 }
 
 /// Where the menu bar, a meeting, or a `hex window show` sends the window.

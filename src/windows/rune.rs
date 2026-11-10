@@ -8,10 +8,12 @@
 //! - The named event from `windows_app` keeps one app per session: a later
 //!   launch signals it and the running app shows its window.
 //!
-//! Rune's `App` keeps the loop, the state, and the hidden window alive
-//! after the window closes (`keep_running`), starts without a window for a
-//! login launch (`windowless`), and opens or quits from other threads
-//! through its `AppHandle`.
+//! Rune's `App` keeps the loop and the state after the window closes and gives
+//! the window and its GPU surface back (`keep_running` with
+//! `release_gpu_when_closed`), starts without a window for a login launch
+//! (`windowless`), and opens or quits from other threads through its
+//! `AppHandle`. Opening again makes the window it closed at the size that one
+//! had (`keep_window_size`).
 
 use std::ffi::c_void;
 use std::path::PathBuf;
@@ -181,6 +183,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let mut app = crate::rune_ui::app(Default::default())
         .args(crate::rune_ui::window_args())
         .on_window(|window| {
+            WINDOW.with(|current| *current.borrow_mut() = Some(window.clone()));
             let _ = window.with_raw_handle(|handle| {
                 if let rune::raw_window_handle::RawWindowHandle::Win32(handle) = handle.as_raw() {
                     let hwnd = handle.hwnd.get() as HWND;
@@ -214,10 +217,14 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     };
     let tray = match added_tray {
         Ok(tray) => {
+            // Closing gives the window and its swapchain back, so a Hex sitting
+            // in the tray holds no Direct3D window and never passes for a game
+            // to capture tools such as NVIDIA's Instant Replay (#1308). Opening
+            // it again makes both, at the size the window had.
             app = if start_hidden {
-                app.windowless()
+                app.windowless().release_gpu_when_closed()
             } else {
-                app.keep_running()
+                app.keep_running().release_gpu_when_closed()
             };
             Some(Arc::new(tray))
         }
@@ -631,6 +638,37 @@ fn apply_window_icon(hwnd: HWND) {
             }
         }
     }
+}
+
+thread_local! {
+    /// Rune's handle to the settings window, which outlives each native window
+    /// it makes: closing destroys the native one (`release_gpu_when_closed`) and
+    /// the next open makes another from this handle. UI-thread only, like the
+    /// native window it names.
+    static WINDOW: std::cell::RefCell<Option<rune::WindowHandle>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Closing destroys the native window, so the next open would make a new one at
+/// the app's own size. Ask for the size the closing window had instead, so a
+/// window the user resized comes back as they left it: Rune carries a resize
+/// request's size onto the next window it creates. A maximized, minimized, or
+/// full-screen frame is not the size to reopen at, so that one is left alone.
+pub(crate) fn keep_window_size(tx: &mut rune::Tx) {
+    let Some(placement) = WINDOW.with(|window| {
+        window
+            .borrow()
+            .as_ref()
+            .and_then(rune::WindowHandle::placement)
+    }) else {
+        return;
+    };
+    if placement.scale <= 0.0 || placement.maximized || placement.minimized || placement.full_screen
+    {
+        return;
+    }
+    let (width, height) = placement.content_size;
+    let scale = placement.scale as f32;
+    tx.resize_window((width as f32 / scale, height as f32 / scale));
 }
 
 /// The settings window Rune created last, for [`match_title_bar`].

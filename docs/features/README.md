@@ -1971,10 +1971,10 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   │   not yet observed with NVIDIA's App, and the x64 speech model's Vulkan
 │   │   device on the same GPU may still trigger it)
 │   ├── Tray at rest -> no Rune GPU device until something shows: the capture
-│   │   capsule, picker, and ink keep their windows from launch but make their
-│   │   GPU surfaces at each show and drop them at each hide (Rune
-│   │   release_gpu_when_hidden); the HUD keeps its surface for 5 minutes
-│   │   after its last hide (release_gpu_after), then gives the device back
+│   │   capsule, picker, ink, and live text hold no window or GPU surface
+│   │   while hidden, and make both at each show (Rune release_gpu_when_hidden);
+│   │   the HUD gives its surface back at each hide too (release_gpu_after, a
+│   │   zero idle on Windows; Linux keeps it 5 minutes), then the device goes
 │   │   ├── Dictation shortcut's modifiers down (Ctrl of Ctrl+Space) -> Rune
 │   │   │   makes the device and the HUD's pipeline on a thread (warm_gpu_with,
 │   │   │   unclaimed for 30 s they go), so the HUD shows without them; this
@@ -2426,8 +2426,11 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 ├── Runtime thread owns WindowsDesktopHost (listener, model preparation, OpenCode, transformations, updater)
 ├── Named event: a second launch shows the window; tray Show / Enable-Disable / Quit
 ├── rune::App: --hidden starts windowless and makes no Direct3D device (on x64
-│   the speech model still loads on the GPU through Vulkan), close hides
-│   (keep_running); Quit or no tray ends it
+│   the speech model still loads on the GPU through Vulkan); closing releases
+│   the window and its swapchain too (release_gpu_when_closed), so a tray Hex
+│   holds neither and capture tools such as NVIDIA's Instant Replay don't take
+│   it for the game (#1308); the next open makes them again at the window's
+│   last size; Quit or no tray ends it
 ├── General adds Launch at login; Terminal paste in Labs; chord capture polls
 ├── HUD: shared indicator model + CPU shader in a Rune overlay
 ├── Modes: "Choose a file…" opens rune::FileDialogs (file_dialog) on its own thread
