@@ -768,6 +768,7 @@ fn start_main_thread() {
     let indicator = DictationIndicatorUi::new(pump.hud.clone());
     install_main_menu(&target, mtm);
     observe_activation(&target);
+    crate::suppression::secure_input::start(mtm);
     // Inside the loop, once AppKit has started, so its own Apple event setup
     // can't replace this handler.
     // SAFETY: the target outlives the handler (kept in PUMP for the app's

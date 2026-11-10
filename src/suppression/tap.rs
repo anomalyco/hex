@@ -187,8 +187,10 @@ pub(super) fn run_event_tap(
     run_loop: Arc<AtomicPtr<c_void>>,
     ready: SyncSender<Result<()>>,
 ) {
+    let sink = Arc::new(InputSink::new(sender, pending));
+    super::secure_input::attach(&sink);
     let mut context = Box::new(EventTapContext {
-        sender,
+        sink,
         activity,
         takes_escape: flags.takes_escape,
         takes_cancel: flags.takes_cancel,
@@ -197,8 +199,6 @@ pub(super) fn run_event_tap(
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
         shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
-        pending,
-        next_sequence: AtomicU64::new(0),
     });
     let context_ptr = &raw mut *context;
     // SAFETY: This is the dedicated event-tap thread's current run loop.
