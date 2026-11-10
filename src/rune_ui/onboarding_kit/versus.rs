@@ -867,6 +867,7 @@ fn room(script: &'static Script<'static>, title: &'static str) -> Notice {
         key: "room",
         app: App::Messages,
         from: title,
+        person: None,
         place: script.group,
         body: "",
         field: "iMessage",

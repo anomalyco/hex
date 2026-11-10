@@ -298,8 +298,12 @@ pub(crate) fn group_faces(p: Paint, face: f32) -> El {
     )
 }
 
-/// A contact's round face with their initial, in their colour.
+/// A contact's round face: their photo if they have one, else their
+/// initial in their colour.
 pub(crate) fn face(p: Paint, name: &str, colour: &str, size: f32) -> El {
+    if let Some(photo) = photo_face(p, name, size) {
+        return photo;
+    }
     let dark = p.k.dark;
     let initial: String = name.chars().take(1).collect();
     el().size(size, size)
@@ -318,4 +322,41 @@ pub(crate) fn face(p: Paint, name: &str, colour: &str, size: f32) -> El {
                 .color(rune_theme_opencode::scale(colour, dark, 11))
                 .transition(Transition::identity()),
         )
+}
+
+/// `name`'s photo in a circle `size` points across, if they have one.
+pub(crate) fn photo_face(p: Paint, name: &str, size: f32) -> Option<El> {
+    Some(
+        el().size(size, size)
+            .radius(size * 0.5)
+            .pixels(photo(name)?)
+            .border(p.hair, p.k.c.border_weak),
+    )
+}
+
+/// The photos of the people who have one, 96 px square: one and a half
+/// times the largest face (a notice's 32 pt icon) at 2×.
+const PHOTOS: [(&str, &[u8]); 1] = [("Jay", include_bytes!("../../../assets/onboarding/jay.jpg"))];
+
+/// `name`'s photo, decoded on first use and kept, so the first frame that
+/// shows it already has it.
+fn photo(name: &str) -> Option<&'static rune::Pixels> {
+    static DECODED: std::sync::OnceLock<Vec<Option<rune::Image>>> = std::sync::OnceLock::new();
+    let decoded = DECODED.get_or_init(|| {
+        let cache = rune::ImageCache::new(std::sync::Arc::new(|| {}));
+        PHOTOS
+            .iter()
+            .map(|(_, bytes)| {
+                let image = cache.load(*bytes);
+                image.wait().ok()?;
+                // The image reports ready a moment before its pixels hold it.
+                while image.pixels().size() == (0, 0) {
+                    std::thread::yield_now();
+                }
+                Some(image)
+            })
+            .collect()
+    });
+    let i = PHOTOS.iter().position(|(who, _)| *who == name)?;
+    decoded[i].as_ref().map(rune::Image::pixels)
 }
