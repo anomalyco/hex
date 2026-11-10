@@ -293,6 +293,16 @@ impl Hud {
         if matches!(&event, HudEvent::Started) {
             self.edge_placed = None;
         }
+        // Rune drops an overlay whose layer surface the compositor closed,
+        // which it does when the HUD's output goes away (a monitor
+        // unplugged, or a KVM switching away and back, #1663), without
+        // telling Hex: ask Rune for the HUD at each capture's start, so a
+        // later one appears on an output that exists. Rune's show is a no-op
+        // while the overlay is visible.
+        #[cfg(target_os = "linux")]
+        if matches!(&event, HudEvent::Started) {
+            self.shown.store(false, Ordering::Release);
+        }
         let starts = matches!(&event, HudEvent::Started);
         let meter = matches!(&event, HudEvent::Meter { .. });
         self.model.handle(event, Instant::now(), self.reduce);

@@ -1808,6 +1808,15 @@ capture's start and each hide now forget the placement, so the next show sends
 the display and rectangle again, as Linux and Windows already do. Not run on a
 two-display Mac; the misplacement inside Rune itself is not addressed here.
 
+**Fixed November 10, 2026 (issue 1663):** on Linux Wayland the HUD stopped
+appearing after its monitor was removed and added back (a KVM switch, for
+example) until Hex restarted. The compositor closes the layer surface with the
+output, and Rune hides and drops that overlay on its own while Hex still thinks
+the HUD is shown, so no later dictation asked for it again. Each capture's start
+now asks for the HUD again, so it reappears on the next dictation, on an output
+that exists. Not verified on real Wayland hardware with a monitor
+unplugged and re-plugged.
+
 ```ts
 Settings > Sounds (next to Sound volume)                    // dictate.sound-set
 ├── Default / older settings -> Classic
