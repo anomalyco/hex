@@ -112,6 +112,9 @@ pub enum Source {
     /// A session named at the start of what was said ("tell scrawl …"; `named`). Obeyed ahead
     /// of everything but an address.
     Named,
+    /// The session a page names itself, by a `<meta name="opencode-session">` tag or an
+    /// `.opencode-session` file in its folder (`served::marker`). Obeyed ahead of rules.
+    Signed,
     /// A `routing.sites` rule covering the tab's URL. Obeyed ahead of weighing when it finds a
     /// session.
     Rule,
@@ -155,6 +158,7 @@ impl Source {
     fn label(self) -> &'static str {
         match self {
             Self::Named => "named",
+            Self::Signed => "signed",
             Self::Rule => "rule",
             Self::AppRule => "app-rule",
             Self::DevBuild => "dev-build",
@@ -173,7 +177,7 @@ impl Source {
     /// Full points for a clue of this source that names a candidate.
     fn points(self) -> u32 {
         match self {
-            Self::Named => 100,
+            Self::Named | Self::Signed => 100,
             Self::Rule
             | Self::AppRule
             | Self::DevBuild
@@ -437,7 +441,12 @@ pub fn decide(evidence: &Evidence, policy: Policy) -> Judgement {
     if let Some(judgement) = ruled(evidence, Source::Named) {
         return judgement;
     }
-    for source in [Source::Rule, Source::AppRule, Source::DevBuild] {
+    for source in [
+        Source::Signed,
+        Source::Rule,
+        Source::AppRule,
+        Source::DevBuild,
+    ] {
         if let Some(judgement) = ruled(evidence, source) {
             return judgement;
         }
@@ -467,8 +476,8 @@ fn addressed(evidence: &Evidence, address: &Address) -> Scored {
     }
 }
 
-/// The session a named address, a `routing.sites` or `routing.apps` rule, or a dev build
-/// (`source`) names, or the newest in its
+/// The session a named address, a signed page, a `routing.sites` or `routing.apps` rule, or a
+/// dev build (`source`) names, or the newest in its
 /// folder (any folder of the folder's repository counts), sent to without weighing. `None` when
 /// it names none open.
 fn ruled(evidence: &Evidence, source: Source) -> Option<Judgement> {
@@ -701,7 +710,7 @@ fn alternatives(ranking: &[Scored]) -> Vec<Scored> {
 fn with_named_sessions(evidence: &Evidence) -> Vec<Candidate> {
     let mut candidates = evidence.candidates.clone();
     for clue in &evidence.clues {
-        if let (Source::Page | Source::Publisher, Pointer::Session { id, .. }) =
+        if let (Source::Page | Source::Signed | Source::Publisher, Pointer::Session { id, .. }) =
             (clue.source, &clue.pointer)
             && !candidates.iter().any(|c| &c.id == id)
         {
@@ -1296,8 +1305,11 @@ mod tests {
         e.clues[0] = folder(Source::Rule, "/p/nobody");
         let j = decide(&e, Policy::Weigh);
         assert_ne!(sent_to(&j), Some("ses_scrawl"));
-        // The user's own choice still beats a rule.
+        // A page naming its session beats the rule, and the user's own choice beats both.
         e.clues[0] = folder(Source::Rule, "/p/scrawl");
+        e.clues.push(named(Source::Signed, "ses_signer"));
+        assert_eq!(sent_to(&decide(&e, Policy::Weigh)), Some("ses_signer"));
+        assert_eq!(sent_to(&decide(&e, Policy::Ladder)), Some("ses_signer"));
         e.address = Some(Address::Chosen("ses_ios".into()));
         assert_eq!(sent_to(&decide(&e, Policy::Weigh)), Some("ses_ios"));
     }

@@ -111,8 +111,19 @@ pub fn locate(
         return Served::Project;
     };
     let (project, _) = super::project_root(listener);
-    if find(&segments, std::slice::from_ref(&project)).is_some() {
-        return Served::Project;
+    if let Some(page) = find(&segments, std::slice::from_ref(&project)) {
+        // A folder in the server's project that sessions publish into says nothing about it.
+        return match page
+            .file
+            .parent()
+            .and_then(|dir| content_root(dir, servers))
+        {
+            Some(root) => Served::Elsewhere(Page {
+                file: page.file,
+                root,
+            }),
+            None => Served::Project,
+        };
     }
     let others: Vec<PathBuf> = roots
         .iter()
@@ -156,7 +167,8 @@ fn find(segments: &[String], roots: &[PathBuf]) -> Option<Page> {
             if name.starts_with('.') || matches!(name.as_str(), "node_modules" | "target") {
                 continue;
             }
-            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            // A symlinked folder counts (`artifacts` -> another disk).
+            if entry.path().is_dir() {
                 add(entry.path());
             }
         }
@@ -187,10 +199,15 @@ fn find(segments: &[String], roots: &[PathBuf]) -> Option<Page> {
 /// a folder named `artifacts` above `dir`, else the folder above the nearest one holding an
 /// `.opencode-session`, within `dir`'s project.
 pub fn content_root(dir: &Path, servers: &[(String, PathBuf)]) -> Option<PathBuf> {
+    // A listener's folder is read as it is on disk; config may name it through a symlink.
+    let inside = |folder: &Path| {
+        (dir.starts_with(folder) && dir != folder)
+            || (real(dir).starts_with(real(folder)) && real(dir) != real(folder))
+    };
     if let Some(folder) = servers
         .iter()
         .map(|(_, folder)| folder)
-        .filter(|folder| dir.starts_with(folder) && dir != folder.as_path())
+        .filter(|folder| inside(folder))
         .max_by_key(|folder| folder.components().count())
     {
         return Some(folder.clone());
@@ -241,6 +258,11 @@ pub fn changes(dir: &Path) -> Vec<u64> {
         .collect()
 }
 
+/// `path` as it is on disk (symlinks resolved), or as given when it can't be read.
+fn real(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn modified_ms(path: &Path) -> Option<u64> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     Some(
@@ -267,9 +289,11 @@ pub fn marker(page: &Page) -> Option<(String, String)> {
             format!("{} names it in a meta tag", page.file.display()),
         ));
     }
-    let mut dir = page.file.parent();
+    // Compared as they are on disk, so a root reached through a symlink still holds the file.
+    let (folder, root) = (page.file.parent().map(real), real(&page.root));
+    let mut dir = folder.as_deref();
     while let Some(d) = dir {
-        if d == page.root || !d.starts_with(&page.root) {
+        if d == root || !d.starts_with(&root) {
             break;
         }
         let file = d.join(".opencode-session");
@@ -377,8 +401,6 @@ const READ_ONLY_TOOLS: [&str; 5] = ["read", "grep", "glob", "list", "webfetch"];
 /// Points for a session whose tool call wrote the file, and for one that only used its folder.
 pub const WROTE: u32 = 95;
 pub const USED: u32 = 60;
-/// Points for a page that names its session.
-pub const MARKED: u32 = 100;
 /// The serving process's folder, when the page is a file from elsewhere.
 pub const SERVER_ONLY: u32 = 15;
 /// The serving process's folder, when it's inside a folder sessions publish into: its project
@@ -601,7 +623,7 @@ mod tests {
         touch(&artifacts.join("2026-10-19-hex/index.html"), "");
         // A session in the folder above `home` lists it before `home`'s own session does.
         let roots = vec![base.clone(), home.clone(), gallery.clone()];
-        let url = "https://studio:8444/raw/2026-10-19-hex/index.html";
+        let url = "https://gallery.example:8444/raw/2026-10-19-hex/index.html";
         assert_eq!(
             locate(url, &gallery.join("server"), &[], &roots),
             Served::Elsewhere(Page {
@@ -611,7 +633,12 @@ mod tests {
         );
         // The trailing slash is its index.html.
         assert!(matches!(
-            locate("https://studio:8444/2026-10-19-hex/", &gallery, &[], &roots),
+            locate(
+                "https://gallery.example:8444/2026-10-19-hex/",
+                &gallery,
+                &[],
+                &roots
+            ),
             Served::Elsewhere(_)
         ));
         // The server's own files and app routes are its project's.
@@ -634,10 +661,13 @@ mod tests {
             Served::Unknown
         );
         // Config maps a prefix outright.
-        let servers = vec![("https://studio:8444/raw/".to_owned(), artifacts.clone())];
+        let servers = vec![(
+            "https://gallery.example:8444/raw/".to_owned(),
+            artifacts.clone(),
+        )];
         assert_eq!(
             locate(
-                "https://studio:8444/raw/lot/iteration-2.jpg",
+                "https://gallery.example:8444/raw/lot/iteration-2.jpg",
                 &gallery,
                 &servers,
                 &[]
@@ -684,6 +714,55 @@ mod tests {
         );
         assert_eq!(marker(&html).map(|m| m.0), Some("ses_page".into()));
         assert_eq!(html.needle(), None);
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    /// A gallery server in a repository whose `artifacts` folder is a symlink to another disk:
+    /// the page is found through the symlink, is the publishing folder's (not the server's), and
+    /// names its session by the folder's `.opencode-session` however its root is spelled.
+    #[cfg(unix)]
+    #[test]
+    fn a_page_under_a_symlinked_artifacts_folder_is_found_and_names_its_session() {
+        let base = temp("symlinked");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".git")).unwrap();
+        let gallery = home.join("tools/gallery");
+        std::fs::create_dir_all(&gallery).unwrap();
+        let disk = base.join("disk/artifacts");
+        touch(&disk.join("2026-01-02-demo/examples/queue/index.html"), "");
+        touch(
+            &disk.join("2026-01-02-demo/.opencode-session"),
+            "ses_signer\n",
+        );
+        std::os::unix::fs::symlink(&disk, home.join("artifacts")).unwrap();
+        let url = "https://gallery.example:8444/2026-01-02-demo/examples/queue/";
+        let artifacts = home.join("artifacts");
+        let page = Page {
+            file: artifacts.join("2026-01-02-demo/examples/queue/index.html"),
+            root: artifacts.clone(),
+        };
+        assert_eq!(
+            locate(url, &gallery, &[], &[]),
+            Served::Elsewhere(page.clone())
+        );
+        assert_eq!(marker(&page).map(|m| m.0), Some("ses_signer".into()));
+        // Config naming the folder on disk finds the same marker in a file read through the link.
+        let real_root = Page {
+            root: std::fs::canonicalize(&disk).unwrap(),
+            ..page.clone()
+        };
+        assert_eq!(marker(&real_root).map(|m| m.0), Some("ses_signer".into()));
+        // The server's own files are still its project's.
+        touch(&gallery.join("app.js"), "");
+        assert_eq!(
+            locate(
+                "https://gallery.example:8444/tools/gallery/app.js",
+                &gallery,
+                &[],
+                &[]
+            ),
+            Served::Project
+        );
         std::fs::remove_dir_all(base).unwrap();
     }
 
