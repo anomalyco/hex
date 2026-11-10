@@ -65,6 +65,10 @@ pub enum DictationFlavour {
     /// Labs › Terminal paste shortcut: processed like a normal dictation,
     /// but pasted with Ctrl+Shift+V whatever Terminal paste says.
     TerminalPaste,
+    /// Labs › Second dictation shortcut: another key that dictates exactly
+    /// like the dictation shortcut. It is its own owner, so neither
+    /// shortcut finishes or double-taps the other's capture.
+    Second,
 }
 
 #[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]

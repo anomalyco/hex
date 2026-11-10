@@ -406,7 +406,6 @@ pub(super) fn conflicts(
         ShortcutTarget::Capture => HotkeySlot::Capture,
         #[cfg(all(hex_capture, target_os = "macos"))]
         ShortcutTarget::CaptureReplay => HotkeySlot::CaptureReplay,
-        #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => HotkeySlot::SecondDictation,
         #[cfg(target_os = "macos")]
         ShortcutTarget::ExtraDictation(index) => HotkeySlot::ExtraDictation(index),
@@ -448,7 +447,6 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::Capture => Some(&settings.capture.hotkey),
         #[cfg(all(hex_capture, target_os = "macos"))]
         ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey.as_ref(),
-        #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey.as_ref(),
         #[cfg(target_os = "macos")]
         ShortcutTarget::ExtraDictation(index) => settings
@@ -481,7 +479,6 @@ pub(super) fn set_binding(
         ShortcutTarget::Capture => settings.capture.hotkey = binding,
         #[cfg(all(hex_capture, target_os = "macos"))]
         ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey = Some(binding),
-        #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => settings.second_dictation_hotkey = Some(binding),
         #[cfg(target_os = "macos")]
         ShortcutTarget::ExtraDictation(index) => {
@@ -1142,7 +1139,6 @@ pub(super) fn hotkey_key(target: ShortcutTarget) -> &'static str {
         ShortcutTarget::Capture => "capture-hotkey",
         #[cfg(all(hex_capture, target_os = "macos"))]
         ShortcutTarget::CaptureReplay => "capture-replay-hotkey",
-        #[cfg(target_os = "macos")]
         ShortcutTarget::SecondDictation => "second-dictation-hotkey",
         // Settings keeps at most four rows, so every one has its own key.
         #[cfg(target_os = "macos")]

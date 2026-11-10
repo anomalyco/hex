@@ -50,7 +50,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Spoken symbols  no    labs.spoken_symbols          spoken "hashtag", "underscore", "comma", … become symbols joined to their words: "#release", "my_variable", "done, thanks"; Spanish "arroba", "guion bajo", "coma", … too (#678, #1040)
 ├── Remove filler words no labs.filler_words          English dictations lose um, umm, uh, uhh, erm, er, ah, with no model (#631)
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
-├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
+├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
 ├── More dictation shortcuts no labs.more_dictation_shortcuts + extra_dictation_hotkeys (macOS)
 │                                        up to four more shortcuts that each dictate like the main one, each with its own
@@ -599,30 +599,49 @@ window yet. Checks:
 loaded in a player; the Labs page goldens need regenerating on Linux with the
 new row.
 
-Second dictation shortcut (`second-dictation-shortcut`, issue 627, macOS):
-for a Globe/Fn shortcut on the laptop keyboard and another key on an
-external keyboard. While on, General shows a "Second dictation shortcut"
+Second dictation shortcut (`second-dictation-shortcut`, issue 627, macOS, Linux
+and Windows): for a Globe/Fn shortcut on the laptop keyboard and another key on
+an external keyboard. While on, General shows a "Second dictation shortcut"
 recorder under Shortcut, unbound by default and clearable
 (`second_dictation_hotkey`, also `hex settings set second_dictation_hotkey
 f5`). It is refused when it shares a key with another Hex shortcut, and the
 others' checks count it while the toggle is on. The gate is
-`AppSettings::active_second_dictation_hotkey`: only on macOS, with the toggle
-on, a binding saved, and no overlap does `RuntimeHotkeys::second_dictation`
-carry it, so the event tap suppresses its keys and the listener
-(`recognition::Hotkeys`) runs a second shortcut machine with the dictation
-shortcut's Hold/Toggle, double-tap lock, and double-tap-only settings. It
-dictates and pastes with processing, as the dictation shortcut does; Paste
-last and meeting paste still come only from the main machine. The shortcut
-that starts a capture finishes or cancels it, and the other stands down
-until its keys lift while it records. Turning the toggle off or clearing the
-binding mid-capture cancels that capture. Off, nothing is matched,
-suppressed, or checked for it, and Hex is unchanged. Checks:
+`AppSettings::active_second_dictation_hotkey`: with the toggle on, a binding
+saved, no overlap with another active shortcut, and, on Linux and Windows, a
+key. On macOS `RuntimeHotkeys::second_dictation` carries it, so the event tap
+suppresses its keys and the listener (`recognition::Hotkeys`) runs a second
+shortcut machine with the dictation shortcut's Hold/Toggle, double-tap lock,
+and double-tap-only settings. On Linux it joins the listener's
+`HotkeyOptions` as its own `Shortcut`, so an X11 grab or a shortcuts-portal
+entry (id `second-dictation`, description "Second dictation shortcut")
+registers it only while on and bound; the desktop may grant a different
+trigger, and Settings shows what it granted. On Windows the listener's
+keyboard hook registers it as its own trigger and down flag
+(`CallbackState::second_dictation`), so it starts, locks, double-taps, and
+finishes a capture exactly as the dictation shortcut does, and the capture's
+`DictationFlavour::Second` keeps it from the main, raw, or Terminal paste
+machine. Linux and Windows register a key, so a binding without one never runs
+there; Windows Settings refuses one without a key, the same rule Dictate
+without processing and Terminal paste follow. On every OS it dictates and
+pastes with processing, as the dictation shortcut does; Paste last and meeting
+paste still come only from the main machine. The shortcut that starts a
+capture finishes or cancels it, and the other stands down until its keys lift
+while it records. Turning the toggle off or clearing the binding mid-capture
+cancels that capture on macOS; on Linux a settings change applies once the
+capture ends. Off, nothing is matched, suppressed, registered, or checked for
+it, and Hex is unchanged. Checks:
 `the_second_dictation_shortcut_needs_its_lab_and_its_own_keys` in
-[app_settings.rs](../../src/app_settings.rs) and
+[app_settings.rs](../../src/app_settings.rs),
 `the_shortcut_that_starts_a_capture_owns_it` in
-[recognition.rs](../../src/recognition.rs) (macOS only). Not yet observed: a
-real Mac with an external keyboard, or the recorder row's rendering (macOS
-builds only; no golden).
+[recognition.rs](../../src/recognition.rs) (macOS only),
+`second_dictation_shortcut_owns_the_capture_it_starts` in
+[linux/input.rs](../../src/linux/input.rs),
+`second_dictation_is_registered_only_while_its_lab_is_on` in
+[linux/dictation.rs](../../src/linux/dictation.rs), and the Windows
+`the_second_dictation_flavour_owns_its_capture` (cross-compiled only). Not yet observed: a
+real Mac with an external keyboard, a real Linux X11 or Wayland shortcut press,
+or the recorder row's rendering; the Labs page goldens show the new row counted
+on Linux, macOS, and Windows.
 
 More dictation shortcuts (`more-dictation-shortcuts`, macOS): up to four
 more shortcuts that each dictate like the main one, each with its own

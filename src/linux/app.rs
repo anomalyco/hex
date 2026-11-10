@@ -63,6 +63,9 @@ pub(crate) enum ShortcutTarget {
     /// Labs › Terminal paste shortcut: dictates like the dictation shortcut
     /// and always pastes with Ctrl+Shift+V.
     TerminalPaste,
+    /// Labs › Second dictation shortcut: another key that dictates exactly
+    /// like the dictation shortcut.
+    SecondDictation,
     /// Toggle mode's cancel shortcut.
     Cancel,
 }
@@ -1112,6 +1115,9 @@ impl LinuxDesktopHost {
                         ShortcutTarget::TypedText => settings.typed_text_hotkey = Some(binding),
                         ShortcutTarget::TerminalPaste => {
                             settings.terminal_paste_hotkey = Some(binding)
+                        }
+                        ShortcutTarget::SecondDictation => {
+                            settings.second_dictation_hotkey = Some(binding)
                         }
                         ShortcutTarget::Cancel => settings.cancel_hotkey = binding,
                     }

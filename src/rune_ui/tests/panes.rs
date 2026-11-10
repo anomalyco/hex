@@ -2064,6 +2064,10 @@ fn labs_lists_every_toggle_off_by_default() {
         ("lab-vocabulary-biasing", settings.labs.vocabulary_biasing),
         ("lab-return-to-app", settings.labs.return_to_app),
         ("lab-speakers-only", settings.labs.speakers_only),
+        (
+            "lab-second-dictation-shortcut",
+            settings.labs.second_dictation_shortcut,
+        ),
     ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
         assert!(!on, "{row} is on");
@@ -2089,11 +2093,23 @@ fn labs_lists_every_toggle_off_by_default() {
     assert!(rt.find("terminal-paste").is_none());
     open_labs(&mut rt);
     assert!(rt.find("lab-return-to-app").is_none(), "macOS only");
+    assert!(
+        rt.find("lab-second-dictation-shortcut").is_some(),
+        "the second dictation shortcut runs on Windows too"
+    );
     tap(&mut rt, "lab-terminal-paste");
     assert!(rt.state.settings.paste_with_shift);
     assert!(
         rt.find("lab-meetings").is_some(),
         "Meetings runs on Windows too"
+    );
+
+    // Linux lists the second dictation shortcut as well.
+    let mut rt = runtime("linux-labs", true, (980.0, 2000.0));
+    unfold_labs(&mut rt);
+    assert!(
+        rt.find("lab-second-dictation-shortcut").is_some(),
+        "the second dictation shortcut runs on Linux too"
     );
 }
 

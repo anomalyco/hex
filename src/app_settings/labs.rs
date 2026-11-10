@@ -91,7 +91,7 @@ pub struct LabsSettings {
     pub filler_words: bool,
     /// `hex meetings show --srt|--vtt` exports a transcript as timed subtitles (macOS, issue 633).
     pub subtitle_export: bool,
-    /// `second_dictation_hotkey` dictates like the dictation shortcut (macOS, issue 627).
+    /// `second_dictation_hotkey` dictates like the dictation shortcut (issue 627).
     pub second_dictation_shortcut: bool,
     /// Up to four more dictation shortcuts, each with its own activation
     /// mode (`extra_dictation_hotkeys`, macOS).

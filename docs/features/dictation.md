@@ -451,6 +451,40 @@ the Windows `a_second_dictation_shortcut_owns_the_capture_it_starts`
 (cross-compiled only). Proof limits: no physical shortcut or real terminal run
 on either OS.
 
+### Second Dictation Shortcut (Labs, every OS)
+
+Another optional dictation shortcut, for a keyboard whose main shortcut key is
+out of reach, such as a Globe/Fn key on a laptop and a spare key on an external
+keyboard. While Labs › Second dictation shortcut is on
+(`labs.second_dictation_shortcut`, off by default; issue 627), General shows
+its recorder under Shortcut, unbound until recorded and clearable:
+
+```ts
+Labs > Second dictation shortcut > recorder    // dictate.second-dictation
+├── Unbound by default -> nothing registered, grabbed, or reserved
+│   └── Record one -> registered only while the lab is on
+│       ├── macOS: its own shortcut machine beside dictation's (recognition::Hotkeys)
+│       ├── Windows: the hook's own trigger, owning its captures
+│       └── Linux: an X11 grab, or a portal entry "Second dictation shortcut"
+│           └── the desktop may grant a different key; Settings shows it
+├── Windows and Linux -> a binding needs a key; a keyless one never runs there
+├── Hold / double-tap lock / Toggle -> as the dictation shortcut
+│   ├── The shortcut that started a capture owns it: dictation, Dictate
+│   │   without processing, and Terminal paste neither finish it nor
+│   │   count toward its double tap              // DictationFlavour::Second
+│   └── Own flavour -> processed and pasted exactly like dictation
+│       (modes, History kind Dictation, last dictation updated)
+├── Clear (trash) -> unbound again; the lab off -> inactive and unregistered
+└── Paste Last and meeting paste -> only from the main shortcut
+```
+
+Checks: `second_dictation_shortcut_owns_the_capture_it_starts` (Linux reducer),
+`second_dictation_is_registered_only_while_its_lab_is_on` (Linux listener
+options), `the_second_dictation_shortcut_needs_its_lab_and_its_own_keys`
+(settings), and the Windows `the_second_dictation_flavour_owns_its_capture`
+(cross-compiled only). Proof limits: no physical shortcut press on any OS, no
+real Wayland grant or X11 grab run, and no Windows hook run.
+
 ### Copy Recent Dictation (Labs, macOS)
 
 Paste Last Dictation reaches only the newest dictation. With Labs › Copy

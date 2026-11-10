@@ -7,8 +7,8 @@
 //! feature (Live text, Live chapters, Vocabulary biasing, keyboard-language
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
-//! clipboard or only copying it (macOS), a second dictation shortcut
-//! (macOS), more dictation shortcuts with their own activation modes
+//! clipboard or only copying it (macOS), a second dictation shortcut,
+//! more dictation shortcuts with their own activation modes
 //! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
 //! recording when its call ends (macOS), transcribing a saved WAV file from a
 //! terminal, and Terminal paste, shortcut sharing
@@ -291,7 +291,6 @@ impl Feature {
             }
             Self::MouseShortcuts
             | Self::PauseBrowser
-            | Self::SecondDictationShortcut
             | Self::SmartSpacing
             | Self::SidedChords
             | Self::RecentDictations
@@ -321,6 +320,7 @@ impl Feature {
             Self::Playground
             | Self::LiveText
             | Self::FailureNotices
+            | Self::SecondDictationShortcut
             | Self::VocabularyBiasing
             | Self::UnloadIdle
             | Self::RestoreShortcutDefault

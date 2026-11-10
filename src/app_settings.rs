@@ -284,8 +284,8 @@ pub struct AppSettings {
     /// Unbound by default and ignored while its Labs toggle is off.
     pub typed_text_hotkey: Option<HotkeyBinding>,
     /// Labs › Second dictation shortcut: another shortcut that dictates
-    /// exactly as `dictation_hotkey` does (macOS). Unbound by default and
-    /// ignored while its Labs toggle is off.
+    /// exactly as `dictation_hotkey` does. Unbound by default and ignored
+    /// while its Labs toggle is off.
     pub second_dictation_hotkey: Option<HotkeyBinding>,
     /// Labs › More dictation shortcuts (macOS): up to
     /// [`MAX_EXTRA_DICTATION_SHORTCUTS`] more, each with its own binding and
@@ -1047,15 +1047,17 @@ impl AppSettings {
     }
 
     /// Labs › Second dictation shortcut's binding while it takes effect:
-    /// macOS, its toggle on, bound, and sharing no key with another active
-    /// shortcut. Otherwise Hex matches, suppresses, and checks nothing for
-    /// it.
+    /// its toggle on, bound, sharing no key with another active shortcut,
+    /// and, on Linux and Windows, naming a key (both register a key). On
+    /// macOS a shortcut without a key can still run. Otherwise Hex matches,
+    /// suppresses, registers, and checks nothing for it.
     pub fn active_second_dictation_hotkey(&self) -> Option<&HotkeyBinding> {
-        if !cfg!(target_os = "macos") || !self.labs.second_dictation_shortcut {
+        if !self.labs.second_dictation_shortcut {
             return None;
         }
         self.second_dictation_hotkey
             .as_ref()
+            .filter(|binding| cfg!(target_os = "macos") || binding.key.is_some())
             .filter(|binding| !self.hotkey_in_use(HotkeySlot::SecondDictation, binding))
     }
 
@@ -1195,7 +1197,7 @@ pub enum HotkeySlot {
     /// Labs › Annotate 15 s replay shortcut (macOS 27+).
     #[cfg(hex_capture)]
     CaptureReplay,
-    /// Labs › Second dictation shortcut (macOS).
+    /// Labs › Second dictation shortcut.
     SecondDictation,
     /// Labs › More dictation shortcuts (macOS): row `index`'s binding.
     ExtraDictation(usize),
@@ -1622,8 +1624,9 @@ mod tests {
     }
 
     /// Labs › Second dictation shortcut (issue 627): its binding takes
-    /// effect only on macOS with its toggle on, never sharing a key with
-    /// another shortcut, and the other shortcuts' checks count it.
+    /// effect on every OS with its toggle on, never sharing a key with
+    /// another shortcut, and the other shortcuts' checks count it. Linux and
+    /// Windows register a key, so a shortcut without one never runs there.
     #[test]
     fn the_second_dictation_shortcut_needs_its_lab_and_its_own_keys() {
         let function = HotkeyBinding {
@@ -1648,8 +1651,25 @@ mod tests {
             assert!(settings.hotkey_in_use(HotkeySlot::RawDictation, &function));
             assert!(settings.hotkey_in_use(HotkeySlot::Dictation, &function));
         } else {
-            assert_eq!(active, None);
+            assert_eq!(active, None, "a keyless shortcut never runs off macOS");
+            assert!(!settings.hotkey_in_use(HotkeySlot::RawDictation, &function));
         }
+
+        // A key runs on every OS, and the other shortcuts see it.
+        let keyed = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                control: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..HotkeyModifiers::default()
+            },
+            key: Some(HotkeyKey::named("f7")),
+        };
+        settings.second_dictation_hotkey = Some(keyed.clone());
+        assert_eq!(
+            settings.runtime_hotkeys().second_dictation,
+            Some(keyed.runtime())
+        );
+        assert!(settings.hotkey_in_use(HotkeySlot::RawDictation, &keyed));
 
         // The dictation shortcut's own keys are refused, and a saved overlap
         // is dropped rather than matched twice.

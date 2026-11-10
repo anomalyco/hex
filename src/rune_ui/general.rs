@@ -62,9 +62,8 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Opt
             let (description, cancel) = search::cancel_rows(ui, p);
             rows.extend_described(tr("Cancel"), Some(description), cancel);
         }
-        // Labs › Second dictation shortcut (macOS): another key that
-        // dictates like the one above, such as on an external keyboard.
-        #[cfg(target_os = "macos")]
+        // Labs › Second dictation shortcut: another key that dictates like
+        // the one above, such as on an external keyboard.
         if crate::labs::Feature::SecondDictationShortcut.on(&ui.settings) {
             rows.extend_described(
                 tr("Second dictation shortcut"),

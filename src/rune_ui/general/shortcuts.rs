@@ -21,10 +21,7 @@ pub(in crate::rune_ui) fn shortcut_rows(
         .center_y()
         .child(keys_button(ui, p, target));
     // The optional shortcuts can be turned off.
-    #[cfg(target_os = "macos")]
     let second = target == ShortcutTarget::SecondDictation;
-    #[cfg(not(target_os = "macos"))]
-    let second = false;
     #[cfg(target_os = "linux")]
     let typed_text = target == ShortcutTarget::TypedText;
     #[cfg(not(target_os = "linux"))]

@@ -94,6 +94,9 @@ pub(crate) enum ShortcutTarget {
     /// Labs › Terminal paste shortcut: dictates like dictation and always
     /// pastes with Ctrl+Shift+V.
     TerminalPaste,
+    /// Labs › Second dictation shortcut: another key that dictates exactly
+    /// like the dictation shortcut.
+    SecondDictation,
     /// Toggle mode's cancel shortcut.
     Cancel,
 }

@@ -59,7 +59,8 @@ struct Job {
     language: String,
     /// The clip, kept for History while Labs › Keep recordings is on.
     recording: Option<crate::history::Recording>,
-    /// The shortcut that started this capture (dictation, raw, or terminal).
+    /// The shortcut that started this capture (dictation, raw, terminal
+    /// paste, or second dictation).
     flavour: crate::dictation::DictationFlavour,
     /// `hex dictation stop --print`: the text goes here, never pasted.
     print: Option<PrintReply>,
@@ -99,6 +100,8 @@ pub struct WindowsDictationConfig {
     pub raw_dictation_hotkey: Option<WindowsHotkey>,
     /// Labs › Terminal paste shortcut, while the lab is on and it is bound.
     pub terminal_paste_hotkey: Option<WindowsHotkey>,
+    /// Labs › Second dictation shortcut, while the lab is on and it is bound.
+    pub second_dictation_hotkey: Option<WindowsHotkey>,
     /// The Annotate key, while Annotate is on.
     pub annotate_hotkey: Option<WindowsHotkey>,
     /// Toggle mode's cancel shortcut; none in Hold mode.
@@ -157,6 +160,9 @@ impl WindowsDictationConfig {
             terminal_paste_hotkey: settings
                 .active_terminal_paste_hotkey()
                 .map(WindowsHotkey::from),
+            second_dictation_hotkey: settings
+                .active_second_dictation_hotkey()
+                .map(WindowsHotkey::from),
             annotate_hotkey: settings
                 .capture_on()
                 .then(|| WindowsHotkey::from(&settings.capture.hotkey)),
@@ -205,18 +211,12 @@ pub fn run(
     } else {
         Some(LocalTranscriber::load(selection)?)
     };
+    // The hook's shortcuts from the same settings, before its fields are
+    // destructured below.
+    let mut shortcuts = Shortcuts::from_config(&config);
     let WindowsDictationConfig {
         device,
         hotkey,
-        paste_last_hotkey,
-        raw_dictation_hotkey,
-        terminal_paste_hotkey,
-        annotate_hotkey,
-        cancel_hotkey,
-        double_tap_lock,
-        double_tap_only,
-        shortcut_mode,
-        share_dictation_shortcut,
         while_dictating,
         release_microphone_while_idle,
         feedback_volume,
@@ -231,6 +231,7 @@ pub fn run(
         swap_failures,
         commands,
         dictations,
+        ..
     } = config;
     // Read by the output worker at each paste, so a change applies in place.
     let paste_with_shift = Arc::new(AtomicBool::new(paste_with_shift));
@@ -277,19 +278,7 @@ pub fn run(
         return Ok(());
     }
     let hotkey_label = hotkey.label();
-    let mut toggle_mode = shortcut_mode == crate::dictation::ShortcutMode::Toggle;
-    let mut shortcuts = Shortcuts {
-        hotkey,
-        paste_last_hotkey,
-        raw_dictation_hotkey,
-        terminal_paste_hotkey,
-        annotate_hotkey,
-        cancel_hotkey,
-        double_tap_lock,
-        double_tap_only,
-        shortcut_mode,
-        share_dictation_shortcut,
-    };
+    let mut toggle_mode = shortcuts.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
     let mut hotkey = shortcuts.start()?;
     // A shortcut event the idle wait took, handled at the next turn.
     let mut held_event = None;
@@ -380,18 +369,7 @@ pub fn run(
         {
             let next_config = WindowsDictationConfig::from_settings(&next);
             paste_with_shift.store(next_config.paste_with_shift, Ordering::Relaxed);
-            let next_shortcuts = Shortcuts {
-                hotkey: next_config.hotkey,
-                paste_last_hotkey: next_config.paste_last_hotkey,
-                raw_dictation_hotkey: next_config.raw_dictation_hotkey,
-                terminal_paste_hotkey: next_config.terminal_paste_hotkey,
-                annotate_hotkey: next_config.annotate_hotkey,
-                cancel_hotkey: next_config.cancel_hotkey,
-                double_tap_lock: next_config.double_tap_lock,
-                double_tap_only: next_config.double_tap_only,
-                shortcut_mode: next_config.shortcut_mode,
-                share_dictation_shortcut: next_config.share_dictation_shortcut,
-            };
+            let next_shortcuts = Shortcuts::from_config(&next_config);
             if next_shortcuts != shortcuts {
                 // The old hook goes first; one keyboard hook runs at a time.
                 drop(hotkey);
