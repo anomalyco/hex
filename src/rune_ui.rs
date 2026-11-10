@@ -375,7 +375,7 @@ fn on_close(ui: &mut Ui, tx: &mut Tx) {
     }
     // Windows destroys the closed window, so the next open makes a new one.
     #[cfg(target_os = "windows")]
-    crate::windows::rune::keep_window_size(tx);
+    crate::windows::rune::keep_window_frame(tx);
     #[cfg(target_os = "macos")]
     crate::macos_rune::window_closed();
     #[cfg(not(target_os = "windows"))]

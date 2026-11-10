@@ -2429,8 +2429,8 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 │   the speech model still loads on the GPU through Vulkan); closing releases
 │   the window and its swapchain too (release_gpu_when_closed), so a tray Hex
 │   holds neither and capture tools such as NVIDIA's Instant Replay don't take
-│   it for the game (#1308); the next open makes them again at the window's
-│   last size; Quit or no tray ends it
+│   it for the game (#1308); the next open makes them again where the window
+│   was and at its size; Quit or no tray ends it
 ├── General adds Launch at login; Terminal paste in Labs; chord capture polls
 ├── HUD: shared indicator model + CPU shader in a Rune overlay
 ├── Modes: "Choose a file…" opens rune::FileDialogs (file_dialog) on its own thread
