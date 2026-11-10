@@ -70,6 +70,7 @@ pub fn obeyed(to: &Scored) -> bool {
                 | Basis::Recorded
                 | Basis::Clue(
                     Source::Named
+                        | Source::Signed
                         | Source::Rule
                         | Source::AppRule
                         | Source::Page
@@ -81,12 +82,13 @@ pub fn obeyed(to: &Scored) -> bool {
     )
 }
 
-/// Whether a send rests on a rule the person saved: a `routing.sites` or `routing.apps` rule
-/// (an "Always send … here" among them). Hex sends only these without asking.
-pub fn saved_rule(to: &Scored) -> bool {
+/// Whether a send rests on something set down ahead of time: a page that names its session, or
+/// a `routing.sites` or `routing.apps` rule the person saved (an "Always send … here" among
+/// them). Hex sends only these without asking.
+pub fn explicit(to: &Scored) -> bool {
     matches!(
         to.lead().map(|r| r.basis),
-        Some(Basis::Clue(Source::Rule | Source::AppRule))
+        Some(Basis::Clue(Source::Signed | Source::Rule | Source::AppRule))
     )
 }
 

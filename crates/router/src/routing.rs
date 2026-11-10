@@ -913,7 +913,7 @@ pub fn learn_capture(dir: &Path, session: &str) -> Option<policy::OfferRule> {
         .get("decision")
         .and_then(|d| serde_json::from_value(d.clone()).ok())
         && to.candidate.id == session
-        && policy::saved_rule(&to)
+        && policy::explicit(&to)
     {
         return None;
     }

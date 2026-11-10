@@ -565,6 +565,7 @@ fn settled_why(judgement: &Judgement) -> Option<String> {
             Basis::Chosen => "chosen",
             Basis::Recorded => "recorded destination",
             Basis::Clue(Source::Named) => "named at the start",
+            Basis::Clue(Source::Signed) => "page names its session",
             Basis::Clue(Source::Rule) => "routing.sites rule",
             Basis::Clue(Source::AppRule) => "routing.apps rule",
             Basis::Clue(Source::DevBuild) => "dev build's checkout",
