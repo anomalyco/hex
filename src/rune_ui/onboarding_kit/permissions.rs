@@ -966,11 +966,15 @@ fn escaping_guide_and_drag(p: Paint, e: f64, reduced: bool) -> El {
                     .color(p.text()),
             )
             .child(el().key("sp").grow(1.0))
+            // It fades as the panel starts to escape rather than dropping
+            // out in one frame; it sits last, so nothing moves into its place.
             .children((esc_u < 0.25).then(|| {
                 text("Accessibility helper")
                     .key("sub")
                     .font(k.ty.small)
                     .color(p.faint())
+                    .opacity(1.0 - smoothstep(esc_u / 0.25))
+                    .opacity_motion(Anim::INSTANT)
             }))
     };
 

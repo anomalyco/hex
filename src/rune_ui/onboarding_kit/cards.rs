@@ -496,14 +496,19 @@ pub(crate) fn carried_bubble(
         .font(BUBBLE_FONT)
         .color(p.text())
         .wrap()
-        .shrink();
+        .shrink()
+        .transition(Transition::identity());
+    // Its line decides how it enters, words and all: a sent line is
+    // launched out of the field at full strength, and a fade of the
+    // bubble's own would start it as a ghost of the text it leaves.
     let bubble = row()
         .key("bubble")
         .max_w(BUBBLE_MAX)
         .px(11.0)
         .py(5.0)
         .radius(13.0)
-        .continuous_corners();
+        .continuous_corners()
+        .transition(Transition::identity());
     let bubble = match carry {
         // The surface is the words' sibling, so its fade never dims them.
         Some(carry) => bubble
