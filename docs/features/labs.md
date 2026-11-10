@@ -627,9 +627,9 @@ pastes with processing, as the dictation shortcut does; Paste last and meeting
 paste still come only from the main machine. The shortcut that starts a
 capture finishes or cancels it, and the other stands down until its keys lift
 while it records. Turning the toggle off or clearing the binding mid-capture
-cancels that capture on macOS; on Linux a settings change applies once the
-capture ends. Off, nothing is matched, suppressed, registered, or checked for
-it, and Hex is unchanged. Checks:
+cancels that capture on macOS; on Linux and Windows a settings change applies
+once the capture ends. Off, nothing is matched, suppressed, registered, or
+checked for it, and Hex is unchanged. Checks:
 `the_second_dictation_shortcut_needs_its_lab_and_its_own_keys` in
 [app_settings.rs](../../src/app_settings.rs),
 `the_shortcut_that_starts_a_capture_owns_it` in
