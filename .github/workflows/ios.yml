@@ -91,6 +91,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
+      - name: Build the shipping configuration for a device
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project HEXMobile.xcodeproj \
+            -scheme HEXMobile \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
       - name: Inspect the keyboard extension
         if: always()
         run: |
