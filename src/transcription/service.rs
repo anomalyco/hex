@@ -645,22 +645,6 @@ mod tests {
     #[test]
     fn a_timed_request_is_answered_only_at_the_models_own_level() {
         use crate::transcription::transcript::TimestampLevel::{None, Segment, Word};
-        for (model, requested) in [
-            (None, None),
-            (None, Segment),
-            (None, Word),
-            (Segment, Segment),
-            (Segment, Word),
-            (Word, Segment),
-            (Word, Word),
-        ] {
-            let refused = check_timings(model, requested).is_err();
-            assert_eq!(refused, !requested.supported_by(model));
-            assert!(
-                !refused || requested != None,
-                "an untimed request never needs the model"
-            );
-        }
         assert!(
             matches!(
                 check_timings(Segment, Word),

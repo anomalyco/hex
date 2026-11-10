@@ -532,8 +532,9 @@ fn timed_spans(
     use crate::transcription::transcript::TranscriptSegment;
     let span = |start_ms: i64, end_ms: i64, text: String| {
         let text = text.trim().to_owned();
+        let start_ms = start_ms.max(0);
         (!text.is_empty()).then(|| TranscriptSegment {
-            start_ms: start_ms.max(0).saturating_add(offset_ms),
+            start_ms: start_ms.saturating_add(offset_ms),
             end_ms: end_ms.max(start_ms).saturating_add(offset_ms),
             text,
         })

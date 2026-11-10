@@ -246,6 +246,7 @@ export const decodeTranscription = (value: unknown): TranscriptionResult => {
     || (granularity !== undefined && segments === undefined)
     || (segments !== undefined && granularity === undefined)
     || (words !== undefined && granularity !== "word")
+    || (granularity === "word" && words === undefined)
   ) {
     return invalid("transcription response")
   }

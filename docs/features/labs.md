@@ -2062,8 +2062,9 @@ result) carries them, Linux and Windows chunk long clips at the model's own
 window and add each chunk's offset once from its sample position, and macOS
 chunks a GGUF clip the same way. Apple Speech gives segments. An end that the
 minimum clip duration or a model's trailing silence pushed past the decoded
-audio is clamped to `durationMs`, and a clip with no speech answers `200`
-with an empty `transcript` and empty arrays.
+audio is clamped to `durationMs`. A GGUF model answers a clip with no speech
+with `200`, an empty `transcript`, and empty arrays; Apple Speech reports no
+speech as `500 transcription-failed`, with or without timings.
 
 An unknown value, or a repeated parameter, is `400 invalid-request`. With the
 lab off, `segment` and `word` answer `403 timestamps-disabled` before the

@@ -60,6 +60,7 @@ describe("transcription decoding", () => {
     [{ timestampGranularity: "segment", segments: [{ text: "hello", startMs: 5 }] }],
     [{ timestampGranularity: "segment", segments: [{ text: "hello", startMs: -1, endMs: 5 }] }],
     [{ timestampGranularity: "word", segments: [], words: [{ text: "hi", startMs: 9, endMs: 4 }] }],
+    [{ timestampGranularity: "word", segments: [] }],
   ])("rejects a malformed timed response for %j", (timed) => {
     expect(() => decodeTranscription({ ...untimed, ...timed }))
       .toThrowError(expect.objectContaining({ code: "invalid-response" }))

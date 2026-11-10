@@ -161,7 +161,7 @@ fn describe(error: TranscriptionServiceError) -> String {
         TranscriptionServiceError::QueueFull => "Another transcription is running.".into(),
         TranscriptionServiceError::Unavailable => "Transcription stopped.".into(),
         TranscriptionServiceError::Cancelled => "Transcription was cancelled.".into(),
-        TranscriptionServiceError::Timestamps => "The model cannot give word times.".into(),
+        TranscriptionServiceError::Timestamps => "The model cannot give these timings.".into(),
         TranscriptionServiceError::Model(error) | TranscriptionServiceError::Inference(error) => {
             error
         }

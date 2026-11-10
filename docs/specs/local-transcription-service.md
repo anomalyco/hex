@@ -137,13 +137,16 @@ queue-full`; all three are decided before the audio body is read.
 `GET /capabilities` always includes `outputProcessing`, true only when a
 processor is installed and the lab is on.
 
-`POST /transcriptions` also accepts an optional `timestamps` query parameter
-on the running desktop app's authenticated API: `none`, `segment`, or `word`
-(Labs › Timestamps in API transcripts, off by default). Absent means `none`.
-Any other value, or a repeated parameter, answers `400 invalid-request`. With
-the lab off, `segment` and `word` answer `403 timestamps-disabled` before the
-audio body is read; `none` and an absent parameter are unaffected. An
-unknown value is `400` whether or not the lab is on.
+`POST /transcriptions` also accepts an optional `timestamps` query parameter:
+`none`, `segment`, or `word` (Labs › Timestamps in API transcripts, off by
+default). The running desktop app's authenticated API reads the lab live;
+`hex service --embedded` honours the saved `labs.api_timestamps`, read once per
+process, so changing the lab takes effect after the helper restarts. Absent
+means `none`. Any other value, or a repeated parameter, answers `400
+invalid-request`. With the lab off, `segment` and `word` answer `403
+timestamps-disabled` before the audio body is read; `none` and an absent
+parameter are unaffected. An unknown value is `400` whether or not the lab is
+on.
 
 ```typescript
 // The response with timestamps=segment, on top of today's fields.
@@ -169,8 +172,10 @@ relative to the model's internal chunk: a long clip transcribed in chunks has
 each chunk's offset added once, from its sample position in the clip, so
 chunks that held no speech shift nothing. An end that padding (the minimum
 clip duration, or a model's trailing silence) pushed past the decoded audio
-is clamped to `durationMs`. A clip with no speech answers `200` with an empty
-`transcript`, empty `segments`, and empty `words`.
+is clamped to `durationMs`. A GGUF model answers a clip with no speech with
+`200`, an empty `transcript`, and empty `segments` and `words`; Apple Speech
+reports no speech instead, as `500 transcription-failed`, whether or not
+timings were asked for.
 
 The times are the model's own: nothing estimates them from text length or
 chunk boundaries, and a word request is never answered with segments. When
