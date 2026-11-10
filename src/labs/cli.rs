@@ -7,6 +7,17 @@ use color_eyre::eyre::eyre;
 use super::Feature;
 use crate::app_settings::AppSettings;
 
+impl Feature {
+    /// Whether saved `settings` turn this on in this build, without applying
+    /// them to this process's switches (`labs::apply`). A read-only command
+    /// that never loads settings reads the saved file this way instead; the
+    /// reader has already enforced any managed lock, and it is checked here
+    /// as `encode` does.
+    pub fn saved_on(self, settings: &AppSettings) -> bool {
+        self.on(settings) && self.shipped() && self.managed().is_none()
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum LabsCommand {
     /// List every Labs feature and whether it is on (the default).

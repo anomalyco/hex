@@ -1652,6 +1652,7 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("again").is_some());
+    assert!(rt.find("again-play").is_some(), "audio can be played");
     rt.state.history.selected = Some(plain);
     rt.invalidate();
     settle(&mut rt);
@@ -1659,6 +1660,7 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
         rt.find("again").is_none(),
         "an entry without audio has nothing to transcribe"
     );
+    assert!(rt.find("again-play").is_none());
 
     rt.state.history.selected = Some(id);
     rt.state.history.again = Some(history::Again::finished(
@@ -1706,11 +1708,101 @@ fn transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry() {
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("versions").is_none(), "off, the versions hide");
+    assert!(rt.find("again-play").is_none(), "off, Play hides");
     assert!(
         texts(&rt).iter().any(|text| text == "Parakeet v3"),
         "the model shows either way"
     );
     let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn leaving_an_entry_or_turning_off_keep_recordings_stops_playback() {
+    use crate::history::playback::Playback;
+    let mut rt = runtime("history", true, GOLDEN_SIZE);
+    rt.state.settings.labs.keep_recordings = true;
+    for entry in &mut rt.state.history.entries {
+        if entry.id == 2 {
+            entry.recording_bytes = 32_000;
+        }
+    }
+    let start = |rt: &mut Runtime<Ui>| {
+        rt.state.history.selected = Some(2);
+        rt.state.history.playback = Some(Playback::test_playing(2));
+        rt.invalidate();
+        settle(rt);
+        assert!(
+            rt.state
+                .history
+                .playback
+                .as_ref()
+                .is_some_and(Playback::playing),
+            "the playback starts"
+        );
+        assert_eq!(
+            element(rt, "again-play").label.as_deref(),
+            Some("Stop"),
+            "the card offers Stop while it plays"
+        );
+    };
+    let stopped = |rt: &Runtime<Ui>| {
+        assert!(
+            !rt.state
+                .history
+                .playback
+                .as_ref()
+                .is_some_and(Playback::playing),
+            "the playback stopped"
+        );
+    };
+    let play = |rt: &Runtime<Ui>| {
+        assert_eq!(
+            element(rt, "again-play").label.as_deref(),
+            Some("Play"),
+            "the card offers Play again"
+        );
+    };
+
+    // Leaving for another entry.
+    start(&mut rt);
+    rt.state.history.selected = Some(3);
+    rt.invalidate();
+    settle(&mut rt);
+    stopped(&rt);
+    rt.state.history.selected = Some(2);
+    rt.invalidate();
+    settle(&mut rt);
+    play(&rt);
+
+    // Leaving History.
+    start(&mut rt);
+    rt.state.pane = Pane::General;
+    rt.invalidate();
+    settle(&mut rt);
+    stopped(&rt);
+    rt.state.pane = Pane::History;
+    rt.invalidate();
+    settle(&mut rt);
+    play(&rt);
+
+    // Turning the lab off.
+    start(&mut rt);
+    rt.state.settings.labs.keep_recordings = false;
+    rt.invalidate();
+    settle(&mut rt);
+    stopped(&rt);
+    assert!(rt.find("again-play").is_none(), "off, Play hides");
+
+    rt.state.settings.labs.keep_recordings = true;
+    rt.invalidate();
+    settle(&mut rt);
+    play(&rt);
+
+    // Closing the window: a hidden window only polls when woken, so on_close
+    // stops the playback itself.
+    start(&mut rt);
+    on_close(&mut rt.state, &mut rune::Tx::default());
+    stopped(&rt);
 }
 
 #[test]

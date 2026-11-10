@@ -91,7 +91,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a_refusal_follows_hexs_code_rather_than_its_status
 │                                        // (control/cli/transcribe.rs); a running service answered model-unavailable for an uninstalled
 │                                        // model, but no transcript answer or offline model load was observed, and nothing ran on macOS or Windows
-├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Transcribe again runs it through another installed model (#1032)
+├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── ⌘Q closes Settings no labs.quit_closes_window      (macOS) the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, the menu bar icon still quits (#1473)
 ├── Notch indicator no    labs.notch_indicator         (macOS) on a screen with a notch, the HUD widens the notch sideways in the Dynamic Island's compact style at either visible position: an orange mic and level bars, the macOS spinner, a green checkmark; Hidden still hides it, and flat screens keep the Top/Bottom setting
@@ -1309,7 +1309,7 @@ in the file manager, or choosing another folder for models. Checks:
 Labs page goldens need regenerating on Linux with the new row.
 
 Keep recordings (`keep-recordings`, issue 1032, every OS): for hearing a
-dictation again through a different model.
+dictation again, through the output device or a different model.
 
 ```ts
 Labs › Keep recordings on                     // labs.keep-recordings
@@ -1322,7 +1322,13 @@ Labs › Keep recordings on                     // labs.keep-recordings
 ├── Retention, the 10,000-entry and text caps, Delete, Clear all -> the
 │   entry's WAV is deleted at the next save (`recordings::sweep`)
 ├── Over 512 MiB of audio -> the oldest entries lose their audio, keep their text
-├── History card, entry with audio -> "Saved recording" + "Transcribe again" menu
+├── History card, entry with audio -> "Saved recording" + Play + "Transcribe again" menu
+│   ├── Play -> the clip through the default output device, on a worker; one
+│   │   playback at a time: Play on another entry, Stop, selecting another
+│   │   entry, leaving History, turning the lab off, or closing the window
+│   │   stops it. Stop shows while it plays and Play returns when it ends or
+│   │   fails (history/playback.rs)
+│   ├── Failed -> "Could not play: <why>" (the file is gone, no output device)
 │   ├── Lists every available model installed for the language it would use
 │   ├── A model that takes a language hint (not Parakeet v3/Ultra, GigaAM,
 │   │   Granite, Bark) -> "<model> · Language: <saved language>" menu (Auto when it
@@ -1340,26 +1346,41 @@ Labs › Keep recordings on                     // labs.keep-recordings
 │   │   Stored in the entry: they count toward the 16 MiB text cap and leave
 │   │   with it (retention, Delete, Clear all); hidden while the toggle is off
 │   └── Failed -> "Could not transcribe again: <why>"
-└── Toggle off -> nothing new is saved and the menu hides; existing audio stays
-    until it expires or History is cleared
+└── Toggle off -> nothing new is saved and the menu and Play hide; existing
+    audio stays until it expires or History is cleared
 ```
 
-No playback yet. Off, History and dictation are exactly as before: no copy
-of the clip is made. Checks: `a_kept_recording_is_an_owner_only_wav_that_reads_back`,
+`hex history --json` names each kept recording's absolute path in `recording`
+while the lab is on and the file is still there; every other row omits the
+field. `hex history` reads the saved `labs.keep_recordings` switch with
+`AppSettings::read` instead of the process's runtime switches, which that
+read-only command never sets; a managed lock and the build's audience keep it
+off as `labs::encode` does. Turning the lab off, leaving the entry or History,
+or closing the window stops playback; closing stops it directly in `on_close`,
+since a hidden window only polls when woken. Off, History and dictation are
+exactly as before: no copy of the clip is made. Checks:
+`a_kept_recording_is_an_owner_only_wav_that_reads_back`,
 `recordings_leave_with_their_entries`,
 `the_recordings_byte_cap_drops_the_oldest_audio_but_keeps_the_text`,
 `a_recording_another_process_has_not_saved_yet_survives_a_sweep`,
 `replacing_the_text_keeps_the_entry_and_its_recording`, and
 `retranscribing_a_missing_recording_says_so` in
 [history.rs](../../src/history.rs);
-`transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry` and
-`transcribe_again_offers_a_language_only_for_models_that_take_one` in
+`a_kept_recording_decodes_into_its_own_clip` and
+`a_worker_answer_returns_the_card_to_play_and_keeps_a_failure` in
+[history/playback.rs](../../src/history/playback.rs);
+`keep_recordings_follows_the_saved_switch_not_the_process` and
+`history_json_names_a_recording_only_where_one_is_kept` in
+[transcript_cli_tests.rs](../../src/control/transcript_cli_tests.rs);
+`transcribe_again_shows_only_with_its_lab_and_replace_updates_the_entry`,
+`transcribe_again_offers_a_language_only_for_models_that_take_one`, and
+`leaving_an_entry_or_turning_off_keep_recordings_stops_playback` in
 [tests.rs](../../src/rune_ui/tests.rs);
 `keep_recordings_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs); the tests in
 [history/versions.rs](../../src/history/versions.rs) (newest first, five at
-most, switch back, text cap, Clear all). Not yet observed: a real dictation kept and
-transcribed again with another model in a window, on any OS.
+most, switch back, text cap, Clear all). Not yet observed: a real dictation kept
+and played or transcribed again with another model in a window, on any OS.
 
 Hide menu bar icon (`hide-menu-bar-icon`, issue 1064, macOS): for people
 who only use the shortcut and want the menu-bar space back. The status item

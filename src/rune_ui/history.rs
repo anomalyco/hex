@@ -1,10 +1,11 @@
 //! The History pane: retained dictations (newest first) with search, one
 //! menu for retention, Keep recordings, and two-step Clear all history, and
 //! a detail view with Copy and Delete. It shares the host's store, which the listener records into.
-//! With Labs › Keep recordings on, an entry that kept its audio offers
-//! Transcribe again with any installed model, run on a worker; Replace keeps
-//! the earlier transcripts as versions to copy or switch back to. Every
-//! entry names the model that made its text, when it is known.
+//! With Labs › Keep recordings on, an entry that kept its audio can Play it
+//! through the output device and offers Transcribe again with any installed
+//! model, run on a worker; Replace keeps the earlier transcripts as versions
+//! to copy or switch back to. Every entry names the model that made its text,
+//! when it is known.
 
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
@@ -13,9 +14,10 @@ use rune_kit::{Menu as KitMenu, MenuItem, Placement, Select, SelectAppearance, T
 
 use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
 use super::list_detail::{self as ld, Item};
-use super::lists::{Tone, error_panel, section_label};
+use super::lists::{Tone, error_panel, section_label, small_button};
 use super::{Menu, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
+use crate::history::playback::Playback;
 use crate::history::stats::{AppCount, HistoryStats};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention, Transcript};
 use crate::transcription::models::TranscriptionModelId;
@@ -52,6 +54,9 @@ pub(super) struct HistoryPane {
     pub(super) pending: Option<Pending>,
     /// The version whose Copy was pressed last: entry and index.
     pub(super) version_copied: Option<(u64, usize)>,
+    /// Labs › Keep recordings: the entry playing through the output, if one
+    /// started from the card.
+    pub(super) playback: Option<Playback>,
 }
 
 /// Transcribe again's chosen model and the language for this one run.
@@ -143,9 +148,24 @@ impl HistoryPane {
     /// searches again only when the query or the store's revision changed,
     /// and sums the stats again when the entries or the toggle changed, or
     /// once when the dialog closes because the stats emptied.
-    pub(super) fn poll(&mut self, visible: bool) -> bool {
+    pub(super) fn poll(&mut self, visible: bool, keep_audio: bool) -> bool {
         let answered = self.poll_again();
+        // Playback's answer returns the card to Play; it is not a reason to
+        // read the stats again.
+        let played = self.poll_playback();
         let mut changed = false;
+        // A playback belongs to the card that shows its Stop: leaving the
+        // entry or History, turning the lab off, or hiding the window
+        // quietly ends it.
+        let left = self.playback.as_ref().is_some_and(|playback| {
+            playback.playing() && (!visible || !keep_audio || self.selected != Some(playback.id))
+        });
+        if left {
+            if let Some(playback) = &mut self.playback {
+                playback.stop();
+            }
+            changed = true;
+        }
         // The dialog belongs to the pane and its switch: leaving History,
         // turning Dictation stats off, or emptying the stats closes it.
         if self.stats_open
@@ -160,7 +180,7 @@ impl HistoryPane {
             changed = true;
         }
         let Some(store) = self.store.as_ref().filter(|_| visible) else {
-            return answered || changed;
+            return answered || played || changed;
         };
         let stale = self.search.text != self.searched || self.revision != Some(store.revision());
         if stale {
@@ -172,7 +192,7 @@ impl HistoryPane {
             self.reload_stats();
             return true;
         }
-        answered || changed
+        answered || played || changed
     }
 
     /// Takes Transcribe again's answer once its worker sends it.
@@ -188,6 +208,13 @@ impl HistoryPane {
         again.worker = None;
         again.result = Some(result);
         true
+    }
+
+    /// Takes the playback's answer once it ends or fails.
+    fn poll_playback(&mut self) -> bool {
+        self.playback
+            .as_mut()
+            .is_some_and(|playback| playback.poll())
     }
 
     fn entry(&self, id: u64) -> Option<&HistoryEntry> {
@@ -428,6 +455,32 @@ fn transcribe_again(
         result: started.err().map(|error| Err(error.to_string())),
         copied: false,
     });
+}
+
+/// Labs › Keep recordings: starts entry `id`'s saved audio, or stops it
+/// while it plays.
+fn toggle_playback(ui: &mut Ui, id: u64) {
+    if let Some(playback) = &mut ui.history.playback
+        && playback.is_playing(id)
+    {
+        playback.stop();
+        return;
+    }
+    let Some(path) = ui
+        .history
+        .store
+        .as_ref()
+        .and_then(|store| store.recording_path(id))
+    else {
+        ui.history.playback = Some(Playback::failed(id, "The recording is gone."));
+        return;
+    };
+    let waker = ui.modes.waker.clone();
+    ui.history.playback = Some(Playback::start(id, &path, move || {
+        if let Some(waker) = &waker {
+            waker();
+        }
+    }));
 }
 
 /// Replaces entry `id`'s text with what Transcribe again found, keeping
@@ -985,8 +1038,43 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
     let mut section = col()
         .key("again")
         .gap(6.0)
-        .child(section_label(p, "label", tr("Saved recording")))
+        .child(
+            row()
+                .key("again-head")
+                .gap(8.0)
+                .center_y()
+                .child(section_label(p, "label", tr("Saved recording")).grow(1.0))
+                .child(small_button(
+                    p,
+                    "again-play",
+                    if ui
+                        .history
+                        .playback
+                        .as_ref()
+                        .is_some_and(|playback| playback.is_playing(id))
+                    {
+                        tr("Stop")
+                    } else {
+                        tr("Play")
+                    },
+                    move |ui: &mut Ui, _| toggle_playback(ui, id),
+                )),
+        )
         .child(menu);
+    if let Some(error) = ui
+        .history
+        .playback
+        .as_ref()
+        .and_then(|playback| playback.error(id))
+    {
+        section = section.child(
+            text(tr_fill("Could not play: {}", tr(error)))
+                .key("again-play-error")
+                .font(super::controls::DESCRIPTION)
+                .color(p.muted())
+                .wrap(),
+        );
+    }
     if let Some(pending) = ui
         .history
         .pending

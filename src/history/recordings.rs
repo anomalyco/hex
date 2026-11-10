@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 
+use super::HistoryEntry;
 use crate::transcription::models::TranscriptionSelection;
 use crate::transcription::service::{
     AudioClip, AudioError, TranscriptionService, TranscriptionServiceError,
@@ -45,12 +46,22 @@ impl Recording {
 }
 
 /// The recordings folder beside the history file at `history`.
-pub(super) fn directory(history: &Path) -> PathBuf {
+pub fn directory(history: &Path) -> PathBuf {
     history.with_file_name(DIRECTORY)
 }
 
 pub(super) fn path(directory: &Path, id: u64) -> PathBuf {
     directory.join(format!("{id}.wav"))
+}
+
+/// Entry `entry`'s recording in `directory` ([`directory`]), when it kept one
+/// and the file is still there. Labs › Keep recordings is the caller's gate.
+pub fn saved(directory: &Path, entry: &HistoryEntry) -> Option<PathBuf> {
+    if !entry.has_recording() {
+        return None;
+    }
+    let path = path(directory, entry.id);
+    path.is_file().then_some(path)
 }
 
 /// Writes entry `id`'s audio atomically and owner-only; returns its size.
