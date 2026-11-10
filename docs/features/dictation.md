@@ -275,8 +275,9 @@ of the time.
 
 ```ts
 Secure input turns on  // dictate.secure-input
-├── Log: "secure input is on…" with the holder's pid and app name
-│   (kCGSSessionSecureInputPID, as `ioreg -l` shows it)
+├── Log: "secure input is on…" with the pid and app name of the app that was
+│   in front when it turned on (kCGSSessionSecureInputPID, as `ioreg -l` shows
+│   it), which is not necessarily the one holding secure input
 ├── Registered as Carbon hotkeys: Annotate, Annotate replay, Paste last,
 │   Paste meeting, and with Labs › Screenshots its two shortcuts
 │   ├── A press -> the same key down the tap would have sent (log: "shortcut
