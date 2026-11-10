@@ -29,6 +29,8 @@ embed-resource = "3"
 
 [features]
 onnx-benchmark = ["dep:transcribe-rs"]
+# Live editing for `scripts/dev-ui`; never in a shipped build.
+hot = ["rune/hot"]
 
 # Shipped executables carry no symbol table (about 11 MB on Linux). Panic
 # backtraces lose function names; debug builds keep them.

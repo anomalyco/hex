@@ -228,10 +228,12 @@ fn on_open_url(ui: &mut Ui, link: &str, tx: &mut Tx) {
     crate::macos_rune::bring_window_forward();
 }
 
-/// `hex app -- --snap …`: a headless render of a fixture scene. With the
-/// Labs on, `--playground [story]` renders the playground.
+/// `hex app -- --snap …`: a headless render of a fixture scene. With Labs ›
+/// Playground on (always in a live-editing build), `--playground [story]`
+/// opens the playground on a story's path, slug, or scene name.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
+    let rune_args = playground::story_args(rune_args);
     let playground = rune_args.iter().any(|arg| arg == "--playground");
     let headless = rune_args
         .iter()
@@ -242,11 +244,15 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
     if let Ok(code) = std::env::var("HEX_RENDER_LANGUAGE") {
         crate::desktop::i18n::apply(Some(&code));
     }
+    // A live-editing build (`scripts/dev-ui`) takes a fresh install's Labs,
+    // not the saved ones, and always has the playground.
+    #[cfg(feature = "hot")]
+    crate::labs::apply(&Default::default());
     // Fixtures only: a render never reads, migrates, or saves the user's
     // settings, History, or anything else in the data folder.
     let app = build(
         Ui::fixture_base,
-        if playground && playground::enabled() {
+        if playground && (cfg!(feature = "hot") || playground::enabled()) {
             PlaygroundMode::Attached
         } else {
             PlaygroundMode::None

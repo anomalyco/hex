@@ -323,6 +323,18 @@ pub(crate) fn enabled() -> bool {
     crate::labs::playground()
 }
 
+/// Rune's flags with `--playground SCENE` naming that scene's story, so a
+/// `--scene` name (`meetings-recording`) opens it the way its path does.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub(super) fn story_args(mut args: Vec<String>) -> Vec<String> {
+    if let Some(at) = args.iter().position(|arg| arg == "--playground")
+        && let Some(story) = args.get(at + 1).and_then(|name| path(name))
+    {
+        args[at + 1] = story.to_owned();
+    }
+    args
+}
+
 /// `spec` with the playground's scenes: every fixture scene but `live`, at
 /// its path in [`PATHS`], each starting from a plain fixture. Only the
 /// window's app uses it: headless renders keep the plain scene names that
@@ -489,6 +501,22 @@ mod tests {
                 .last()
                 .is_some_and(|name| name.starts_with("Linux & Windows/"))
         );
+    }
+
+    #[test]
+    fn playground_flag_takes_a_scene_name() {
+        let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            story_args(args(&["--playground", "meetings-actions", "--hot"])),
+            args(&["--playground", "Window/Meetings/Actions menu", "--hot"])
+        );
+        for kept in [
+            &["--playground", "window-meetings-recording"][..],
+            &["--playground"],
+            &["--scene", "meetings"],
+        ] {
+            assert_eq!(story_args(args(kept)), args(kept));
+        }
     }
 
     /// A scene hears the window's ⌘-digit pane shortcuts as soon as it opens

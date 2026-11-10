@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Live editing for the window's panes: the playground on a fixture scene, with
+# no runtime, instance lock, or saved settings. Saved edits to function bodies
+# in src/rune_ui/ patch into the open window; any other edit rebuilds and
+# relaunches it.
+#
+#   scripts/dev-ui meetings              the playground on the Meetings scenes
+#   scripts/dev-ui SCENE                 any `--scene` name (`hex app -- --list-scenes`)
+#   scripts/dev-ui SCENE --snap OUT.png  no window: rewrites OUT.png (and OUT.json) after
+#                                        each patch, for agents and checks
+#   scripts/dev-ui SCENE --print         prints the command instead of running it
+#   scripts/dev-ui SCENE -- ARGS         more flags for Rune (`--theme light`, …)
+#
+# The build and the window run in one HiveMind cargo lease on HOT_WORKER (default
+# studio), so the window opens there: on Studio only Kit starts it, never an agent.
+# Needs Dioxus CLI 0.7.10 at ~/.cargo/bin/dx (RUNE_DX overrides). Rune's
+# scripts/rune-dev comes from the checkout Cargo.lock pins (RUNE overrides).
+set -euo pipefail
+
+scene="" snap="" print=false extra=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --snap) snap=${2:?--snap needs a path}; shift 2 ;;
+    --print) print=true; shift ;;
+    --) shift; extra=("$@"); break ;;
+    -*) echo "dev-ui: unknown flag $1" >&2; exit 2 ;;
+    *) [[ -z $scene ]] || { echo "dev-ui: one scene at a time" >&2; exit 2; }; scene=$1; shift ;;
+  esac
+done
+[[ -n $scene ]] || { echo "dev-ui: name a scene, e.g. scripts/dev-ui meetings" >&2; exit 2; }
+[[ -z $snap || $snap == /* ]] || snap=$PWD/$snap
+cd "$(dirname "$0")/.."
+
+if [[ -n ${RUNE:-} ]]; then
+  root=$RUNE
+else
+  root=$(cargo metadata --format-version 1 --locked | python3 -c '
+import json, sys
+from pathlib import Path
+for package in json.load(sys.stdin)["packages"]:
+    if package["name"] == "rune" and (package["source"] or "").startswith("git+"):
+        print(Path(package["manifest_path"]).parents[2])
+        break')
+fi
+[[ -f $root/scripts/rune-dev ]] || { echo "dev-ui: no scripts/rune-dev in the Rune checkout ($root); set RUNE" >&2; exit 1; }
+
+# A window opens the playground on the scene's story; --snap renders the scene
+# itself, which the headless patch loop draws without the playground.
+if [[ -n $snap ]]; then
+  app=(--scene "$scene" --snap-on-patch "$snap")
+else
+  app=(--playground "$scene")
+fi
+command=(python3 "$root/scripts/rune-dev" --local --manifest-path Cargo.toml --bin hex
+  --patch 'src/rune_ui/**/*.rs' --port "${HOT_PORT:-18748}"
+  -- app -- "${app[@]}" ${extra[@]+"${extra[@]}"})
+export RUNE_DEV_WRAP=${RUNE_DEV_WRAP-"hivemind run --kind cargo --worker ${HOT_WORKER:-studio} --no-sync --"}
+# The lease lasts the whole session, which sits idle between edits: no stall
+# kill, and a 12-hour cap instead of a build's 30 minutes.
+export HIVEMIND_STALL_S=${HIVEMIND_STALL_S:-0} HIVEMIND_MAX_RUNTIME_S=${HIVEMIND_MAX_RUNTIME_S:-43200}
+if $print; then
+  printf 'RUNE_DEV_WRAP=%q' "$RUNE_DEV_WRAP"
+  printf ' %q' "${command[@]}"
+  echo
+  exit 0
+fi
+exec "${command[@]}"

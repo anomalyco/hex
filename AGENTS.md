@@ -1584,6 +1584,14 @@ render on lavapipe with `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
 A scene is a fixture, not native end-to-end proof; the meeting capsules and
 HUDs have no scene.
 
+For live editing, `scripts/dev-ui <scene>` (e.g. `scripts/dev-ui meetings`)
+opens the window in the playground on that scene's story, with the same
+fixtures and no runtime, lock, or saved settings, built with the `hot` feature
+(never shipped) under one HiveMind cargo lease. Saved function-body edits in
+`src/rune_ui/` patch into the open window; other edits rebuild and relaunch.
+It opens a window, so on Studio only Kit runs it; agents add `--snap OUT.png`,
+which renders the scene headless after every patch (`scripts/dev-ui --help`).
+
 The supported Linux beta host is x86_64 Arch Linux; releases build in a Debian 12
 image (x64 and ARM64, `scripts/build-linux-release.sh`) for a glibc 2.36 floor. Install its
 native build dependencies with:
