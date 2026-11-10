@@ -223,6 +223,8 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   "Without Hex" (typed, with typos) -> "With Hex" (the same reply, spoken,
 │   fireworks lighting the page), then moves on by itself; Skip → (or
 │   Escape) cuts to the end
+│   └── Jay's face rides the newest message: it fades out on the older line as
+│       it fades in on the new one, never popping off in one frame
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
 │   └── Permissions are read again at launch: a setup they now finish (macOS's
 │       Quit & Reopen after a grant) is passed; past setup, it waits until they do
@@ -2082,10 +2084,12 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   │       pays the adapter check too, roughly 150 ms
 │   └── A launch that crashed drawing (gpu-draw.pending, written when Rune
 │       starts the launch's first GPU device, left in the data folder, same
-│       version; cleared by the first frame on any surface or a clean quit; a
-│       tray launch that never draws writes none) -> high-performance GPU
-│       (WGPU_POWER_PREF=high), warned in process.log, until Hex updates or
-│       the file is deleted
+│       version; cleared by the first frame on any surface, a clean quit, or
+│       an orderly session end - Rune's quit hook runs on WM_QUERYENDSESSION
+│       and WM_ENDSESSION before the process may end, also for a windowless
+│       launch; a tray launch that never draws writes none) -> high-performance
+│       GPU (WGPU_POWER_PREF=high), warned in process.log, until Hex updates
+│       or the file is deleted
 ├── Present cadence -> after any change the window presents every refresh for
 │   1 s, then rests: windowed G-SYNC/FreeSync sees one rate change per
 │   interaction, not a swing per hover (#689; Rune e2ea18e4; not run on Windows)
@@ -2099,6 +2103,14 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── HUD display -> the monitor under the pointer (GetCursorPos) at each capture
 │   start, inside that monitor's work area, at its own DPI (#486); while
 │   shown, checked every 250 ms; moves once two checks agree (#807)
+├── HUD start -> a fresh first-frame attempt (own baseline, clock, and one
+│   recovery hide): no frame in 1.5 s -> hidden at once (not the exit fade,
+│   which needs a frame), so Rune releases the window and GPU surface and the
+│   next capture makes both again. A second start restarts the attempt, a
+│   previous attempt's reason never hides the new one, each attempt hides at
+│   most once, and the next start hides again if it is frame-less too. Rune's
+│   overlay failure is the Settings/log reason only. Logged once per reason;
+│   Settings' listener warning (dictation.md, rune_hud::FirstFrame)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
 │   └── Theme read when the tray is created; a later switch applies at the next launch
