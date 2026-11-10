@@ -14,7 +14,8 @@ secret. `.github/workflows/` (Release, Site deploy, Site) and
 
 - **Build jobs** run repository code (cargo, build.rs, bun, makepkg, brew)
   with no environment, no secret, and no id-token, and make unsigned files.
-- **Sign and publish jobs** run in the `release` environment, check out only
+- **Sign and publish jobs** run in the `release` environment, and the site
+  deploy in `infra-dev` or `infra-production`. They check out only
   `.github/release/` (sparse checkout), and run only those scripts and
   SHA-pinned actions, on artifacts they treat as data. They never build,
   install dependencies, or run repository code or the artifacts. The one
@@ -103,6 +104,16 @@ and `production`. The registry ties channels to refs, so a
 build of `dev` can never publish to `stable`. No key or secret publishes:
 only the `publish`, `record-aur`, and `record-brew` jobs present an OIDC
 token, and the Windows signing jobs one for Azure.
+
+The site deploy does not use `release`: it runs in the environment of the
+site it deploys, so dev pushes never hold a token that can write the
+production site.
+
+| Environment | Branches | Reviewers | Used by | AWS role |
+| --- | --- | --- | --- | --- |
+| `release` | `dev`, `production` | none | Release sign and publish jobs, aur-check | `role/github/hex-release` |
+| `infra-dev` | `dev` | none | Site deploy, `mode: dev` | `role/github/hex-infra-dev` |
+| `infra-production` | `production` | none | Site deploy, `mode: production` | `role/github/hex-infra-production` |
 
 `publish` uploads each file under its own name with its SHA-256 (files over
 95 MiB in 90 MiB parts), then posts the release naming each target by file
@@ -282,7 +293,7 @@ Site deploy is split like Release:
 Site deploy (mode dev | production)
 ├─ build    bun install + site/scripts/build.ts --mode <mode>, no environment or secret;   [build]
 │           uploads site/.cloudflare/output (Build Output) with its SHA256SUMS digest
-├─ deploy   sparse checkout of .github/release/; npm ci the pinned cf CLI; verify the     [release]
+├─ deploy   sparse checkout of .github/release/; npm ci the pinned cf CLI; verify the     [infra-<mode>]
 │           artifact's digest; mint a 15-minute Cloudflare token; deploy-site.sh <mode>
 └─ verify   the live site answers 200 and bun run check:downloads, no secret               [build]
 ```
@@ -309,25 +320,24 @@ the Worker reads and never writes.
 
 One short-lived token, minted per deploy:
 
-- `deploy` assumes `role/github/hex-release`, then runs
-  `.github/release/cloudflare-token.sh`, which SigV4-POSTs to the token issuer
-  in [anomalyco/secrets](https://github.com/anomalyco/secrets) and receives a
-  15-minute account-owned token with Workers Scripts Write (account) and
+- `deploy` runs in `infra-<mode>`, assumes `role/github/hex-infra-<mode>`,
+  then runs `.github/release/cloudflare-token.sh`, which SigV4-POSTs to the
+  token issuer in [anomalyco/secrets](https://github.com/anomalyco/secrets)
+  and receives a 15-minute account-owned token with Individual Workers Editor
+  on that mode's Worker only (`hex-dev-site` or `hex-production-site`) and
   Workers Routes Write (zone `anoma.ly`), pinned to the runner's request IP,
   at most ten live at once. The script masks it before writing
   `steps.cloudflare-token.outputs.token`, and only the Deploy step receives it
   as `CLOUDFLARE_API_TOKEN`. It has no R2 access: deploying a binding needs
   none, and `cf` skips provisioning a bucket it cannot read (a warning, not a
-  failure). Cloudflare supports per-Worker roles (Individual Workers Editor)
-  that would limit it to the two site Workers, but they can be granted only
-  from the dashboard or by an API token, not by the `cf` OAuth login, and the
-  `cf deploy` route preflight is not verified with them; until it is,
-  `deploy-site.sh`'s Worker-name check is the limit. Routes are always written
-  on deploy, and `cf` then needs Routes Write on the zone.
-- The old long-lived `hex-site-deploy` token is kept only because the
-  `production` branch (far behind `dev`) still reads it from Secrets Manager
-  as `hex/release/CLOUDFLARE_API_TOKEN`; revoke it once `production` is
-  promoted and deploys from this workflow.
+  failure). `deploy-site.sh`'s Worker-name check still applies. Routes are
+  always written on deploy, and `cf` then needs Routes Write on the zone,
+  which Cloudflare does not scope per route.
+- The `production` branch (far behind `dev`) still deploys the production
+  site from `release`, reading the old long-lived `hex-site-deploy` token from
+  Secrets Manager as `hex/release/CLOUDFLARE_API_TOKEN`. Once `production` is
+  promoted and its site deploys green from `infra-production`, revoke that
+  token and drop the site permissions from the `hex.release` issuer stage.
 
 ## Old clients (2.3.1 and earlier)
 
@@ -397,21 +407,26 @@ the release service compile `https://anoma.ly/release`.
 
 Release secrets live in AWS Secrets Manager (account `anomaly-secrets`), managed from
 [anomalyco/secrets](https://github.com/anomalyco/secrets). Jobs in the `release` environment
-(limited to `dev` and `production`; `dev` is allowed because dev-channel builds and dev site
-deploys run from it, and no reviewer is required) assume `role/github/hex-release` with
+(limited to `dev` and `production`; `dev` is allowed because dev-channel builds run from it,
+and no reviewer is required) assume `role/github/hex-release` with
 GitHub OIDC and fetch only what they use. That role can read `hex/release/*` and the shared Apple, AUR and Homebrew
 secrets. Set a value with `bun set hex release <NAME>` in that repo.
 
 | Secret | Use |
 | --- | --- |
 | (none) | publishing to the release service: the job's GitHub OIDC token |
-| (none) | site deploys mint a 15-minute Cloudflare token from the token issuer (`.github/release/cloudflare-token.sh`); the old `hex-site-deploy` token stays in Secrets Manager only until `production` is promoted |
+| `hex/release/CLOUDFLARE_API_TOKEN` | old long-lived `hex-site-deploy` token, read only by the `production` branch's site deploy until `production` is promoted; then revoke it |
 | `shared/AUR_SSH_KEY` | pushes `hex-bin`; one key for every Anomaly AUR package (`github-actions-hex-aur`) |
 | `shared/HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb`; one deploy key on `anomalyco/homebrew-tap` for every app (`anomaly-release`) |
 | vars `AZURE_*` | Authenticode (docs/windows-signing.md); not secrets, `azure/login` uses OIDC |
 | `shared/APPLE_SIGNING_CERTIFICATE`, `shared/APPLE_NOTARY_KEY`, vars `APPLE_NOTARY_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
 | `hex/release/RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |
 | `SPARKLE_ED_PRIVATE_KEY` | old 2.3.1 appcast key; unused, kept for old clients |
+
+`infra-dev` and `infra-production` hold no secrets. Their roles,
+`role/github/hex-infra-dev` and `role/github/hex-infra-production`, can read only their own
+empty `hex/infra-<mode>/*` folder; the site deploy only mints a 15-minute Cloudflare token for
+its own Worker from the token issuer (`.github/release/cloudflare-token.sh`).
 
 ## Linux packages
 

@@ -8,8 +8,10 @@ name: Site deploy
 # - build runs repository code (bun install, site/scripts/build.ts) with no
 #   environment and no secrets, and uploads the Worker's Build Output with a
 #   SHA256SUMS whose digest it reports.
-# - deploy runs in the release environment and mints a short-lived Cloudflare
-#   token from the token issuer after assuming the release role
+# - deploy runs in the mode's infra environment (infra-dev or
+#   infra-production, each admitting only its own branch) and mints a
+#   short-lived Cloudflare token for that mode's Worker from the token issuer
+#   after assuming the environment's role, github/hex-infra-<mode>
 #   (.github/release/cloudflare-token.sh). It checks out only .github/release/,
 #   verifies the artifact against that digest, and runs only
 #   .github/release/deploy-site.sh, which pins the Worker, routes, and
@@ -70,7 +72,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-24.04
-    environment: release
+    environment: infra-${{ inputs.mode }}
     permissions:
       contents: read
       id-token: write
@@ -108,7 +110,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-infra-${{ inputs.mode }}
           role-session-name: hex-${{ github.run_id }}
           aws-region: us-east-1
       - name: Cloudflare token
