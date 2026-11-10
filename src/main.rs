@@ -879,6 +879,14 @@ mod tests {
 fn main() -> Result<()> {
     #[cfg(target_arch = "x86_64")]
     transcription::cpu_floor::require();
+    // Opening ALSA's default device loads libpipewire into this process, and
+    // its realtime module asks the desktop portal for a realtime budget and
+    // then limits this process's realtime CPU time to it; the portal caches
+    // that budget once at its own startup and can report zero, which makes
+    // the kernel kill Hex. Hex never takes realtime scheduling through the
+    // portal or rtkit.
+    // SAFETY: Before any other thread exists to read the environment.
+    unsafe { std::env::set_var("DISABLE_RTKIT", "1") };
     linux::input_route::mark_streams();
     linux::run(&SHUTDOWN)
 }
