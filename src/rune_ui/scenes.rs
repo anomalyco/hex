@@ -2,6 +2,7 @@
 //! opens.
 
 use super::*;
+use onboarding_kit::scenes::{FirstRun, first_run, mac_first_run};
 
 /// A named starting state for `--scene`.
 pub(super) type Scene = (&'static str, fn(&mut Ui));
@@ -280,6 +281,11 @@ pub(super) const SCENES: &[Scene] = &[
     }),
     ("onboarding-waiting", |ui| {
         first_run(ui, FirstRun::Downloading, Page::Waiting)
+    }),
+    // "Watch another one": the first sketch, after its second reply.
+    ("onboarding-sketch", |ui| {
+        first_run(ui, FirstRun::Downloading, Page::Waiting);
+        onboarding_kit::sketch_fixture(ui, 11.0);
     }),
     // GNOME and KDE on Wayland: why the desktop asks before the first paste.
     ("onboarding-paste", |ui| {
@@ -766,6 +772,13 @@ pub(super) const SCENES: &[Scene] = &[
     ("mac-onboarding-restart", |ui| {
         mac_first_run(ui, onboarding::MacStep::SetupRestart, Page::Permissions)
     }),
+    ("mac-onboarding-waiting", |ui| {
+        mac_first_run(ui, onboarding::MacStep::SetupWaiting, Page::Waiting)
+    }),
+    ("mac-onboarding-sketch", |ui| {
+        mac_first_run(ui, onboarding::MacStep::SetupWaiting, Page::Waiting);
+        onboarding_kit::sketch_fixture(ui, 11.0);
+    }),
     ("mac-onboarding-try", |ui| {
         mac_first_run(ui, onboarding::MacStep::TryIt, Page::Try)
     }),
@@ -776,54 +789,6 @@ pub(super) const SCENES: &[Scene] = &[
         mac_first_run(ui, onboarding::MacStep::Done, Page::Ready)
     }),
 ];
-
-/// The tour state a Linux first-run scene starts from.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FirstRun {
-    /// Nothing installed; the recommended model just started downloading.
-    Fresh,
-    /// The download is a third of the way.
-    Downloading,
-    /// The download stopped.
-    Failed,
-    /// The model is installed.
-    Ready,
-    /// The model is installed, and the desktop asks before Hex's first
-    /// paste (GNOME and KDE on Wayland).
-    PasteAccess,
-}
-
-fn first_run(ui: &mut Ui, state: FirstRun, page: Page) {
-    *ui = portal_fixture();
-    onboarding::fixture(ui, crate::desktop::onboarding::Step::Setup, true);
-    match state {
-        FirstRun::Fresh => onboarding::set_downloaded(ui, 8),
-        FirstRun::Downloading => onboarding::set_downloaded(ui, 31),
-        FirstRun::Failed => {
-            if let Some(view) = &mut ui.view {
-                view.transcription.preparing = None;
-                view.transcription.error = Some("The connection was reset.".into());
-            }
-        }
-        FirstRun::Ready | FirstRun::PasteAccess => {
-            ui.picker.installed = Some(vec![ui.settings.transcription.model]);
-            if let Some(view) = &mut ui.view {
-                view.transcription.preparing = None;
-            }
-        }
-    }
-    if state == FirstRun::PasteAccess {
-        ui.platform.paste = Some(paste_access::PasteAccess::Ask);
-    }
-    onboarding::poll(ui);
-    onboarding_kit::live::fixture(ui, page);
-}
-
-fn mac_first_run(ui: &mut Ui, step: onboarding::MacStep, page: Page) {
-    *ui = mac_fixture();
-    onboarding::mac_fixture(ui, step);
-    onboarding_kit::live::fixture(ui, page);
-}
 
 /// The Annotate pane with captures `enabled`, a 3-day video retention, and
 /// `adjust` applied to what the host shows.

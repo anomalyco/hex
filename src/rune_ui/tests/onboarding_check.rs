@@ -35,8 +35,10 @@ pub(super) const SCENES: &[&str] = &[
     "windows-onboarding-microphone",
     // GNOME and KDE on Wayland: the desktop's paste permission, explained.
     "onboarding-paste",
-    // Almost ready: the model still downloads.
+    // Almost ready: the model still downloads, and a sketch from "Watch
+    // another one" while it does.
     "onboarding-waiting",
+    "onboarding-sketch",
     // Your turn: the practice game, and the shortcut that didn't start.
     "onboarding-try",
     "mac-onboarding-try",
@@ -326,13 +328,13 @@ fn onboarding_walkthrough() {
     );
     rt.state.picker.installed = Some(vec![model]);
 
-    // The story plays on: the demo, then the practice game once the model
-    // is ready, then Hex is ready.
+    // The story plays on: the demo, then the practice game ("With Hex")
+    // once the model is ready, then Hex is ready.
     settle(&mut rt);
     rt.update(|ui, _| super::super::onboarding_kit::live::fixture_resume(ui, Page::Try));
     settle(&mut rt);
     assert_eq!(step(&rt), Some(Step::TryIt));
-    assert!(texts(&rt).contains(&"Clear your messages".to_owned()));
+    assert!(texts(&rt).contains(&"With Hex".to_owned()));
     assert!(rt.find("skip").is_some(), "Skip shows on the practice too");
     tap(&mut rt, "done");
     assert!(texts(&rt).contains(&"Hex is ready".to_owned()));

@@ -1,0 +1,93 @@
+# B, "dirty": as A until "STOP TYPING.", then Caps Lock, shaking fingers
+# (D for S, I for O) and autocorrect finish the job.
+
+title   Launch Room
+group   Jay, you, and 3 investors
+boss    Jay cobalt
+side    Priya lilac
+side    Marcus amber
+side    Dana mint
+pill    Jay is presenting
+lead    Investors are waiting. One quick reply by hand.
+
+Jay: The investors are in the room.
+Jay: Are we ready to ship?
+
+start
+Jay: they're asking right now [0.35]
+# A capital W, thought better of.
+type    W [panic 0]
+wait    0.45
+delete  1
+wait    0.3
+type    Yse, we're deady [panic 0.05-0.5]
+wait    0.4
+delete  1
+# "dead" sits there; reaching for delete again, the finger lands on Return.
+wait    0.23
+send    slip meant Yes, we're ready
+wait    freeze
+read
+tap     ‼ 0.5
+wait    0.75
+
+Jay: what?? [0.3]
+type    oh fuck *reayd [panic 0.75-0.9]
+send    meant oh fuck *ready
+tap     ?
+wait    0.2
+
+Jay: ready or dead? [0.4]
+type    rea [panic 0.55-0.6]
+# It freezes, then takes it back a letter at a time.
+wait    0.6
+delete  3
+wait    0.2
+type    yes [panic 0.5]
+send
+tap     ? ?
+wait    0.3
+
+flare
+Jay: they can see my screen [0.6]
+type    sorry fart fingers [panic 0.8-0.95]
+send    meant sorry fat fingers
+tap     haha 0.35 haha 0.6
+wait    0.35
+
+Jay: STOP TYPING. [0.45]
+elbow
+wait    0.3
+type    I'M SO DIRRY [panic 0.85-1]
+autocorrect DIRRY -> DIRTY
+send    meant I'M SO SORRY
+tap     haha haha ‼ ?
+wait    0.3
+
+dots    0.5
+wait    0.45
+dots    0.7
+Jay: Clear your desk. [0.2]
+tap     👍 0.25 👍 0.45 ❤ 1.15
+wait    0.6
+
+# Caps Lock still on.
+type    WAIT NO I MEANT SOR [panic 1]
+wait    0.12
+end     removed
+
+with
+hex     Yes, we're ready. Everything's tested, go ahead.
+tap     ❤ ❤ ‼ 👍
+Jay:    they're standing up
+Priya:  wiring $40M now
+Marcus: that was the clearest sentence I've ever read
+Dana:   I'm crying
+status  Jay made you CEO
+Jay:    I quit. it's yours
+pill    You're presenting
+rename  Bow Before You
+effect  confetti
+effect  fireworks
+score   {hex}, no typos, one company.
+typed   Typing: {secs}, {typos}, and one job.

@@ -13,6 +13,13 @@ path = "junit.xml"
 [test-groups]
 gpu = { max-threads = 2 }
 
+# The first run's motion gate records 30 headless windows: a minute alone,
+# more on a busy machine.
+[[profile.default.overrides]]
+filter = "test(motion_gate::the_first_run_moves_cleanly)"
+test-group = "gpu"
+slow-timeout = { period = "60s", terminate-after = 2 }
+
 # Rune scenes render on the GPU; the driver test compiles the C plug-in.
 [[profile.default.overrides]]
 filter = "test(/scene|golden|rune_ui::/) | test(driver_plugin_loopback)"

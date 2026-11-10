@@ -1,0 +1,39 @@
+# A sketch: "Without Hex" alone, played while the model downloads.
+
+title   Family
+group   Mom, Dad, Grandma, and you
+boss    Mom coral
+side    Dad blue
+side    Grandma lilac
+lead    The family wants an answer. One quick reply by hand.
+
+Mom: Who's bringing what on Sunday?
+
+start
+Mom: you're still doing the pie? [0.35]
+type    yes!! pecan [panic 0.25-0.4]
+send
+tap     ❤ 0.4
+wait    0.3
+
+Dad: and the folding chairs? [0.35]
+elbow
+type    ILL BRING EVERYTHING [panic 0.55-0.7]
+send    meant i'll bring everything
+wait    0.2
+
+Grandma: WHY ARE WE YELLING [0.3]
+Dad: nobody's yelling mom [0.3]
+Mom: honey, your caps lock [0.4]
+type    WHAT [panic 0.8]
+send    meant what?
+wait    0.3
+
+Grandma: DON'T TAKE THAT TONE WITH ME [0.4]
+type    SORRY GRANDMA [panic 0.9]
+send    meant sorry grandma
+tap     ‼ 0.3
+wait    0.6
+
+Grandma: THAT'S IT [0.8]
+end     removed: Grandma removed you from “Family”

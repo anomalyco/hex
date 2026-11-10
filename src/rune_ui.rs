@@ -236,6 +236,11 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
         .iter()
         .any(|arg| arg == "--snap" || arg == "--video" || arg == "--list-scenes");
     onboarding_kit::set_live_window(playground && !headless);
+    // A render is in English unless `HEX_RENDER_LANGUAGE` names an
+    // interface language (`ru`, `pl`, …) to check its copy in.
+    if let Ok(code) = std::env::var("HEX_RENDER_LANGUAGE") {
+        crate::desktop::i18n::apply(Some(&code));
+    }
     // Fixtures only: a render never reads, migrates, or saves the user's
     // settings, History, or anything else in the data folder.
     let app = build(
@@ -264,7 +269,7 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
 #[derive(Default)]
 pub(crate) struct WindowCompositor {
     onboarding: Option<onboarding_kit::gpu_stage::OnboardingGpu>,
-    game: Option<onboarding_kit::game_fx::GameFx>,
+    game: Option<onboarding_kit::game::fx::GameFx>,
     sounds: sound_sets::Preview,
     /// The device whose backend `process.log` names.
     logged: Option<rune::compose::DeviceKey>,
@@ -284,31 +289,26 @@ impl rune::compose::Compositor<Ui> for WindowCompositor {
         if f.rt
             .marks
             .iter()
-            .any(|&m| onboarding_kit::game_fx::is_game_mark(m))
+            .any(|&m| onboarding_kit::game::fx::is_game_mark(m))
         {
+            // The game's HUD is onboarding's: its draw hook paints both.
+            let hud = onboarding_kit::gpu_stage::OnboardingGpu::for_frame(&mut self.onboarding, f);
             self.game
-                .get_or_insert_with(|| onboarding_kit::game_fx::GameFx::new(f.device))
-                .render(f);
+                .get_or_insert_with(|| onboarding_kit::game::fx::GameFx::new(f.device))
+                .render(f, hud);
         } else if self.onboarding.is_some()
             || f.rt
                 .marks
                 .iter()
                 .any(|&m| onboarding_kit::gpu_stage::is_onboard_mark(m))
         {
-            if self
-                .onboarding
-                .as_ref()
-                .is_none_or(|g| !g.matches(f.format))
-            {
-                self.onboarding = Some(onboarding_kit::gpu_stage::OnboardingGpu::new(
-                    f.device, f.format,
-                ));
-            }
-            self.onboarding.as_mut().expect("created above").render(f);
+            onboarding_kit::gpu_stage::warm_later_pipelines(f.device, f.format);
+            onboarding_kit::gpu_stage::OnboardingGpu::for_frame(&mut self.onboarding, f).render(f);
         } else {
             f.draw_ui();
         }
         self.sounds.render(f);
+        onboarding_kit::live::frame_drawn();
     }
 }
 
@@ -1154,6 +1154,11 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     }
     if event.key != rune::Key::Escape {
         return false;
+    }
+    if let Some(s) = ui.first_run.as_mut()
+        && s.skip_scene()
+    {
+        return true;
     }
     if ui.explainer.open {
         explainer::close(ui);

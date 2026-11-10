@@ -218,12 +218,18 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │       error), + Download + Add model file…. Check: golden
 │   │       `onboarding-no-model`, `onboarding_continue_without_model`
 │   └── Change or delete the model later in Settings      // setup.delete-model
-├── The demo: Without Hex (typed, with typos) -> With Hex (spoken) -> Continue
+├── The demo, while the model downloads: a second on Setting up Hex, then the
+│   Launch Room's conversation is there, Jay's messages landing in it ->
+│   "Without Hex" (typed, with typos) -> "With Hex" (the same reply, spoken,
+│   fireworks lighting the page), then moves on by itself; Skip → (or
+│   Escape) cuts to the end
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
 │   └── Permissions are read again at launch: a setup they now finish (macOS's
 │       Quit & Reopen after a grant) is passed; past setup, it waits until they do
-├── Permissions                           // setup.checklist; skipped when granted
-│   ├── macOS: "Let Hex hear you and type for you", Microphone and Accessibility
+├── Permissions, one page each           // setup.checklist; skipped when granted
+│   ├── macOS: "Let Hex hear you" (Microphone), then "Make it work everywhere"
+│   │   (Accessibility), both before Your turn: the shortcut needs Accessibility;
+│   │   each card floats off once allowed
 │   │   ├── No Input Monitoring row: Accessibility also lets the shortcut taps listen
 │   │   ├── Microphone -> macOS prompt; refused -> "Open System Settings" + guide
 │   │   ├── Accessibility -> Privacy pane + drag guide
@@ -236,7 +242,7 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   │   └── macOS 27 names the list "Device Control and Data Access"; the row follows
 │   │   ├── On in System Settings, unusable until relaunch -> "Needs a restart"
 │   │   │   └── Every permission on -> "Restart Hex" -> relaunch at setup  // setup.restart
-│   │   └── Last grant -> 0.7 s beat -> the story moves on
+│   │   └── Each grant -> a beat with its check -> the card floats off -> on
 │   ├── Windows: only while the microphone privacy switch is off: "Let Hex hear
 │   │   you", one Microphone row -> Open Settings (ms-settings:privacy-microphone)
 │   └── Linux: no page
@@ -255,6 +261,7 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   ├── First time -> Hex records a marker, reopens itself, resumes at the practice
 │   └── Within 2 min of that relaunch -> "Hex's shortcut didn't start." + Reopen Hex
 └── Hex is ready -> where Hex lives (menu bar, system tray, or app launcher)
+    ├── macOS: "Open Hex when your Mac starts?" + Launch at login
     ├── Try again -> back to the practice game
     └── Start using Hex -> records completion once setup is ready; closes onboarding
 Run setup again (Labs) or `hex onboarding reset` -> the same story from the start,

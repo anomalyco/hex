@@ -1,4 +1,4 @@
-// The practice game's strike and burn (game_fx.rs). Ported from
+// The practice game's strike and burn (fx.rs). Ported from
 // Psychopomp's dissolve.wgsl (burn field, scorched band, hot rim) and
 // lightning.wgsl (white core, sheath, Lorentzian corona).
 //
@@ -114,7 +114,7 @@ fn emit(light: vec3f) -> vec4f {
     return vec4f(light / peak * 0.85 * a, a);
 }
 
-// Integer-hashed lattice noise, bit-identical to game_fx.rs.
+// Integer-hashed lattice noise, bit-identical to fx.rs.
 fn lattice_hash(value: u32, salt: u32) -> f32 {
     var h = (value * 0x9E3779B1u) ^ (salt * 0x85EBCA77u);
     h = h ^ (h >> 15u);

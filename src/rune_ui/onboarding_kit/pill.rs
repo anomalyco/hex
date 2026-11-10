@@ -12,6 +12,7 @@ use std::sync::Mutex;
 use super::super::controls::Paint;
 use super::fixture::{Download, Language};
 use super::hex_meter::hex_meter;
+use super::stories::{Flow, Onboard, Step};
 
 /// Shared-element id carried by the thin single-hexagon mark from the top-bar
 /// pill to the Ready landing.
@@ -21,7 +22,35 @@ pub(crate) const PILL: &str = "hex-mark";
 pub(crate) const CAPSULE: &str = "download-capsule";
 /// Zero-bounce flight spring (`0.42 s / 0.0`).
 pub(crate) const FLY: Spring = Spring::new(0.42, 0.0);
+/// When a [`FLY`] flight is within 2% of its place: what the words it
+/// crosses wait for, so the download never passes over them.
+const FLY_LANDS: f64 = 0.38;
+/// How words the download flew past come in once it lands.
+const AFTER_FLIGHT: Spring = Spring::new(0.24, 0.0);
 const HEIGHT: f32 = 30.0;
+
+/// Whether the download sits in the top bar rather than on the page.
+pub(crate) fn up(s: &Onboard) -> bool {
+    s.flow == Flow::FirstRun
+        && !s.had_model
+        && s.download.is_some()
+        && s.step != Step::Ready
+        && !(matches!(s.step, Step::Pick | Step::Started | Step::Waiting)
+            && !super::sketches::playing(s))
+}
+
+/// Whether the download has landed from its last flight between the top
+/// bar and the page. A flight starts on the frame the page changes, before
+/// the story's next poll records it.
+pub(crate) fn landed(s: &Onboard) -> bool {
+    s.reduced.get() || (s.pill_up == up(s) && s.now - s.pill_flew >= FLY_LANDS)
+}
+
+/// `el` hidden while the download flies past it, then faded in.
+pub(crate) fn after_flight(el: El, s: &Onboard) -> El {
+    el.opacity(if landed(s) { 1.0 } else { 0.0 })
+        .opacity_motion(AFTER_FLIGHT)
+}
 
 /// What the real first run calls [`Language::Other`]: the language it
 /// downloads. Each run replaces it, so a later setup never shows the
