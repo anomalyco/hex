@@ -262,6 +262,43 @@ Checks: the `both_options_*` tests and
 `a_modifier_alone_says_linux_needs_a_key_and_suggests_one` in
 `rune_ui/tests.rs`. Constructed events only; no physical keyboard run on any OS.
 
+### Shortcuts Under Secure Input (macOS)
+
+**Added November 9, 2026:** while another app holds Secure Event Input (a
+password field, a terminal's Secure Keyboard Entry, an app that never turned it
+off), macOS stops handing key presses to Hex's event tap; modifier changes
+still arrive. Hex polls `IsSecureEventInputEnabled()` every 0.25 s and, only
+while it is on, registers the key shortcuts that start something as Carbon
+hotkeys (`suppression/secure_input.rs`). A Carbon hotkey takes its key before
+the session tap, so registering only then keeps the tap's chord rules the rest
+of the time.
+
+```ts
+Secure input turns on  // dictate.secure-input
+├── Log: "secure input is on…" with the holder's pid and app name
+│   (kCGSSessionSecureInputPID, as `ioreg -l` shows it)
+├── Registered as Carbon hotkeys: Annotate, Annotate replay, Paste last,
+│   Paste meeting, and with Labs › Screenshots its two shortcuts
+│   ├── A press -> the same key down the tap would have sent (log: "shortcut
+│   │   arrived through secure input"); a release -> its key up
+│   ├── Annotate's "starts once a modifier comes up" still works: the tap
+│   │   sees the modifier change and records
+│   └── Sides can't be told apart: Right ⌥ ⇧ S also fires on Left ⌥
+├── Not registered: a binding needing Fn/Globe, mouse buttons, keyless
+│   bindings, and nothing while a shortcut is being recorded in Settings
+└── Still don't work: a dictation shortcut with a key (modifier-only ones do),
+    Dictate without processing with a key, Escape (Toggle cancel, an armed
+    Annotate press, stop drawing), and the screenshot picker's Esc and Space
+Secure input turns off -> hotkeys unregistered (a held one sends its release),
+    log: "secure input is off…"
+```
+
+Check: the tests in `suppression/secure_input.rs` (chord selection, press
+flags, missing-release bookkeeping, and Annotate's arm-then-record through
+`CaptureShortcut`). Live: a synthetic ⌥⇧F20 posted at HID while another app
+held secure input fired a Carbon press and release, and a listen-only session
+tap saw only the modifier changes. Not run with a physical keyboard press.
+
 **CLI:** `hex listen` uses saved settings; `--device` is authoritative. This is
 the CLI listener, not Settings. Do not run it beside an existing listener.
 

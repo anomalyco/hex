@@ -16,7 +16,7 @@ unsafe extern "C" {
 fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<ObservedInputEvent>) {
     let (sender, receiver) = mpsc::channel();
     let context = EventTapContext {
-        sender,
+        sink: Arc::new(InputSink::new(sender, PendingInputEvents::default())),
         activity: InputActivity::default(),
         takes_escape: Arc::new(AtomicBool::new(takes_escape)),
         takes_cancel: Arc::new(AtomicBool::new(false)),
@@ -25,8 +25,6 @@ fn test_tap_context(takes_escape: bool) -> (EventTapContext, mpsc::Receiver<Obse
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),
         shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
-        pending: PendingInputEvents::default(),
-        next_sequence: AtomicU64::new(0),
     };
     (context, receiver)
 }

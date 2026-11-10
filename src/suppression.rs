@@ -15,6 +15,7 @@ use crate::dictation::{BOTH_SIDES_WINDOW, MINIMUM_HOLD_DURATION};
 
 mod hotkey;
 pub(crate) mod physical_keys;
+pub(crate) mod secure_input;
 mod tap;
 pub use hotkey::{DictationHotkey, HotkeyAction};
 use tap::*;
@@ -420,8 +421,48 @@ pub(crate) fn alpha_shift_now() -> bool {
         != 0
 }
 
+/// The listener's input channel. The taps' thread and, under Secure Event
+/// Input, the main thread's Carbon hotkeys ([`secure_input`]) both send
+/// through it; the lock keeps the pending queue in the channel's order.
+struct InputSink {
+    sender: Mutex<Sender<ObservedInputEvent>>,
+    pending: PendingInputEvents,
+    next_sequence: AtomicU64,
+}
+
+impl InputSink {
+    fn new(sender: Sender<ObservedInputEvent>, pending: PendingInputEvents) -> Self {
+        Self {
+            sender: Mutex::new(sender),
+            pending,
+            next_sequence: AtomicU64::new(0),
+        }
+    }
+
+    /// False once the listener is gone.
+    fn send(&self, event: InputEvent, capture_at: CaptureInstant) -> bool {
+        let sender = self
+            .sender
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let sequence = self.next_sequence.fetch_add(1, Ordering::Relaxed);
+        self.pending.push(sequence, capture_at);
+        let sent = sender
+            .send(ObservedInputEvent {
+                sequence,
+                event,
+                capture_at,
+            })
+            .is_ok();
+        if !sent {
+            self.pending.acknowledge(sequence);
+        }
+        sent
+    }
+}
+
 struct EventTapContext {
-    sender: Sender<ObservedInputEvent>,
+    sink: Arc<InputSink>,
     activity: InputActivity,
     takes_escape: Arc<AtomicBool>,
     takes_cancel: Arc<AtomicBool>,
@@ -430,8 +471,6 @@ struct EventTapContext {
     observation_tap: AtomicPtr<c_void>,
     physical_tap: AtomicPtr<c_void>,
     shortcut_suppression: Mutex<ShortcutSuppression>,
-    pending: PendingInputEvents,
-    next_sequence: AtomicU64,
 }
 
 unsafe extern "C" fn physical_event_callback(
@@ -977,21 +1016,12 @@ fn report_capture_input(event_type: u32, event: EventRef) -> CaptureTap {
 }
 
 fn send_input(context: &EventTapContext, event: InputEvent, capture_at: CaptureInstant) -> bool {
-    let sequence = context.next_sequence.fetch_add(1, Ordering::Relaxed);
-    context.pending.push(sequence, capture_at);
-    match context.sender.send(ObservedInputEvent {
-        sequence,
-        event,
-        capture_at,
-    }) {
-        Ok(()) => true,
-        Err(_) => {
-            context.pending.acknowledge(sequence);
-            // SAFETY: The callback runs on the event-tap thread's run loop.
-            unsafe { CFRunLoopStop(CFRunLoopGetCurrent()) };
-            false
-        }
+    let sent = context.sink.send(event, capture_at);
+    if !sent {
+        // SAFETY: The callback runs on the event-tap thread's run loop.
+        unsafe { CFRunLoopStop(CFRunLoopGetCurrent()) };
     }
+    sent
 }
 
 #[derive(Default)]

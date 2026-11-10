@@ -1463,6 +1463,9 @@ shortcut uses) opens a second copy of Annotate's capture picker
                       (Reduce Motion: a fade either way); ✕ shows inside its top-left corner on hover
                       a dictation while cards show -> pastes as usual, being no shot's talk-over
                       a failure -> the error tone; there is no success sound (Hex has no shutter cue)
+Another app holds Secure Event Input -> ⌘⇧4 and the record shortcut still open the picker
+                  (Carbon hotkeys while it lasts; see dictation.md's Shortcuts Under Secure Input);
+                  Space and Escape don't arrive, so window mode and Escape don't work then
 ```
 
 The cards stack in the corner as CleanShot's Quick Access Overlay does
