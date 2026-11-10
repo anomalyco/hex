@@ -98,7 +98,9 @@ fn emit(light: vec3f) -> vec4f {
         return vec4f(0.0);
     }
     let a = clamp(peak * 1.4, 0.0, 1.0);
-    return vec4f(light / peak * 0.8 * a, a);
+    // Deeper than the light's own hue: pale gold is lost on a white page.
+    let ink = pow(light / peak, vec3f(1.6)) * 0.85;
+    return vec4f(ink * a, a);
 }
 
 @fragment
@@ -157,6 +159,8 @@ fn tint_fragment(v: Varyings) -> @location(0) vec4f {
         return vec4f(1.0);
     }
     let hue = l / peak;
-    let amount = clamp(peak * 0.18, 0.0, 0.3);
+    // A soft shoulder: a clamp here paints a flat disc of colour over the
+    // page round each burst.
+    let amount = 0.2 * (1.0 - exp(-0.45 * peak));
     return vec4f(mix(vec3f(1.0), hue, amount), 1.0);
 }

@@ -51,6 +51,8 @@ const DRAG: f32 = 2.3;
 const GRAVITY: f32 = 90.0;
 /// The page light's decay after a burst.
 const FLASH: f32 = 0.26;
+/// The decay of the burst's own flash, at its centre.
+const BANG: f32 = 0.06;
 /// The most lights a frame carries (`fireworks.wgsl`'s `LIGHTS`).
 const LIGHTS: usize = 4;
 
@@ -487,20 +489,18 @@ pub(crate) fn show(p: Paint, t: f32, reduced: bool) -> Option<Show> {
                 reach: look.reach,
             });
         }
-        // The bang: a soft bloom, white going to the shell's colour, with
-        // no hard core. It stays compact as it fades: a wide, faint,
-        // whitish glow reads as grey smoke on the dark page.
-        let bang = (-age / 0.08).exp();
+        // The bang: a point of light, white-hot at its core and the
+        // shell's colour round it, gone as the stars open. It's small and
+        // brighter than white: a wide glow dimmer than that encodes to a
+        // flat grey disc on the dark page, smoke where the flash should be.
+        let bang = (-age / BANG).exp();
         if bang > 0.02 {
             layer.push(Streak {
                 from: local(burst),
                 to: local(burst),
-                color: scaled(
-                    mix3(hue, white, bang * bang),
-                    0.8 * look.bright.min(1.1) * bang,
-                ),
-                half: 0.0,
-                glow: 8.0 + 6.0 * (1.0 - bang),
+                color: scaled(mix3(hue, white, bang), 4.0 * look.bright.min(1.1) * bang),
+                half: 1.6 * look.half * bang,
+                glow: 2.4 + 1.2 * (1.0 - bang),
                 tail: 1.0,
             });
         }
