@@ -1072,6 +1072,8 @@ Release when idle -> Press shortcut                   // dictate.cold-microphone
   -> Open microphone asynchronously, no pre-roll
      ├── Release before readiness -> Discard
      ├── Stream fails before the hold threshold -> Reopen for the same press
+     ├── macOS: stream fails after the threshold -> Keep what arrived; copy,
+     │   never paste                       // recover.interrupted-dictation
      └── Ready while held or locked -> Capture
   -> Capture idle -> Microphone can close             // accepted jobs do not keep it open
 ```
@@ -1179,7 +1181,9 @@ Model advertises streaming, GPU device             // dictate.streaming
        │   -> Transcribe the whole clip offline (source=fallback)   // language switch
        ├── No final text within 1.5 s -> Abort the stream -> Whole clip
        └── Model switched during the capture -> Stream closed -> Whole clip
-  Short tap, chord discard, microphone failure -> Drop the stream
+  Short tap, chord discard -> Drop the stream
+  Microphone stream failure -> Its audio so far becomes a copy-only dictation  // recovery.md#keep-an-interrupted-dictation
+    └── A timeline gap over 250 ms still drops the capture  // recovery.md#reopen-with-fresh-audio
   Voice-delimited and programmatic captures (macOS) -> Whole clip after release
   Nothing is pasted or reaches the focused app until the final text exists
   Labs + labs.live_text -> After each feed the stream publishes its text   // dictate.live-text
@@ -1743,7 +1747,10 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Labs › Failure notices: why beside the HUD for ~6 s  // dictate.failure-notice, off by default
         -> a new capture dismisses it; no old failure is replayed at launch
      -> Classic has none: macOS Basso, Signature's error on Windows and Linux
-     -> A lost microphone or input -> No tone; the capture ends
+     -> A lost microphone or input -> A kept clip: no tone; a shortcut or
+        `hex dictation start` capture's audio is transcribed and copied
+        instead of pasted    // recovery.md#keep-an-interrupted-dictation
+        -> No usable audio after the start, or a near-silent clip -> Error tone
   Tone requested -> Playback worker opens the default output, then plays
      -> macOS releases ~10 s after the last tone; Windows 5 min; Linux 1 s
      -> An open macOS output is a live CoreAudio client coreaudiod services
