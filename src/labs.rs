@@ -101,6 +101,7 @@ impl Feature {
             | Self::VocabularyBiasing
             | Self::TerminalPaste
             | Self::KeyboardModelSwitching
+            | Self::AppModelSwitching
             | Self::MouseShortcuts
             | Self::PauseBrowser
             | Self::ShareShortcut
@@ -233,6 +234,7 @@ impl Feature {
             | Self::SpeakersOnly
             | Self::MeetingNotesFile
             | Self::MoreDictationShortcuts => 20261109,
+            Self::AppModelSwitching => 20261110,
         }
     }
 
@@ -307,6 +309,7 @@ impl Feature {
             Self::ReturnToApp => cfg!(target_os = "macos"),
             Self::TapOrHold => cfg!(any(target_os = "macos", target_os = "linux")),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
+            Self::AppModelSwitching => cfg!(any(target_os = "macos", target_os = "windows")),
             Self::AnnotateReplay => {
                 #[cfg(hex_capture)]
                 {
@@ -365,6 +368,7 @@ impl Feature {
             Self::VocabularyBiasing => "vocabulary-biasing",
             Self::TerminalPaste => "terminal-paste",
             Self::KeyboardModelSwitching => "keyboard-model-switching",
+            Self::AppModelSwitching => "app-model-switching",
             Self::MouseShortcuts => "mouse-shortcuts",
             Self::PauseBrowser => "pause-browser",
             Self::ShareShortcut => "share-shortcut",
@@ -440,6 +444,7 @@ impl Feature {
             Self::VocabularyBiasing => "labs.vocabulary_biasing",
             Self::TerminalPaste => "paste_with_shift",
             Self::KeyboardModelSwitching => "keyboard_model_switching.enabled",
+            Self::AppModelSwitching => "labs.app_model_switching",
             Self::MouseShortcuts => "labs.mouse_shortcuts",
             Self::PauseBrowser => "pause_browser_media",
             Self::ShareShortcut => "share_dictation_shortcut",
@@ -519,6 +524,7 @@ impl Feature {
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing,
             Self::TerminalPaste => settings.paste_with_shift,
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled,
+            Self::AppModelSwitching => settings.labs.app_model_switching,
             Self::MouseShortcuts => settings.labs.mouse_shortcuts,
             Self::PauseBrowser => settings.pause_browser_media,
             Self::ShareShortcut => settings.share_dictation_shortcut,
@@ -654,6 +660,7 @@ impl Feature {
             &mut labs.transcribe_files,
             &mut labs.api_processing,
             &mut labs.speakers_only,
+            &mut labs.app_model_switching,
             &mut labs.more_dictation_shortcuts,
         ]
     }
@@ -675,6 +682,7 @@ impl Feature {
             Self::VocabularyBiasing => settings.labs.vocabulary_biasing = on,
             Self::TerminalPaste => settings.paste_with_shift = on,
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled = on,
+            Self::AppModelSwitching => settings.labs.app_model_switching = on,
             Self::MouseShortcuts => settings.labs.mouse_shortcuts = on,
             Self::PauseBrowser => settings.pause_browser_media = on,
             Self::ShareShortcut => settings.share_dictation_shortcut = on,
@@ -827,6 +835,9 @@ const SPEAKERS_ONLY: u64 = RETURN_TO_APP << 1;
 /// The next bit above Only on speakers' switch: a meeting's transcript and
 /// notes export to their own `<stem>.transcript.md` and `<stem>.notes.md`.
 const MEETING_NOTES_FILE: u64 = SPEAKERS_ONLY << 1;
+/// The next bit above Notes' file: a dictation mode's speech model and
+/// language follow the foreground application (macOS, Windows).
+const APP_MODEL_SWITCHING: u64 = MEETING_NOTES_FILE << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1043,6 +1054,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             API_PROCESSING,
         ),
         (Feature::SpeakersOnly, settings.speakers_only, SPEAKERS_ONLY),
+        (
+            Feature::AppModelSwitching,
+            settings.app_model_switching,
+            APP_MODEL_SWITCHING,
+        ),
         (
             Feature::GnomeMeetingCapsules,
             settings.gnome_meeting_capsules,

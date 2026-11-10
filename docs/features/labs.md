@@ -37,6 +37,11 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
 │                                        the input source picks its mapped model (#216); General shows the mappings while on
+├── Switch model with app no  labs.app_model_switching       (macOS, Windows)
+│                                        each mode, Global included, picks a speech model and language; Modes shows the choice
+│                                        while on, and Hex switches when the app in front changes. Both OSes match by
+│                                        application, never by website, and Hex's own window is ignored; Linux has no
+│                                        runtime for it; a switch never downloads a model
 ├── Mouse shortcuts no    labs.mouse_shortcuts         (macOS)   mouse buttons record as shortcuts (#209)
 ├── Also pause the browser no pause_browser_media      (macOS)   pause a playing tab too, with Pause media (#301); General shows its permission row
 ├── Share dictation shortcut no share_dictation_shortcut (Windows) apps such as Discord see the shortcut too (#176)
@@ -279,6 +284,53 @@ not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
 Add a new feature to `labs::Feature` (name, settings key, description, audience), give
 it a row in `rune_ui/labs.rs` and a `hex settings` key, and default it off.
 When a feature graduates, remove it from Labs.
+
+Switch model with app (`app-model-switching`, macOS and Windows): while on,
+the Modes pane gives each mode, Global included, a "Speech model" row:
+Don't switch, or any installed GGUF model the picker offers, then a language
+that model supports (shown fixed for a one-language model). A new model
+choice starts on that model's last-used language, else the saved language it
+supports. The choice saves to the mode's `speech` (in
+`dictation_processing.modes[]`, and Global's in
+`dictation_processing.default_mode`) as `{"model": ..., "language": ...}`.
+When the app in front changes, `transcription/app_model_switching` matches it
+to a mode by application and, 300 ms after the last change, starts the shared
+picker's installed-only preparation for the mode's choice; a mode without a
+choice switches nothing. Matching is by application on macOS and Windows
+alike: a mode's website rules are ignored, so a mode chosen only by website
+never switches. Hex's own window, and a moment with no application in front,
+are ignored: they neither schedule nor cancel a switch. A manual model
+choice cancels a pending switch, launching Hex records the mode in front
+without switching it, and a switch due while a dictation records or
+transcribes waits until it is idle (macOS knows a capture from its press;
+Windows sees only the engine's streams and finishes). It never downloads a
+model: a choice whose model is no longer downloaded shows Not installed, its
+preparation refuses it, and the selected model stays. Enabling the lab while
+Hex is in front applies nothing; the choice applies when you next focus an
+app other than Hex, after the same 300 ms. Editing a mode's choice, Global's
+included, likewise applies when you next focus an app whose mode carries it,
+never while Hex is in front. With keyboard switching also on, the source
+whose switch is due later wins, and an app switch wins a tie in the same
+tick. There is no Linux runtime for it, so Linux does not list the lab. Off,
+the Modes pane is exactly as before and nothing reads the frontmost app for
+models. Checks:
+`app_model_switching_is_a_labs_toggle_on_macos_and_windows`,
+`a_mode_picks_an_installed_speech_model_and_language`, and
+`the_speech_row_needs_the_lab_and_a_capable_os` in
+[speech_model_tests.rs](../../src/rune_ui/speech_model_tests.rs); the switch
+policy tests in
+[app_model_switching.rs](../../src/transcription/app_model_switching.rs);
+`app_model_switching_is_opt_in_and_mode_speech_choices_round_trip` and
+`loading_drops_mode_speech_choices_that_no_longer_validate` in
+[app_settings.rs](../../src/app_settings.rs); and
+`a_modes_speech_choice_uses_the_same_selectors_as_its_processing` in
+[dictation/config.rs](../../src/dictation/config.rs) and
+`a_modes_speech_choice_matches_its_application_or_website_else_global` in
+[dictation/modes.rs](../../src/dictation/modes.rs). Not yet observed: a
+real Mac or Windows PC switching apps while dictating, and the runtime
+scheduling on either host; the `mac-labs` and `windows-labs` goldens were
+regenerated for the new card, the Modes goldens did not change with the lab
+off, and the new `modes-speech` golden shows the on state.
 
 Mouse shortcuts off: the recorder ignores mouse buttons, `hex settings`
 refuses one, and a saved mouse-button shortcut goes back to its default when
@@ -2579,6 +2631,10 @@ Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `voice_filter_shows_only_while_its_labs_toggle_is_on`, and
 `an_installed_driver_keeps_the_voice_filter_on` in
 [panes.rs](../../src/rune_ui/tests/panes.rs);
+`app_model_switching_is_a_labs_toggle_on_macos_and_windows`,
+`a_mode_picks_an_installed_speech_model_and_language`, and
+`the_speech_row_needs_the_lab_and_a_capable_os` in
+[speech_model_tests.rs](../../src/rune_ui/speech_model_tests.rs);
 `every_feature_is_off_by_default_and_round_trips` and
 `the_old_master_switch_is_read_and_ignored` in [labs.rs](../../src/labs.rs);
 `a_dev_feature_in_a_stable_build_is_unlisted_refused_and_off` in [labs.rs](../../src/labs.rs) (a stand-in for a Dev feature, since none exists yet); `labs_parse_as_a_read_command` in [main.rs](../../src/main.rs);

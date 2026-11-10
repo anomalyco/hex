@@ -41,6 +41,16 @@ pub fn dictation_profiles() -> Profiles {
         .clone()
 }
 
+/// The speech model and language the mode `settings` select for `context`,
+/// through the same selectors processing uses: a browser host first, then an
+/// exact application name, else Global. `None` means the mode never switches.
+pub fn speech_for(
+    settings: &DictationProcessingSettings,
+    context: &crate::dictation::context::ContextSnapshot,
+) -> Option<crate::app_settings::KeyboardModelChoice> {
+    build_dictation_profiles(settings).speech_for(context)
+}
+
 pub fn update_dictation_profiles(settings: &DictationProcessingSettings) {
     let profiles = build_dictation_profiles(settings);
     READS_BROWSER.store(uses_browser(settings), Ordering::Release);
@@ -67,7 +77,8 @@ fn build_dictation_profiles(settings: &DictationProcessingSettings) -> Profiles 
             global.transformations.clone(),
             &global.post_processing,
         )
-        .vocabulary(global.vocabulary.clone()),
+        .vocabulary(global.vocabulary.clone())
+        .speech(global.speech.clone()),
     )
     .global_replacements(ReplacementSet::new(&global.replacements));
     for mode in &settings.modes {
@@ -169,6 +180,56 @@ mod tests {
 
         assert_eq!(in_app("Zed"), [term("useEffect")]);
         assert!(in_app("Notes").is_empty());
+    }
+
+    #[test]
+    fn a_modes_speech_choice_uses_the_same_selectors_as_its_processing() {
+        use crate::app_settings::{DictationMode, KeyboardModelChoice};
+        use crate::transcription::models::TranscriptionModelId;
+        let choice = |language: &str| KeyboardModelChoice {
+            model: TranscriptionModelId::ParakeetV3,
+            language: language.into(),
+        };
+        let settings = DictationProcessingSettings {
+            default_mode: DictationMode {
+                speech: Some(choice("en")),
+                ..DictationMode::default()
+            },
+            modes: vec![
+                DictationMode {
+                    applications: vec!["Slack".into()],
+                    speech: Some(choice("de")),
+                    ..DictationMode::default()
+                },
+                DictationMode {
+                    browser_hosts: vec!["x.com".into()],
+                    speech: Some(choice("es")),
+                    ..DictationMode::default()
+                },
+            ],
+        };
+        let profiles = build_dictation_profiles(&settings);
+        let speech = |application: &str, url: Option<&str>| {
+            profiles.speech_for(&ContextSnapshot {
+                application: Some(application.into()),
+                browser_url: url.map(|url| url::Url::parse(url).unwrap()),
+                ..ContextSnapshot::default()
+            })
+        };
+
+        // An exact application name (a `.app` suffix never matters here).
+        assert_eq!(speech("Slack", None).unwrap().language, "de");
+        // A website is more specific than the application.
+        assert_eq!(
+            speech("Safari", Some("https://x.com/home"))
+                .unwrap()
+                .language,
+            "es"
+        );
+        // Nothing matches, so Global's own choice applies.
+        assert_eq!(speech("Notes", None).unwrap().language, "en");
+        let bare = build_dictation_profiles(&DictationProcessingSettings::default());
+        assert!(bare.speech_for(&ContextSnapshot::default()).is_none());
     }
 
     #[test]

@@ -658,6 +658,80 @@ reported `us`, then `ru` after an XKB group lock. The Windows observer and both
 new runtime paths compile (x64 clippy) but were not run on Windows or a live X11
 desktop.
 
+### Switch models with the app in front
+
+```ts
+Labs > Switch model with app                      // labs.app_model_switching; macOS, Windows; off by default; Modes shows each mode's choice while on
+├── Each mode, Global included -> Don't switch, or an installed model and a language
+│   ├── New choice -> The model's last-used language, else the saved language it supports
+│   ├── One-language model -> Its language shown fixed
+│   └── No choice -> Leave the selected model alone
+├── Matching -> By application on macOS and Windows alike; a mode's website rules are ignored
+├── Frontmost app changes -> The matching mode's speech choice
+│   ├── 300 ms after the last change -> Existing installed-only picker preparation
+│   ├── Same model and language already selected -> Nothing loads
+│   └── A model no longer downloaded -> Not installed; the preparation refuses it
+├── Hex's own window, or no app in front -> Ignored; keep the last mode and its pending switch
+├── Enable -> Wait for the next app other than Hex; launch records the app in front without switching
+├── Editing a mode's choice -> Applies when you next focus an app whose mode carries it, never while Hex is in front
+├── Manual model choice -> Supersede pending automatic work; do not reapply at recording start
+├── A dictation records or transcribes -> Hold a due switch until idle   // macOS from its press; Windows engine streams and finishes
+├── Both keyboard and app switching on -> Whichever switch is due later wins; the app wins a tie
+├── Disable -> Cancel automatic work; stop observing; leave the selected model alone
+└── Linux -> Not listed; no runtime follows the frontmost app for models
+```
+
+Each mode's choice persists as `speech` in `dictation_processing.modes[]`,
+and Global's in `dictation_processing.default_mode.speech`, storing a model
+with a language it supports. Only downloaded GGUF models from the picker are
+offered (Apple Speech never); downloads stay in the picker, and a switch never
+downloads. A choice whose model is no longer downloaded reads Not installed
+and is refused by preparation, which leaves the selected model alone.
+Editing a mode's choice, Global's included, applies when you next focus an
+app whose mode carries it; it never applies while Hex's own window is in
+front. Enabling the lab switches nothing by itself: the choice applies when
+you next focus an app other than Hex, after the same 300 ms debounce.
+
+The switch follows the same policy as keyboard-language switching
+([app_model_switching.rs](../../src/transcription/app_model_switching.rs)):
+a manual choice cancels a pending automatic switch, launching records the mode
+in front without applying it, and a due switch waits while a dictation
+records or transcribes (macOS knows a capture from its press; Windows sees the
+engine's streams and finishes). A mode without a choice switches nothing, and
+turning the lab off stops observing the frontmost app. Both hosts match by
+application only: macOS matches the foreground application through the same
+dictation profile selectors as mode processing, and Windows matches the
+foreground executable stem through `dictation::modes`; neither reads a
+browser page, so a mode's website rules are ignored and a mode chosen only by
+website never matches. Hex's own window, and a moment with no application in
+front, are ignored entirely: they neither schedule nor cancel a switch.
+Linux has no runtime for it, so the lab is not listed there.
+
+The switch is debounced for 300 ms after the app changes. With keyboard
+switching also on, both sources follow the same picker preparation: the one
+that becomes due later wins, and if both are due in the same tick the app
+switch wins.
+
+Sources: [switch policy](../../src/transcription/app_model_switching.rs),
+[macOS runtime](../../src/macos_rune/runtime.rs),
+[Windows host](../../src/windows/app.rs),
+[Modes pane](../../src/rune_ui/modes.rs), and the shared
+[row](../../src/rune_ui/speech_model.rs) it uses with General's input-source
+mappings. Checks:
+`app_model_switching_is_a_labs_toggle_on_macos_and_windows`,
+`a_mode_picks_an_installed_speech_model_and_language`, and
+`the_speech_row_needs_the_lab_and_a_capable_os` in
+[speech_model_tests.rs](../../src/rune_ui/speech_model_tests.rs); the policy
+tests in [app_model_switching.rs](../../src/transcription/app_model_switching.rs);
+the settings round-trip and validation tests in
+[app_settings.rs](../../src/app_settings.rs); and the selector tests in
+[dictation/config.rs](../../src/dictation/config.rs) and
+[dictation/modes.rs](../../src/dictation/modes.rs). No check delivers a
+foreground app change on a live Mac or Windows PC, and the runtime scheduling
+compiles there only; the `mac-labs` and `windows-labs` goldens were regenerated
+for the new card, the Modes goldens are unchanged with the lab off, and the new
+`modes-speech` golden shows the on state.
+
 ### Delete downloaded models
 
 ```ts
@@ -1188,6 +1262,11 @@ Selected mode                            // replaces Global's rewrite and transf
 
 Stage fails -> Preserve its input        // failed chain discards partial results
 ```
+
+With Labs › Switch model with app on, each mode also carries a speech model
+and language (`speech`) and the frontmost app's mode switches the
+transcription model before the next dictation; see
+[Switch models with the app in front](#switch-models-with-the-app-in-front).
 
 **Fixed November 1, 2026 (issue 949):** every OpenCode rewrite's fixed
 instructions (`PROTOCOL_PROMPT`) now say to keep every number as said (no

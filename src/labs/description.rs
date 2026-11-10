@@ -26,6 +26,9 @@ impl Feature {
             Self::KeyboardModelSwitching => {
                 "Changing the keyboard language switches the speech model and language"
             }
+            Self::AppModelSwitching => {
+                "Each dictation mode's speech model and language follow the app in front"
+            }
             Self::MouseShortcuts => "Record mouse buttons as shortcuts",
             Self::PauseBrowser => "Also pause the browser while dictating, with Pause media",
             Self::ShareShortcut => "Let apps such as Discord see the dictation shortcut too",

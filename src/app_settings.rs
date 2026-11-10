@@ -1585,6 +1585,65 @@ mod tests {
     }
 
     #[test]
+    fn app_model_switching_is_opt_in_and_mode_speech_choices_round_trip() {
+        let mut settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.labs.app_model_switching);
+        assert!(settings.dictation_processing.default_mode.speech.is_none());
+        let speech = KeyboardModelChoice {
+            model: TranscriptionModelId::ParakeetV3,
+            language: "es".into(),
+        };
+        settings.labs.app_model_switching = true;
+        settings.dictation_processing.default_mode.speech = Some(speech.clone());
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["labs"]["app_model_switching"], true);
+        let restored: AppSettings = serde_json::from_value(saved).unwrap();
+        assert!(restored.labs.app_model_switching);
+        assert_eq!(
+            restored.dictation_processing.default_mode.speech,
+            Some(speech)
+        );
+        // A mode without a choice writes no `speech` at all.
+        let bare: AppSettings = serde_json::from_str("{}").unwrap();
+        let saved = serde_json::to_value(&bare).unwrap();
+        assert!(
+            saved["dictation_processing"]["default_mode"]
+                .get("speech")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn loading_drops_mode_speech_choices_that_no_longer_validate() {
+        let dir = TestSettingsDir::new("mode-speech");
+        let mut settings = AppSettings::default();
+        let russian = KeyboardModelChoice {
+            model: TranscriptionModelId::ParakeetV3,
+            language: "ru".into(),
+        };
+        settings.dictation_processing.modes = vec![
+            DictationMode {
+                name: "Russian".into(),
+                speech: Some(russian.clone()),
+                ..DictationMode::default()
+            },
+            DictationMode {
+                name: "Japanese".into(),
+                speech: Some(KeyboardModelChoice {
+                    model: TranscriptionModelId::ParakeetUnifiedEnglish,
+                    language: "ja".into(),
+                }),
+                ..DictationMode::default()
+            },
+        ];
+        settings.write_to(&dir.path).unwrap();
+        let loaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(loaded.dictation_processing.modes[0].speech, Some(russian));
+        assert_eq!(loaded.dictation_processing.modes[1].speech, None);
+        assert_eq!(loaded.dictation_processing.modes[1].name, "Japanese");
+    }
+
+    #[test]
     fn loading_folds_saved_recognition_hints_into_the_vocabulary_once() {
         let dir = TestSettingsDir::new("folded-hints");
         let mut file = serde_json::to_value(AppSettings {

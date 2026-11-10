@@ -149,6 +149,7 @@ const PATHS: &[(&str, &str)] = &[
     ("modes", "Window/Modes/Modes"),
     ("modes-global", "Window/Modes/Global mode"),
     ("modes-picker", "Window/Modes/App picker"),
+    ("modes-speech", "Window/Modes/Speech model"),
     (
         "modes-transformation-menu",
         "Window/Modes/Transformation menu",

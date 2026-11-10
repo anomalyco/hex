@@ -66,6 +66,7 @@ mod sidebar;
 mod sidebar_update;
 mod sound_sets;
 mod spark;
+mod speech_model;
 #[cfg(target_os = "macos")]
 pub(crate) mod story_link;
 mod vocabulary;
@@ -591,6 +592,10 @@ enum Menu {
     InputSourceModel(usize),
     /// An input source's language in keyboard model switching.
     InputSourceLanguage(usize),
+    /// A mode's speech model in the Modes pane (Labs › Switch model with app).
+    ModeSpeechModel(modes::Selection),
+    /// A mode's speech language in the Modes pane.
+    ModeSpeechLanguage(modes::Selection),
     /// How long History keeps dictations.
     HistoryRetention,
     /// The installed models History's Transcribe again offers.
@@ -1502,6 +1507,9 @@ mod snap_isolation;
 
 #[cfg(test)]
 mod keyboard_model_tests;
+
+#[cfg(test)]
+mod speech_model_tests;
 
 #[cfg(test)]
 mod dmg_keycap;

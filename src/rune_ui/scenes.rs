@@ -172,6 +172,19 @@ pub(super) const SCENES: &[Scene] = &[
         ui.open = Some(Menu::Transformations);
         ui.pane = Pane::Modes;
     }),
+    // Labs › Switch model with app: each mode's speech model and language.
+    ("modes-speech", |ui| {
+        *ui = mac_fixture();
+        modes::fixture(ui);
+        ui.settings.labs.app_model_switching = true;
+        ui.settings.dictation_processing.modes[0].speech =
+            Some(crate::app_settings::KeyboardModelChoice {
+                model: TranscriptionModelId::ParakeetV3,
+                language: "es".into(),
+            });
+        ui.picker.installed = Some(vec![TranscriptionModelId::ParakeetV3]);
+        ui.pane = Pane::Modes;
+    }),
     ("picker", |ui| {
         *ui = portal_fixture();
         picker::fixture(ui, None);

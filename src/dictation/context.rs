@@ -497,6 +497,21 @@ pub fn frontmost_bundle_path() -> Option<std::path::PathBuf> {
     })
 }
 
+/// The frontmost application's display name, without reading a page or a
+/// window title: a dictation mode's application name (Labs › Switch model
+/// with app). `None` when Hex itself owns the frontmost application, since
+/// its own window names no mode, or when macOS reports none.
+#[cfg(target_os = "macos")]
+pub fn frontmost_other_application() -> Option<String> {
+    autoreleasepool(|_| {
+        let application = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+        if application.processIdentifier() == std::process::id() as i32 {
+            return None;
+        }
+        application.localizedName().map(|name| name.to_string())
+    })
+}
+
 /// The frontmost application's process ID, for Accessibility reads.
 #[cfg(target_os = "macos")]
 pub fn frontmost_pid() -> Option<i32> {

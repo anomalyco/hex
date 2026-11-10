@@ -7,20 +7,17 @@ use std::time::{Duration, Instant};
 use rune::{Edge, El, Key, KeyEvent, Transition, Tx, col, row, spacer, text};
 
 use super::controls::{
-    ButtonKind, Choice, DESCRIPTION, KEY_GAP, KeySize, METRICS, Paint, button, fixed_select,
-    keycap, note, pulsing_dot, section, select, setting_row, status_dot,
+    ButtonKind, Choice, DESCRIPTION, KEY_GAP, KeySize, METRICS, Paint, button, keycap, note,
+    pulsing_dot, section, setting_row, status_dot,
 };
 use super::host;
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
-use crate::app_settings::{
-    AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, KeyboardModelChoice, ModifierSide,
-};
+use crate::app_settings::{AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide};
 use crate::desktop::host::{
     DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopUpdateStatus,
 };
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
-use crate::transcription::keyboard_model_switching::InputSource;
 use crate::transcription::models::{self as transcription_models, ModelPreparationStage};
 
 mod grants;
@@ -924,143 +921,43 @@ pub(super) fn input_source_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 .get(&source.id)
                 .cloned();
             let source_id = source.id.clone();
-            let mut choices = vec![Choice {
-                label: tr("Don't switch").into(),
-                detail: None,
-                selected: mapped.is_none(),
-                choose: Box::new(move |ui| {
-                    ui.open = None;
-                    ui.update(|settings| {
-                        settings
-                            .keyboard_model_switching
-                            .mappings
-                            .remove(&source_id);
-                    });
-                }),
-            }];
-            choices.extend(
-                transcription_models::all_models()
-                    .into_iter()
-                    .filter_map(|model| {
-                        let fallback = ui.settings.transcription_for_model(model.id).language;
-                        if !model.available()
-                            || !matches!(model.runtime, transcription_models::ModelRuntime::Gguf(_))
-                            || !ui.picker.installed(model, &fallback)
-                        {
-                            return None;
-                        }
-                        let language = match &mapped {
-                            Some(choice) if model.supports_language(&choice.language) => {
-                                choice.language.clone()
-                            }
-                            _ => source.language_for(model, &fallback),
-                        };
-                        let source_id = source.id.clone();
-                        let id = model.id;
-                        Some(Choice {
-                            label: model.name.into(),
-                            detail: None,
-                            selected: mapped.as_ref().is_some_and(|choice| choice.model == id),
-                            choose: Box::new(move |ui| {
-                                ui.open = None;
-                                ui.update(|settings| {
-                                    settings.keyboard_model_switching.mappings.insert(
-                                        source_id.clone(),
-                                        KeyboardModelChoice {
-                                            model: id,
-                                            language: language.clone(),
-                                        },
-                                    );
-                                });
-                            }),
-                        })
-                    }),
-            );
-            let label = mapped.as_ref().map_or_else(
-                || tr("Don't switch").to_string(),
-                |choice| {
-                    let model = transcription_models::definition(choice.model);
-                    if ui.picker.installed(model, &choice.language) {
-                        model.name.into()
-                    } else {
-                        format!("{} · {}", model.name, tr("Not installed"))
-                    }
-                },
-            );
-            let mut controls = row().gap(8.0).center_y();
-            if let Some(choice) = &mapped {
-                controls =
-                    controls.child(input_source_language(ui, p, index, source, choice, layer));
-            }
-            setting_row(
+            let key = format!("input-source{index}");
+            let model_key = format!("input-source-model{index}");
+            let language_key = format!("input-source-language{index}");
+            super::speech_model::setting(
+                ui,
                 p,
-                &format!("input-source{index}"),
-                &source.name,
-                None,
-                controls.child(select(
-                    p,
-                    &format!("input-source-model{index}"),
-                    tr("Speech model"),
-                    &label,
-                    ui.open == Some(Menu::InputSourceModel(index)),
-                    choices,
-                    move |ui| toggle_menu(ui, Menu::InputSourceModel(index)),
-                    layer,
-                )),
+                super::speech_model::SpeechRow {
+                    key: &key,
+                    model_key: &model_key,
+                    language_key: &language_key,
+                    title: &source.name,
+                    description: None,
+                    choice: mapped,
+                    model_menu: Menu::InputSourceModel(index),
+                    language_menu: Menu::InputSourceLanguage(index),
+                },
+                |model, fallback| source.language_for(model, fallback),
+                move |ui, choice| {
+                    ui.update(|settings| match choice {
+                        Some(choice) => {
+                            settings
+                                .keyboard_model_switching
+                                .mappings
+                                .insert(source_id.clone(), choice);
+                        }
+                        None => {
+                            settings
+                                .keyboard_model_switching
+                                .mappings
+                                .remove(&source_id);
+                        }
+                    });
+                },
+                layer,
             )
         })
         .collect()
-}
-
-/// A mapped source's language: a select, or fixed for one-language models.
-fn input_source_language(
-    ui: &Ui,
-    p: Paint,
-    index: usize,
-    source: &InputSource,
-    choice: &KeyboardModelChoice,
-    layer: &mut Vec<El>,
-) -> El {
-    let key = format!("input-source-language{index}");
-    let current = transcription_models::language_name(&choice.language);
-    let codes = transcription_models::definition(choice.model).language_choices();
-    if codes.len() <= 1 {
-        return fixed_select(p, &key, tr("Language"), current);
-    }
-    let choices = codes
-        .into_iter()
-        .map(|code| {
-            let source_id = source.id.clone();
-            let model = choice.model;
-            Choice {
-                label: transcription_models::language_name(code).to_owned(),
-                detail: None,
-                selected: code == choice.language,
-                choose: Box::new(move |ui: &mut Ui| {
-                    ui.open = None;
-                    ui.update(|settings| {
-                        settings.keyboard_model_switching.mappings.insert(
-                            source_id.clone(),
-                            KeyboardModelChoice {
-                                model,
-                                language: code.to_owned(),
-                            },
-                        );
-                    });
-                }),
-            }
-        })
-        .collect();
-    select(
-        p,
-        &key,
-        tr("Language"),
-        current,
-        ui.open == Some(Menu::InputSourceLanguage(index)),
-        choices,
-        move |ui| toggle_menu(ui, Menu::InputSourceLanguage(index)),
-        layer,
-    )
 }
 
 /// The speech model row's description: preparation progress or its error.
