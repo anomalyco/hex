@@ -13,7 +13,7 @@ use crate::app_settings::{
 
 mod hotkeys;
 
-use hotkeys::special_key_refusal;
+use hotkeys::check_shortcut;
 pub use hotkeys::{format_hotkey, parse_hotkey};
 
 /// One setting as `hex settings get` reports it.
@@ -1398,42 +1398,6 @@ fn invalid(name: &str, why: &str) -> ControlError {
         "invalid-value",
         format!("invalid value for `{name}`: {why}"),
     )
-}
-
-/// Applies the checks a recorded shortcut meets: Labs › Mouse shortcuts
-/// where mouse buttons are recorded, the special-key rules, the OS's own
-/// rule for `slot`, and no key shared with another active shortcut.
-fn check_shortcut(
-    settings: &AppSettings,
-    candidate: &AppSettings,
-    name: &str,
-    slot: HotkeySlot,
-    binding: &HotkeyBinding,
-    shortcuts: &ShortcutRules,
-) -> Result<(), ControlError> {
-    if cfg!(target_os = "macos")
-        && !candidate.labs.mouse_shortcuts
-        && binding.key.as_ref().is_some_and(HotkeyKey::is_mouse)
-    {
-        return Err(invalid(
-            name,
-            "mouse buttons need Labs › Mouse shortcuts: hex labs on mouse-shortcuts",
-        ));
-    }
-    if let Some(why) = special_key_refusal(candidate, binding) {
-        return Err(invalid(name, &why));
-    }
-    (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
-    if settings.hotkey_in_use(slot, binding) {
-        return Err(ControlError::new(
-            "shortcut-in-use",
-            format!(
-                "{} is already in use by another Hex shortcut",
-                format_hotkey(binding)
-            ),
-        ));
-    }
-    Ok(())
 }
 
 fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, ControlError> {
