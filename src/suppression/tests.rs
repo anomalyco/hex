@@ -4680,6 +4680,38 @@ fn caps_lock_press_starts_and_finishes_its_own_hands_free_capture() {
     assert!(!hotkey.is_recording());
 }
 
+// Labs › Pause from menu bar's resume waits on `neutral_with`, which runs on
+// the real keyboard only in macOS builds; these pin its rules.
+#[test]
+fn a_toggled_caps_lock_still_reads_neutral() {
+    // CoreGraphics reports Caps Lock as a held key, and sets alpha shift,
+    // for as long as it is toggled on.
+    assert!(neutral_with(
+        || crate::caps_lock_dictation::ALPHA_SHIFT_MASK,
+        |code| code == CAPS_LOCK_KEY_CODE
+    ));
+    assert_eq!(held_key_with(|code| code == CAPS_LOCK_KEY_CODE), None);
+}
+
+#[test]
+fn a_held_key_reads_not_neutral() {
+    const K: u16 = 40;
+    assert!(!neutral_with(|| 0, |code| code == K));
+    assert_eq!(held_key_with(|code| code == K), Some(K));
+}
+
+#[test]
+fn a_held_modifier_reads_not_neutral() {
+    const LEFT_SHIFT: u16 = 56;
+    assert!(!neutral_with(|| SHIFT_KEY_MASK, |code| code == LEFT_SHIFT));
+}
+
+#[test]
+fn a_stuck_function_flag_still_reads_neutral() {
+    // Arrow-key metadata can leave SecondaryFn set after the key is up.
+    assert!(neutral_with(|| FUNCTION_KEY_MASK, |_| false));
+}
+
 #[test]
 fn caps_lock_leaves_a_hold_capture_alone() {
     let now = capture_time();

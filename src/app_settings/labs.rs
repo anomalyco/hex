@@ -207,6 +207,9 @@ pub struct LabsSettings {
     /// A dictation mode's speech model and language follow the foreground
     /// application (macOS and Windows).
     pub app_model_switching: bool,
+    /// The menu bar offers Pause Hex, which makes every capture shortcut
+    /// inert until Resume (macOS).
+    pub pause_menu: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -279,6 +282,7 @@ impl Default for LabsSettings {
             api_timestamps: false,
             speakers_only: false,
             app_model_switching: false,
+            pause_menu: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,

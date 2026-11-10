@@ -861,6 +861,7 @@ impl Pump {
                 crate::app_settings::meetings_enabled(),
             );
             crate::macos_rune::status_item::update_software(&update_status());
+            crate::macos_rune::status_item::update_pause();
             self.meeting_menu_at = now + MEETING_MENU_REFRESH;
         }
     }
@@ -950,6 +951,17 @@ impl Pump {
                 }
             }
             StatusItemAction::OpenMeetings => show(&self.window, Destination::Meetings(None)),
+            // Labs › Pause from menu bar: only keyboard shortcuts stop; the
+            // menu's own actions keep working. The row says Resume Hex while
+            // a resume waits, and choosing it again leaves it waiting.
+            StatusItemAction::TogglePause => {
+                crate::shortcut_pause::toggle();
+                // Carbon hotkeys register for secure input, so a pause must
+                // drop them and a resume re-add them now, not at the next
+                // quarter-second poll.
+                crate::suppression::secure_input::refresh();
+                crate::macos_rune::status_item::update_pause();
+            }
             StatusItemAction::Quit => {
                 self.runtime_cancel();
                 self.window.quit();

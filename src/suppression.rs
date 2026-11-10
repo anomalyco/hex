@@ -22,6 +22,9 @@ use tap::*;
 
 const DOUBLE_TAP_WINDOW: Duration = MINIMUM_HOLD_DURATION;
 const ESCAPE_KEY_CODE: u16 = 53;
+/// Caps Lock's key code. CoreGraphics reports it as held for as long as it is
+/// toggled on, so it never makes a keyboard non-neutral.
+const CAPS_LOCK_KEY_CODE: u16 = 57;
 /// The key code the Globe (Fn) key reports in its own key events.
 const GLOBE_KEY_CODE: u16 = 179;
 
@@ -433,6 +436,45 @@ pub(crate) fn alpha_shift_now() -> bool {
         != 0
 }
 
+/// The modifier flags that keep a keyboard from reading neutral. Caps Lock's
+/// alpha shift is a toggle rather than a hold, and arrow-key metadata can
+/// leave SecondaryFn set after release, which `recover_stale_keys_with`
+/// ignores too once its own modifier history says Fn is up. The pause has no
+/// such history, so it ignores that bit whenever it is set.
+const NEUTRAL_BLOCKING_MODIFIERS: u64 = HOTKEY_MODIFIERS_MASK
+    & !crate::app_settings::FUNCTION_KEY_MASK
+    & !crate::caps_lock_dictation::ALPHA_SHIFT_MASK;
+
+/// The first keyboard key code that reads as held, Caps Lock aside.
+fn held_key_with(mut key_down: impl FnMut(u16) -> bool) -> Option<u16> {
+    (0..128u16).find(|&code| code != CAPS_LOCK_KEY_CODE && key_down(code))
+}
+
+/// Whether a keyboard reporting `flags` and `key_down` reads as neutral: no
+/// modifier is down and no key is held. Split from the CoreGraphics reads so
+/// the rule is testable without a keyboard.
+fn neutral_with(mut flags: impl FnMut() -> u64, key_down: impl FnMut(u16) -> bool) -> bool {
+    flags() & NEUTRAL_BLOCKING_MODIFIERS == 0 && held_key_with(key_down).is_none()
+}
+
+/// Whether no keyboard key or modifier reads as held, with the physical
+/// keyboard's own state agreeing. Labs › Pause from menu bar waits for this
+/// before its shortcuts go live again, so a key held while Resume is chosen
+/// can never start a capture.
+pub(crate) fn keyboard_is_neutral() -> bool {
+    // SAFETY: a read-only CoreGraphics state query.
+    neutral_with(
+        || unsafe { CGEventSourceFlagsState(HID_SYSTEM_STATE) },
+        input_is_held,
+    )
+}
+
+/// The first key code that reads as held: what a pending resume is still
+/// waiting for, for its one slow warning.
+pub(crate) fn held_key_code() -> Option<u16> {
+    held_key_with(input_is_held)
+}
+
 /// The listener's input channel. The taps' thread and, under Secure Event
 /// Input, the main thread's Carbon hotkeys ([`secure_input`]) both send
 /// through it; the lock keeps the pending queue in the channel's order.
@@ -507,7 +549,7 @@ unsafe extern "C" fn physical_event_callback(
     }
     if event.is_null()
         || event_type != EVENT_KEY_DOWN
-        || crate::app_settings::hotkey_capture_active()
+        || crate::app_settings::shortcuts_suspended()
         // SAFETY: CoreGraphics supplied a valid event to this callback.
         || unsafe { CGEventGetIntegerValueField(event, EVENT_SOURCE_USER_DATA) }
             == crate::keyboard::SYNTHETIC_EVENT_MARKER
@@ -683,7 +725,7 @@ unsafe extern "C" fn event_callback(
         // A swallowed press must not leak a drag into the foreground app.
         // SAFETY: CoreGraphics supplied a valid mouse event.
         let button = unsafe { CGEventGetIntegerValueField(event, MOUSE_EVENT_BUTTON_NUMBER) };
-        let suppress = !crate::app_settings::hotkey_capture_active()
+        let suppress = !crate::app_settings::shortcuts_suspended()
             && u16::try_from(button).ok().is_some_and(|button| {
                 context
                     .shortcut_suppression
@@ -754,7 +796,7 @@ unsafe extern "C" fn event_callback(
     // Physical HID events used raw Mach ticks on the tested Apple Silicon system.
     // SAFETY: CoreGraphics supplied a valid event to this callback.
     let capture_at = CaptureInstant::from_nanos(unsafe { CGEventGetTimestamp(event) });
-    if crate::app_settings::hotkey_capture_active() {
+    if crate::app_settings::shortcuts_suspended() {
         context.activity.observe(input, false);
         context
             .shortcut_suppression
@@ -813,11 +855,12 @@ enum ListSwallow {
 }
 
 /// Whether the capsule's list or suggestions may take a key press: only
-/// while captures are on, something is open, and no shortcut is being
-/// recorded. With captures turned off, a capsule left open takes nothing.
+/// while captures are on, something is open, and shortcuts are live (no
+/// binding is being recorded and Hex isn't paused). With captures turned
+/// off, a capsule left open takes nothing.
 #[cfg(hex_capture)]
-fn list_takes_keys(capture_on: bool, open: bool, recording_shortcut: bool) -> bool {
-    capture_on && open && !recording_shortcut
+fn list_takes_keys(capture_on: bool, open: bool, suspended: bool) -> bool {
+    capture_on && open && !suspended
 }
 
 /// Hands Labs › Screenshots its keys (`screenshots::key`): its shortcut,
@@ -860,7 +903,7 @@ fn list_tap(event_type: u32, event: EventRef) -> ListSwallow {
             && list_takes_keys(
                 crate::app_settings::capture_on(),
                 list_open() || suggesting(),
-                crate::app_settings::hotkey_capture_active(),
+                crate::app_settings::shortcuts_suspended(),
             )
         {
             capsule_key(CapsuleKey::Shift(down));
@@ -889,7 +932,7 @@ fn list_tap(event_type: u32, event: EventRef) -> ListSwallow {
     if !list_takes_keys(
         crate::app_settings::capture_on(),
         list_open() || suggesting,
-        crate::app_settings::hotkey_capture_active(),
+        crate::app_settings::shortcuts_suspended(),
     ) {
         return ListSwallow::No;
     }

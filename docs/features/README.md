@@ -1499,6 +1499,10 @@ Menu bar and Settings                    // maintenance
 ├── Menu (macOS), top to bottom: now, things to do, the app
 │   ├── Meetings on or a meeting under way: Recording · <title> · 12:34 (opens
 │   │   the Meetings pane), Stop & Transcribe, Copy Section ▸; idle: Record Meeting
+│   ├── Pause Hex (Labs › Pause from menu bar, off, #82) -> every capture
+│   │   shortcut and the secure-input hotkeys go inert, the tap passes keys
+│   │   through, and the row reads Resume Hex (labs.md); Resume waits for a
+│   │   neutral keyboard, and a restart starts unpaused
 │   ├── Paste Last Dictation ⌥⇧V (saved binding), Copy Recent Dictation ▸ (Labs),
 │   │   Copy Last Meeting Transcript (Meetings on), Restore Last Capture (Labs ›
 │   │   Screenshots on; dimmed until a capture card was closed), Speech Model ▸
@@ -1508,7 +1512,8 @@ Menu bar and Settings                    // maintenance
 │   ├── No Meetings… (Settings… opens the same window) and no Show Hex in
 │   │   Screen Recordings (Annotate's pane has it)
 │   └── check: the_menu_reads_meeting_then_actions_then_the_app,
-│       paste_last_shows_the_saved_binding_or_nothing (status_item.rs; the
+│       paste_last_shows_the_saved_binding_or_nothing,
+│       the_pause_row_reads_pause_or_resume (status_item.rs; the
 │       row order and key equivalents only, no native menu is drawn)
 ├── Icon -> 18 pt monochrome Hex mark template (recording variant + elapsed time)
 │   └── Labs > Hide menu bar icon (off, #1064) -> hidden unless a meeting is under

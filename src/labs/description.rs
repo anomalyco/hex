@@ -196,6 +196,9 @@ impl Feature {
             Self::SpeakersOnly => {
                 "Apply \"While dictating\" only when sound plays through speakers; headphones are left alone"
             }
+            Self::PauseMenu => {
+                "Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys"
+            }
         }
     }
 }

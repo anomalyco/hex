@@ -108,6 +108,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // model, but no transcript answer or offline model load was observed, and nothing ran on macOS or Windows
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
+├── Pause from menu bar no labs.pause_menu             (macOS) the menu bar's action block offers Pause Hex; while paused every capture shortcut and the secure-input hotkeys are inert, the event tap passes keys through, and Resume waits for a neutral keyboard (#82)
 ├── ⌘Q closes Settings no labs.quit_closes_window      (macOS) the app menu's Quit Hex (⌘Q) closes the Settings window instead of quitting Hex; dictation keeps running, the menu bar icon still quits (#1473)
 ├── Notch indicator no    labs.notch_indicator         (macOS) on a screen with a notch, the HUD widens the notch sideways in the Dynamic Island's compact style at either visible position: an orange mic and level bars, the macOS spinner, a green checkmark; Hidden still hides it, and flat screens keep the Top/Bottom setting
 ├── Movable meeting capsules no labs.movable_meeting_capsules (macOS) panel capsules (Meeting transcript ready, Recording automatically, offers, reminders) drag to another corner and show in the last one, shared with the recording capsule (#1093)
@@ -1545,6 +1546,88 @@ only); `hide_menu_bar_icon_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs). Not yet observed: the icon hiding on a real
 Mac, or macOS restoring an item's remembered visibility; the row renders
 only in macOS builds, so no golden changes.
+
+Pause from menu bar (`pause-menu`, issue 82, macOS): for people whose game or
+another app collides with Hex's shortcuts and who don't want to quit. With the
+lab on, the menu bar's action block starts with Pause Hex; pressing it pauses
+Hex and the row reads Resume Hex. A pause is runtime-only and never saved, so a
+restart starts unpaused. While paused every capture shortcut is inert:
+dictation (main, second, extra, Caps Lock, and raw), Paste Last Dictation and
+meeting paste, Annotate and Screenshots, and the Carbon hotkeys registered under
+Secure Event Input. The event tap passes every key event through unmodified,
+exactly as while a new binding is recorded, because every suspension site reads
+`app_settings::shortcuts_suspended()` (a recording binding or a pause) instead
+of `hotkey_capture_active()` alone. Pausing cancels only an active dictation
+capture: the listener suspends every shortcut machine as the pause begins
+(`Hotkeys::suspend_when`, once per suspension) and cancels the capture it was
+recording, while accepted transcription and paste jobs still finish and a
+capture a command starts during the same pause keeps recording. An Annotate or
+Screenshots recording already under way is not cancelled by a pause: it keeps
+recording and stops from its own capsule, while only its shortcuts go inert. A
+Caps Lock dictation ignores the key while shortcuts are suspended, so a pause
+neither starts a dictation nor forces Caps Lock off. Hiding the menu bar icon
+(Labs › Hide menu bar icon) leaves no Resume Hex row at all, so with the icon
+hidden turning the lab off is what resumes.
+
+```ts
+Paused     -> every capture shortcut inert; tap passes keys through
+           -> the listener cancels only the dictation capture it is recording
+           -> Caps Lock starts nothing and the lock stays as it is
+Resume     -> the row still reads Resume Hex: shortcuts stay suspended until
+              no key or modifier reads as held for 100 ms -> live again
+Lab off    -> resumes at once and the row hides; a restart starts unpaused
+```
+
+Choosing Resume Hex again while a resume already waits leaves it waiting; it is
+never re-paused or restarted.
+
+Resuming does not re-arm shortcuts on a held keyboard: the listener's
+`shortcut_pause::tick` settles the pause on each pass and only goes live after
+100 ms of a neutral keyboard (`STALE_KEY_NEUTRAL_DURATION`'s window in
+[src/suppression.rs](../../src/suppression.rs)), so a key held while the user
+clicks Resume can never start a capture. That check,
+`suppression::keyboard_is_neutral`, reads the HID modifier flags and every
+keyboard key code below 128 through `CGEventSourceKeyState` (the combined
+session state and HID state must agree); Caps Lock's own key code is skipped
+because macOS reports it down while it is merely toggled on, and the Fn flag is
+masked out because arrow-key metadata can leave SecondaryFn set after release
+(the pause has no modifier history to tell that apart from a held Fn, so it
+always ignores the bit), the same way `recover_stale_keys_with` drops it once
+its own history says Fn is up. Only a pending resume reads the keyboard and
+takes the pause machine's lock (once); a running or paused Hex reads a lock-free
+atomic mirror instead. A pending resume logs one warning naming the held key
+code after five seconds, and the pause, resume request, and live-again
+transitions log at info. The gate, `labs::pause_menu()`, is read when the status
+item refreshes (about twice a second) and as the menu opens; `labs::apply`
+resumes at once when the lab turns off. Explicit CLI commands (`hex dictation
+start`) and the menu's own actions are not keyboard shortcuts and keep working,
+though a capture `hex dictation start` begins during a pause can only be
+finished with `hex dictation stop`: its reply still offers the shortcut, which
+is inert until Resume.
+Checks: `pause_suspends_and_resume_only_follows_a_neutral_keyboard`,
+`a_neutral_keyboard_past_the_window_resumes`,
+`choosing_resume_while_a_resume_waits_leaves_it_waiting`,
+`a_pending_resume_reports_how_long_it_has_waited`,
+`turning_the_lab_off_resumes_at_once`, `settling_leaves_a_running_hex_alone`, and
+`a_resume_ignored_while_running_does_not_suspend` in
+[shortcut_pause.rs](../../src/shortcut_pause.rs);
+`a_pause_cancels_once_and_leaves_a_command_capture_alone` in
+[recognition/hotkeys.rs](../../src/recognition/hotkeys.rs);
+`the_pause_row_reads_pause_or_resume` and
+`the_menu_reads_meeting_then_actions_then_the_app` in
+[macos_rune/status_item.rs](../../src/macos_rune/status_item.rs);
+`pause_menu_is_its_own_bit_and_macos_only` in [labs.rs](../../src/labs.rs);
+`a_toggled_caps_lock_still_reads_neutral`, `a_held_key_reads_not_neutral`,
+`a_held_modifier_reads_not_neutral`, and
+`a_stuck_function_flag_still_reads_neutral` in
+[suppression/tests.rs](../../src/suppression/tests.rs).
+Not yet observed: a real pause and resume on a Mac, especially against a held
+modifier and a game's colliding key; the suppression, secure-input, listener,
+and status-item changes are compiled and clippy-linted by the macOS CI build but
+no permission-granted keyboard test ran. The pause machine's checks run on
+Linux too, while the tap, secure-input, listener, and menu tests, and the
+neutral-keyboard rules, run only in macOS builds. The row renders only in macOS
+builds, so no golden changes.
 
 ⌘Q closes Settings (`quit-closes-window`, issue 1473, macOS): for people who
 press ⌘Q to put the Settings window away and expect dictation to keep running.

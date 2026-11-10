@@ -1259,6 +1259,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Up to four more shortcuts that each dictate like the main one, each with its own mode", "Jusqu'à quatre raccourcis supplémentaires qui dictent comme le principal, chacun avec son propre mode"),
     ("Extra shortcut {}", "Raccourci supplémentaire {}"),
     ("Add shortcut", "Ajouter un raccourci"),
+    ("Pause from menu bar", "Pause depuis la barre des menus"),
+    ("Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys", "Ajoute Pause Hex à la barre des menus. En pause, Hex ignore ses raccourcis pour que les autres apps reçoivent les touches"),
 ];
 
 #[cfg(test)]

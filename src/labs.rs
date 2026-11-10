@@ -161,6 +161,7 @@ impl Feature {
             | Self::ApiProcessing
             | Self::ApiTimestamps
             | Self::SpeakersOnly
+            | Self::PauseMenu
             | Self::MoreDictationShortcuts => Audience::Everyone,
         }
     }
@@ -235,7 +236,7 @@ impl Feature {
             | Self::SpeakersOnly
             | Self::MeetingNotesFile
             | Self::MoreDictationShortcuts => 20261109,
-            Self::AppModelSwitching | Self::ApiTimestamps => 20261110,
+            Self::AppModelSwitching | Self::ApiTimestamps | Self::PauseMenu => 20261110,
         }
     }
 
@@ -303,6 +304,7 @@ impl Feature {
             | Self::Screenshots
             | Self::CapsLockDictation
             | Self::DoubleTapModifiers
+            | Self::PauseMenu
             | Self::MoreDictationShortcuts => cfg!(target_os = "macos"),
             Self::KeepOnClipboard | Self::CopyOnly => {
                 cfg!(any(target_os = "macos", target_os = "windows"))
@@ -430,6 +432,7 @@ impl Feature {
             Self::ApiProcessing => "api-processing",
             Self::ApiTimestamps => "api-timestamps",
             Self::SpeakersOnly => "speakers-only",
+            Self::PauseMenu => "pause-menu",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
     }
@@ -507,6 +510,7 @@ impl Feature {
             Self::ApiProcessing => "labs.api_processing",
             Self::ApiTimestamps => "labs.api_timestamps",
             Self::SpeakersOnly => "labs.speakers_only",
+            Self::PauseMenu => "labs.pause_menu",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
     }
@@ -588,6 +592,7 @@ impl Feature {
             Self::ApiProcessing => settings.labs.api_processing,
             Self::ApiTimestamps => settings.labs.api_timestamps,
             Self::SpeakersOnly => settings.labs.speakers_only,
+            Self::PauseMenu => settings.labs.pause_menu,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
         }
     }
@@ -667,6 +672,7 @@ impl Feature {
             &mut labs.api_timestamps,
             &mut labs.speakers_only,
             &mut labs.app_model_switching,
+            &mut labs.pause_menu,
             &mut labs.more_dictation_shortcuts,
         ]
     }
@@ -751,6 +757,7 @@ impl Feature {
             Self::ApiProcessing => settings.labs.api_processing = on,
             Self::ApiTimestamps => settings.labs.api_timestamps = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
+            Self::PauseMenu => settings.labs.pause_menu = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
@@ -845,9 +852,12 @@ const MEETING_NOTES_FILE: u64 = SPEAKERS_ONLY << 1;
 /// The next bit above Notes' file: a dictation mode's speech model and
 /// language follow the foreground application (macOS, Windows).
 const APP_MODEL_SWITCHING: u64 = MEETING_NOTES_FILE << 1;
-/// The next bit above the app model switching: the local API's
+/// The next bit above Switch model with app: the menu bar offers Pause Hex,
+/// and every capture shortcut is inert while paused (macOS).
+const PAUSE_MENU: u64 = APP_MODEL_SWITCHING << 1;
+/// The next bit above Pause from menu bar: the local API's
 /// `timestamps=segment|word` returns native timings.
-const API_TIMESTAMPS: u64 = APP_MODEL_SWITCHING << 1;
+const API_TIMESTAMPS: u64 = PAUSE_MENU << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -886,6 +896,9 @@ pub fn window_dark(labs: &LabsSettings, system_dark: bool) -> bool {
 /// Records the switches the loaded or saved settings hold.
 pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
+    // Labs › Pause from menu bar: turning it off resumes at once, without
+    // waiting for the menu to refresh; the menu row hides itself there.
+    crate::shortcut_pause::reconcile(pause_menu());
 }
 
 fn encode(settings: &LabsSettings) -> u64 {
@@ -1069,6 +1082,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             API_TIMESTAMPS,
         ),
         (Feature::SpeakersOnly, settings.speakers_only, SPEAKERS_ONLY),
+        (Feature::PauseMenu, settings.pause_menu, PAUSE_MENU),
         (
             Feature::AppModelSwitching,
             settings.app_model_switching,
@@ -1729,6 +1743,25 @@ mod tests {
         assert!(Feature::SpeakersOnly.on_this_os());
         assert_eq!(Feature::SpeakersOnly.added(), 20261109);
         assert_eq!(Feature::SpeakersOnly.audience(), Audience::Everyone);
+    }
+
+    #[test]
+    fn pause_menu_is_its_own_bit_and_macos_only() {
+        assert_eq!(PAUSE_MENU, 1 << 60);
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & PAUSE_MENU, 0);
+        labs.pause_menu = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & PAUSE_MENU, 0);
+        assert_eq!(state & MEETING_NOTES_FILE, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(Feature::PauseMenu.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::PauseMenu.added(), 20261110);
+        assert_eq!(Feature::PauseMenu.audience(), Audience::Everyone);
+        assert_eq!(Feature::PauseMenu.group(), Group::Shortcuts);
+        assert_eq!(Feature::PauseMenu.settings_key(), "labs.pause_menu");
+        assert_eq!(Feature::PauseMenu.name(), "pause-menu");
     }
 
     #[test]

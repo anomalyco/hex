@@ -655,6 +655,12 @@ const KEYS: &[Key] = &[
          left alone, and outputs Hex can't classify count as speakers",
     ),
     key(
+        "labs.pause_menu",
+        Kind::Bool,
+        "Labs: the menu bar offers Pause Hex, which makes every capture shortcut inert until \
+         Resume; a restart starts unpaused (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

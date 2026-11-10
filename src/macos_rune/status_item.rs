@@ -29,6 +29,9 @@ pub enum StatusItemAction {
     StartMeeting,
     StopMeeting,
     CopyLastMeetingTranscript,
+    /// Pause Hex, or Resume Hex while shortcuts are suspended (Labs › Pause
+    /// from menu bar).
+    TogglePause,
     /// Copy chapter `n` of the recording meeting (Labs).
     CopyChapter(usize),
     /// The recording row: the Meetings pane.
@@ -102,6 +105,7 @@ objc2::define_class!(
         fn menu_needs_update(&self, _menu: &NSMenu) {
             refresh_recent_dictations();
             refresh_restore_capture();
+            update_pause();
         }
 
         /// Restore Last Capture is dimmed while no closed card can come
@@ -127,6 +131,13 @@ objc2::define_class!(
                 .ivars()
                 .actions
                 .try_send(StatusItemAction::CopyLastMeetingTranscript);
+        }
+
+        /// Labs › Pause from menu bar: every capture shortcut goes inert, or
+        /// comes back once the keyboard is neutral.
+        #[unsafe(method(togglePause:))]
+        fn toggle_pause(&self, _sender: &AnyObject) {
+            let _ = self.ivars().actions.try_send(StatusItemAction::TogglePause);
         }
 
         #[unsafe(method(copyChapter:))]
@@ -172,6 +183,8 @@ enum Row {
     CopySection,
     RecordMeeting,
     MeetingSeparator,
+    /// Labs › Pause from menu bar: hidden until the menu opens with it on.
+    PauseHex,
     PasteLast,
     /// Labs › Copy recent dictations: hidden until the menu opens with it on.
     CopyRecentDictation,
@@ -185,12 +198,13 @@ enum Row {
     Quit,
 }
 
-const ROWS: [Row; 14] = [
+const ROWS: [Row; 15] = [
     Row::MeetingStatus,
     Row::StopMeeting,
     Row::CopySection,
     Row::RecordMeeting,
     Row::MeetingSeparator,
+    Row::PauseHex,
     Row::PasteLast,
     Row::CopyRecentDictation,
     Row::CopyLastMeetingTranscript,
@@ -211,6 +225,7 @@ impl Row {
             Row::StopMeeting => "Stop & Transcribe",
             Row::CopySection => "Copy Section",
             Row::RecordMeeting => "Record Meeting",
+            Row::PauseHex => pause_title(false),
             Row::PasteLast => "Paste Last Dictation",
             Row::CopyRecentDictation => "Copy Recent Dictation",
             Row::CopyLastMeetingTranscript => "Copy Last Meeting Transcript",
@@ -228,6 +243,7 @@ impl Row {
             Row::MeetingStatus => sel!(openMeetings:),
             Row::StopMeeting => sel!(stopMeeting:),
             Row::RecordMeeting => sel!(startMeeting:),
+            Row::PauseHex => sel!(togglePause:),
             Row::PasteLast => sel!(pasteLast:),
             Row::CopyLastMeetingTranscript => sel!(copyLastMeetingTranscript:),
             Row::RestoreCapture => sel!(restoreCapture:),
@@ -261,6 +277,7 @@ impl Row {
                 | Row::CopySection
                 | Row::RecordMeeting
                 | Row::MeetingSeparator
+                | Row::PauseHex
                 | Row::CopyRecentDictation
                 | Row::CopyLastMeetingTranscript
                 | Row::RestoreCapture
@@ -330,6 +347,8 @@ struct StatusItemController {
     meeting_button: RefCell<(String, bool)>,
     paste_last: Retained<NSMenuItem>,
     paste_last_key: RefCell<Option<KeyEquivalent>>,
+    pause: Retained<NSMenuItem>,
+    pause_title: RefCell<String>,
     recent: Retained<NSMenuItem>,
     recent_menu: Retained<NSMenu>,
     restore_capture: Retained<NSMenuItem>,
@@ -479,6 +498,8 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
             meeting_button: RefCell::new((String::new(), false)),
             paste_last: row(Row::PasteLast),
             paste_last_key: RefCell::new(None),
+            pause: row(Row::PauseHex),
+            pause_title: RefCell::new(pause_title(false).into()),
             recent: row(Row::CopyRecentDictation),
             recent_menu,
             restore_capture: row(Row::RestoreCapture),
@@ -670,6 +691,12 @@ fn icon_shown(hide: bool, meeting_active: bool) -> bool {
     !hide || meeting_active
 }
 
+/// Labs › Pause from menu bar's row: Pause Hex while shortcuts run, Resume
+/// Hex while they are paused or a resume waits for a neutral keyboard.
+fn pause_title(suspended: bool) -> &'static str {
+    if suspended { "Resume Hex" } else { "Pause Hex" }
+}
+
 /// A meeting title short enough for one menu line.
 fn menu_title(title: &str) -> String {
     const MAX_CHARS: usize = 48;
@@ -737,6 +764,27 @@ fn refresh_restore_capture() {
     STATUS_ITEM.with(|controller| {
         if let Some(controller) = controller.borrow().as_ref() {
             controller.restore_capture.setHidden(!shown);
+        }
+    });
+}
+
+/// Shows Pause Hex while Labs › Pause from menu bar is on, reads Resume Hex
+/// while shortcuts are suspended, and resumes at once if the lab turned off
+/// under a pause. The title follows the pause state itself, so it reads
+/// Resume Hex while a resume waits for a neutral keyboard too.
+pub fn update_pause() {
+    let on = crate::labs::pause_menu();
+    crate::shortcut_pause::reconcile(on);
+    let title = pause_title(crate::shortcut_pause::suspended());
+    STATUS_ITEM.with(|controller| {
+        let controller = controller.borrow();
+        let Some(controller) = controller.as_ref() else {
+            return;
+        };
+        controller.pause.setHidden(!on);
+        if *controller.pause_title.borrow() != title {
+            controller.pause.setTitle(&NSString::from_str(title));
+            controller.pause_title.replace(title.into());
         }
     });
 }
@@ -963,6 +1011,7 @@ mod tests {
                 "Copy Section".into(),
                 "Record Meeting".into(),
                 "—".into(),
+                "Pause Hex".into(),
                 "Paste Last Dictation".into(),
                 "Copy Recent Dictation".into(),
                 "Copy Last Meeting Transcript".into(),
@@ -1017,6 +1066,17 @@ mod tests {
         assert!(icon_shown(false, true));
         assert!(!icon_shown(true, false));
         assert!(icon_shown(true, true));
+    }
+
+    #[test]
+    fn the_pause_row_reads_pause_or_resume() {
+        // Suspended covers a pause and the resume that waits for a neutral
+        // keyboard, so the row never says Pause Hex while keys are inert.
+        assert_eq!(pause_title(false), "Pause Hex");
+        assert_eq!(pause_title(true), "Resume Hex");
+        assert_eq!(Row::PauseHex.title().as_deref(), Some("Pause Hex"));
+        assert!(Row::PauseHex.action().is_some());
+        assert!(Row::PauseHex.starts_hidden());
     }
 
     #[test]

@@ -316,6 +316,10 @@ thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
+/// Set once the hotkey handler is installed, so [`refresh`] never registers
+/// hotkeys nothing would hear.
+static STARTED: AtomicBool = AtomicBool::new(false);
+
 /// Installs the hotkey handler and starts watching for secure input, on
 /// the main thread, whose run loop dispatches Carbon events.
 pub(crate) fn start(_mtm: MainThreadMarker) {
@@ -348,6 +352,7 @@ pub(crate) fn start(_mtm: MainThreadMarker) {
         );
         return;
     }
+    STARTED.store(true, Ordering::Release);
     let block = block2::RcBlock::new(|_: std::ptr::NonNull<NSTimer>| poll());
     // SAFETY: the timer runs its block on this (main) thread's run loop,
     // which keeps it for the life of the process.
@@ -358,11 +363,21 @@ pub(crate) fn start(_mtm: MainThreadMarker) {
     poll();
 }
 
+/// Re-reads secure input and the shortcuts now, on the main thread, so a
+/// pause or a resume reaches the Carbon hotkeys without waiting for the next
+/// poll. Does nothing before [`start`] installed the handler: a registered
+/// hotkey nothing listens for would swallow the key.
+pub(crate) fn refresh() {
+    if STARTED.load(Ordering::Acquire) {
+        poll();
+    }
+}
+
 fn poll() {
     // SAFETY: a read-only HIToolbox query.
     let secure = unsafe { IsSecureEventInputEnabled() } != 0;
     let sink = sink();
-    let wanted = if secure && sink.is_some() && !crate::app_settings::hotkey_capture_active() {
+    let wanted = if secure && sink.is_some() && !crate::app_settings::shortcuts_suspended() {
         chords(crate::app_settings::runtime_hotkeys(), screenshot_hotkeys())
     } else {
         Vec::new()

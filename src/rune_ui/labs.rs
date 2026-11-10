@@ -599,6 +599,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Hide menu bar icon"),
                 tr("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings"),
             ));
+            // macOS's status item offers Pause Hex while its keyboard
+            // listener stays up.
+            rows.push(row(
+                Feature::PauseMenu,
+                None,
+                tr("Pause from menu bar"),
+                tr("Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys"),
+            ));
             // macOS's app menu Quit Hex closes the window instead.
             rows.push(row(
                 Feature::QuitClosesWindow,
@@ -919,6 +927,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::Appearance => "lab-appearance",
         Feature::ReleaseNotesLink => "lab-release-notes-link",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
+        Feature::PauseMenu => "lab-pause-menu",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
