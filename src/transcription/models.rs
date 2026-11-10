@@ -2105,6 +2105,25 @@ mod tests {
     }
 
     #[test]
+    fn urdu_is_transcribed_by_whisper_with_its_language_hint() {
+        let selection = recommended_selection("ur");
+        assert_eq!(selection.model, TranscriptionModelId::WhisperLargeV3Turbo);
+        assert_eq!(selection.language, "ur");
+        let model = validate(&selection).unwrap();
+        assert_eq!(model.runtime_language_hint("ur"), Some("ur"));
+        let choices = choices_for_runtime("ur");
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].recommendation, Recommendation::Recommended);
+        assert!(
+            validate(&TranscriptionSelection {
+                model: TranscriptionModelId::Qwen3Asr06B,
+                language: "ur".into(),
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
     fn whisper_and_qwen3_asr_read_the_vocabulary_as_a_prompt_and_parakeet_biases() {
         use TranscriptionModelId::*;
         let by = |kind| {
