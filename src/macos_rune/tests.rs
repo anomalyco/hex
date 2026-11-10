@@ -3,6 +3,10 @@
 use super::runtime::Runtime;
 use super::*;
 use crate::app_settings::{KeyboardModelChoice, KeyboardModelSwitching};
+// `Request` moved beside `ShortcutTarget` into `macos_rune/request.rs`, so the
+// runtime's own imports no longer name the model IDs and selections these
+// tests build.
+use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 use crate::transcription::preparation::TranscriptionPreparation;
 
 const WAIT: Duration = Duration::from_secs(3);

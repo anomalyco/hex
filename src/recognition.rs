@@ -23,11 +23,17 @@ use crate::feedback::{self, Tone};
 use crate::parakeet::{
     DictationJobId, DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,
 };
-use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputEvent, InputMonitor};
+use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputMonitor};
 
 mod context_watch;
+mod guards;
+mod hotkeys;
 
 use context_watch::ContextWatch;
+use guards::{
+    caps_lock_can_press, capture_boundary, capture_refusal, claims_escape, paste_last_refusal,
+};
+use hotkeys::{Hotkeys, Shortcut};
 
 enum FinishResult {
     Discarded,
@@ -158,247 +164,6 @@ impl FinishingProgrammaticDictation {
     }
 }
 
-/// One of the dictation shortcut machines.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Shortcut {
-    Dictation,
-    /// Labs › Second dictation shortcut: dictates as the dictation shortcut
-    /// does.
-    Second,
-    /// Dictate without processing.
-    Raw,
-    /// Labs › Caps Lock dictation: a press toggles a hands-free capture.
-    CapsLock,
-}
-
-impl Shortcut {
-    const ALL: [Self; 4] = [Self::Dictation, Self::Second, Self::Raw, Self::CapsLock];
-}
-
-/// The dictation shortcut machines: dictation, Labs › Second dictation
-/// shortcut while it is on and bound, and Dictate without processing while
-/// it is bound. One records at a time, and the one that started a capture
-/// finishes or cancels it.
-struct Hotkeys {
-    dictation: DictationHotkey,
-    second: Option<DictationHotkey>,
-    raw: Option<DictationHotkey>,
-    /// Labs › Caps Lock dictation's hands-free toggle. Its binding is empty:
-    /// presses arrive from the caps-lock worker, not the shortcut matcher.
-    caps_lock: DictationHotkey,
-    /// The recording (or the last) skips processing: the raw shortcut or
-    /// `hex dictation start --raw` started it.
-    raw_capture: bool,
-}
-
-impl Hotkeys {
-    fn machines(&mut self) -> impl Iterator<Item = &mut DictationHotkey> {
-        std::iter::once(&mut self.dictation)
-            .chain(self.second.as_mut())
-            .chain(self.raw.as_mut())
-            .chain(Some(&mut self.caps_lock))
-    }
-
-    fn machine(&self, shortcut: Shortcut) -> Option<&DictationHotkey> {
-        match shortcut {
-            Shortcut::Dictation => Some(&self.dictation),
-            Shortcut::Second => self.second.as_ref(),
-            Shortcut::Raw => self.raw.as_ref(),
-            Shortcut::CapsLock => Some(&self.caps_lock),
-        }
-    }
-
-    fn machine_mut(&mut self, shortcut: Shortcut) -> Option<&mut DictationHotkey> {
-        match shortcut {
-            Shortcut::Dictation => Some(&mut self.dictation),
-            Shortcut::Second => self.second.as_mut(),
-            Shortcut::Raw => self.raw.as_mut(),
-            Shortcut::CapsLock => Some(&mut self.caps_lock),
-        }
-    }
-
-    /// Whether a machine other than `shortcut`'s records.
-    fn recording_besides(&self, shortcut: Shortcut) -> bool {
-        Shortcut::ALL
-            .into_iter()
-            .filter(|other| *other != shortcut)
-            .filter_map(|other| self.machine(other))
-            .any(DictationHotkey::is_recording)
-    }
-
-    /// Whether a machine other than `shortcut`'s has a double-tap gesture
-    /// waiting to become a recording.
-    fn pending_gesture_besides(&self, shortcut: Shortcut) -> bool {
-        Shortcut::ALL
-            .into_iter()
-            .filter(|other| *other != shortcut)
-            .filter_map(|other| self.machine(other))
-            .any(DictationHotkey::has_pending_gesture)
-    }
-
-    fn any_recording(&self) -> bool {
-        Shortcut::ALL
-            .into_iter()
-            .filter_map(|shortcut| self.machine(shortcut))
-            .any(DictationHotkey::is_recording)
-    }
-
-    fn suppresses_recognition(&self) -> bool {
-        Shortcut::ALL
-            .into_iter()
-            .filter_map(|shortcut| self.machine(shortcut))
-            .any(DictationHotkey::suppresses_recognition)
-    }
-
-    /// Stands `shortcut`'s machine down, as when its start was refused.
-    fn suspend(&mut self, shortcut: Shortcut) {
-        match self.machine_mut(shortcut) {
-            Some(machine) => machine.suspend(),
-            None => self.dictation.suspend(),
-        };
-    }
-
-    /// Suspends every machine (never stopping at the first, as `any`
-    /// would) and reports whether one was recording.
-    fn suspend_all(&mut self) -> bool {
-        self.machines().filter_map(DictationHotkey::suspend).count() > 0
-    }
-
-    fn disarm_pending_gestures(&mut self) {
-        self.machines()
-            .for_each(DictationHotkey::disarm_pending_gesture);
-    }
-
-    fn track_key_state(&mut self, event: InputEvent, at: CaptureInstant) {
-        for machine in self.machines() {
-            machine.track_key_state(event, at);
-        }
-    }
-
-    fn recover_stale_keys(&mut self) {
-        self.machines()
-            .for_each(DictationHotkey::recover_stale_keys);
-    }
-
-    fn break_chords(&mut self, now: CaptureInstant) {
-        for machine in self.machines() {
-            machine.break_chord(now);
-        }
-    }
-
-    /// Applies the saved shortcut options. Unbinding the raw or second
-    /// shortcut (or turning the second's Labs toggle off) while it records
-    /// reports true: the caller cancels that recording.
-    fn configure(&mut self, now: CaptureInstant) -> bool {
-        let hotkeys = crate::app_settings::runtime_hotkeys();
-        let raw_cancelled = rebind(&mut self.raw, hotkeys.raw_dictation, now);
-        let second_cancelled = rebind(&mut self.second, hotkeys.second_dictation, now);
-        self.dictation.set_binding(hotkeys.dictation);
-        for machine in self.machines() {
-            machine.set_double_tap_enabled(crate::app_settings::double_tap_lock());
-            machine.set_double_tap_only(crate::app_settings::double_tap_only());
-            machine.set_toggle(crate::app_settings::shortcut_toggle());
-            machine.set_cancel(hotkeys.cancel);
-        }
-        // Caps Lock is hands-free by definition: its own machine always
-        // treats a press as Toggle, and Escape cancels it in every mode.
-        self.caps_lock
-            .set_binding(crate::app_settings::RuntimeHotkey::default());
-        self.caps_lock.set_double_tap_enabled(false);
-        self.caps_lock.set_double_tap_only(false);
-        self.caps_lock.set_toggle(true);
-        self.caps_lock.set_cancel(Some(
-            crate::app_settings::HotkeyBinding::cancel_default().runtime(),
-        ));
-        raw_cancelled || second_cancelled
-    }
-
-    /// A Caps Lock press, if the lab's machine should act on it. A hold
-    /// capture, another shortcut recording, or a pending double-tap gesture
-    /// is left undisturbed.
-    fn caps_lock_press(&mut self) -> Option<HotkeyAction> {
-        if self.recording_besides(Shortcut::CapsLock)
-            || self.pending_gesture_besides(Shortcut::CapsLock)
-        {
-            return None;
-        }
-        let action = self.caps_lock.caps_lock_toggle()?;
-        if action == HotkeyAction::Start {
-            self.raw_capture = false;
-        }
-        Some(action)
-    }
-
-    /// Stands a Caps Lock capture down when its lab turns off. Returns
-    /// whether one was recording so the caller can cancel it.
-    fn stop_caps_lock(&mut self) -> bool {
-        if self.caps_lock.is_recording() {
-            self.caps_lock.suspend();
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Feeds one input to every machine, and returns what each did with
-    /// which machine it was. A machine that starts while another records
-    /// stands down until its keys come up, and only the dictation machine
-    /// pastes.
-    fn process(&mut self, event: InputEvent, at: CaptureInstant) -> Vec<(Shortcut, HotkeyAction)> {
-        let mut actions = Vec::new();
-        for shortcut in Shortcut::ALL {
-            let others_recording = self.recording_besides(shortcut);
-            let Some(machine) = self.machine_mut(shortcut) else {
-                continue;
-            };
-            match machine.process(event, at) {
-                Some(HotkeyAction::Start) if others_recording => {
-                    machine.suspend();
-                }
-                Some(HotkeyAction::PasteLast | HotkeyAction::PasteMeeting)
-                    if shortcut != Shortcut::Dictation => {}
-                Some(action) => actions.push((shortcut, action)),
-                None => {}
-            }
-        }
-        actions
-    }
-
-    /// Stops whichever machine records, as a `stop` or `cancel` command does.
-    fn suspend_recording(&mut self) {
-        for machine in self.machines() {
-            if machine.is_recording() {
-                machine.suspend();
-            }
-        }
-    }
-}
-
-/// Creates, rebinds, or removes an optional shortcut machine. Returns
-/// whether a removed machine was recording.
-fn rebind(
-    slot: &mut Option<DictationHotkey>,
-    binding: Option<crate::app_settings::RuntimeHotkey>,
-    now: CaptureInstant,
-) -> bool {
-    match binding {
-        None => slot.take().is_some_and(|machine| machine.is_recording()),
-        Some(binding) => {
-            match slot.as_mut() {
-                Some(machine) => machine.set_binding(binding),
-                None => {
-                    *slot = Some(DictationHotkey::new(
-                        now,
-                        crate::app_settings::double_tap_lock(),
-                        binding,
-                    ));
-                }
-            }
-            false
-        }
-    }
-}
-
 pub fn listen(
     events: EventLog,
     device_override: Option<&str>,
@@ -418,21 +183,18 @@ pub fn listen(
     let mut events = events;
     let input_monitor = InputMonitor::start()?;
     let mut context = ContextWatch::start(input_monitor.activity.clone());
-    let mut hotkeys = Hotkeys {
-        dictation: DictationHotkey::new(
+    let mut hotkeys = Hotkeys::new(
+        DictationHotkey::new(
             CaptureInstant::now(),
             crate::app_settings::double_tap_lock(),
             crate::app_settings::dictation_hotkey(),
         ),
-        second: None,
-        raw: None,
-        caps_lock: DictationHotkey::new(
+        DictationHotkey::new(
             CaptureInstant::now(),
             false,
             crate::app_settings::RuntimeHotkey::default(),
         ),
-        raw_capture: false,
-    };
+    );
     hotkeys.configure(CaptureInstant::now());
     let hud = indicator;
     let caps_lock = crate::caps_lock_dictation::CapsLockDictation::new();
@@ -1191,6 +953,8 @@ pub fn listen(
         // keeps its Toggle-mode cancel meaning while it records.
         input_monitor
             .set_caps_lock_cancel(programmatic.is_none() && hotkeys.caps_lock.is_recording());
+        // An extra shortcut takes its own cancel key in its own mode too.
+        input_monitor.set_extra_cancel(programmatic.is_none() && hotkeys.extra_recording());
         if received_worker_event {
             emit_engine_state(
                 &mut events,
@@ -1571,38 +1335,6 @@ fn finish_hotkey_dictation(
     Ok(finished)
 }
 
-/// Whether Hex takes Escape from the app in front: only for a capture
-/// (drawing, its press, the capsule's picker), never for dictation, and never
-/// while a programmatic dictation records: the listener ignores every key
-/// then, so Escape stays with its owner app rather than being swallowed.
-fn claims_escape(programmatic: bool, capture_escape: bool) -> bool {
-    !programmatic && capture_escape
-}
-
-/// Whether a Caps Lock press may act. An Annotate capture records the
-/// narration itself, so a Caps Lock press must not start a dictation over it;
-/// a press that finishes an already-running Caps Lock capture still works.
-fn caps_lock_can_press(caps_recording: bool, annotate_recording: bool) -> bool {
-    caps_recording || !annotate_recording
-}
-
-/// Why a control can't start a capture now, if it can't.
-fn capture_refusal(other_recording: bool, suspended: bool) -> Option<ControlReply> {
-    if other_recording {
-        Some(ControlReply::error(
-            "busy",
-            "another recording is in progress; finish it first",
-        ))
-    } else if suspended {
-        Some(ControlReply::error(
-            "busy",
-            "Hex is recording a shortcut in Settings or reopening the microphone; try again",
-        ))
-    } else {
-        None
-    }
-}
-
 /// A control start has no press to judge, so its capture counts as
 /// intentional from its first sample: the recording environment starts and
 /// the live stream opens now. `tone_owed` plays the start tone for a capture
@@ -1752,18 +1484,6 @@ fn control_dictation(
     })
 }
 
-/// A `hex paste-last` (or the menu bar's Paste Last Dictation) waits for
-/// every capture and shortcut gesture to end: pasting cancels the audio
-/// owner's capture, which would strand the machine that started it.
-fn paste_last_refusal(capture_active: bool) -> Option<ControlReply> {
-    capture_active.then(|| {
-        ControlReply::error(
-            "busy",
-            "a recording or shortcut is in progress; finish it first",
-        )
-    })
-}
-
 /// Pastes the last dictation at the current focus.
 fn paste_last(
     worker: &DictationWorker,
@@ -1780,16 +1500,6 @@ fn paste_last(
     };
     emit_engine_state(events, false, worker, device)?;
     Ok(reply)
-}
-
-/// The instant a shortcut edge applies to. A released microphone has no
-/// authoritative timeline yet, so the edge uses wall-clock time instead.
-fn capture_boundary(input: &DictationAudio, release_while_idle: bool) -> CaptureInstant {
-    if release_while_idle {
-        CaptureInstant::now()
-    } else {
-        input.captured_through()
-    }
 }
 
 fn fail_capture(
@@ -2047,15 +1757,17 @@ fn handle_dictation_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_settings::{
+        CONTROL_KEY_MASK, ExtraDictationMode, HotkeyModifiers, MAX_EXTRA_DICTATION_SHORTCUTS,
+        ModifierSide, OPTION_KEY_MASK, RuntimeHotkey, SHIFT_KEY_MASK,
+    };
+    use crate::suppression::InputEvent;
 
     /// Labs › Second dictation shortcut (issue 627): each shortcut follows
     /// the same double-tap lock, the one that started a capture finishes
     /// it, and the other stands down while it records.
     #[test]
     fn the_shortcut_that_starts_a_capture_owns_it() {
-        use crate::app_settings::{
-            CONTROL_KEY_MASK, HotkeyModifiers, ModifierSide, OPTION_KEY_MASK, RuntimeHotkey,
-        };
         let base = CaptureInstant::from_nanos(60_000_000_000);
         let at = |ms: u64| base + Duration::from_millis(ms);
         let option = RuntimeHotkey {
@@ -2073,6 +1785,7 @@ mod tests {
             dictation: DictationHotkey::new(base, true, option),
             second: Some(DictationHotkey::new(base, true, control)),
             raw: None,
+            extra: std::array::from_fn(|_| None),
             caps_lock: DictationHotkey::new(base, false, RuntimeHotkey::default()),
             raw_capture: false,
         };
@@ -2106,6 +1819,254 @@ mod tests {
         assert!(!hotkeys.any_recording());
     }
 
+    /// A bound extra row's machine, as the listener configures it.
+    fn extra_hotkeys(
+        base: CaptureInstant,
+        dictation: RuntimeHotkey,
+        rows: &[(RuntimeHotkey, ExtraDictationMode)],
+    ) -> Hotkeys {
+        let mut bindings = [None; MAX_EXTRA_DICTATION_SHORTCUTS];
+        for (index, (binding, _)) in rows.iter().enumerate() {
+            bindings[index] = Some(*binding);
+        }
+        let mut hotkeys = Hotkeys {
+            dictation: DictationHotkey::new(base, true, dictation),
+            second: None,
+            raw: None,
+            extra: std::array::from_fn(|_| None),
+            caps_lock: DictationHotkey::new(base, false, RuntimeHotkey::default()),
+            raw_capture: false,
+        };
+        hotkeys.rebind_extra(bindings, base);
+        let cancel = crate::app_settings::HotkeyBinding::cancel_default().runtime();
+        for (index, (_, mode)) in rows.iter().enumerate() {
+            let machine = hotkeys.extra[index].as_mut().expect("the row is bound");
+            machine.set_trigger(*mode);
+            machine.set_cancel(Some(cancel));
+            machine.set_cancel_in_any_mode(true);
+        }
+        hotkeys
+    }
+
+    fn modifier_hotkey(modifiers: HotkeyModifiers) -> RuntimeHotkey {
+        RuntimeHotkey {
+            modifiers,
+            key_code: None,
+        }
+    }
+
+    fn shift_hotkey() -> RuntimeHotkey {
+        modifier_hotkey(HotkeyModifiers {
+            shift: Some(ModifierSide::Either),
+            ..HotkeyModifiers::default()
+        })
+    }
+
+    /// Labs › More dictation shortcuts: each extra row triggers its own way
+    /// while the dictation shortcut keeps its global mode.
+    #[test]
+    fn each_extra_shortcut_keeps_its_own_mode() {
+        let base = CaptureInstant::from_nanos(110_000_000_000);
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let option = modifier_hotkey(HotkeyModifiers::option());
+        let control = modifier_hotkey(HotkeyModifiers::control());
+        let mut hotkeys = extra_hotkeys(
+            base,
+            option,
+            &[
+                (control, ExtraDictationMode::Tap),
+                (shift_hotkey(), ExtraDictationMode::Hold),
+            ],
+        );
+        const EXTRA_TAP: Shortcut = Shortcut::Extra(0);
+        const EXTRA_HOLD: Shortcut = Shortcut::Extra(1);
+        const START: HotkeyAction = HotkeyAction::Start;
+        const FINISH: HotkeyAction = HotkeyAction::Finish;
+        let press = |hotkeys: &mut Hotkeys, flags: u64, ms: u64| {
+            hotkeys.process(InputEvent::Flags(flags), at(ms))
+        };
+
+        // Tap starts hands-free on one press; the release keeps recording.
+        assert_eq!(
+            press(&mut hotkeys, CONTROL_KEY_MASK, 0),
+            [(EXTRA_TAP, START)]
+        );
+        assert!(press(&mut hotkeys, 0, 80).is_empty());
+        assert!(hotkeys.extra[0].as_ref().unwrap().is_recording());
+        assert_eq!(
+            press(&mut hotkeys, CONTROL_KEY_MASK, 200),
+            [(EXTRA_TAP, FINISH)]
+        );
+        assert!(press(&mut hotkeys, 0, 280).is_empty());
+
+        // Hold lets go to finish.
+        assert_eq!(
+            press(&mut hotkeys, SHIFT_KEY_MASK, 400),
+            [(EXTRA_HOLD, START)]
+        );
+        assert_eq!(press(&mut hotkeys, 0, 480), [(EXTRA_HOLD, FINISH)]);
+
+        // The dictation shortcut keeps its own hold behavior.
+        const DICTATION: Shortcut = Shortcut::Dictation;
+        assert_eq!(
+            press(&mut hotkeys, OPTION_KEY_MASK, 600),
+            [(DICTATION, START)]
+        );
+        assert_eq!(press(&mut hotkeys, 0, 680), [(DICTATION, FINISH)]);
+        assert!(!hotkeys.any_recording());
+    }
+
+    /// An extra shortcut that starts a capture owns it: the other extras and
+    /// the dictation shortcut stand down until it finishes.
+    #[test]
+    fn an_extra_shortcut_owns_the_capture_it_starts() {
+        let base = CaptureInstant::from_nanos(120_000_000_000);
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let option = modifier_hotkey(HotkeyModifiers::option());
+        let mut hotkeys = extra_hotkeys(
+            base,
+            option,
+            &[
+                (
+                    modifier_hotkey(HotkeyModifiers::control()),
+                    ExtraDictationMode::HoldOrDoubleTap,
+                ),
+                (shift_hotkey(), ExtraDictationMode::HoldOrDoubleTap),
+            ],
+        );
+        const EXTRA0: Shortcut = Shortcut::Extra(0);
+        const START: HotkeyAction = HotkeyAction::Start;
+        const FINISH: HotkeyAction = HotkeyAction::Finish;
+        let press = |hotkeys: &mut Hotkeys, flags: u64, ms: u64| {
+            hotkeys.process(InputEvent::Flags(flags), at(ms))
+        };
+
+        // Double-tap it hands-free.
+        assert_eq!(press(&mut hotkeys, CONTROL_KEY_MASK, 0), [(EXTRA0, START)]);
+        assert_eq!(press(&mut hotkeys, 0, 80), [(EXTRA0, FINISH)]);
+        assert_eq!(
+            press(&mut hotkeys, CONTROL_KEY_MASK, 180),
+            [(EXTRA0, START)]
+        );
+        assert!(press(&mut hotkeys, 0, 260).is_empty());
+        assert!(hotkeys.extra[0].as_ref().unwrap().is_locked());
+
+        // The other extra and the dictation shortcut stand down.
+        assert!(press(&mut hotkeys, SHIFT_KEY_MASK, 400).is_empty());
+        assert!(press(&mut hotkeys, 0, 480).is_empty());
+        assert!(press(&mut hotkeys, OPTION_KEY_MASK, 600).is_empty());
+        assert!(press(&mut hotkeys, 0, 680).is_empty());
+        assert!(hotkeys.extra[0].as_ref().unwrap().is_recording());
+        assert!(!hotkeys.extra[1].as_ref().unwrap().is_recording());
+        assert!(!hotkeys.dictation.is_recording());
+
+        // Only the shortcut that started it finishes it.
+        assert_eq!(
+            press(&mut hotkeys, CONTROL_KEY_MASK, 800),
+            [(EXTRA0, FINISH)]
+        );
+        assert!(press(&mut hotkeys, 0, 880).is_empty());
+        assert!(!hotkeys.any_recording());
+    }
+
+    /// Rebinding matches rows by binding, so adding or removing another row
+    /// never cancels a recording extra's capture; dropping its own row does.
+    #[test]
+    fn removing_another_row_keeps_a_recording_extra() {
+        let base = CaptureInstant::from_nanos(130_000_000_000);
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let option = modifier_hotkey(HotkeyModifiers::option());
+        let control = modifier_hotkey(HotkeyModifiers::control());
+        let shift = shift_hotkey();
+        let mut hotkeys = extra_hotkeys(
+            base,
+            option,
+            &[
+                (control, ExtraDictationMode::Hold),
+                (shift, ExtraDictationMode::Hold),
+            ],
+        );
+        assert_eq!(
+            hotkeys.process(InputEvent::Flags(CONTROL_KEY_MASK), at(0)),
+            [(Shortcut::Extra(0), HotkeyAction::Start)]
+        );
+
+        // Adding a row before it moves the machine without dropping it.
+        let mut added = [None; MAX_EXTRA_DICTATION_SHORTCUTS];
+        added[0] = Some(shift);
+        added[1] = Some(control);
+        assert!(!hotkeys.rebind_extra(added, at(100)));
+        assert!(hotkeys.extra[1].as_ref().unwrap().is_recording());
+
+        // Removing the other row leaves it recording, in either position.
+        let mut removed = [None; MAX_EXTRA_DICTATION_SHORTCUTS];
+        removed[0] = Some(control);
+        assert!(!hotkeys.rebind_extra(removed, at(200)));
+        assert!(hotkeys.extra[0].as_ref().unwrap().is_recording());
+
+        // Dropping the recording row reports the cancel the listener acts on.
+        assert!(hotkeys.rebind_extra([None; MAX_EXTRA_DICTATION_SHORTCUTS], at(300)));
+        assert!(!hotkeys.any_recording());
+    }
+
+    /// Escape cancels a recording extra in its own mode, and the dictation
+    /// shortcut keeps its Hold-mode behavior (no cancel at all). A locked
+    /// extra is cancelled too while that shortcut ignores Escape as it holds.
+    #[test]
+    fn escape_cancels_a_locked_extra_that_records() {
+        let base = CaptureInstant::from_nanos(140_000_000_000);
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let option = modifier_hotkey(HotkeyModifiers::option());
+        let mut hotkeys = extra_hotkeys(
+            base,
+            option,
+            &[(
+                modifier_hotkey(HotkeyModifiers::control()),
+                ExtraDictationMode::HoldOrDoubleTap,
+            )],
+        );
+        const EXTRA0: Shortcut = Shortcut::Extra(0);
+        const START: HotkeyAction = HotkeyAction::Start;
+        const FINISH: HotkeyAction = HotkeyAction::Finish;
+        let press = |hotkeys: &mut Hotkeys, flags: u64, ms: u64| {
+            hotkeys.process(InputEvent::Flags(flags), at(ms))
+        };
+        let escape = |hotkeys: &mut Hotkeys, down: bool, flags: u64, ms: u64| {
+            hotkeys.process(
+                InputEvent::Key {
+                    code: 53,
+                    down,
+                    flags,
+                },
+                at(ms),
+            )
+        };
+
+        // Double-tap the extra hands-free.
+        assert_eq!(press(&mut hotkeys, CONTROL_KEY_MASK, 0), [(EXTRA0, START)]);
+        assert_eq!(press(&mut hotkeys, 0, 80), [(EXTRA0, FINISH)]);
+        assert_eq!(
+            press(&mut hotkeys, CONTROL_KEY_MASK, 180),
+            [(EXTRA0, START)]
+        );
+        assert!(press(&mut hotkeys, 0, 260).is_empty());
+        assert!(hotkeys.extra[0].as_ref().unwrap().is_locked());
+        assert_eq!(
+            escape(&mut hotkeys, true, 0, 400),
+            [(EXTRA0, HotkeyAction::CancelShortcut)]
+        );
+        assert!(escape(&mut hotkeys, false, 0, 500).is_empty());
+        assert!(!hotkeys.extra[0].as_ref().unwrap().is_recording());
+
+        // Hold dictation still ignores Escape while its key is held.
+        assert_eq!(
+            press(&mut hotkeys, OPTION_KEY_MASK, 600),
+            [(Shortcut::Dictation, START)]
+        );
+        assert!(escape(&mut hotkeys, true, OPTION_KEY_MASK, 680).is_empty());
+        assert!(hotkeys.dictation.is_recording());
+    }
+
     fn caps_lock_hotkeys(
         base: CaptureInstant,
         dictation: crate::app_settings::RuntimeHotkey,
@@ -2120,6 +2081,7 @@ mod tests {
             dictation: DictationHotkey::new(base, false, dictation),
             second: None,
             raw: None,
+            extra: std::array::from_fn(|_| None),
             caps_lock,
             raw_capture: false,
         }
@@ -2198,7 +2160,6 @@ mod tests {
 
     #[test]
     fn caps_lock_never_starts_over_a_pending_double_tap() {
-        use crate::app_settings::{HotkeyModifiers, OPTION_KEY_MASK, RuntimeHotkey};
         let base = CaptureInstant::from_nanos(100_000_000_000);
         let space = RuntimeHotkey {
             modifiers: HotkeyModifiers::option(),

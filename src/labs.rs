@@ -8,6 +8,7 @@
 //! model switching, mouse shortcuts, pausing the browser, restoring Paste
 //! last dictation's default shortcut, keeping the dictation on the
 //! clipboard or only copying it (macOS), a second dictation shortcut
+//! (macOS), more dictation shortcuts with their own activation modes
 //! (macOS), Toggle's tap or hold (macOS, Linux), stopping an automatic meeting
 //! recording when its call ends (macOS), transcribing a saved WAV file from a
 //! terminal, and Terminal paste, shortcut sharing
@@ -157,7 +158,8 @@ impl Feature {
             | Self::OpenCodeInWsl
             | Self::TranscribeFiles
             | Self::ApiProcessing
-            | Self::SpeakersOnly => Audience::Everyone,
+            | Self::SpeakersOnly
+            | Self::MoreDictationShortcuts => Audience::Everyone,
         }
     }
 
@@ -229,7 +231,8 @@ impl Feature {
             | Self::DoubleTapModifiers
             | Self::ReturnToApp
             | Self::SpeakersOnly
-            | Self::MeetingNotesFile => 20261109,
+            | Self::MeetingNotesFile
+            | Self::MoreDictationShortcuts => 20261109,
         }
     }
 
@@ -297,7 +300,8 @@ impl Feature {
             | Self::NotchIndicator
             | Self::Screenshots
             | Self::CapsLockDictation
-            | Self::DoubleTapModifiers => cfg!(target_os = "macos"),
+            | Self::DoubleTapModifiers
+            | Self::MoreDictationShortcuts => cfg!(target_os = "macos"),
             Self::KeepOnClipboard | Self::CopyOnly => {
                 cfg!(any(target_os = "macos", target_os = "windows"))
             }
@@ -419,6 +423,7 @@ impl Feature {
             Self::TranscribeFiles => "transcribe-files",
             Self::ApiProcessing => "api-processing",
             Self::SpeakersOnly => "speakers-only",
+            Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
     }
 
@@ -493,6 +498,7 @@ impl Feature {
             Self::TranscribeFiles => "labs.transcribe_files",
             Self::ApiProcessing => "labs.api_processing",
             Self::SpeakersOnly => "labs.speakers_only",
+            Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
     }
 
@@ -571,6 +577,7 @@ impl Feature {
             Self::TranscribeFiles => settings.labs.transcribe_files,
             Self::ApiProcessing => settings.labs.api_processing,
             Self::SpeakersOnly => settings.labs.speakers_only,
+            Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
         }
     }
 
@@ -647,6 +654,7 @@ impl Feature {
             &mut labs.transcribe_files,
             &mut labs.api_processing,
             &mut labs.speakers_only,
+            &mut labs.more_dictation_shortcuts,
         ]
     }
 
@@ -728,6 +736,7 @@ impl Feature {
             Self::TranscribeFiles => settings.labs.transcribe_files = on,
             Self::ApiProcessing => settings.labs.api_processing = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
+            Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -803,9 +812,8 @@ const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
 /// The next bit above Caps Lock's slow blink: an OpenCode service in WSL is
 /// found when no Windows one answers (Windows).
 const OPENCODE_IN_WSL: u64 = CAPS_LOCK_SLOW_BLINK << 1;
-/// The next bit above OpenCode in WSL's switch: the local API's
-/// `process=global` returns a transcript after Global mode's output
-/// processing.
+/// The next bit above OpenCode in WSL: the local API's `process=global`
+/// returns a transcript after Global mode's output processing.
 const API_PROCESSING: u64 = OPENCODE_IN_WSL << 1;
 /// The next bit above Process API transcripts' switch: Double-tap accepts a
 /// shortcut without a key (macOS).

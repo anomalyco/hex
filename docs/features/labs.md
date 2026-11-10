@@ -52,6 +52,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
+├── More dictation shortcuts no labs.more_dictation_shortcuts + extra_dictation_hotkeys (macOS)
+│                                        up to four more shortcuts that each dictate like the main one, each with its own
+│                                        mode; General shows a numbered row with a recorder, a shortcut mode, and Remove for each while on
 ├── Terminal paste shortcut no labs.terminal_paste_shortcut + terminal_paste_hotkey (Windows, Linux)
 │                                        another shortcut dictates like the main one and always pastes with Ctrl+Shift+V; General shows its recorder while on
 ├── Caps Lock dictation no labs.caps_lock_dictation + labs.caps_lock_light (macOS)   a Caps Lock press starts and stops hands-free dictation; its light waits for the microphone, then shows recording (steady or slow blink), processing, and off
@@ -620,6 +623,66 @@ suppressed, or checked for it, and Hex is unchanged. Checks:
 real Mac with an external keyboard, or the recorder row's rendering (macOS
 builds only; no golden).
 
+More dictation shortcuts (`more-dictation-shortcuts`, macOS): up to four
+more shortcuts that each dictate like the main one, each with its own
+activation mode, for a keyboard with more keys to spare. While on, General
+shows one numbered row per saved extra under the second dictation shortcut's:
+its recorder, a shortcut-mode select with the dictation shortcut's choices
+(Hold or double-tap, Hold, Tap, Double-tap; Double-tap is left out while the
+row's binding has no key, unless Labs › Double-tap on a lone modifier is on,
+exactly as it is for the main shortcut), and
+a Remove button that drops the row. An Add shortcut row appears while fewer
+than four rows exist, and a new row starts unbound. The rows persist as
+`extra_dictation_hotkeys`, an array of `{"binding": ..., "mode": ...}` rows
+in `settings.json` (also `hex settings set extra_dictation_hotkeys …`),
+capped at four: loading keeps the first four and folds each row's mode to
+one its binding can trigger. The gate is
+`AppSettings::active_extra_dictation_hotkey`: only on macOS, with the toggle
+on, a binding saved, and no overlap with another active shortcut does
+`RuntimeHotkeys::extra_dictation` carry that row, so the event tap
+suppresses its keys and the listener (`recognition::Hotkeys`) runs the row's
+own shortcut machine with the switches its mode saves
+(`ExtraDictationMode::switches`). Each row follows Labs › Double-tap on a
+lone modifier exactly as the dictation shortcut does: with it on, a row on a
+lone modifier keeps Double-tap, and the machine's own
+`labs::double_tap_modifiers()` check admits it; off, the row folds to Hold or
+double-tap as before, and turning the lab off folds the saved mode while the
+dictation shortcut's `double_tap_only` is cleared. It dictates and pastes with processing, as
+the dictation shortcut does; Paste last and meeting paste still come only
+from the main machine. The shortcut that starts a capture owns it, and the
+others stand down until its keys lift while it records. Escape cancels a
+recording row once it is locked, in Tap mode, or while a bare key or mouse
+button is held, Toggle's cancel binding included; while a Hold row on a
+modifier or chord binding is physically held, Escape carries those modifiers
+and neither cancels nor is swallowed. Removing the row that records cancels
+its capture while removing another row leaves it recording. Turning the
+toggle off or clearing the binding mid-capture cancels that capture. Off,
+the saved rows stay and nothing is matched, suppressed, or checked for them.
+Checks:
+`an_extra_shortcut_needs_its_lab_and_its_own_keys`,
+`active_rows_do_not_share_a_key`,
+`adding_stops_at_the_maximum_and_removing_frees_a_place`,
+`extra_rows_round_trip_and_survive_their_lab_turning_off`,
+`loading_truncates_and_folds_the_rows`,
+`double_tap_folds_away_without_a_key_or_the_lab` and
+`a_rows_double_tap_follows_the_lone_modifier_lab` in
+[app_settings/extra_shortcuts.rs](../../src/app_settings/extra_shortcuts.rs);
+`a_row_needs_a_key_or_the_lone_modifier_lab` in
+[rune_ui/shortcut_mode.rs](../../src/rune_ui/shortcut_mode.rs);
+`each_extra_shortcut_keeps_its_own_mode`,
+`an_extra_shortcut_owns_the_capture_it_starts`,
+`removing_another_row_keeps_a_recording_extra` and
+`escape_cancels_a_locked_extra_that_records` in
+[recognition.rs](../../src/recognition.rs); and
+`an_extra_capture_keeps_its_cancel_from_the_app` and
+`an_extra_mode_sets_its_trigger_switches` in
+[suppression/tests.rs](../../src/suppression/tests.rs) (macOS only).
+`extra_dictation_hotkeys_takes_up_to_four_checked_rows` covers
+`hex settings set` in
+[control/settings.rs](../../src/control/settings.rs). Not yet observed on a
+real Mac: the recorder rows, the mode select, Add shortcut and Remove, each
+row's own mode, and the Labs card (macOS builds only; no golden).
+
 Terminal paste shortcut (`terminal-paste-shortcut`, Windows and Linux):
 another dictation shortcut whose paste is always Ctrl+Shift+V, for a terminal
 window that needs it, while the main dictation shortcut keeps following the
@@ -864,13 +927,13 @@ different modifier. Modifier flag events are never suppressed, so a lone
 Option or Globe press and release reach the focused app unchanged; macOS's
 own "press Globe twice" system dictation shortcut may therefore also fire
 while this lab is on. It applies to every `DictationHotkey` that takes the
-mode (the primary shortcut, Dictate without processing, and the second
-dictation shortcut). Off, the persisted normalization clears `double_tap_only`
-for a shortcut without a key exactly as a fresh load does, Double-tap is
-dimmed in the Shortcut mode modal, and `hex settings set double_tap_only on`
-refuses it. Windows and Linux have no such path for this lab: their runtime
-gates and `hex settings` validation are exactly as before, and both keep the
-key requirement.
+mode (the primary shortcut, Dictate without processing, the second dictation
+shortcut, and each Labs › More dictation shortcuts row). Off, the persisted
+normalization clears `double_tap_only` for a shortcut without a key exactly
+as a fresh load does, Double-tap is dimmed in the Shortcut mode modal, and
+`hex settings set double_tap_only on` refuses it. Windows and Linux have no
+such path for this lab: their runtime gates and `hex settings` validation are
+exactly as before, and both keep the key requirement.
 
 Checks: `double_tap_only_with_the_lab_starts_from_a_lone_modifier` (Option
 and Fn), `double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord`,

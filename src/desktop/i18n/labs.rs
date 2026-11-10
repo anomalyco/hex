@@ -69,4 +69,9 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Could not play: {}", ["Nie udało się odtworzyć: {}", "无法播放：{}", "再生できませんでした: {}", "Wiedergabe fehlgeschlagen: {}", "No se pudo reproducir: {}", "Не вдалося відтворити: {}"]),
     ("No audio output is available.", ["Brak dostępnego wyjścia audio.", "没有可用的音频输出。", "利用できる音声出力がありません。", "Es ist keine Audioausgabe verfügbar.", "No hay ninguna salida de audio disponible.", "Немає доступного аудіовиходу."]),
     ("Playback stopped.", ["Odtwarzanie zostało przerwane.", "播放已停止。", "再生が停止しました。", "Die Wiedergabe wurde beendet.", "La reproducción se detuvo.", "Відтворення зупинилося."]),
+    ("Extra dictation shortcut", ["Dodatkowy skrót dyktowania", "额外的听写快捷键", "追加の音声入力ショートカット", "Weiteres Diktierkürzel", "Atajo de dictado adicional", "Додаткова комбінація для диктування"]),
+    ("More dictation shortcuts", ["Więcej skrótów dyktowania", "更多听写快捷键", "その他の音声入力ショートカット", "Mehr Diktierkürzel", "Más atajos de dictado", "Більше комбінацій для диктування"]),
+    ("Up to four more shortcuts that each dictate like the main one, each with its own mode", ["Do czterech dodatkowych skrótów, z których każdy dyktuje jak główny, każdy z własnym trybem", "最多四个额外的快捷键，每个都像主快捷键一样听写，并各自拥有模式", "メインと同じように音声入力するショートカットを最大4つ、それぞれ独自のモードで使えます", "Bis zu vier weitere Kürzel, die wie das Hauptkürzel diktieren, jedes mit eigenem Modus", "Hasta cuatro atajos más que dictan como el principal, cada uno con su propio modo", "До чотирьох додаткових комбінацій, кожна диктує як основна, зі своїм режимом"]),
+    ("Extra shortcut {}", ["Dodatkowy skrót {}", "额外快捷键 {}", "追加のショートカット {}", "Weiteres Kürzel {}", "Atajo adicional {}", "Додаткова комбінація {}"]),
+    ("Add shortcut", ["Dodaj skrót", "添加快捷键", "ショートカットを追加", "Kürzel hinzufügen", "Añadir atajo", "Додати комбінацію"]),
 ];

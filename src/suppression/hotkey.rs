@@ -136,6 +136,9 @@ pub struct DictationHotkey {
     double_tap_only: bool,
     /// Press to start, press again to finish: releasing locks the capture.
     toggle: bool,
+    /// Cancel works in every trigger mode, not only under Toggle: an extra
+    /// dictation shortcut has its own mode and always takes its cancel key.
+    cancel_in_any_mode: bool,
     /// Labs › Tap or hold, read at each Toggle release: a press held past
     /// the hold threshold finishes on release instead of locking.
     tap_or_hold: fn() -> bool,
@@ -194,6 +197,7 @@ impl DictationHotkey {
             double_tap_enabled,
             double_tap_only: false,
             toggle: false,
+            cancel_in_any_mode: false,
             tap_or_hold: TAP_OR_HOLD,
             double_tap_modifiers: DOUBLE_TAP_MODIFIERS,
             binding,
@@ -260,9 +264,32 @@ impl DictationHotkey {
         self.toggle = enabled;
     }
 
-    /// Toggle's cancel shortcut, or `None` for no cancel.
+    /// Applies a Labs › More dictation shortcuts row's activation mode.
+    /// Double-tap is enabled first because double-tap only reads it, then
+    /// double-tap only, then Toggle.
+    pub fn set_trigger(&mut self, mode: crate::app_settings::ExtraDictationMode) {
+        let (toggle, double_tap_enabled, double_tap_only) = mode.switches();
+        self.set_double_tap_enabled(double_tap_enabled);
+        self.set_double_tap_only(double_tap_only);
+        self.set_toggle(toggle);
+    }
+
+    /// Whether this machine takes its cancel shortcut in every trigger mode,
+    /// as an extra dictation shortcut does.
+    pub fn set_cancel_in_any_mode(&mut self, enabled: bool) {
+        self.cancel_in_any_mode = enabled;
+    }
+
+    /// Toggle's or an extra shortcut's cancel shortcut, or `None` for no
+    /// cancel.
     pub fn set_cancel(&mut self, cancel: Option<RuntimeHotkey>) {
         self.cancel = cancel;
+    }
+
+    /// The shortcut this machine matches, for rebinding a machine by its
+    /// binding.
+    pub fn binding(&self) -> RuntimeHotkey {
+        self.binding
     }
 
     pub fn set_binding(&mut self, binding: RuntimeHotkey) {
@@ -666,10 +693,11 @@ impl DictationHotkey {
             self.state = State::Dirty;
             return Some(action);
         }
-        // Toggle's cancel shortcut discards the recording; the tap kept the
-        // key from the app in front. Hold mode has no cancel.
+        // Toggle's cancel shortcut discards the recording, and an extra
+        // shortcut takes its own in every trigger mode. The tap kept the key
+        // from the app in front.
         if fresh_key_down
-            && self.toggle
+            && (self.toggle || self.cancel_in_any_mode)
             && self.is_recording()
             && let InputEvent::Key {
                 code,

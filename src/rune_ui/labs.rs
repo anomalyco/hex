@@ -555,6 +555,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Second dictation shortcut"),
                 tr("Another shortcut that dictates like the main one, such as a key on an external keyboard"),
             ));
+            // Up to four more, each with its own activation mode.
+            rows.push(row(
+                Feature::MoreDictationShortcuts,
+                Some(&KEYBOARD),
+                tr("More dictation shortcuts"),
+                tr("Up to four more shortcuts that each dictate like the main one, each with its own mode"),
+            ));
             // Reads the text before the cursor through macOS Accessibility.
             rows.push(row(
                 Feature::SmartSpacing,
@@ -871,6 +878,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::FillerWords => "lab-filler-words",
         Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
+        Feature::MoreDictationShortcuts => "lab-more-dictation-shortcuts",
         Feature::TerminalPasteShortcut => "lab-terminal-paste-shortcut",
         Feature::SmartSpacing => "lab-smart-spacing",
         Feature::SpokenSymbols => "lab-spoken-symbols",

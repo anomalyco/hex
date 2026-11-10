@@ -77,7 +77,7 @@ pub(super) const MOUSE_MASK: u64 = (1_u64 << EVENT_LEFT_MOUSE_DOWN)
 pub(super) const OBSERVATION_MASK: u64 = 1_u64 << EVENT_FLAGS_CHANGED;
 
 /// The shortcuts whose mouse button the session tap may consume.
-fn mouse_bindable(hotkeys: RuntimeHotkeys) -> [Option<RuntimeHotkey>; 5] {
+fn mouse_bindable(hotkeys: RuntimeHotkeys) -> impl Iterator<Item = RuntimeHotkey> {
     [
         Some(hotkeys.dictation),
         hotkeys.raw_dictation,
@@ -85,6 +85,9 @@ fn mouse_bindable(hotkeys: RuntimeHotkeys) -> [Option<RuntimeHotkey>; 5] {
         hotkeys.paste_last,
         hotkeys.paste_meeting,
     ]
+    .into_iter()
+    .flatten()
+    .chain(hotkeys.extra_dictation.into_iter().flatten())
 }
 
 /// Whether any shortcut is a mouse button, so clicks must pass through the
@@ -93,7 +96,7 @@ fn mouse_bindable(hotkeys: RuntimeHotkeys) -> [Option<RuntimeHotkey>; 5] {
 /// every event unchanged, breaks dragging windows between displays and
 /// Spaces (#1215).
 pub(super) fn filters_mouse(hotkeys: RuntimeHotkeys) -> bool {
-    mouse_bindable(hotkeys).iter().flatten().any(|binding| {
+    mouse_bindable(hotkeys).any(|binding| {
         binding
             .key_code
             .is_some_and(|code| crate::app_settings::HotkeyKey::mouse_button(code).is_some())
@@ -119,10 +122,7 @@ pub(super) fn mouse_input(
     hotkeys: RuntimeHotkeys,
 ) -> Option<InputEvent> {
     let code = crate::app_settings::HotkeyKey::mouse_code(button)?;
-    let bound = mouse_bindable(hotkeys)
-        .iter()
-        .flatten()
-        .any(|binding| binding.key_code == Some(code));
+    let bound = mouse_bindable(hotkeys).any(|binding| binding.key_code == Some(code));
     if bound {
         Some(InputEvent::Key { code, down, flags })
     } else {
@@ -177,6 +177,7 @@ pub(super) struct TapFlags {
     pub(super) takes_escape: Arc<AtomicBool>,
     pub(super) takes_cancel: Arc<AtomicBool>,
     pub(super) caps_lock_cancel: Arc<AtomicBool>,
+    pub(super) extra_cancel: Arc<AtomicBool>,
 }
 
 pub(super) fn run_event_tap(
@@ -195,6 +196,7 @@ pub(super) fn run_event_tap(
         takes_escape: flags.takes_escape,
         takes_cancel: flags.takes_cancel,
         caps_lock_cancel: flags.caps_lock_cancel,
+        extra_cancel: flags.extra_cancel,
         key_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         physical_tap: AtomicPtr::new(ptr::null_mut()),

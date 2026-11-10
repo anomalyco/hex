@@ -4,7 +4,7 @@
 //! keys alone, Linux), shortcuts without a key (Labs › Double-tap on a
 //! lone modifier, macOS), and the persisted double-tap mode those need.
 
-use super::{AppSettings, HotkeyBinding, HotkeyKey};
+use super::{AppSettings, HotkeyBinding, HotkeyKey, MAX_EXTRA_DICTATION_SHORTCUTS};
 
 impl HotkeyKey {
     /// Menu, Pause, or Scroll Lock: keys that type nothing, which Labs ›
@@ -101,11 +101,16 @@ impl AppSettings {
     /// is off, or a lone modifier is not allowed by its Labs switch. With
     /// the lab off, a modifier-only binding falls back exactly as a fresh
     /// load does (`shortcut_mode` stays Hold, `double_tap_lock` stays on).
+    /// Each Labs › More dictation shortcuts row folds the same way.
     pub(crate) fn normalize_double_tap_settings(&mut self) {
-        if !self.double_tap_lock
-            || (self.dictation_hotkey.key.is_none() && !self.double_tap_modifiers_allowed())
-        {
+        let modifiers_allowed = self.double_tap_modifiers_allowed();
+        if !self.double_tap_lock || (self.dictation_hotkey.key.is_none() && !modifiers_allowed) {
             self.double_tap_only = false;
+        }
+        for row in &mut self.extra_dictation_hotkeys {
+            row.mode = row
+                .mode
+                .for_binding(row.binding.as_ref(), modifiers_allowed);
         }
     }
 
@@ -161,6 +166,22 @@ impl AppSettings {
         }
     }
 
+    /// Labs › More dictation shortcuts keeps at most
+    /// [`MAX_EXTRA_DICTATION_SHORTCUTS`] rows, and each row's mode folds to
+    /// one its binding can trigger (double-tap only needs a key, or Labs ›
+    /// Double-tap on a lone modifier). The rows stay saved while the Lab is
+    /// off.
+    pub(crate) fn repair_extra_dictation_shortcuts(&mut self) {
+        self.extra_dictation_hotkeys
+            .truncate(MAX_EXTRA_DICTATION_SHORTCUTS);
+        let modifiers_allowed = self.double_tap_modifiers_allowed();
+        for row in &mut self.extra_dictation_hotkeys {
+            row.mode = row
+                .mode
+                .for_binding(row.binding.as_ref(), modifiers_allowed);
+        }
+    }
+
     /// Puts back every shortcut `matches`: dictation, Paste last dictation,
     /// and Annotate to their defaults, the optional ones unbound. Returns
     /// whether any changed.
@@ -185,6 +206,12 @@ impl AppSettings {
         if self.second_dictation_hotkey.as_ref().is_some_and(&matches) {
             self.second_dictation_hotkey = None;
             reset = true;
+        }
+        for row in &mut self.extra_dictation_hotkeys {
+            if row.binding.as_ref().is_some_and(&matches) {
+                row.binding = None;
+                reset = true;
+            }
         }
         if self.terminal_paste_hotkey.as_ref().is_some_and(&matches) {
             self.terminal_paste_hotkey = None;

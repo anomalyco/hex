@@ -1662,6 +1662,7 @@ mod tests {
         include_str!("../rune_ui/explainer.rs"),
         include_str!("../rune_ui/fun.rs"),
         include_str!("../rune_ui/general.rs"),
+        include_str!("../rune_ui/general/extra_shortcuts.rs"),
         include_str!("../rune_ui/general/search.rs"),
         include_str!("../rune_ui/history.rs"),
         include_str!("../rune_ui/hud_lab.rs"),

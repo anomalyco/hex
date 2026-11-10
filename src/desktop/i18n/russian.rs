@@ -1247,6 +1247,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("If another app comes to the front while you dictate, Hex switches back to the app you started in before pasting. If it can't, nothing is pasted and Paste last dictation has the text.", "Если во время диктовки на передний план выходит другое приложение, Hex перед вставкой возвращается в приложение, где вы начали. Если это не удаётся, ничего не вставляется, а текст остаётся в «Вставить последнюю диктовку»."),
     ("Only on speakers", "Только через динамики"),
     ("Apply \"While dictating\" only when sound plays through speakers. Headphones are left alone.", "Применять «Во время диктовки», только когда звук идёт через динамики. Наушники не затрагиваются."),
+    ("Extra dictation shortcut", "Дополнительное сочетание для диктовки"),
+    ("More dictation shortcuts", "Больше сочетаний для диктовки"),
+    ("Up to four more shortcuts that each dictate like the main one, each with its own mode", "До четырёх дополнительных сочетаний, каждое диктует как основное, со своим режимом"),
+    ("Extra shortcut {}", "Дополнительное сочетание {}"),
+    ("Add shortcut", "Добавить сочетание"),
 ];
 
 #[cfg(test)]
