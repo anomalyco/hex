@@ -78,7 +78,8 @@ impl Feature {
             | Self::TerminalPaste
             | Self::OutputFixes
             | Self::OpenCodeInWsl
-            | Self::ApiProcessing => Group::Output,
+            | Self::ApiProcessing
+            | Self::ApiTimestamps => Group::Output,
             Self::KeepRecordings | Self::HistoryStats | Self::RecentDictations => Group::History,
             Self::Meetings
             | Self::LiveChapters

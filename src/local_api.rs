@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{Cursor, Read, Write};
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
@@ -19,6 +19,8 @@ mod http;
 mod meeting_events;
 pub(crate) mod processing;
 mod streams;
+pub(crate) mod timestamps;
+mod transcriptions;
 
 #[cfg(debug_assertions)]
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
@@ -28,6 +30,8 @@ pub use discovery::{call_control, running_pid};
 pub(crate) use discovery::{error_code, post_wav};
 use http::*;
 pub use processing::Processing;
+pub use timestamps::Timestamps;
+use transcriptions::transcribe_audio;
 const API_VERSION: &str = "2";
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// The longest the accept loop sleeps without a connection. Shutdown wakes
@@ -99,6 +103,7 @@ struct HttpContext {
     stream_engine: crate::transcription::stream::EngineSource,
     meeting_events: meeting_events::Source,
     processing: processing::Processing,
+    timestamps: timestamps::Timestamps,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -138,6 +143,10 @@ pub struct LocalApiOptions {
     /// Uninstalled, `/transcriptions` and `/streams/{id}/finish` answer
     /// `409 processing-unavailable` when asked to process.
     pub processing: Processing,
+    /// Native timings on `/transcriptions` (Labs › Timestamps in API
+    /// transcripts). Off, a timed request answers
+    /// `403 timestamps-disabled`.
+    pub timestamps: Timestamps,
     /// Where `/streams` finds its engine; the running app's shared engine
     /// when unset.
     pub(crate) stream_engine: Option<crate::transcription::stream::EngineSource>,
@@ -272,6 +281,7 @@ impl LocalApi {
                 .unwrap_or_else(|| Arc::new(crate::transcription::stream::shared_engine)),
             meeting_events,
             processing: options.processing,
+            timestamps: options.timestamps,
         };
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -582,14 +592,18 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                 body_prefix,
                 admission,
                 processing,
+                timestamps,
             } => {
                 let response = transcribe_audio(
                     &mut stream,
-                    selection,
+                    transcriptions::Admitted {
+                        selection,
+                        admission,
+                        guard: processing,
+                        timings: timestamps,
+                    },
                     content_length,
                     body_prefix,
-                    admission,
-                    processing,
                     &context,
                 );
                 if let Some(response) = response
@@ -661,7 +675,12 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
         return RequestAction::Respond(HttpResponse::empty(401));
     }
     if request.method == "POST" && path == "/transcriptions" {
-        return transcription_action(request, &context.transcription, &context.processing);
+        return transcription_action(
+            request,
+            &context.transcription,
+            &context.processing,
+            &context.timestamps,
+        );
     }
     if request.method == "POST" && path == "/dev/control" {
         return developer_control_action(request, context.developer_control.is_some());
@@ -775,6 +794,7 @@ fn transcription_action(
     request: HttpRequest,
     transcription: &crate::transcription::service::TranscriptionServiceHandle,
     processing: &processing::Processing,
+    timestamps: &timestamps::Timestamps,
 ) -> RequestAction {
     let guard = match processing::wanted(&request.path) {
         Ok(wanted) => match processing::gate(wanted, processing) {
@@ -783,6 +803,13 @@ fn transcription_action(
         },
         Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
     };
+    let requested = match timestamps::requested(&request.path) {
+        Ok(requested) => requested,
+        Err(code) => return RequestAction::Respond(HttpResponse::code(400, code)),
+    };
+    if let Err(response) = timestamps::gate(requested, timestamps) {
+        return RequestAction::Respond(response);
+    }
     if !request.has_content_type("audio/wav") {
         return RequestAction::Respond(HttpResponse::code(415, "unsupported-audio"));
     }
@@ -819,6 +846,7 @@ fn transcription_action(
         body_prefix: request.body_prefix,
         admission,
         processing: guard,
+        timestamps: requested,
     }
 }
 
@@ -1028,105 +1056,6 @@ fn selection_query(path: &str) -> std::result::Result<SelectionQuery, &'static s
         }
     }
     Ok(selection)
-}
-
-fn transcribe_audio(
-    stream: &mut TcpStream,
-    selection: crate::transcription::models::TranscriptionSelection,
-    content_length: usize,
-    mut body: Vec<u8>,
-    admission: crate::transcription::service::AudioAdmission,
-    guard: Option<processing::Guard>,
-    context: &HttpContext,
-) -> Option<HttpResponse> {
-    let transcription = &context.transcription;
-    let shutdown = &context.shutdown;
-    if let Err(error) = read_body_bounded(
-        stream,
-        content_length,
-        &mut body,
-        shutdown,
-        MAX_AUDIO_BYTES,
-        UPLOAD_DEADLINE,
-    ) {
-        return Some(match error {
-            BodyReadError::ResourceExhausted => HttpResponse::code(413, "resource-exhausted"),
-            BodyReadError::Invalid => HttpResponse::code(400, "invalid-audio"),
-            BodyReadError::Io(error) => {
-                tracing::debug!(%error, "audio upload stopped before completion");
-                HttpResponse::code(400, "invalid-audio")
-            }
-            BodyReadError::Deadline => HttpResponse::code(408, "upload-timeout"),
-            BodyReadError::Shutdown => return None,
-        });
-    }
-    let clip = match crate::transcription::service::AudioClip::decode_wav(Cursor::new(body)) {
-        Ok(clip) => clip,
-        Err(crate::transcription::service::AudioError::ResourceExhausted) => {
-            return Some(HttpResponse::code(413, "resource-exhausted"));
-        }
-        Err(crate::transcription::service::AudioError::Unsupported) => {
-            return Some(HttpResponse::code(415, "unsupported-audio"));
-        }
-        Err(crate::transcription::service::AudioError::Invalid) => {
-            return Some(HttpResponse::code(400, "invalid-audio"));
-        }
-    };
-    let duration_ms = clip.duration_ms;
-    let language = selection.language.clone();
-    let job = match transcription.transcribe(selection, clip, admission) {
-        Ok(job) => job,
-        Err(error) => return Some(transcription_error(error)),
-    };
-    loop {
-        match job.wait_timeout(TRANSCRIPTION_POLL_INTERVAL) {
-            Ok(Some(Ok(transcript))) => {
-                let mut response = serde_json::json!({
-                    "transcript": &transcript,
-                    "durationMs": duration_ms,
-                });
-                processing::attach(
-                    &mut response,
-                    guard.as_ref(),
-                    &transcript,
-                    &language,
-                    &context.shutdown,
-                );
-                return Some(HttpResponse::json(200, &response));
-            }
-            Ok(Some(Err(error))) | Err(error) => return Some(transcription_error(error)),
-            Ok(None) => {
-                if shutdown.load(Ordering::Acquire) || client_aborted(stream) {
-                    job.cancel();
-                    return None;
-                }
-            }
-        }
-    }
-}
-
-fn transcription_error(
-    error: crate::transcription::service::TranscriptionServiceError,
-) -> HttpResponse {
-    match error {
-        crate::transcription::service::TranscriptionServiceError::QueueFull => {
-            HttpResponse::code(429, "queue-full")
-        }
-        crate::transcription::service::TranscriptionServiceError::Unavailable => {
-            HttpResponse::code(503, "service-gone")
-        }
-        crate::transcription::service::TranscriptionServiceError::Cancelled => {
-            HttpResponse::code(409, "cancelled")
-        }
-        crate::transcription::service::TranscriptionServiceError::Model(error) => {
-            tracing::error!(%error, "prepared transcription model could not load");
-            HttpResponse::code(500, "model-load-failed")
-        }
-        crate::transcription::service::TranscriptionServiceError::Inference(error) => {
-            tracing::error!(%error, "local transcription failed");
-            HttpResponse::code(500, "transcription-failed")
-        }
-    }
 }
 
 fn client_aborted(stream: &TcpStream) -> bool {
@@ -1405,6 +1334,8 @@ enum RequestAction {
         admission: crate::transcription::service::AudioAdmission,
         /// `process=global` was asked for; the guard holds its one slot.
         processing: Option<processing::Guard>,
+        /// `timestamps=segment|word` was asked for, and the lab allows it.
+        timestamps: crate::transcription::transcript::TimestampLevel,
     },
     DeveloperControl {
         content_length: usize,
@@ -2150,6 +2081,7 @@ mod tests {
             },
             &transcription,
             &Processing::default(),
+            &Timestamps::default(),
         );
         let RequestAction::Respond(response) = action else {
             panic!("unsupported audio must be rejected before upload");
@@ -2169,6 +2101,7 @@ mod tests {
             },
             &transcription,
             &Processing::default(),
+            &Timestamps::default(),
         );
         let RequestAction::Respond(response) = action else {
             panic!("unsafe body size must be rejected before upload");
@@ -2199,6 +2132,7 @@ mod tests {
             stream_engine: Arc::new(crate::transcription::stream::shared_engine),
             meeting_events: meeting_events::Source::default(),
             processing: Processing::default(),
+            timestamps: Timestamps::default(),
         };
         let action = handle_request(
             HttpRequest {

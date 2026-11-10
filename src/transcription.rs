@@ -142,6 +142,28 @@ impl Transcriber {
             Self::AppleSpeech(model) => model.transcribe(&samples),
         }
     }
+
+    /// A complete clip with its native timings, padded exactly as
+    /// [`Self::transcribe`] pads it so the text matches an untimed request.
+    pub fn transcribe_timed(&mut self, mut samples: Vec<f32>) -> Result<Transcript> {
+        match self {
+            Self::Gguf(model) => {
+                pad_gguf_samples(&mut samples, model.model_id());
+                model.transcribe_timed(&samples)
+            }
+            // Apple Speech segments the whole clip itself.
+            Self::AppleSpeech(model) => model.transcribe(&samples),
+        }
+    }
+
+    /// The finest native timings this backend gives: Apple Speech segments,
+    /// and a GGUF model what its metadata advertises.
+    pub fn timestamps(&self) -> crate::transcription::transcript::TimestampLevel {
+        match self {
+            Self::Gguf(model) => model.timestamps(),
+            Self::AppleSpeech(_) => crate::transcription::transcript::TimestampLevel::Segment,
+        }
+    }
 }
 
 /// Pads a GGUF clip as dictation prepares it on every OS: the backend's

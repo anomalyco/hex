@@ -19,6 +19,8 @@ export type {
   ModelProgress,
   PrepareModelOptions,
   RequestOptions,
+  TimedText,
+  TimestampGranularity,
   TranscriptionRequest,
   TranscriptionResult,
   Transcriber,

@@ -779,6 +779,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Apps can ask Hex's local API for transcripts with Global mode's processing applied."),
     ));
     rows.push(row(
+        Feature::ApiTimestamps,
+        None,
+        tr("Timestamps in API transcripts"),
+        tr("Apps can ask Hex's local API for each segment's or word's start and end times."),
+    ));
+    rows.push(row(
         Feature::SpeakersOnly,
         None,
         tr("Only on speakers"),
@@ -934,6 +940,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::TranscribeFiles => "lab-transcribe-files",
         Feature::ApiProcessing => "lab-api-processing",
+        Feature::ApiTimestamps => "lab-api-timestamps",
         Feature::SpeakersOnly => "lab-speakers-only",
     }
 }

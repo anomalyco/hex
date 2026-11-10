@@ -95,11 +95,28 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
           return
         }
         const processed = url.searchParams.get("process") === "global"
-        response.end(JSON.stringify(
-          processed
-            ? { transcript: "hello from hex", durationMs: 750, processed: "Hello from Hex." }
-            : { transcript: "hello from hex", durationMs: 750 },
-        ))
+        const timestamps = url.searchParams.get("timestamps")
+        const timed = timestamps === "segment" || timestamps === "word"
+        response.end(JSON.stringify({
+          transcript: "hello from hex",
+          durationMs: 750,
+          ...(processed ? { processed: "Hello from Hex." } : {}),
+          ...(timed
+            ? {
+              timestampGranularity: timestamps,
+              segments: [{ text: "hello from hex", startMs: 0, endMs: 750 }],
+              ...(timestamps === "word"
+                ? {
+                  words: [
+                    { text: "hello", startMs: 0, endMs: 300 },
+                    { text: "from", startMs: 320, endMs: 480 },
+                    { text: "hex", startMs: 500, endMs: 750 },
+                  ],
+                }
+                : {}),
+            }
+            : {}),
+        }))
       })
       return
     }

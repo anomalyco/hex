@@ -643,6 +643,12 @@ const KEYS: &[Key] = &[
          rewrite, and transformations applied (process=global)",
     ),
     key(
+        "labs.api_timestamps",
+        Kind::Bool,
+        "Labs: apps using Hex's local API can ask for each segment's or word's start and end times \
+         in a transcript, as the speech model heard them (timestamps=segment|word)",
+    ),
+    key(
         "labs.speakers_only",
         Kind::Bool,
         "Labs: While dictating applies only while the default output is speakers; headphones are \

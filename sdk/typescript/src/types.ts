@@ -90,13 +90,35 @@ export interface TranscriptionRequest extends RequestOptions {
    * raw as before.
    */
   readonly process?: "global"
+  /**
+   * Ask for the speech model's own timings (Labs › Timestamps in API
+   * transcripts). `segment` adds `segments`; `word` adds `segments` and
+   * `words`. `none` and absent ask for none. A model without that level
+   * answers `unsupported-timestamps`, and the timings are never estimated.
+   */
+  readonly timestamps?: "none" | TimestampGranularity
 }
+
+/** One timed span: `text` from `startMs` to `endMs`, from the audio's start. */
+export interface TimedText {
+  readonly text: string
+  readonly startMs: number
+  readonly endMs: number
+}
+
+export type TimestampGranularity = "segment" | "word"
 
 export interface TranscriptionResult {
   readonly transcript: string
   readonly durationMs: number
   /** Present only when the request asked for `process: "global"`. */
   readonly processed?: string
+  /** Present only when the request asked for timings. */
+  readonly timestampGranularity?: TimestampGranularity
+  /** Native segments, in order; present with `segment` and `word`. */
+  readonly segments?: readonly TimedText[]
+  /** Native word timings; present with `word` only. */
+  readonly words?: readonly TimedText[]
 }
 
 export interface DictationStartOptions {

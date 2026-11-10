@@ -1240,6 +1240,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Adds hex transcribe <file> to turn a WAV recording into text with your dictation model.", "Добавляет hex transcribe <file>: запись WAV превращается в текст с помощью вашей модели диктовки."),
     ("Process API transcripts", "Обрабатывать транскрипты API"),
     ("Apps can ask Hex's local API for transcripts with Global mode's processing applied.", "Приложения могут запрашивать у локального API Hex транскрипты с обработкой глобального режима"),
+    ("Timestamps in API transcripts", "Метки времени в транскриптах API"),
+    ("Apps can ask Hex's local API for each segment's or word's start and end times.", "Приложения могут запрашивать у локального API Hex время начала и конца каждого сегмента или слова"),
     ("Appearance", "Внешний вид"),
     ("Use light or dark for the main window instead of the system's", "Используйте светлое или тёмное оформление главного окна вместо системного"),
     ("Theme", "Тема"),
