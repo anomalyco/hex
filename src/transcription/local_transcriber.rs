@@ -9,8 +9,9 @@ use crate::app_settings::TranscriptionDevice;
 use crate::transcription::gguf_session::{OfflineGgufSession, output_truncated};
 use crate::transcription::gpu_health;
 use crate::transcription::models::{
-    TranscriptionSelection, download_with_progress, model_path, validate,
+    TranscriptionModelId, TranscriptionSelection, download_with_progress, model_path, validate,
 };
+use crate::transcription::{pad_gguf_samples, trailing_silence_samples};
 
 /// A word or segment's start and end (ms from the clip's start) and text.
 pub type TimedSpan = (i64, i64, String);
@@ -459,6 +460,17 @@ impl LocalTranscriber {
         self.stream.as_ref()
     }
 
+    /// Silence a live stream of this model hears before it finalizes, the
+    /// same trailing silence its whole-clip runs get.
+    pub(crate) fn stream_trailing_silence(&self) -> usize {
+        trailing_silence_samples(Some(self.model_id()))
+    }
+
+    /// The model this transcriber was loaded for.
+    pub(crate) fn model_id(&self) -> TranscriptionModelId {
+        self.selection.model
+    }
+
     pub(crate) fn with_stream<R>(
         &mut self,
         stream_options: &transcribe_cpp::StreamOptions,
@@ -489,9 +501,10 @@ impl LocalTranscriber {
             .wrap_err("could not prewarm transcription model")
     }
 
-    /// Transcribes a complete 16 kHz clip, padded as a dictation's clip is.
+    /// Transcribes a complete 16 kHz clip, padded as a dictation's clip is:
+    /// the minimum duration, then Unified English's trailing silence.
     pub(crate) fn transcribe_clip(&mut self, mut samples: Vec<f32>) -> Result<String> {
-        crate::dictation::pad_for_parakeet(&mut samples);
+        pad_gguf_samples(&mut samples, Some(self.model_id()));
         self.transcribe(&samples)
     }
 

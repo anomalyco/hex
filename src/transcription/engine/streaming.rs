@@ -143,16 +143,11 @@ pub(super) fn spoken_text_end_ms(tokens: &[transcribe_cpp::Token]) -> Option<u64
 }
 
 /// Silence a dictation stream of `model` hears after the clip, before it
-/// finalizes: on macOS the trailing silence its whole-clip runs get, so a
-/// streamed sentence keeps its closing punctuation (issue 657).
-#[cfg(target_os = "macos")]
+/// finalizes: the same trailing silence its whole-clip runs get, so a
+/// streamed sentence keeps its closing punctuation (issue 657). Applies on
+/// every OS.
 pub(super) fn stream_trailing_silence(model: &Model) -> usize {
     model.stream_trailing_silence()
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(super) fn stream_trailing_silence(_model: &Model) -> usize {
-    0
 }
 
 /// Pause audio a dictation stream still hears before its long pauses are

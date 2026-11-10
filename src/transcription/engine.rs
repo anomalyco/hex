@@ -704,9 +704,11 @@ impl TranscriptionEngine {
             stream,
             clip,
             Box::new(|model, clip| {
-                // Labs › Skip long pauses, asked as the run starts.
-                let mut clip = whole_clip(clip, crate::labs::skip_pauses());
-                crate::dictation::pad_for_parakeet(&mut clip);
+                // Labs › Skip long pauses, asked as the run starts, then
+                // padding that follows the cut rather than being trimmed by
+                // a trailing pause (#1629).
+                let clip =
+                    padded_whole_clip(clip, crate::labs::skip_pauses(), Some(model.model_id()));
                 model
                     .transcribe(&clip)
                     .map_err(|error| format!("{error:#}"))
@@ -931,6 +933,20 @@ pub(crate) fn transcribe_clip(model: &mut HeldModel, samples: Vec<f32>) -> Resul
     return model.transcribe(samples);
     #[cfg(not(target_os = "macos"))]
     model.transcribe_clip(samples)
+}
+
+/// A whole clip as a non-macOS dictation run transcribes it: long pauses cut
+/// first, then the minimum duration and the model's trailing silence, so a
+/// trailing pause cannot trim Unified English's closing context (#1629).
+#[cfg(not(target_os = "macos"))]
+fn padded_whole_clip(
+    clip: Vec<f32>,
+    skip_pauses: bool,
+    model: Option<crate::transcription::models::TranscriptionModelId>,
+) -> Vec<f32> {
+    let mut clip = whole_clip(clip, skip_pauses);
+    crate::transcription::pad_gguf_samples(&mut clip, model);
+    clip
 }
 
 impl Drop for TranscriptionEngine {
@@ -1769,6 +1785,36 @@ mod tests {
             clip.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
         );
         assert!(whole_clip(clip.clone(), true).len() < clip.len());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn a_whole_clip_is_padded_after_cutting_its_trailing_pause() {
+        use crate::transcription::UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES;
+        use crate::transcription::models::TranscriptionModelId;
+
+        // #1629: quiet pre-roll, speech, then a 5 s trailing pause. Cutting
+        // the pause must leave the 400 ms of Unified English silence after
+        // the cut, where nothing can trim it.
+        let mut clip = vec![0.0; 8_000];
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 80_000]);
+        let cut = whole_clip(clip.clone(), true);
+        let cut_len = cut.len();
+        assert_eq!(cut_len, 8_000 + 16_000 + PAUSE_HEAD_SAMPLES);
+
+        let padded = padded_whole_clip(
+            clip,
+            true,
+            Some(TranscriptionModelId::ParakeetUnifiedEnglish),
+        );
+
+        assert_eq!(
+            padded.len(),
+            cut_len + UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES
+        );
+        assert_eq!(padded[..cut_len], cut[..]);
+        assert!(padded[cut_len..].iter().all(|&sample| sample == 0.0));
     }
 
     fn assert_quiet_speech_is_kept(speech_db: f32, noise_db: f32, dc_offset: f32) {
