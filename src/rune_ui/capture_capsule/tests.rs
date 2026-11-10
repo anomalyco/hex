@@ -13,7 +13,7 @@ use super::flow::{
 };
 use super::surface::{Id, PANEL_H, PANEL_W, TOP};
 use super::{CapsuleState, poll, trace_channels, view};
-use crate::capture_host::CaptureNeed;
+use crate::capture_host::{AskedBy, CaptureNeed};
 
 fn guess() -> Route {
     Route::Guess {
@@ -274,12 +274,18 @@ fn stills() -> Vec<(&'static str, Pres)> {
         }),
         (
             "permission",
-            after(&[In(Input::NeedsPermission(CaptureNeed::ScreenRecording))]),
+            after(&[In(Input::NeedsPermission(
+                CaptureNeed::ScreenRecording,
+                AskedBy::Capture,
+            ))]),
         ),
         (
             "permission-asked",
             after(&[
-                In(Input::NeedsPermission(CaptureNeed::ScreenRecording)),
+                In(Input::NeedsPermission(
+                    CaptureNeed::ScreenRecording,
+                    AskedBy::Capture,
+                )),
                 Click(Id::Ask),
             ]),
         ),
@@ -287,7 +293,10 @@ fn stills() -> Vec<(&'static str, Pres)> {
         ("permission-ready", permission(Grant::Ready)),
         (
             "permission-microphone",
-            after(&[In(Input::NeedsPermission(CaptureNeed::Microphone))]),
+            after(&[In(Input::NeedsPermission(
+                CaptureNeed::Microphone,
+                AskedBy::Capture,
+            ))]),
         ),
     ]
 }
@@ -295,7 +304,10 @@ fn stills() -> Vec<(&'static str, Pres)> {
 /// The permission helper for Screen Recording once its grant is `grant`.
 fn permission(grant: Grant) -> Pres {
     after(&[
-        In(Input::NeedsPermission(CaptureNeed::ScreenRecording)),
+        In(Input::NeedsPermission(
+            CaptureNeed::ScreenRecording,
+            AskedBy::Capture,
+        )),
         In(Input::Permission(CaptureNeed::ScreenRecording, grant)),
     ])
 }

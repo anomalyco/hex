@@ -1240,7 +1240,9 @@ impl AppSettings {
     /// active shortcuts (each active Labs › More dictation shortcuts row
     /// included) and, where meetings exist (macOS), meeting paste. The two
     /// capture shortcuts never share a key, on or off, since turning captures
-    /// on can't pull them apart.
+    /// on can't pull them apart. A saved Screenshots record shortcut and
+    /// Annotate's capture shortcuts never share a key, whether Annotate or the
+    /// Lab is on, since turning either on can't pull them apart.
     pub fn hotkey_in_use(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
         let mut others = Vec::new();
         if slot != HotkeySlot::Dictation {
@@ -1308,12 +1310,10 @@ impl AppSettings {
         if slot != HotkeySlot::Screenshot && cfg!(target_os = "macos") && self.labs.screenshots {
             others.push(self.screenshots.hotkey.clone());
         }
-        if slot != HotkeySlot::ScreenshotRecord
-            && self.screenshot_recording_available()
-            && let Some(record) = &self.screenshots.record_hotkey
-        {
-            others.push(record.clone());
-        }
+        // A saved record shortcut and Annotate's own capture shortcuts never
+        // share a key, even with one of them off, so turning either on can
+        // never leave one of the two dead.
+        others.extend(self.screenshots_record_counterparts(slot));
         hotkey_conflicts(binding, others)
     }
 }
