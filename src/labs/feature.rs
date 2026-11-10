@@ -65,6 +65,7 @@ pub enum Feature {
     AnnotateReplay,
     MeetingImport,
     MeetingDescriptiveFilenames,
+    MeetingNotesFile,
     QuitClosesWindow,
     ExpireMeetingAudio,
     CapsLockDictation,
@@ -75,7 +76,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 67] = [
+    pub const ALL: [Self; 68] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -136,6 +137,7 @@ impl Feature {
         Self::AnnotateReplay,
         Self::MeetingImport,
         Self::MeetingDescriptiveFilenames,
+        Self::MeetingNotesFile,
         Self::QuitClosesWindow,
         Self::ExpireMeetingAudio,
         Self::CapsLockDictation,

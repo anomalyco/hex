@@ -124,6 +124,8 @@ pub(crate) fn import(source: &Path) -> Result<MeetingManifest> {
             chapters_refined: false,
             retention_applies: true,
             export_sha256: None,
+            notes_export_path: None,
+            notes_export_sha256: None,
             audio_removed_at_ms: None,
             imported: true,
         };

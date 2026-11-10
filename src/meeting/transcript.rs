@@ -2164,16 +2164,22 @@ pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptE
 }
 
 /// Writes the user-facing Markdown copy without replacing an existing file.
+/// `separate_notes` is Labs › Separate notes file: the transcript becomes
+/// `<stem>.transcript.md` and its stem stays free for the notes file.
 pub(super) fn export_markdown(
     folder: &Path,
     manifest: &MeetingManifest,
     entries: &[TranscriptEntry],
+    separate_notes: bool,
 ) -> Result<PathBuf> {
     fs::create_dir_all(folder)
         .wrap_err_with(|| format!("could not create {}", folder.display()))?;
     let stem = super::export_name::file_stem(manifest, &super::display_title(manifest));
-    let path = super::export_name::path_without_collision(folder, &stem, None)?;
-    let temporary = folder.join(format!(".{stem}.md.tmp"));
+    let path = super::notes_file::export_path(folder, &stem, separate_notes)?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| eyre!("{} has no name", path.display()))?;
+    let temporary = folder.join(format!(".{}.tmp", name.to_string_lossy()));
     let mut file = File::create(&temporary)?;
     file.write_all(render_markdown(manifest, entries).as_bytes())?;
     file.sync_all()?;
@@ -4050,8 +4056,8 @@ mod tests {
         ));
         let mut manifest = manifest();
         manifest.title = "Design/sync: Q4?".into();
-        let first = export_markdown(&folder, &manifest, &[]).unwrap();
-        let second = export_markdown(&folder, &manifest, &[]).unwrap();
+        let first = export_markdown(&folder, &manifest, &[], false).unwrap();
+        let second = export_markdown(&folder, &manifest, &[], false).unwrap();
         assert_ne!(first, second);
         let name = first.file_name().unwrap().to_string_lossy().to_string();
         assert!(name.ends_with(" Design-sync- Q4.md"), "{name}");
@@ -4066,6 +4072,45 @@ mod tests {
             fs::read_to_string(&first)
                 .unwrap()
                 .contains("_No speech was transcribed._")
+        );
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_separated_export_names_the_transcript_and_keeps_the_pair_free() {
+        let folder = std::env::temp_dir().join(format!(
+            "hex-meeting-export-pair-{}-{}",
+            std::process::id(),
+            crate::desktop::events::now_ms()
+        ));
+        let mut manifest = manifest();
+        manifest.title = "Design sync".into();
+        let export = export_markdown(&folder, &manifest, &[], true).unwrap();
+        assert!(
+            export
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with(" Design sync.transcript.md")
+        );
+        fs::write(
+            folder.join(
+                export
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace(".transcript.md", ".notes.md"),
+            ),
+            "their notes\n",
+        )
+        .unwrap();
+        let second = export_markdown(&folder, &manifest, &[], true).unwrap();
+        assert!(
+            second
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with(" Design sync (2).transcript.md")
         );
         fs::remove_dir_all(folder).unwrap();
     }

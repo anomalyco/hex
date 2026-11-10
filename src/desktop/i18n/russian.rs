@@ -1222,6 +1222,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Try another search", "Попробуйте другой запрос"),
     ("Descriptive meeting file names", "Описательные имена файлов встреч"),
     ("Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time", "Переименовывает экспортированный Markdown встречи по её названию, как только его дадут заметки или переименование, сохраняя дату и время"),
+    ("Separate notes file", "Отдельный файл заметок"),
+    ("Write the meeting's notes to their own file next to the transcript, sharing its name, with a link back to the transcript", "Записывает заметки встречи в отдельный файл рядом с расшифровкой, с тем же именем и ссылкой обратно на расшифровку"),
     ("Caps Lock dictation", "Диктовка Caps Lock"),
     ("Press Caps Lock to start dictation and again to finish. Hex keeps Caps Lock off and uses its light while it records and transcribes", "Нажмите Caps Lock, чтобы начать диктовку, и ещё раз, чтобы закончить. Hex держит Caps Lock выключенным и использует его индикатор во время записи и расшифровки"),
     ("Getting Hex ready to listen…", "Hex готовится слушать…"),

@@ -920,6 +920,7 @@ fn retitle_export(manifest: &mut MeetingManifest, previous: &str) {
             &title,
             crate::labs::meeting_descriptive_filenames(),
         );
+        super::notes_file::refresh(manifest);
     }
 }
 
