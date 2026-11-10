@@ -416,7 +416,10 @@ ready stream fails while the press is held
   │     ├── release before ready -> discard
   │     └── ready -> capture from the original press -> expected output
   └── after the threshold -> fail with "Microphone capture was interrupted"
-CoreAudio processor overload (Xrun) -> warn and keep the stream // not a failure
+Microphone overload (Xrun) or refused real-time promotion -> counted; one warning per burst // not a failure
+  └── Some hosts report it from the thread that runs the stream: that callback only
+      counts, the poll that drains the stream writes the count at most once per 10 s,
+      and a stream closed with a count left over writes it as it closes
 gap in the microphone timeline (warm or cold)
   ├── macOS: 50–250 ms -> filled with silence, capture continues // #619
   │     └── over 250 ms -> fail as a capture discontinuity
@@ -435,7 +438,9 @@ in [linux/dictation/gap.rs](../../src/linux/dictation/gap.rs):
 [linux/dictation.rs](../../src/linux/dictation.rs):
 `a_short_microphone_gap_is_padded_into_a_finished_clip`; in
 [audio.rs](../../src/audio.rs): `overload_glitches_do_not_interrupt_the_stream`,
-`cold_open_retries_the_selected_microphone_before_falling_back`.
+`cold_open_retries_the_selected_microphone_before_falling_back`; in
+[audio/overloads.rs](../../src/audio/overloads.rs):
+`a_burst_writes_one_line_and_holds_the_rest`.
 
 **Fixed after 2.1.25 ([#130](https://github.com/anomalyco/hex/issues/130)):** the
 first hold after minutes of idle failed with the error tone. The reporter's logs
@@ -444,7 +449,7 @@ after opening. cpal 0.18 reports that as `ErrorKind::Xrun` from CoreAudio's
 `kAudioDeviceProcessorOverload` listener; the stream keeps running, but Hex
 treated every error callback as fatal. In release-when-idle mode the owner then
 closed the device without retrying, and recognition suspended the held gesture.
-Overloads and refused real-time promotion are now logged and ignored; actual
+Overloads and refused real-time promotion are now ignored; actual
 sample gaps over 50 ms still fail the capture as a discontinuity. An interruption
 before the hold threshold re-pends the same press instead of failing it. The same
 logs show a cold open falling back from the selected microphone to automatic
@@ -454,6 +459,25 @@ Not verified: the reporter's hardware, whether 200 ms of retries is long enough
 for their device, or a physical cold open after idle.
 Proof limit: controlled asynchronous opener and capture ownership, not onset
 latency or the macOS microphone indicator.
+
+**Changed after dev (overload logging):** a host can report an overload, or a
+refused real-time promotion, on the thread that runs the stream. The old line
+formatted itself there and wrote to stderr and `process.log` behind a mutex,
+once per overload. Hex now only counts them there, and writes one
+`microphone stream glitched; continuing` line with `count` from the poll that
+drains the stream, at most once every 10 s. A count that window holds back is
+written by that poll later, and a stream that closes with a count left over
+writes it as it closes (`Drop for AudioInput` calling `overloads::flush`) rather
+than beside the next open's lines hours later. `since_last_stream_glitch` still
+answers capture diagnostics from the same counters. On macOS the first chunk of
+each open also logs the callback's frames and period, which is the hardware
+period cpal does not report for `BufferSize::Default` (skipped under
+`HEX_AUDIO_FIXTURE`, whose chunks are the file's); no CoreAudio FFI was added.
+Check: `a_burst_writes_one_line_and_holds_the_rest` covers the window;
+`overload_glitches_do_not_interrupt_the_stream` covers counting instead of
+failing. Not verified: a real overload burst after this change, whether the
+coalesced rate suits a loaded machine, or the close-time flush on a device that
+glitches.
 
 **Fixed after dev ([#619](https://github.com/anomalyco/hex/issues/619)):** a
 Bluetooth headset's stream skipped about 130–145 ms of audio soon after it

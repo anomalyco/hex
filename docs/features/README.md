@@ -1860,7 +1860,7 @@ Linux beta                               // not macOS feature parity
 │   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
 │   ├── Startup open fails -> Retry with backoff; the listener keeps running
 │   └── Released while idle, on-demand open fails -> Failed entry; stays released
-│   └── Overload (Xrun) glitch -> Logged; not a failure
+│   └── Overload (Xrun) glitch -> Counted; the polling thread logs one line per burst; not a failure
 ├── Paste -> Restore the previous clipboard 500 ms after the shortcut  // linux.clipboard-restore
 │   ├── Before the transcript -> snapshot every format (32 MiB, 1 s); empty -> cleared again
 │   ├── Later paste, copy, or another client replaced the transcript -> left alone

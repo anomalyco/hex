@@ -14,6 +14,7 @@ mod lid;
 mod mix_format;
 pub(crate) mod output_ducking;
 pub(crate) mod output_route;
+mod overloads;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
 mod transport;
@@ -29,7 +30,6 @@ use std::time::{Duration, Instant};
 
 static AUDIO_SERVICE_RESTART_GENERATION: AtomicU64 = AtomicU64::new(0);
 static INPUT_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
-static STREAM_GLITCHED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 static AVOID_BLUETOOTH_MICROPHONE: AtomicBool = AtomicBool::new(true);
 
 /// Whether `HEX_AUDIO_FIXTURE` names a WAV file that stands in for every
@@ -54,10 +54,7 @@ fn avoid_bluetooth_microphone() -> bool {
 /// How long ago a microphone stream last reported an overload it continued
 /// through, for diagnosing captures.
 pub fn since_last_stream_glitch() -> Option<Duration> {
-    STREAM_GLITCHED_AT
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .map(|at| at.elapsed())
+    overloads::since_last()
 }
 
 pub fn notify_audio_service_restarted() {
@@ -231,6 +228,9 @@ pub struct AudioInput {
     stall_after: Option<Duration>,
     /// When the stream opened or last delivered a chunk.
     last_delivery: Mutex<Instant>,
+    /// Whether this stream's first chunk has reported how often it delivers
+    /// audio.
+    reported_period: AtomicBool,
 }
 
 /// A running stream delivers audio every few milliseconds, even silence. One
@@ -463,6 +463,7 @@ impl AudioInput {
                 hex_microphone: crate::audio::hex_microphone::capture_feed(48_000).1,
                 stall_after: None,
                 last_delivery: Mutex::new(Instant::now()),
+                reported_period: AtomicBool::new(false),
             },
             sender,
         )
@@ -520,6 +521,9 @@ impl AudioInput {
         watch_input_devices();
         let uid = device.id().ok().map(|id| id.id().to_owned());
         let restart_generation = audio_service_restart_generation();
+        // Taken before the stream runs, so CoreAudio's real-time thread reads
+        // an initialized clock.
+        overloads::start_clock();
         let started = input_format::start_stream_with_fallback(
             &device,
             &device_name,
@@ -539,6 +543,7 @@ impl AudioInput {
             hex_microphone: started.hex_microphone,
             stall_after: Some(STREAM_STALL_TIMEOUT),
             last_delivery: Mutex::new(Instant::now()),
+            reported_period: AtomicBool::new(false),
         })
     }
 
@@ -550,6 +555,10 @@ impl AudioInput {
     }
 
     pub fn recv_timeout(&self, timeout: Duration) -> AudioInputEvent {
+        // The one place a stream's overloads reach the log, whoever reported
+        // them: the error callback only counts them, and this poll writes the
+        // count.
+        overloads::report();
         if self.watch_service_restarts
             && audio_service_restart_generation() != self.restart_generation
         {
@@ -571,6 +580,7 @@ impl AudioInput {
         }
         match received {
             Ok((samples, captured_through)) => {
+                self.report_period(samples.len());
                 if self.stall_after.is_some() {
                     *self
                         .last_delivery
@@ -600,6 +610,37 @@ impl AudioInput {
                 AudioInputEvent::StreamFailed("microphone audio channel disconnected".into())
             }
         }
+    }
+
+    /// Reports how much audio the stream's callbacks deliver, once per open.
+    /// cpal exposes no readback of the period it picks for `BufferSize::Default`
+    /// and overloads arrive sooner on a smaller one, so the first chunk says
+    /// what the device actually does. A fixture input's chunks are its WAV
+    /// file's, not a device's, so it says nothing.
+    fn report_period(&self, frames: usize) {
+        let first = !self.reported_period.swap(true, Ordering::Relaxed);
+        #[cfg(target_os = "macos")]
+        if first && !uses_fixture() {
+            tracing::info!(
+                device = %self.device_name,
+                sample_rate = self.sample_rate,
+                frames,
+                period_us = duration_for_frames(frames, self.sample_rate).as_micros() as u64,
+                "microphone stream opened"
+            );
+        }
+        // Only macOS logs the period; every platform keeps the same open state.
+        #[cfg(not(target_os = "macos"))]
+        let _ = (frames, first);
+    }
+}
+
+impl Drop for AudioInput {
+    fn drop(&mut self) {
+        // Stop the stream before the count is taken, so a closing stream's last
+        // burst is written here instead of beside the next open's lines.
+        self._stream = None;
+        overloads::flush();
     }
 }
 
@@ -1451,21 +1492,19 @@ impl StreamErrorReporter {
 }
 
 fn report_stream_error(sender: &SyncSender<String>, error: cpal::Error) {
-    if matches!(
-        error.kind(),
-        cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied
-    ) {
-        // CoreAudio reports processor overloads, common while a cold device
-        // starts, without stopping the stream. Real sample gaps still surface as
+    match error.kind() {
+        // An overload or a refused real-time promotion is a glitch on a stream
+        // that keeps running, common while a cold device starts. Some hosts
+        // report it from the thread that runs the stream, where a log line or a
+        // lock blocks an already-late cycle, so only the counters move here and
+        // the audio owner writes the burst. Real sample gaps still surface as
         // capture discontinuities.
-        tracing::warn!(%error, "microphone stream glitched; continuing");
-        *STREAM_GLITCHED_AT
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(Instant::now());
-        return;
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied => overloads::record(),
+        _ => {
+            tracing::error!(%error, "microphone stream failed");
+            let _ = sender.try_send(error.to_string());
+        }
     }
-    tracing::error!(%error, "microphone stream failed");
-    let _ = sender.try_send(error.to_string());
 }
 
 fn build_stream<T: SizedSample>(
@@ -2349,6 +2388,7 @@ mod tests {
         report_stream_error(&sender, cpal::ErrorKind::Xrun.into());
         report_stream_error(&sender, cpal::ErrorKind::RealtimeDenied.into());
         assert!(errors.try_recv().is_err());
+        assert!(since_last_stream_glitch().is_some());
 
         report_stream_error(&sender, cpal::ErrorKind::DeviceNotAvailable.into());
         assert!(errors.try_recv().is_ok());
