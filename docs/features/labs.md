@@ -2069,9 +2069,9 @@ speech as `500 transcription-failed`, with or without timings.
 An unknown value, or a repeated parameter, is `400 invalid-request`. With the
 lab off, `segment` and `word` answer `403 timestamps-disabled` before the
 audio body is read, and `none` is unaffected. The running app reads the switch
-live; a `hex service` process reads the saved `labs.api_timestamps` once (the
-embedded helper on its first request), so a change reaches a running helper
-after it restarts.
+live; a `hex service` process without the app reads the saved
+`labs.api_timestamps` once (the embedded helper on its first request), so a
+change reaches a running helper after it restarts.
 
 When the selected model cannot
 produce that level natively — a word request on a model whose
