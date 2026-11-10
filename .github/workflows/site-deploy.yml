@@ -8,8 +8,9 @@ name: Site deploy
 # - build runs repository code (bun install, site/scripts/build.ts) with no
 #   environment and no secrets, and uploads the Worker's Build Output with a
 #   SHA256SUMS whose digest it reports.
-# - deploy runs in the release environment, which reads the hex-site-deploy
-#   token from AWS Secrets Manager. It checks out only .github/release/,
+# - deploy runs in the release environment and mints a short-lived Cloudflare
+#   token from the token issuer after assuming the release role
+#   (.github/release/cloudflare-token.sh). It checks out only .github/release/,
 #   verifies the artifact against that digest, and runs only
 #   .github/release/deploy-site.sh, which pins the Worker, routes, and
 #   bindings and deploys with the cf CLI locked in .github/release/cf/.
@@ -110,16 +111,16 @@ jobs:
           role-to-assume: arn:aws:iam::604439173067:role/github/hex-release
           role-session-name: hex-${{ github.run_id }}
           aws-region: us-east-1
-      - name: Fetch the release secrets
-        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # v3.0.2
-        with:
-          secret-ids: |
-            CLOUDFLARE_API_TOKEN,hex/release/CLOUDFLARE_API_TOKEN
-          parse-json-secrets: false
+      - name: Cloudflare token
+        id: cloudflare-token
+        env:
+          CLOUDFLARE_TOKEN_URL: ${{ vars.CLOUDFLARE_TOKEN_URL }}
+        run: bash .github/release/cloudflare-token.sh
       - name: Deploy
         env:
           MODE: ${{ inputs.mode }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
         run: bash .github/release/deploy-site.sh "$MODE" "$RUNNER_TEMP/in/site-$MODE"
 
   verify:
