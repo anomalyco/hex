@@ -267,6 +267,10 @@ no input device at all (macOS)
 no input opens, at startup or after an interruption (Linux) // #937
   -> one "could not open the microphone: …" failure per outage // take_failure
   -> last failure filled in while it keeps retrying; reset once one opens
+ALSA's default goes through PipeWire's ALSA plugin (Linux) // main, #1628
+  -> DISABLE_RTKIT is set first: PipeWire's realtime module fails to start,
+     which is ignored and the stream still opens, so the portal's realtime
+     budget never lowers RLIMIT_RTTIME // a zero budget killed Hex
 listener worker returns an error or panics (macOS)
   -> status: running false, "Stopped", capture unknown // never "Enabled"
 saved microphone missing or will not open
