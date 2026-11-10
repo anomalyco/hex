@@ -15,6 +15,7 @@ use zbus::{Connection, OwnedVariant};
 use crate::app_settings::RecordingAudioBehavior;
 use crate::audio::idle_sleep::PreventSleep;
 use crate::audio::output_ducking;
+use crate::audio::output_route;
 
 const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
@@ -149,6 +150,18 @@ enum Suppressed {
 }
 
 fn suppress(behavior: RecordingAudioBehavior) -> Suppressed {
+    if behavior == RecordingAudioBehavior::DoNothing {
+        return Suppressed::Nothing;
+    }
+    // Read once per recording, here on the worker thread, so the dictation
+    // loop never waits on the sound server. With Labs › Only on speakers
+    // on, headphones leave other audio alone for this recording; idle sleep
+    // is not part of this. With the lab off nothing runs pactl.
+    if crate::labs::speakers_only() && !output_route::applies(output_route::default_output_route())
+    {
+        tracing::info!("left other audio alone while dictating on headphones");
+        return Suppressed::Nothing;
+    }
     match behavior {
         RecordingAudioBehavior::Mute => match Mixer::find() {
             Some(mixer) if mixer.mute(true) => Suppressed::Muted(mixer),

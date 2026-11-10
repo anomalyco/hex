@@ -884,6 +884,17 @@ General                                  // settings
 │   ├── Intentional capture only, not ordinary shortcut chords
 │   ├── Pause/resume only players already reported running by macOS
 │   ├── Linux restore -> Waits 300 ms; a new capture keeps it suppressed // double-tap lock
+│   ├── Labs > Only on speakers (every OS; off by default)
+│   │   ├── On, default output is speakers -> applies as chosen
+│   │   ├── On, default output is wired or Bluetooth headphones -> no mute, lower, or media pause for that recording or capture
+│   │   ├── Dictation and screen captures both ask the route as each starts, on the environment's or audio-control worker thread
+│   │   ├── macOS -> an overlapping session that shares an already-held effect reuses the first session's decision
+│   │   ├── Anything unclassified (unknown, USB, HDMI) counts as speakers
+│   │   ├── macOS -> CoreAudio transport, jack data source, and UID
+│   │   ├── Linux -> pactl's default sink: active port, form factor, or Bluetooth
+│   │   ├── Windows -> the default output's WASAPI form factor through cpal
+│   │   ├── Idle sleep is unchanged; pre-roll follows the setting, not the route
+│   │   └── Limits: Bluetooth speakers read as headphones (macOS always; Linux unless PipeWire says speaker); a wpctl-only Linux reads unknown and applies
 │   └── Labs > Also pause the browser (macOS, Pause media only; off by default); its permission row shows here while on
 │       ├── Turning it on without System Audio Recording -> ask now, never while dictating
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed

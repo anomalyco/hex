@@ -195,7 +195,10 @@ fn own_streams_on(source: u32) -> Vec<u32> {
         .collect()
 }
 
-fn pactl(args: &[&str]) -> Option<String> {
+/// Runs `pactl` with `args`, returning its stdout, or `None` when it is
+/// missing or fails. Shared with the output route, which names and lists
+/// the default sink the same way.
+pub(crate) fn pactl(args: &[&str]) -> Option<String> {
     let output = Command::new("pactl").args(args).output().ok()?;
     output
         .status

@@ -192,6 +192,9 @@ pub struct LabsSettings {
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
+    /// "While dictating" applies only while the default output is speakers;
+    /// headphones are left alone.
+    pub speakers_only: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -260,6 +263,7 @@ impl Default for LabsSettings {
             opencode_in_wsl: false,
             transcribe_files: false,
             api_processing: false,
+            speakers_only: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,

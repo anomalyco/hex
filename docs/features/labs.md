@@ -159,7 +159,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General);
 │                                         Java games (javaw/java, e.g. Minecraft) still get Ctrl+V (#1362)
 │                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
-└── OpenCode in WSL no    labs.opencode_in_wsl          (Windows) Modes rewriting, the Modes model picker, and Annotate's capture sends
+├── OpenCode in WSL no    labs.opencode_in_wsl          (Windows) Modes rewriting, the Modes model picker, and Annotate's capture sends
                                          use an OpenCode service running in the default WSL distribution
                                          when no Windows registration answers; looking for it can start WSL
                                          // checks: the_passwd_line_for_the_uid_names_its_home, both_wsl_prefixes_name_the_distribution,
@@ -176,6 +176,20 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
                                          // a_failed_wsl_request_forgets_the_workspace, a_not_found_wsl_request_forgets_the_workspace,
                                          // a_wsl_request_failure_reads_as_the_capsule_expects,
                                          // opencode_in_wsl_is_its_own_bit_and_windows_only; not run on a real Windows PC with WSL
+└── Only on speakers no   labs.speakers_only            (every OS) While dictating (Mute, Lower audio, Pause
+                                         media) applies only while the default output is speakers; wired or Bluetooth
+                                         headphones leave the output and media alone for that recording or capture, and
+                                         anything Hex can't classify counts as speakers
+                                         // checks: bluetooth_outputs_are_headphones,
+                                         // a_built_in_output_on_its_headphone_jack_is_headphones,
+                                         // apples_wired_headphone_device_is_headphones, everything_else_is_speakers,
+                                         // an_analog_sink_is_headphones_only_on_a_headphone_port, a_headset_port_is_headphones,
+                                         // bluetooth_sinks_are_headphones_unless_they_say_speakers,
+                                         // a_sink_the_sound_server_does_not_name_is_unknown,
+                                         // a_non_string_property_does_not_hide_the_others,
+                                         // cpal_headphone_types_are_headphones (audio/output_route.rs);
+                                         // speakers_only_is_its_own_bit_and_off_by_default (labs.rs);
+                                         // not observed on a real Mac or a real Linux or Windows desktop with headphones
 
 Settings › Labs                          // labs.page, a store (labs/store.rs)
 ├── Header -> "Labs", Search N labs (⌘F focuses it), Discover | Turned on · N
@@ -2307,6 +2321,55 @@ Checks: `the_passwd_line_for_the_uid_names_its_home`,
 running OpenCode inside WSL, including whether the UNC read starts the
 distribution and whether Annotate's send reaches it. The
 `windows-labs` golden shows the new card.
+
+Only on speakers (`speakers-only`, every OS)
+puts "While dictating" behind the default output. While on, each dictation
+session and each screen-capture session asks the route as it starts, on the
+recording environment's worker thread (macOS) or the audio-control worker
+(Linux and Windows), never the event tap's or the dictation loop's, and with
+headphones it holds no audio effect for that session: no mute, no lower, no
+media pause. On macOS an overlapping session that shares an already-held
+effect reuses the decision the first session made when it took it. Dictation
+still prevents idle sleep, and screen captures never do. Speakers, and
+anything the route can't classify, behave exactly as before, and with the lab
+off every recording behaves as it always did, and nothing reads the output at
+all: macOS never asks CoreAudio, Linux never runs
+`pactl`, Windows never asks cpal, and a session with "While dictating" set to
+Do nothing never asks either. The macOS backend
+([audio/output_route.rs](../../src/audio/output_route.rs)) reads
+the default output's CoreAudio transport type, its output-scope data source
+(`hdpn` on the built-in jack), and its UID (`BuiltInHeadphoneOutputDevice`):
+Bluetooth and Bluetooth LE are headphones whatever they are, a built-in
+device is headphones while the jack source is selected. Linux reads `pactl
+get-default-sink` and `pactl -f json list sinks` with the same helper its
+microphone route uses: the default sink is headphones while its active port
+names headphones or a headset (`analog-output-headphones`, `[Out] Headset`),
+or its `device.form_factor` is headphone or headset, and a Bluetooth sink
+(`device.api` `bluez5`) is headphones unless its form factor says speaker.
+Windows reads the default output's WASAPI form factor through cpal: headphones,
+headset, earpiece, and handset are headphones, speakers are speakers, and
+anything else is unknown. Limits:
+Bluetooth speakers read as headphones on macOS (transport alone) and on Linux
+unless PipeWire names them speakers; an external USB headphone DAC reads as
+speakers; a Linux session with only `wpctl` and no `pactl`, or an older
+`pactl` without `get-default-sink`, reads unknown, so "While dictating"
+applies; and the hotkey pre-roll follows the While dictating setting, not the
+route, so a skipped recording keeps the setting's pre-roll. Checks:
+`bluetooth_outputs_are_headphones`,
+`a_built_in_output_on_its_headphone_jack_is_headphones`,
+`apples_wired_headphone_device_is_headphones`,
+`everything_else_is_speakers`,
+`an_analog_sink_is_headphones_only_on_a_headphone_port`,
+`a_headset_port_is_headphones`,
+`bluetooth_sinks_are_headphones_unless_they_say_speakers`,
+`a_sink_the_sound_server_does_not_name_is_unknown`,
+`a_non_string_property_does_not_hide_the_others`, and
+`cpal_headphone_types_are_headphones` in
+[output_route.rs](../../src/audio/output_route.rs);
+`speakers_only_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real Mac with wired and
+Bluetooth headphones and the lab on, and the Linux and Windows backends on a
+real desktop.
 
 Checks: `labs_is_one_flat_list_of_toggles_off_by_default`,
 `contributed_options_are_labs_toggles_off_by_default`,

@@ -13,6 +13,7 @@ mod lid;
 #[cfg(any(target_os = "windows", test))]
 mod mix_format;
 pub(crate) mod output_ducking;
+pub(crate) mod output_route;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
 mod transport;

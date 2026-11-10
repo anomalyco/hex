@@ -1237,6 +1237,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Dark mode", "Sombre"),
     ("Return to app", "Revenir à l'app"),
     ("If another app comes to the front while you dictate, Hex switches back to the app you started in before pasting. If it can't, nothing is pasted and Paste last dictation has the text.", "Si une autre app passe au premier plan pendant que vous dictez, Hex revient à l'app où vous avez commencé avant de coller. S'il n'y arrive pas, rien n'est collé et Coller la dernière dictée garde le texte."),
+    ("Only on speakers", "Haut-parleurs uniquement"),
+    ("Apply \"While dictating\" only when sound plays through speakers. Headphones are left alone.", "Applique « Pendant la dictée » uniquement quand le son sort des haut-parleurs. Les écouteurs ne sont pas touchés."),
 ];
 
 #[cfg(test)]
