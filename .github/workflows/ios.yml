@@ -4,6 +4,12 @@ name: iOS
 # pull request that touches them and by hand. `ios/README.md` describes the
 # project; XcodeGen generates it from `ios/project.yml`.
 on:
+  push:
+    # `dev` and `production` take no push checks; Release builds both.
+    branches-ignore: ["dev", "production"]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
