@@ -115,6 +115,12 @@ pub(crate) enum ModelStep {
 }
 
 impl Live {
+    /// macOS keeps showing the mic in use: Hex holds it open between
+    /// dictations unless "Turn off the mic when not dictating" is on.
+    pub(crate) fn mic_stays_open(&self) -> bool {
+        self.accessibility_row && !self.release_microphone
+    }
+
     /// The story waits on the download page for the model step.
     pub(crate) fn holds(&self) -> bool {
         self.scanning

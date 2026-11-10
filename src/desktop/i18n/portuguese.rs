@@ -916,6 +916,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Ready the moment you press the shortcut. macOS shows the mic in use while Hex runs; you can change that in Settings", "Pronto assim que você pressiona o atalho. O macOS mostra o microfone em uso enquanto o Hex está aberto; você pode mudar isso nos Ajustes"),
     ("Ready the moment you press the shortcut", "Pronto assim que você pressiona o atalho"),
     ("Opens only while you dictate", "Abre só enquanto você dita"),
+    ("macOS shows the mic in use because Hex keeps it open to catch your first word.", "O macOS mostra o microfone em uso porque o Hex o mantém aberto para captar sua primeira palavra."),
+    ("It records only while you dictate.", "Ele só grava enquanto você dita."),
     ("Let Hex hear you and type for you", "Deixe o Hex ouvir você e digitar por você"),
     ("Notices the shortcut and pastes your words", "Percebe o atalho e cola suas palavras"),
     ("Quit and reopen Hex to finish setup. macOS applies some permissions only after a restart.", "Saia e abra o Hex de novo para concluir a configuração. O macOS só aplica algumas permissões após reiniciar."),
