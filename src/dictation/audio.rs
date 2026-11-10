@@ -2216,7 +2216,9 @@ mod tests {
                 Some(DictationAudioEvent::Reopened)
             ));
 
-            // Speech may already be recorded, so dropping it silently would paste a fragment.
+            // Neither capture has a clip to keep: the first delivered nothing
+            // at all, and the second's chunk arrived without the capture ever
+            // being marked intentional. The previous failure stands.
             owner.handle_input(RecoveringAudioInputEvent::Interrupted);
             assert!(!input.is_recording());
             assert!(matches!(
@@ -2229,6 +2231,44 @@ mod tests {
                 })
             ));
         }
+    }
+
+    #[test]
+    fn cold_stream_failure_keeps_the_audio_a_held_capture_already_delivered() {
+        let (mut owner, input, _unused_samples) = owner_for_test(false);
+        owner.release_while_idle = true;
+        let pressed_at = capture_time();
+        start(&mut owner, pressed_at);
+        let event = owner.input.recv_timeout(Duration::ZERO, false);
+        owner.handle_input(event);
+        let threshold_at = pressed_at + crate::dictation::MINIMUM_HOLD_DURATION;
+        owner.handle_input(RecoveringAudioInputEvent::Chunk {
+            samples: vec![0.25; 14_400],
+            captured_through: threshold_at,
+        });
+        assert!(owner.capture.become_intentional(threshold_at));
+        assert!(matches!(
+            input.try_recv_event(),
+            Some(DictationAudioEvent::Reopened)
+        ));
+
+        owner.handle_input(RecoveringAudioInputEvent::Interrupted);
+        assert!(!input.is_recording());
+        let Some(DictationAudioEvent::Interrupted {
+            was_recording: true,
+            kept: Some(clip),
+            keep_hotkey: true,
+            ..
+        }) = input.try_recv_event()
+        else {
+            panic!("a held cold capture keeps the audio delivered before the loss");
+        };
+        // The 300 ms delivered from the press; nothing from after the loss.
+        assert!(
+            (295..=305).contains(&clip.duration_ms()),
+            "{}",
+            clip.duration_ms()
+        );
     }
 
     #[test]

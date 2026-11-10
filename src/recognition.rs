@@ -35,7 +35,7 @@ use guards::{
     caps_lock_can_press, capture_boundary, capture_refusal, claims_escape, paste_last_refusal,
 };
 use hotkeys::{Hotkeys, Shortcut};
-use output::{salvage_dictation, submit_dictation};
+use output::{interrupted_dictation, submit_dictation};
 
 enum FinishResult {
     Discarded,
@@ -1030,22 +1030,11 @@ pub fn listen(
                 } => {
                     hotkeys.suspend_all();
                     if was_recording {
-                        match kept {
-                            // A recording shortcut keeps what it heard: the
-                            // person may have lost a long dictation, and the
-                            // disruption may have moved focus, so it is copied
-                            // instead of pasted.
-                            Some(clip) if keep_hotkey => {
-                                let context = context.finish(&mut events)?;
-                                salvage_dictation(
-                                    clip,
-                                    &dictation_worker,
-                                    context,
-                                    &input.device_name(),
-                                    &mut events,
-                                    indicator,
-                                )?;
-                            }
+                        // A recording shortcut keeps what it heard, copied
+                        // instead of pasted; without a kept clip the previous
+                        // failure stands.
+                        let salvaged = match kept {
+                            Some(clip) if keep_hotkey => Some((clip, context.finish(&mut events)?)),
                             kept => {
                                 programmatic_microphone_lost(
                                     programmatic.take(),
@@ -1054,15 +1043,17 @@ pub fn listen(
                                     &mut programmatic_lost,
                                     &mut programmatic_completions,
                                 );
-                                fail_capture(
-                                    "Microphone capture was interrupted; reconnecting.".into(),
-                                    &dictation_worker,
-                                    &input.device_name(),
-                                    &mut events,
-                                    indicator,
-                                )?;
+                                None
                             }
-                        }
+                        };
+                        interrupted_dictation(
+                            salvaged,
+                            hotkeys.raw_capture,
+                            &dictation_worker,
+                            &input.device_name(),
+                            &mut events,
+                            indicator,
+                        )?;
                     }
                 }
             }
@@ -1683,6 +1674,7 @@ fn handle_dictation_event(
             let phase = match target {
                 TranscriptionTarget::Paste
                 | TranscriptionTarget::CopyOnlyPaste
+                | TranscriptionTarget::RawCopyOnlyPaste
                 | TranscriptionTarget::RawPaste => DictationPhase::Pasted,
                 TranscriptionTarget::Print | TranscriptionTarget::RawPrint => {
                     DictationPhase::Printed

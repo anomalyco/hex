@@ -90,6 +90,9 @@ pub enum TranscriptionTarget {
     /// like a paste, but copied to the clipboard instead of pasted, still
     /// available to Paste Last Dictation and kept in History.
     CopyOnlyPaste,
+    /// The same interrupted recording from Dictate without processing: copied
+    /// as heard, skipping the Output pane's steps.
+    RawCopyOnlyPaste,
     /// Dictate without processing: pasted as heard, skipping the Output
     /// pane's steps.
     RawPaste,
@@ -1042,6 +1045,7 @@ fn finish_output(
                     match target {
                         TranscriptionTarget::Paste
                         | TranscriptionTarget::CopyOnlyPaste
+                        | TranscriptionTarget::RawCopyOnlyPaste
                         | TranscriptionTarget::RawPaste => {
                             // Labs › Copy dictation only, read as the output
                             // commits: dictations go to the clipboard
@@ -1049,7 +1053,11 @@ fn finish_output(
                             // A rescued microphone-loss dictation is always
                             // copied: the disruption may have taken focus.
                             let mode = if crate::labs::copy_only()
-                                || matches!(target, TranscriptionTarget::CopyOnlyPaste)
+                                || matches!(
+                                    target,
+                                    TranscriptionTarget::CopyOnlyPaste
+                                        | TranscriptionTarget::RawCopyOnlyPaste
+                                )
                             {
                                 PasteMode::CopyOnly
                             } else {
@@ -1088,6 +1096,7 @@ fn finish_output(
                         target,
                         TranscriptionTarget::Paste
                             | TranscriptionTarget::CopyOnlyPaste
+                            | TranscriptionTarget::RawCopyOnlyPaste
                             | TranscriptionTarget::RawPaste
                     ) {
                         *last_transcript = Some(completed.text.clone());
@@ -1162,7 +1171,7 @@ fn record_history(
 ) {
     let kind = match target {
         TranscriptionTarget::Paste | TranscriptionTarget::CopyOnlyPaste => HistoryKind::Dictation,
-        TranscriptionTarget::RawPaste => HistoryKind::Raw,
+        TranscriptionTarget::RawPaste | TranscriptionTarget::RawCopyOnlyPaste => HistoryKind::Raw,
         TranscriptionTarget::Print | TranscriptionTarget::RawPrint => HistoryKind::Printed,
         TranscriptionTarget::Service => return,
     };
@@ -1539,68 +1548,77 @@ mod tests {
 
     #[test]
     fn a_salvaged_dictation_is_copied_and_kept_for_paste_last_and_history() {
-        let directory =
-            std::env::temp_dir().join(format!("hex-parakeet-salvage-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&directory);
-        std::fs::create_dir_all(&directory).unwrap();
-        let history = History::new(crate::history::HistoryStore::open(
-            directory.join("history.json"),
-            crate::history::HistoryRetention::Week,
-            crate::history::now_ms(),
-        ));
-        let text = "the part of the dictation the microphone heard";
-        let mut pasted = None;
-        let mut last_transcript = None;
-        let event = finish_output(
-            OutputJob::Completed {
-                job_id: DictationJobId(1),
-                control: Arc::new(JobControl::default()),
-                target: TranscriptionTarget::CopyOnlyPaste,
-                result: Box::new(Ok(CompletedTranscript {
-                    text: text.into(),
-                    raw: text.into(),
-                    application: Some("Call".into()),
-                    return_to: None,
-                    timings: JobTimings {
-                        total_started: Instant::now(),
-                        queue_ms: 0,
-                        audio_ms: 4_000,
-                        prepare_ms: 0,
-                        inference_ms: 0,
-                    },
-                    processing: None,
-                    recording: None,
-                })),
-            },
-            &mut |pasted_text, mode, commit| {
-                assert!(commit());
-                pasted = Some((pasted_text.to_string(), mode));
-                Ok(())
-            },
-            &mut last_transcript,
-            Some(&history),
-        );
+        // A normal salvage is processed before it is copied; a raw one is
+        // copied as heard and recorded as raw history. Neither is pasted.
+        for (target, kind) in [
+            (TranscriptionTarget::CopyOnlyPaste, HistoryKind::Dictation),
+            (TranscriptionTarget::RawCopyOnlyPaste, HistoryKind::Raw),
+        ] {
+            let directory = std::env::temp_dir().join(format!(
+                "hex-parakeet-salvage-{}-{target:?}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            let history = History::new(crate::history::HistoryStore::open(
+                directory.join("history.json"),
+                crate::history::HistoryRetention::Week,
+                crate::history::now_ms(),
+            ));
+            let text = "the part of the dictation the microphone heard";
+            let mut pasted = None;
+            let mut last_transcript = None;
+            let event = finish_output(
+                OutputJob::Completed {
+                    job_id: DictationJobId(1),
+                    control: Arc::new(JobControl::default()),
+                    target,
+                    result: Box::new(Ok(CompletedTranscript {
+                        text: text.into(),
+                        raw: text.into(),
+                        application: Some("Call".into()),
+                        return_to: None,
+                        timings: JobTimings {
+                            total_started: Instant::now(),
+                            queue_ms: 0,
+                            audio_ms: 4_000,
+                            prepare_ms: 0,
+                            inference_ms: 0,
+                        },
+                        processing: None,
+                        recording: None,
+                    })),
+                },
+                &mut |pasted_text, mode, commit| {
+                    assert!(commit());
+                    pasted = Some((pasted_text.to_string(), mode));
+                    Ok(())
+                },
+                &mut last_transcript,
+                Some(&history),
+            );
 
-        assert!(matches!(
-            event,
-            WorkerEvent::Completed {
-                result: Ok(ref completed),
-                ..
-            } if completed.as_str() == text
-        ));
-        let (pasted_text, mode) = pasted.expect("the transcript reaches the clipboard");
-        assert_eq!(pasted_text, text);
-        assert!(
-            matches!(mode, PasteMode::CopyOnly),
-            "an interrupted dictation is copied, never pasted"
-        );
-        assert_eq!(last_transcript.as_deref(), Some(text));
-        let entries = history.recent(1);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].kind, HistoryKind::Dictation);
-        assert_eq!(entries[0].final_text, text);
-        assert_eq!(entries[0].application.as_deref(), Some("Call"));
-        let _ = std::fs::remove_dir_all(&directory);
+            assert!(matches!(
+                event,
+                WorkerEvent::Completed {
+                    result: Ok(ref completed),
+                    ..
+                } if completed.as_str() == text
+            ));
+            let (pasted_text, mode) = pasted.expect("the transcript reaches the clipboard");
+            assert_eq!(pasted_text, text);
+            assert!(
+                matches!(mode, PasteMode::CopyOnly),
+                "{target:?}: an interrupted dictation is copied, never pasted"
+            );
+            assert_eq!(last_transcript.as_deref(), Some(text));
+            let entries = history.recent(1);
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].kind, kind, "{target:?}");
+            assert_eq!(entries[0].final_text, text);
+            assert_eq!(entries[0].application.as_deref(), Some("Call"));
+            let _ = std::fs::remove_dir_all(&directory);
+        }
     }
 
     #[test]

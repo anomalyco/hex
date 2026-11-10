@@ -1860,8 +1860,8 @@ Linux beta                               // not macOS feature parity
 │       Home Manager's programs.hex.autostart, `systemctl --user enable`) -> on;
 │       turning it off errors, naming where to disable it; no entry is written (#1164)
 │       // check: an_enabled_systemd_unit_starts_hex_at_login (the link scan only)
-├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
-│   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
+├── Microphone failure -> Same recovery as macOS, except an interrupted dictation is never kept (RecoveringAudioInput)
+│   ├── Stream fails -> Cancel an unfinished capture (macOS transcribes and copies a held one), "reopening" failure, retry with backoff
 │   ├── Startup open fails -> Retry with backoff; the listener keeps running
 │   └── Released while idle, on-demand open fails -> Failed entry; stays released
 │   └── Overload (Xrun) glitch -> Counted; the polling thread logs one line per burst; not a failure
