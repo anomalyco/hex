@@ -92,6 +92,7 @@ impl Feature {
             | Self::GnomeMeetingCapsules
             | Self::MeetingImport
             | Self::MeetingDescriptiveFilenames
+            | Self::MeetingNotesFile
             | Self::ExpireMeetingAudio => Group::Meetings,
             Self::Screenshots | Self::AnnotateReplay | Self::GnomeAnnotate => Group::Annotate,
             Self::MouseShortcuts

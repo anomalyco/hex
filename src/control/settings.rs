@@ -583,6 +583,11 @@ const KEYS: &[Key] = &[
         "Labs: an exported meeting's Markdown follows its title once notes or a rename provide one, keeping the date and time",
     ),
     key(
+        "labs.meeting_notes_file",
+        Kind::Bool,
+        "Labs: a meeting's notes are written to their own file beside the transcript, sharing its name and linking back to it",
+    ),
+    key(
         "labs.expire_meeting_audio",
         Kind::Bool,
         "Labs: finished meetings drop their WAVs on meetings.audio_retention while their transcripts, notes, summary, and Markdown stay",
@@ -855,6 +860,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.meeting_notes_vocabulary", "meetings"),
     ("labs.meeting_finished_event", "meetings"),
     ("labs.meeting_descriptive_filenames", "meetings"),
+    ("labs.meeting_notes_file", "meetings"),
     ("labs.follow_live_transcript", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("typed_text_hotkey", "typed_text"),

@@ -59,6 +59,7 @@ pub(crate) mod import;
 mod loopback_route;
 pub(crate) mod mcp;
 mod notes;
+mod notes_file;
 pub mod query;
 mod retention;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -217,6 +218,19 @@ pub struct MeetingManifest {
     /// user edited stays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_sha256: Option<String>,
+    /// The notes file beside the transcript while Labs › Separate notes file
+    /// wrote one, tracked so renames, Trash, and retention follow it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes_export_path: Option<PathBuf>,
+    /// SHA-256 of the notes file as Hex last wrote it. A later notes
+    /// regeneration rewrites it only while it still matches, and expiry moves
+    /// it only then, so a copy the user edited stays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes_export_sha256: Option<String>,
+    /// The tracked notes file was deleted outside Hex. Hex forgets its path
+    /// and never writes another notes file for this meeting.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notes_export_removed: bool,
     /// When the meeting's WAV tracks moved to the Trash (Labs › Expire
     /// meeting audio separately); the transcript, notes, and Markdown stay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -485,6 +499,9 @@ pub fn record(
         chapters_refined: false,
         retention_applies: true,
         export_sha256: None,
+        notes_export_path: None,
+        notes_export_sha256: None,
+        notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
     };
@@ -938,6 +955,7 @@ fn transcribe(
         &crate::app_settings::meeting_output_folder(),
         manifest,
         &transcript,
+        crate::labs::meeting_notes_file(),
     ) {
         Ok(path) => {
             tracing::info!(path = %path.display(), "published meeting transcript");
@@ -1213,6 +1231,9 @@ fn trash_meeting(
     if let Some(path) = exported_markdown(&manifest) {
         move_to_trash(&path)?;
     }
+    if let Some(path) = notes_file::tracked(&manifest) {
+        move_to_trash(&path)?;
+    }
     move_to_trash(directory)
 }
 
@@ -1263,7 +1284,8 @@ fn rename_meeting_with(
     set_title_source(&mut manifest, TitleSource::User);
     let next = display_title(&manifest);
     let mut markdown_error = None;
-    let mut heading_updated = previous != next;
+    let title_changed = previous != next;
+    let mut heading_updated = title_changed;
     if heading_updated
         && let Some(path) = manifest.export_path.clone().filter(|path| path.exists())
         && let Err(error) =
@@ -1275,9 +1297,13 @@ fn rename_meeting_with(
     }
     // The notes writer applies its own title and renames the file; leaving
     // the name alone here keeps it from racing that in-place rewrite. A
-    // failed heading update keeps the old name too, as notes do.
+    // failed heading update keeps the old name too, as notes do. The notes
+    // file follows the title independently, since it is Hex's own copy.
     if heading_updated && !notes_in_progress(&manifest.id) {
         export_name::rename_to_title(&mut manifest, &next, descriptive_filenames);
+    }
+    if title_changed && !notes_in_progress(&manifest.id) {
+        notes_file::refresh(&mut manifest);
     }
     write_manifest(directory, &manifest)?;
     match markdown_error {

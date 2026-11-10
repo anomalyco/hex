@@ -96,7 +96,7 @@ pub(super) fn path_without_collision(
 /// Whether `candidate` is the file at `current` itself. `current` is exact
 /// path bytes off Unix; on Unix the same device and inode count, so a case
 /// change on a case-insensitive volume is not a collision.
-fn is_current_file(candidate: &Path, current: &Path) -> bool {
+pub(super) fn is_current_file(candidate: &Path, current: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -108,9 +108,16 @@ fn is_current_file(candidate: &Path, current: &Path) -> bool {
 }
 
 /// Renames the exported Markdown to the meeting's current title, keeping
-/// the date and time prefix. Returns the new path when it renamed; a
-/// missing file, an unchanged name, or a failed rename leaves it alone.
-/// The bytes do not change, so `export_sha256` stays valid for retention.
+/// the date and time prefix and a `.transcript` suffix when the export has
+/// one, and moves a tracked notes file to its matching `<stem>.notes.md`.
+/// A tracked notes file the user deleted stops being tracked instead.
+///
+/// Returns the transcript's new path when the transcript itself renamed;
+/// `None` when only the notes file moved, nothing changed, or a rename
+/// failed and left the pair where it was. If the transcript moves but its
+/// notes file cannot, the transcript is renamed back; if that rollback also
+/// fails, the manifest keeps the paths the files actually have. The bytes do
+/// not change, so `export_sha256` stays valid for retention.
 /// `enabled` is the caller's Labs › Descriptive meeting file names switch.
 pub(super) fn rename_to_title(
     manifest: &mut MeetingManifest,
@@ -122,18 +129,79 @@ pub(super) fn rename_to_title(
     }
     let current = manifest.export_path.clone().filter(|path| path.exists())?;
     let folder = current.parent()?;
+    let notes_current = match manifest.notes_export_path.clone() {
+        Some(path) if path.exists() => Some(path),
+        Some(path) => {
+            tracing::info!(
+                meeting = manifest.id,
+                path = %path.display(),
+                "stopped tracking a meeting notes file that is gone"
+            );
+            manifest.notes_export_path = None;
+            manifest.notes_export_sha256 = None;
+            manifest.notes_export_removed = true;
+            None
+        }
+        None => None,
+    };
     let stem = file_stem_from(&current, manifest, title);
-    let target = match path_without_collision(folder, &stem, Some(&current)) {
-        Ok(path) => path,
+    let suffix = super::notes_file::transcript_suffix(&current);
+
+    // With no notes file to move and no `.transcript` suffix, this is the
+    // single-file rename it was before the notes file lab: an untracked
+    // `<stem>.notes.md` is someone else's file and never pushes the
+    // transcript to " (2)".
+    if notes_current.is_none() && suffix.is_empty() {
+        let target = match path_without_collision(folder, &stem, Some(&current)) {
+            Ok(path) => path,
+            Err(error) => {
+                tracing::warn!(%error, meeting = manifest.id, "could not name meeting Markdown");
+                return None;
+            }
+        };
+        if target == current {
+            return None;
+        }
+        if let Err(error) = fs::rename(&current, &target) {
+            tracing::warn!(
+                %error,
+                meeting = manifest.id,
+                from = %current.display(),
+                to = %target.display(),
+                "could not rename meeting Markdown"
+            );
+            return None;
+        }
+        sync_after_rename(&manifest.id, folder);
+        tracing::info!(
+            meeting = manifest.id,
+            from = %current.display(),
+            to = %target.display(),
+            "renamed meeting Markdown"
+        );
+        manifest.export_path = Some(target.clone());
+        return Some(target);
+    }
+
+    let (target, notes_target) = match super::notes_file::pair_without_collision(
+        folder,
+        &stem,
+        suffix,
+        Some(&current),
+        notes_current.as_deref(),
+    ) {
+        Ok(pair) => pair,
         Err(error) => {
             tracing::warn!(%error, meeting = manifest.id, "could not name meeting Markdown");
             return None;
         }
     };
-    if target == current {
+    let transcript_renamed = target != current;
+    let notes_move = notes_current.filter(|notes| *notes != notes_target);
+    if !transcript_renamed && notes_move.is_none() {
         return None;
     }
-    if let Err(error) = fs::rename(&current, &target) {
+    if transcript_renamed && let Err(error) = fs::rename(&current, &target) {
         tracing::warn!(
             %error,
             meeting = manifest.id,
@@ -143,13 +211,52 @@ pub(super) fn rename_to_title(
         );
         return None;
     }
-    if let Err(error) = super::sync_directory(folder) {
-        tracing::warn!(
-            %error,
+    if let Some(notes) = notes_move {
+        if let Err(error) = fs::rename(&notes, &notes_target) {
+            tracing::warn!(
+                %error,
+                meeting = manifest.id,
+                from = %notes.display(),
+                to = %notes_target.display(),
+                "could not rename the meeting's notes file"
+            );
+            if transcript_renamed {
+                match fs::rename(&target, &current) {
+                    Ok(()) => {
+                        tracing::warn!(
+                            meeting = manifest.id,
+                            "renamed the Markdown back after its notes file could not move"
+                        );
+                        sync_after_rename(&manifest.id, folder);
+                        return None;
+                    }
+                    Err(rollback) => {
+                        tracing::warn!(
+                            %rollback,
+                            meeting = manifest.id,
+                            from = %target.display(),
+                            to = %current.display(),
+                            "could not rename the Markdown back; keeping the paths the files have"
+                        );
+                        manifest.export_path = Some(target.clone());
+                        sync_after_rename(&manifest.id, folder);
+                        return Some(target);
+                    }
+                }
+            }
+            sync_after_rename(&manifest.id, folder);
+            return None;
+        }
+        manifest.notes_export_path = Some(notes_target.clone());
+        tracing::info!(
             meeting = manifest.id,
-            folder = %folder.display(),
-            "could not sync the meeting folder after a rename"
+            path = %notes_target.display(),
+            "renamed the meeting's notes file"
         );
+    }
+    sync_after_rename(&manifest.id, folder);
+    if !transcript_renamed {
+        return None;
     }
     tracing::info!(
         meeting = manifest.id,
@@ -159,6 +266,17 @@ pub(super) fn rename_to_title(
     );
     manifest.export_path = Some(target.clone());
     Some(target)
+}
+
+fn sync_after_rename(meeting: &str, folder: &Path) {
+    if let Err(error) = super::sync_directory(folder) {
+        tracing::warn!(
+            %error,
+            meeting,
+            folder = %folder.display(),
+            "could not sync the meeting folder after a rename"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -212,6 +330,28 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&renamed).unwrap(),
             "# Teams call 2.00 PM\n"
+        );
+        assert_eq!(manifest.export_path, Some(renamed));
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn an_untracked_notes_file_does_not_number_a_plain_rename() {
+        let folder = folder("untracked-notes");
+        let stamp = LocalTime::from_ms(STARTED).file_stamp();
+        let current = folder.join(format!("{stamp} Old title.md"));
+        fs::write(&current, "the meeting\n").unwrap();
+        let theirs = folder.join(format!("{stamp} Arcade planning.notes.md"));
+        fs::write(&theirs, "someone else's notes\n").unwrap();
+        let mut manifest = manifest(current.clone());
+
+        let renamed = rename_to_title(&mut manifest, "Arcade planning", true).expect("renamed");
+
+        assert_eq!(renamed, folder.join(format!("{stamp} Arcade planning.md")));
+        assert!(!current.exists());
+        assert_eq!(
+            fs::read_to_string(&theirs).unwrap(),
+            "someone else's notes\n"
         );
         assert_eq!(manifest.export_path, Some(renamed));
         fs::remove_dir_all(folder).unwrap();

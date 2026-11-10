@@ -1146,6 +1146,11 @@ Final publication                                   // meetings.output
     │   the new title, keeping the date and time prefix; a taken name adds
     │   " (2)" without overwriting (manifest export_path follows; Reveal,
     │   Trash, and retention read it)
+    ├── Labs › Separate notes file on (off by default) -> exports
+    │   <stem>.transcript.md, then writes <stem>.notes.md beside it when the
+    │   notes are applied; the chosen stem is free of both files, a taken
+    │   pair adds " (2)" to both, and notes_export_path/notes_export_sha256
+    │   follow
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
@@ -1204,18 +1209,22 @@ Rename -> inline field; Enter or Save          // meetings.rename
   -> empty title refused
 Delete… (overflow menu) -> "Trash recording & Markdown" (or "Trash recording")
   / Cancel, under the title in place of the icons until answered
-  -> exported Markdown, then Application Support/meetings/<id>, to the Trash
+  -> exported Markdown, then its tracked notes file, then
+     Application Support/meetings/<id>, to the Trash
   -> refused while recording, transcribing, or writing notes   // meetings.delete
 ```
 
 Choice: Delete trashes the Markdown copy too, since it holds the transcript;
-both stay recoverable from the Trash. Sources:
+a separate notes file Hex tracks goes with it, and all stay recoverable from
+the Trash. Sources:
 [rune_ui/meetings.rs](../../src/rune_ui/meetings.rs), the requests in
 [rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), and `RevealTarget` /
 `trash` / `rename` in [meeting.rs](../../src/meeting.rs). Checks:
 `deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording`,
+`deleting_trashes_a_tracked_notes_file_after_the_transcript`,
 `renaming_updates_the_manifest_and_an_unedited_markdown_heading`,
 `a_rename_follows_the_title_when_descriptive_file_names_are_on`,
+`a_rename_without_descriptive_names_still_retitles_the_notes_file`,
 `notes_rename_the_export_only_with_descriptive_file_names`,
 `retitling_replaces_only_a_matching_first_heading`,
 `the_exported_markdown_is_the_reveal_target_only_while_it_exists`,
@@ -1258,6 +1267,8 @@ Meeting controller, Meetings on or off           // meetings.retention
 │   -> the exported Markdown to the Trash only while its SHA-256 still
 │      matches the copy Hex last wrote (manifest `export_sha256`; Hex's own
 │      heading and notes rewrites keep it current); an edited copy stays
+│   -> a tracked separate notes file to the Trash only while its SHA-256
+│      matches `notes_export_sha256`; an edited copy stays
 ├── Skips recording, transcribing, writing-notes, and final.pending
 │   meetings; a later pass retries them
 └── Nothing expires while Hex is not running
@@ -1305,6 +1316,7 @@ Sources: `retention_for`, `expired`, `expire`, `trash_expired`,
 Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
 `until_one_is_chosen_only_meetings_recorded_since_the_default_expire`,
 `expiry_leaves_a_markdown_copy_the_user_edited`,
+`expiry_trashes_a_notes_file_only_while_its_digest_matches`,
 `hex_rewriting_its_markdown_keeps_it_hexs_and_a_user_edit_does_not`,
 `separate_audio_expiry_covers_only_finished_meetings_older_than_it`,
 `audio_expiry_moves_only_the_wavs_and_records_it`, and
@@ -1362,6 +1374,12 @@ Final publication complete                               // meetings.notes
      │       Intelligence", "Written by <provider/model> through OpenCode", or,
      │       for older notes without written_by, no writer at all (#1125;
      │       check: the_notes_footer_names_the_writer_that_wrote_them)
+     ├── Labs › Separate notes file on (off by default) -> <base>.notes.md
+     │   beside the transcript: title, date, duration, app, a relative
+     │   percent-encoded transcript link (its text Markdown-escaped), summary,
+     │   chapters, and its own footer saying the transcript has the details;
+     │   rewritten only while its SHA-256 is still Hex's copy, never recreated
+     │   once deleted
      ├── Text outside the block is preserved; changed mid-write -> not written
      └── Missing file -> manifest only
   -> Failure / timeout -> notes_error; Markdown untouched; recording stays Complete
@@ -1392,7 +1410,16 @@ and Reveal, Trash, and retention follow the manifest's new `export_path`. A
 failed rename leaves the old path and never fails the notes or the rename. If
 Hex stops between the file rename and the manifest write, the manifest keeps
 the old path: Reveal falls back to the recording folder and the Markdown stays
-in the folder untouched.
+in the folder untouched. With Labs › Separate notes file on, the export is
+`<stem>.transcript.md` and its notes are `<stem>.notes.md`; export chooses a
+stem free of both, a descriptive rename moves the pair together (keeping a
+`.transcript` suffix) and rolls the transcript back if its notes file cannot
+move, and an unedited tracked notes file is re-rendered so its heading and
+transcript link follow notes, a rename, or chapter retitles
+([meeting/notes_file.rs](../../src/meeting/notes_file.rs)). The transcript
+keeps its own `<!-- hex:notes -->` summary block and footer throughout. A notes
+file the user deletes stops being tracked and is never written back, even by a
+later regeneration.
 
 Action items and decisions are gone: other agents read the transcript for
 details (MCP). Older manifests still decode: a list summary is joined into one
