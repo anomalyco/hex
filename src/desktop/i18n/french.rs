@@ -120,6 +120,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Not installed", "Non installé"),
     ("Switch model with keyboard language", "Changer de modèle avec la langue du clavier"),
     ("Changing input source selects its mapped model and language; manual choices still work", "Changer de source de saisie sélectionne le modèle et la langue associés ; le choix manuel reste possible"),
+    ("Switch model with app", "Changer de modèle avec l'app"),
+    ("Each mode can pick a speech model; Hex switches to it when you change apps", "Chaque mode peut choisir un modèle vocal ; Hex bascule dessus quand vous changez d'app"),
     ("Shortcut side", "Côté du raccourci"),
     ("Labs", "Labs"),
     ("Tap or hold", "Appuyer ou maintenir"),

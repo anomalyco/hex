@@ -172,6 +172,19 @@ impl AppSettings {
             .keyboard_model_switching
             .mappings
             .retain(|_, choice| choice.validate().is_ok());
+        // A mode's speech choice that no longer validates is forgotten; the
+        // mode itself and its applications stay.
+        for mode in std::iter::once(&mut settings.dictation_processing.default_mode)
+            .chain(settings.dictation_processing.modes.iter_mut())
+        {
+            if mode
+                .speech
+                .as_ref()
+                .is_some_and(|choice| choice.validate().is_err())
+            {
+                mode.speech = None;
+            }
+        }
         // A saved import that can't run stays saved (`validate_saved`).
         if let Err(error) = crate::transcription::models::validate_saved(&settings.transcription) {
             warn("transcription", &error.to_string());

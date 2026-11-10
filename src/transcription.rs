@@ -1,3 +1,4 @@
+pub(crate) mod app_model_switching;
 pub(crate) mod artifacts;
 pub(crate) mod background_priority;
 #[cfg(target_os = "macos")]

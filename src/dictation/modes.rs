@@ -220,6 +220,20 @@ fn mode_for_context<'a>(
         .find(|mode| matches_application(mode, application))
 }
 
+/// The speech model and language the mode matching the focused context
+/// carries, else Global's. `None` means the mode never switches.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn speech_for<'a>(
+    settings: &'a DictationProcessingSettings,
+    application: Option<&str>,
+    browser_host: Option<&str>,
+) -> Option<&'a crate::app_settings::KeyboardModelChoice> {
+    mode_for_context(&settings.modes, application, browser_host)
+        .unwrap_or(&settings.default_mode)
+        .speech
+        .as_ref()
+}
+
 /// Hosts compare case-insensitively with any trailing dot removed,
 /// matching the macOS browser-host semantics.
 pub fn normalize_host(host: &str) -> String {
@@ -406,6 +420,44 @@ mod tests {
             ..crate::dictation::context::ContextSnapshot::default()
         };
         assert!(runtime.profile(&context).rewrites());
+    }
+
+    #[test]
+    fn a_modes_speech_choice_matches_its_application_or_website_else_global() {
+        use crate::app_settings::KeyboardModelChoice;
+        use crate::transcription::models::TranscriptionModelId;
+        let choice = |language: &str| KeyboardModelChoice {
+            model: TranscriptionModelId::ParakeetV3,
+            language: language.into(),
+        };
+        let settings = DictationProcessingSettings {
+            default_mode: DictationMode {
+                speech: Some(choice("en")),
+                ..DictationMode::default()
+            },
+            modes: vec![
+                DictationMode {
+                    applications: vec!["code".into()],
+                    speech: Some(choice("de")),
+                    ..DictationMode::default()
+                },
+                DictationMode {
+                    browser_hosts: vec!["x.com".into()],
+                    speech: Some(choice("es")),
+                    ..DictationMode::default()
+                },
+            ],
+        };
+        let matched = |application: Option<&str>, host: Option<&str>| {
+            speech_for(&settings, application, host).map(|choice| choice.language.as_str())
+        };
+
+        assert_eq!(matched(Some("vscode"), None), Some("de"));
+        // A website is more specific than an application.
+        assert_eq!(matched(Some("chrome"), Some("x.com")), Some("es"));
+        // Nothing matches, so Global's own choice applies.
+        assert_eq!(matched(Some("notepad"), None), Some("en"));
+        assert_eq!(matched(None, None), Some("en"));
     }
 
     #[test]

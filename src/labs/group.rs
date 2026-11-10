@@ -108,6 +108,7 @@ impl Feature {
             | Self::ShareShortcut
             | Self::CapsLockDictation => Group::Shortcuts,
             Self::KeyboardModelSwitching
+            | Self::AppModelSwitching
             | Self::UnloadIdle
             | Self::PickerSortFilter
             | Self::BenchmarkDetails

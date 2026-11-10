@@ -129,6 +129,11 @@ const KEYS: &[Key] = &[
         "Input-source IDs mapped to a model and language; absent sources don't switch (macOS, Windows, X11)",
     ),
     key(
+        "labs.app_model_switching",
+        Kind::Bool,
+        "Labs: switch the speech model and language with the foreground application (macOS, Windows)",
+    ),
+    key(
         "release_microphone_while_idle",
         Kind::Bool,
         "Release the microphone between dictations",
@@ -1256,6 +1261,7 @@ pub fn apply(
         }
         "dictation_processing.default_mode" => {
             candidate.dictation_processing.default_mode.name = "Global".into();
+            validate_mode_speech(name, &candidate.dictation_processing.default_mode)?;
         }
         "dictation_processing.modes" => {
             let mut names = std::collections::HashSet::new();
@@ -1264,6 +1270,7 @@ pub fn apply(
                 if mode_name.is_empty() || !names.insert(mode_name.to_lowercase()) {
                     return Err(invalid(name, "every mode needs a unique, non-empty name"));
                 }
+                validate_mode_speech(name, mode)?;
             }
         }
         #[cfg(hex_capture)]
@@ -1398,6 +1405,19 @@ fn invalid(name: &str, why: &str) -> ControlError {
         "invalid-value",
         format!("invalid value for `{name}`: {why}"),
     )
+}
+
+/// A mode's speech choice must name a model and a language it supports.
+fn validate_mode_speech(
+    name: &str,
+    mode: &crate::app_settings::DictationMode,
+) -> Result<(), ControlError> {
+    if let Some(choice) = &mode.speech {
+        choice
+            .validate()
+            .map_err(|error| invalid(name, &error.to_string()))?;
+    }
+    Ok(())
 }
 
 fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, ControlError> {
@@ -1717,6 +1737,34 @@ mod tests {
                 .unwrap_err()
                 .code,
             "invalid-value"
+        );
+    }
+
+    #[test]
+    fn app_model_switching_is_named_and_modes_validate_their_speech_choice() {
+        let settings = apply(
+            &AppSettings::default(),
+            "labs.app_model_switching",
+            "on",
+            &rules(),
+        )
+        .unwrap()
+        .settings;
+        assert!(settings.labs.app_model_switching);
+        let modes = r#"[{"name":"Spanish","applications":["Notes"],"speech":{"model":"parakeet_v3","language":"es"}}]"#;
+        let change = apply(&settings, "dictation_processing.modes", modes, &rules()).unwrap();
+        assert_eq!(
+            change.settings.dictation_processing.modes[0].speech,
+            Some(crate::app_settings::KeyboardModelChoice {
+                model: crate::transcription::models::TranscriptionModelId::ParakeetV3,
+                language: "es".into(),
+            })
+        );
+        let invalid =
+            r#"[{"name":"Japanese","speech":{"model":"parakeet_unified_en","language":"ja"}}]"#;
+        assert!(
+            apply(&settings, "dictation_processing.modes", invalid, &rules()).is_err(),
+            "a language the model lacks was accepted"
         );
     }
 

@@ -991,6 +991,7 @@ mod tests {
                 Default::default(),
                 None,
             ),
+            app_switcher: crate::transcription::app_model_switching::Switcher::new(false, None),
             automatic_preparation: false,
             preparation,
             recognition_start: None,

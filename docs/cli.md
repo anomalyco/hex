@@ -439,6 +439,24 @@ mapping applies it; launching Hex does not reapply it. Wayland has no general
 protocol for the active layout, so there Hex keeps the settings but does not
 observe input-source changes or show these controls.
 
+On macOS and Windows, `labs.app_model_switching` opts into switching the
+shared speech-model picker per dictation mode. Each mode, Global included, may
+carry `speech`, a model and a language it supports, for example
+`{"model":"parakeet_v3","language":"es"}` in
+`dictation_processing.default_mode` or `dictation_processing.modes[]`; omit it
+for "Don't switch". When the app in front changes, Hex matches the mode by
+application, waits 300 ms, then prepares its choice through the same
+installed-only path as a manual pick; it never downloads a model and a
+recording holds a due switch until it is idle. Matching is by application on
+both macOS and Windows, and a mode's website rules are ignored, so a mode
+chosen only by website never switches. Hex's own window, and a moment with no
+app in front, are ignored: they neither schedule nor cancel a switch, so
+enabling the lab while Hex is in front applies nothing until you next focus
+another app. Editing a mode's choice applies when you next focus an app whose
+mode carries it. With keyboard switching also on, the switch that is due
+later wins, and an app switch wins a tie in the same tick. Linux does not
+support this lab.
+
 - Booleans take `on`/`off`, `true`/`false`, `yes`/`no`, or `1`/`0`.
 - Optional settings take `none` to clear them.
 - `microphone` takes a device name exactly as Settings lists it, or
@@ -525,7 +543,7 @@ Writable keys: `release_microphone_while_idle`,
 `avoid_bluetooth_microphone`, `recording_audio_behavior`, `recording_duck_volume`, `double_tap_lock`, `double_tap_only`,
 `shortcut_mode`, `dictation_hotkey`, `paste_last_hotkey`, `raw_dictation_hotkey`,
 `second_dictation_hotkey`, `extra_dictation_hotkeys`, `labs.second_dictation_shortcut`,
-`labs.more_dictation_shortcuts`, `labs.standalone_special_keys`, `show_dock_icon`, `vocabulary_boost`,
+`labs.more_dictation_shortcuts`, `labs.standalone_special_keys`, `labs.app_model_switching`, `show_dock_icon`, `vocabulary_boost`,
 `dictation_processing.default_mode`, `dictation_processing.modes`,
 `history_retention`, `meetings.enabled`,
 `meetings.output_folder`, `meetings.summaries`, `meetings.opencode_model`,

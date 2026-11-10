@@ -2916,6 +2916,7 @@ fn goldens() {
             "output",
             "modes",
             "modes-picker",
+            "modes-speech",
             "picker-downloading",
         ] {
             check_golden(scene, dark, PANE_SIZE);

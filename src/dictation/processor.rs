@@ -58,6 +58,9 @@ pub struct Profile {
     transformations: Vec<String>,
     /// The mode's own vocabulary, heard and spelled ahead of the shared list.
     vocabulary: Vec<VocabularyEntry>,
+    /// The mode's speech model and language while it matches the foreground
+    /// app (Labs › Switch model with app).
+    speech: Option<crate::app_settings::KeyboardModelChoice>,
 }
 
 impl Profile {
@@ -71,7 +74,16 @@ impl Profile {
             replacements: ReplacementSet::default(),
             transformations: Vec::new(),
             vocabulary: Vec::new(),
+            speech: None,
         }
+    }
+
+    pub(crate) fn speech(
+        mut self,
+        speech: Option<crate::app_settings::KeyboardModelChoice>,
+    ) -> Self {
+        self.speech = speech;
+        self
     }
 
     pub(crate) fn vocabulary(mut self, vocabulary: Vec<VocabularyEntry>) -> Self {
@@ -135,6 +147,7 @@ impl Profile {
             &mode.post_processing,
         )
         .vocabulary(mode.vocabulary.clone())
+        .speech(mode.speech.clone())
     }
 
     /// Builds a runtime profile from persisted settings. A malformed model key
@@ -337,6 +350,14 @@ impl Profiles {
     /// The selected mode's own vocabulary.
     pub(crate) fn vocabulary_for(&self, context: &ContextSnapshot) -> Vec<VocabularyEntry> {
         self.select(context).vocabulary.clone()
+    }
+
+    /// The speech model and language the selected mode carries, if any.
+    pub(crate) fn speech_for(
+        &self,
+        context: &ContextSnapshot,
+    ) -> Option<crate::app_settings::KeyboardModelChoice> {
+        self.select(context).speech.clone()
     }
 
     pub fn processes(&self, context: &ContextSnapshot) -> bool {
