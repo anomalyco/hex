@@ -168,7 +168,7 @@ fn the_mic_note_follows_the_shortcut() {
         let mut ui = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
         super::super::onboarding_kit::scenes::mac_first_run(
             &mut ui,
-            crate::desktop::onboarding::MacStep::TryIt,
+            crate::rune_ui::onboarding::MacStep::TryIt,
             Page::Try,
         );
         let s = ui.first_run.as_mut().expect("the first run is open");
