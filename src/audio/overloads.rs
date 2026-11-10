@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 /// Overloads reported since the last line.
 static GLITCHES: AtomicU64 = AtomicU64::new(0);
 /// The last overload, and the last line written about them, in nanoseconds on
-/// [`CLOCK`]. Zero means never, which a real reading cannot be: the clock
-/// starts before any stream runs, and a reading is taken after it.
+/// [`CLOCK`]. Zero means never, which a real reading cannot be: it is clamped
+/// to at least one.
 static GLITCHED_AT: AtomicU64 = AtomicU64::new(0);
 static REPORTED_AT: AtomicU64 = AtomicU64::new(0);
 /// The base those two are measured from, taken before a stream runs so the
@@ -104,12 +104,12 @@ fn write_pending() {
     tracing::warn!(count, "microphone stream glitched; continuing");
 }
 
-/// The clock reading, taken after [`CLOCK`] is read so a first one is never the
-/// zero that means never.
+/// The clock reading. Two `Instant::now()` calls can share a tick, so the
+/// result is clamped to at least one, which keeps zero meaning never.
 fn now_nanos() -> u64 {
     let base = *CLOCK.get_or_init(Instant::now);
     let since = Instant::now().saturating_duration_since(base);
-    u64::try_from(since.as_nanos()).unwrap_or(u64::MAX)
+    u64::try_from(since.as_nanos()).unwrap_or(u64::MAX).max(1)
 }
 
 #[cfg(test)]
