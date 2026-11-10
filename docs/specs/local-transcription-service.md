@@ -139,14 +139,16 @@ processor is installed and the lab is on.
 
 `POST /transcriptions` also accepts an optional `timestamps` query parameter:
 `none`, `segment`, or `word` (Labs › Timestamps in API transcripts, off by
-default). The running desktop app's authenticated API reads the lab live;
-`hex service --embedded` honours the saved `labs.api_timestamps`, read once per
-process, so changing the lab takes effect after the helper restarts. Absent
-means `none`. Any other value, or a repeated parameter, answers `400
-invalid-request`. With the lab off, `segment` and `word` answer `403
-timestamps-disabled` before the audio body is read; `none` and an absent
-parameter are unaffected. An unknown value is `400` whether or not the lab is
-on.
+default). The running desktop app reads the lab live, so its next request sees
+a toggle. A `hex service` process without the app reads the saved
+`labs.api_timestamps` once, at startup, and the embedded helper (the SDK's
+direct child) loads no settings and reads the saved value once, on its first
+request. Neither re-reads it, so changing the lab reaches a running helper only
+after it restarts. Absent means `none`. Any other value, or a repeated
+parameter, answers `400 invalid-request`. With the lab off, `segment` and
+`word` answer `403 timestamps-disabled` before the audio body is read; `none`
+and an absent parameter are unaffected. An unknown value is `400` whether or
+not the lab is on.
 
 ```typescript
 // The response with timestamps=segment, on top of today's fields.

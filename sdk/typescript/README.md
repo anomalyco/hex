@@ -158,7 +158,9 @@ for (const word of result.words ?? []) {
 parameter, so the response is the untimed one. A model that cannot produce the
 level asked for answers `unsupported-timestamps`; the times are never estimated
 or cut down from a coarser level, and the Lab being off answers
-`timestamps-disabled`.
+`timestamps-disabled`. An embedded helper reads the lab from saved settings
+once, on its first request, so restart it after turning the lab on; `connect()`
+reads the running app's value live.
 
 Use `models.list()` to discover available models rather than treating the exported
 `MODEL_IDS` as an availability list. `apple_speech` remains in the public type but
