@@ -1170,9 +1170,9 @@ fn choosing_an_opencode_model_saves_it() {
             .as_deref(),
         Some("anthropic/claude-sonnet-4-5")
     );
-    assert!(!rt.state.models.picker.open);
+    assert!(!rt.state.models.picker.is_open());
     tap(&mut rt, "model-value");
-    assert!(rt.state.models.picker.open && rt.state.models.picker.search.focused);
+    assert!(rt.state.models.picker.is_open() && rt.state.models.picker.search().focused);
     tap(&mut rt, "model-picker-option-0");
     assert_eq!(
         rt.state.settings.dictation_processing.modes[0]
@@ -1199,7 +1199,7 @@ fn a_long_model_list_fits_the_window_and_follows_the_highlight() {
         key(&mut rt, Key::Down, Mods::default());
     }
     settle(&mut rt);
-    assert_eq!(rt.state.models.picker.active.as_deref(), Some("40"));
+    assert_eq!(rt.state.models.picker.active(), Some("40"));
     let [_, row_top, _, row_height] = rt.presented("model-picker-option-40").unwrap().0;
     assert!(
         row_top >= top && row_top + row_height <= top + height,
@@ -1225,7 +1225,7 @@ fn arrow_keys_move_the_search_highlight_and_enter_picks_it() {
             .as_deref(),
         Some("anthropic/claude-sonnet-4-5")
     );
-    assert!(!rt.state.models.picker.open);
+    assert!(!rt.state.models.picker.is_open());
 
     let mut rt = runtime("modes-picker", true, GOLDEN_SIZE);
     tap(&mut rt, "application-search");
