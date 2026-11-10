@@ -171,6 +171,11 @@ fn the_mic_note_follows_the_shortcut() {
             crate::rune_ui::onboarding::MacStep::TryIt,
             Page::Try,
         );
+        // Each poll reads both from settings again.
+        if toggle {
+            ui.settings.shortcut_mode = crate::dictation::ShortcutMode::Toggle;
+        }
+        ui.settings.release_microphone_while_idle = release;
         let s = ui.first_run.as_mut().expect("the first run is open");
         s.toggle = toggle;
         if let Some(live) = s.live.as_mut() {
