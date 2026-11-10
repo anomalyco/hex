@@ -38,25 +38,6 @@ impl ScreenshotSettings {
         }
     }
 
-    /// A record shortcut that shares Annotate's capture shortcut is cleared:
-    /// Annotate's shortcuts aren't filtered at runtime the way the record one
-    /// is, so the chord would still start a whole-screen recording, and a
-    /// record saved on the replay shortcut turned replay off with the Lab off.
-    #[cfg(hex_capture)]
-    pub(super) fn clear_annotate_capture_overlap(&mut self, capture: &CaptureSettings) {
-        let shared = self.record_hotkey.as_ref().is_some_and(|record| {
-            record.overlaps(&capture.hotkey)
-                || capture
-                    .replay_hotkey
-                    .as_ref()
-                    .is_some_and(|replay| record.overlaps(replay))
-        });
-        if shared {
-            tracing::warn!("cleared a record shortcut that shares Annotate's capture shortcut");
-            self.record_hotkey = None;
-        }
-    }
-
     /// The folder screenshots go to.
     pub fn folder(&self) -> PathBuf {
         self.folder
@@ -66,6 +47,33 @@ impl ScreenshotSettings {
 }
 
 impl AppSettings {
+    /// A record shortcut that shares Annotate's capture or replay shortcut is
+    /// cleared: Annotate's shortcuts aren't filtered at runtime the way the
+    /// record one is, so the chord would still start a whole-screen recording,
+    /// and a record saved on the replay shortcut turned replay off with the
+    /// Lab off. Runs after every repair that can reset `capture.hotkey`, since
+    /// a reset puts Annotate back on its default and the record shortcut may
+    /// be saved there.
+    #[cfg(hex_capture)]
+    pub(super) fn clear_record_shortcut_sharing_capture(&mut self) {
+        let shared = self
+            .screenshots
+            .record_hotkey
+            .as_ref()
+            .is_some_and(|record| {
+                record.overlaps(&self.capture.hotkey)
+                    || self
+                        .capture
+                        .replay_hotkey
+                        .as_ref()
+                        .is_some_and(|replay| record.overlaps(replay))
+            });
+        if shared {
+            tracing::warn!("cleared a record shortcut that shares Annotate's capture shortcut");
+            self.screenshots.record_hotkey = None;
+        }
+    }
+
     /// The screenshot shortcut while it takes effect: macOS, the Lab on,
     /// and sharing no key with another active shortcut.
     pub fn active_screenshot_hotkey(&self) -> Option<&HotkeyBinding> {

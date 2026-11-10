@@ -1179,9 +1179,6 @@ impl AppSettings {
             self.capture.replay_hotkey = None;
         }
         self.screenshots.clear_left_click_record();
-        #[cfg(hex_capture)]
-        self.screenshots
-            .clear_annotate_capture_overlap(&self.capture);
     }
 }
 
@@ -1756,6 +1753,14 @@ mod tests {
 
         let (_, loaded) = load(HotkeyBinding::capture_default(), None);
         assert_eq!(loaded.screenshots.record_hotkey, None);
+        // The repair counts as a migration, so the file loses the shortcut
+        // too instead of being cleared again on every load.
+        let written: serde_json::Value =
+            serde_json::from_slice(&fs::read(&dir.path).unwrap()).unwrap();
+        assert_eq!(
+            written["screenshots"]["record_hotkey"],
+            serde_json::Value::Null
+        );
 
         let (saved, loaded) = load(replay.clone(), Some(replay.clone()));
         if cfg!(target_os = "macos") {
@@ -1767,6 +1772,31 @@ mod tests {
         // Any other chord stays saved.
         let (_, loaded) = load(replay.clone(), None);
         assert_eq!(loaded.screenshots.record_hotkey, Some(replay));
+
+        // macOS puts Annotate's mouse-button shortcut back on its default
+        // with Labs › Mouse shortcuts off, so a record shortcut saved on that
+        // default is cleared after the reset, not before it.
+        #[cfg(target_os = "macos")]
+        {
+            let mut settings = AppSettings::default();
+            settings.labs.mouse_shortcuts = false;
+            settings.capture.hotkey = HotkeyBinding {
+                modifiers: HotkeyModifiers::default(),
+                key: HotkeyKey::mouse(3),
+            };
+            settings.screenshots.record_hotkey = Some(HotkeyBinding::capture_default());
+            fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
+            assert!(
+                !settings.hotkey_in_use(
+                    HotkeySlot::ScreenshotRecord,
+                    &HotkeyBinding::capture_default()
+                ),
+                "the reset, not the saved shortcut, makes the two share a key"
+            );
+            let loaded = AppSettings::load_from(&dir.path).unwrap();
+            assert_eq!(loaded.capture.hotkey, HotkeyBinding::capture_default());
+            assert_eq!(loaded.screenshots.record_hotkey, None);
+        }
     }
 
     /// Labs › Transform typed text: its binding takes effect only on Linux

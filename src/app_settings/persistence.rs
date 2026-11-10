@@ -155,6 +155,11 @@ impl AppSettings {
         settings.repair_section_key();
         settings.normalize_double_tap_settings();
         settings.repair_extra_dictation_shortcuts();
+        // After every repair that can put Annotate back on its default
+        // shortcut, which a saved record shortcut may now share: a mouse
+        // button with Labs › Mouse shortcuts off, or a bare left click.
+        #[cfg(hex_capture)]
+        settings.clear_record_shortcut_sharing_capture();
         settings.migrate_legacy_replacements();
         settings.normalize_mode_application_names();
         settings.migrate_disabled_transcription_model();
