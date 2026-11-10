@@ -314,6 +314,12 @@ pub fn api_processing() -> bool {
     on(API_PROCESSING) && Feature::ApiProcessing.on_this_os()
 }
 
+/// The local API's `POST /transcriptions` accepts `timestamps=segment|word`
+/// and returns the model's own times (read where each request's route starts).
+pub fn api_timestamps() -> bool {
+    on(API_TIMESTAMPS) && Feature::ApiTimestamps.on_this_os()
+}
+
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`
 /// (read by the meeting controller's expiry pass and the window's Settings
 /// row).

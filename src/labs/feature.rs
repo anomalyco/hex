@@ -73,12 +73,13 @@ pub enum Feature {
     OpenCodeInWsl,
     TranscribeFiles,
     ApiProcessing,
+    ApiTimestamps,
     SpeakersOnly,
     MoreDictationShortcuts,
 }
 
 impl Feature {
-    pub const ALL: [Self; 70] = [
+    pub const ALL: [Self; 71] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -147,6 +148,7 @@ impl Feature {
         Self::OpenCodeInWsl,
         Self::TranscribeFiles,
         Self::ApiProcessing,
+        Self::ApiTimestamps,
         Self::SpeakersOnly,
         Self::MoreDictationShortcuts,
     ];

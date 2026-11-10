@@ -198,6 +198,9 @@ pub struct LabsSettings {
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
+    /// The local API's `timestamps=segment|word` returns the speech model's
+    /// own segment and word times.
+    pub api_timestamps: bool,
     /// "While dictating" applies only while the default output is speakers;
     /// headphones are left alone.
     pub speakers_only: bool,
@@ -273,6 +276,7 @@ impl Default for LabsSettings {
             opencode_in_wsl: false,
             transcribe_files: false,
             api_processing: false,
+            api_timestamps: false,
             speakers_only: false,
             app_model_switching: false,
             gnome_meeting_capsules: false,

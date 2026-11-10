@@ -13,6 +13,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use crate::transcription::models::{
     AUTO_LANGUAGE, ModelDefinition, ModelRuntime, TranscriptionSelection,
 };
+use crate::transcription::transcript::TimestampLevel;
 
 /// 8 s of audio reaches every stream window shape a dictation can use (the
 /// left context grows to 5.6 s), so the GPU driver compiles those kernels
@@ -443,6 +444,114 @@ impl OfflineGgufSession {
         }
         Ok(output.join(" "))
     }
+
+    /// [`Self::transcribe_chunked`] with the model's own segment and word
+    /// times, moved onto the clip's timeline by each chunk's sample position.
+    /// Text is joined exactly as the untimed run joins it.
+    pub(crate) fn transcribe_chunked_timed(
+        &mut self,
+        samples: &[f32],
+        options: &transcribe_cpp::RunOptions,
+        max_audio_samples: Option<usize>,
+    ) -> Result<crate::transcription::transcript::Transcript> {
+        let Some(max_samples) =
+            max_audio_samples.filter(|&max_samples| samples.len() > max_samples)
+        else {
+            let transcript = self
+                .run(samples, options)
+                .wrap_err("transcription failed")?;
+            return Ok(timed(transcript, 0));
+        };
+        let mut timed = crate::transcription::transcript::Transcript::default();
+        let mut texts = Vec::new();
+        for (index, samples) in samples.chunks(max_samples).enumerate() {
+            if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
+                return Err(eyre!("transcription was cancelled"));
+            }
+            if !chunk_may_hold_speech(samples) {
+                tracing::info!(
+                    chunk_ms = samples.len() / 16,
+                    "skipped a chunk of a long clip with no speech"
+                );
+                continue;
+            }
+            let mut chunk = samples.to_vec();
+            crate::dictation::pad_for_parakeet(&mut chunk);
+            let transcript = self.run(&chunk, options).wrap_err("transcription failed")?;
+            let text = transcript.text.trim();
+            if !text.is_empty() {
+                texts.push(text.to_string());
+            }
+            // The offset comes from where the chunk sits in the clip, never
+            // from how many chunks produced text.
+            let spans = timed_spans(transcript, chunk_offset_ms(index, max_samples));
+            timed.segments.extend(spans.segments);
+            timed.words.extend(spans.words);
+        }
+        timed.text = texts.join(" ");
+        Ok(timed)
+    }
+}
+
+/// A whole clip's segments and words, from its single run.
+fn timed(
+    transcript: transcribe_cpp::Transcript,
+    offset_ms: i64,
+) -> crate::transcription::transcript::Transcript {
+    let text = transcript.text.clone();
+    let spans = timed_spans(transcript, offset_ms);
+    crate::transcription::transcript::Transcript {
+        text,
+        segments: spans.segments,
+        words: spans.words,
+    }
+}
+
+/// The native timing level a run options timestamp kind asks for.
+pub(crate) fn timestamp_level(kind: transcribe_cpp::TimestampKind) -> TimestampLevel {
+    match kind {
+        transcribe_cpp::TimestampKind::Word | transcribe_cpp::TimestampKind::Token => {
+            TimestampLevel::Word
+        }
+        transcribe_cpp::TimestampKind::Segment | transcribe_cpp::TimestampKind::Auto => {
+            TimestampLevel::Segment
+        }
+        transcribe_cpp::TimestampKind::None => TimestampLevel::None,
+    }
+}
+
+/// Where one chunk starts in the clip, in whole milliseconds.
+pub(crate) fn chunk_offset_ms(index: usize, chunk_samples: usize) -> i64 {
+    i64::try_from(index.saturating_mul(chunk_samples) / 16).unwrap_or(i64::MAX)
+}
+
+fn timed_spans(
+    transcript: transcribe_cpp::Transcript,
+    offset_ms: i64,
+) -> crate::transcription::transcript::Transcript {
+    use crate::transcription::transcript::TranscriptSegment;
+    let span = |start_ms: i64, end_ms: i64, text: String| {
+        let text = text.trim().to_owned();
+        let start_ms = start_ms.max(0);
+        (!text.is_empty()).then(|| TranscriptSegment {
+            start_ms: start_ms.saturating_add(offset_ms),
+            end_ms: end_ms.max(start_ms).saturating_add(offset_ms),
+            text,
+        })
+    };
+    crate::transcription::transcript::Transcript {
+        segments: transcript
+            .segments
+            .into_iter()
+            .filter_map(|segment| span(segment.t0_ms, segment.t1_ms, segment.text))
+            .collect(),
+        words: transcript
+            .words
+            .into_iter()
+            .filter_map(|word| span(word.t0_ms, word.t1_ms, word.text))
+            .collect(),
+        ..Default::default()
+    }
 }
 
 /// Whether one chunk of a long clip goes to the model. The clip as a whole
@@ -631,6 +740,74 @@ mod tests {
     fn normalizes_spoken_numbers_and_punctuation() {
         assert_eq!(normalize_spoken("Move LEFT, three!"), "move left 3");
         assert_eq!(normalize_spoken("Ä ä A a ONE one"), "Ä ä a a 1 1");
+    }
+
+    #[test]
+    fn a_chunks_times_move_onto_the_clips_timeline_by_sample_position() {
+        // 30 s chunks at 16 kHz, and a short final chunk: offsets come from
+        // where each chunk starts, never from how many produced text.
+        assert_eq!(chunk_offset_ms(0, 30 * 16_000), 0);
+        assert_eq!(chunk_offset_ms(1, 30 * 16_000), 30_000);
+        assert_eq!(chunk_offset_ms(2, 30 * 16_000), 60_000);
+        assert_eq!(chunk_offset_ms(3, 1_600), 300);
+
+        let shifted = timed_spans(
+            transcribe_cpp::Transcript {
+                text: "hello".into(),
+                segments: vec![transcribe_cpp::Segment {
+                    text: " hello ".into(),
+                    t0_ms: 0,
+                    t1_ms: 480,
+                    ..Default::default()
+                }],
+                words: vec![
+                    transcribe_cpp::Word {
+                        text: "hello".into(),
+                        t0_ms: 10,
+                        t1_ms: 480,
+                        ..Default::default()
+                    },
+                    transcribe_cpp::Word {
+                        text: "  ".into(),
+                        t0_ms: 500,
+                        t1_ms: 600,
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            chunk_offset_ms(2, 30 * 16_000),
+        );
+        assert_eq!(shifted.segments.len(), 1);
+        assert_eq!(
+            (
+                shifted.segments[0].start_ms,
+                shifted.segments[0].end_ms,
+                shifted.segments[0].text.as_str()
+            ),
+            (60_000, 60_480, "hello")
+        );
+        assert_eq!(shifted.words.len(), 1, "an empty word is dropped");
+        assert_eq!(
+            (shifted.words[0].start_ms, shifted.words[0].end_ms),
+            (60_010, 60_480)
+        );
+    }
+
+    #[test]
+    fn a_models_timestamp_kind_names_its_finest_level() {
+        for (kind, level) in [
+            (transcribe_cpp::TimestampKind::Word, TimestampLevel::Word),
+            (transcribe_cpp::TimestampKind::Token, TimestampLevel::Word),
+            (
+                transcribe_cpp::TimestampKind::Segment,
+                TimestampLevel::Segment,
+            ),
+            (transcribe_cpp::TimestampKind::Auto, TimestampLevel::Segment),
+            (transcribe_cpp::TimestampKind::None, TimestampLevel::None),
+        ] {
+            assert_eq!(timestamp_level(kind), level, "{kind:?}");
+        }
     }
 
     #[test]

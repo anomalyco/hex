@@ -1411,6 +1411,22 @@ impl Parakeet {
             .transcribe_chunked(samples, &self.options, self.max_audio_samples)
     }
 
+    /// [`Self::transcribe`] with the model's own segment and word times,
+    /// chunked and offset exactly as the untimed run chunks it.
+    pub(crate) fn transcribe_timed(
+        &mut self,
+        samples: &[f32],
+    ) -> Result<crate::transcription::transcript::Transcript> {
+        self.session
+            .transcribe_chunked_timed(samples, &self.options, self.max_audio_samples)
+    }
+
+    /// The finest native timings this model gives, as a timed request needs
+    /// them. Never the level a caller asked for.
+    pub(crate) fn timestamps(&self) -> crate::transcription::transcript::TimestampLevel {
+        crate::transcription::gguf_session::timestamp_level(self.options.timestamps)
+    }
+
     pub fn transcribe_segments(&mut self, samples: &[f32]) -> Result<Transcript> {
         self.session
             .run(samples, &self.options)

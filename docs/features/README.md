@@ -2388,7 +2388,9 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   └── Dictation first; uses the loaded model only (docs/streams.md)
 ├── Running app's /transcriptions -> Listener's engine when it holds the model
 │   ├── Otherwise the service's own copy of the requested model
-│   └── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
+│   ├── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
+│   └── ?timestamps=segment|word -> The model's own segment or word times
+│       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No silence gate                  // model output, unlike hotkey dictation;
 │   │                                     // only recognition-hint echoes are dropped
@@ -2445,6 +2447,15 @@ or without the parameter, responses are unchanged raw transcripts, and the
 embedded helper installs no processor (`409 processing-unavailable`, even
 with the lab off). Processing runs one at a time (`429 queue-full`).
 `/capabilities` always includes `outputProcessing`.
+
+`timestamps=segment|word` (Labs › Timestamps in API transcripts, off by
+default) makes `POST /transcriptions` return the speech model's own
+`segments`, and for `word` its `words`, with `timestampGranularity`; times
+are milliseconds from the submitted audio's start. Absent and `none` keep the
+response unchanged; off, a timed request is `403 timestamps-disabled`, and a
+model without that native level is `422 unsupported-timestamps`. Nothing
+estimates the times, and `/streams` and `/dictations` are unchanged
+([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and

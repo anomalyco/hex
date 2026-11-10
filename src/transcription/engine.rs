@@ -935,6 +935,25 @@ pub(crate) fn transcribe_clip(model: &mut HeldModel, samples: Vec<f32>) -> Resul
     model.transcribe_clip(samples)
 }
 
+/// Transcribes a complete 16 kHz clip with a held model and its own native
+/// timings, never estimated ones.
+pub(crate) fn transcribe_clip_timed(
+    model: &mut HeldModel,
+    samples: Vec<f32>,
+) -> Result<crate::transcription::transcript::Transcript, String> {
+    model
+        .transcribe_timed(samples)
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// The finest native timings a held model gives. Dictation never asks; the
+/// local API answers `422` for a level the model cannot produce.
+pub(crate) fn timestamp_level(
+    model: &HeldModel,
+) -> crate::transcription::transcript::TimestampLevel {
+    model.timestamps()
+}
+
 /// A whole clip as a non-macOS dictation run transcribes it: long pauses cut
 /// first, then the minimum duration and the model's trailing silence, so a
 /// trailing pause cannot trim Unified English's closing context (#1629).

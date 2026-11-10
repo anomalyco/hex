@@ -85,6 +85,13 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        stay raw transcripts as before
 │                                        // checks: local_api::processing route tests (409, 403, 400, 429, processed, absent);
 │                                        // not observed on macOS or Windows, and no /transcriptions success without a model
+├── Timestamps in API transcripts no labs.api_timestamps (every OS) apps using Hex's local API can add
+│                                        timestamps=segment|word to POST /transcriptions for the speech model's own
+│                                        segment or word times (startMs, endMs); off, a timed request answers 403
+│                                        timestamps-disabled and responses stay as before
+│                                        // checks: local_api::timestamps (parse, 403 before the body, response fields,
+│                                        // clamping, empty arrays), transcription::service (the 422 decision), and
+│                                        // gguf_session (chunk offsets); no real-model transcript with times
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
@@ -2037,6 +2044,54 @@ repeated values, the aliases, `429 queue-full` while one run holds the slot,
 needs an installed model, so its `processed` field is covered through the
 shared seam and the `/streams` finish route rather than an end-to-end
 transcription; nothing ran on macOS or Windows.
+
+Timestamps in API transcripts (`api-timestamps`; every OS; its row is
+Output's, beside Process API transcripts): for a host app that needs to know
+when each phrase or word was said, for captions, search, or syncing. While on,
+the authenticated local API's `POST /transcriptions` accepts
+`timestamps=segment|word`; absent means `none`, the response as it was
+([local-transcription-service.md](../specs/local-transcription-service.md)).
+`segment` adds `timestampGranularity: "segment"` and `segments`; `word` adds
+`timestampGranularity: "word"`, `segments`, and `words`. Each span is `text`,
+`startMs`, and `endMs` in whole milliseconds from the start of the submitted
+audio.
+
+The times are the model's own native output. Nothing estimates them from text
+length or chunk boundaries: `Transcript` (already the meeting and capture
+result) carries them, Linux and Windows chunk long clips at the model's own
+window and add each chunk's offset once from its sample position, and macOS
+chunks a GGUF clip the same way. Apple Speech gives segments. An end that the
+minimum clip duration or a model's trailing silence pushed past the decoded
+audio is clamped to `durationMs`. A GGUF model answers a clip with no speech
+with `200`, an empty `transcript`, and empty arrays; Apple Speech reports no
+speech as `500 transcription-failed`, with or without timings.
+
+An unknown value, or a repeated parameter, is `400 invalid-request`. With the
+lab off, `segment` and `word` answer `403 timestamps-disabled` before the
+audio body is read, and `none` is unaffected. The running app reads the switch
+live; a `hex service` process without the app reads the saved
+`labs.api_timestamps` once (the embedded helper on its first request), so a
+change reaches a running helper after it restarts.
+
+When the selected model cannot
+produce that level natively — a word request on a model whose
+`capabilities.max_timestamp_kind` is segments, or Apple Speech for words — the
+answer is `422 unsupported-timestamps`, decided after the model resolves and
+before inference, on both the shared dictation engine and the service's own
+copy. A word request is never downgraded to segments. With `process=global`,
+the timings describe the raw transcript and `processed` stays separate.
+`/streams` and `/dictations` keep their own timing and do not offer this
+parameter. Checks: `local_api::timestamps` route tests cover the absent and
+`none` defaults, each level, invalid and repeated values, the 403 before the
+body, the response fields (and no new field without a request), clamping, and
+empty arrays; `transcription::service`'s
+`a_timed_request_is_answered_only_at_the_models_own_level` covers the 422
+decision; `transcription::gguf_session`'s
+`a_chunks_times_move_onto_the_clips_timeline_by_sample_position` covers chunk
+offsets; `api_timestamps_is_its_own_bit_and_off_by_default` and
+`every_feature_is_off_by_default_and_round_trips` in
+[labs.rs](../../src/labs.rs) cover the switch. Not observed: a real model
+answering with times, on any OS, and the macOS `/transcriptions` path.
 
 Meeting finished event (`meeting-finished-event`, issue 964; every OS with
 Meetings; its row shows wherever Meetings does): for a companion app that

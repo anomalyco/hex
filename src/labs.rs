@@ -159,6 +159,7 @@ impl Feature {
             | Self::OpenCodeInWsl
             | Self::TranscribeFiles
             | Self::ApiProcessing
+            | Self::ApiTimestamps
             | Self::SpeakersOnly
             | Self::MoreDictationShortcuts => Audience::Everyone,
         }
@@ -234,7 +235,7 @@ impl Feature {
             | Self::SpeakersOnly
             | Self::MeetingNotesFile
             | Self::MoreDictationShortcuts => 20261109,
-            Self::AppModelSwitching => 20261110,
+            Self::AppModelSwitching | Self::ApiTimestamps => 20261110,
         }
     }
 
@@ -351,6 +352,7 @@ impl Feature {
             | Self::FillerWords
             | Self::TranscribeFiles
             | Self::ApiProcessing
+            | Self::ApiTimestamps
             | Self::SpeakersOnly => true,
         }
     }
@@ -426,6 +428,7 @@ impl Feature {
             Self::OpenCodeInWsl => "opencode-in-wsl",
             Self::TranscribeFiles => "transcribe-files",
             Self::ApiProcessing => "api-processing",
+            Self::ApiTimestamps => "api-timestamps",
             Self::SpeakersOnly => "speakers-only",
             Self::MoreDictationShortcuts => "more-dictation-shortcuts",
         }
@@ -502,6 +505,7 @@ impl Feature {
             Self::OpenCodeInWsl => "labs.opencode_in_wsl",
             Self::TranscribeFiles => "labs.transcribe_files",
             Self::ApiProcessing => "labs.api_processing",
+            Self::ApiTimestamps => "labs.api_timestamps",
             Self::SpeakersOnly => "labs.speakers_only",
             Self::MoreDictationShortcuts => "labs.more_dictation_shortcuts",
         }
@@ -582,6 +586,7 @@ impl Feature {
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl,
             Self::TranscribeFiles => settings.labs.transcribe_files,
             Self::ApiProcessing => settings.labs.api_processing,
+            Self::ApiTimestamps => settings.labs.api_timestamps,
             Self::SpeakersOnly => settings.labs.speakers_only,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
         }
@@ -659,6 +664,7 @@ impl Feature {
             &mut labs.opencode_in_wsl,
             &mut labs.transcribe_files,
             &mut labs.api_processing,
+            &mut labs.api_timestamps,
             &mut labs.speakers_only,
             &mut labs.app_model_switching,
             &mut labs.more_dictation_shortcuts,
@@ -743,6 +749,7 @@ impl Feature {
             Self::OpenCodeInWsl => settings.labs.opencode_in_wsl = on,
             Self::TranscribeFiles => settings.labs.transcribe_files = on,
             Self::ApiProcessing => settings.labs.api_processing = on,
+            Self::ApiTimestamps => settings.labs.api_timestamps = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             // Off, no shortcut keeps a key only the feature allows.
@@ -838,6 +845,9 @@ const MEETING_NOTES_FILE: u64 = SPEAKERS_ONLY << 1;
 /// The next bit above Notes' file: a dictation mode's speech model and
 /// language follow the foreground application (macOS, Windows).
 const APP_MODEL_SWITCHING: u64 = MEETING_NOTES_FILE << 1;
+/// The next bit above the app model switching: the local API's
+/// `timestamps=segment|word` returns native timings.
+const API_TIMESTAMPS: u64 = APP_MODEL_SWITCHING << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -1052,6 +1062,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::ApiProcessing,
             settings.api_processing,
             API_PROCESSING,
+        ),
+        (
+            Feature::ApiTimestamps,
+            settings.api_timestamps,
+            API_TIMESTAMPS,
         ),
         (Feature::SpeakersOnly, settings.speakers_only, SPEAKERS_ONLY),
         (
@@ -1679,6 +1694,22 @@ mod tests {
         assert_eq!(state & TYPED_TEXT, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert!(Feature::ApiProcessing.on_this_os());
+    }
+
+    #[test]
+    fn api_timestamps_is_its_own_bit_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & API_TIMESTAMPS, 0);
+        labs.api_timestamps = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & API_TIMESTAMPS, 0);
+        assert_eq!(state & API_PROCESSING, 0);
+        assert_eq!(state & MEETING_NOTES_FILE, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(Feature::ApiTimestamps.on_this_os());
+        assert_eq!(Feature::ApiTimestamps.added(), 20261110);
+        assert_eq!(Feature::ApiTimestamps.audience(), Audience::Everyone);
     }
 
     #[test]

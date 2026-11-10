@@ -508,6 +508,37 @@ impl LocalTranscriber {
         self.transcribe(&samples)
     }
 
+    /// [`Self::transcribe_clip`] with the model's own segment and word times,
+    /// chunked and padded exactly as the untimed run chunks and pads it, so
+    /// the text matches and each chunk's times sit on the clip's timeline.
+    pub(crate) fn transcribe_timed(
+        &mut self,
+        mut samples: Vec<f32>,
+    ) -> Result<crate::transcription::transcript::Transcript> {
+        pad_gguf_samples(&mut samples, Some(self.model_id()));
+        let options = RunOptions {
+            timestamps: self.finest_timestamps,
+            ..self.options.clone()
+        };
+        match self
+            .session
+            .transcribe_chunked_timed(&samples, &options, self.max_audio_samples)
+        {
+            Err(error) if self.gpu_failed(&error) => {
+                self.recover_on_cpu(&error)?;
+                self.session
+                    .transcribe_chunked_timed(&samples, &options, self.max_audio_samples)
+            }
+            result => result,
+        }
+    }
+
+    /// The finest native timings this model gives, as a timed request needs
+    /// them. Never the level a caller asked for.
+    pub(crate) fn timestamps(&self) -> crate::transcription::transcript::TimestampLevel {
+        crate::transcription::gguf_session::timestamp_level(self.finest_timestamps)
+    }
+
     pub fn device_label(&self) -> &str {
         &self.device_label
     }

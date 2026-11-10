@@ -162,6 +162,7 @@ pub(super) fn reason(status: u16) -> &'static str {
         411 => "Length Required",
         413 => "Content Too Large",
         415 => "Unsupported Media Type",
+        422 => "Unprocessable Content",
         429 => "Too Many Requests",
         431 => "Request Header Fields Too Large",
         500 => "Internal Server Error",
