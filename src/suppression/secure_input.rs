@@ -527,11 +527,13 @@ fn log_secure(secure: bool) {
         tracing::info!("secure input is off; key shortcuts are back on the event tap");
         return;
     }
-    match holder::pid() {
+    match frontmost::pid() {
         Some(pid) => tracing::info!(
-            holder_pid = pid,
-            holder = %holder::name(pid).unwrap_or_default(),
-            "secure input is on and blocks key events; key shortcuts arrive as Carbon hotkeys"
+            frontmost_pid = pid,
+            frontmost = %frontmost::name(pid).unwrap_or_default(),
+            "secure input is on and blocks key events; key shortcuts arrive as Carbon hotkeys; \
+             the app named here was in front when it turned on, which is not necessarily the \
+             one holding secure input"
         ),
         None => tracing::info!(
             "secure input is on and blocks key events; key shortcuts arrive as Carbon hotkeys"
@@ -539,9 +541,12 @@ fn log_secure(secure: bool) {
     }
 }
 
-/// Which process holds secure input: `kCGSSessionSecureInputPID` in the
-/// registry's console users, as `ioreg -l` shows it.
-mod holder {
+/// The app that was in front when secure input turned on:
+/// `kCGSSessionSecureInputPID` in the registry's console users, as `ioreg -l`
+/// shows it. macOS fills it with the frontmost app's pid, not the process that
+/// called `EnableSecureEventInput`, so it is evidence of who holds secure
+/// input, not proof.
+mod frontmost {
     use std::ffi::c_void;
 
     use objc2_core_foundation::CFString;
@@ -616,7 +621,7 @@ mod holder {
         }
     }
 
-    /// The holder's app bundle name, else its executable's.
+    /// The front app's bundle name, else its executable's.
     pub(super) fn name(pid: i32) -> Option<String> {
         let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
         // SAFETY: the buffer holds the size passed.
@@ -813,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn the_holder_is_named_by_its_app_bundle() {
+    fn the_frontmost_app_is_named_by_its_app_bundle() {
         assert_eq!(
             process_name("/Applications/OpenCode.app/Contents/MacOS/opencode"),
             "OpenCode"
