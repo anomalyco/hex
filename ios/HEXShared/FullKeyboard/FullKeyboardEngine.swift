@@ -16,20 +16,20 @@ protocol KeyboardTextTarget: AnyObject {
 
 @MainActor
 final class DocumentProxyTextTarget: KeyboardTextTarget {
-    private let proxy: () -> UITextDocumentProxy
+    private let proxy: () -> UITextDocumentProxy?
 
-    init(_ proxy: @escaping () -> UITextDocumentProxy) {
+    init(_ proxy: @escaping () -> UITextDocumentProxy?) {
         self.proxy = proxy
     }
 
-    var documentContextBeforeInput: String? { proxy().documentContextBeforeInput }
-    var hasText: Bool { proxy().hasText }
-    var autocapitalizationType: UITextAutocapitalizationType? { proxy().autocapitalizationType }
-    var keyboardType: UIKeyboardType? { proxy().keyboardType }
-    var returnKeyType: UIReturnKeyType? { proxy().returnKeyType }
-    var keyboardAppearance: UIKeyboardAppearance? { proxy().keyboardAppearance }
-    func insertText(_ text: String) { proxy().insertText(text) }
-    func deleteBackward() { proxy().deleteBackward() }
+    var documentContextBeforeInput: String? { proxy()?.documentContextBeforeInput }
+    var hasText: Bool { proxy()?.hasText ?? false }
+    var autocapitalizationType: UITextAutocapitalizationType? { proxy()?.autocapitalizationType }
+    var keyboardType: UIKeyboardType? { proxy()?.keyboardType }
+    var returnKeyType: UIReturnKeyType? { proxy()?.returnKeyType }
+    var keyboardAppearance: UIKeyboardAppearance? { proxy()?.keyboardAppearance }
+    func insertText(_ text: String) { proxy()?.insertText(text) }
+    func deleteBackward() { proxy()?.deleteBackward() }
 }
 
 /// Everything the keys do, apart from drawing: multitouch with rollover, shift, pages,
