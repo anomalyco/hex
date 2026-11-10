@@ -220,13 +220,17 @@ pub struct MeetingManifest {
     pub export_sha256: Option<String>,
     /// The notes file beside the transcript while Labs › Separate notes file
     /// wrote one, tracked so renames, Trash, and retention follow it.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_export_path: Option<PathBuf>,
     /// SHA-256 of the notes file as Hex last wrote it. A later notes
     /// regeneration rewrites it only while it still matches, and expiry moves
     /// it only then, so a copy the user edited stays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_export_sha256: Option<String>,
+    /// The tracked notes file was deleted outside Hex. Hex forgets its path
+    /// and never writes another notes file for this meeting.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notes_export_removed: bool,
     /// When the meeting's WAV tracks moved to the Trash (Labs › Expire
     /// meeting audio separately); the transcript, notes, and Markdown stay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -497,6 +501,7 @@ pub fn record(
         export_sha256: None,
         notes_export_path: None,
         notes_export_sha256: None,
+        notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
     };

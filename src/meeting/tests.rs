@@ -174,6 +174,7 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
         export_sha256: None,
         notes_export_path: None,
         notes_export_sha256: None,
+        notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
     };
@@ -224,6 +225,7 @@ fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() 
         export_sha256: None,
         notes_export_path: None,
         notes_export_sha256: None,
+        notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
     };
@@ -881,6 +883,7 @@ fn retention_manifest(
         export_sha256: None,
         notes_export_path: None,
         notes_export_sha256: None,
+        notes_export_removed: false,
         audio_removed_at_ms: None,
         imported: false,
     }

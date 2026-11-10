@@ -1376,8 +1376,10 @@ Final publication complete                               // meetings.notes
      │       check: the_notes_footer_names_the_writer_that_wrote_them)
      ├── Labs › Separate notes file on (off by default) -> <base>.notes.md
      │   beside the transcript: title, date, duration, app, a relative
-     │   percent-encoded transcript link, summary, chapters, and the same
-     │   footer; rewritten only while its SHA-256 is still Hex's copy
+     │   percent-encoded transcript link (its text Markdown-escaped), summary,
+     │   chapters, and its own footer saying the transcript has the details;
+     │   rewritten only while its SHA-256 is still Hex's copy, never recreated
+     │   once deleted
      ├── Text outside the block is preserved; changed mid-write -> not written
      └── Missing file -> manifest only
   -> Failure / timeout -> notes_error; Markdown untouched; recording stays Complete
@@ -1411,9 +1413,13 @@ the old path: Reveal falls back to the recording folder and the Markdown stays
 in the folder untouched. With Labs › Separate notes file on, the export is
 `<stem>.transcript.md` and its notes are `<stem>.notes.md`; export chooses a
 stem free of both, a descriptive rename moves the pair together (keeping a
-`.transcript` suffix), and an unedited tracked notes file is re-rendered so its
-heading and transcript link follow notes, a rename, or chapter refinement
-([meeting/notes_file.rs](../../src/meeting/notes_file.rs)).
+`.transcript` suffix) and rolls the transcript back if its notes file cannot
+move, and an unedited tracked notes file is re-rendered so its heading and
+transcript link follow notes, a rename, or chapter retitles
+([meeting/notes_file.rs](../../src/meeting/notes_file.rs)). The transcript
+keeps its own `<!-- hex:notes -->` summary block and footer throughout. A notes
+file the user deletes stops being tracked and is never written back, even by a
+later regeneration.
 
 Action items and decisions are gone: other agents read the transcript for
 details (MCP). Older manifests still decode: a list summary is joined into one

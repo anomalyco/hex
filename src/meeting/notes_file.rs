@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Result, eyre};
 
 use super::export_name::{is_current_file, path_without_collision};
-use super::notes::notes_footer;
+use super::notes::notes_file_footer;
 use super::transcript::LocalTime;
 use super::{MeetingManifest, display_title, format_duration};
 
@@ -61,7 +61,13 @@ fn is_free(candidate: &Path, current: Option<&Path>) -> bool {
     current.is_some_and(|current| is_current_file(candidate, current)) || !candidate.exists()
 }
 
-/// `.transcript` while `path` is a separated transcript, else nothing.
+/// `.transcript` while `path`'s name says it is a separated transcript, else
+/// nothing. Hex reads the name alone: a manifest written before the notes
+/// file lab has no record of how an export was named, and keeping the suffix
+/// after the lab is turned off (or its notes file deleted) is safer than
+/// renaming a separated transcript back to a plain name. The accepted edge
+/// case is a plain export whose title itself ends in `.transcript`: a later
+/// descriptive rename keeps that suffix and checks the notes companion.
 pub(super) fn transcript_suffix(path: &Path) -> &'static str {
     let name = path
         .file_name()
@@ -119,7 +125,27 @@ pub(super) fn refresh(manifest: &mut MeetingManifest) {
 
 fn update(manifest: &mut MeetingManifest, transcript: &Path, create: bool) -> Result<()> {
     let path = match manifest.notes_export_path.clone() {
-        Some(path) => path,
+        Some(path) if path.exists() => path,
+        Some(path) => {
+            // The user deleted the notes file: forget it for good rather
+            // than writing it back or tracking a path that is gone.
+            tracing::info!(
+                meeting = manifest.id,
+                path = %path.display(),
+                "stopped tracking a meeting notes file that is gone"
+            );
+            manifest.notes_export_path = None;
+            manifest.notes_export_sha256 = None;
+            manifest.notes_export_removed = true;
+            return Ok(());
+        }
+        None if manifest.notes_export_removed => {
+            tracing::info!(
+                meeting = manifest.id,
+                "kept a deleted meeting notes file from coming back"
+            );
+            return Ok(());
+        }
         None if create => first_free_path(transcript)?,
         None => return Ok(()),
     };
@@ -206,7 +232,8 @@ pub(super) fn render(manifest: &MeetingManifest, transcript: &Path) -> String {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     markdown.push_str(&format!(
-        "- **Transcript:** [{transcript_name}]({})\n",
+        "- **Transcript:** [{}]({})\n",
+        escape_link_text(&transcript_name),
         percent_encode(&transcript_name)
     ));
     markdown.push_str("\n## Summary\n\n");
@@ -237,7 +264,7 @@ pub(super) fn render(manifest: &MeetingManifest, transcript: &Path) -> String {
             }
         }
     }
-    let footer = notes_footer(
+    let footer = notes_file_footer(
         manifest
             .notes
             .as_ref()
@@ -245,6 +272,19 @@ pub(super) fn render(manifest: &MeetingManifest, transcript: &Path) -> String {
     );
     markdown.push_str(&format!("\n_{footer}_\n"));
     markdown
+}
+
+/// Escapes Markdown punctuation in link text, which is read rather than
+/// percent-decoded. The target beside it stays percent-encoded.
+fn escape_link_text(name: &str) -> String {
+    let mut escaped = String::with_capacity(name.len());
+    for character in name.chars() {
+        if matches!(character, '\\' | '[' | ']' | '*' | '_' | '`') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
 }
 
 /// Percent-encodes a link target, at least the space, `%`, `(`, `)`, `<`,
@@ -410,11 +450,25 @@ mod tests {
         assert!(written.contains("### 01:05 · Plan\n\nThe plan.\n"));
         assert!(written.contains("### 02:05 · Loose ends\n"));
         assert!(written.contains(
-            "_Written on this Mac by Apple Intelligence; the transcript below has the details._\n"
+            "_Written on this Mac by Apple Intelligence; the transcript has the details._\n"
         ));
         assert_eq!(
             manifest.notes_export_sha256,
             Some(text_sha256(written.as_bytes()))
+        );
+
+        // Link text is escaped; the percent-encoded target keeps `]` out.
+        let marked = folder.join("2026-10-15 1500 Plan [draft]_v2.transcript.md");
+        fs::write(&marked, "# Old title\n").unwrap();
+        let mut marked_manifest = self::manifest(marked);
+        write_after_notes(&mut marked_manifest, true);
+        let marked_notes = marked_manifest.notes_export_path.clone().unwrap();
+        let marked_written = fs::read_to_string(marked_notes).unwrap();
+        assert!(
+            marked_written.contains(
+                r"- **Transcript:** [2026-10-15 1500 Plan \[draft\]\_v2.transcript.md](2026-10-15%201500%20Plan%20%5Bdraft%5D_v2.transcript.md)"
+            ),
+            "{marked_written}"
         );
         fs::remove_dir_all(folder).unwrap();
     }
@@ -465,6 +519,58 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&notes).unwrap(), "# My own notes\n");
         assert_eq!(fs::read_dir(&folder).unwrap().count(), 2);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_deleted_notes_file_stays_gone_and_stops_being_tracked() {
+        let folder = folder("deleted");
+        let transcript = folder.join("2026-10-15 1418 Design sync.transcript.md");
+        fs::write(&transcript, "# Old title\n").unwrap();
+        let mut manifest = manifest(transcript);
+        write_after_notes(&mut manifest, true);
+        let notes = manifest.notes_export_path.clone().unwrap();
+        fs::remove_file(&notes).unwrap();
+
+        // A user rename clears tracking rather than aiming a missing file at
+        // the new name.
+        manifest.title = "Arcade planning".into();
+        rename_to_title(&mut manifest, "Arcade planning", true);
+        assert_eq!(manifest.notes_export_path, None);
+        assert_eq!(manifest.notes_export_sha256, None);
+        assert!(manifest.notes_export_removed);
+
+        // Regenerating notes with the lab on does not write it back.
+        manifest.notes.as_mut().unwrap().summary = "A newer summary.".into();
+        write_after_notes(&mut manifest, true);
+        assert!(!notes.exists());
+        assert_eq!(manifest.notes_export_path, None);
+        assert_eq!(manifest.notes_export_sha256, None);
+        assert!(manifest.notes_export_removed);
+        assert_eq!(fs::read_dir(&folder).unwrap().count(), 1);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn moving_only_the_notes_file_returns_nothing() {
+        let folder = folder("notes-only");
+        let transcript = folder.join("2026-10-15 1418 Design sync.transcript.md");
+        fs::write(&transcript, "# Design sync\n").unwrap();
+        let stray = folder.join("stray.notes.md");
+        fs::write(&stray, "# Design sync\n").unwrap();
+        let mut manifest = manifest(transcript.clone());
+        manifest.notes_export_path = Some(stray.clone());
+        manifest.notes_export_sha256 = Some(text_sha256(b"# Design sync\n"));
+
+        assert_eq!(rename_to_title(&mut manifest, "Design sync", true), None);
+
+        assert_eq!(manifest.export_path, Some(transcript.clone()));
+        assert!(transcript.exists());
+        assert!(!stray.exists());
+        assert_eq!(
+            manifest.notes_export_path,
+            Some(folder.join("2026-10-15 1418 Design sync.notes.md"))
+        );
         fs::remove_dir_all(folder).unwrap();
     }
 
@@ -540,6 +646,16 @@ mod tests {
         let read: MeetingManifest = serde_json::from_value(stored).unwrap();
         assert_eq!(read.notes_export_path, manifest.notes_export_path);
         assert_eq!(read.notes_export_sha256, manifest.notes_export_sha256);
+
+        // An untracked meeting writes neither key, and a deleted notes file
+        // only its tombstone.
+        let bare = serde_json::to_value(self::manifest(
+            folder.join("2026-10-15 1418 Design sync.md"),
+        ))
+        .unwrap();
+        assert!(bare.get("notes_export_path").is_none());
+        assert!(bare.get("notes_export_sha256").is_none());
+        assert!(bare.get("notes_export_removed").is_none());
 
         let older: MeetingManifest = serde_json::from_value(serde_json::json!({
             "schema_version": 1,

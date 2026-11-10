@@ -1974,34 +1974,47 @@ transcript. Export picks the first stem whose transcript and notes names are
 both free, adding `" (2)"` to both together, so a later meeting never lands on
 half a pair. While applying the notes (final title and summary), Hex writes the
 notes file with the title, date, duration, app, the percent-encoded transcript
-link, the summary, each chapter as `### mm:ss · title` with its summary, and
-the notes block's footer naming the writer. If the plain notes name is taken by
-a file Hex doesn't track, only the notes file gets the next number
-(`<stem> (2).notes.md`) and it logs that; the manifest's `notes_export_path`
-and `notes_export_sha256` track it, so one meeting never gets a second notes
-file. A later notes regeneration rewrites the file only while its SHA-256 still
-matches, so a file the user edited is left alone and logged. With Labs ›
+link (its text escaping Markdown punctuation), the summary, each chapter as
+`### mm:ss · title` with its summary, and its own footer naming the writer and
+saying the transcript has the details. The transcript keeps its own
+`<!-- hex:notes -->` summary block and its "transcript below" footer as before.
+If the plain notes name is taken by a file Hex doesn't track, only the notes
+file gets the next number (`<stem> (2).notes.md`) and it logs that; the
+manifest's `notes_export_path` and `notes_export_sha256` track it, so one
+meeting never gets a second notes file. A later notes regeneration rewrites the
+file only while its SHA-256 still matches, so a file the user edited is left
+alone and logged. A notes file the user deletes stops being tracked and is
+never written back, even by a later regeneration with the lab on. With Labs ›
 Descriptive meeting file names on, notes and renames move both files together
 (a `.transcript` suffix is kept) and re-render an unedited notes file's heading
-and link; a user rename or chapter retitle re-renders it even with descriptive
-file names off, and either re-render works whether or not this lab is still on
-— only creating a notes file is gated. Delete to Trash moves the transcript,
-then the tracked notes file, then the recording folder; retention moves the
-notes file only while its SHA-256 matches, as it does for the transcript, and
-Reveal stays pointed at the transcript. Off, export is byte-for-byte and
-name-for-name unchanged. Checks:
+and link; if the notes rename fails the transcript rename is rolled back, and
+if that rollback also fails the manifest keeps the paths the files actually
+have. A user rename or chapter retitle re-renders the notes file even with
+descriptive file names off, and either re-render works whether or not this lab
+is still on — only creating a notes file is gated. Delete to Trash moves the
+transcript, then the tracked notes file, then the recording folder; retention
+moves the notes file only while its SHA-256 matches, as it does for the
+transcript, and Reveal stays pointed at the transcript. Off, a new export keeps
+the plain `<stem>.md` name and unchanged bytes and creates no notes file; one
+written while the lab was on still follows later notes and renames. Checks:
 `a_separated_export_names_the_transcript_and_its_notes_as_a_pair`,
 `a_taken_pair_gets_the_next_number_without_overwriting`,
 `notes_are_written_beside_the_transcript_with_an_encoded_link`,
 `a_taken_untracked_notes_name_gets_a_number_and_is_never_replaced`,
 `an_edited_notes_file_is_left_alone_even_with_new_notes`,
+`a_deleted_notes_file_stays_gone_and_stops_being_tracked`,
+`moving_only_the_notes_file_returns_nothing`,
 `an_unedited_tracked_notes_file_follows_later_notes_without_the_lab`,
 `a_descriptive_rename_moves_both_files_and_updates_the_link`,
 `a_manifest_round_trips_the_notes_file_and_older_ones_still_load`, and
 `a_plain_export_gets_the_plain_notes_name` in
 [meeting/notes_file.rs](../../src/meeting/notes_file.rs);
+`an_untracked_notes_file_does_not_number_a_plain_rename` in
+[meeting/export_name.rs](../../src/meeting/export_name.rs);
 `a_separated_export_names_the_transcript_and_keeps_the_pair_free` in
 [meeting/transcript.rs](../../src/meeting/transcript.rs);
+`a_chapter_retitle_rewrites_an_unedited_notes_file_heading` in
+[meeting/chapters_tests.rs](../../src/meeting/chapters_tests.rs);
 `deleting_trashes_a_tracked_notes_file_after_the_transcript`,
 `expiry_trashes_a_notes_file_only_while_its_digest_matches`, and
 `a_rename_without_descriptive_names_still_retitles_the_notes_file` in

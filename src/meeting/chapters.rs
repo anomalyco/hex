@@ -901,7 +901,7 @@ fn refine_meeting_with(
     }
 }
 
-fn retitle_export(manifest: &mut MeetingManifest, previous: &str) {
+pub(super) fn retitle_export(manifest: &mut MeetingManifest, previous: &str) {
     let title = display_title(manifest);
     if title != previous
         && let Some(path) = manifest.export_path.clone().filter(|path| path.exists())

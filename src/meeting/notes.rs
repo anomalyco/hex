@@ -447,18 +447,35 @@ pub(super) fn render_notes_block(notes: &MeetingNotes) -> String {
 
 /// The line under the summary, naming the writer that actually wrote it.
 pub(super) fn notes_footer(writer: Option<&NotesWriter>) -> String {
-    const DETAILS: &str = "the transcript below has the details.";
+    notes_footer_for(
+        writer,
+        "the transcript below has the details.",
+        "The transcript below has the details.",
+    )
+}
+
+/// The line under the separate notes file's summary: the same writer, but
+/// pointing at the linked transcript rather than the one below.
+pub(super) fn notes_file_footer(writer: Option<&NotesWriter>) -> String {
+    notes_footer_for(
+        writer,
+        "the transcript has the details.",
+        "The transcript has the details.",
+    )
+}
+
+fn notes_footer_for(writer: Option<&NotesWriter>, details: &str, without_a_writer: &str) -> String {
     match writer {
         Some(NotesWriter::AppleIntelligence) => {
-            format!("Written on this Mac by Apple Intelligence; {DETAILS}")
+            format!("Written on this Mac by Apple Intelligence; {details}")
         }
         Some(NotesWriter::OpenCode { model: Some(model) }) => {
-            format!("Written by {model} through OpenCode; {DETAILS}")
+            format!("Written by {model} through OpenCode; {details}")
         }
         Some(NotesWriter::OpenCode { model: None }) => {
-            format!("Written by OpenCode's default model; {DETAILS}")
+            format!("Written by OpenCode's default model; {details}")
         }
-        None => "The transcript below has the details.".into(),
+        None => without_a_writer.into(),
     }
 }
 

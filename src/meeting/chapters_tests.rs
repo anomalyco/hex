@@ -714,6 +714,57 @@ fn finishing_hands_over_chapters_not_yet_taken_and_the_departure_stop_opened() {
     assert_eq!(live.finish(), None);
 }
 
+#[test]
+fn a_chapter_retitle_rewrites_an_unedited_notes_file_heading() {
+    let folder = std::env::temp_dir().join(format!(
+        "hex-chapter-notes-file-{}-{}",
+        std::process::id(),
+        crate::desktop::events::now_ms()
+    ));
+    fs::create_dir_all(&folder).unwrap();
+    let transcript = folder.join("2026-10-15 1418 Team sync.transcript.md");
+    fs::write(&transcript, "# Team sync\n").unwrap();
+    let notes = folder.join("2026-10-15 1418 Team sync.notes.md");
+    let mut manifest: MeetingManifest = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "id": "1760000000000-1",
+        "title": "Team sync",
+        "title_source": "user",
+        "status": "complete",
+        "created_at_ms": 1_760_000_000_000_u64,
+        "ended_at_ms": 1_760_000_060_000_u64,
+        "duration_ms": 60_000,
+        "system": {"file": "system.wav", "samples": 0, "dropped_packets": 0},
+        "microphone": {"file": "microphone.wav", "samples": 0, "dropped_packets": 0},
+        "error": null,
+        "export_path": transcript,
+        "notes": {"title": "Team sync", "summary": "Covered the plan."},
+        "chapters": [{"title": "Plan", "summary": "", "start_ms": 0}]
+    }))
+    .unwrap();
+    fs::write(
+        &notes,
+        crate::meeting::notes_file::render(&manifest, &transcript),
+    )
+    .unwrap();
+    manifest.notes_export_path = Some(notes.clone());
+    manifest.notes_export_sha256 = Some(crate::meeting::text_sha256(&fs::read(&notes).unwrap()));
+
+    manifest.title = "Arcade planning".into();
+    retitle_export(&mut manifest, "Team sync");
+
+    assert_eq!(manifest.export_path, Some(transcript.clone()));
+    assert!(transcript.exists());
+    let written = fs::read_to_string(&notes).unwrap();
+    assert!(written.starts_with("# Arcade planning\n"));
+    assert!(written.contains("The transcript has the details."));
+    assert_eq!(
+        manifest.notes_export_sha256,
+        Some(crate::meeting::text_sha256(written.as_bytes()))
+    );
+    fs::remove_dir_all(folder).unwrap();
+}
+
 fn chapter_with(title: &str, start_ms: u64) -> Chapter {
     Chapter {
         summary: format!("About {}.", title.to_lowercase()),
