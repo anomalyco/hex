@@ -1512,6 +1512,72 @@ mod tests {
         }
     }
 
+    /// A saved record shortcut and Annotate's shortcut can't share a chord
+    /// with either off. The reported sequence: Annotate off with the Lab on
+    /// and a record shortcut saved. Setting Annotate's shortcut to the
+    /// record chord is refused, and so is setting the record shortcut to
+    /// Annotate's chord. The old code allowed both, and Annotate then won
+    /// the key at runtime, recording the whole screen.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_screenshot_lab_and_annotate_never_share_a_shortcut() {
+        let chord = |code: u16, label: &str, modifiers: crate::app_settings::HotkeyModifiers| {
+            HotkeyBinding {
+                modifiers,
+                key: Some(HotkeyKey {
+                    code,
+                    label: label.into(),
+                }),
+            }
+        };
+        let mut settings = AppSettings {
+            capture: crate::app_settings::CaptureSettings {
+                enabled: false,
+                ..Default::default()
+            },
+            ..AppSettings::default()
+        };
+        settings.labs.screenshots = true;
+        settings.capture.hotkey = chord(
+            u16::from(b's'),
+            "S",
+            crate::app_settings::HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+        );
+        let record = chord(
+            u16::from(b'r'),
+            "R",
+            crate::app_settings::HotkeyModifiers {
+                command: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+        );
+        settings.screenshots.record_hotkey = Some(record.clone());
+
+        let error = apply(
+            &settings,
+            "capture.hotkey",
+            &format_hotkey(&record),
+            &rules(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "shortcut-in-use");
+
+        let annotate = settings.capture.hotkey.clone();
+        let error = apply(
+            &settings,
+            "screenshots.record_hotkey",
+            &format_hotkey(&annotate),
+            &rules(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "shortcut-in-use");
+    }
+
     fn rules() -> ShortcutRules {
         ShortcutRules {
             key_named: |name| match name.to_ascii_lowercase().as_str() {

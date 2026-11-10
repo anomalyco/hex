@@ -7,7 +7,7 @@
 use rune::TextEdit;
 use scrawl_capture::capture::Stage;
 
-use crate::capture_host::CaptureNeed;
+use crate::capture_host::{AskedBy, CaptureNeed};
 use crate::desktop::i18n::{tr, tr_fill};
 
 use super::tuning::{self, CapsuleFlow};
@@ -212,9 +212,10 @@ pub(crate) enum Grant {
 /// Everything that moves the capsule.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Input {
-    /// A capture was refused for a permission Hex lacks: the helper opens
-    /// in its place.
-    NeedsPermission(CaptureNeed),
+    /// A capture (or the Screenshots picker) was refused for a permission
+    /// Hex lacks: the helper opens in its place, and its grant returns to
+    /// what asked.
+    NeedsPermission(CaptureNeed, AskedBy),
     /// How that permission stands now, while the helper shows.
     Permission(CaptureNeed, Grant),
     /// A capture's stage, from `capture_host`'s engine events.
@@ -288,6 +289,12 @@ pub(crate) enum Action {
     Record(Mode),
     /// Start recording what the picker picked on screen.
     Start(crate::capture_host::CaptureTarget),
+    /// The Screenshots picker, once its permission is granted: opens it
+    /// again to shoot, or to record when `record` is set, instead of
+    /// starting an Annotate capture.
+    OpenScreenshots {
+        record: bool,
+    },
     /// The permission helper's Allow: macOS's prompt, or System Settings
     /// with the guide beside it.
     Allow(CaptureNeed),
@@ -544,11 +551,13 @@ enum Phase {
         what: Failure,
         why: Option<String>,
     },
-    /// The permission helper: a capture needs `need`.
+    /// The permission helper: a capture needs `need`, and its grant returns
+    /// to `asked_by`.
     Permission {
         need: CaptureNeed,
         grant: Grant,
         at: f64,
+        asked_by: AskedBy,
     },
 }
 
@@ -696,8 +705,9 @@ pub(crate) struct Flow {
     /// Annotate draws now.
     drawing: bool,
     /// A capture that just finished with no screen asked for the
-    /// permission helper: it opens once that capture's capsule folds.
-    helper_next: Option<CaptureNeed>,
+    /// permission helper: it opens once that capture's capsule folds, and
+    /// returns to what asked.
+    helper_next: Option<(CaptureNeed, AskedBy)>,
 }
 
 impl Default for Flow {
@@ -1054,11 +1064,12 @@ impl Flow {
                     let before = std::mem::replace(&mut self.phase, Phase::Hidden);
                     self.closed = true;
                     self.left_waiting(before, &[]);
-                    if let Some(need) = self.helper_next.take() {
+                    if let Some((need, asked_by)) = self.helper_next.take() {
                         self.phase = Phase::Permission {
                             need,
                             grant: Grant::Off,
                             at: now,
+                            asked_by,
                         };
                     }
                 }
@@ -3205,7 +3216,7 @@ mod tests {
         flow.input(Input::Permission(screen, Grant::Ready), 0.5);
         assert_eq!(flow.pres(0.5), Pres::Hidden);
 
-        flow.input(Input::NeedsPermission(screen), 1.0);
+        flow.input(Input::NeedsPermission(screen, AskedBy::Capture), 1.0);
         let shown = done(&flow, 1.0);
         assert_eq!(shown.lead, Lead::Warning);
         assert_eq!(shown.text, "Hex needs Screen Recording");
@@ -3217,7 +3228,7 @@ mod tests {
         // Still off: it waits on System Settings, and the shortcut again
         // leaves it as it stands.
         flow.input(Input::Permission(screen, Grant::Off), 3.0);
-        flow.input(Input::NeedsPermission(screen), 4.0);
+        flow.input(Input::NeedsPermission(screen, AskedBy::Capture), 4.0);
         let waiting = done(&flow, 4.0);
         assert_eq!(
             waiting.why.as_deref(),
@@ -3244,16 +3255,65 @@ mod tests {
         assert_eq!(flow.pres(64.0), Pres::Hidden);
 
         // Unanswered, it folds; ✕ closes it at once.
-        flow.input(Input::NeedsPermission(CaptureNeed::Microphone), 70.0);
+        flow.input(
+            Input::NeedsPermission(CaptureNeed::Microphone, AskedBy::Capture),
+            70.0,
+        );
         assert_eq!(done(&flow, 70.0).text, "Hex needs Microphone");
         assert!(flow.tick(70.0 + PERMISSION_HOLD_S));
         assert_eq!(flow.pres(70.0 + PERMISSION_HOLD_S), Pres::Hidden);
-        flow.input(Input::NeedsPermission(screen), 300.0);
+        flow.input(Input::NeedsPermission(screen, AskedBy::Capture), 300.0);
         flow.click(Id::Close, 301.0);
         assert_eq!(flow.pres(301.0), Pres::Hidden);
         // A capture that starts takes its place.
-        flow.input(Input::NeedsPermission(screen), 302.0);
+        flow.input(Input::NeedsPermission(screen, AskedBy::Capture), 302.0);
         flow.input(Input::Stage(Stage::Recording), 303.0);
         assert!(matches!(flow.pres(303.0), Pres::Recording { .. }));
+    }
+
+    /// Labs › Screenshots' permission helper returns to its picker in the
+    /// mode its shortcut asked for, never to Annotate's whole-screen
+    /// recording. Annotate's own helper still records.
+    #[test]
+    fn a_granted_screenshots_permission_reopens_its_picker() {
+        use super::super::surface::Id;
+        let screen = CaptureNeed::ScreenRecording;
+        for (record, action) in [
+            (true, Action::OpenScreenshots { record: true }),
+            (false, Action::OpenScreenshots { record: false }),
+        ] {
+            let mut flow = Flow::new();
+            flow.input(
+                Input::NeedsPermission(screen, AskedBy::Screenshots { record }),
+                1.0,
+            );
+            assert_eq!(done(&flow, 1.0).text, "Hex needs Screen Recording");
+            flow.input(Input::Permission(screen, Grant::Ready), 2.0);
+            assert_eq!(flow.click(Id::Ask, 3.0), vec![action]);
+            assert_eq!(flow.pres(3.0), Pres::Hidden, "the helper folds");
+        }
+
+        // The newest ask is what the grant returns to: Annotate asked
+        // first, then the record shortcut.
+        let mut flow = Flow::new();
+        flow.input(Input::NeedsPermission(screen, AskedBy::Capture), 1.0);
+        flow.input(
+            Input::NeedsPermission(screen, AskedBy::Screenshots { record: true }),
+            2.0,
+        );
+        flow.input(Input::Permission(screen, Grant::Ready), 3.0);
+        assert_eq!(
+            flow.click(Id::Ask, 4.0),
+            vec![Action::OpenScreenshots { record: true }]
+        );
+        // The other way round, Annotate records its own capture.
+        let mut flow = Flow::new();
+        flow.input(
+            Input::NeedsPermission(screen, AskedBy::Screenshots { record: false }),
+            1.0,
+        );
+        flow.input(Input::NeedsPermission(screen, AskedBy::Capture), 2.0);
+        flow.input(Input::Permission(screen, Grant::Ready), 3.0);
+        assert_eq!(flow.click(Id::Ask, 4.0), vec![Action::Record(Mode::Screen)]);
     }
 }

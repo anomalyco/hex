@@ -2391,6 +2391,28 @@ fn labs_groups_fold_and_remember_it() {
     assert_eq!(rt.state.settings.labs.groups.get("models"), Some(&true));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn a_saved_record_shortcut_shows_and_clears_while_annotate_is_off() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| {
+        ui.settings.labs.screenshots = true;
+        ui.settings.capture.enabled = false;
+        ui.settings.screenshots.record_hotkey =
+            Some(crate::app_settings::HotkeyBinding::screenshot_default());
+        ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
+    });
+    settle(&mut rt);
+    assert!(rt.find("needs-annotate").is_some());
+    assert!(
+        rt.find("clear-screenshot-record-shortcut").is_some(),
+        "the key it holds stays visible and can be freed"
+    );
+    tap(&mut rt, "clear-screenshot-record-shortcut");
+    assert_eq!(rt.state.settings.screenshots.record_hotkey, None);
+    assert!(rt.find("clear-screenshot-record-shortcut").is_none());
+}
+
 /// Each OS shows only its labs, and a group with none of them hides.
 #[test]
 fn labs_groups_follow_each_os() {

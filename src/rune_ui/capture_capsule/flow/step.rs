@@ -73,7 +73,7 @@ impl Flow {
         match input {
             // A capture finishing without its screen: its capsule says
             // where it went first.
-            Input::NeedsPermission(need)
+            Input::NeedsPermission(need, asked_by)
                 if matches!(
                     self.phase,
                     Phase::Processing
@@ -83,12 +83,13 @@ impl Flow {
                         | Phase::Queued { .. }
                 ) =>
             {
-                self.helper_next = Some(need);
+                self.helper_next = Some((need, asked_by));
                 return actions;
             }
-            Input::NeedsPermission(need) => {
+            Input::NeedsPermission(need, asked_by) => {
                 self.helper_next = None;
-                // Pressed again while it's up: it stays as it stands.
+                // Pressed again while it's up: it stays as it stands, but
+                // the newest ask is what its grant returns to.
                 let grant = match &self.phase {
                     Phase::Permission {
                         need: shown, grant, ..
@@ -99,6 +100,7 @@ impl Flow {
                     need,
                     grant,
                     at: now,
+                    asked_by,
                 };
                 return actions;
             }
@@ -107,6 +109,7 @@ impl Flow {
                     need: shown,
                     grant: was,
                     at,
+                    ..
                 } = &mut self.phase
                 {
                     // Still off once Allow was pressed: it waits on System

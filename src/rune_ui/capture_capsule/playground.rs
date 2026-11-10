@@ -20,7 +20,7 @@ use super::flow::{Action, Cue, Delivered, Dest, Failure, Grant, Input, Route, Un
 use super::surface::{Id, PANEL_H, PANEL_W};
 use super::tuning::{self, CapsuleFlow, ListFooter, TopLine, Tuning, flow_label};
 use super::{CapsuleState, Mode, capsule, tone};
-use crate::capture_host::CaptureNeed;
+use crate::capture_host::{AskedBy, CaptureNeed};
 use crate::rune_ui::controls::{DESCRIPTION, Paint};
 use crate::rune_ui::lists::slider_in;
 
@@ -300,7 +300,10 @@ fn lone_rule() -> Route {
 
 /// A capture refused for Screen Recording: the permission helper.
 fn needs_screen() -> Step {
-    Step::Input(Input::NeedsPermission(CaptureNeed::ScreenRecording))
+    Step::Input(Input::NeedsPermission(
+        CaptureNeed::ScreenRecording,
+        AskedBy::Capture,
+    ))
 }
 
 /// A saved rule's answer, which the router sends at once.
@@ -445,6 +448,7 @@ impl Playground {
             }
             Action::Cancel
             | Action::Discard
+            | Action::OpenScreenshots { .. }
             | Action::Send { .. }
             | Action::Paste
             | Action::Pen

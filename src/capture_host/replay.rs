@@ -625,7 +625,10 @@ fn check_screen_permission() -> Option<ControlReply> {
             "Screen Recording turns on after Hex restarts",
         )),
         super::screen_access::ScreenAccess::Off => {
-            super::permissions::report(super::permissions::CaptureNeed::ScreenRecording);
+            super::permissions::report_capture(
+                super::permissions::CaptureNeed::ScreenRecording,
+                false,
+            );
             Some(ControlReply::error(
                 "permission",
                 "Screen Recording is off for Hex",

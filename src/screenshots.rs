@@ -89,8 +89,9 @@ pub(crate) fn record() -> bool {
     }
 }
 
-/// Opens the picker to shoot or, with `record`, to record.
-fn open(record: bool) -> bool {
+/// Opens the picker to shoot or, with `record`, to record. The picker's own
+/// permission helper calls this again once its grant is made.
+pub(crate) fn open(record: bool) -> bool {
     if !crate::labs::screenshots() || OVERLAYS.get().is_none() {
         return false;
     }
@@ -109,11 +110,16 @@ fn open(record: bool) -> bool {
     // Off the tap's thread: a fresh Screen Recording read may take a moment.
     let spawned = std::thread::Builder::new()
         .name("hex-screenshot-open".into())
-        .spawn(|| {
+        .spawn(move || {
             if crate::capture_host::permission_state(CaptureNeed::ScreenRecording, true).is_some() {
                 PICKING.store(false, Ordering::Release);
                 tracing::info!("screenshot needs Screen Recording");
-                crate::capture_host::report_missing_permission(CaptureNeed::ScreenRecording);
+                // The helper returns here, to the picker, once it's granted:
+                // never to Annotate's whole-screen recording.
+                crate::capture_host::report_screenshot_permission(
+                    CaptureNeed::ScreenRecording,
+                    record,
+                );
                 return;
             }
             show(Some(Mode::Area));

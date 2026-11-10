@@ -1179,6 +1179,9 @@ impl AppSettings {
             self.capture.replay_hotkey = None;
         }
         self.screenshots.clear_left_click_record();
+        #[cfg(hex_capture)]
+        self.screenshots
+            .clear_annotate_capture_overlap(&self.capture);
     }
 }
 
@@ -1657,6 +1660,113 @@ mod tests {
         assert!(settings.hotkey_in_use(HotkeySlot::SecondDictation, &dictation));
         settings.second_dictation_hotkey = Some(dictation);
         assert_eq!(settings.runtime_hotkeys().second_dictation, None);
+    }
+
+    /// A saved Screenshots record shortcut and Annotate's own capture
+    /// shortcuts never share a key, whether Annotate or the Lab is on:
+    /// turning either on can't leave the record shortcut dead and let
+    /// Annotate record the whole screen. Other shortcuts see the record key
+    /// only while a recording is available.
+    #[test]
+    fn the_record_shortcut_and_annotates_capture_shortcuts_never_share_a_key() {
+        let key = |label: &str| HotkeyKey {
+            code: u16::from(label.as_bytes()[0]),
+            label: label.to_uppercase(),
+        };
+        let record = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                command: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..HotkeyModifiers::default()
+            },
+            key: Some(key("r")),
+        };
+        let replay = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                command: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..HotkeyModifiers::default()
+            },
+            key: Some(key("e")),
+        };
+        let mut settings = AppSettings {
+            capture: CaptureSettings {
+                enabled: false,
+                ..CaptureSettings::default()
+            },
+            ..AppSettings::default()
+        };
+        settings.capture.replay_hotkey = Some(replay.clone());
+        settings.screenshots.record_hotkey = Some(record.clone());
+        if cfg!(target_os = "macos") {
+            // Annotate's checks count the saved record shortcut with
+            // Annotate and the Lab off, so neither can take it when it's
+            // turned on.
+            assert!(settings.hotkey_in_use(HotkeySlot::Capture, &record));
+            assert!(settings.hotkey_in_use(HotkeySlot::CaptureReplay, &record));
+            // The record check counts Annotate's saved shortcuts the same
+            // way.
+            assert!(settings.hotkey_in_use(HotkeySlot::ScreenshotRecord, &settings.capture.hotkey));
+            assert!(settings.hotkey_in_use(HotkeySlot::ScreenshotRecord, &replay));
+            // Another shortcut only sees the record key while a recording
+            // is available: the Lab and Annotate on.
+            assert!(!settings.hotkey_in_use(HotkeySlot::RawDictation, &record));
+            settings.labs.screenshots = true;
+            assert!(!settings.hotkey_in_use(HotkeySlot::RawDictation, &record));
+            settings.capture.enabled = true;
+            assert!(settings.hotkey_in_use(HotkeySlot::RawDictation, &record));
+            // Annotate's check still counts the record key with the Lab off.
+            settings.labs.screenshots = false;
+            assert!(settings.hotkey_in_use(HotkeySlot::Capture, &record));
+        } else {
+            assert!(!settings.hotkey_in_use(HotkeySlot::Capture, &record));
+            assert!(
+                !settings.hotkey_in_use(HotkeySlot::ScreenshotRecord, &settings.capture.hotkey)
+            );
+        }
+    }
+
+    /// A settings file saved before the record shortcut and Annotate's
+    /// capture shortcuts were kept apart has its record shortcut cleared on
+    /// load: Annotate's shortcut isn't filtered at runtime, so the chord
+    /// would still record the whole screen, and a replay saved on the record
+    /// chord turned replay off even with the Lab off (its default).
+    #[test]
+    fn a_saved_record_shortcut_sharing_annotates_chord_is_cleared_on_load() {
+        let dir = TestSettingsDir::new("record-shortcut-overlap");
+        let load = |record: HotkeyBinding, replay: Option<HotkeyBinding>| {
+            let mut settings = AppSettings::default();
+            settings.labs.annotate_replay = true;
+            settings.capture.replay_hotkey = replay;
+            settings.screenshots.record_hotkey = Some(record);
+            fs::write(&dir.path, serde_json::to_vec(&settings).unwrap()).unwrap();
+            (settings, AppSettings::load_from(&dir.path).unwrap())
+        };
+        let replay = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                command: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..HotkeyModifiers::default()
+            },
+            key: Some(HotkeyKey {
+                code: 7,
+                label: "E".into(),
+            }),
+        };
+
+        let (_, loaded) = load(HotkeyBinding::capture_default(), None);
+        assert_eq!(loaded.screenshots.record_hotkey, None);
+
+        let (saved, loaded) = load(replay.clone(), Some(replay.clone()));
+        if cfg!(target_os = "macos") {
+            assert!(saved.hotkey_in_use(HotkeySlot::CaptureReplay, &replay));
+        }
+        assert_eq!(loaded.screenshots.record_hotkey, None);
+        assert!(!loaded.hotkey_in_use(HotkeySlot::CaptureReplay, &replay));
+
+        // Any other chord stays saved.
+        let (_, loaded) = load(replay.clone(), None);
+        assert_eq!(loaded.screenshots.record_hotkey, Some(replay));
     }
 
     /// Labs › Transform typed text: its binding takes effect only on Linux
