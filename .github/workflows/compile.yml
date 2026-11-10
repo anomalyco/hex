@@ -5,6 +5,8 @@ name: Compile
 # requests merge without waiting for it, and a breakage on dev goes to the CI
 # failure pipeline. The full suites (check-linux.yml, check-macos.yml,
 # check-windows.yml) run in Release's check and stable channels, and by hand.
+# When a Check macOS run was dispatched for the pull request's head commit,
+# the macOS compile is skipped: that suite runs the same clippy and more.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -68,9 +70,34 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --locked --bin hex -- -D warnings
 
+  # macOS runners are scarce (5 at once across the org). A Check macOS
+  # dispatch usually comes with the push, so this waits a minute for it.
+  macos-covered:
+    name: macOS covered by Check macOS
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      covered: ${{ steps.find.outputs.covered }}
+    steps:
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          sleep 60
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/check-macos.yml/runs?head_sha=$SHA&event=workflow_dispatch" \
+            --jq '[.workflow_runs[] | select(.conclusion != "cancelled")] | length') || runs=0
+          if [ "$runs" -gt 0 ]; then covered=true; else covered=false; fi
+          echo "covered=$covered" >> "$GITHUB_OUTPUT"
+          echo "Check macOS runs for $SHA: $runs" >> "$GITHUB_STEP_SUMMARY"
+
   macos:
     name: macOS
-    if: ${{ !github.event.pull_request.draft }}
+    needs: macos-covered
+    if: ${{ !cancelled() && !github.event.pull_request.draft && needs.macos-covered.outputs.covered != 'true' }}
     runs-on: macos-26
     timeout-minutes: 45
     env:

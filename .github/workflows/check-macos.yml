@@ -16,6 +16,13 @@ on:
 permissions:
   contents: read
 
+# A new dispatch on a branch cancels that branch's stale run. Release's calls
+# (inputs.sha is set) and dispatches on dev or production each get a group of
+# their own, so nothing ever cancels them.
+concurrency:
+  group: ${{ (inputs.sha || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/production') && format('check-macos-run-{0}', github.run_id) || format('check-macos-{0}', github.ref) }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: macos-26

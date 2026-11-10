@@ -1685,7 +1685,9 @@ run publishes nothing until all four pass.
 
 CI is minimal (Dax): a pull request runs only `hex-agent-policy` and Compile
 (`compile.yml`: `cargo clippy --bin hex` on Linux, macOS, and Windows x64,
-for code changes). Merge as soon as it compiles locally, without waiting for
+for code changes; its macOS job is skipped when a Check macOS run was
+dispatched for the same commit, and a newer dispatch on a branch cancels that
+branch's stale Check macOS run). Merge as soon as it compiles locally, without waiting for
 CI; the CI failure pipeline fixes breakages on `dev` afterwards. A push to
 `dev` runs no checks: its Release dev build compiles every OS, and Test
 builds run beside it. The full suites (tests, goldens, Nix, Windows ARM64)
