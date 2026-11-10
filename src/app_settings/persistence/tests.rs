@@ -5,7 +5,6 @@ use crate::app_settings::{
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 use serde::Deserialize;
 use serde_json::json;
-use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
 struct SettingsFile {
@@ -54,10 +53,7 @@ fn launch_note(path: &Path) -> Option<String> {
     }
 }
 
-/// `load_for_launch` publishes process-global runtime state, so a test that
-/// calls it runs alone and restores the defaults afterwards.
-static LAUNCH_RUNTIME: Mutex<()> = Mutex::new(());
-
+/// `load_for_launch` publishes process-global runtime state; restore the defaults afterwards.
 struct RestoredRuntime;
 
 impl Drop for RestoredRuntime {
@@ -357,9 +353,6 @@ fn a_broken_settings_file_is_named_at_launch_with_its_parse_error() {
 
 #[test]
 fn launch_publishes_the_saved_selection_before_the_worker_starts() {
-    let _guard = LAUNCH_RUNTIME
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
     let _restore = RestoredRuntime;
     let file = SettingsFile::new(b"{}");
     let saved = TranscriptionSelection {
@@ -376,7 +369,7 @@ fn launch_publishes_the_saved_selection_before_the_worker_starts() {
     AppSettings::load_for_launch_at(Ok(file.path.clone()));
     assert_eq!(crate::app_settings::transcription_selection().1, saved);
 
-    // The defaults fallback publishes too, so a broken file starts default.
+    // The defaults fallback publishes too, so a launch that can't read settings starts from defaults.
     AppSettings::load_for_launch_at(Err(eyre!("settings path unavailable")));
     assert_eq!(
         crate::app_settings::transcription_selection().1,

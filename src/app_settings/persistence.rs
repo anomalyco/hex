@@ -79,8 +79,7 @@ impl AppSettings {
                 }
             }
         };
-        // No later load runs before the listener and dictation worker start,
-        // so launch publishes the saved runtime state here, including defaults.
+        // Launch has no other load that publishes, so the saved runtime state (or the defaults) goes live here, before any listener or worker starts.
         launch.settings.apply_runtime();
         launch
     }
