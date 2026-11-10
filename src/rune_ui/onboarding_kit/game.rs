@@ -1140,7 +1140,9 @@ fn render<S: 'static>(p: Paint, g: &Play, t: f64, reduced: bool, look: &Look<'_,
     let mut world = el()
         .key("world")
         .size(STAGE_W, STAGE_H)
-        .motion_intent(MotionIntent::JIGGLE)
+        // The screen shake: a kick along the last word's heading under
+        // noise, whose steps can be a jump from one frame to the next.
+        .motion_intent(MotionIntent::KICK | MotionIntent::STEP)
         .offset(shake[0], shake[1])
         .rotate(tilt)
         .offset_motion(Anim::INSTANT)

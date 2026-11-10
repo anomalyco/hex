@@ -49,7 +49,7 @@ const SKETCH_DOWNLOAD_SECS: f64 = 59.2;
 const DOWNLOAD_HOLD: f64 = 2.8;
 /// How long the first run's `"Setting up Hex"` holds before its download
 /// flies up and `"Without Hex"` opens.
-const FIRST_RUN_HOLD: f64 = 1.0;
+const FIRST_RUN_HOLD: f64 = 1.6;
 const PERMISSIONS_WAIT: f64 = 0.6;
 const CLOSE_SECS: f64 = 0.65;
 const WORD_SECS: f64 = 0.22;
@@ -1202,8 +1202,9 @@ pub(crate) const TAPS_BEFORE_TOGGLE: u8 = 2;
 /// The longest gap between polls that still plays a flight.
 const FLIGHT_SEEN: f64 = 0.25;
 
-/// How long `"Without Hex"`'s last line holds before the first run moves on.
-const COMEDY_HOLD: f64 = 1.6;
+/// How long `"Without Hex"`'s last line holds before the first run moves on,
+/// after the scene's own hold on the removal ([`typing::Timing::fired`]).
+const COMEDY_HOLD: f64 = 0.8;
 /// How long `"With Hex"`'s happy ending stays before the first run moves on.
 const ENDING_HOLD: f64 = 1.5;
 

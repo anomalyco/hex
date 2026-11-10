@@ -56,13 +56,6 @@ const ALLOW: &[AllowRow] = &[
     )
     .max(3),
     AllowRow::new(
-        "overshoot",
-        "stage/world",
-        "handoff",
-        "the game's screen shake, still going as the window ends",
-    )
-    .max(3),
-    AllowRow::new(
         "appear-then-jump",
         "thread/hex-bubble",
         "words",
