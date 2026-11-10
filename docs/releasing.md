@@ -9,7 +9,7 @@ the release service itself: Hex never publishes to it or reads from it. Builds
 are tested before stable on the production service's `dev` channel.
 
 Like OpenCode's release, building is split from everything that holds a
-secret. `.github/workflows/` (Release, Site deploy, Site) and
+secret. `.github/workflows/` (Release, Deploy) and
 `.github/release/` are the security boundary:
 
 - **Build jobs** run repository code (cargo, build.rs, bun, makepkg, brew)
@@ -112,8 +112,8 @@ production site.
 | Environment | Branches | Reviewers | Used by | AWS role |
 | --- | --- | --- | --- | --- |
 | `release` | `dev`, `production` | none | Release sign and publish jobs, aur-check | `role/github/hex-release` |
-| `infra-dev` | `dev` | none | Site deploy, `mode: dev` | `role/github/hex-infra-dev` |
-| `infra-production` | `production` | none | Site deploy, `mode: production` | `role/github/hex-infra-production` |
+| `infra-dev` | `dev` | none | Deploy, from `dev` | `role/github/hex-infra-dev` |
+| `infra-production` | `production` | none | Deploy, from `production` | `role/github/hex-infra-production` |
 
 `publish` uploads each file under its own name with its SHA-256 (files over
 95 MiB in 90 MiB parts), then posts the release naming each target by file
@@ -148,7 +148,7 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   set to the Dev update channel follow and `https://anoma.ly/hex/download/dev`
   links. Every push to `dev` runs it, except pushes that change only `docs/`,
   `site/`, or Markdown; a running dev release always finishes, and only the newest push that lands meanwhile waits to run next (GitHub drops the ones between), and
-  `gh workflow run release.yml --ref dev -f channel=dev -f ref=dev`
+  `gh workflow run release.yml --ref dev -f channel=dev`
   runs it by hand. It runs in `release`, which needs no approval. Each dev
   build's notes are the titles of the PRs merged since the previous dev
   build, without CI fixes and changes outside the app
@@ -181,7 +181,7 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   focus (at most once a minute), so a push reaches them within minutes of its
   run finishing.
 - `stable`, dispatched from `production` (`gh workflow run release.yml
-  --ref production -f channel=stable -f ref=production`), publishes the crate
+  --ref production -f channel=stable`), publishes the crate
   version from `Cargo.toml` to `https://anoma.ly/release`, the AUR, and
   Homebrew. It needs every platform signed and `docs/releases/<version>.md`,
   and refuses a version already tagged `v<version>` or `app-v<version>`.
@@ -190,7 +190,7 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   commit with `GITHUB_TOKEN` and the GitHub release `v<version>` (GitHub's
   "Latest"; SDK releases never take it) mirrors the files. A failed run leaves no tag. Releases through
   2.3.1 used `app-v<version>` tags, which stay as history. Deploy the
-  production site afterwards with Site.
+  production site afterwards with Deploy.
 
 To ramp, halt, roll back, or force an update, use the service's actions
 (`rollout`, `halt`, `promote` with a history `sequence`, `required`;
@@ -279,18 +279,18 @@ the stable link switch in Settings › General › Update channel, after
 confirming the switch.
 The route ships with the Worker, so it is live on production only after a
 production site deploy of a commit that has it: the next stable Release, or
-Site dispatched with `mode: production` from `production` once `production`
+Deploy dispatched from `production` once `production`
 contains it. Both move or deploy `production`, which the release freeze
 forbids, so until the freeze lifts the link works only on dev
 (`https://dev.anoma.ly/hex/download/dev`, which reads the dev service).
 
-Deploys run only from CI (`.github/workflows/site.yml` and `site-deploy.yml`):
-a push to `dev` that touches `site/` deploys dev, and Site can be dispatched
-with `mode: production` from `production` only (after a stable release).
-Site deploy is split like Release:
+Deploys run only from CI (`.github/workflows/deploy.yml`, Deploy): a push to
+`dev` that touches `site/` deploys dev, and a push to or dispatch from
+`production` (after a stable release) deploys production; the mode always
+follows the branch. Deploy is split like Release:
 
 ```ts
-Site deploy (mode dev | production)
+Deploy (mode = branch: dev | production)
 ├─ build    bun install + site/scripts/build.ts --mode <mode>, no environment or secret;   [build]
 │           uploads site/.cloudflare/output (Build Output) with its SHA256SUMS digest
 ├─ deploy   sparse checkout of .github/release/; npm ci the pinned cf CLI; verify the     [infra-<mode>]
@@ -320,8 +320,9 @@ the Worker reads and never writes.
 
 One short-lived token, minted per deploy:
 
-- `deploy` runs in `infra-<mode>`, assumes `role/github/hex-infra-<mode>`,
-  then runs `.github/release/cloudflare-token.sh`, which SigV4-POSTs to the
+- `deploy` runs in `infra-<mode>`, assumes `role/github/hex-infra-<mode>`
+  (a 15-minute session, only a step output that the token step alone
+  receives; cf never sees it), then runs `.github/release/cloudflare-token.sh`, which SigV4-POSTs to the
   token issuer in [anomalyco/secrets](https://github.com/anomalyco/secrets)
   and receives a 15-minute account-owned token with Individual Workers Editor
   on that mode's Worker only (`hex-dev-site` or `hex-production-site`) and
@@ -352,7 +353,7 @@ app (new updater, and on macOS a new bundle ID), so:
   `packaging/macos/legacy-appcast.xml`, served by the site build: one
   informational item that tells 2.3.1 users to download the new Hex from
   https://anoma.ly/hex (no enclosure, so Sparkle installs nothing). Edit that
-  file and push; the Site deploy serves it. Superseded (Kit, 2026-11-02): the 2.3.1
+  file and push; Deploy serves it. Superseded (Kit, 2026-11-02): the 2.3.1
   and Swift feeds offer the released ZIP itself, signed with their old Sparkle
   key, so Install Update moves those Macs onto the new Hex
   (docs/plans/swift-app-handoff.md, "Legacy Update"). Keep `SUPublicEDKey` in
@@ -412,6 +413,15 @@ and no reviewer is required) assume `role/github/hex-release` with
 GitHub OIDC and fetch only what they use. That role can read `hex/release/*` and the shared Apple, AUR and Homebrew
 secrets. Set a value with `bun set hex release <NAME>` in that repo.
 
+Credentials are step-scoped. `configure-aws-credentials` runs with
+`output-env-credentials: false`, so the 15-minute AWS session is only a step output, passed
+to the one step that needs it; that step reads its secrets with
+`.github/release/with-secrets.sh`, which masks them, drops the AWS session, and runs the one
+script that uses them. Nothing goes to `$GITHUB_ENV`, so no other step of the job (downloads,
+notarytool, Azure signing, the release service) holds the AWS session or a secret. The Azure
+signing action runs with `cache-dependencies: false`: the Actions cache is shared with build
+jobs that run repository code.
+
 | Secret | Use |
 | --- | --- |
 | (none) | publishing to the release service: the job's GitHub OIDC token |
@@ -435,7 +445,7 @@ its own Worker from the token issuer (`.github/release/cloudflare-token.sh`).
   by the site Worker; stable, or dev until there is a stable release): the
   user-local version layout plus the `install.json` receipt; it updates
   itself from the service's manifest and the window offers "Update" (restart
-  into the staged version). The Site deploy runs the installer test before it
+  into the staged version). Deploy runs the installer test before it
   deploys and compares the served bytes with `.github/release/` afterwards.
 - **AUR** `hex-bin` (`packaging/aur`, staged by `scripts/release-aur.sh`, pushed by `.github/release/push-aur.sh`):
   `/usr/bin/hex`, the desktop entry, and the systemd user unit

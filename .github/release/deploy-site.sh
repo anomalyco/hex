@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # deploy-site.sh <dev|production> <dir>: deploys the site Worker from a
-# verified Build Output artifact (<dir>, site/.cloudflare/output from Site's
+# verified Build Output artifact (<dir>, site/.cloudflare/output from Deploy's
 # build job) with the cf CLI pinned in cf/package-lock.json, which the
 # workflow installs (npm ci --ignore-scripts) before the token is in reach.
 #

@@ -1715,10 +1715,11 @@ check out only `.github/release/`, and run only those scripts and SHA-pinned
 actions on artifacts treated as data (macOS Developer ID signing,
 notarization, and stapling; Azure Authenticode; the release service through
 OIDC; the AUR and Homebrew pushes). Every artifact carries a `SHA256SUMS`
-whose digest its job reports and every consumer checks. Site deploy follows
-the same split: its build job has no secret, and its `release` job runs only
+whose digest its job reports and every consumer checks. Deploy
+(`.github/workflows/deploy.yml`) follows the same split: its build job has no
+secret, and its deploy job (in `infra-dev` or `infra-production`) runs only
 `.github/release/cloudflare-token.sh` (which mints a 15-minute Cloudflare
-token after assuming the release role) and `.github/release/deploy-site.sh`,
+token after assuming the environment's role) and `.github/release/deploy-site.sh`,
 which deploys the verified Build Output only
 when it names exactly that mode's site Worker, routes, and bindings, with the
 cf CLI locked in `.github/release/cf/`; its build job runs the installer test
