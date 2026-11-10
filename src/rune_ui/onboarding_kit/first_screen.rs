@@ -5,7 +5,7 @@
 use rune::{El, Icon, TextStyle, Transition, col, icon, row, text};
 use rune_kit::glyphs;
 
-use crate::desktop::i18n::tr;
+use crate::desktop::i18n::{tr, tr_fill};
 
 use super::super::controls::Paint;
 use super::fixture::Download;
@@ -45,19 +45,33 @@ pub(super) fn note(p: Paint, s: &Onboard) -> Option<El> {
             if s.live.as_ref().is_some_and(|live| live.mic_stays_open()) =>
         {
             let why = tr(
-                "macOS shows the mic in use because Hex keeps it open to catch your first word.",
+                "macOS shows the mic as on because Hex keeps it warm, so dictation starts instantly.",
             );
-            let only = tr("It records only while you dictate.");
+            let only = tr_fill(
+                if s.toggle {
+                    "It only records after you tap {}."
+                } else {
+                    "It only records while you hold {}."
+                },
+                &shortcut(&s.caps),
+            );
             Some(foot(
                 "mic-note",
                 col()
                     .items_center()
                     .child(marked(p, &glyphs::MIC, why))
-                    .child(words(p, only).key("only")),
+                    .child(words(p, &only).key("only")),
             ))
         }
         _ => None,
     }
+}
+
+/// The dictation shortcut as text where the template's `{}` is: macOS's
+/// glyphs run together as its menus write them (`⌥⇧S`), others join with
+/// `+`. Keycaps here would make the second line taller than the first.
+fn shortcut(caps: &[String]) -> String {
+    caps.join(if cfg!(target_os = "macos") { "" } else { "+" })
 }
 
 /// Quiet notes at the foot of the window, their first line where the
