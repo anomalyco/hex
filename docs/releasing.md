@@ -283,7 +283,7 @@ Site deploy (mode dev | production)
 ├─ build    bun install + site/scripts/build.ts --mode <mode>, no environment or secret;   [build]
 │           uploads site/.cloudflare/output (Build Output) with its SHA256SUMS digest
 ├─ deploy   sparse checkout of .github/release/; npm ci the pinned cf CLI; verify the     [release]
-│           artifact's digest; deploy-site.sh <mode>
+│           artifact's digest; mint a 15-minute Cloudflare token; deploy-site.sh <mode>
 └─ verify   the live site answers 200 and bun run check:downloads, no secret               [build]
 ```
 
@@ -307,18 +307,27 @@ turns off Browser Integrity Check for `/hex/files/` on both hosts (it returned
 the appcast; the bucket only holds the frozen 2.3.1 feeds and artifacts, which
 the Worker reads and never writes.
 
-One account token, used by one locked step only:
+One short-lived token, minted per deploy:
 
-- `hex-site-deploy` (`release` secret `CLOUDFLARE_API_TOKEN`): Workers Scripts
-  Write (account) and Workers Routes Write (zone `anoma.ly`), used only by
-  `deploy-site.sh`. It has no R2 access: deploying a binding needs none.
-  Cloudflare supports per-Worker roles (Individual Workers Editor) that would
-  limit it to the two site Workers, but they can be granted only from the
-  dashboard or by an API token, not by the `cf` OAuth login; until it is
-  recreated that way, `deploy-site.sh`'s Worker-name check is the limit.
-  Routes are always written on deploy, and `cf` then needs Routes Write on the
-  zone. Recreate rather than edit a token's policies: an edited policy did not
-  take effect on the routes API in testing.
+- `deploy` assumes `role/github/hex-release`, then runs
+  `.github/release/cloudflare-token.sh`, which SigV4-POSTs to the token issuer
+  in [anomalyco/secrets](https://github.com/anomalyco/secrets) and receives a
+  15-minute account-owned token with Workers Scripts Write (account) and
+  Workers Routes Write (zone `anoma.ly`), pinned to the runner's request IP,
+  at most ten live at once. The script masks it before writing
+  `steps.cloudflare-token.outputs.token`, and only the Deploy step receives it
+  as `CLOUDFLARE_API_TOKEN`. It has no R2 access: deploying a binding needs
+  none, and `cf` skips provisioning a bucket it cannot read (a warning, not a
+  failure). Cloudflare supports per-Worker roles (Individual Workers Editor)
+  that would limit it to the two site Workers, but they can be granted only
+  from the dashboard or by an API token, not by the `cf` OAuth login, and the
+  `cf deploy` route preflight is not verified with them; until it is,
+  `deploy-site.sh`'s Worker-name check is the limit. Routes are always written
+  on deploy, and `cf` then needs Routes Write on the zone.
+- The old long-lived `hex-site-deploy` token is kept only because the
+  `production` branch (far behind `dev`) still reads it from Secrets Manager
+  as `hex/release/CLOUDFLARE_API_TOKEN`; revoke it once `production` is
+  promoted and deploys from this workflow.
 
 ## Old clients (2.3.1 and earlier)
 
@@ -396,7 +405,7 @@ secrets. Set a value with `bun set hex release <NAME>` in that repo.
 | Secret | Use |
 | --- | --- |
 | (none) | publishing to the release service: the job's GitHub OIDC token |
-| `hex/release/CLOUDFLARE_API_TOKEN`, var `CLOUDFLARE_ACCOUNT_ID` | site deploys (`hex-site-deploy`, used only by `deploy-site.sh`) |
+| (none) | site deploys mint a 15-minute Cloudflare token from the token issuer (`.github/release/cloudflare-token.sh`); the old `hex-site-deploy` token stays in Secrets Manager only until `production` is promoted |
 | `shared/AUR_SSH_KEY` | pushes `hex-bin`; one key for every Anomaly AUR package (`github-actions-hex-aur`) |
 | `shared/HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb`; one deploy key on `anomalyco/homebrew-tap` for every app (`anomaly-release`) |
 | vars `AZURE_*` | Authenticode (docs/windows-signing.md); not secrets, `azure/login` uses OIDC |

@@ -1717,7 +1717,9 @@ notarization, and stapling; Azure Authenticode; the release service through
 OIDC; the AUR and Homebrew pushes). Every artifact carries a `SHA256SUMS`
 whose digest its job reports and every consumer checks. Site deploy follows
 the same split: its build job has no secret, and its `release` job runs only
-`.github/release/deploy-site.sh`, which deploys the verified Build Output only
+`.github/release/cloudflare-token.sh` (which mints a 15-minute Cloudflare
+token after assuming the release role) and `.github/release/deploy-site.sh`,
+which deploys the verified Build Output only
 when it names exactly that mode's site Worker, routes, and bindings, with the
 cf CLI locked in `.github/release/cf/`; its build job runs the installer test
 and the appcast check on repository code, no secret. Keep that boundary:

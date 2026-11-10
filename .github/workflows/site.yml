@@ -13,6 +13,7 @@ on:
       - ".github/workflows/site.yml"
       - ".github/workflows/site-deploy.yml"
       - ".github/release/deploy-site.sh"
+      - ".github/release/cloudflare-token.sh"
       - ".github/release/cf/**"
       - ".github/release/install-linux.sh"
       - ".github/release/install-windows.ps1"
