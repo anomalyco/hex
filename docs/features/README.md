@@ -256,6 +256,9 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   -> "Getting Hex ready to listen…" in place of the hold prompt until its
 │   │   first session starts (desktop/host.rs `warming`)
 │   │   // setup.warming; Check: `the_practice_page_waits_for_the_listener`
+│   ├── macOS, mic kept open (General's "Turn off the mic when not dictating"
+│   │   off when the run opened) -> a note at the window's foot, here and on
+│   │   Hex is ready, says why macOS shows the mic in use  // setup.mic-note
 │   └── Done at any time -> Hex is ready  // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
 │   ├── First time -> Hex records a marker, reopens itself, resumes at the practice

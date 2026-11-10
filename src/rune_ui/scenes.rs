@@ -900,7 +900,9 @@ pub(super) fn portal_fixture() -> Ui {
 /// Deterministic settings and service state matching a typical Wayland
 /// desktop with the shortcuts portal.
 pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
-    crate::desktop::i18n::apply(Some("en"));
+    // English, unless a render names another language to check its copy in.
+    let language = std::env::var("HEX_RENDER_LANGUAGE").unwrap_or_else(|_| "en".into());
+    crate::desktop::i18n::apply(Some(&language));
     let settings = AppSettings {
         dictation_hotkey: HotkeyBinding {
             modifiers: HotkeyModifiers::default(),
