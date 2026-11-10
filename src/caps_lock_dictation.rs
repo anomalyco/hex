@@ -328,10 +328,11 @@ fn wake_worker(command: macos::WorkerCommand) {
 }
 
 /// A raw HID Caps Lock key-down from the tracker. It only arms a press; the
-/// AlphaShift edge confirms it.
+/// AlphaShift edge confirms it. Suspended shortcuts mean no dictation, so the
+/// key is only Caps Lock.
 #[cfg(target_os = "macos")]
 pub(crate) fn physical_press(at: CaptureInstant) {
-    if !ENABLED.load(Ordering::Acquire) {
+    if !ENABLED.load(Ordering::Acquire) || crate::app_settings::shortcuts_suspended() {
         return;
     }
     let matched = HID_GATE
@@ -345,10 +346,12 @@ pub(crate) fn physical_press(at: CaptureInstant) {
 
 /// An AlphaShift change observed by the event tap, with the event's own
 /// timestamp. The press is forwarded to the listener before the worker is
-/// asked to touch IOKit.
+/// asked to touch IOKit. Suspended shortcuts mean no dictation: the edge
+/// neither presses nor resets the lock, so a pause never forces Caps Lock off
+/// or treats the key as a dictation key.
 #[cfg(target_os = "macos")]
 pub(crate) fn alpha_shift(shift: bool, at: CaptureInstant) {
-    if !ENABLED.load(Ordering::Acquire) {
+    if !ENABLED.load(Ordering::Acquire) || crate::app_settings::shortcuts_suspended() {
         return;
     }
     // Hex's own lock reset produces an off edge; it must never become a

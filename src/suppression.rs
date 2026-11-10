@@ -22,6 +22,9 @@ use tap::*;
 
 const DOUBLE_TAP_WINDOW: Duration = MINIMUM_HOLD_DURATION;
 const ESCAPE_KEY_CODE: u16 = 53;
+/// Caps Lock's key code. CoreGraphics reports it as held for as long as it is
+/// toggled on, so it never makes a keyboard non-neutral.
+const CAPS_LOCK_KEY_CODE: u16 = 57;
 /// The key code the Globe (Fn) key reports in its own key events.
 const GLOBE_KEY_CODE: u16 = 179;
 
@@ -433,14 +436,43 @@ pub(crate) fn alpha_shift_now() -> bool {
         != 0
 }
 
+/// The modifier flags that keep a keyboard from reading neutral. Caps Lock's
+/// alpha shift is a toggle rather than a hold, and arrow-key metadata can
+/// leave SecondaryFn set after release, which `recover_stale_keys_with`
+/// ignores too once its own modifier history says Fn is up. The pause has no
+/// such history, so it ignores that bit whenever it is set.
+const NEUTRAL_BLOCKING_MODIFIERS: u64 = HOTKEY_MODIFIERS_MASK
+    & !crate::app_settings::FUNCTION_KEY_MASK
+    & !crate::caps_lock_dictation::ALPHA_SHIFT_MASK;
+
+/// The first keyboard key code that reads as held, Caps Lock aside.
+fn held_key_with(mut key_down: impl FnMut(u16) -> bool) -> Option<u16> {
+    (0..128u16).find(|&code| code != CAPS_LOCK_KEY_CODE && key_down(code))
+}
+
+/// Whether a keyboard reporting `flags` and `key_down` reads as neutral: no
+/// modifier is down and no key is held. Split from the CoreGraphics reads so
+/// the rule is testable without a keyboard.
+fn neutral_with(mut flags: impl FnMut() -> u64, key_down: impl FnMut(u16) -> bool) -> bool {
+    flags() & NEUTRAL_BLOCKING_MODIFIERS == 0 && held_key_with(key_down).is_none()
+}
+
 /// Whether no keyboard key or modifier reads as held, with the physical
 /// keyboard's own state agreeing. Labs › Pause from menu bar waits for this
 /// before its shortcuts go live again, so a key held while Resume is chosen
 /// can never start a capture.
 pub(crate) fn keyboard_is_neutral() -> bool {
-    // SAFETY: read-only CoreGraphics state queries.
-    (unsafe { CGEventSourceFlagsState(HID_SYSTEM_STATE) } & HOTKEY_MODIFIERS_MASK) == 0
-        && !(0..128u16).any(input_is_held)
+    // SAFETY: a read-only CoreGraphics state query.
+    neutral_with(
+        || unsafe { CGEventSourceFlagsState(HID_SYSTEM_STATE) },
+        input_is_held,
+    )
+}
+
+/// The first key code that reads as held: what a pending resume is still
+/// waiting for, for its one slow warning.
+pub(crate) fn held_key_code() -> Option<u16> {
+    held_key_with(input_is_held)
 }
 
 /// The listener's input channel. The taps' thread and, under Secure Event

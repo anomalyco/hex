@@ -1557,31 +1557,57 @@ meeting paste, Annotate and Screenshots, and the Carbon hotkeys registered under
 Secure Event Input. The event tap passes every key event through unmodified,
 exactly as while a new binding is recorded, because every suspension site reads
 `app_settings::shortcuts_suspended()` (a recording binding or a pause) instead
-of `hotkey_capture_active()` alone. Pausing cancels only an active capture:
-the listener suspends every shortcut machine as the pause begins
+of `hotkey_capture_active()` alone. Pausing cancels only an active dictation
+capture: the listener suspends every shortcut machine as the pause begins
 (`Hotkeys::suspend_when`, once per suspension) and cancels the capture it was
 recording, while accepted transcription and paste jobs still finish and a
-capture a command starts during the same pause keeps recording.
+capture a command starts during the same pause keeps recording. An Annotate or
+Screenshots recording already under way is not cancelled by a pause: it keeps
+recording and stops from its own capsule, while only its shortcuts go inert. A
+Caps Lock dictation ignores the key while shortcuts are suspended, so a pause
+neither starts a dictation nor forces Caps Lock off. Hiding the menu bar icon
+(Labs › Hide menu bar icon) leaves no Resume Hex row at all, so with the icon
+hidden turning the lab off is what resumes.
 
 ```ts
-Paused    -> every capture shortcut inert; tap passes keys through
-          -> the listener cancels only the capture it is recording
-Resume    -> shortcuts stay suspended until no key or modifier reads as held
-          -> 100 ms of that neutrality (STALE_KEY_NEUTRAL_DURATION) -> live
-Lab off   -> resumes at once and the row hides; a restart starts unpaused
+Paused     -> every capture shortcut inert; tap passes keys through
+           -> the listener cancels only the dictation capture it is recording
+           -> Caps Lock starts nothing and the lock stays as it is
+Resume     -> the row still reads Resume Hex: shortcuts stay suspended until
+              no key or modifier reads as held for 100 ms -> live again
+Lab off    -> resumes at once and the row hides; a restart starts unpaused
 ```
 
+Choosing Resume Hex again while a resume already waits leaves it waiting; it is
+never re-paused or restarted.
+
 Resuming does not re-arm shortcuts on a held keyboard: the listener's
-`shortcut_pause::tick` runs its `settle` step, which checks
-`suppression::keyboard_is_neutral` (the HID modifier flags and every tracked key
-and mouse button through `CGEventSourceKeyState`) on each pass and only goes
-live after a full neutral window, so a key held while the user clicks Resume can
-never start a capture. The gate, `labs::pause_menu()`, is read when the status
+`shortcut_pause::tick` settles the pause on each pass and only goes live after
+100 ms of a neutral keyboard (`STALE_KEY_NEUTRAL_DURATION`'s window in
+[src/suppression.rs](../../src/suppression.rs)), so a key held while the user
+clicks Resume can never start a capture. That check,
+`suppression::keyboard_is_neutral`, reads the HID modifier flags and every
+keyboard key code below 128 through `CGEventSourceKeyState` (the combined
+session state and HID state must agree); Caps Lock's own key code is skipped
+because macOS reports it down while it is merely toggled on, and the Fn flag is
+masked out because arrow-key metadata can leave SecondaryFn set after release
+(the pause has no modifier history to tell that apart from a held Fn, so it
+always ignores the bit), the same way `recover_stale_keys_with` drops it once
+its own history says Fn is up. Only a pending resume reads the keyboard and
+takes the pause machine's lock (once); a running or paused Hex reads a lock-free
+atomic mirror instead. A pending resume logs one warning naming the held key
+code after five seconds, and the pause, resume request, and live-again
+transitions log at info. The gate, `labs::pause_menu()`, is read when the status
 item refreshes (about twice a second) and as the menu opens; `labs::apply`
 resumes at once when the lab turns off. Explicit CLI commands (`hex dictation
-start`) and the menu's own actions are not keyboard shortcuts and keep working.
+start`) and the menu's own actions are not keyboard shortcuts and keep working,
+though a capture `hex dictation start` begins during a pause can only be
+finished with `hex dictation stop`: its reply still offers the shortcut, which
+is inert until Resume.
 Checks: `pause_suspends_and_resume_only_follows_a_neutral_keyboard`,
 `a_neutral_keyboard_past_the_window_resumes`,
+`choosing_resume_while_a_resume_waits_leaves_it_waiting`,
+`a_pending_resume_reports_how_long_it_has_waited`,
 `turning_the_lab_off_resumes_at_once`, `settling_leaves_a_running_hex_alone`, and
 `a_resume_ignored_while_running_does_not_suspend` in
 [shortcut_pause.rs](../../src/shortcut_pause.rs);
@@ -1590,13 +1616,18 @@ Checks: `pause_suspends_and_resume_only_follows_a_neutral_keyboard`,
 `the_pause_row_reads_pause_or_resume` and
 `the_menu_reads_meeting_then_actions_then_the_app` in
 [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs);
-`pause_menu_is_its_own_bit_and_macos_only` in [labs.rs](../../src/labs.rs).
+`pause_menu_is_its_own_bit_and_macos_only` in [labs.rs](../../src/labs.rs);
+`a_toggled_caps_lock_still_reads_neutral`, `a_held_key_reads_not_neutral`,
+`a_held_modifier_reads_not_neutral`, and
+`a_stuck_function_flag_still_reads_neutral` in
+[suppression/tests.rs](../../src/suppression/tests.rs).
 Not yet observed: a real pause and resume on a Mac, especially against a held
 modifier and a game's colliding key; the suppression, secure-input, listener,
 and status-item changes are compiled and clippy-linted by the macOS CI build but
-no permission-granted keyboard test ran. The pause-state checks run on Linux
-too, while the listener, tap, and menu tests run only in macOS builds. The row
-renders only in macOS builds, so no golden changes.
+no permission-granted keyboard test ran. The pause machine's checks run on
+Linux too, while the tap, secure-input, listener, and menu tests, and the
+neutral-keyboard rules, run only in macOS builds. The row renders only in macOS
+builds, so no golden changes.
 
 ⌘Q closes Settings (`quit-closes-window`, issue 1473, macOS): for people who
 press ⌘Q to put the Settings window away and expect dictation to keep running.
