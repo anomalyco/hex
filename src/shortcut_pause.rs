@@ -81,7 +81,9 @@ impl Machine {
     }
 
     /// Whether shortcuts stay suspended: paused, or resuming. The menu's
-    /// Pause Hex / Resume Hex title reads this.
+    /// Pause Hex / Resume Hex title reads the lock-free [`STATE`] mirror
+    /// instead; this is the machine's own answer for its tests.
+    #[cfg(test)]
     pub const fn suspended(&self) -> bool {
         !matches!(self.state, State::Running)
     }
@@ -197,20 +199,6 @@ fn with<T>(change: impl FnOnce(&mut Machine) -> T) -> T {
 
 fn state() -> State {
     State::from_code(STATE.load(Ordering::Acquire))
-}
-
-/// Pauses Hex's shortcuts from the menu bar.
-pub fn pause() {
-    if with(Machine::pause) {
-        log_paused();
-    }
-}
-
-/// Starts a resume, which goes live once the keyboard is neutral.
-pub fn resume() {
-    if with(|machine| machine.resume(Instant::now())) {
-        log_resuming();
-    }
 }
 
 /// The menu row's action: pause, resume, or leave a pending resume alone.
