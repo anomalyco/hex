@@ -38,6 +38,8 @@ use color_eyre::eyre::Result;
 use crate::apple_speech::AppleSpeech;
 #[cfg(target_os = "macos")]
 use crate::parakeet::Parakeet;
+#[cfg(not(target_os = "macos"))]
+use crate::transcription::models::TranscriptionModelId;
 #[cfg(target_os = "macos")]
 use crate::transcription::models::{
     ModelRuntime, TranscriptionModelId, TranscriptionSelection, validate,
@@ -48,7 +50,6 @@ pub use crate::transcription::transcript::{Transcript, TranscriptSegment};
 /// Silence after a Unified English clip (400 ms at 16 kHz), so the model
 /// has the context to emit the final word and its closing punctuation
 /// (issue 657: sentences lost their full stop or question mark).
-#[cfg(target_os = "macos")]
 pub(crate) const UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES: usize = 6_400;
 
 #[cfg(target_os = "macos")]
@@ -100,7 +101,7 @@ impl Transcriber {
     pub fn transcribe(&mut self, mut samples: Vec<f32>) -> Result<String> {
         match self {
             Self::Gguf(model) => {
-                prepare_gguf_samples(&mut samples, model.model_id());
+                pad_gguf_samples(&mut samples, model.model_id());
                 model.transcribe(&samples)
             }
             Self::AppleSpeech(model) => model.transcribe(&samples).map(|result| result.text),
@@ -112,7 +113,7 @@ impl Transcriber {
     pub fn transcribe_segments(&mut self, mut samples: Vec<f32>) -> Result<Transcript> {
         match self {
             Self::Gguf(model) => {
-                prepare_gguf_samples(&mut samples, model.model_id());
+                pad_gguf_samples(&mut samples, model.model_id());
                 model
                     .transcribe_segments(&samples)
                     .map(|result| Transcript {
@@ -142,15 +143,16 @@ impl Transcriber {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn prepare_gguf_samples(samples: &mut Vec<f32>, model: Option<TranscriptionModelId>) {
+/// Pads a GGUF clip as dictation prepares it on every OS: the backend's
+/// minimum duration, then the model's trailing silence. Applied after any
+/// pause cut, so a trailing pause cannot trim that silence.
+pub(crate) fn pad_gguf_samples(samples: &mut Vec<f32>, model: Option<TranscriptionModelId>) {
     crate::dictation::pad_for_parakeet(samples);
     samples.resize(samples.len() + trailing_silence_samples(model), 0.0);
 }
 
 /// Silence a clip of `model` gets after its audio, whole clip or stream.
-#[cfg(target_os = "macos")]
-fn trailing_silence_samples(model: Option<TranscriptionModelId>) -> usize {
+pub(crate) fn trailing_silence_samples(model: Option<TranscriptionModelId>) -> usize {
     if model == Some(TranscriptionModelId::ParakeetUnifiedEnglish) {
         UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES
     } else {
@@ -235,9 +237,8 @@ impl WarmTranscriber {
 }
 
 #[cfg(all(test, target_os = "macos"))]
-mod tests {
-    use super::{Transcript, UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES, prepare_gguf_samples};
-    use crate::transcription::models::TranscriptionModelId;
+mod apple_speech_tests {
+    use super::Transcript;
 
     #[test]
     fn apple_bridge_transcript_uses_the_canonical_wire_shape() {
@@ -251,12 +252,18 @@ mod tests {
         assert_eq!(transcript.segments[0].start_ms, 10);
         assert_eq!(transcript.segments[0].end_ms, 40);
     }
+}
+
+#[cfg(test)]
+mod padding_tests {
+    use super::{UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES, pad_gguf_samples};
+    use crate::transcription::models::TranscriptionModelId;
 
     #[test]
     fn unified_english_gets_trailing_silence_for_final_token_context() {
         let mut samples = vec![0.5; 32_000];
 
-        prepare_gguf_samples(
+        pad_gguf_samples(
             &mut samples,
             Some(TranscriptionModelId::ParakeetUnifiedEnglish),
         );
@@ -273,7 +280,7 @@ mod tests {
     fn other_gguf_models_do_not_get_trailing_silence() {
         let mut samples = vec![0.5; 32_000];
 
-        prepare_gguf_samples(&mut samples, Some(TranscriptionModelId::ParakeetV2));
+        pad_gguf_samples(&mut samples, Some(TranscriptionModelId::ParakeetV2));
 
         assert_eq!(samples.len(), 32_000);
     }
@@ -281,7 +288,7 @@ mod tests {
     #[test]
     fn short_unified_input_is_minimum_padded_before_trailing_context() {
         let mut samples = vec![0.5; 1_600];
-        prepare_gguf_samples(
+        pad_gguf_samples(
             &mut samples,
             Some(TranscriptionModelId::ParakeetUnifiedEnglish),
         );

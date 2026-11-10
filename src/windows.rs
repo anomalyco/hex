@@ -480,9 +480,8 @@ fn capture(
     emit_state(&events, VoiceState::Transcribing, &device_name)?;
     events.dictation(DictationPhase::Transcribing, "")?;
     let started = Instant::now();
-    let mut samples = crate::dictation::resample_for_parakeet(&samples, sample_rate);
-    crate::dictation::pad_for_parakeet(&mut samples);
-    let text = match transcriber.transcribe(&samples) {
+    let samples = crate::dictation::resample_for_parakeet(&samples, sample_rate);
+    let text = match transcriber.transcribe_clip(samples) {
         Ok(text) => text.trim().to_string(),
         Err(error) => {
             fail_capture(&events, &device_name, &format!("{error:#}"))?;

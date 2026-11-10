@@ -1136,12 +1136,14 @@ stream hears it (`skip_long_pauses` in
 [engine/streaming.rs](../../src/transcription/engine/streaming.rs), the same
 `PauseCap`): each pause at the noise floor keeps its first 2.5 s and last
 0.3 s, a trailing pause only its first 2.5 s, and shorter pauses pass whole.
+Unified English's trailing silence is appended after that cut, so the trailing
+pause cannot trim it.
 A clip in which no frame rose above the noise floor is left whole, as the
 stream does for #841. The job deadline, History's duration, and the silence
 discard still use the full clip; process.log adds a `skipped long pauses
 before whole-clip transcription` line with `pauses_dropped_ms`. macOS,
-streams, meetings, captures, and the local API are unchanged, and off the
-clip is passed through untouched. Checks:
+streams, meetings, captures, and the local API are unchanged, and off, the
+pause cut leaves the clip untouched. Checks:
 `skipping_pauses_cuts_a_whole_clips_long_pauses_to_their_ends`,
 `skipping_pauses_leaves_short_pauses_and_quiet_only_clips_whole`, and
 `with_skip_pauses_off_the_whole_clip_is_untouched` in

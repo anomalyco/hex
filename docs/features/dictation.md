@@ -1133,7 +1133,7 @@ Model advertises streaming, GPU device             // dictate.streaming
   Release -> Collect the release tail (200 ms, up to 600 ms while speech goes on)
     -> Finish with the complete clip
     -> Feed any unfed remainder
-    -> macOS Unified English: feed 400 ms of silence, as the whole clip gets
+    -> Unified English: feed 400 ms of silence, as the whole clip gets (every OS)
     -> Finalize -> Final text
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
@@ -1452,11 +1452,15 @@ sections in each repetition. This is Metal inference evidence on an M2 Max, not
 physical capture/paste or Linux runtime proof. Chunk boundaries can still affect
 individual words; this is not a claim of perfect recognition or silence handling.
 
-The macOS `Transcriber` owns backend input padding for ordinary
-transcription. `short_unified_input_is_minimum_padded_before_trailing_context`
-in [transcription.rs](../../src/transcription.rs) checks minimum-duration padding
-followed by Unified English's additional trailing silence. This is a pure sample
-policy check, not native inference-quality proof.
+`pad_gguf_samples` in [transcription.rs](../../src/transcription.rs) owns backend
+input padding on every OS for ordinary transcription: the minimum duration,
+then Unified English's additional trailing silence. The macOS `Transcriber` and
+the Linux and Windows `LocalTranscriber::transcribe_clip` both call it; a
+non-macOS whole-clip run calls it after its pause cut.
+`short_unified_input_is_minimum_padded_before_trailing_context` in
+[transcription.rs](../../src/transcription.rs) checks minimum-duration padding
+followed by Unified English's additional trailing silence. This is a pure
+sample policy check, not native inference-quality proof.
 
 **Fixed October 31, 2026 (issue 657):** with Unified English on macOS,
 dictated sentences and questions pasted without their closing full stop or
@@ -1466,8 +1470,18 @@ trailing silence at all, and whole clips got only 200 ms. Both now get
 the stream hears it through `PauseCap` just before finalizing). Check:
 `a_dictation_stream_hears_trailing_silence_before_it_finalizes` in
 transcription/engine.rs (a fake stream). Not measured on the real model or a
-microphone; Linux and Windows streams are unchanged. Padding is now included in
-`inference_ms`; `prepare_ms` covers clip conversion and diagnostic retention.
+microphone; at the time, Linux and Windows streams were unchanged. Padding is
+now included in `inference_ms`; `prepare_ms` covers clip conversion and
+diagnostic retention.
+
+**Fixed November 10, 2026 (issue 1629):** Windows and Linux had been gated out
+of that fix. They now get the same 400 ms for Unified English on stream finish
+(`LocalTranscriber::stream_trailing_silence` through `PauseCap`) and on the
+whole clip. A whole-clip run cuts long pauses first, then pads, so a trailing
+pause cannot trim the silence. Check:
+`a_whole_clip_is_padded_after_cutting_its_trailing_pause` in
+transcription/engine.rs. Not measured on a real Windows or Linux model or
+microphone.
 
 ```ts
 Listening idle                            // dictate.model-memory
