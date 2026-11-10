@@ -779,9 +779,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   no pre-roll, preserves the physical press for the hold threshold, discards a
   release before readiness, and closes only after the authoritative capture is
   idle. Accepted jobs never keep the stream open. A stream failure before the
-  hold threshold returns the press to pending and reopens; a later failure
-  keeps the audio already delivered as a copy-only dictation, or fails the
-  capture when no audio after the start arrived or it is near-silent. Cold
+  hold threshold returns the press to pending and reopens; on macOS, a later
+  failure keeps the audio already delivered as a copy-only dictation, or fails
+  the capture when no audio after the start arrived or it is near-silent. Cold
   opens retry the selected device briefly before falling back.
 - Model inference, optional post-processing, and paste must
   never block authoritative audio capture. Their queues remain bounded.
@@ -907,12 +907,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   kept. An explicit CLI `--device` remains authoritative for that listener
   process and never falls back. A stream that already failed or delivered
   digital silence is stopped before its replacement opens, so the replacement
-  starts with no dictation stream on the device, as at launch. A runtime stream
-  failure keeps a shortcut dictation held past the hold threshold, or a
-  `hex dictation start` control capture, along with the audio delivered before
-  the failure: transcribed and processed like a dictation, then copied rather
-  than pasted (the disruption may have moved focus), still Paste Last
-  Dictation and History, with no error tone. A clip with no audio after its
+  starts with no dictation stream on the device, as at launch. On macOS, a
+  runtime stream failure keeps a shortcut dictation held past the hold
+  threshold, or a `hex dictation start` control capture, along with the audio
+  delivered before the failure: transcribed and processed like a dictation
+  (Dictate without processing copies it unprocessed), then copied rather than
+  pasted (the disruption may have moved focus), still Paste Last Dictation and
+  History, with no error tone. A clip with no audio after its
   start, or a near-silent one, fails as before; a programmatic capture keeps
   its audio for its owner's `/finish`, which answers `microphone-lost` when
   there is none. Audio from after the loss and stale chunks are dropped, and

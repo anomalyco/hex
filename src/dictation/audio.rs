@@ -2216,9 +2216,10 @@ mod tests {
                 Some(DictationAudioEvent::Reopened)
             ));
 
-            // Neither capture has a clip to keep: the first delivered nothing
-            // at all, and the second's chunk arrived without the capture ever
-            // being marked intentional. The previous failure stands.
+            // Neither capture has a clip to keep: the first delivered a chunk
+            // but was never marked intentional, and the second was marked
+            // intentional without delivering any audio. The previous failure
+            // stands.
             owner.handle_input(RecoveringAudioInputEvent::Interrupted);
             assert!(!input.is_recording());
             assert!(matches!(
