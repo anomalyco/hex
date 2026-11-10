@@ -498,7 +498,7 @@ impl Taken {
         shortcuts: Shortcuts,
         picking: bool,
         card: bool,
-        recording_shortcut: bool,
+        suspended: bool,
     ) -> (Take, Effect) {
         let Some(bit) = 1u128.checked_shl(u32::from(key.code)) else {
             return (Take::No, Effect::None);
@@ -513,7 +513,7 @@ impl Taken {
             self.0 &= !bit;
             return (if ours { take } else { Take::No }, Effect::None);
         }
-        if recording_shortcut {
+        if suspended {
             return (Take::No, Effect::None);
         }
         let pressed = |hotkey: Option<RuntimeHotkey>| {
@@ -565,7 +565,7 @@ pub(crate) fn key(key: Key) -> Take {
         shortcuts,
         picking,
         crate::rune_ui::screenshot_thumbnail::hovered(),
-        crate::app_settings::hotkey_capture_active(),
+        crate::app_settings::shortcuts_suspended(),
     );
     drop(taken);
     match effect {

@@ -362,7 +362,7 @@ fn poll() {
     // SAFETY: a read-only HIToolbox query.
     let secure = unsafe { IsSecureEventInputEnabled() } != 0;
     let sink = sink();
-    let wanted = if secure && sink.is_some() && !crate::app_settings::hotkey_capture_active() {
+    let wanted = if secure && sink.is_some() && !crate::app_settings::shortcuts_suspended() {
         chords(crate::app_settings::runtime_hotkeys(), screenshot_hotkeys())
     } else {
         Vec::new()

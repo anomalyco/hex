@@ -284,6 +284,15 @@ pub fn speakers_only() -> bool {
     on(SPEAKERS_ONLY) && Feature::SpeakersOnly.on_this_os()
 }
 
+/// The menu bar offers Pause Hex, and every capture shortcut is inert while
+/// it is paused (macOS; read each time the status item refreshes, as each
+/// shortcut's suspension is read, and when settings change so turning the
+/// lab off resumes).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn pause_menu() -> bool {
+    on(PAUSE_MENU) && Feature::PauseMenu.on_this_os()
+}
+
 /// A physical Caps Lock press starts and stops dictation, and its light
 /// follows Hex's recording and processing (macOS; read by the listener on
 /// every pass and by the event tap and HID tracker through their own flag).

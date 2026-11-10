@@ -713,9 +713,8 @@ pub fn listen(
         if next_revision != transcription_revision && dictation_worker.reload(selection).is_ok() {
             transcription_revision = next_revision;
         }
-        let hotkey_capture_active = crate::app_settings::hotkey_capture_active();
-        let hotkey_capture_suspended = hotkey_capture_active || input.is_recovering();
-        if hotkey_capture_suspended && hotkeys.suspend_all() {
+        let hotkey_capture_suspended = crate::shortcut_pause::tick() || input.is_recovering();
+        if hotkeys.suspend_when(hotkey_capture_suspended) {
             handle_hotkey_action(
                 HotkeyAction::Cancel,
                 false,
@@ -1779,6 +1778,7 @@ mod tests {
             extra: std::array::from_fn(|_| None),
             caps_lock: DictationHotkey::new(base, false, RuntimeHotkey::default()),
             raw_capture: false,
+            suspended: false,
         };
         let mut press = |flags: u64, ms: u64| hotkeys.process(InputEvent::Flags(flags), at(ms));
         const START: HotkeyAction = HotkeyAction::Start;
@@ -1827,6 +1827,7 @@ mod tests {
             extra: std::array::from_fn(|_| None),
             caps_lock: DictationHotkey::new(base, false, RuntimeHotkey::default()),
             raw_capture: false,
+            suspended: false,
         };
         hotkeys.rebind_extra(bindings, base);
         let cancel = crate::app_settings::HotkeyBinding::cancel_default().runtime();
@@ -2075,6 +2076,7 @@ mod tests {
             extra: std::array::from_fn(|_| None),
             caps_lock,
             raw_capture: false,
+            suspended: false,
         }
     }
 

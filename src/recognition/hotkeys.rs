@@ -56,6 +56,9 @@ pub(super) struct Hotkeys {
     /// The recording (or the last) skips processing: the raw shortcut or
     /// `hex dictation start --raw` started it.
     pub(super) raw_capture: bool,
+    /// Whether the listener last saw shortcuts suspended, so that a capture
+    /// a command starts during a pause is left alone.
+    pub(super) suspended: bool,
 }
 
 impl Hotkeys {
@@ -69,6 +72,7 @@ impl Hotkeys {
             extra: std::array::from_fn(|_| None),
             caps_lock,
             raw_capture: false,
+            suspended: false,
         }
     }
 
@@ -161,6 +165,17 @@ impl Hotkeys {
     /// would) and reports whether one was recording.
     pub(super) fn suspend_all(&mut self) -> bool {
         self.machines().filter_map(DictationHotkey::suspend).count() > 0
+    }
+
+    /// Suspends every machine when shortcuts become suspended, once per
+    /// suspension: the capture under way is cancelled, while a capture a
+    /// command starts during the same suspension keeps recording. Reports
+    /// whether one was recording when the suspension began.
+    pub(super) fn suspend_when(&mut self, suspended: bool) -> bool {
+        if std::mem::replace(&mut self.suspended, suspended) == suspended {
+            return false;
+        }
+        suspended && self.suspend_all()
     }
 
     pub(super) fn disarm_pending_gestures(&mut self) {
@@ -342,5 +357,42 @@ pub(super) fn rebind(
             }
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_settings::RuntimeHotkey;
+
+    fn hotkeys() -> Hotkeys {
+        let base = CaptureInstant::ZERO;
+        Hotkeys::new(
+            DictationHotkey::new(base, true, RuntimeHotkey::default()),
+            DictationHotkey::new(base, false, RuntimeHotkey::default()),
+        )
+    }
+
+    #[test]
+    fn a_pause_cancels_once_and_leaves_a_command_capture_alone() {
+        let mut hotkeys = hotkeys();
+        assert!(!hotkeys.suspend_when(false));
+
+        // A capture under way is cancelled as the pause begins.
+        assert!(hotkeys.dictation.lock());
+        assert!(hotkeys.any_recording());
+        assert!(hotkeys.suspend_when(true));
+        assert!(!hotkeys.any_recording());
+
+        // While the same pause holds, a command's capture keeps recording.
+        assert!(hotkeys.dictation.lock());
+        assert!(!hotkeys.suspend_when(true));
+        assert!(hotkeys.any_recording());
+
+        // Resuming leaves it alone too; the next pause cancels it.
+        assert!(!hotkeys.suspend_when(false));
+        assert!(hotkeys.any_recording());
+        assert!(hotkeys.suspend_when(true));
+        assert!(!hotkeys.any_recording());
     }
 }

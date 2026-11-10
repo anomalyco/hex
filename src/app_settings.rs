@@ -1387,6 +1387,13 @@ pub fn set_hotkey_capture_active(active: bool) {
     HOTKEY_CAPTURE_ACTIVE.store(active, Ordering::Release);
 }
 
+/// Whether shortcut matching is suspended: a new shortcut binding is being
+/// recorded, or Labs › Pause from menu bar paused Hex. Every capture
+/// shortcut reads this instead of `hotkey_capture_active` alone.
+pub fn shortcuts_suspended() -> bool {
+    hotkey_capture_active() || crate::shortcut_pause::suspended()
+}
+
 /// The Dock policy while no Settings window is open. An open window always
 /// shows the icon: hiding it deactivates Hex asynchronously, which would drop
 /// that window behind other applications.

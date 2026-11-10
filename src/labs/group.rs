@@ -107,7 +107,8 @@ impl Feature {
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone
             | Self::ShareShortcut
-            | Self::CapsLockDictation => Group::Shortcuts,
+            | Self::CapsLockDictation
+            | Self::PauseMenu => Group::Shortcuts,
             Self::KeyboardModelSwitching
             | Self::AppModelSwitching
             | Self::UnloadIdle

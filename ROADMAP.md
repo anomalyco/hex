@@ -141,12 +141,12 @@ with cold-microphone capture, before calling #77 done.
 
 Track the remaining shortcut requests explicitly:
 
-- [#82](https://github.com/anomalyco/hex/issues/82): menu-bar Pause/Resume must
-  remain deferred for now; quitting Hex is sufficient for the current scope.
-  If revisited, it must
-  suspend capture shortcuts and command activation, cancel only active capture,
-  retain accepted output, and require key release before resuming. Test event-tap
-  suppression as well as the recognition state. App exclusions are a later slice.
+- [#82](https://github.com/anomalyco/hex/issues/82): menu-bar Pause/Resume ships
+  as the `pause-menu` Lab ([labs.md](docs/features/labs.md)), off by default.
+  It suspends every capture shortcut and the secure-input Carbon hotkeys, passes
+  every key event through, cancels only active capture, keeps accepted output,
+  and requires a neutral keyboard before shortcuts go live again. App exclusions
+  (pausing only in chosen apps) are a later slice.
 - [#77](https://github.com/anomalyco/hex/issues/77): Toggle mode is implemented;
   it still needs physical chord-discard and cold-microphone checks.
 - [#67](https://github.com/anomalyco/hex/issues/67): standalone keypad/character

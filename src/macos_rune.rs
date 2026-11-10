@@ -861,6 +861,7 @@ impl Pump {
                 crate::app_settings::meetings_enabled(),
             );
             crate::macos_rune::status_item::update_software(&update_status());
+            crate::macos_rune::status_item::update_pause();
             self.meeting_menu_at = now + MEETING_MENU_REFRESH;
         }
     }
@@ -950,6 +951,16 @@ impl Pump {
                 }
             }
             StatusItemAction::OpenMeetings => show(&self.window, Destination::Meetings(None)),
+            // Labs › Pause from menu bar: only keyboard shortcuts stop; the
+            // menu's own actions keep working.
+            StatusItemAction::TogglePause => {
+                if crate::shortcut_pause::paused() {
+                    crate::shortcut_pause::resume();
+                } else {
+                    crate::shortcut_pause::pause();
+                }
+                crate::macos_rune::status_item::update_pause();
+            }
             StatusItemAction::Quit => {
                 self.runtime_cancel();
                 self.window.quit();
