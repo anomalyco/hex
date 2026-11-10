@@ -104,7 +104,7 @@ final class KeyboardViewController: UIInputViewController {
         if wantsFull {
             let keyboard = FullKeyboardView(
                 model: viewModel,
-                target: DocumentProxyTextTarget { [unowned self] in self.textDocumentProxy }
+                target: DocumentProxyTextTarget { [weak self] in self?.textDocumentProxy }
             )
             keyboard.hostController = self
             keyboard.allowsHaptics = { [weak self] in self?.hasFullAccess ?? false }
@@ -112,7 +112,9 @@ final class KeyboardViewController: UIInputViewController {
             mounted = keyboard
             heightConstraint?.constant = keyboard.preferredHeight
         } else {
-            let hosting = UIHostingController(rootView: KeyboardSurfaceView(model: viewModel))
+            let hosting = UIHostingController(
+                rootView: KeyboardSurfaceView(model: viewModel, defersDotScopeUntilActive: true)
+            )
             hosting.view.backgroundColor = .clear
             addChild(hosting)
             hosting.didMove(toParent: self)
