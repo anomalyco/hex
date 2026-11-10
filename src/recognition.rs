@@ -28,12 +28,14 @@ use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputMonit
 mod context_watch;
 mod guards;
 mod hotkeys;
+mod output;
 
 use context_watch::ContextWatch;
 use guards::{
     caps_lock_can_press, capture_boundary, capture_refusal, claims_escape, paste_last_refusal,
 };
 use hotkeys::{Hotkeys, Shortcut};
+use output::{salvage_dictation, submit_dictation};
 
 enum FinishResult {
     Discarded,
@@ -1023,26 +1025,44 @@ pub fn listen(
                 DictationAudioEvent::Interrupted {
                     was_recording,
                     kept,
+                    keep_hotkey,
                     ..
                 } => {
-                    if was_recording {
-                        programmatic_microphone_lost(
-                            programmatic.take(),
-                            kept,
-                            "mic-interrupted",
-                            &mut programmatic_lost,
-                            &mut programmatic_completions,
-                        );
-                    }
                     hotkeys.suspend_all();
                     if was_recording {
-                        fail_capture(
-                            "Microphone capture was interrupted; reconnecting.".into(),
-                            &dictation_worker,
-                            &input.device_name(),
-                            &mut events,
-                            indicator,
-                        )?;
+                        match kept {
+                            // A recording shortcut keeps what it heard: the
+                            // person may have lost a long dictation, and the
+                            // disruption may have moved focus, so it is copied
+                            // instead of pasted.
+                            Some(clip) if keep_hotkey => {
+                                let context = context.finish(&mut events)?;
+                                salvage_dictation(
+                                    clip,
+                                    &dictation_worker,
+                                    context,
+                                    &input.device_name(),
+                                    &mut events,
+                                    indicator,
+                                )?;
+                            }
+                            kept => {
+                                programmatic_microphone_lost(
+                                    programmatic.take(),
+                                    kept,
+                                    "mic-interrupted",
+                                    &mut programmatic_lost,
+                                    &mut programmatic_completions,
+                                );
+                                fail_capture(
+                                    "Microphone capture was interrupted; reconnecting.".into(),
+                                    &dictation_worker,
+                                    &input.device_name(),
+                                    &mut events,
+                                    indicator,
+                                )?;
+                            }
+                        }
                     }
                 }
             }
@@ -1635,28 +1655,7 @@ fn finish_dictation_with(
     if tail.is_zero() {
         feedback::play(Tone::DictationStop);
     }
-    events.emit(&VoiceEvent::State {
-        timestamp_ms: now_ms(),
-        state: VoiceState::Transcribing,
-        device: device.into(),
-    })?;
-    events.dictation(DictationPhase::Transcribing, "")?;
-    match submit(clip) {
-        Ok(job_id) => {
-            indicator.send(DictationIndicatorEvent::Submitted {
-                job_id: job_id.value(),
-            });
-            Ok(FinishResult::Submitted)
-        }
-        Err(error) => {
-            feedback::play(Tone::Error);
-            events.dictation(DictationPhase::Failed(error.into()), "")?;
-            indicator.send(DictationIndicatorEvent::Failed {
-                message: Some(error.into()),
-            });
-            Ok(FinishResult::Rejected(error.into()))
-        }
-    }
+    submit_dictation(clip, submit, false, device, events, indicator)
 }
 
 fn handle_dictation_event(
@@ -1682,9 +1681,9 @@ fn handle_dictation_event(
             processing,
         } => {
             let phase = match target {
-                TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
-                    DictationPhase::Pasted
-                }
+                TranscriptionTarget::Paste
+                | TranscriptionTarget::CopyOnlyPaste
+                | TranscriptionTarget::RawPaste => DictationPhase::Pasted,
                 TranscriptionTarget::Print | TranscriptionTarget::RawPrint => {
                     DictationPhase::Printed
                 }

@@ -57,8 +57,12 @@ pub enum DictationAudioEvent {
     Interrupted {
         was_recording: bool,
         capture_generation: u64,
-        /// A programmatic capture's audio delivered before the loss.
+        /// A capture's audio delivered before the loss.
         kept: Option<DictationClip>,
+        /// The kept clip is a recording shortcut's: transcribe and copy it
+        /// instead of dropping it. A programmatic clip belongs to its owner's
+        /// `/finish`.
+        keep_hotkey: bool,
     },
     Reopened,
     CaptureDiscontinuity {
@@ -410,6 +414,7 @@ impl DictationAudio {
                 was_recording,
                 capture_generation,
                 kept,
+                ..
             }
             | DictationAudioEvent::CaptureDiscontinuity {
                 was_recording,
@@ -819,7 +824,7 @@ impl Owner {
                     self.discontinuity_at = Some(Instant::now());
                     let was_recording = self.capture.is_recording();
                     let capture_generation = self.state.capture_generation.load(Ordering::Acquire);
-                    let kept = self.keep_lost_capture(self.last_captured_through);
+                    let kept = self.keep_lost_capture(self.last_captured_through, false);
                     self.capture = new_capture(self.sample_rate(), &self.recording_environment);
                     self.state.recording.store(false, Ordering::Release);
                     self.next_recognition_generation();
@@ -899,7 +904,8 @@ impl Owner {
                 }
                 let was_recording = self.capture.is_recording();
                 let capture_generation = self.state.capture_generation.load(Ordering::Acquire);
-                let kept = self.keep_lost_capture(lost_through);
+                let kept = self.keep_lost_capture(lost_through, true);
+                let keep_hotkey = kept.is_some() && !self.keep_on_loss;
                 self.capture.cancel();
                 self.state.recording.store(false, Ordering::Release);
                 self.state.recovering.store(true, Ordering::Release);
@@ -907,6 +913,7 @@ impl Owner {
                     was_recording,
                     capture_generation,
                     kept,
+                    keep_hotkey,
                 });
                 if self.release_while_idle && !self.capture_sink_open() {
                     self.close_input();
@@ -1050,12 +1057,21 @@ impl Owner {
         self.keep_on_loss = matches!(kind, CaptureKind::Programmatic);
     }
 
-    /// Finishes a programmatic capture the microphone cut short at the last
-    /// audio delivered before the loss, as a release-tail finish keeps the
-    /// audio already delivered. Other captures are dropped by the caller.
-    /// Pre-roll alone is not a usable clip: it needs audio from after the start.
-    fn keep_lost_capture(&mut self, through: Option<CaptureInstant>) -> Option<DictationClip> {
-        let started_at = self.capture.started_at().filter(|_| self.keep_on_loss)?;
+    /// Finishes a capture the microphone cut short at the last audio delivered
+    /// before the loss, as a release-tail finish keeps the audio already
+    /// delivered. A programmatic capture always keeps its audio for its
+    /// owner's `/finish`; `keep_hotkey` keeps a recording shortcut's instead of
+    /// dropping it. Other captures are dropped by the caller. Pre-roll alone is
+    /// not a usable clip: it needs audio from after the start.
+    fn keep_lost_capture(
+        &mut self,
+        through: Option<CaptureInstant>,
+        keep_hotkey: bool,
+    ) -> Option<DictationClip> {
+        let started_at = self
+            .capture
+            .started_at()
+            .filter(|_| self.keep_on_loss || (keep_hotkey && self.capture.is_intentional()))?;
         let through = through.filter(|through| *through > started_at)?;
         match self.capture.finish_with_tail(through, Duration::ZERO) {
             Finish::Transcribe(mut clip) => {
@@ -2033,7 +2049,7 @@ mod tests {
     }
 
     #[test]
-    fn microphone_loss_keeps_only_a_programmatic_captures_delivered_audio() {
+    fn microphone_loss_keeps_a_recording_captures_delivered_audio() {
         for programmatic in [false, true] {
             for gap in [false, true] {
                 let (mut owner, input, _samples) = owner_for_test(true);
@@ -2070,21 +2086,26 @@ mod tests {
                     owner.handle_input(RecoveringAudioInputEvent::Interrupted);
                 }
                 assert!(!input.is_recording());
-                let (was_recording, kept) = match input.try_recv_event() {
+                let (was_recording, kept, keep_hotkey) = match input.try_recv_event() {
                     Some(DictationAudioEvent::CaptureDiscontinuity {
                         was_recording,
                         kept,
                         ..
-                    }) if gap => (was_recording, kept),
+                    }) if gap => (was_recording, kept, false),
                     Some(DictationAudioEvent::Interrupted {
                         was_recording,
                         kept,
+                        keep_hotkey,
                         ..
-                    }) if !gap => (was_recording, kept),
+                    }) if !gap => (was_recording, kept, keep_hotkey),
                     _ => panic!("expected the loss to be reported"),
                 };
                 assert!(was_recording);
-                assert_eq!(kept.is_some(), programmatic, "gap {gap}");
+                // A stream failure keeps a recording shortcut's audio, but a
+                // gap still fails the capture and only a programmatic one
+                // keeps its clip for `/finish`.
+                assert_eq!(kept.is_some(), programmatic || !gap, "gap {gap}");
+                assert_eq!(keep_hotkey, !programmatic && !gap);
                 if let Some(clip) = kept {
                     // The 10 ms pre-roll and the 400 ms delivered before the
                     // loss; nothing from after it.
@@ -2202,6 +2223,8 @@ mod tests {
                 input.try_recv_event(),
                 Some(DictationAudioEvent::Interrupted {
                     was_recording: true,
+                    kept: None,
+                    keep_hotkey: false,
                     ..
                 })
             ));

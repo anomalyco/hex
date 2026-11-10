@@ -12,6 +12,7 @@ platforms, and dependencies.
 - [Finish without losing other work](#finish-without-losing-other-work).
 - [Rearm without a phantom capture](#rearm-without-a-phantom-capture).
 - [Reopen with fresh audio](#reopen-with-fresh-audio).
+- [Keep an interrupted dictation](#keep-an-interrupted-dictation).
 - [Fence late capture notifications](#fence-late-capture-notifications).
 - [Degrade only the failing dependency](#degrade-only-the-failing-dependency).
 - [Keep Linux listeners managed](#keep-linux-listeners-managed).
@@ -253,7 +254,9 @@ listener restart, even after cancellation.
 
 ```ts
 initial open fails OR stream interrupts
-  -> cancel incomplete capture + discard stale audio  // interrupted audio cannot return
+  -> a recording shortcut dictation keeps what it heard  // recover.interrupted-dictation
+     -> transcribed and copied, never pasted
+  -> otherwise cancel the incomplete capture + discard stale audio  // interrupted audio cannot return
   -> bounded backoff -> reopen the resolved input     // warm microphone retries
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
@@ -356,7 +359,7 @@ values; no iPhone observed with the lid closed),
 `a_dead_stream_is_stopped_before_its_replacement_opens`;
 [dictation/audio.rs](../../src/dictation/audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
-`microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,
+`microphone_loss_keeps_a_recording_captures_delivered_audio`,
 `microphone_loss_with_only_pre_roll_keeps_nothing`,
 `finish_after_an_unread_microphone_loss_takes_the_kept_clip`,
 `a_dictation_of_digital_silence_reopens_the_microphone`;
@@ -415,7 +418,9 @@ ready stream fails while the press is held
   ├── before the 300 ms hold threshold -> back to pending, reopen for the same press
   │     ├── release before ready -> discard
   │     └── ready -> capture from the original press -> expected output
-  └── after the threshold -> fail with "Microphone capture was interrupted"
+  └── after the threshold -> keep the audio delivered, transcribed and
+        copied (recover.interrupted-dictation), or fail with
+        "Microphone capture was interrupted" when none arrived
 Microphone overload (Xrun) or refused real-time promotion -> counted; one warning per burst // not a failure
   └── Some hosts report it from the thread that runs the stream: that callback only
       counts, the poll that drains the stream writes the count at most once per 10 s,
@@ -536,6 +541,37 @@ stopped delivering audio without reporting an error, so every dictation held
 only the stale pre-roll and was discarded as no speech until Hex restarted. An
 open stream that delivers nothing for 4 s now counts as failed and is reopened
 with the usual bounded recovery. Not verified on the reporter's microphone.
+
+### Keep An Interrupted Dictation
+
+`recover.interrupted-dictation`: a recording shortcut whose microphone fails
+keeps what it already heard instead of dropping the whole dictation.
+
+```ts
+shortcut held past the hold threshold -> stream fails or stalls
+  -> audio delivered up to the loss is kept        // pre-roll alone keeps nothing
+  -> transcribed and processed like a dictation
+  -> final text copied, never pasted              // the disrupting app may hold focus
+     -> Paste Last Dictation and History keep it
+  -> no error tone or Failed HUD; the HUD transcribes, processes, completes
+  -> no audio after the start -> the previous failure, "Microphone capture was interrupted"
+```
+
+The copied text is processed exactly like a normal dictation, including mode
+corrections, OpenCode rewriting, and transformations; the copy is forced for
+this job whether or not Labs › Copy dictation only is on. The shortcut machine
+is suspended, so the eventual key release does nothing, and the microphone
+reopens with the usual bounded recovery. A microphone gap over 250 ms still
+fails the capture as a discontinuity.
+
+Checks in [dictation/audio.rs](../../src/dictation/audio.rs):
+`microphone_loss_keeps_a_recording_captures_delivered_audio` (a recording
+shortcut keeps its clip; a gap still keeps only a programmatic capture's) and
+`cold_stream_failure_after_hold_threshold_still_fails_the_capture` (nothing
+after the start keeps nothing). In [parakeet.rs](../../src/parakeet.rs):
+`a_salvaged_dictation_is_copied_and_kept_for_paste_last_and_history`. Proof
+limit: channel-backed audio and the output worker, not a physical microphone
+taken by a call app or a target app's clipboard.
 
 ### Fence Late Capture Notifications
 

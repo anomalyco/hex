@@ -779,8 +779,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   no pre-roll, preserves the physical press for the hold threshold, discards a
   release before readiness, and closes only after the authoritative capture is
   idle. Accepted jobs never keep the stream open. A stream failure before the
-  hold threshold returns the press to pending and reopens; later failures fail
-  the capture. Cold opens retry the selected device briefly before falling back.
+  hold threshold returns the press to pending and reopens; a later failure
+  keeps the audio already delivered as a copy-only dictation, or fails the
+  capture when no audio after the start arrived. Cold opens retry the selected
+  device briefly before falling back.
 - Model inference, optional post-processing, and paste must
   never block authoritative audio capture. Their queues remain bounded.
 - CoreAudio capture timestamps and annotated-session CGEvent shortcut timestamps
@@ -906,13 +908,17 @@ CoreAudio formats, AppleScript details, or event serialization.
   process and never falls back. A stream that already failed or delivered
   digital silence is stopped before its replacement opens, so the replacement
   starts with no dictation stream on the device, as at launch. A runtime stream
-  failure cancels an incomplete capture (a programmatic one keeps the audio
-  delivered before the failure for its owner's `/finish`, which answers
-  `microphone-lost` when there is none), discards stale chunks, and retries
-  with bounded backoff; it must not require a settings change or process
-  restart. An initial open failure uses the same bounded recovery without
-  stopping the listener. Cancellation does not stop warm-microphone retries;
-  enabling release-while-idle stops them once capture is idle.
+  failure keeps a recording shortcut's audio delivered before the failure:
+  transcribed and processed like a dictation, then copied rather than pasted
+  (the disruption may have moved focus), still Paste Last Dictation and
+  History, with no error tone. Without audio after its start it fails, as
+  before; a programmatic capture keeps its audio for its owner's `/finish`,
+  which answers `microphone-lost` when there is none. Audio from after the loss
+  and stale chunks are dropped, and the stream retries with bounded backoff;
+  it must not require a settings change or process restart. An initial open
+  failure uses the same bounded recovery without stopping the listener.
+  Cancellation does not stop warm-microphone retries; enabling
+  release-while-idle stops them once capture is idle.
 - On Linux, opening ALSA's default device loads PipeWire's ALSA plugin into
   Hex's own process, so `main` sets `DISABLE_RTKIT` before any stream opens:
   PipeWire's realtime module would otherwise lower this process's realtime CPU

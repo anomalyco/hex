@@ -86,6 +86,10 @@ pub enum PasteKind {
 #[derive(Clone, Copy, Debug)]
 pub enum TranscriptionTarget {
     Paste,
+    /// A recording microphone interrupted a shortcut dictation: processed
+    /// like a paste, but copied to the clipboard instead of pasted, still
+    /// available to Paste Last Dictation and kept in History.
+    CopyOnlyPaste,
     /// Dictate without processing: pasted as heard, skipping the Output
     /// pane's steps.
     RawPaste,
@@ -853,7 +857,9 @@ fn run_inference_worker(
             Ok(text)
                 if matches!(
                     target,
-                    TranscriptionTarget::Paste | TranscriptionTarget::Print
+                    TranscriptionTarget::Paste
+                        | TranscriptionTarget::CopyOnlyPaste
+                        | TranscriptionTarget::Print
                 ) && !text.trim().is_empty() =>
             {
                 if processor_jobs
@@ -1034,11 +1040,17 @@ fn finish_output(
                 if !completed.text.trim().is_empty() {
                     let commit = || control.begin_output();
                     match target {
-                        TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
+                        TranscriptionTarget::Paste
+                        | TranscriptionTarget::CopyOnlyPaste
+                        | TranscriptionTarget::RawPaste => {
                             // Labs › Copy dictation only, read as the output
                             // commits: dictations go to the clipboard
                             // unpasted; Paste last dictation still pastes.
-                            let mode = if crate::labs::copy_only() {
+                            // A rescued microphone-loss dictation is always
+                            // copied: the disruption may have taken focus.
+                            let mode = if crate::labs::copy_only()
+                                || matches!(target, TranscriptionTarget::CopyOnlyPaste)
+                            {
                                 PasteMode::CopyOnly
                             } else {
                                 PasteMode::Continue
@@ -1074,7 +1086,9 @@ fn finish_output(
                     .map_err(|error| error.to_string())?;
                     if matches!(
                         target,
-                        TranscriptionTarget::Paste | TranscriptionTarget::RawPaste
+                        TranscriptionTarget::Paste
+                            | TranscriptionTarget::CopyOnlyPaste
+                            | TranscriptionTarget::RawPaste
                     ) {
                         *last_transcript = Some(completed.text.clone());
                     }
@@ -1147,7 +1161,7 @@ fn record_history(
     completed: &mut CompletedTranscript,
 ) {
     let kind = match target {
-        TranscriptionTarget::Paste => HistoryKind::Dictation,
+        TranscriptionTarget::Paste | TranscriptionTarget::CopyOnlyPaste => HistoryKind::Dictation,
         TranscriptionTarget::RawPaste => HistoryKind::Raw,
         TranscriptionTarget::Print | TranscriptionTarget::RawPrint => HistoryKind::Printed,
         TranscriptionTarget::Service => return,
@@ -1521,6 +1535,72 @@ mod tests {
             "You: First. Still me.\n\nThem: Reply.\n\nYou: Second."
         );
         assert!(format_meeting_delta(&[]).is_err());
+    }
+
+    #[test]
+    fn a_salvaged_dictation_is_copied_and_kept_for_paste_last_and_history() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-parakeet-salvage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let history = History::new(crate::history::HistoryStore::open(
+            directory.join("history.json"),
+            crate::history::HistoryRetention::Week,
+            crate::history::now_ms(),
+        ));
+        let text = "the part of the dictation the microphone heard";
+        let mut pasted = None;
+        let mut last_transcript = None;
+        let event = finish_output(
+            OutputJob::Completed {
+                job_id: DictationJobId(1),
+                control: Arc::new(JobControl::default()),
+                target: TranscriptionTarget::CopyOnlyPaste,
+                result: Box::new(Ok(CompletedTranscript {
+                    text: text.into(),
+                    raw: text.into(),
+                    application: Some("Call".into()),
+                    return_to: None,
+                    timings: JobTimings {
+                        total_started: Instant::now(),
+                        queue_ms: 0,
+                        audio_ms: 4_000,
+                        prepare_ms: 0,
+                        inference_ms: 0,
+                    },
+                    processing: None,
+                    recording: None,
+                })),
+            },
+            &mut |pasted_text, mode, commit| {
+                assert!(commit());
+                pasted = Some((pasted_text.to_string(), mode));
+                Ok(())
+            },
+            &mut last_transcript,
+            Some(&history),
+        );
+
+        assert!(matches!(
+            event,
+            WorkerEvent::Completed {
+                result: Ok(ref completed),
+                ..
+            } if completed.as_str() == text
+        ));
+        let (pasted_text, mode) = pasted.expect("the transcript reaches the clipboard");
+        assert_eq!(pasted_text, text);
+        assert!(
+            matches!(mode, PasteMode::CopyOnly),
+            "an interrupted dictation is copied, never pasted"
+        );
+        assert_eq!(last_transcript.as_deref(), Some(text));
+        let entries = history.recent(1);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, HistoryKind::Dictation);
+        assert_eq!(entries[0].final_text, text);
+        assert_eq!(entries[0].application.as_deref(), Some("Call"));
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
