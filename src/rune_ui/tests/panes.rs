@@ -1007,7 +1007,7 @@ fn the_practice_page_waits_for_the_listener() {
         assert!(
             !shown
                 .iter()
-                .any(|text| text == "and answer the one that's lit"),
+                .any(|text| text == "and answer the one that's lit."),
             "{scene}: no hold prompt while warming: {shown:?}"
         );
         warming_state(&mut rt, false);
@@ -1015,7 +1015,7 @@ fn the_practice_page_waits_for_the_listener() {
         assert!(
             shown
                 .iter()
-                .any(|text| text == "and answer the one that's lit"),
+                .any(|text| text == "and answer the one that's lit."),
             "{scene}: the hold prompt returns: {shown:?}"
         );
         assert!(

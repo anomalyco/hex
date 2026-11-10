@@ -194,11 +194,11 @@ fn heading(p: Paint, motion: Motion, which: Perm) -> El {
     let (title, lead) = match which {
         Perm::Microphone => (
             tr("Let Hex hear you"),
-            "Hex listens only while you hold your shortcut.",
+            tr("Hex listens only while you hold your shortcut."),
         ),
         Perm::Accessibility => (
-            "Make it work everywhere",
-            "Let Hex notice your shortcut and type your words in any app.",
+            tr("Make it work everywhere"),
+            tr("Let Hex notice your shortcut and type your words in any app."),
         ),
     };
     heading_with(p, motion, which, title, lead)
@@ -310,7 +310,7 @@ fn live_page(p: Paint, live: &Live, s: &Onboard, which: Perm) -> El {
                 ItemStatus::Stale => tr("An older Hex entry can keep this off"),
                 ItemStatus::Waiting => tr("Switch on Hex in System Settings"),
                 ItemStatus::Restart => tr("Turns on when Hex restarts"),
-                _ => tr("Notices the shortcut and pastes your words in any app"),
+                _ => tr("Notices the shortcut and pastes your words"),
             };
             card.children((!mic_ready).then(|| separator(p, "sep0")))
                 .child(perm_row(
@@ -541,7 +541,7 @@ fn setup_card(p: Paint, mic: PermState, ax: PermState, tray_open: bool, escaped:
     let ax_desc = if ax == PermState::Asking {
         "Drag Hex into System Settings below"
     } else {
-        "Notices the shortcut and pastes your words in any app"
+        "Notices the shortcut and pastes your words"
     };
     let mut card = col()
         .key("setup-card")

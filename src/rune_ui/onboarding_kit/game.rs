@@ -1331,7 +1331,7 @@ fn header<S: 'static>(
                 )
                 .child(keys(p, "keys", look.caps, g.holding))
                 .child(
-                    text(tr("and answer the one that's lit"))
+                    text(tr("and answer the one that's lit."))
                         .key("rest")
                         .font(LEAD)
                         .color(p.muted()),
@@ -1740,7 +1740,7 @@ fn certificate(p: Paint, targeted: bool, signed: bool) -> El {
                         .color(p.text()),
                 )
                 .child(
-                    text(tr("I hereby have completed Hex onboarding."))
+                    text(tr("I hereby certify that I have completed Hex onboarding."))
                         .key("body")
                         .font(k.ty.ui)
                         .color(p.text()),
