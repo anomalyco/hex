@@ -555,8 +555,9 @@ impl AudioInput {
     }
 
     pub fn recv_timeout(&self, timeout: Duration) -> AudioInputEvent {
-        // The one place CoreAudio's overloads reach the log: its real-time
-        // callback only records them, and this poll is where they are counted.
+        // The one place a stream's overloads reach the log, whoever reported
+        // them: the error callback only counts them, and this poll writes the
+        // count.
         overloads::report();
         if self.watch_service_restarts
             && audio_service_restart_generation() != self.restart_generation
@@ -613,12 +614,13 @@ impl AudioInput {
 
     /// Reports how much audio the stream's callbacks deliver, once per open.
     /// cpal exposes no readback of the period it picks for `BufferSize::Default`
-    /// and CoreAudio overloads arrive sooner on a smaller one, so the first
-    /// chunk says what the device actually does.
+    /// and overloads arrive sooner on a smaller one, so the first chunk says
+    /// what the device actually does. A fixture input's chunks are its WAV
+    /// file's, not a device's, so it says nothing.
     fn report_period(&self, frames: usize) {
         let first = !self.reported_period.swap(true, Ordering::Relaxed);
         #[cfg(target_os = "macos")]
-        if first {
+        if first && !uses_fixture() {
             tracing::info!(
                 device = %self.device_name,
                 sample_rate = self.sample_rate,
@@ -630,6 +632,15 @@ impl AudioInput {
         // Only macOS logs the period; every platform keeps the same open state.
         #[cfg(not(target_os = "macos"))]
         let _ = (frames, first);
+    }
+}
+
+impl Drop for AudioInput {
+    fn drop(&mut self) {
+        // Stop the stream before the count is taken, so a closing stream's last
+        // burst is written here instead of beside the next open's lines.
+        self._stream = None;
+        overloads::flush();
     }
 }
 
@@ -1482,13 +1493,13 @@ impl StreamErrorReporter {
 
 fn report_stream_error(sender: &SyncSender<String>, error: cpal::Error) {
     match error.kind() {
-        // CoreAudio reports processor overloads, common while a cold device
-        // starts, without stopping the stream, on its real-time thread: a log
-        // line or a lock there blocks an already-late cycle. Only the counters
-        // move here; the audio owner reports the burst. Real sample gaps still
-        // surface as capture discontinuities.
-        cpal::ErrorKind::Xrun => overloads::record(false),
-        cpal::ErrorKind::RealtimeDenied => overloads::record(true),
+        // An overload or a refused real-time promotion is a glitch on a stream
+        // that keeps running, common while a cold device starts. Some hosts
+        // report it from the thread that runs the stream, where a log line or a
+        // lock blocks an already-late cycle, so only the counters move here and
+        // the audio owner writes the burst. Real sample gaps still surface as
+        // capture discontinuities.
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied => overloads::record(),
         _ => {
             tracing::error!(%error, "microphone stream failed");
             let _ = sender.try_send(error.to_string());

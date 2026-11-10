@@ -416,9 +416,10 @@ ready stream fails while the press is held
   │     ├── release before ready -> discard
   │     └── ready -> capture from the original press -> expected output
   └── after the threshold -> fail with "Microphone capture was interrupted"
-CoreAudio processor overload (Xrun) -> counted; one warning per burst // not a failure
-  └── The callback runs on CoreAudio's real-time thread: it only counts, and the
-      poll that drains the stream logs the count, at most once per 10 s
+Microphone overload (Xrun) or refused real-time promotion -> counted; one warning per burst // not a failure
+  └── Some hosts report it from the thread that runs the stream: that callback only
+      counts, the poll that drains the stream writes the count at most once per 10 s,
+      and a stream closed with a count left over writes it as it closes
 gap in the microphone timeline (warm or cold)
   ├── macOS: 50–250 ms -> filled with silence, capture continues // #619
   │     └── over 250 ms -> fail as a capture discontinuity
@@ -459,22 +460,24 @@ for their device, or a physical cold open after idle.
 Proof limit: controlled asynchronous opener and capture ownership, not onset
 latency or the macOS microphone indicator.
 
-**Changed in dev (overload logging):** that listener fires on CoreAudio's
-real-time thread, where the old line formatted itself and wrote to stderr and
-`process.log` behind a mutex, and where the glitch time was taken behind another;
-it ran for every overload, hundreds a day. Hex now only counts overloads there
-(a refused real-time promotion is counted apart) and logs one
-`microphone stream glitched; continuing` line with `count` and
-`realtime_denied` from the poll that drains the stream, at most once per 10 s.
-A burst that the window holds back is counted by the next line, so nothing is
-lost while the stream is open; `since_last_stream_glitch` still answers capture
-diagnostics from the same counters. On macOS the first chunk of each open also
-logs the callback's frames and period, which is the hardware period cpal does
-not report for `BufferSize::Default`; no CoreAudio FFI was added. Check:
-`a_burst_writes_one_line_and_holds_the_rest` covers the window;
+**Changed after dev (overload logging):** a host can report an overload, or a
+refused real-time promotion, on the thread that runs the stream. The old line
+formatted itself there and wrote to stderr and `process.log` behind a mutex,
+once per overload. Hex now only counts them there, and writes one
+`microphone stream glitched; continuing` line with `count` from the poll that
+drains the stream, at most once every 10 s. A count that window holds back is
+written by that poll later, and a stream that closes with a count left over
+writes it as it closes (`Drop for AudioInput` calling `overloads::flush`) rather
+than beside the next open's lines hours later. `since_last_stream_glitch` still
+answers capture diagnostics from the same counters. On macOS the first chunk of
+each open also logs the callback's frames and period, which is the hardware
+period cpal does not report for `BufferSize::Default` (skipped under
+`HEX_AUDIO_FIXTURE`, whose chunks are the file's); no CoreAudio FFI was added.
+Check: `a_burst_writes_one_line_and_holds_the_rest` covers the window;
 `overload_glitches_do_not_interrupt_the_stream` covers counting instead of
-failing. Not verified: a real overload burst after this change, and whether the
-coalesced rate matches what a loaded Mac produces.
+failing. Not verified: a real overload burst after this change, whether the
+coalesced rate suits a loaded machine, or the close-time flush on a device that
+glitches.
 
 **Fixed after dev ([#619](https://github.com/anomalyco/hex/issues/619)):** a
 Bluetooth headset's stream skipped about 130–145 ms of audio soon after it
