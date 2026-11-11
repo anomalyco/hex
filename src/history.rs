@@ -445,6 +445,34 @@ impl HistoryStore {
         Ok(true)
     }
 
+    /// Delete every entry in `ids` with one save. Returns how many existed;
+    /// unknown ids are ignored. A failed save restores every removed entry
+    /// where it was, so the deletion can be retried.
+    pub fn delete_many(&mut self, ids: &[u64]) -> io::Result<usize> {
+        let mut removed = Vec::new();
+        let mut kept = Vec::with_capacity(self.entries.len());
+        for (index, entry) in std::mem::take(&mut self.entries).into_iter().enumerate() {
+            if ids.contains(&entry.id) {
+                removed.push((index, entry));
+            } else {
+                kept.push(entry);
+            }
+        }
+        self.entries = kept;
+        let count = removed.len();
+        if count == 0 {
+            return Ok(0);
+        }
+        if let Err(error) = self.persist() {
+            for (index, entry) in removed {
+                let at = index.min(self.entries.len());
+                self.entries.insert(at, entry);
+            }
+            return Err(error);
+        }
+        Ok(count)
+    }
+
     /// Replace entry `id`'s text with `transcript`, such as a transcription
     /// of its recording with another model, keeping the current text as its
     /// newest version. Returns whether it existed.
@@ -728,6 +756,11 @@ impl History {
 
     pub fn delete(&self, id: u64) -> io::Result<bool> {
         self.synced().delete(id)
+    }
+
+    /// Delete every entry in `ids` with one save ([`HistoryStore::delete_many`]).
+    pub fn delete_many(&self, ids: &[u64]) -> io::Result<usize> {
+        self.synced().delete_many(ids)
     }
 
     pub fn clear(&self) -> io::Result<()> {
@@ -1485,6 +1518,31 @@ mod tests {
     }
 
     #[test]
+    fn delete_many_removes_only_the_listed_entries() {
+        let path = temp_path("delete-many");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
+        let first = store.record(draft("one"), 1_000).unwrap().unwrap();
+        let second = store.record(draft("two"), 2_000).unwrap().unwrap();
+        let third = store.record(draft("three"), 3_000).unwrap().unwrap();
+
+        assert_eq!(
+            store.delete_many(&[first, third, 9_999]).unwrap(),
+            2,
+            "only the listed entries that exist count"
+        );
+        assert_eq!(store.len(), 1);
+        assert!(store.entry(first).is_none());
+        assert!(store.entry(second).is_some());
+        assert!(store.entry(third).is_none());
+        assert_eq!(store.delete_many(&[9_999]).unwrap(), 0);
+        assert_eq!(store.len(), 1);
+
+        let reopened = HistoryStore::open(path, HistoryRetention::Week, 4_000);
+        assert_eq!(reopened.len(), 1);
+        assert!(reopened.entry(second).is_some());
+    }
+
+    #[test]
     fn failed_clear_and_delete_keep_entries_for_a_retry() {
         let path = temp_path("failed-clear");
         let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
@@ -1494,8 +1552,17 @@ mod tests {
         fs::create_dir(&temporary).unwrap();
 
         assert!(store.delete(first).is_err());
+        assert!(store.delete_many(&[first]).is_err());
         assert!(store.clear().is_err());
         assert_eq!(store.len(), 2, "a failed save keeps the entries");
+        assert_eq!(
+            store
+                .entries()
+                .map(|entry| entry.final_text.as_str())
+                .collect::<Vec<_>>(),
+            ["two", "one"],
+            "a failed save puts every removed entry back in place"
+        );
 
         fs::remove_dir(temporary).unwrap();
         store.sync();

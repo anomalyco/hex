@@ -125,6 +125,7 @@ impl Feature {
             | Self::ParakeetUltra
             | Self::StandaloneSpecialKeys
             | Self::HistoryStats
+            | Self::HistoryMultiSelect
             | Self::RecentDictations
             | Self::SkipPauses
             | Self::StopWhenCallEnds
@@ -236,7 +237,10 @@ impl Feature {
             | Self::SpeakersOnly
             | Self::MeetingNotesFile
             | Self::MoreDictationShortcuts => 20261109,
-            Self::AppModelSwitching | Self::ApiTimestamps | Self::PauseMenu => 20261110,
+            Self::AppModelSwitching
+            | Self::ApiTimestamps
+            | Self::PauseMenu
+            | Self::HistoryMultiSelect => 20261110,
         }
     }
 
@@ -336,6 +340,7 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::ParakeetUltra
             | Self::HistoryStats
+            | Self::HistoryMultiSelect
             | Self::OutputFixes
             | Self::PickerActiveFirst
             | Self::ModelInPlace
@@ -396,6 +401,7 @@ impl Feature {
             Self::ParakeetUltra => "parakeet-ultra",
             Self::StandaloneSpecialKeys => "special-keys",
             Self::HistoryStats => "history-stats",
+            Self::HistoryMultiSelect => "history-multi-select",
             Self::RecentDictations => "recent-dictations",
             Self::SkipPauses => "skip-pauses",
             Self::StopWhenCallEnds => "stop-when-call-ends",
@@ -474,6 +480,7 @@ impl Feature {
             Self::ParakeetUltra => "labs.parakeet_ultra",
             Self::StandaloneSpecialKeys => "labs.standalone_special_keys",
             Self::HistoryStats => "labs.history_stats",
+            Self::HistoryMultiSelect => "labs.history_multi_select",
             Self::RecentDictations => "labs.recent_dictations",
             Self::SkipPauses => "labs.skip_pauses",
             Self::StopWhenCallEnds => "labs.stop_when_call_ends",
@@ -556,6 +563,7 @@ impl Feature {
             Self::ParakeetUltra => settings.labs.parakeet_ultra,
             Self::StandaloneSpecialKeys => settings.labs.standalone_special_keys,
             Self::HistoryStats => settings.labs.history_stats,
+            Self::HistoryMultiSelect => settings.labs.history_multi_select,
             Self::RecentDictations => settings.labs.recent_dictations,
             Self::SkipPauses => settings.labs.skip_pauses,
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends,
@@ -635,6 +643,7 @@ impl Feature {
             &mut labs.parakeet_ultra,
             &mut labs.standalone_special_keys,
             &mut labs.history_stats,
+            &mut labs.history_multi_select,
             &mut labs.recent_dictations,
             &mut labs.skip_pauses,
             &mut labs.stop_when_call_ends,
@@ -722,6 +731,7 @@ impl Feature {
             Self::BenchmarkDetails => settings.labs.benchmark_details = on,
             Self::ParakeetUltra => settings.labs.parakeet_ultra = on,
             Self::HistoryStats => settings.labs.history_stats = on,
+            Self::HistoryMultiSelect => settings.labs.history_multi_select = on,
             Self::RecentDictations => settings.labs.recent_dictations = on,
             Self::SkipPauses => settings.labs.skip_pauses = on,
             Self::StopWhenCallEnds => settings.labs.stop_when_call_ends = on,
@@ -858,6 +868,9 @@ const PAUSE_MENU: u64 = APP_MODEL_SWITCHING << 1;
 /// The next bit above Pause from menu bar: the local API's
 /// `timestamps=segment|word` returns native timings.
 const API_TIMESTAMPS: u64 = PAUSE_MENU << 1;
+/// The next bit above API timings: History selects several dictations at
+/// once, to copy or delete them together.
+const HISTORY_MULTI_SELECT: u64 = API_TIMESTAMPS << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -974,6 +987,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             PARAKEET_ULTRA,
         ),
         (Feature::HistoryStats, settings.history_stats, HISTORY_STATS),
+        (
+            Feature::HistoryMultiSelect,
+            settings.history_multi_select,
+            HISTORY_MULTI_SELECT,
+        ),
         (
             Feature::RecentDictations,
             settings.recent_dictations,
@@ -1123,6 +1141,7 @@ pub fn log_launch() {
         typed_text = typed_text(),
         playground = playground(),
         vocabulary_biasing = vocabulary_biasing(),
+        history_multi_select = history_multi_select(),
         "labs"
     );
 }
@@ -1385,6 +1404,28 @@ mod tests {
         assert_ne!(state & HISTORY_STATS, 0);
         assert_eq!(state & PARAKEET_ULTRA, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn history_multi_select_is_its_own_bit_and_off_by_default() {
+        assert_eq!(HISTORY_MULTI_SELECT, 1 << 62);
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode_where(&labs, |_| true) & HISTORY_MULTI_SELECT, 0);
+        labs.history_multi_select = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & HISTORY_MULTI_SELECT, 0);
+        assert_eq!(state & HISTORY_STATS, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(Feature::HistoryMultiSelect.on_this_os());
+        assert_eq!(Feature::HistoryMultiSelect.added(), 20261110);
+        assert_eq!(Feature::HistoryMultiSelect.audience(), Audience::Everyone);
+        assert_eq!(Feature::HistoryMultiSelect.group(), Group::History);
+        assert_eq!(
+            Feature::HistoryMultiSelect.settings_key(),
+            "labs.history_multi_select"
+        );
+        assert_eq!(Feature::HistoryMultiSelect.name(), "history-multi-select");
     }
 
     #[test]

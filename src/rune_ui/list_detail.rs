@@ -116,24 +116,35 @@ pub(super) struct Item {
     pub(super) selected: bool,
 }
 
-/// A selectable list row hung past the gutter: a hover fill (and the row's
-/// action in the time's place), a quiet fill when selected. Nothing on it
-/// animates.
-pub(super) fn item(p: Paint, item: Item, select: impl Fn(&mut Ui) + 'static) -> El {
-    item_with_icon(p, item, None, select)
-}
-
 /// The size of a row's leading icon, about the meta line's height.
 const LEADING_ICON: f32 = 14.0;
 
-/// [`item`] with a small faint icon before its title when `leading` is
-/// set; assistive technology hears the title alone.
+/// One selectable list row with a small faint icon before its title when
+/// `leading` is set; assistive technology hears the title alone.
 pub(super) fn item_with_icon(
     p: Paint,
     item: Item,
     leading: Option<&'static Icon>,
     select: impl Fn(&mut Ui) + 'static,
 ) -> El {
+    let selected = item.selected;
+    let row = item_body(p, item, leading);
+    super::lists::source_item(
+        super::lists::select_at_once(row, selected, select),
+        selected,
+    )
+}
+
+/// [`item_with_icon`] whose press its pane wires itself, for a list that
+/// selects several (History's Shift-, Command-, and drag-selection): `press`
+/// gets the finished row, which it draws and gives its gesture.
+pub(super) fn item_with_press(p: Paint, item: Item, press: impl Fn(El) -> El) -> El {
+    let selected = item.selected;
+    super::lists::source_item(press(item_body(p, item, None)), selected)
+}
+
+/// One row's box, words, and selected fill, before any press handling.
+fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) -> El {
     let c = &p.k.c;
     // A row of the list: its title names it and its meta and time describe
     // it, so their texts stay out of the tree.
@@ -207,8 +218,7 @@ pub(super) fn item_with_icon(
     if item.selected {
         row_el = row_el.fill(c.layer_02);
     }
-    let row_el = super::lists::select_at_once(row_el, item.selected, select);
-    super::lists::source_item(row_el, item.selected)
+    row_el
 }
 
 /// The card's title block: the title over its meta line, actions at the

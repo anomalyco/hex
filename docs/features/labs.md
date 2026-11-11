@@ -73,6 +73,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
 ├── Section key alone no  labs.section_key_alone       (Linux) the § key, left of 1 on ISO keyboards, may be a shortcut with no modifier (#1050)
 ├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations; hex history stats prints it (#790)
+├── Select multiple dictations no labs.history_multi_select  History selects several dictations with Shift-click, Cmd-click (Ctrl on
+│                                        Windows and Linux), or a drag, and copies or deletes them together
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Stop when the call ends no labs.stop_when_call_ends (macOS) a recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet (#835)
@@ -1245,6 +1247,53 @@ cap); `history_stats_parse_sum_retained_entries_and_need_the_labs_toggle` in
 [rune_ui/scenes.rs](../../src/rune_ui/scenes.rs) renders the button and dialog
 in both themes. Not yet observed: the dialog in a real window, and the Labs
 page goldens need regenerating on Linux with the new row.
+
+Select multiple dictations (`history-multi-select`, every OS): while on,
+History's rows select as a list does. A plain click selects one entry and
+makes it the range anchor; Shift-click selects every visible row from the
+anchor through the row clicked (the search's matches, so a filter narrows the
+range); Cmd-click (Ctrl on Windows and Linux) toggles one row and makes it
+the anchor; and a press dragged over other rows selects from the row it
+started on through the row under the pointer (Rune resolves that row from the
+`history-entry{id}` key of the element picked at the drag's window point,
+[selection.rs](../../src/rune_ui/history/selection.rs)). A Command press on an
+empty set adds the row History already had selected first, so a row selected
+before the lab was turned on stays selected. Every selected row draws the
+selected fill, and while two or more are selected the detail area shows
+"{count} dictations selected" with Copy (the selected final texts that have
+any, oldest first, a blank line between each, through the window's clipboard
+write like every other Copy) and Delete…, which asks once in the card ("Delete
+N dictations", then Cancel) and then deletes every selected entry in one save
+through `History::delete_many`; a failed save puts every removed entry back,
+keeps the selection, and shows the error the same way single Delete does, so
+the delete can be tried again. One selected entry keeps the ordinary card with
+its facts, Copy, Delete, and, with Keep recordings, Transcribe again and its
+versions. A search, new dictations, and a delete prune the selection to rows
+that still show; turning the switch off collapses it to the one entry the card
+shows. Off, History is exactly as before: one selected entry, the same rows,
+and Shift and Command change nothing. The pane reads its own switch
+(`ui.settings.labs.history_multi_select`, through `Feature::on`, as it reads
+Keep recordings); `labs::history_multi_select()` is the same switch for this
+process and is logged at launch with the other labs. Checks:
+`history_multi_select_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs);
+`delete_many_removes_only_the_listed_entries` and
+`failed_clear_and_delete_keep_entries_for_a_retry` in
+[history.rs](../../src/history.rs);
+`history_selects_several_with_shift_command_and_drag`,
+`history_selection_copies_oldest_first`,
+`history_selection_deletes_in_two_steps`,
+`history_command_click_keeps_the_row_selected_before_the_lab`,
+`history_shift_click_selects_one_without_the_lab`, and
+`history_multi_select_turns_off_to_one_entry` in
+[rune_ui/tests.rs](../../src/rune_ui/tests.rs), which press rows with Shift
+and Command held and drag from one row to another. `history-selection` in
+[rune_ui/scenes.rs](../../src/rune_ui/scenes.rs) renders the card with two
+entries selected. Not yet observed: a real pointer drag in a window (the test
+drives Rune's pointer directly). The Labs page goldens (`mac-labs-dark`,
+`mac-labs-light`, `mac-labs-link-dark`, `mac-labs-link-light`,
+`windows-labs-light`, and `linux-labs-light`) are regenerated on Linux with
+the new featured row.
 
 Copy recent dictations (`recent-dictations`, issue 877, macOS): while on,
 the menu-bar menu shows a Copy Recent Dictation submenu right under Paste

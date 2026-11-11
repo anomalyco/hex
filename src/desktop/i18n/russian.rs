@@ -1261,6 +1261,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Add shortcut", "Добавить сочетание"),
     ("Pause from menu bar", "Пауза из меню-бара"),
     ("Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys", "Добавляет «Приостановить Hex» в меню-бар. Пока Hex на паузе, он игнорирует свои сочетания клавиш, и клавиши получают другие приложения"),
+    ("Select multiple dictations", "Выбор нескольких диктовок"),
+    ("Shift-click, Cmd-click (Ctrl on Windows and Linux) or drag to select several dictations, then copy or delete them together", "Клик с Shift, клик с Cmd (Ctrl в Windows и Linux) или перетаскивание выбирают несколько диктовок, которые можно вместе скопировать или удалить"),
+    ("{} dictations selected", "Выбрано диктовок: {}"),
+    ("Copy puts the selected dictations on the clipboard, oldest first, with a blank line between each", "Копирование помещает выбранные диктовки в буфер обмена, начиная с самой старой, с пустой строкой между ними"),
+    ("Delete {} dictations", "Удалить диктовки: {}"),
 ];
 
 #[cfg(test)]

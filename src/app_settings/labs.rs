@@ -119,6 +119,9 @@ pub struct LabsSettings {
     /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
     pub standalone_special_keys: bool,
     pub history_stats: bool,
+    /// History selects several dictations at once, with Shift, Command (Ctrl
+    /// on Windows and Linux), or a drag, to copy or delete them together.
+    pub history_multi_select: bool,
     pub recent_dictations: bool,
     pub skip_pauses: bool,
     /// An automatic meeting recording stops after its call ends (macOS, issue 835).
@@ -251,6 +254,7 @@ impl Default for LabsSettings {
             parakeet_ultra: false,
             standalone_special_keys: false,
             history_stats: false,
+            history_multi_select: false,
             recent_dictations: false,
             skip_pauses: false,
             stop_when_call_ends: false,
