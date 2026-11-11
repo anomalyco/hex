@@ -1299,13 +1299,14 @@ any, oldest first, a blank line between each, through the window's clipboard
 write like every other Copy) and Delete…, which asks once in the card ("Delete
 N dictations", then Cancel) and then deletes every selected entry in one save
 through `History::delete_many`; a failed save puts every removed entry back,
-keeps the selection, and shows the error the same way single Delete does, so
+keeps the selection, and shows the error the same way single Delete… does, so
 the delete can be tried again. One selected entry keeps the ordinary card with
-its facts, Copy, Delete, and, with Keep recordings, Transcribe again and its
-versions. A search, new dictations, and a delete prune the selection to rows
-that still show; turning the switch off collapses it to the one entry the card
-shows. Off, History is exactly as before: one selected entry, the same rows,
-and Shift and Command change nothing. The pane reads its own switch
+its facts, Copy, Delete… (which asks once in the card, Confirm delete or
+Cancel), and, with Keep recordings, Transcribe again and its versions. A
+search, new dictations, and a delete prune the selection to rows that still
+show; turning the switch off collapses it to the one entry the card shows. Off,
+History is exactly as before: one selected entry, the same rows, and Shift and
+Command change nothing. The pane reads its own switch
 (`ui.settings.labs.history_multi_select`, through `Feature::on`, as it reads
 Keep recordings); `labs::history_multi_select()` is the same switch for this
 process and is logged at launch with the other labs. Checks:

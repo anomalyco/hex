@@ -149,6 +149,7 @@ fn visible(pane: &HistoryPane) -> Vec<u64> {
 /// makes it the anchor.
 fn choose(ui: &mut Ui, id: u64, click: Click) {
     ui.history.clear_armed = false;
+    ui.history.delete_armed = None;
     if !on(ui) {
         ui.history.selected = Some(id);
         return;
@@ -276,6 +277,7 @@ fn dragged(ui: &mut Ui, from: u64, drag: &Drag, tx: &mut Tx) {
                 return;
             }
             ui.history.selection.drag_left = true;
+            ui.history.delete_armed = None;
             let rows = visible(&ui.history);
             ui.history.selection.select_range(from, id, &rows);
             ui.history.selected = Some(id);

@@ -1282,7 +1282,25 @@ fn history_selects_deletes_and_clears_in_two_steps() {
     let mut rt = runtime("history", true, PANE_SIZE);
     tap(&mut rt, "history-entry3");
     assert_eq!(rt.state.history.selected, Some(3));
+    // Delete… only asks. Cancel keeps the entry.
     tap(&mut rt, "history-delete");
+    assert_eq!(rt.state.history.delete_armed, Some(3));
+    assert!(rt.find("history-confirm-delete").is_some());
+    assert!(rt.find("history-delete").is_none());
+    tap(&mut rt, "history-cancel-delete");
+    assert!(rt.state.history.delete_armed.is_none());
+    assert!(rt.state.history.entries.iter().any(|entry| entry.id == 3));
+    // Escape answers the confirmation too.
+    tap(&mut rt, "history-delete");
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    assert!(rt.state.history.delete_armed.is_none());
+    assert!(rt.find("history-confirm-delete").is_none());
+    assert!(rt.state.history.entries.iter().any(|entry| entry.id == 3));
+    // Only the confirmation deletes.
+    tap(&mut rt, "history-delete");
+    tap(&mut rt, "history-confirm-delete");
+    assert!(rt.state.history.delete_armed.is_none());
     assert!(rt.state.history.entries.iter().all(|entry| entry.id != 3));
     // Clear all history… sits at the bottom of the retention menu and only
     // asks; Cancel keeps everything, and only the confirmation clears.

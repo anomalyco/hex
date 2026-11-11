@@ -40,6 +40,9 @@ pub(super) struct HistoryPane {
     revision: Option<u64>,
     pub(super) selected: Option<u64>,
     pub(super) clear_armed: bool,
+    /// The shown entry whose Delete… was pressed, waiting for its
+    /// confirmation.
+    pub(super) delete_armed: Option<u64>,
     pub(super) copied: Option<u64>,
     error: Option<String>,
     /// Labs › Dictation stats: every retained entry summed up, while on.
@@ -118,7 +121,11 @@ impl HistoryPane {
     }
 
     fn reload_entries(&mut self) {
+        let requery = self.searched != self.search.text;
         self.searched = self.search.text.clone();
+        if requery {
+            self.delete_armed = None;
+        }
         let Some(store) = &self.store else {
             return;
         };
@@ -133,6 +140,23 @@ impl HistoryPane {
         }
         // A search, a delete, or new dictations leave no selected id behind.
         selection::prune(self);
+        if self
+            .delete_armed
+            .is_some_and(|id| self.selected != Some(id))
+        {
+            self.delete_armed = None;
+        }
+    }
+
+    /// Escape, or a press elsewhere: Delete… stops asking.
+    pub(super) fn cancel_delete(&mut self) -> bool {
+        self.delete_armed.take().is_some()
+    }
+
+    /// Delete… asks for `id`, and stops any other confirmation.
+    pub(super) fn arm_delete(&mut self, id: u64) {
+        self.clear_armed = false;
+        self.delete_armed = Some(id);
     }
 
     /// Sums up every retained entry, only while Labs › Dictation stats is
@@ -357,6 +381,7 @@ fn set_retention(ui: &mut Ui, retention: HistoryRetention) {
 }
 
 fn clear(ui: &mut Ui) {
+    ui.history.delete_armed = None;
     if !ui.history.clear_armed {
         ui.history.clear_armed = true;
         return;
@@ -557,6 +582,7 @@ fn restore(ui: &mut Ui, id: u64, index: usize) {
 }
 
 fn delete(ui: &mut Ui, id: u64) {
+    ui.history.delete_armed = None;
     if let Some(store) = &ui.history.store {
         if let Err(error) = store.delete(id) {
             ui.history.error = Some(error.to_string());
@@ -1019,6 +1045,41 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     if ui.settings.labs.keep_recordings && !entry.versions.is_empty() {
         body = body.child(versions_section(ui, p, entry));
     }
+    let armed = pane.delete_armed == Some(id);
+    let mut actions = Vec::new();
+    let confirm = armed.then(|| {
+        row()
+            .key("delete-confirm")
+            .gap(8.0)
+            .pt(14.0)
+            .child(
+                button(
+                    p,
+                    "history-confirm-delete",
+                    tr("Confirm delete"),
+                    ButtonKind::Danger,
+                    move |ui: &mut Ui, _| delete(ui, id),
+                )
+                .default_button(),
+            )
+            .child(button(
+                p,
+                "history-cancel-delete",
+                tr("Cancel"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| ui.history.delete_armed = None,
+            ))
+    });
+    if !armed {
+        actions.push(copy_action(ui, p, id, false));
+        actions.push(ld::ghost_icon(
+            p,
+            "history-delete",
+            ld::TRASH_ICON,
+            tr("Delete…"),
+            move |ui: &mut Ui, _| ui.history.arm_delete(id),
+        ));
+    }
     col()
         .key("history-detail")
         .grow(1.0)
@@ -1026,17 +1087,9 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         .child(ld::card_header(
             ld::card_title(p, tr(entry.kind.label())),
             vec![ld::meta_text(p, &event_age(entry.timestamp_ms))],
-            vec![
-                copy_action(ui, p, id, false),
-                ld::ghost_icon(
-                    p,
-                    "history-delete",
-                    ld::TRASH_ICON,
-                    tr("Delete"),
-                    move |ui: &mut Ui, _| delete(ui, id),
-                ),
-            ],
+            actions,
         ))
+        .children(confirm)
         .child(ld::card_scroll(p, "detail-scroll", body))
 }
 
