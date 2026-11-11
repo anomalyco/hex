@@ -241,9 +241,10 @@ pub struct AudioInput {
 /// error (seen after a burst of overruns, #1206) and is reopened.
 pub(crate) const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(4);
 
-/// A stream that has delivered audio for this long has proven that it works:
-/// its failure reopens it at once. One that stops sooner never started, so its
-/// reopen backs off instead of looping every stall timeout (#1681).
+/// A stream that has delivered chunks for this long since its first one has
+/// proven that it works: its failure reopens it at once. One that fails
+/// sooner never proved steady delivery, so its reopen backs off instead of
+/// looping every stall timeout (#1681).
 const STREAM_PROVEN_UPTIME: Duration = STREAM_STALL_TIMEOUT.saturating_mul(2);
 
 pub enum AudioInputEvent {
@@ -311,10 +312,12 @@ type Opener = Arc<dyn Fn(&OpenRequest) -> Result<Opened> + Send + Sync>;
 
 pub struct RecoveringAudioInput {
     input: Option<AudioInput>,
-    /// When the installed stream opened. A stream that fails before
-    /// [`STREAM_PROVEN_UPTIME`] never proved it delivers, so its reopen backs
-    /// off instead of repeating the stall timeout forever.
-    opened_at: Option<Instant>,
+    /// When the installed stream first delivered a chunk, and whether it has
+    /// since delivered for [`STREAM_PROVEN_UPTIME`] without stopping. A stream
+    /// that fails before that never proved steady delivery, so its reopen
+    /// backs off instead of repeating the stall timeout forever (#1681).
+    first_delivery: Option<Instant>,
+    proven: bool,
     device_override: Option<String>,
     selected_device: Option<String>,
     active_revision: u64,
@@ -615,7 +618,8 @@ impl RecoveringAudioInput {
     ) -> Self {
         Self {
             input: None,
-            opened_at: None,
+            first_delivery: None,
+            proven: false,
             device_override: device_override.map(str::to_owned),
             selected_device: selected_device.map(str::to_owned),
             active_revision: selection_revision,
@@ -685,7 +689,7 @@ impl RecoveringAudioInput {
     }
 
     /// A dictation press asks for the microphone now instead of waiting out a
-    /// stalled stream's backoff. The grown backoff stays, so pressing again
+    /// failed stream's backoff. The grown backoff stays, so pressing again
     /// cannot restore the fast reopen loop; the press itself still cannot
     /// capture until the stream opens.
     pub fn retry_now(&mut self) {
@@ -700,7 +704,6 @@ impl RecoveringAudioInput {
         self.retire_input();
         input.feed_hex_microphone(true);
         self.input = Some(input);
-        self.opened_at = Some(Instant::now());
         self.outage = None;
         self.retry_warning = None;
     }
@@ -708,7 +711,8 @@ impl RecoveringAudioInput {
     /// Stops the open stream and drops it, so no stream of Hex's is left on
     /// the device.
     fn retire_input(&mut self) {
-        self.opened_at = None;
+        self.first_delivery = None;
+        self.proven = false;
         if let Some(previous) = self.input.take() {
             previous.feed_hex_microphone(false);
             drop(previous);
@@ -719,7 +723,8 @@ impl RecoveringAudioInput {
         if let Some(previous) = self.input.take() {
             previous.feed_hex_microphone(false);
         }
-        self.opened_at = None;
+        self.first_delivery = None;
+        self.proven = false;
         self.replacement = None;
         self.recovery.recovered();
         self.outage = None;
@@ -797,15 +802,15 @@ impl RecoveringAudioInput {
                     }
                     input.selection = selection;
                     self.active_revision = opened_revision;
-                    // The stream itself kept running, so a stall backoff it
-                    // still owes is kept too.
+                    // The stream itself kept running, so a failed stream's
+                    // backoff it still owes is kept too.
                     self.recovery.reopened();
                     self.after_resolving(now);
                 }
                 Ok(Opened::Input(replacement)) if capture_idle || self.input.is_none() => {
                     self.install(*replacement);
                     self.active_revision = opened_revision;
-                    // A stalled stream keeps the backoff it grew until this
+                    // A failed stream keeps the backoff it grew until this
                     // one delivers steadily.
                     self.recovery.reopened();
                     self.after_resolving(now);
@@ -872,11 +877,7 @@ impl RecoveringAudioInput {
                 samples,
                 captured_through,
             } => {
-                // A reopened stream that keeps delivering has proven itself:
-                // the stalled streams before it no longer count against it.
-                if self.stream_proved_itself(now) {
-                    self.recovery.stream_proved();
-                }
+                self.note_delivery(Instant::now());
                 RecoveringAudioInputEvent::Chunk {
                     samples,
                     captured_through,
@@ -884,22 +885,33 @@ impl RecoveringAudioInput {
             }
             AudioInputEvent::Timeout => RecoveringAudioInputEvent::Timeout,
             AudioInputEvent::StreamFailed(error) => {
+                let failed_at = Instant::now();
                 tracing::warn!(%error, device = %input.device_name, "microphone stream stopped; reopening it");
-                if self.stream_proved_itself(now) {
-                    self.recovery.request_stream_recovery(now);
+                if self.proven {
+                    self.recovery.request_stream_recovery(failed_at);
                 } else {
-                    self.recovery.back_off_stream_recovery(now);
+                    // Release the dead stream before the wait starts: Hex
+                    // holds no microphone while it backs off.
+                    self.retire_input();
+                    self.recovery.back_off_stream_recovery(failed_at);
                 }
                 RecoveringAudioInputEvent::Interrupted
             }
         }
     }
 
-    /// Whether the installed stream delivered long enough that its failure is
-    /// the end of a working stream rather than one that never started.
-    fn stream_proved_itself(&self, now: Instant) -> bool {
-        self.opened_at
-            .is_some_and(|opened| now.saturating_duration_since(opened) >= STREAM_PROVEN_UPTIME)
+    /// Records that the installed stream delivered a chunk. A stream that has
+    /// delivered across [`STREAM_PROVEN_UPTIME`] has proven it works: the
+    /// failed streams before it no longer count against it.
+    fn note_delivery(&mut self, now: Instant) {
+        if self.proven {
+            return;
+        }
+        let first = *self.first_delivery.get_or_insert(now);
+        if now.saturating_duration_since(first) >= STREAM_PROVEN_UPTIME {
+            self.proven = true;
+            self.recovery.stream_proved();
+        }
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -2879,8 +2891,8 @@ mod tests {
         ));
         assert_eq!(input.recovery.delay, Duration::from_secs(1));
 
-        // Delivering until it has proven itself forgets that wait.
-        input.opened_at = Some(Instant::now() - STREAM_PROVEN_UPTIME);
+        // Delivering across the proof window forgets that wait.
+        input.first_delivery = Some(Instant::now() - STREAM_PROVEN_UPTIME);
         let at = CaptureInstant::from_nanos(30_000_000_000);
         sender
             .lock()
@@ -2908,6 +2920,48 @@ mod tests {
             settle(&mut input, true),
             RecoveringAudioInputEvent::Reopened
         ));
+    }
+
+    #[test]
+    fn a_stream_that_stops_before_proving_itself_backs_off() {
+        let sender = Arc::new(Mutex::new(None));
+        let mut input =
+            RecoveringAudioInput::with_opener_for_test(None, || 0, opener_keeping_sender(&sender));
+        input.finish_initial_open(Ok(stalling_input()), Instant::now());
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Interrupted
+        ));
+        input.recovery.next_attempt = Some(Instant::now());
+        assert!(matches!(
+            settle(&mut input, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+
+        // One chunk is not proof: the stream stopped before delivering across
+        // the proof window, so its next reopen backs off instead of looping.
+        let at = CaptureInstant::from_nanos(1_000_000_000);
+        sender
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .send((vec![0.5; 240], at))
+            .unwrap();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Chunk { .. }
+        ));
+        assert!(!input.proven);
+        let failed_at = Instant::now();
+        drop(sender.lock().unwrap().take());
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Interrupted
+        ));
+        assert!(!input.recovery.should_attempt(Instant::now()));
+        assert!(input.recovery.next_attempt.unwrap() >= failed_at + Duration::from_millis(500));
+        assert_eq!(input.recovery.delay, Duration::from_secs(1));
     }
 
     #[test]
@@ -2943,6 +2997,8 @@ mod tests {
         ));
         assert_eq!(input.recovery.delay, Duration::from_secs(2));
         assert!(!input.recovery.should_attempt(Instant::now()));
+        // The dead stream was released when its wait began.
+        assert!(!input.is_open());
 
         // The lid opening resolves the input at once, not in two seconds,
         // and keeps the wait the stalled streams grew.

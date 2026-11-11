@@ -1,8 +1,8 @@
 //! When the dictation microphone opens again. An open that fails backs off to
-//! five seconds. A reopened stream that stops delivering before it has proven
-//! itself backs off to a minute instead, so a microphone that never starts
-//! cannot keep waking the machine every few seconds (#1681). A stream that
-//! delivered steadily reopens at once, as it always has (#1206).
+//! five seconds. Any stream that fails before proving steady delivery backs off
+//! to a minute instead, so a microphone that never starts cannot keep waking
+//! the machine every few seconds (#1681). A stream that delivered steadily
+//! reopens at once, as it always has (#1206).
 
 use std::time::{Duration, Instant};
 
@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 pub(super) const MICROPHONE_RETRY_INITIAL: Duration = Duration::from_millis(250);
 /// A microphone that will not open waits at most this long between attempts.
 pub(super) const MICROPHONE_RETRY_MAX: Duration = Duration::from_secs(5);
-/// A microphone that reopens but keeps stalling waits this long at most: it
-/// never delivers, so a reopen every few seconds would only wake the machine.
+/// A stream that keeps failing before it proves steady delivery waits this
+/// long at most: a reopen every few seconds would only wake the machine.
 pub(super) const MICROPHONE_STALL_RETRY_MAX: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,9 +27,10 @@ pub(super) enum MicrophoneRecoveryReason {
 pub(super) struct MicrophoneRecovery {
     pub(super) next_attempt: Option<Instant>,
     pub(super) delay: Duration,
-    /// Whether `delay` is a stalled stream's backoff. It grows to
+    /// Whether `delay` is a stream failure's backoff. It grows to
     /// [`MICROPHONE_STALL_RETRY_MAX`] and survives the reopens it schedules,
-    /// so one that never delivers cannot start the wait over on every reopen.
+    /// so a stream that never proves steady delivery cannot start the wait
+    /// over on every reopen.
     stream_stall: bool,
     pub(super) reason: Option<MicrophoneRecoveryReason>,
     pub(super) target_revision: Option<u64>,
@@ -61,7 +62,7 @@ impl MicrophoneRecovery {
     }
 
     /// Resolves the input again at `at`. A pending reopen or selection
-    /// change resolves it anyway, but a stalled stream's wait is cut short:
+    /// change resolves it anyway, but a failed stream's wait is cut short:
     /// the lid opening must reach the built-in microphone at once instead of
     /// waiting out up to a minute. Its backoff stays, so device churn cannot
     /// start the fast reopen loop again.
@@ -71,7 +72,7 @@ impl MicrophoneRecovery {
                 self.reason = Some(MicrophoneRecoveryReason::RouteChanged);
                 self.next_attempt = Some(at);
                 // A stream that has not proven itself yet keeps the backoff
-                // its stalled predecessors grew.
+                // its failed predecessors grew.
                 if !self.stream_stall {
                     self.delay = MICROPHONE_RETRY_INITIAL;
                 }
@@ -96,7 +97,7 @@ impl MicrophoneRecovery {
         }
     }
 
-    /// A reopened stream stopped before it proved itself: wait out the stall
+    /// A stream stopped before it proved steady delivery: wait out the stall
     /// backoff, doubling it up to [`MICROPHONE_STALL_RETRY_MAX`].
     pub(super) fn back_off_stream_recovery(&mut self, now: Instant) {
         self.reason = Some(MicrophoneRecoveryReason::StreamFailed);
@@ -122,7 +123,7 @@ impl MicrophoneRecovery {
         self.delay = self.delay.saturating_mul(2).min(ceiling);
     }
 
-    /// A replacement stream is open. A stalled stream's backoff is kept until
+    /// A replacement stream is open. A failed stream's backoff is kept until
     /// that stream delivers steadily; anything else starts over.
     pub(super) fn reopened(&mut self) {
         self.next_attempt = None;
@@ -134,8 +135,8 @@ impl MicrophoneRecovery {
     }
 
     /// The installed stream has delivered steadily, so the backoff left by
-    /// the stalled streams before it is forgotten. A stream that never
-    /// delivers never gets here.
+    /// the failed streams before it is forgotten. A stream that never proves
+    /// steady delivery never gets here.
     pub(super) fn stream_proved(&mut self) {
         if self.stream_stall {
             self.stream_stall = false;
@@ -153,7 +154,7 @@ impl MicrophoneRecovery {
         self.target_revision = None;
     }
 
-    /// A dictation press asks for a stalled microphone now, keeping the
+    /// A dictation press asks for a failed microphone now, keeping the
     /// backoff it has grown so repeated presses cannot restore the loop.
     pub(super) fn retry_now(&mut self, now: Instant) {
         if self.reason == Some(MicrophoneRecoveryReason::StreamFailed) {
