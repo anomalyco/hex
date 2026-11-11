@@ -1,13 +1,11 @@
 name: Release TypeScript SDK
 
 # Pending changesets on dev open (or update) the "chore: release TypeScript
-# SDK" pull request into dev, which bumps versions and changelogs. Nothing is
-# published from dev. Publishing happens when production is fast-forwarded to
-# a dev commit whose SDK version is not on npm yet: changeset publish
-# publishes it, pushes its tag, and creates its GitHub release.
+# SDK" pull request into dev, which bumps versions and changelogs. Dispatch
+# this workflow on dev to publish an unreleased SDK version and tag it.
 on:
   push:
-    branches: [dev, production]
+    branches: [dev]
     paths:
       - "sdk/**"
       - ".github/workflows/release-typescript.yml"
@@ -25,7 +23,7 @@ permissions:
 
 jobs:
   version:
-    if: github.ref == 'refs/heads/dev'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -40,7 +38,7 @@ jobs:
           pr-title: "chore: release TypeScript SDK"
 
   publish:
-    if: github.ref == 'refs/heads/production'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     defaults:
       run:

@@ -26,9 +26,9 @@ name: Release
 # a ruleset lets only Dax change .github/ (docs/releasing.md).
 #
 # There is one environment, release, like OpenCode's: no approval, deployment
-# policy dev and production. The service authorizes the publish jobs by their
-# OIDC token: anomalyco/hex, this file, environment release, the dev channel
-# from dev and stable from production (anomalyco/release registry/hex.json).
+# policy dev only. The service authorizes publish jobs by their OIDC token:
+# anomalyco/hex, this file, refs/heads/dev, environment release
+# (anomalyco/release registry/hex.json).
 # Hex never uses the service's dev stage.
 #
 # Channels (.github/release/plan.sh):
@@ -41,20 +41,20 @@ name: Release
 # - check: a dispatch from dev builds, signs, and verifies the same and
 #   publishes nothing; its last job pushes and deletes a throwaway
 #   v0.0.0-test-<run> tag to prove it can tag.
-# - stable: a dispatch from production publishes the crate version with every
+# - stable: a dispatch from dev publishes the crate version with every
 #   platform signed, the AUR, and Homebrew. Tags trigger nothing: only after
 #   everything published does the last job tag v<version> on the released
-#   commit and create the GitHub release, so a failed run leaves no tag. Deploy the production site afterwards with Deploy.
+#   commit and create the GitHub release. Site deployment is separate.
 #
 # A run always releases the commit it runs on (github.sha): there is no ref
 # input, every job checks out github.sha, and plan.sh fails unless the commit
 # it checked out is github.sha. So the scripts the release-environment jobs
-# run are always this workflow's own commit of dev or production.
+# run are always this workflow's own commit of dev.
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: check (build, sign, and verify; publish nothing), dev (the dev channel; run from dev), or stable (public)
+        description: Run from dev. Select check (build, sign, and verify), dev (dev channel), or stable (public release).
         type: choice
         options: [check, dev, stable]
         default: check
@@ -82,6 +82,7 @@ env:
 
 jobs:
   plan:
+    if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.plan.outputs.version }}

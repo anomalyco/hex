@@ -6,7 +6,7 @@
 #          the release service's dev channel, as OpenCode numbers dev builds.
 #   check  a dispatch from dev: the same build, signed and verified, published
 #          nowhere.
-#   stable a dispatch from production: the crate version from Cargo.toml on
+#   stable a dispatch from dev: the crate version from Cargo.toml on
 #          the stable channel. Tags never start a release; tag-release.sh tags
 #          v<version> only after everything published, so the version must
 #          not be tagged yet.
@@ -24,13 +24,14 @@ version=$(awk '/^\[package\]/ { package = 1; next } /^\[/ { package = 0 } packag
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Stable releases need an X.Y.Z crate version, not $version."
 case "$CHANNEL" in
   stable)
-    if [ "$EVENT" != workflow_dispatch ] || [ "$REF_NAME" != production ]; then
-      die "Stable releases are dispatched from production."
+    if [ "$EVENT" != workflow_dispatch ] || [ "$REF_NAME" != dev ]; then
+      die "Stable releases are dispatched from dev."
     fi
     tag="v$version"
     for existing in "$tag" "app-v$version"; do
-      if gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$existing" --jq '.[].ref' | grep -qx "refs/tags/$existing"; then
-        die "Hex $version is already tagged $existing; raise the version in Cargo.toml on production first."
+      refs=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$existing" --jq '.[].ref')
+      if grep -Fxq "refs/tags/$existing" <<< "$refs"; then
+        die "Hex $version is already tagged $existing; raise the version in Cargo.toml on dev first."
       fi
     done
     [ -f "docs/releases/$version.md" ] || die "Add release notes at docs/releases/$version.md first."
