@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
+use crate::audio::linger::MicrophoneLinger;
 use crate::audio::recording_environment::{CaptureMarker, RecordingEnvironmentController};
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::dictation::{
@@ -157,6 +158,9 @@ enum Command {
 struct Owner {
     input: RecoveringAudioInput,
     release_while_idle: bool,
+    /// Labs › Keep mic open after dictating: how long a finished or
+    /// cancelled capture's microphone keeps open before it is released.
+    linger: MicrophoneLinger,
     pending_capture: Option<PendingCapture>,
     capture: DictationCapture,
     recording_environment: RecordingEnvironmentController,
@@ -565,6 +569,7 @@ impl Owner {
         let owner = Self {
             input,
             release_while_idle,
+            linger: MicrophoneLinger::default(),
             pending_capture: None,
             capture,
             recording_environment,
@@ -1079,14 +1084,25 @@ impl Owner {
 
     fn reconcile_input(&mut self) {
         if self.release_while_idle && !self.capture_sink_open() {
-            if self.capture_idle() && self.input.is_active() {
+            // Labs › Keep mic open after dictating: a capture's end keeps the
+            // microphone open for the lab's window, and closing waits for it.
+            // Off, this is the plain idle close.
+            if self.input.is_active() && self.linger.may_close(Instant::now(), !self.capture_idle())
+            {
                 self.close_input();
             }
-        } else if !self.input.is_active() {
-            // A key release is acknowledged after its synchronous controls return;
-            // waiting for that acknowledgment here can leave the owner asleep.
-            self.input.request_recovery();
-            self.state.recovering.store(true, Ordering::Release);
+        } else {
+            if self.release_while_idle {
+                // A capture sink holds the microphone open: no window of the
+                // lab's outlives it.
+                self.linger.may_close(Instant::now(), true);
+            }
+            if !self.input.is_active() {
+                // A key release is acknowledged after its synchronous controls return;
+                // waiting for that acknowledgment here can leave the owner asleep.
+                self.input.request_recovery();
+                self.state.recovering.store(true, Ordering::Release);
+            }
         }
     }
 
@@ -1148,9 +1164,26 @@ impl Owner {
     /// stream failure, and renegotiate the device's sample rate as it opens:
     /// the device can stay on a stale clock that delivers only zeros (#1575).
     /// A cold microphone closes once idle and opens fresh for the next press
-    /// anyway.
+    /// anyway; a lingering one (Labs › Keep mic open after dictating) closes
+    /// now for the same reason, since it would otherwise stay open on the
+    /// dead stream.
     fn reopen_silent_stream(&mut self) {
-        if self.release_while_idle || !self.input.is_open() || self.input.is_recovering() {
+        if !self.input.is_open() || self.input.is_recovering() {
+            return;
+        }
+        if self.release_while_idle {
+            // A capture sink is copying this microphone, so closing it would
+            // leave a gap in the capture: leave the stream as always-open
+            // mode does.
+            if crate::audio::linger::window().is_none() || self.capture_sink_open() {
+                return;
+            }
+            tracing::warn!(
+                device = %self.input.device_name(),
+                "dictation audio was digital silence; closing the lingering microphone"
+            );
+            self.linger.clear();
+            self.close_input();
             return;
         }
         tracing::warn!(

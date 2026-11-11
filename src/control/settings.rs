@@ -607,6 +607,10 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
                 let minutes: u32 = choice.parse().expect("idle choices are numbers");
                 debug_assert!(crate::app_settings::UNLOAD_IDLE_MINUTES.contains(&minutes));
                 Value::from(minutes)
+            } else if name == "labs.keep_microphone_open_seconds" {
+                let seconds: u32 = choice.parse().expect("linger choices are numbers");
+                debug_assert!(crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS.contains(&seconds));
+                Value::from(seconds)
             } else {
                 Value::String((*choice).into())
             })
@@ -842,6 +846,48 @@ mod tests {
         let change = apply(&AppSettings::default(), "ui_language", "zh", &rules()).unwrap();
         let shown = get(&change.settings, "ui_language").unwrap();
         assert_eq!(shown[0].value, Value::String("zh".into()));
+    }
+
+    #[test]
+    fn a_microphone_linger_window_is_seconds_in_settings_json() {
+        let settings = apply(
+            &AppSettings::default(),
+            "labs.keep_microphone_open",
+            "on",
+            &rules(),
+        )
+        .unwrap()
+        .settings;
+        assert!(settings.labs.keep_microphone_open);
+        assert_eq!(
+            settings.labs.keep_microphone_open_for(),
+            Some(std::time::Duration::from_secs(60)),
+            "the default window"
+        );
+        let change = apply(
+            &settings,
+            "labs.keep_microphone_open_seconds",
+            "180",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(change.settings.labs.keep_microphone_open_seconds, 180);
+        assert_eq!(
+            get(&change.settings, "labs.keep_microphone_open_seconds").unwrap()[0].value,
+            Value::String("180".into()),
+            "shown as its choice"
+        );
+        assert_eq!(
+            apply(
+                &settings,
+                "labs.keep_microphone_open_seconds",
+                "45",
+                &rules()
+            )
+            .unwrap_err()
+            .code,
+            "invalid-value"
+        );
     }
 
     #[test]

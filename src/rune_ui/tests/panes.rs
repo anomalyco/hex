@@ -401,7 +401,7 @@ fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
 
 #[test]
 fn contributed_options_are_labs_toggles_off_by_default() {
-    let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
+    let mut rt = runtime("mac-settings", true, (980.0, 2400.0));
     open_labs(&mut rt);
     for row in [
         "lab-mouse-shortcuts",
@@ -2217,6 +2217,28 @@ fn unload_when_idle_shows_its_minutes_on_its_card_while_on() {
     tap(&mut rt, "lab-unload-idle");
     assert!(rt.state.settings.labs.unload_idle);
     assert!(rt.find("unload-idle-minutes").is_some());
+}
+
+#[test]
+fn keep_microphone_open_shows_its_window_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(Feature::KeepMicrophoneOpen.group()));
+    settle(&mut rt);
+    assert!(
+        rt.find("keep-microphone-open-seconds").is_none(),
+        "hidden while off"
+    );
+    tap(&mut rt, "lab-keep-microphone-open");
+    assert!(rt.state.settings.labs.keep_microphone_open);
+    assert!(rt.find("keep-microphone-open-seconds").is_some());
+    assert_eq!(
+        rt.state.settings.labs.keep_microphone_open_seconds,
+        crate::app_settings::LabsSettings::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS
+    );
+    tap(&mut rt, "lab-keep-microphone-open");
+    assert!(!rt.state.settings.labs.keep_microphone_open);
+    assert!(rt.find("keep-microphone-open-seconds").is_none());
 }
 
 #[test]

@@ -10,6 +10,7 @@ pub(crate) mod input_level;
 pub(crate) mod instant;
 #[cfg(target_os = "macos")]
 mod lid;
+pub(crate) mod linger;
 #[cfg(any(target_os = "windows", test))]
 mod mix_format;
 pub(crate) mod output_ducking;

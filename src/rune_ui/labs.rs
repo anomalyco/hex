@@ -812,6 +812,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Only on speakers"),
         tr("Apply \"While dictating\" only when sound plays through speakers. Headphones are left alone."),
     ));
+    rows.push(row(
+        Feature::KeepMicrophoneOpen,
+        Some(&TIMER),
+        tr("Keep mic open after dictating"),
+        tr("With Turn off the mic when not dictating on, the microphone stays open for a while after each dictation, so the next one starts at once"),
+    ));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
         && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     let ultra = row(Feature::ParakeetUltra, None, tr("Parakeet Ultra"), "");
@@ -966,6 +972,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
         Feature::SpeakersOnly => "lab-speakers-only",
+        Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
     }
 }
 
@@ -1029,6 +1036,20 @@ fn extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
                         .color(p.muted()),
                 )
                 .child(unload_after(ui, p)),
+        ),
+        Lab::Feature(Feature::KeepMicrophoneOpen) => Some(
+            row()
+                .key("keep-microphone-open-row")
+                .gap(8.0)
+                .center_y()
+                .flex_wrap()
+                .child(
+                    text(tr("Keep open for"))
+                        .key("label")
+                        .font(controls::DESCRIPTION)
+                        .color(p.muted()),
+                )
+                .child(keep_microphone_open_for(ui, p)),
         ),
         Lab::Feature(Feature::CapsLockDictation) => Some(
             row()
@@ -1118,4 +1139,35 @@ fn unload_after(ui: &Ui, p: Paint) -> El {
         let minutes = UNLOAD_IDLE_MINUTES[index];
         ui.update(|settings| settings.labs.unload_idle_minutes = minutes);
     })
+}
+
+/// How long the microphone stays open after a dictation before it is
+/// released.
+fn keep_microphone_open_for(ui: &Ui, p: Paint) -> El {
+    use crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS;
+    let labels: Vec<String> = KEEP_MICROPHONE_OPEN_SECONDS
+        .iter()
+        .map(|seconds| {
+            if *seconds < 60 {
+                tr_fill("{} s", &seconds.to_string())
+            } else {
+                tr_fill("{} min", &(seconds / 60).to_string())
+            }
+        })
+        .collect();
+    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let selected = KEEP_MICROPHONE_OPEN_SECONDS
+        .iter()
+        .position(|seconds| *seconds == ui.settings.labs.keep_microphone_open_seconds)
+        .unwrap_or(1);
+    controls::segmented(
+        p,
+        "keep-microphone-open-seconds",
+        &labels,
+        selected,
+        |ui, index| {
+            let seconds = KEEP_MICROPHONE_OPEN_SECONDS[index];
+            ui.update(|settings| settings.labs.keep_microphone_open_seconds = seconds);
+        },
+    )
 }

@@ -81,8 +81,11 @@ const UNIT: Kind = Kind::Number { min: 0.0, max: 1.0 };
 const MODEL_CHANGE: &str = "change the transcription model with `hex model use`";
 
 /// Choice keys whose values are numbers in settings.json.
-pub(super) const NUMERIC_CHOICES: [&str; 2] =
-    ["meetings.calendar.lead_minutes", "labs.unload_idle_minutes"];
+pub(super) const NUMERIC_CHOICES: [&str; 3] = [
+    "meetings.calendar.lead_minutes",
+    "labs.unload_idle_minutes",
+    "labs.keep_microphone_open_seconds",
+];
 
 pub(super) const KEYS: &[Key] = &[
     key(
@@ -333,6 +336,16 @@ pub(super) const KEYS: &[Key] = &[
         "labs.unload_idle_minutes",
         Kind::Choice(&["5", "15", "30", "60"]),
         "Minutes unused before Labs › Unload model when idle unloads the model",
+    ),
+    key(
+        "labs.keep_microphone_open",
+        Kind::Bool,
+        "Labs: with Release microphone while idle on, keep the microphone open for a while after each dictation so the next one starts at once",
+    ),
+    key(
+        "labs.keep_microphone_open_seconds",
+        Kind::Choice(&["30", "60", "180", "300", "1800"]),
+        "Seconds the microphone stays open after a dictation with Labs › Keep mic open after dictating on: 30 s, 1, 3, 5, or 30 minutes",
     ),
     key(
         "labs.restore_shortcut_default",

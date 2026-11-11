@@ -76,6 +76,14 @@ pub struct LabsSettings {
     /// The engine unloads the speech model after `unload_idle_minutes` (5, 15 default, 30, 60) unused (issue 442).
     pub unload_idle: bool,
     pub unload_idle_minutes: u32,
+    /// With Release microphone while idle on, the microphone stays open for
+    /// `keep_microphone_open_seconds` after a capture, so the next one starts
+    /// at once.
+    pub keep_microphone_open: bool,
+    /// One of [`KEEP_MICROPHONE_OPEN_SECONDS`]; another value loads the
+    /// default.
+    #[serde(deserialize_with = "deserialize_keep_microphone_open_seconds")]
+    pub keep_microphone_open_seconds: u32,
     /// Paste last dictation's row offers its default shortcut back (issue 613).
     pub restore_shortcut_default: bool,
     /// A pasted dictation stays on the clipboard, not the previous one (macOS and Windows, issue 200).
@@ -223,6 +231,45 @@ pub struct LabsSettings {
 /// The idle times Labs › Unload model when idle offers, in minutes.
 pub const UNLOAD_IDLE_MINUTES: [u32; 4] = [5, 15, 30, 60];
 
+/// The times Labs › Keep mic open after dictating offers, in seconds:
+/// 30 s, 1, 3, 5, and 30 minutes.
+pub const KEEP_MICROPHONE_OPEN_SECONDS: [u32; 5] = [30, 60, 180, 300, 1_800];
+
+impl LabsSettings {
+    /// The default [`KEEP_MICROPHONE_OPEN_SECONDS`] choice.
+    pub const DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS: u32 = 60;
+
+    /// How long a capture's microphone keeps open once it ends, while Labs ›
+    /// Keep mic open after dictating is on. `None` turns it off, and
+    /// a choice outside [`KEEP_MICROPHONE_OPEN_SECONDS`] (a hand-edited file)
+    /// also reads as off rather than guessing.
+    pub fn keep_microphone_open_for(&self) -> Option<std::time::Duration> {
+        let seconds = self.keep_microphone_open_seconds;
+        (self.keep_microphone_open && KEEP_MICROPHONE_OPEN_SECONDS.contains(&seconds))
+            .then(|| std::time::Duration::from_secs(u64::from(seconds)))
+    }
+}
+
+/// A saved `keep_microphone_open_seconds` must name one of
+/// [`KEEP_MICROPHONE_OPEN_SECONDS`]; another value fails to load, so the
+/// field returns to its default with the usual launch note.
+fn deserialize_keep_microphone_open_seconds<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let seconds = u32::deserialize(deserializer)?;
+    if KEEP_MICROPHONE_OPEN_SECONDS.contains(&seconds) {
+        Ok(seconds)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "expected one of {}",
+            KEEP_MICROPHONE_OPEN_SECONDS
+                .map(|seconds| seconds.to_string())
+                .join(", ")
+        )))
+    }
+}
+
 impl Default for LabsSettings {
     fn default() -> Self {
         Self {
@@ -235,6 +282,8 @@ impl Default for LabsSettings {
             mouse_shortcuts: false,
             unload_idle: false,
             unload_idle_minutes: 15,
+            keep_microphone_open: false,
+            keep_microphone_open_seconds: Self::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS,
             restore_shortcut_default: false,
             keep_on_clipboard: false,
             copy_only: false,

@@ -107,6 +107,7 @@ impl Feature {
             | Self::PauseBrowser
             | Self::ShareShortcut
             | Self::UnloadIdle
+            | Self::KeepMicrophoneOpen
             | Self::RestoreShortcutDefault
             | Self::KeepOnClipboard
             | Self::CopyOnly
@@ -242,6 +243,7 @@ impl Feature {
             | Self::ApiTimestamps
             | Self::PauseMenu
             | Self::HistoryMultiSelect => 20261110,
+            Self::KeepMicrophoneOpen => 20261111,
         }
     }
 
@@ -261,6 +263,9 @@ impl Feature {
     pub fn for_settings_key(key: &str) -> Option<Self> {
         if key == "labs.unload_idle_minutes" {
             return Some(Self::UnloadIdle);
+        }
+        if key == "labs.keep_microphone_open_seconds" {
+            return Some(Self::KeepMicrophoneOpen);
         }
         if key == "labs.caps_lock_light" {
             return Some(Self::CapsLockDictation);
@@ -332,6 +337,7 @@ impl Feature {
             | Self::SecondDictationShortcut
             | Self::VocabularyBiasing
             | Self::UnloadIdle
+            | Self::KeepMicrophoneOpen
             | Self::RestoreShortcutDefault
             | Self::KeepOnClipboard
             | Self::SpokenFormatting
@@ -382,6 +388,7 @@ impl Feature {
             Self::PauseBrowser => "pause-browser",
             Self::ShareShortcut => "share-shortcut",
             Self::UnloadIdle => "unload-idle",
+            Self::KeepMicrophoneOpen => "keep-microphone-open",
             Self::RestoreShortcutDefault => "restore-shortcut-default",
             Self::KeepOnClipboard => "keep-on-clipboard",
             Self::CopyOnly => "copy-only",
@@ -461,6 +468,7 @@ impl Feature {
             Self::PauseBrowser => "pause_browser_media",
             Self::ShareShortcut => "share_dictation_shortcut",
             Self::UnloadIdle => "labs.unload_idle",
+            Self::KeepMicrophoneOpen => "labs.keep_microphone_open",
             Self::RestoreShortcutDefault => "labs.restore_shortcut_default",
             Self::KeepOnClipboard => "labs.keep_on_clipboard",
             Self::CopyOnly => "labs.copy_only",
@@ -544,6 +552,7 @@ impl Feature {
             Self::PauseBrowser => settings.pause_browser_media,
             Self::ShareShortcut => settings.share_dictation_shortcut,
             Self::UnloadIdle => settings.labs.unload_idle,
+            Self::KeepMicrophoneOpen => settings.labs.keep_microphone_open,
             Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default,
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard,
             Self::CopyOnly => settings.labs.copy_only,
@@ -624,6 +633,7 @@ impl Feature {
             &mut labs.vocabulary_biasing,
             &mut labs.mouse_shortcuts,
             &mut labs.unload_idle,
+            &mut labs.keep_microphone_open,
             &mut labs.restore_shortcut_default,
             &mut labs.keep_on_clipboard,
             &mut labs.copy_only,
@@ -708,6 +718,7 @@ impl Feature {
             Self::PauseBrowser => settings.pause_browser_media = on,
             Self::ShareShortcut => settings.share_dictation_shortcut = on,
             Self::UnloadIdle => settings.labs.unload_idle = on,
+            Self::KeepMicrophoneOpen => settings.labs.keep_microphone_open = on,
             Self::RestoreShortcutDefault => settings.labs.restore_shortcut_default = on,
             Self::KeepOnClipboard => settings.labs.keep_on_clipboard = on,
             Self::CopyOnly => settings.labs.copy_only = on,
@@ -871,10 +882,20 @@ const API_TIMESTAMPS: u64 = PAUSE_MENU << 1;
 /// The next bit above API timings: History selects several dictations at
 /// once, to copy or delete them together.
 const HISTORY_MULTI_SELECT: u64 = API_TIMESTAMPS << 1;
+/// The last free bit: with Release microphone while idle on, the microphone
+/// stays open for a while after a capture (Labs › Keep mic open after
+/// dictating). Its window does not fit above the minutes, so it lives in
+/// [`MICROPHONE_LINGER_SECONDS`].
+const KEEP_MICROPHONE_OPEN: u64 = HISTORY_MULTI_SELECT << 1;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
 static STATE: AtomicU64 = AtomicU64::new(0);
+
+/// The seconds a capture's microphone keeps open after it ends, set beside
+/// [`STATE`]: 0 turns it off. The one free bit above holds the switch; the
+/// window itself has no room in the word.
+static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 fn on(bit: u64) -> bool {
     state() & bit != 0
@@ -883,12 +904,27 @@ fn on(bit: u64) -> bool {
 fn state() -> u64 {
     match STATE.load(Ordering::Acquire) {
         0 => {
-            let saved = encode(&AppSettings::saved_labs());
-            let _ = STATE.compare_exchange(0, saved, Ordering::AcqRel, Ordering::Acquire);
+            let saved = AppSettings::saved_labs();
+            if STATE
+                .compare_exchange(0, encode(&saved), Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                // The switch and its window are two stores. A gate read just
+                // between them sees the switch on with no window, which reads
+                // as off, and the next read is right.
+                MICROPHONE_LINGER_SECONDS.store(linger_seconds(&saved), Ordering::Release);
+            }
             STATE.load(Ordering::Acquire)
         }
         state => state,
     }
+}
+
+/// The window a saved setting holds, in seconds; 0 when it's off.
+fn linger_seconds(settings: &LabsSettings) -> u64 {
+    settings
+        .keep_microphone_open_for()
+        .map_or(0, |window| window.as_secs())
 }
 
 /// Whether the main window draws dark: the OS's appearance, unless Labs ›
@@ -908,7 +944,11 @@ pub fn window_dark(labs: &LabsSettings, system_dark: bool) -> bool {
 
 /// Records the switches the loaded or saved settings hold.
 pub(crate) fn apply(settings: &LabsSettings) {
+    // The switch and its window are two stores, so a gate read between them
+    // sees Labs › Keep mic open after dictating off for one pass; the read
+    // after both is right.
     STATE.store(encode(settings), Ordering::Release);
+    MICROPHONE_LINGER_SECONDS.store(linger_seconds(settings), Ordering::Release);
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.
     crate::shortcut_pause::reconcile(pause_menu());
@@ -1117,6 +1157,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             GNOME_ANNOTATE,
         ),
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
+        (
+            Feature::KeepMicrophoneOpen,
+            settings.keep_microphone_open,
+            KEEP_MICROPHONE_OPEN,
+        ),
     ]
     .into_iter()
     .filter(|(feature, on, _)| *on && reaches(*feature))
@@ -1275,6 +1320,50 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & UNLOAD_IDLE, 0);
         assert_eq!(state >> MINUTES_SHIFT, 30);
+    }
+
+    #[test]
+    fn keep_microphone_open_is_its_own_bit_and_carries_its_window() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(
+            labs.keep_microphone_open_seconds,
+            LabsSettings::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS
+        );
+        assert_eq!(labs.keep_microphone_open_for(), None);
+        let state = encode(&labs);
+        assert_eq!(state & KEEP_MICROPHONE_OPEN, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 15);
+        labs.keep_microphone_open = true;
+        labs.keep_microphone_open_seconds = 180;
+        labs.unload_idle_minutes = 30;
+        let state = encode(&labs);
+        assert_ne!(state & KEEP_MICROPHONE_OPEN, 0);
+        assert_eq!(
+            (state >> MINUTES_SHIFT) & MINUTES_MASK,
+            30,
+            "not the window"
+        );
+        assert_eq!(
+            labs.keep_microphone_open_for(),
+            Some(std::time::Duration::from_secs(180))
+        );
+        assert_eq!(linger_seconds(&labs), 180);
+        // The lab's own seconds are a key of their own.
+        assert_eq!(
+            Feature::for_settings_key("labs.keep_microphone_open_seconds"),
+            Some(Feature::KeepMicrophoneOpen)
+        );
+    }
+
+    #[test]
+    fn a_window_outside_the_choices_turns_the_linger_off() {
+        let labs = LabsSettings {
+            keep_microphone_open: true,
+            keep_microphone_open_seconds: 45,
+            ..LabsSettings::default()
+        };
+        assert_eq!(labs.keep_microphone_open_for(), None);
+        assert_eq!(linger_seconds(&labs), 0);
     }
 
     #[test]
