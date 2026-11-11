@@ -1367,24 +1367,26 @@ mod tests {
             "invalid-value"
         );
 
-        // A key that types nothing alone needs its Lab, as a recorded
-        // shortcut does.
-        let menu = serde_json::to_value(HotkeyBinding {
+        // Windows accepts Menu alone without the special-keys Lab.
+        let menu = HotkeyBinding {
             modifiers: HotkeyModifiers::default(),
             key: Some(HotkeyKey::named("menu")),
-        })
-        .unwrap();
-        assert_eq!(
-            apply(
-                &AppSettings::default(),
-                "extra_dictation_hotkeys",
-                &rows(vec![serde_json::json!({"binding": menu})]),
-                &rules
-            )
-            .unwrap_err()
-            .code,
-            "invalid-value"
+        };
+        let without_lab = apply(
+            &AppSettings::default(),
+            "extra_dictation_hotkeys",
+            &rows(vec![serde_json::json!({"binding": menu})]),
+            &rules,
         );
+        if cfg!(target_os = "windows") {
+            let change = without_lab.unwrap();
+            assert_eq!(
+                change.settings.extra_dictation_hotkeys[0].binding,
+                Some(menu)
+            );
+        } else {
+            assert_eq!(without_lab.unwrap_err().code, "invalid-value");
+        }
 
         // The OS's own rule for a recorded shortcut applies to a row too.
         let refuse = ShortcutRules {
