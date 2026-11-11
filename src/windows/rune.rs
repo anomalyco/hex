@@ -168,6 +168,9 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bool) -> Result<()> {
+    if let Err(error) = crate::windows::login_item::follow_current_version() {
+        tracing::warn!(%error, "could not point Launch at login at this version of Hex");
+    }
     let Some(instance) = crate::windows::app::AppInstance::claim(start_hidden)? else {
         return Ok(());
     };
