@@ -305,6 +305,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Clear words", "Очистить слова"),
     ("Hold your dictation shortcut to talk over it", "Удерживайте сочетание диктовки, чтобы прокомментировать голосом"),
     ("Couldn't copy", "Не удалось скопировать"),
+    ("Couldn't draw your marks", "Не удалось нарисовать пометки"),
     ("Couldn't send", "Не удалось отправить"),
     ("Looking for sessions…", "Поиск сессий…"),
     ("No sessions", "Нет сессий"),

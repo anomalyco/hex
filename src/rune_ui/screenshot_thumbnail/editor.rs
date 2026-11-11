@@ -135,6 +135,9 @@ pub(crate) struct Editor {
     waiting: Option<Dest>,
     /// A short note and the animation seconds it appeared.
     note: Option<(String, f64)>,
+    /// An export that failed: its note stays beside Retry until the next
+    /// export.
+    failed: Option<Out>,
     on: bool,
     leaving: Option<f64>,
     now: f64,
@@ -312,6 +315,21 @@ impl Editor {
         tx.wake_after(Duration::from_secs_f64(NOTE_S));
     }
 
+    /// An export to `out` failed for the reason `note` gives: it stays
+    /// shown, with Retry, and nothing went out.
+    fn failed(&mut self, note: String, out: Out, tx: &mut Tx) {
+        self.note = Some((note, self.now));
+        self.failed = Some(out);
+        tx.animated();
+    }
+
+    /// The export that failed, again.
+    fn retry(&mut self, tx: &mut Tx) {
+        if let Some(out) = self.failed.clone() {
+            self.deliver(out, tx);
+        }
+    }
+
     /// A drag on the shot, at `at` in its pixels.
     fn draw(&mut self, phase: Phase, at: [f32; 2]) {
         let Some(shot) = &self.shot else {
@@ -421,6 +439,9 @@ impl Editor {
     fn deliver(&mut self, out: Out, tx: &mut Tx) {
         self.finish_typing();
         self.send = None;
+        if self.failed.take().is_some() {
+            self.note = None;
+        }
         if let Out::Send(dest) = &out
             && self.listen != Listen::Idle
         {
@@ -454,23 +475,24 @@ impl Editor {
         let spawned = std::thread::Builder::new()
             .name("hex-screenshot-export".into())
             .spawn(move || {
-                let note = match job.png().and_then(|png| deliver(&out, &png, &words)) {
-                    Ok(()) => match &out {
-                        Out::Copy => tr("Copied").to_owned(),
-                        Out::Save => tr("Saved").to_owned(),
-                        Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
-                    },
-                    Err(error) => {
-                        tracing::warn!(%error, "could not export the edited screenshot");
-                        match &out {
-                            Out::Copy => tr("Couldn't copy").to_owned(),
-                            Out::Save => tr("Couldn't save").to_owned(),
-                            Out::Send(_) => tr("Couldn't send").to_owned(),
-                        }
-                    }
+                let result = job.png().and_then(|png| deliver(&out, &png, &words));
+                let Some(overlay) = overlay else {
+                    return;
                 };
-                if let Some(overlay) = overlay {
-                    overlay.update(move |s, tx| s.note(note, tx));
+                match result {
+                    Ok(()) => {
+                        let note = match &out {
+                            Out::Copy => tr("Copied").to_owned(),
+                            Out::Save => tr("Saved").to_owned(),
+                            Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
+                        };
+                        overlay.update(move |s, tx| s.note(note, tx));
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %format!("{error:#}"), "could not export the edited screenshot");
+                        let note = export_failure(&error, &out);
+                        overlay.update(move |s, tx| s.failed(note, out, tx));
+                    }
                 }
             });
         if let Err(error) = spawned {
@@ -504,26 +526,40 @@ impl Editor {
         let spawned = std::thread::Builder::new()
             .name("hex-recording-export".into())
             .spawn(move || {
-                let note = match job.deliver(&out) {
-                    Ok(()) => match &out {
-                        Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
-                        _ => tr("Saved").to_owned(),
-                    },
+                let result = job.deliver(&out);
+                let Some(overlay) = overlay else {
+                    return;
+                };
+                match result {
+                    Ok(()) => {
+                        let note = match &out {
+                            Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
+                            _ => tr("Saved").to_owned(),
+                        };
+                        overlay.update(move |s, tx| s.note(note, tx));
+                    }
                     Err(error) => {
                         tracing::warn!(%error, "could not export the recording");
-                        match &out {
-                            Out::Send(_) => tr("Couldn't send").to_owned(),
-                            _ => tr("Couldn't save").to_owned(),
-                        }
+                        let note = export_failure(&error, &out);
+                        overlay.update(move |s, tx| s.failed(note, out, tx));
                     }
-                };
-                if let Some(overlay) = overlay {
-                    overlay.update(move |s, tx| s.note(note, tx));
                 }
             });
         if let Err(error) = spawned {
             tracing::warn!(%error, "could not start a recording export");
         }
+    }
+}
+
+/// What the editor says when an export to `out` failed with `error`.
+fn export_failure(error: &anyhow::Error, out: &Out) -> String {
+    if error.downcast_ref::<export::MarksNotDrawn>().is_some() {
+        return tr("Couldn't draw your marks").to_owned();
+    }
+    match out {
+        Out::Copy => tr("Couldn't copy").to_owned(),
+        Out::Save => tr("Couldn't save").to_owned(),
+        Out::Send(_) => tr("Couldn't send").to_owned(),
     }
 }
 
@@ -642,7 +678,9 @@ fn poll(s: &mut Editor, now: f64, tx: &mut Tx) -> bool {
         tx.wake_after(Duration::from_secs_f64(at + LEAVE_S - now));
         return false;
     }
-    if let Some((_, at)) = &s.note {
+    if let Some((_, at)) = &s.note
+        && s.failed.is_none()
+    {
         let left = at + NOTE_S - now;
         if left <= 0.0 {
             s.note = None;

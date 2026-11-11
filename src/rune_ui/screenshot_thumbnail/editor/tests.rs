@@ -373,6 +373,56 @@ fn an_export_draws_the_marks_over_the_shot() {
     }
 }
 
+/// A shot larger than the GPU draws, or one exported with no GPU at all,
+/// never goes out without its marks: the export fails instead.
+#[test]
+fn a_shot_whose_marks_cant_be_drawn_is_not_exported() {
+    // Only its size matters: it's refused before its pixels are read.
+    let shot = shot([64, 48], 1.0);
+    let export = Export {
+        image: shot.image.clone(),
+        rgba: shot.rgba.clone(),
+        size: [33_000, 2],
+        scale: 1.0,
+        marks: vec![Mark::Box {
+            from: [10.0, 0.0],
+            to: [200.0, 2.0],
+        }],
+        crop: None,
+    };
+    let error = export.png().unwrap_err();
+    assert!(
+        error.downcast_ref::<export::MarksNotDrawn>().is_some(),
+        "{error:#}"
+    );
+    assert_eq!(
+        export_failure(&error, &Out::Copy),
+        "Couldn't draw your marks"
+    );
+}
+
+/// A failed export's note stays, with Retry, until the next export.
+#[test]
+fn a_failed_export_stays_shown_until_it_is_retried() {
+    let mut editor = Editor {
+        on: true,
+        ..Editor::default()
+    };
+    let mut tx = Tx::default();
+    editor.failed("Couldn't draw your marks".into(), Out::Copy, &mut tx);
+    poll(&mut editor, NOTE_S + 5.0, &mut tx);
+    assert_eq!(
+        editor.note.as_ref().map(|(note, _)| note.as_str()),
+        Some("Couldn't draw your marks"),
+        "it doesn't fade like a success"
+    );
+    assert!(matches!(editor.failed, Some(Out::Copy)));
+    // No shot, so the retry stops before exporting anything.
+    editor.retry(&mut tx);
+    assert!(editor.failed.is_none());
+    assert!(editor.note.is_none());
+}
+
 /// What the goldens and the frames say over the shot.
 const WORDS: &str = "The padding on the left of this dialog is tighter than on the right. \
                      Match it to the capsule's, then check the dark theme too.";
@@ -495,6 +545,7 @@ fn editor_goldens() {
         ("send", true, false, false),
         ("words", false, true, false),
         ("trim", false, false, true),
+        ("failed", false, false, false),
     ] {
         for dark in [false, true] {
             let theme = if dark { "dark" } else { "light" };
@@ -523,6 +574,10 @@ fn editor_goldens() {
                 recording.drag(clip::Handle::Start, 2_000);
                 recording.drag(clip::Handle::End, 9_000);
                 editor.clip = Some(recording);
+            }
+            if name.starts_with("screenshot-editor-failed") {
+                editor.note = Some((tr("Couldn't draw your marks").into(), 0.0));
+                editor.failed = Some(Out::Copy);
             }
             if words {
                 editor.words = WORDS.into();
