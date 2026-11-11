@@ -334,6 +334,13 @@ meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
 open stream stops delivering audio without an error (any OS, #1206)
   -> 4 s with no chunk (STREAM_STALL_TIMEOUT) -> treated as a stream failure
   -> reopened like any interrupted stream, idle or not // logged "microphone stopped delivering audio"
+     ├── it had delivered for 8 s (STREAM_PROVEN_UPTIME) -> it was working:
+     │     reopen at once with the backoff reset // exactly as before
+     └── a reopened stream that stops sooner never started (#1681)
+           -> wait a growing backoff, 250 ms doubling to 60 s
+           -> a successful reopen keeps it; only 8 s of delivered audio resets it
+           -> a route change (the lid opening) or a dictation press reopens at
+              once, keeping the backoff // never a fast reopen loop again
 
 programmatic dictation (local API) when the stream interrupts or gaps
   ├── audio delivered before the loss -> kept under its id // recover.programmatic-loss
@@ -357,6 +364,11 @@ values; no iPhone observed with the lid closed),
 `where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
 `only_an_idle_capture_lets_the_microphone_switch`,
 `a_stream_that_stops_delivering_audio_is_reopened`,
+`a_stream_that_keeps_stalling_backs_off_to_a_minute`,
+`a_reopened_stream_keeps_the_stall_backoff_its_predecessors_grew`,
+`a_stream_that_delivers_steadily_reopens_at_once_and_forgets_the_backoff`,
+`a_route_change_ends_a_stall_wait_without_resetting_its_backoff`,
+`a_dictation_press_retries_a_stalled_microphone_at_once`,
 `a_dead_stream_is_stopped_before_its_replacement_opens`;
 [dictation/audio.rs](../../src/dictation/audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
