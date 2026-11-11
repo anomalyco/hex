@@ -30,6 +30,14 @@ embed-resource = "3"
 [features]
 onnx-benchmark = ["dep:transcribe-rs"]
 
+# Full debug info made each dev/test build ~19 GB per worktree. Line tables keep
+# function names and file:line in backtraces; dependencies carry none.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 # Shipped executables carry no symbol table (about 11 MB on Linux). Panic
 # backtraces lose function names; debug builds keep them.
 [profile.release]
