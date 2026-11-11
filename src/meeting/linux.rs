@@ -178,6 +178,15 @@ pub(crate) fn reveal(path: &Path) {
     } else {
         path.parent().unwrap_or(path)
     };
+    open(folder);
+}
+
+/// Opens the folder `path` itself.
+pub(crate) fn open_folder(path: &Path) {
+    open(path);
+}
+
+fn open(folder: &Path) {
     if let Err(error) = Command::new("xdg-open")
         .arg(folder)
         .stdin(Stdio::null())

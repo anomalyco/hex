@@ -40,13 +40,13 @@ mod os;
 /// Linux's Trash, for capture retention too: distros ship no `trash` command.
 #[cfg(target_os = "linux")]
 pub(crate) use os::move_to_trash;
-pub(crate) use os::reveal;
 #[cfg(target_os = "macos")]
 pub(crate) use os::{
     SystemAudioAuthorization, create_tap_aggregate, request_screen_recording,
     request_system_audio_access, reset_system_audio_request, screen_recording_permitted,
     system_audio_authorization, system_audio_ready,
 };
+pub(crate) use os::{open_folder, reveal};
 mod delta;
 mod echo;
 mod export_name;
@@ -1208,6 +1208,13 @@ fn explorer_select(path: &Path) -> std::ffi::OsString {
     select.push(path.as_os_str());
     select.push("\"");
     select
+}
+
+/// Explorer's argument that opens `path` itself: the path alone, with no
+/// select switch, so a folder opens rather than its parent selecting it.
+#[cfg(any(windows, test))]
+fn explorer_open(path: &Path) -> std::ffi::OsString {
+    path.as_os_str().to_owned()
 }
 
 /// Moves a finished meeting to the Trash: its exported Markdown first, then

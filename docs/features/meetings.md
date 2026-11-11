@@ -205,12 +205,14 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     │   focus; if Rune still can't open them, the pane path above
     │   // checks: linux/meeting_capsules.rs gating tests; not run on GNOME
     └── not observed on a real GNOME session; no automated check
-Files -> Reveal files opens the recording folder (selected in Explorer,
-    opened by xdg-open); Reveal Markdown additionally appears while the
+Files -> Reveal files opens the recording folder itself (Explorer and
+    xdg-open open it); Reveal Markdown additionally appears while the
     exported .md exists and selects it (Explorer gets `/select,"<path>"`,
     with the switch outside the quotes so a folder such as `Hex Meetings`
     stays one path) or opens the folder holding it (xdg-open); Delete moves
     to the freedesktop Trash or the Recycle Bin
+    // checks: explorer_opens_a_folder_itself_without_the_select_switch;
+    // not observed on a real Windows machine
 ```
 
 The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and

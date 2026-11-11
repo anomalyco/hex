@@ -99,6 +99,17 @@ pub(crate) fn reveal(path: &Path) {
     }
 }
 
+/// Opens the folder `path` itself in Finder, rather than selecting it in its
+/// parent.
+pub(crate) fn open_folder(path: &Path) {
+    if let Err(error) = std::process::Command::new("/usr/bin/open")
+        .arg(path)
+        .spawn()
+    {
+        tracing::error!(%error, "could not open meeting folder");
+    }
+}
+
 pub(super) fn move_to_trash(path: &Path) -> Result<()> {
     use objc2_foundation::{NSFileManager, NSString, NSURL};
     let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));

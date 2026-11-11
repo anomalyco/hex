@@ -497,6 +497,18 @@ pub(crate) fn reveal(path: &Path) {
     }
 }
 
+/// Opens Explorer at the folder `path` itself, rather than selecting it in
+/// its parent.
+pub(crate) fn open_folder(path: &Path) {
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    if let Err(error) = std::process::Command::new("explorer.exe")
+        .arg(super::explorer_open(&path))
+        .spawn()
+    {
+        tracing::error!(%error, "could not open meeting folder");
+    }
+}
+
 /// Moves `path` to the Recycle Bin, where it can be restored.
 pub(super) fn move_to_trash(path: &Path) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
