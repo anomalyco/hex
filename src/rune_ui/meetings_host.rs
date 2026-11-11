@@ -50,15 +50,19 @@ impl LocalMeetings {
                 .map_err(failed),
             MeetingRequest::Trash(id) => crate::meeting::trash(&id).map_err(failed),
             MeetingRequest::Reveal(target) => {
-                // Explorer selects the exported Markdown; Linux opens the
-                // folder that holds it.
-                crate::meeting::reveal(target.path());
+                // A file is selected in its folder; a recording folder opens
+                // itself.
+                if target.is_markdown() {
+                    crate::meeting::reveal(target.path());
+                } else {
+                    crate::meeting::open_folder(target.path());
+                }
                 Ok(())
             }
             MeetingRequest::RevealFolder => {
                 let folder = crate::app_settings::meeting_output_folder();
                 std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
-                crate::meeting::reveal(&folder);
+                crate::meeting::open_folder(&folder);
                 Ok(())
             }
             MeetingRequest::ChooseFolder => {
