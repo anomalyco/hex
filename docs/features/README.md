@@ -841,14 +841,14 @@ Completed output                         // output
 │   └── macOS menu item shows the saved binding (⌥⇧V by default); unbound,
 │       modifier-only, or a mouse button -> no shortcut shown
 └── History
-    ├── Inspect / search / copy (row hover or the card) / delete
+    ├── Inspect / search / copy (row hover or the card) / Delete… (asks once)
     ├── Retention ("Kept 7 days ▾" menu) -> Seven days by default, always hard-capped
     ├── Off ("History off") -> Stop new entries; preserve existing entries
     ├── Same menu > Clear all history… -> asks in the header; only the red confirm clears
     ├── Labs > Select multiple dictations (off, every OS) -> one row as before   // labs.history_multi_select
     │   ├── Plain click, Shift-click on the visible (searched) rows, Cmd-click (Ctrl), or a drag -> one, a range, or a toggled set
     │   ├── Two or more selected -> "{count} dictations selected": Copy (final texts, oldest first, a blank line between each) / Delete… (asks once)
-    │   ├── One selected -> the ordinary card, Copy, Delete (and Transcribe again with Keep recordings)
+    │   ├── One selected -> the ordinary card, Copy, Delete… (asks once, then Cancel), Transcribe again with Keep recordings
     │   └── A search, new entries, or a delete prune it; turning the lab off keeps one entry (labs.md)
     └── Labs > Keep recordings (off) -> new entries keep their 16 kHz audio   // labs.keep-recordings
         -> also "Keep audio too" in the retention menu while the lab is offered
@@ -2598,8 +2598,8 @@ best-effort deletion is not guaranteed deletion.
 `dev.rune-ui` lives in [rune_ui.rs](../../src/rune_ui.rs) and its pane modules;
 its tests drive the Rune runtime headlessly (navigation; General rows per
 shortcut source, fitting the default window with Advanced collapsed, Shortcut mode's modal, saves through the host, Quit Hex, microphone-release
-confirmation, shortcut recording and Escape, conflicts; History select, delete, two-step
-clear, copy; Modes add/delete, corrections, transformations (drag reorder saves once
+confirmation, shortcut recording and Escape, conflicts; History select, two-step
+delete and clear, copy; Modes add/delete, corrections, transformations (drag reorder saves once
 on release), application conflicts, a chosen file joining the mode, arrow
 keys in the model and application searches; the picker's ChooseModel/CancelModel; setup's download; draft
 saves; and, from macOS/Windows preview data, each OS's panes and rows, Launch

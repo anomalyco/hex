@@ -1282,7 +1282,25 @@ fn history_selects_deletes_and_clears_in_two_steps() {
     let mut rt = runtime("history", true, PANE_SIZE);
     tap(&mut rt, "history-entry3");
     assert_eq!(rt.state.history.selected, Some(3));
+    // Delete… only asks. Cancel keeps the entry.
     tap(&mut rt, "history-delete");
+    assert_eq!(rt.state.history.delete_armed, Some(3));
+    assert!(rt.find("history-confirm-delete").is_some());
+    assert!(rt.find("history-delete").is_none());
+    tap(&mut rt, "history-cancel-delete");
+    assert!(rt.state.history.delete_armed.is_none());
+    assert!(rt.state.history.entries.iter().any(|entry| entry.id == 3));
+    // Escape answers the confirmation too.
+    tap(&mut rt, "history-delete");
+    key(&mut rt, Key::Escape, Mods::default());
+    settle(&mut rt);
+    assert!(rt.state.history.delete_armed.is_none());
+    assert!(rt.find("history-confirm-delete").is_none());
+    assert!(rt.state.history.entries.iter().any(|entry| entry.id == 3));
+    // Only the confirmation deletes.
+    tap(&mut rt, "history-delete");
+    tap(&mut rt, "history-confirm-delete");
+    assert!(rt.state.history.delete_armed.is_none());
     assert!(rt.state.history.entries.iter().all(|entry| entry.id != 3));
     // Clear all history… sits at the bottom of the retention menu and only
     // asks; Cancel keeps everything, and only the confirmation clears.
@@ -1299,6 +1317,79 @@ fn history_selects_deletes_and_clears_in_two_steps() {
     tap(&mut rt, &clear);
     tap(&mut rt, "history-confirm-clear");
     assert!(rt.state.history.entries.is_empty());
+}
+
+#[test]
+fn history_delete_confirmation_stops_when_the_pane_moves_on() {
+    use crate::history::{History, HistoryDraft, HistoryKind, HistoryRetention, HistoryStore};
+    let directory =
+        std::env::temp_dir().join(format!("hex-rune-history-disarm-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let history = History::new(HistoryStore::open(
+        directory.join("history.json"),
+        HistoryRetention::Week,
+        crate::history::now_ms(),
+    ));
+    let record = |text: &str| {
+        history
+            .record(HistoryDraft {
+                kind: HistoryKind::Dictation,
+                raw_text: text.into(),
+                final_text: text.into(),
+                application: None,
+                processing: None,
+                audio_ms: 900,
+                inference_ms: 80,
+                total_ms: 200,
+                recording: None,
+                model: None,
+            })
+            .unwrap()
+            .unwrap()
+    };
+    let first = record("Ship it.");
+    let second = record("Ship it again.");
+    let mut rt = runtime("history-empty", true, PANE_SIZE);
+    rt.state.history = history::HistoryPane::shared(Some(history));
+    rt.state.history.selected = Some(first);
+    rt.state.history.reload();
+    rt.invalidate();
+    settle(&mut rt);
+    // Choosing another entry answers Delete… and leaves the first entry be.
+    tap(&mut rt, "history-delete");
+    tap(&mut rt, &format!("history-entry{second}"));
+    assert!(rt.state.history.delete_armed.is_none());
+    assert!(
+        rt.state
+            .history
+            .entries
+            .iter()
+            .any(|entry| entry.id == first)
+    );
+    // Clear all history… answers it, then asks for its own confirmation.
+    tap(&mut rt, &format!("history-entry{first}"));
+    tap(&mut rt, "history-delete");
+    tap(&mut rt, "history-retention-field-trigger");
+    let clear = menu_item(&rt, "history-retention", "Clear all history…");
+    tap(&mut rt, &clear);
+    assert!(rt.state.history.delete_armed.is_none());
+    assert!(rt.find("history-confirm-delete").is_none());
+    tap(&mut rt, "history-cancel-clear");
+    // Leaving History answers it too.
+    tap(&mut rt, "history-delete");
+    tap(&mut rt, "nav-output");
+    tap(&mut rt, "nav-history");
+    assert!(rt.state.history.delete_armed.is_none());
+    assert!(rt.find("history-confirm-delete").is_none());
+    // A search answers it.
+    tap(&mut rt, "history-delete");
+    tap(&mut rt, "history-search");
+    rt.paste("zebra");
+    settle(&mut rt);
+    assert!(rt.state.history.delete_armed.is_none());
+    assert!(rt.find("history-confirm-delete").is_none());
+    let _ = std::fs::remove_dir_all(&directory);
 }
 
 #[test]
