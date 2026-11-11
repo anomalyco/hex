@@ -1531,6 +1531,55 @@ fn history_a_press_dragged_inside_its_row_keeps_a_command_toggle() {
     assert_eq!(rt.state.history.selected, Some(2));
 }
 
+/// Presses row `from`, drags over row `to`, and lets go at `at` on the row it
+/// pressed, all in the frames the moves take: the release and the last move
+/// share one, so no drawn tree shows the drag back on its own row.
+fn drag_out_and_back(rt: &mut Runtime<Ui>, from: &str, to: &str, at: (f32, f32)) {
+    let (from_x, from_y) = rt.find(from).unwrap_or_else(|| panic!("no element {from}"));
+    let (to_x, to_y) = rt.find(to).unwrap_or_else(|| panic!("no element {to}"));
+    rt.pointer_down(from_x, from_y);
+    rt.pointer_move(to_x, to_y);
+    rt.pointer_move(at.0, at.1);
+    rt.pointer_up(at.0, at.1);
+    settle(rt);
+}
+
+#[test]
+fn history_a_drag_back_onto_its_row_selects_only_that_row() {
+    let mut rt = history_multi();
+    tap(&mut rt, "history-entry3");
+    let (x, y) = rt.find("history-entry2").unwrap();
+    hold(&mut rt, command());
+    // Out to row 1 and back onto row 2, 8 pt from where the press landed: the
+    // range shrinks back to row 2, and that row's release must not toggle it
+    // off again.
+    drag_out_and_back(&mut rt, "history-entry2", "history-entry1", (x + 8.0, y));
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 1);
+    assert!(rt.state.history.selection.contains(2));
+    assert_eq!(rt.state.history.selected, Some(2));
+}
+
+#[test]
+fn history_a_drag_back_near_its_press_selects_only_that_row() {
+    let mut rt = history_multi();
+    tap(&mut rt, "history-entry3");
+    let (x, y) = rt.find("history-entry2").unwrap();
+    hold(&mut rt, command());
+    // The return lands 2 pt from the press, under the click slop: the press is
+    // a drag now, so it still ranges back to row 2 instead of leaving row 1.
+    drag_out_and_back(
+        &mut rt,
+        "history-entry2",
+        "history-entry1",
+        (x + 2.0, y - 1.0),
+    );
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 1);
+    assert!(rt.state.history.selection.contains(2));
+    assert_eq!(rt.state.history.selected, Some(2));
+}
+
 #[test]
 fn history_keyboard_activation_selects_a_row_in_the_set() {
     let mut rt = history_multi();

@@ -192,13 +192,12 @@ fn press(ui: &mut Ui, id: u64, click: Click) {
     choose(ui, id, click);
 }
 
-/// A row pressing without a pointer press of its own (Space, or the arrows
-/// in the list): a pointer's release leaves the row its down already chose.
-fn activated(ui: &mut Ui, id: u64, click: Click) {
-    if on(ui) && ui.history.selection.pressed.take() == Some(id) {
-        return;
-    }
-    choose(ui, id, click);
+/// Whether this row's press belongs to the pointer press that already chose it
+/// on the way down: its release presses nothing, whether or not the row is the
+/// one the card shows. Space and the arrows press the focused row without a
+/// pointer press, so they always choose.
+fn pressed_here(ui: &mut Ui, id: u64) -> bool {
+    ui.history.selection.pressed.take() == Some(id)
 }
 
 /// One History row's press: a plain press selects its row alone, Shift and
@@ -218,23 +217,31 @@ pub(super) fn gesture(row: El, id: u64, primary: bool) -> El {
         Phase::Move => dragged(ui, id, drag, tx),
         Phase::Up => {
             ui.history.selection.drag = None;
-            // A press that reached another row is a drag, whose release presses
-            // nothing: the next keyboard activation of this row still selects
-            // it. A cancelled gesture presses nothing either. Movement that
-            // stayed on the pressed row is still its click, and its release
-            // must not choose the row a second time.
-            if ui.history.selection.drag_left || drag.cancelled() {
+            // A release on the pressed row is still its click, even after a
+            // drag out and back, so it keeps `pressed` for the Press that
+            // follows on this same release to swallow instead of choosing the
+            // row a second time. A release elsewhere, or a cancelled gesture,
+            // presses nothing: the next keyboard activation of this row still
+            // selects it.
+            let x = drag.x;
+            let y = drag.y;
+            let inside = (0.0..drag.w).contains(&x) && (0.0..drag.h).contains(&y);
+            if drag.cancelled() || !inside {
                 ui.history.selection.pressed = None;
             }
         }
     };
     row.on_drag(gesture)
         .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| {
-            // Space and the arrows press the focused row through here, so only
-            // the row a pointer press already chose may skip them.
+            // A pointer press chose this row on the way down, so its release
+            // presses nothing and leaves no `pressed` behind for the next
+            // keyboard activation. Space and the arrows come here without one.
+            if pressed_here(ui, id) {
+                return;
+            }
             if !primary {
                 tx.instant();
-                activated(ui, id, Click::of(tx));
+                choose(ui, id, Click::of(tx));
             }
         })
 }
@@ -243,9 +250,15 @@ pub(super) fn gesture(row: El, id: u64, primary: bool) -> El {
 /// in the frame's drawn rows by its `history-entry{id}` key. Pointer jitter
 /// under the click slop, and movement over the row the drag started on before
 /// it reaches another, leaves the selection alone: a click with a shaky hand
-/// still toggles or ranges what it landed on.
+/// still toggles or ranges what it landed on. Once the drag has reached another
+/// row it is a drag, so coming back within the slop of the press still ranges
+/// through the rows between.
 fn dragged(ui: &mut Ui, from: u64, drag: &Drag, tx: &mut Tx) {
-    if !on(ui) || (drag.dx.abs() <= CLICK_SLOP && drag.dy.abs() <= CLICK_SLOP) {
+    if !on(ui) {
+        return;
+    }
+    if !ui.history.selection.drag_left && drag.dx.abs() <= CLICK_SLOP && drag.dy.abs() <= CLICK_SLOP
+    {
         return;
     }
     let point = drag.window_point();
