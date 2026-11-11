@@ -2,6 +2,7 @@ use super::*;
 use crate::app_settings::{
     MeetingRetention, MeetingSettings, MeetingSummaries, RecordingAudioBehavior,
 };
+use crate::dictation::vocabulary::VocabularyEntry;
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 use serde::Deserialize;
 use serde_json::json;
@@ -95,6 +96,79 @@ fn unset_retention_saves_a_shape_older_hex_can_read() {
             retention
         );
     }
+}
+
+#[test]
+fn saved_keys_are_sorted_at_every_level() {
+    let file = SettingsFile::new(b"{}");
+    let settings = AppSettings {
+        sound_effect_volume: 0.37,
+        vocabulary: vec![VocabularyEntry {
+            term: "Cappuccino".into(),
+            sounds_like: vec!["capuchin".into()],
+        }],
+        ..AppSettings::default()
+    };
+    settings.write_to(&file.path).unwrap();
+    let raw = fs::read_to_string(&file.path).unwrap();
+    let keys = assert_sorted_keys(&raw);
+    assert!(keys > 40, "only {keys} keys checked");
+    // f32 settings keep their short form instead of widening through `Value`.
+    for (key, value) in [
+        ("sound_effect_volume", "0.37"),
+        ("recording_duck_volume", "0.2"),
+        ("hex_microphone_strength", "1.0"),
+    ] {
+        let line = format!("\"{key}\": {value}");
+        assert!(
+            raw.lines()
+                .any(|written| written.trim().trim_end_matches(',') == line),
+            "settings.json has no `{line}`"
+        );
+    }
+    let saved: Value = serde_json::from_str(&raw).unwrap();
+    // These sections have several keys each, and the vocabulary entry is an
+    // object inside an array, so nested objects are covered.
+    assert!(saved["meetings"].as_object().unwrap().len() > 1);
+    assert!(saved["transcription"].as_object().unwrap().len() > 1);
+    assert_eq!(saved["vocabulary"][0]["sounds_like"], json!(["capuchin"]));
+    assert_eq!(AppSettings::load_from(&file.path).unwrap(), settings);
+}
+
+/// Asserts that every object in the pretty-printed JSON `raw` has ascending
+/// keys, including the objects inside arrays, and returns the number of keys it
+/// checked. `Value` sorts keys as it parses, so this reads the file's own text:
+/// serde_json gives every key its own line, indented two spaces per level.
+fn assert_sorted_keys(raw: &str) -> usize {
+    /// The key of a line that starts a member (`"key": ...`).
+    fn key_at(line: &str) -> Option<&str> {
+        let rest = line.strip_prefix('"')?;
+        let key = &rest[..rest.find('"')?];
+        rest[key.len() + 1..].starts_with(':').then_some(key)
+    }
+    // Each open object by the indentation of its keys, with the last key seen.
+    let mut open: Vec<(usize, &str)> = Vec::new();
+    let mut checked = 0;
+    for line in raw.lines() {
+        let indent = line.len() - line.trim_start().len();
+        open.retain(|(key_indent, _)| *key_indent <= indent);
+        let Some(key) = key_at(line.trim_start()) else {
+            continue;
+        };
+        checked += 1;
+        match open.last_mut() {
+            Some((key_indent, previous)) if *key_indent == indent => {
+                assert!(
+                    *previous < key,
+                    "settings.json writes \"{key}\" after \"{previous}\" at nesting level {}",
+                    indent / 2
+                );
+                *previous = key;
+            }
+            _ => open.push((indent, key)),
+        }
+    }
+    checked
 }
 
 #[test]
