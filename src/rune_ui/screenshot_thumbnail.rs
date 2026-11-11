@@ -571,7 +571,10 @@ pub(crate) mod files {
         spawn("hex-card-trash", move || {
             #[cfg(target_os = "macos")]
             match crate::screenshots::save::trash(&path) {
-                Ok(()) => crate::history::captures::forget(&path),
+                Ok(()) => {
+                    crate::history::captures::forget(&path);
+                    crate::history::annotations::forget(&path);
+                }
                 Err(error) => {
                     tracing::warn!(%error, path = %path.display(), "could not trash the capture");
                     crate::feedback::play(crate::feedback::Tone::Error);

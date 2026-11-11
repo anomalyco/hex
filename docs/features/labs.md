@@ -2139,7 +2139,8 @@ cards
 CleanShot's ⌘S saves the capture; every Hex capture is already saved,
 so ⌘S shows it in Finder instead.
 
-Every shot and recording the Lab saves is also listed in the Captures
+Every shot and recording the Lab saves, and every annotation and replay
+Annotate wrote to its captures folder, is also listed in the Captures
 pane ([captures.rs](../../src/rune_ui/captures.rs)), which sits under
 History in the sidebar while the Lab is on. It is its own pane rather than
 a part of History: its rows are pictures and movies with their own
@@ -2148,12 +2149,19 @@ actions, and History's retention menu and Clear all don't apply to them.
 ```ts
 Captures
 ├── search      -> every word in what was said over it, its file name, or its kind
+│                  (an annotation: its words, app, the session it went to)
 ├── rows        -> newest first, the last 30 days, only files still where they were saved:
 │                  thumbnail · the words said over it (else the file's name) ·
-│                  "Screenshot · 2880 × 1800" or "Screen recording · 0:42" · its age
-├── click       -> the editor (a shot with its words; a recording to trim)
-├── drag        -> the file
+│                  "Screenshot · 2880 × 1800", "Screen recording · 0:42",
+│                  "Annotation · 0:18", or "Annotation · Video expired" · its age
+├── click       -> the editor (a shot with its words; a recording, or an
+│                  annotation's movie with its timed words, to trim; an
+│                  annotation whose movie expired: its first keyframe)
+├── drag        -> the file (an annotation's movie, else its keyframe)
 ├── hover       -> Copy, Show in Finder, Move to Trash in the age's place
+│                  (Copy: a check only once the clipboard has it, else the
+│                  error tone; an annotation copies as Annotate does; Trash
+│                  moves an annotation's whole bundle)
 └── nothing yet -> "No captures yet." and what shows here
 ```
 
@@ -2174,12 +2182,21 @@ words. Move to Trash (a card's or the pane's) forgets the entry. The
 editor's Save makes a new file that isn't listed. Writes are atomic, and a
 malformed index is kept aside as `index.json.corrupt`.
 
+Annotations come from the captures folder itself
+([history/annotations.rs](../../src/history/annotations.rs)), never an
+index: while the pane shows, a `hex-captures-scan` thread lists the
+`*.scrawl` bundles at most every 5 s, skips any whose name dates it past 30
+days, and reads only the `scrawl.json` files that changed since the last
+scan. Annotate's replays are written as ordinary bundles, so they list as
+annotations too.
+
 The last ten cards closed (by ✕, a key, the menu, opening the editor, or
 the stack reaching the top) are kept in memory. The menu bar's Restore
 Last Capture, shown while the Lab is on and dimmed until a card was
 closed, brings back the newest of them, sliding in from the right edge
 into the corner; one whose file is gone is skipped, and Move to Trash
-keeps none. They don't outlast Hex.
+keeps none. They don't outlast Hex: after a relaunch the Captures pane is
+the way back to a closed card's capture.
 
 The card's overlay is the whole display under the pointer, click-through
 outside the card, so the card can start anywhere a shot was taken from.
@@ -2395,7 +2412,9 @@ and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/s
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
 the index's order, reopen, owner-only modes, search, window, caps, forgetting,
 words, and a malformed file in [history/captures.rs](../../src/history/captures.rs);
-the Captures pane as the `captures` golden (light and dark) and
+the annotation listing's window, order, expired movies, search, and rescan in
+[history/annotations.rs](../../src/history/annotations.rs);
+the Captures pane (with an annotation row) as the `captures` golden (light and dark) and
 `--scene captures-empty`;
 its card renders as `--scene mac-labs-screenshots`; the card's entrance
 and the stack's motion are `thumbnail_frames` (`HEX_SCREENSHOT_FRAMES`
