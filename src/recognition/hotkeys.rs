@@ -167,8 +167,10 @@ impl Hotkeys {
     }
 
     /// Suspends every machine (never stopping at the first, as `any`
-    /// would) and reports whether one was recording.
+    /// would) and reports whether one was recording. A command still waiting
+    /// for a print-only recording is answered: that recording is over.
     pub(super) fn suspend_all(&mut self) -> bool {
+        self.fail_print("its recording already ended");
         self.machines().filter_map(DictationHotkey::suspend).count() > 0
     }
 
@@ -309,15 +311,29 @@ impl Hotkeys {
     }
 
     /// Takes the print-only recording's reply for the shortcut `action` that
-    /// ends it. A finish hands the reply to transcription; a discard never
-    /// spoke, and anything else Hex or the person ends it with is refused.
-    /// An action that doesn't end the recording leaves the reply waiting.
-    pub(super) fn print_for(&mut self, action: HotkeyAction) -> Option<PrintReply> {
+    /// ends it. Only the dictation machine owns the reply: `hex dictation
+    /// start` locks that one, and another shortcut's action leaves it alone.
+    /// A finish hands the reply to transcription; a discard never spoke, and
+    /// anything else Hex or the person ends it with is refused. A start means
+    /// the recording it belonged to already ended, so it is failed rather
+    /// than left to answer a later dictation.
+    pub(super) fn print_for(
+        &mut self,
+        shortcut: Shortcut,
+        action: HotkeyAction,
+    ) -> Option<PrintReply> {
+        if shortcut != Shortcut::Dictation {
+            return None;
+        }
         let print = self.print_capture.take()?;
         match action {
             HotkeyAction::Finish => return Some(print),
             HotkeyAction::Discard(_) => print.send(PrintedTranscript::NoSpeech),
-            HotkeyAction::Start => self.print_capture = Some(print),
+            HotkeyAction::Start => {
+                print.send(PrintedTranscript::Failed(
+                    "its recording already ended".into(),
+                ));
+            }
             HotkeyAction::PasteLast
             | HotkeyAction::PasteMeeting
             | HotkeyAction::Cancel
@@ -371,7 +387,10 @@ impl Hotkeys {
     }
 
     /// Stops whichever machine records, as a `stop` or `cancel` command does.
+    /// A reply still waiting belongs to a recording that already ended, so it
+    /// is answered rather than left to a later capture.
     pub(super) fn suspend_recording(&mut self) {
+        self.fail_print("its recording already ended");
         for machine in self.machines() {
             if machine.is_recording() {
                 machine.suspend();
@@ -462,9 +481,10 @@ mod tests {
             ),
             [(Shortcut::Dictation, HotkeyAction::Finish)]
         );
-        assert!(hotkeys.print_capture.is_none());
+        // Only `print_for` takes the reply; the action alone leaves it.
+        assert!(hotkeys.print_capture.is_some());
         let print = hotkeys
-            .print_for(HotkeyAction::Finish)
+            .print_for(Shortcut::Dictation, HotkeyAction::Finish)
             .expect("the transcript goes to the printing start");
         print.send(PrintedTranscript::Text("Ship it.".into()));
         assert_eq!(
@@ -475,10 +495,78 @@ mod tests {
         // A cancel is refused rather than waited out.
         let (start, printed) = PrintReply::channel();
         hotkeys.keep_print(start);
-        assert!(hotkeys.print_for(HotkeyAction::Cancel).is_none());
+        assert!(
+            hotkeys
+                .print_for(Shortcut::Dictation, HotkeyAction::Cancel)
+                .is_none()
+        );
         assert!(matches!(
             printed.recv_timeout(Duration::from_millis(50)),
             Ok(PrintedTranscript::Cancelled)
+        ));
+    }
+
+    /// A held reply belongs to the recording that started it: another
+    /// shortcut leaves it alone, and a later start or a suspension answers it
+    /// instead of letting it wait for a new dictation.
+    #[test]
+    fn a_held_print_reply_never_answers_a_later_dictation() {
+        use crate::suppression::DiscardCause;
+
+        let mut hotkeys = hotkeys();
+
+        // The raw shortcut's finish isn't the dictation machine's, so the
+        // reply stays held for its own recording.
+        let (start, printed) = PrintReply::channel();
+        hotkeys.keep_print(start);
+        assert!(
+            hotkeys
+                .print_for(Shortcut::Raw, HotkeyAction::Finish)
+                .is_none()
+        );
+        assert!(hotkeys.print_capture.is_some());
+        assert!(matches!(
+            printed.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        // A start means that recording already ended: fail it, never let it
+        // wait for the new capture.
+        assert!(
+            hotkeys
+                .print_for(Shortcut::Dictation, HotkeyAction::Start)
+                .is_none()
+        );
+        assert!(hotkeys.print_capture.is_none());
+        assert!(matches!(
+            printed.recv_timeout(Duration::from_millis(50)),
+            Ok(PrintedTranscript::Failed(why)) if why == "its recording already ended"
+        ));
+
+        // A short tap or chord never spoke.
+        let (start, printed) = PrintReply::channel();
+        hotkeys.keep_print(start);
+        assert!(
+            hotkeys
+                .print_for(
+                    Shortcut::Dictation,
+                    HotkeyAction::Discard(DiscardCause::Key)
+                )
+                .is_none()
+        );
+        assert!(matches!(
+            printed.recv_timeout(Duration::from_millis(50)),
+            Ok(PrintedTranscript::NoSpeech)
+        ));
+
+        // Suspending every machine answers a reply that was still waiting.
+        let (start, printed) = PrintReply::channel();
+        hotkeys.keep_print(start);
+        hotkeys.suspend_all();
+        assert!(hotkeys.print_capture.is_none());
+        assert!(matches!(
+            printed.recv_timeout(Duration::from_millis(50)),
+            Ok(PrintedTranscript::Failed(_))
         ));
     }
 }

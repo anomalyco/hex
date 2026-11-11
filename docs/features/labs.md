@@ -632,23 +632,29 @@ the reply is read once: the shortcut's finish (`finish_hotkey_dictation`)
 hands it to `DictationWorker::transcribe_printed` (target `Print` or
 `RawPrint`; processed like a paste, History kind Printed, Paste Last skipped);
 `hex dictation stop` and `toggle` join their own reply with it so both
-commands get the one transcript; `hex dictation cancel`, Toggle's cancel
+commands get the one transcript (a plain stop still answers as a plain stop
+does); `hex dictation cancel`, Toggle's cancel
 shortcut, and the Paste Last shortcut answer it as cancelled; a short-tap
-discard and a near-silent kept clip answer `no-speech`; and a paused shortcut,
+discard and a near-silent kept clip answer `no-speech`; a paused shortcut,
 an unopened microphone, or a microphone loss with no kept audio answers
-failed. Nothing pastes or copies the text, and a start while anything already
+failed; and a reply still held when the next recording starts is failed
+rather than left to answer that one. Nothing pastes or copies the text, and a
+start while anything already
 records is refused with `busy`. Off, the command answers `disabled`; Linux and
 Windows answer `unsupported`; neither changes anything else. The printing
 start waits at most `PRINT_START_WAIT` (31 minutes), and
 `ControlCommand::deadline` gives its transport 5 s more; a timeout leaves the
-recording print-only. Checks:
+recording print-only. While it waits, it holds one of the local API's four
+connection workers (`local_api::HTTP_WORKERS`) until it answers or hits that
+cap, even if the client that asked is killed. Checks:
 `a_printing_stop_answers_through_its_reply_channel` (a joined `PrintReply`
 answers both waiters, `start --print` is accepted, `toggle`/`cancel --print`
 are refused, and the two deadlines) and `cancel_parses_and_takes_no_flags` in
 [control.rs](../../src/control.rs); the Linux and Windows `unsupported` answer
 in `a_printing_stop_answers_with_the_transcript`
 ([control/host.rs](../../src/control/host.rs));
-`a_printing_start_follows_the_shortcut_that_finishes_it` in
+`a_printing_start_follows_the_shortcut_that_finishes_it` and
+`a_held_print_reply_never_answers_a_later_dictation` in
 [recognition/hotkeys.rs](../../src/recognition/hotkeys.rs) (compiled only on
 macOS); `print_start_is_its_own_bit_and_macos_only` in
 [labs.rs](../../src/labs.rs); the row in

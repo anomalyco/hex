@@ -124,12 +124,18 @@ command to the running Hex. `hex history`, `hex meetings list|show|search`, and
 stores the command's reply with the recording (`recognition::Hotkeys::print_capture`)
 and reads it at every end. The shortcut's finish passes it to
 `DictationWorker::transcribe_printed`; `dictation stop` and `toggle` join it
-with their own reply so one transcript answers both; `dictation cancel`, a
-discard, and a kept microphone loss answer it themselves. Nothing pastes or
+with their own reply so one transcript answers both (a plain stop still
+answers as a plain stop does); `dictation cancel`, a
+discard, and a kept microphone loss answer it themselves. Only the dictation
+machine's actions may take it, and a reply still held when a new recording
+starts, or when the machines are suspended, is failed rather than left to
+answer a later dictation. Nothing pastes or
 copies it, History records it as Printed, and the reply is answered rather
 than dropped on every path, including a discarded or silent clip and a
-microphone loss. Linux and Windows answer `unsupported` before their host runs
-anything.
+microphone loss. While it waits, it holds one of the local API's four
+connection workers (`local_api::HTTP_WORKERS`) until it answers or reaches
+its cap, even if the asking client is killed. Linux and Windows answer
+`unsupported` before their host runs anything.
 
 Sources: [control.rs](../../src/control.rs) (protocol, status, quit rules),
 [control/host.rs](../../src/control/host.rs) (the Linux and Windows host),
@@ -158,7 +164,10 @@ covers the immediate stream and `ReadyIntentional`; `recognition::tests`
 cover the stop replies and the paste-last refusal;
 `recognition::hotkeys::tests::a_printing_start_follows_the_shortcut_that_finishes_it`
 covers a printing start's reply surviving to the shortcut's finish and a
-cancel; `control::tests::cancel_parses_and_takes_no_flags`
+cancel, and
+`recognition::hotkeys::tests::a_held_print_reply_never_answers_a_later_dictation`
+covers another shortcut leaving it alone, a later start failing it, a discard,
+and a suspension; `control::tests::cancel_parses_and_takes_no_flags`
 covers `cancel` and its flags; local API's
 `control_requests_are_authenticated_versioned_and_typed` covers authentication,
 bounds, and error codes; `tests::control_commands_parse_beside_the_read_commands`

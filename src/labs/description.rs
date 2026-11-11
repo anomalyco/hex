@@ -206,7 +206,7 @@ impl Feature {
                 "Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys"
             }
             Self::PrintStart => {
-                "Let hex dictation start --print hand the transcript to the command that started it, even when the shortcut finishes the recording"
+                "Let hex dictation start --print hand the transcript to the command that started it, however the recording ends"
             }
         }
     }

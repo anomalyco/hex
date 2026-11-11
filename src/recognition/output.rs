@@ -29,20 +29,19 @@ pub(super) fn interrupted_dictation(
     events: &mut EventLog,
     indicator: DictationSink<'_>,
 ) -> Result<()> {
+    let target = if raw {
+        TranscriptionTarget::RawCopyOnlyPaste
+    } else {
+        TranscriptionTarget::CopyOnlyPaste
+    };
     let mut silent = false;
     if let Some((clip, context)) = salvaged {
-        if salvage_dictation(
-            clip,
-            print.take(),
-            raw,
-            worker,
-            context,
-            device,
-            events,
-            indicator,
-        )?
-        .is_some()
-        {
+        let reply = print.take();
+        let submit = |clip| match reply {
+            Some(reply) => worker.transcribe_printed(clip, reply, raw, context),
+            None => worker.transcribe(clip, target, context),
+        };
+        if salvage_dictation(clip, submit, device, events, indicator)?.is_some() {
             // The capture ended with a job, not a failure: the HUD keeps
             // transcribing until the copy completes.
             return super::emit_engine_state(events, false, worker, device);
@@ -67,21 +66,17 @@ pub(super) fn interrupted_dictation(
 }
 
 /// A shortcut dictation or `hex dictation start` control capture whose
-/// microphone failed keeps the audio delivered before the loss. A normal one
-/// is transcribed and processed like an ordinary dictation; a raw one is
-/// transcribed as heard. Either way it is copied instead of pasted: the app
-/// or call that disrupted the microphone may have taken focus. Paste Last
-/// Dictation and History keep it like any other dictation. A print-only one
-/// answers the command that started it instead.
+/// microphone failed keeps the audio delivered before the loss and hands it
+/// to `submit`: a normal one is transcribed and processed like an ordinary
+/// dictation, a raw one as heard, and either is copied instead of pasted
+/// because the app or call that disrupted the microphone may have taken
+/// focus. A print-only one answers the command that started it.
 ///
 /// Returns `None` for a near-silent clip, after saving its diagnostics: the
 /// caller keeps the previous microphone-loss failure for it.
 pub(super) fn salvage_dictation(
     clip: DictationClip,
-    print: Option<crate::control::PrintReply>,
-    raw: bool,
-    worker: &DictationWorker,
-    context: ContextSnapshot,
+    submit: impl FnOnce(DictationClip) -> Result<DictationJobId, &'static str>,
     device: &str,
     events: &mut EventLog,
     indicator: DictationSink<'_>,
@@ -90,23 +85,7 @@ pub(super) fn salvage_dictation(
         crate::dictation::diagnostics::persist_near_silent(&clip.into_transcription_samples());
         return Ok(None);
     }
-    let target = if raw {
-        TranscriptionTarget::RawCopyOnlyPaste
-    } else {
-        TranscriptionTarget::CopyOnlyPaste
-    };
-    submit_dictation(
-        clip,
-        |clip| match print {
-            Some(print) => worker.transcribe_printed(clip, print, raw, context),
-            None => worker.transcribe(clip, target, context),
-        },
-        true,
-        device,
-        events,
-        indicator,
-    )
-    .map(Some)
+    submit_dictation(clip, submit, true, device, events, indicator).map(Some)
 }
 
 #[allow(clippy::too_many_arguments)]

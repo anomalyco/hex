@@ -105,7 +105,7 @@ corrections, OpenCode rewriting, and transformations). History keeps it as
 clip, or an empty transcript) exits 4 with code `no-speech` and prints
 nothing; with nothing recording it refuses with `not-recording`. A failure,
 or the 60 s timeout prints nothing, exits 1, and never
-falls back to pasting. `--print` with any other action is a usage error
+falls back to pasting. `--print` with `toggle` or `cancel` is a usage error
 (exit 2). The command is the same on Linux and Windows, where `hex dictation`
 and `hex paste-last` reach the listener's own queue as its shortcut would;
 Linux's `hex typed-text` does too.
@@ -123,9 +123,10 @@ to whatever app has focus. A discarded or silent clip answers `no-speech`
 audio or suspended shortcuts, answers `failed` too, so the command never
 hangs. A printing `start` while anything already records is refused with
 `busy`: it never takes over the person's own dictation or a programmatic one.
-A plain `dictation stop` of a print-only recording answers `done` and the
-transcript still goes to the start; `stop --print` of it answers `done` too,
-and both commands wait for the one transcript. With the lab off, or on Linux
+A plain `dictation stop` of a print-only recording answers as any plain stop
+does (`done`, or `discarded` for no audio or silence) and the transcript still
+goes to the start; `stop --print` of it answers `done` too, and both commands
+wait for the one transcript. With the lab off, or on Linux
 and Windows, it answers `disabled` or `unsupported`. The text gets the same
 processing as a paste and History keeps it as `printed`, as `stop --print`
 does; Paste Last skips it. A printing start waits at most 31 minutes; if it
@@ -294,6 +295,10 @@ transcription and `/streams`, but answer `/control` with
 - The app answers within 10 s (`504 control-timeout` otherwise); the CLI waits
   15 s. `dictation stop --print` gets 65 s, and the CLI waits 70 s;
   `dictation start --print` gets 31 min 5 s, and the CLI waits 31 min 10 s.
+- A waiting `dictation start --print` holds one of the local API's four
+  connection workers until its recording ends or it hits that cap, even if
+  the CLI that asked is killed: it answers a dropped receiver harmlessly,
+  never pastes, and frees the worker only then.
 - Every answer the app gives is `200` with a `ControlResponse`, refusals
   included. Transport-level failures use HTTP status codes:
   `400 invalid-control-command` (malformed or unknown command),
