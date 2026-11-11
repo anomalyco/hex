@@ -68,7 +68,11 @@ Picker header -> "Use model file where it is…" beside "Add model file…" -> t
 │   SHA-256, receipt and manifest (with the file's path, no Hugging Face origin)
 │   in models/custom/; nothing copied, nothing written near the file
 ├── The same file imported by copy before -> same ID, keeps its name; Hex's
-│   copy is removed
+│   copy is removed only when the OS shows the chosen file is a different
+│   file (links resolved, device and inode or volume and file index); when
+│   unsure, the copy stays
+├── Hex's own copy chosen (a linked folder, a hard link, another case) ->
+│   nothing changes; the import stays a copy
 ├── Card -> "Used where it is" · family · languages · the file's name; Use
 │   loads it from its path; later uses rehash only when size, mtime, or file ID
 │   change, and Check again accepts it when the contents still match

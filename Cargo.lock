@@ -2279,6 +2279,7 @@ dependencies = [
  "rune-kit",
  "rune-motion",
  "rune-theme-opencode",
+ "same-file",
  "scrawl-capture",
  "screencapturekit",
  "serde",
