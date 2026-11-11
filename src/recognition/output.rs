@@ -1,12 +1,16 @@
-//! Submitting a finished shortcut clip to the dictation worker, including a
-//! recording the microphone cut short.
+//! Finishing a shortcut capture and submitting its clip to the dictation
+//! worker, including a recording the microphone cut short.
+
+use std::time::Duration;
 
 use color_eyre::Result;
 
+use crate::audio::CaptureInstant;
 use crate::desktop::events::{DictationPhase, EventLog, VoiceEvent, VoiceState, now_ms};
-use crate::dictation::DictationClip;
+use crate::dictation::audio::DictationAudio;
 use crate::dictation::context::ContextSnapshot;
 use crate::dictation::indicator::DictationIndicatorEvent;
+use crate::dictation::{DictationClip, Finish};
 use crate::feedback::{self, Tone};
 use crate::parakeet::{DictationJobId, DictationWorker, TranscriptionTarget};
 
@@ -75,6 +79,90 @@ pub(super) fn salvage_dictation(
         indicator,
     )
     .map(Some)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn finish_dictation(
+    capture: &DictationAudio,
+    ended_at: CaptureInstant,
+    tail: Duration,
+    worker: &DictationWorker,
+    target: TranscriptionTarget,
+    context: &ContextSnapshot,
+    device: &str,
+    events: &mut EventLog,
+    indicator: DictationSink<'_>,
+) -> Result<FinishResult> {
+    finish_dictation_with(
+        capture,
+        ended_at,
+        tail,
+        |clip, salvaged| {
+            let target = match target {
+                TranscriptionTarget::Paste if salvaged => TranscriptionTarget::CopyOnlyPaste,
+                TranscriptionTarget::RawPaste if salvaged => TranscriptionTarget::RawCopyOnlyPaste,
+                target => target,
+            };
+            worker.transcribe(clip, target, context.clone())
+        },
+        device,
+        events,
+        indicator,
+    )
+}
+
+/// Finishes the capture and hands its clip to `submit`, which is told
+/// whether the microphone cut the capture short.
+pub(super) fn finish_dictation_with(
+    capture: &DictationAudio,
+    ended_at: CaptureInstant,
+    tail: Duration,
+    submit: impl FnOnce(DictationClip, bool) -> Result<DictationJobId, &'static str>,
+    device: &str,
+    events: &mut EventLog,
+    indicator: DictationSink<'_>,
+) -> Result<FinishResult> {
+    let clip = match capture.finish_with_tail(ended_at, tail)? {
+        Finish::Transcribe(clip) if !clip.is_near_silent() => clip,
+        // The microphone failed first and the audio owner kept what it
+        // heard. Claim it now, under this capture's own target and context:
+        // a press after this finish makes its loss notification stale.
+        Finish::Discard if let Some(clip) = capture.take_kept_hotkey() => {
+            return submit_dictation(
+                clip,
+                |clip| submit(clip, true),
+                true,
+                device,
+                events,
+                indicator,
+            );
+        }
+        finish => {
+            events.dictation(DictationPhase::Discarded, "")?;
+            indicator.send(DictationIndicatorEvent::Discarded);
+            return Ok(match finish {
+                Finish::Discard => FinishResult::Discarded,
+                Finish::Transcribe(clip) => {
+                    crate::dictation::diagnostics::persist_near_silent(
+                        &clip.into_transcription_samples(),
+                    );
+                    FinishResult::Silent
+                }
+            });
+        }
+    };
+    // The audio owner already announced a release with a tail.
+    if tail.is_zero() {
+        feedback::play(Tone::DictationStop);
+    }
+    submit_dictation(
+        clip,
+        |clip| submit(clip, false),
+        false,
+        device,
+        events,
+        indicator,
+    )
 }
 
 /// Reports the capture as transcribing and hands its clip to `submit`.
