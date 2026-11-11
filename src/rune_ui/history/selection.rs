@@ -52,6 +52,9 @@ pub(in crate::rune_ui) struct Selection {
     pressed: Option<u64>,
     /// The row a pointer is dragging from, while its button is down.
     drag: Option<u64>,
+    /// Whether that drag has reached a row other than the one it started on. Until it has,
+    /// the press is still a click, so pointer movement selects nothing.
+    drag_left: bool,
     /// Delete asks, and waits for its confirmation.
     pub(in crate::rune_ui) delete_armed: bool,
     /// Copy was pressed; its button says Copied until the selection changes.
@@ -82,6 +85,7 @@ impl Selection {
         self.anchor = None;
         self.pressed = None;
         self.drag = None;
+        self.drag_left = false;
         self.delete_armed = false;
         self.copied = false;
     }
@@ -153,13 +157,20 @@ fn choose(ui: &mut Ui, id: u64, click: Click) {
     let rows = visible(&ui.history);
     let selection = &mut ui.history.selection;
     if click.cmd {
-        // A row selected before the lab was turned on is part of the set: a
-        // Command press adds it first, so toggling another row keeps it.
-        if selection.ids.is_empty()
-            && let Some(other) = ui.history.selected
-            && other != id
-        {
-            selection.select_only(other);
+        if selection.ids.is_empty() {
+            // The one selected row, with nothing else in the set: Command
+            // deselects it, as it would any other selected row.
+            if ui.history.selected == Some(id) {
+                selection.anchor = None;
+                selection.restated();
+                ui.history.selected = None;
+                return;
+            }
+            // A row selected before the lab was turned on is part of the set: a
+            // Command press adds it first, so toggling another row keeps it.
+            if let Some(other) = ui.history.selected {
+                selection.select_only(other);
+            }
         }
         selection.toggle(id);
         let primary = selection.primary();
@@ -192,17 +203,19 @@ fn activated(ui: &mut Ui, id: u64, click: Click) {
 
 /// One History row's press: a plain press selects its row alone, Shift and
 /// Command extend or toggle the selection, and a press dragged over other
-/// rows selects from this one through the row under the pointer.
-pub(super) fn gesture(row: El, id: u64, selected: bool) -> El {
+/// rows selects from this one through the row under the pointer. `primary`
+/// is whether this is the one selected row the detail card shows.
+pub(super) fn gesture(row: El, id: u64, primary: bool) -> El {
     let gesture = move |ui: &mut Ui, drag: &mut Drag, tx: &mut Tx| match drag.phase {
         Phase::Down => {
             tx.instant();
             if on(ui) {
                 ui.history.selection.drag = Some(id);
+                ui.history.selection.drag_left = false;
             }
             press(ui, id, Click::of(tx));
         }
-        Phase::Move => dragged(ui, id, drag.window_point(), tx),
+        Phase::Move => dragged(ui, id, drag, tx),
         Phase::Up => {
             ui.history.selection.drag = None;
             // A press that travelled is a drag, whose release presses nothing:
@@ -214,7 +227,9 @@ pub(super) fn gesture(row: El, id: u64, selected: bool) -> El {
     };
     row.on_drag(gesture)
         .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| {
-            if !selected {
+            // Space and the arrows press the focused row through here, so only
+            // the row a pointer press already chose may skip them.
+            if !primary {
                 tx.instant();
                 activated(ui, id, Click::of(tx));
             }
@@ -222,11 +237,15 @@ pub(super) fn gesture(row: El, id: u64, selected: bool) -> El {
 }
 
 /// A drag from row `from`: selects through the row under the pointer, found
-/// in the frame's drawn rows by its `history-entry{id}` key.
-fn dragged(ui: &mut Ui, from: u64, point: [f32; 2], tx: &mut Tx) {
-    if !on(ui) {
+/// in the frame's drawn rows by its `history-entry{id}` key. Pointer jitter
+/// under the click slop, and movement over the row the drag started on before
+/// it reaches another, leaves the selection alone: a click with a shaky hand
+/// still toggles or ranges what it landed on.
+fn dragged(ui: &mut Ui, from: u64, drag: &Drag, tx: &mut Tx) {
+    if !on(ui) || (drag.dx.abs() <= CLICK_SLOP && drag.dy.abs() <= CLICK_SLOP) {
         return;
     }
+    let point = drag.window_point();
     tx.element_at::<Ui>(
         point[0],
         point[1],
@@ -237,6 +256,10 @@ fn dragged(ui: &mut Ui, from: u64, point: [f32; 2], tx: &mut Tx) {
             if ui.history.selection.drag != Some(from) {
                 return;
             }
+            if id == from && !ui.history.selection.drag_left {
+                return;
+            }
+            ui.history.selection.drag_left = true;
             let rows = visible(&ui.history);
             ui.history.selection.select_range(from, id, &rows);
             ui.history.selected = Some(id);
@@ -278,6 +301,7 @@ pub(super) fn prune(pane: &mut HistoryPane) -> bool {
     }
     if selection.drag.is_some_and(|drag| !rows.contains(&drag)) {
         selection.drag = None;
+        selection.drag_left = false;
     }
     let mut changed = selection.ids.len() != before;
     if changed {

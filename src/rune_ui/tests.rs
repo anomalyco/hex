@@ -1476,6 +1476,60 @@ fn history_selects_several_with_shift_command_and_drag() {
     assert!(!rt.state.history.selection.contains(3));
 }
 
+/// Presses row `key` and lets go 2 pt away: a shaky click, not a drag.
+fn tap_jitter(rt: &mut Runtime<Ui>, key: &str) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+    rt.pointer_down(x, y);
+    rt.pointer_move(x + 2.0, y - 1.0);
+    rt.pointer_up(x + 2.0, y - 1.0);
+    settle(rt);
+}
+
+#[test]
+fn history_a_jittered_press_keeps_a_command_toggle() {
+    let mut rt = history_multi();
+    tap(&mut rt, "history-entry3");
+    hold(&mut rt, command());
+    tap_jitter(&mut rt, "history-entry2");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 2);
+    assert!(rt.state.history.selection.contains(3));
+    assert!(rt.state.history.selection.contains(2));
+    assert_eq!(rt.state.history.selected, Some(2));
+}
+
+#[test]
+fn history_a_jittered_press_keeps_a_shift_range() {
+    let mut rt = history_multi();
+    tap(&mut rt, "history-entry3");
+    hold(&mut rt, shift());
+    tap_jitter(&mut rt, "history-entry1");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 3);
+    for id in [1, 2, 3] {
+        assert!(rt.state.history.selection.contains(id));
+    }
+    assert_eq!(rt.state.history.selected, Some(1));
+}
+
+#[test]
+fn history_keyboard_activation_selects_a_row_in_the_set() {
+    let mut rt = history_multi();
+    tap(&mut rt, "history-entry3");
+    hold(&mut rt, shift());
+    tap(&mut rt, "history-entry2");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 2);
+    assert_eq!(rt.state.history.selected, Some(2));
+    // Up moves focus from the pressed row to row 3, which the set holds but
+    // the card does not show, and presses it there.
+    key(&mut rt, Key::Up, Mods::default());
+    settle(&mut rt);
+    assert_eq!(rt.state.history.selection.len(), 1);
+    assert!(rt.state.history.selection.contains(3));
+    assert_eq!(rt.state.history.selected, Some(3));
+}
+
 #[test]
 fn history_selection_copies_oldest_first() {
     let mut rt = history_multi();
@@ -1554,6 +1608,25 @@ fn history_command_click_keeps_the_row_selected_before_the_lab() {
     assert!(rt.state.history.selection.contains(3));
     assert_eq!(rt.state.history.selected, Some(3));
     assert!(rt.find("history-selection-copy").is_some());
+}
+
+#[test]
+fn history_command_click_deselects_the_only_selected_row() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    tap(&mut rt, "history-entry2");
+    assert_eq!(rt.state.history.selected, Some(2));
+
+    // A row selected before the lab was turned on is the whole set: Command
+    // deselects it, leaving nothing selected.
+    rt.state.settings.labs.history_multi_select = true;
+    rt.invalidate();
+    settle(&mut rt);
+    hold(&mut rt, command());
+    tap(&mut rt, "history-entry2");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 0);
+    assert_eq!(rt.state.history.selected, None);
+    assert!(!rt.state.history.is_selected(2));
 }
 
 #[test]

@@ -119,11 +119,12 @@ impl HistoryPane {
 
     fn reload_entries(&mut self) {
         self.searched = self.search.text.clone();
-        if let Some(store) = &self.store {
-            let (revision, entries) = store.search_at(&self.searched);
-            self.revision = Some(revision);
-            self.entries = entries;
-        }
+        let Some(store) = &self.store else {
+            return;
+        };
+        let (revision, entries) = store.search_at(&self.searched);
+        self.revision = Some(revision);
+        self.entries = entries;
         if self
             .selected
             .is_some_and(|id| !self.entries.iter().any(|entry| entry.id == id))
@@ -602,6 +603,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                     meta.push_str(application);
                 }
                 let selected = pane.is_selected(id);
+                let primary = pane.selected == Some(id);
                 list = list.child(
                     ld::item_with_press(
                         p,
@@ -614,7 +616,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                             hover: vec![copy_action(ui, p, id, true)],
                             selected,
                         },
-                        move |row| selection::gesture(row, id, selected),
+                        move |row| selection::gesture(row, id, primary),
                     )
                     .position_in_set(index + 1, count),
                 );
