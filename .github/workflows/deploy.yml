@@ -12,10 +12,10 @@ name: Deploy
 # - build runs repository code (bun install, site/scripts/build.ts) with no
 #   environment and no secrets, and uploads the Worker's Build Output with a
 #   SHA256SUMS whose digest it reports.
-# - deploy runs in the mode's infra environment (infra-dev or
-#   infra-production, each admitting only its own branch) and mints a
+# - deploy runs in the mode's environment (dev or production, each
+#   admitting only its own branch) and mints a
 #   short-lived Cloudflare token for that mode's Worker from the token issuer
-#   after assuming the environment's role, github/hex-infra-<mode>
+#   after assuming the environment's role, github/hex-<mode>
 #   (.github/release/cloudflare-token.sh). The AWS session is a step output
 #   given only to the token step, and the token only to the Deploy step. It
 #   checks out only .github/release/, verifies the artifact against that
@@ -90,7 +90,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-24.04
-    environment: infra-${{ github.ref_name == 'production' && 'production' || 'dev' }}
+    environment: ${{ github.ref_name == 'production' && 'production' || 'dev' }}
     permissions:
       contents: read
       id-token: write
@@ -134,7 +134,7 @@ jobs:
         name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: arn:aws:iam::604439173067:role/github/hex-infra-${{ env.MODE }}
+          role-to-assume: arn:aws:iam::604439173067:role/github/hex-${{ env.MODE }}
           role-session-name: hex-${{ github.run_id }}
           role-duration-seconds: 900
           aws-region: us-east-1

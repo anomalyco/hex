@@ -15,7 +15,7 @@ secret. `.github/workflows/` (Release, Deploy) and
 - **Build jobs** run repository code (cargo, build.rs, bun, makepkg, brew)
   with no environment, no secret, and no id-token, and make unsigned files.
 - **Sign and publish jobs** run in the `release` environment, and the site
-  deploy in `infra-dev` or `infra-production`. They check out only
+  deploy in `dev` or `production`. They check out only
   `.github/release/` (sparse checkout), and run only those scripts and
   SHA-pinned actions, on artifacts they treat as data. They never build,
   install dependencies, or run repository code or the artifacts. The one
@@ -112,8 +112,11 @@ production site.
 | Environment | Branches | Reviewers | Used by | AWS role |
 | --- | --- | --- | --- | --- |
 | `release` | `dev`, `production` | none | Release sign and publish jobs, aur-check | `role/github/hex-release` |
-| `infra-dev` | `dev` | none | Deploy, from `dev` | `role/github/hex-infra-dev` |
-| `infra-production` | `production` | none | Deploy, from `production` | `role/github/hex-infra-production` |
+| `dev` | `dev` | none | Deploy, from `dev` | `role/github/hex-dev` |
+| `production` | `production` | none | Deploy, from `production` | `role/github/hex-production` |
+
+`release` signs and ships builds; `dev` and `production` hold everything the
+repo runs in that stage.
 
 `publish` uploads each file under its own name with its SHA-256 (files over
 95 MiB in 90 MiB parts), then posts the release naming each target by file
@@ -293,7 +296,7 @@ follows the branch. Deploy is split like Release:
 Deploy (mode = branch: dev | production)
 ├─ build    bun install + site/scripts/build.ts --mode <mode>, no environment or secret;   [build]
 │           uploads site/.cloudflare/output (Build Output) with its SHA256SUMS digest
-├─ deploy   sparse checkout of .github/release/; npm ci the pinned cf CLI; verify the     [infra-<mode>]
+├─ deploy   sparse checkout of .github/release/; npm ci the pinned cf CLI; verify the           [<mode>]
 │           artifact's digest; mint a 15-minute Cloudflare token; deploy-site.sh <mode>
 └─ verify   the live site answers 200 and bun run check:downloads, no secret               [build]
 ```
@@ -320,7 +323,7 @@ the Worker reads and never writes.
 
 One short-lived token, minted per deploy:
 
-- `deploy` runs in `infra-<mode>`, assumes `role/github/hex-infra-<mode>`
+- `deploy` runs in `<mode>`, assumes `role/github/hex-<mode>`
   (a 15-minute session, only a step output that the token step alone
   receives; cf never sees it), then runs `.github/release/cloudflare-token.sh`, which SigV4-POSTs to the
   token issuer in [anomalyco/secrets](https://github.com/anomalyco/secrets)
@@ -337,7 +340,7 @@ One short-lived token, minted per deploy:
 - The `production` branch (far behind `dev`) still deploys the production
   site from `release`, reading the old long-lived `hex-site-deploy` token from
   Secrets Manager as `hex/release/CLOUDFLARE_API_TOKEN`. Once `production` is
-  promoted and its site deploys green from `infra-production`, revoke that
+  promoted and its site deploys green from `production`, revoke that
   token and drop the site permissions from the `hex.release` issuer stage.
 
 ## Old clients (2.3.1 and earlier)
@@ -433,9 +436,9 @@ jobs that run repository code.
 | `hex/release/RELEASE_SIGNING_KEY` | ed25519 PEM; signs each Linux executable (`<target>-sig`), public key `.github/release/linux-signing.pub` and `src/updater/linux.rs` |
 | `SPARKLE_ED_PRIVATE_KEY` | old 2.3.1 appcast key; unused, kept for old clients |
 
-`infra-dev` and `infra-production` hold no secrets. Their roles,
-`role/github/hex-infra-dev` and `role/github/hex-infra-production`, can read only their own
-empty `hex/infra-<mode>/*` folder; the site deploy only mints a 15-minute Cloudflare token for
+`dev` and `production` hold no secrets. Their roles,
+`role/github/hex-dev` and `role/github/hex-production`, can read only their own
+empty `hex/<mode>/*` folder; the site deploy only mints a 15-minute Cloudflare token for
 its own Worker from the token issuer (`.github/release/cloudflare-token.sh`).
 
 ## Linux packages

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Mints a short-lived Cloudflare token for the current job from the token issuer
 # (anomalyco/secrets). Run after aws-actions/configure-aws-credentials has assumed the job's
-# role (the site deploy: arn:aws:iam::604439173067:role/github/hex-infra-<mode>), with its
+# role (the site deploy: arn:aws:iam::604439173067:role/github/hex-<mode>), with its
 # credentials in this step's env from the action's outputs (output-env-credentials: false): the Lambda
 # identifies the role from the SigV4 signature and mints only that stage's token. No repo,
 # stage, permission or TTL is sent in the request, and the token is pinned to the runner's IP

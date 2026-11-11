@@ -1740,7 +1740,7 @@ notarization, and stapling; Azure Authenticode; the release service through
 OIDC; the AUR and Homebrew pushes). Every artifact carries a `SHA256SUMS`
 whose digest its job reports and every consumer checks. Deploy
 (`.github/workflows/deploy.yml`) follows the same split: its build job has no
-secret, and its deploy job (in `infra-dev` or `infra-production`) runs only
+secret, and its deploy job (in `dev` or `production`) runs only
 `.github/release/cloudflare-token.sh` (which mints a 15-minute Cloudflare
 token after assuming the environment's role) and `.github/release/deploy-site.sh`,
 which deploys the verified Build Output only
