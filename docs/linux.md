@@ -75,12 +75,18 @@ StatusNotifierItem host, such as Waybar, KDE, or Omarchy's bar), Hex shows a
 tray icon: click it to open the window, or use its menu: **Show Hex**,
 **Paste last dictation**, the downloaded speech models, the update once one
 is ready (**Restart to update**), **Enable / Disable Hex**, and **Quit Hex**;
-while Hex records or transcribes, the menu and tooltip say so. The mark is white,
-and black when the desktop's color scheme prefers light; Hex reads that setting
-when it creates the tray, so a later switch applies at the next launch. KDE's
-portal takes the scheme from the window palette, so a mixed theme with light
-windows and a dark panel (such as Breeze Twilight) gets a black mark on a dark
-panel. Without a tray, quit with **Quit Hex** at the bottom of the window's
+while Hex records or transcribes, the menu and tooltip say so. Hosts that draw
+theme icons, such as Plasma 6, GNOME's AppIndicator extension, and Waybar, draw
+a symbolic mark in the panel's own text color, so it stays visible on a light
+or dark panel. Plasma 6 recolors it only with icon themes that follow the color
+scheme (Breeze and Papirus do); other themes show the mark's default color.
+Plasma 5 also prefers the icon name but has no panel palette, so its color
+there is untested. Hosts that don't use theme names get Hex's pixmap: white,
+and black when the desktop's color scheme prefers light (Waybar also falls
+back to it when it can't find the name). Hex reads that setting when it
+creates the tray, so a later switch applies at the next launch, and asks a
+running Plasma session to reload icons after writing the mark.
+Without a tray, quit with **Quit Hex** at the bottom of the window's
 sidebar, the launcher's **Quit Hex** action, or `hex quit`.
 
 The window opens at 980×760 logical pixels and floats on tiling window
@@ -256,6 +262,8 @@ for Hex's app id `anomaly.hex`, which its windows also report. Earlier installs
 named both entries `hex.desktop`; Hex and the installer rename Hex's own.
 Its icon is `anomaly.hex`: packages install it in the hicolor theme, and a
 direct install gets it in `~/.local/share/icons/hicolor` when Hex first starts.
+The tray's symbolic mark, `anomaly.hex-symbolic.svg`, is always written there
+too, in `hicolor/scalable/apps`, because packages don't ship it.
 
 Remove the application while preserving logs and settings with:
 

@@ -147,6 +147,11 @@ uninstall() {
       rm -f "$icon"
     fi
   done
+  # The tray's symbolic icon, written at startup even beside packaged icons.
+  tray_icon="$data_home/icons/hicolor/scalable/apps/anomaly.hex-symbolic.svg"
+  if [ -f "$tray_icon" ] && [ ! -L "$tray_icon" ] && LC_ALL=C grep -Faq 'X-Hex-Managed=true' "$tray_icon"; then
+    rm -f "$tray_icon"
+  fi
   if [ -d "$data_home/icons/hicolor" ] && [ ! -L "$data_home/icons/hicolor" ]; then
     touch "$data_home/icons/hicolor" 2>/dev/null || true
   fi

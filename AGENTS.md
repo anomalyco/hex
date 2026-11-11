@@ -389,6 +389,10 @@ substitute for source inspection or a second roadmap.
 - `linux/tray`: the optional tray icon, a `rune::Tray` (StatusNotifierItem
   with a dbusmenu built by `desktop/tray_menu`). It registers whenever a tray host
   (`org.kde.StatusNotifierWatcher`) appears; without one Hex runs unchanged.
+  Beside the IconPixmap it serves Hex's symbolic theme icon when hicolor has it,
+  so Plasma 6, GNOME's AppIndicator extension, and Waybar draw the mark in the
+  panel's text color, and asks a running Plasma session to reload icons after
+  writing it.
 - `desktop/tray_menu`: the tray menu Linux and Windows share (recording state, Show
   Hex, Paste last dictation, the downloaded-model picker, the update item,
   Enable / Disable Hex, Quit Hex) and the model entries the macOS menu bar
@@ -1385,7 +1389,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   PNGs into `~/.local/share/icons/hicolor` at startup and names that icon in
   the managed entries it or the installer wrote (#652). The PNGs carry an
   `X-Hex-Managed=true` text chunk: Hex replaces and the installer removes only
-  marked regular files, never a user's own icon or a symlink. Launch at login is
+  marked regular files, never a user's own icon or a symlink. The tray's
+  `anomaly.hex-symbolic.svg` is a runtime asset, so Hex always writes it to
+  `hicolor/scalable/apps` with the same mark, packaged installs included, and
+  carries KDE's `current-color-scheme` stylesheet so hosts that recolor theme
+  icons draw it in the panel's text color. Launch at login is
   `~/.config/autostart/anomaly.hex.desktop`; where the Background portal exists
   (`linux/background`, #812) Hex asks it at startup to run in the background
   and Launch at login goes through it (the portal writes or removes that file,

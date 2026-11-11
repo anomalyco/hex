@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!--
+    Hex's tray mark as a symbolic icon: two nested hexagon outlines around a
+    solid hexagonal core, drawn in the panel's text color.
+
+    Plasma 6 loads this icon name with the panel's own palette and recolors it
+    through KDE's current-color-scheme stylesheet. GNOME's AppIndicator
+    extension and Waybar recolor it because its name ends in -symbolic, not
+    through that stylesheet. Hosts that do not recolor it show this default,
+    chosen like the tray pixmap from the desktop's color-scheme preference.
+
+    X-Hex-Managed=true
+  -->
+  <style id="current-color-scheme" type="text/css">.ColorScheme-Text { color:#ffffff; }</style>
+  <path class="ColorScheme-Text" fill="currentColor" fill-rule="evenodd" d="M16 0.319L29.58 8.159L29.58 23.841L16 31.681L2.42 23.841L2.42 8.159ZM16 2.282L27.88 9.141L27.88 22.859L16 29.718L4.12 22.859L4.12 9.141Z"/>
+  <path class="ColorScheme-Text" fill="currentColor" fill-rule="evenodd" d="M16 5.619L24.99 10.809L24.99 21.191L16 26.381L7.01 21.191L7.01 10.809ZM16 7.582L23.29 11.791L23.29 20.209L16 24.418L8.71 20.209L8.71 11.791Z"/>
+  <path class="ColorScheme-Text" fill="currentColor" d="M16 11.3L20.07 13.65L20.07 18.35L16 20.7L11.93 18.35L11.93 13.65Z"/>
+</svg>

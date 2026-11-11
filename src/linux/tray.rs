@@ -2,12 +2,18 @@
 //! window; the menu is the one `tray_menu` builds for Linux and Windows. A
 //! desktop without a tray host (GNOME without an extension, i3bar) shows
 //! nothing, and Hex runs on as before.
+//!
+//! Beside the IconPixmap, the item names Hex's symbolic icon when hicolor has
+//! it, so a host that follows the panel's text color (Plasma 6, GNOME's
+//! AppIndicator extension, Waybar) draws a mark that stays visible on any
+//! panel. Hosts that don't know the name keep using the pixmap.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
 
+use tokio::runtime::Runtime;
 use zbus::{Connection, OwnedVariant, Variant};
 
 use crate::desktop::host::DesktopAction;
@@ -17,13 +23,19 @@ use crate::linux::app::{HostHandle, HostRequest, HostSnapshot};
 use crate::linux::input::ShortcutCommand;
 use crate::linux::service::{Activation, Control, Published};
 
-/// How long the tray waits for the desktop's color scheme when it is created.
+/// How long the tray waits to reach the session bus when it is created.
+const SESSION_BUS_TIMEOUT: Duration = Duration::from_millis(250);
+/// How long it then waits for the desktop's color scheme.
 const COLOR_SCHEME_TIMEOUT: Duration = Duration::from_millis(250);
+/// How long it waits for KIconLoader's reload broadcast to leave.
+const RELOAD_TIMEOUT: Duration = Duration::from_millis(250);
 const PORTAL_DESKTOP: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const PORTAL_SETTINGS: &str = "org.freedesktop.portal.Settings";
 const APPEARANCE: &str = "org.freedesktop.appearance";
 const COLOR_SCHEME: &str = "color-scheme";
+const ICON_LOADER_PATH: &str = "/KIconLoader";
+const ICON_LOADER_INTERFACE: &str = "org.kde.KIconLoader";
 
 /// Shows the tray icon until the returned tray drops.
 pub(crate) fn start(
@@ -33,14 +45,34 @@ pub(crate) fn start(
     shutdown: &'static AtomicBool,
 ) -> Option<rune::Tray> {
     let view = TrayView::default();
-    let icon = rune::TrayIcon::rgba(
-        tray_icon::SIZE,
-        tray_icon::SIZE,
-        tray_icon::pixels(desktop_prefers_light()),
-    );
-    let spec = rune::TraySpec::new("hex", "Hex", icon)
+    // One runtime for the whole read and reload: zbus's connection keeps its
+    // tasks on the runtime that created it, so a second runtime could not
+    // drive the first one's connection.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok();
+    let (light, bus) = match &runtime {
+        Some(runtime) => appearance(runtime),
+        None => (false, None),
+    };
+    // Before the tray exists: Plasma reads the name when the item registers.
+    let symbolic = crate::linux::icons::install_tray_symbolic(light)
+        .inspect_err(|error| tracing::warn!(%error, "could not install Hex's symbolic tray icon"))
+        .unwrap_or_default();
+    if symbolic.wrote
+        && let (Some(runtime), Some(bus)) = (runtime.as_ref(), bus)
+    {
+        reload_icons(runtime, &bus);
+    }
+    drop(runtime);
+    let icon = rune::TrayIcon::rgba(tray_icon::SIZE, tray_icon::SIZE, tray_icon::pixels(light));
+    let mut spec = rune::TraySpec::new("hex", "Hex", icon)
         .tooltip(view.tooltip())
         .menu(view.menu());
+    if symbolic.present {
+        spec = spec.icon_name(crate::linux::icons::TRAY_ICON);
+    }
     let show = move |token| {
         let activation = Activation {
             token,
@@ -63,31 +95,61 @@ pub(crate) fn start(
         .ok()
 }
 
-/// Whether the desktop prefers a light color scheme, read once when the tray
-/// is created: the tray has no set_icon, so a later switch applies at the
-/// next launch. Only an explicit light preference gets the black mark:
-/// GNOME reports no preference while its top bar stays dark.
-fn desktop_prefers_light() -> bool {
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    else {
-        return false;
+/// The desktop's color-scheme preference and the session bus it was read on,
+/// read once when the tray is created: the tray has no set_icon, so a later
+/// switch applies at the next launch. It picks both the pixmap's mark and the
+/// default color of the symbolic icon, so a host that does not recolor shows
+/// the same mark. Only an explicit light preference gets the dark mark: GNOME
+/// reports no preference while its top bar stays dark. Keeps the connection
+/// when only the portal does not answer, so a reload can still use it.
+fn appearance(runtime: &Runtime) -> (bool, Option<Connection>) {
+    runtime.block_on(async {
+        let Ok(Ok(bus)) = tokio::time::timeout(SESSION_BUS_TIMEOUT, Connection::session()).await
+        else {
+            return (false, None);
+        };
+        let light = tokio::time::timeout(COLOR_SCHEME_TIMEOUT, scheme(&bus))
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false);
+        (light, Some(bus))
+    })
+}
+
+/// Whether the portal's `color-scheme` prefers light, or `None` when the
+/// portal does not answer.
+async fn scheme(bus: &Connection) -> Option<bool> {
+    let value = match color_scheme(bus, "ReadOne").await {
+        Some(value) => value,
+        // Older portals have no ReadOne; Read wraps the same value in one
+        // more variant.
+        None => color_scheme(bus, "Read").await?,
     };
-    let light = runtime.block_on(async {
-        tokio::time::timeout(COLOR_SCHEME_TIMEOUT, async {
-            let bus = Connection::session().await.ok()?;
-            let value = match color_scheme(&bus, "ReadOne").await {
-                Some(value) => value,
-                // Older portals have no ReadOne; Read wraps the same value
-                // in one more variant.
-                None => color_scheme(&bus, "Read").await?,
-            };
-            Some(prefers_light(&value))
-        })
+    Some(prefers_light(&value))
+}
+
+/// Tells a running Plasma to reload its icons. KIconLoader lists the hicolor
+/// folders that exist when the session starts, so it never looks in the
+/// scalable folder Hex just created; without the broadcast its IconName draws
+/// nothing until the next login. Emits on the connection's own runtime;
+/// best-effort, so a failure must not unset the name.
+fn reload_icons(runtime: &Runtime, bus: &Connection) {
+    let sent = runtime.block_on(tokio::time::timeout(RELOAD_TIMEOUT, async {
+        bus.emit_signal(
+            None::<&str>,
+            ICON_LOADER_PATH,
+            ICON_LOADER_INTERFACE,
+            "iconChanged",
+            &(0i32,),
+        )
         .await
-    });
-    matches!(light, Ok(Some(true)))
+    }));
+    match sent {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::warn!(%error, "could not ask the desktop to reload icons"),
+        Err(_) => tracing::warn!("the desktop did not take the icon reload in time"),
+    }
 }
 
 /// The portal's `color-scheme` value, read with `method`.
