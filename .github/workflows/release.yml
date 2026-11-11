@@ -201,7 +201,7 @@ jobs:
   # signs it with the Developer ID.
   build-macos:
     needs: plan
-    runs-on: macos-26
+    runs-on: blacksmith-6vcpu-macos-26
     timeout-minutes: 120
     env:
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
@@ -488,7 +488,7 @@ jobs:
   verify-macos:
     needs: [plan, sign-macos]
     if: ${{ !cancelled() && needs.sign-macos.result == 'success' && needs.sign-macos.outputs.signed == 'true' }}
-    runs-on: macos-26
+    runs-on: blacksmith-6vcpu-macos-26
     timeout-minutes: 30
     env:
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
@@ -748,7 +748,7 @@ jobs:
     name: Homebrew cask
     needs: [plan, publish]
     if: ${{ !cancelled() && needs.publish.result == 'success' && needs.plan.outputs.channel == 'stable' }}
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     env:
       RELEASE: ${{ needs.plan.outputs.service }}
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
