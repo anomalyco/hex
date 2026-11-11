@@ -123,9 +123,13 @@ impl Follow {
             return inputs;
         }
         let stage = self.stage(snapshot);
-        if stage == Some(Input::Stage(Stage::Done)) && heard_nothing(snapshot, self.shown.as_ref())
-        {
-            inputs.push(Input::NothingHeard);
+        if stage == Some(Input::Stage(Stage::Done)) {
+            if heard_nothing(snapshot, self.shown.as_ref()) {
+                inputs.push(Input::NothingHeard);
+            }
+            if copy_failed(snapshot, self.shown.as_ref()) {
+                inputs.push(Input::CopyFailed);
+            }
         }
         inputs.extend(stage);
         inputs.extend(self.routed(snapshot));
@@ -250,6 +254,13 @@ impl Follow {
         }
         Some(Input::Stage(stage))
     }
+}
+
+/// Whether the shown capture's summary didn't reach the clipboard.
+fn copy_failed(snapshot: &CaptureSnapshot, shown: Option<&(PathBuf, Stage)>) -> bool {
+    snapshot.last.as_ref().is_some_and(|last| {
+        shown.is_some_and(|(bundle, _)| *bundle == last.bundle) && last.copy_error.is_some()
+    })
 }
 
 /// Whether the shown capture was written with a transcript that has no
@@ -653,6 +664,7 @@ mod tests {
                 gaps: Some(0),
                 missing_transcript: None,
                 error: None,
+                copy_error: None,
                 route: None,
             }),
             phone: None,
@@ -750,6 +762,24 @@ mod tests {
             follow.next(&silent(Some("Transcriber unavailable."))),
             [Input::Stage(Stage::Done)],
             "no transcript at all isn't silence"
+        );
+    }
+
+    #[test]
+    fn a_capture_whose_copy_failed_says_so() {
+        let mut uncopied = settled("a", Stage::Done);
+        uncopied.last.as_mut().unwrap().copy_error = Some("pasteboard refused".into());
+        let mut follow = Follow::default();
+        follow.next(&recording("a"));
+        assert_eq!(
+            follow.next(&uncopied),
+            [Input::CopyFailed, Input::Stage(Stage::Done)]
+        );
+        let mut follow = Follow::default();
+        follow.next(&recording("a"));
+        assert_eq!(
+            follow.next(&settled("a", Stage::Done)),
+            [Input::Stage(Stage::Done)]
         );
     }
 

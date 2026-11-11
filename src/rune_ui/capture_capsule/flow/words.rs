@@ -3,9 +3,11 @@
 use super::short;
 use crate::desktop::i18n::{tr, tr_fill};
 
-/// A written capture, on the clipboard and sent nowhere yet.
+/// A written capture, its summary on the clipboard and sent nowhere yet.
+/// The clipboard carries the summary (words, marks, and where the movie
+/// is), never the movie itself.
 pub(crate) fn copied() -> &'static str {
-    tr("Copied")
+    tr("Summary copied")
 }
 pub(super) fn not_running() -> &'static str {
     tr("OpenCode isn't running")

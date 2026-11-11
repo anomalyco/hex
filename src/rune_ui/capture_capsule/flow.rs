@@ -280,6 +280,8 @@ pub(crate) enum Input {
     ClickAway,
     /// The written capture has no words: the microphone heard no speech.
     NothingHeard,
+    /// The written capture's summary didn't reach the clipboard.
+    CopyFailed,
     /// The router sent the capture, from the capsule or not
     /// (`hex capture send`).
     Settled,
@@ -689,6 +691,8 @@ pub(crate) struct Flow {
     cues: Vec<Cue>,
     /// The capture shown has no words.
     silent: bool,
+    /// The capture shown isn't on the clipboard: its copy failed.
+    uncopied: bool,
     /// The written capture shown was closed (dismissed, or its hold ran
     /// out); news of it leaves the capsule closed.
     closed: bool,
@@ -730,6 +734,7 @@ impl Flow {
             phone: false,
             cues: Vec::new(),
             silent: false,
+            uncopied: false,
             closed: false,
             undoing: false,
             superseded: false,
@@ -1109,6 +1114,15 @@ impl Flow {
             && done.countdown == Some(pause.end)
         {
             done.held = Some(pause.end - pause.since);
+        }
+        // A copy that failed never reads as one that worked.
+        if let Pres::Done(done) = &mut pres
+            && self.uncopied
+            && done.lead == Lead::Check
+            && (done.text == copied() || (done.text.is_empty() && done.why.is_none()))
+        {
+            done.lead = Lead::Warning;
+            done.text = tr("Couldn't copy").into();
         }
         // Scrawl's "No speech": a capture with no words still copies.
         if let Pres::Done(done) = &mut pres
@@ -2887,6 +2901,39 @@ mod tests {
         flow.input(Input::Stage(Stage::Done), 3.0);
         flow.input(Input::Routed(Route::Nothing { recent: Vec::new() }), 3.0);
         assert_eq!(done(&flow, 3.0).why, None);
+    }
+
+    /// The capsule says what reached the clipboard, the summary, and only
+    /// once it did: a copy that failed says so, with a warning.
+    #[test]
+    fn a_failed_copy_never_reads_as_copied() {
+        let mut flow = Flow::new();
+        flow.input(Input::Stage(Stage::Recording), 0.0);
+        flow.input(Input::Stage(Stage::Done), 1.0);
+        let shown = done(&flow, 1.0);
+        assert_eq!(shown.text, "Summary copied");
+        assert_eq!(shown.lead, Lead::Check);
+
+        for route in [
+            None,
+            Some(guess()),
+            Some(Route::Nothing { recent: Vec::new() }),
+        ] {
+            let mut flow = Flow::new();
+            flow.input(Input::Stage(Stage::Recording), 0.0);
+            flow.input(Input::CopyFailed, 1.0);
+            flow.input(Input::Stage(Stage::Done), 1.0);
+            if let Some(route) = route {
+                flow.input(Input::Routed(route), 1.0);
+            }
+            let shown = done(&flow, 1.0);
+            assert_eq!(shown.text, "Couldn't copy");
+            assert_eq!(shown.lead, Lead::Warning);
+            // The next recording starts fresh.
+            flow.input(Input::Stage(Stage::Recording), 2.0);
+            flow.input(Input::Stage(Stage::Done), 3.0);
+            assert_eq!(done(&flow, 3.0).text, "Summary copied");
+        }
     }
 
     #[test]

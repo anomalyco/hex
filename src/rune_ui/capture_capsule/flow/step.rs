@@ -8,12 +8,17 @@ impl Flow {
             self.silent = true;
             return actions;
         }
+        if input == Input::CopyFailed {
+            self.uncopied = true;
+            return actions;
+        }
         if let Input::Drawing(on) = input {
             self.drawing = on;
             return actions;
         }
         if input == Input::Stage(Stage::Recording) {
             self.silent = false;
+            self.uncopied = false;
             if !matches!(self.phase, Phase::Recording { .. }) {
                 self.drawing = false;
             }

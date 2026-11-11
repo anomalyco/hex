@@ -408,7 +408,7 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                     .on_press_tx(press(id));
             }
             done.role("text").label(if shown.ident.is_empty() {
-                tr("Copied").to_owned()
+                super::flow::copied().to_owned()
             } else {
                 shown.ident.clone()
             })

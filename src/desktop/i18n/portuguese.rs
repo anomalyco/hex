@@ -310,6 +310,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Hold your dictation shortcut to talk over it", "Segure seu atalho de ditado para comentar em voz alta"),
     ("Couldn't copy", "Não foi possível copiar"),
     ("Couldn't draw your marks", "Não foi possível desenhar suas marcações"),
+    ("Summary copied", "Resumo copiado"),
+    ("Movie copied", "Vídeo copiado"),
     ("Couldn't send", "Não foi possível enviar"),
     ("Looking for sessions…", "Procurando sessões…"),
     ("No sessions", "Nenhuma sessão"),
