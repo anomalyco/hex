@@ -117,7 +117,7 @@ impl Feature {
                 "Show only downloaded speech models in the picker, with the space they take"
             }
             Self::SectionKeyAlone => {
-                "Use the § key, left of 1 on ISO keyboards, alone as a shortcut; Hex takes § from every app while it's bound"
+                "Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"
             }
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"

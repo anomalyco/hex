@@ -1,9 +1,11 @@
 //! Shortcut keys a Labs feature allows, and the repair that puts a saved
 //! shortcut on one back while the feature is off: mouse buttons (Labs ›
 //! Mouse shortcuts, macOS), Menu, Pause, or Scroll Lock (Labs › Special
-//! keys alone, Linux), shortcuts without a key (Labs › Double-tap on a
-//! lone modifier, macOS), and the persisted double-tap mode those need.
+//! keys alone, Linux), the ISO section key (Labs › Section key alone, Linux
+//! and macOS), shortcuts without a key (Labs › Double-tap on a lone
+//! modifier, macOS), and the persisted double-tap mode those need.
 
+use super::hotkeys::ISO_SECTION_KEY_CODE;
 use super::{AppSettings, HotkeyBinding, HotkeyKey, MAX_EXTRA_DICTATION_SHORTCUTS};
 
 impl HotkeyKey {
@@ -20,9 +22,13 @@ impl HotkeyKey {
     }
 
     /// The § key, left of 1 on ISO keyboards, which Labs › Section key
-    /// alone lets a Linux shortcut use on its own (issue 1050).
+    /// alone lets a shortcut use on its own (issue 1050). macOS knows it by
+    /// virtual key code too, because a dead-key layout labels it `^`, `´`,
+    /// or `` ` `` rather than §.
     pub fn is_section(&self) -> bool {
-        !self.is_mouse() && Self::section_name(&self.label)
+        !self.is_mouse()
+            && (Self::section_name(&self.label)
+                || (cfg!(target_os = "macos") && self.code == ISO_SECTION_KEY_CODE))
     }
 
     /// Whether `name` names the § key: `§` or `section`.
@@ -81,10 +87,10 @@ impl AppSettings {
             && crate::labs::Feature::StandaloneSpecialKeys.shipped()
     }
 
-    /// Whether Labs › Section key alone is on: a Linux shortcut may be the
-    /// § key with no modifier.
+    /// Whether Labs › Section key alone is on: on Linux and macOS a shortcut
+    /// may be the ISO section key, left of 1, with no modifier.
     pub fn section_key_allowed(&self) -> bool {
-        cfg!(target_os = "linux")
+        cfg!(any(target_os = "linux", target_os = "macos"))
             && self.labs.section_key_alone
             && crate::labs::Feature::SectionKeyAlone.shipped()
     }
@@ -114,15 +120,18 @@ impl AppSettings {
         }
     }
 
-    /// With Labs › Section key alone off, a Linux shortcut on § alone goes
-    /// back to its default (an optional one is unbound), so the listener
-    /// never registers one. § with a modifier is unaffected.
+    /// With Labs › Section key alone off, a Linux or macOS shortcut on the
+    /// ISO section key alone goes back to its default (an optional one is
+    /// unbound), so the listener never registers one. The section key with a
+    /// modifier is unaffected.
     pub(crate) fn repair_section_key(&mut self) {
-        if self.section_key_allowed() || !cfg!(target_os = "linux") {
+        if self.section_key_allowed() || !cfg!(any(target_os = "linux", target_os = "macos")) {
             return;
         }
         if self.reset_shortcuts(HotkeyBinding::is_lone_section_key) {
-            tracing::info!("reset § shortcuts without a modifier: Labs › Section key alone is off");
+            tracing::info!(
+                "reset section-key shortcuts without a modifier: Labs › Section key alone is off"
+            );
         }
     }
 
@@ -342,8 +351,8 @@ mod tests {
     }
 
     /// Issue 1050: off, a saved § shortcut without a modifier goes back to
-    /// its default on Linux; § with a modifier, and § with the toggle on,
-    /// stay.
+    /// its default on Linux and macOS; § with a modifier, and § with the
+    /// toggle on, stay.
     #[test]
     fn a_lone_section_key_goes_back_to_its_default_while_its_labs_toggle_is_off() {
         let section = HotkeyBinding {
@@ -370,12 +379,41 @@ mod tests {
         assert_eq!(on.dictation_hotkey, section);
         settings.repair_section_key();
         assert_eq!(settings.raw_dictation_hotkey, Some(with_control));
-        if cfg!(target_os = "linux") {
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
             assert!(on.section_key_allowed());
             assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
         } else {
             assert!(!on.section_key_allowed());
             assert_eq!(settings.dictation_hotkey, section);
         }
+    }
+
+    /// macOS labels the ISO section key by what it types: a dead-key layout
+    /// gives `^` for key code 10, and the section-key rules must still see
+    /// it. Elsewhere only the label names the section key.
+    #[test]
+    fn a_dead_key_label_is_the_section_key_only_on_macos() {
+        let dead_key = HotkeyBinding {
+            modifiers: Default::default(),
+            key: Some(HotkeyKey {
+                code: ISO_SECTION_KEY_CODE,
+                label: "^".into(),
+            }),
+        };
+        assert_eq!(dead_key.is_lone_section_key(), cfg!(target_os = "macos"));
+        let mut settings = AppSettings {
+            dictation_hotkey: dead_key.clone(),
+            ..Default::default()
+        };
+        settings.repair_section_key();
+        if cfg!(target_os = "macos") {
+            assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
+        } else {
+            assert_eq!(settings.dictation_hotkey, dead_key);
+        }
+        settings.labs.section_key_alone = true;
+        settings.dictation_hotkey = dead_key.clone();
+        settings.repair_section_key();
+        assert_eq!(settings.dictation_hotkey, dead_key);
     }
 }

@@ -1175,7 +1175,7 @@ mod tests {
         let settings = AppSettings::default();
         let without_toggle = apply(&settings, "dictation_hotkey", "§", &rules());
         assert_eq!(without_toggle.unwrap_err().code, "invalid-value");
-        if !cfg!(target_os = "linux") {
+        if !cfg!(any(target_os = "linux", target_os = "macos")) {
             return;
         }
         let on = apply(&settings, "labs.section_key_alone", "on", &rules())

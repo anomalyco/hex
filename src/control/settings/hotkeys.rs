@@ -125,7 +125,7 @@ pub fn parse_hotkey(
             && !key.is_mouse()
             && !HotkeyKey::special_name(&key.label)
             && !(cfg!(target_os = "windows") && HotkeyKey::navigation_name(&key.label))
-            && !(cfg!(target_os = "linux") && HotkeyKey::section_name(&key.label))
+            && !(cfg!(any(target_os = "linux", target_os = "macos")) && key.is_section())
         {
             return Err("add a modifier, such as option+".to_string() + &key.label.to_lowercase());
         }
@@ -143,8 +143,11 @@ pub(super) fn special_key_refusal(
     settings: &AppSettings,
     binding: &HotkeyBinding,
 ) -> Option<String> {
-    // The § key alone needs Labs › Section key alone (Linux).
-    if cfg!(target_os = "linux") && binding.is_lone_section_key() && !settings.section_key_allowed()
+    // The ISO section key alone needs Labs › Section key alone (Linux,
+    // macOS).
+    if cfg!(any(target_os = "linux", target_os = "macos"))
+        && binding.is_lone_section_key()
+        && !settings.section_key_allowed()
     {
         return Some("section needs Labs › Section key alone: hex labs on section-key".into());
     }

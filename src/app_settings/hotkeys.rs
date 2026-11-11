@@ -370,6 +370,11 @@ pub struct HotkeyKey {
 /// Reserved input codes for the 32 mouse buttons CoreGraphics can report.
 pub(super) const MOUSE_INPUT_CODES: std::ops::Range<u16> = 0x8000..0x8020;
 
+/// macOS's virtual key code for the ISO section key, left of 1 on ISO
+/// keyboards (`kVK_ISO_Section`). Layouts label it § or a dead key such as
+/// `^`, `´`, or `` ` ``.
+pub const ISO_SECTION_KEY_CODE: u16 = 10;
+
 impl HotkeyKey {
     /// macOS mouse buttons occupy a separate input-code range, beyond every
     /// native keyboard code used by macOS. A shared trigger code lets keyboard

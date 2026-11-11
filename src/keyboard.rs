@@ -8,7 +8,13 @@ type InputSourceRef = *const c_void;
 type EventRef = *mut c_void;
 
 const KEY_ACTION_DISPLAY: u16 = 3;
+/// The no-dead-keys option clear: a dead key starts a dead-key state and
+/// reports no character, which is what the layout snapshot wants for the
+/// character a key types.
 const NO_DEAD_KEYS: isize = 0;
+/// `kUCKeyTranslateNoDeadKeysMask` (bit 0): a dead key reports its base
+/// character (`^`, `´`, `` ` ``) instead of starting a dead-key state.
+const KEY_TRANSLATE_NO_DEAD_KEYS: isize = 1;
 const NO_MODIFIER_STATE: u32 = 0;
 /// Carbon `cmdKey >> 8`, the UCKeyTranslate modifier state for the Command layer.
 const COMMAND_MODIFIER_STATE: u32 = 1;
@@ -180,6 +186,54 @@ fn resolve_key_code(character: char, command: bool) -> Result<u16> {
     result
         .or_else(|| ascii_capable_key_code(character))
         .ok_or_else(|| eyre!("current keyboard layout has no key for {character:?}"))
+}
+
+/// The base character `code` types on the active layout, translated with the
+/// no-dead-keys option so a dead key names itself. The shortcut recorder
+/// falls back to it when AppKit gives no character for a key: on a German
+/// layout the key left of 1 (ISO section, virtual key code 10) is `^`.
+///
+/// Enters TIS, so only the main thread or a headless CLI process may call it.
+pub fn key_label(code: u16) -> Option<String> {
+    with_layout(|layout| {
+        translate_with_options(layout, code, NO_MODIFIER_STATE, KEY_TRANSLATE_NO_DEAD_KEYS)
+    })
+    .flatten()
+}
+
+/// The key whose base character is `character` on the active layout,
+/// translated with the no-dead-keys option: `^` names the ISO section key on
+/// a German layout, where AppKit reports no character for the dead key.
+///
+/// Enters TIS, so only the main thread or a headless CLI process may call it.
+pub fn key_code_for_base_label(character: char) -> Option<u16> {
+    let mut target = [0; 4];
+    let target = character.encode_utf8(&mut target);
+    with_layout(|layout| {
+        (0..128).find(|&key_code| {
+            translate_with_options(
+                layout,
+                key_code,
+                NO_MODIFIER_STATE,
+                KEY_TRANSLATE_NO_DEAD_KEYS,
+            )
+            .is_some_and(|translated| translated.eq_ignore_ascii_case(target))
+        })
+    })
+    .flatten()
+}
+
+/// Runs `read` against the active layout's bytes under the layout lock, as
+/// every other native layout lookup does.
+///
+/// Enters TIS, so only the main thread or a headless CLI process may call it.
+fn with_layout<T>(read: impl FnOnce(*const u8) -> T) -> Option<T> {
+    let _access = LAYOUT_ACCESS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let source = LayoutSource::current().ok()?;
+    let layout = source.layout_bytes().ok()?;
+    Some(read(layout))
 }
 
 /// The character `code` types with Command held on the active layout, read
@@ -493,6 +547,15 @@ impl Drop for LayoutSource {
 }
 
 fn translate(layout: *const u8, key_code: u16, modifier_state: u32) -> Option<String> {
+    translate_with_options(layout, key_code, modifier_state, NO_DEAD_KEYS)
+}
+
+fn translate_with_options(
+    layout: *const u8,
+    key_code: u16,
+    modifier_state: u32,
+    options: isize,
+) -> Option<String> {
     let mut dead_key_state = 0;
     let mut output = [0_u16; 4];
     let mut length = 0;
@@ -504,7 +567,7 @@ fn translate(layout: *const u8, key_code: u16, modifier_state: u32) -> Option<St
             KEY_ACTION_DISPLAY,
             modifier_state,
             LMGetKbdType().into(),
-            NO_DEAD_KEYS,
+            options,
             &mut dead_key_state,
             output.len() as isize,
             &mut length,

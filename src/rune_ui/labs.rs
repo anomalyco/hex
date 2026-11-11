@@ -642,6 +642,19 @@ fn rows(ui: &Ui) -> Vec<Row> {
             }
         }
     }
+    // The ISO section key, left of 1, may be a shortcut with no modifier
+    // (Labs › Section key alone, Linux and macOS).
+    if matches!(
+        caps.os,
+        super::platform::Os::Linux | super::platform::Os::Macos
+    ) {
+        rows.push(row(
+            Feature::SectionKeyAlone,
+            Some(&KEYBOARD),
+            tr("Section key alone"),
+            tr("Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"),
+        ));
+    }
     // Linux's X11 grabs and shortcuts portal take these keys alone.
     if caps.os == super::platform::Os::Linux {
         rows.push(row(
@@ -649,12 +662,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
             Some(&KEYBOARD),
             tr("Special keys alone"),
             tr("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"),
-        ));
-        rows.push(row(
-            Feature::SectionKeyAlone,
-            Some(&KEYBOARD),
-            tr("Section key alone"),
-            tr("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound"),
         ));
         // Linux's shortcut machine reads it with the listener's options.
         rows.push(row(

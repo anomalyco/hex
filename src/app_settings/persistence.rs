@@ -159,7 +159,7 @@ impl AppSettings {
         settings.repair_mouse_shortcuts();
         #[cfg(target_os = "linux")]
         settings.repair_special_keys();
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         settings.repair_section_key();
         settings.normalize_double_tap_settings();
         settings.repair_extra_dictation_shortcuts();
