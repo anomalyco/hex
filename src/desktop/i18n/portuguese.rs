@@ -1266,6 +1266,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("{} dictations selected", "{} ditados selecionados"),
     ("Copy puts the selected dictations on the clipboard, oldest first, with a blank line between each", "Copiar coloca os ditados selecionados na área de transferência, do mais antigo para o mais novo, com uma linha em branco entre eles"),
     ("Delete {} dictations", "Excluir {} ditados"),
+    ("Print-only CLI dictation", "Ditado de CLI só para impressão"),
+    ("Let hex dictation start --print answer with the transcript when it ends", "Permite que hex dictation start --print receba a transcrição ao terminar"),
 ];
 
 #[cfg(test)]

@@ -137,6 +137,15 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
             )
         }
         ControlCommand::Dictation {
+            action: CaptureAction::Start,
+            print: true,
+            ..
+        } => ControlReply::error(
+            "unsupported",
+            "`hex dictation start --print` is macOS only; `hex dictation stop --print` \
+             still prints here",
+        ),
+        ControlCommand::Dictation {
             action,
             print: true,
             raw,
@@ -763,7 +772,7 @@ mod tests {
             print: true,
             raw: false,
         };
-        assert_eq!(code(&ask(&host, start_print)), "invalid-value");
+        assert_eq!(code(&ask(&host, start_print)), "unsupported");
         assert_eq!(
             *host.dictations.lock().unwrap(),
             [CaptureAction::Stop, CaptureAction::Stop]

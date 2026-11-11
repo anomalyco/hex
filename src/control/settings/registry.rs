@@ -647,6 +647,12 @@ pub(super) const KEYS: &[Key] = &[
          Resume; a restart starts unpaused (macOS)",
     ),
     key(
+        "labs.print_start",
+        Kind::Bool,
+        "Labs: `hex dictation start --print` records a dictation whose transcript goes to \
+         that command, never pasted or copied, however the recording ends (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

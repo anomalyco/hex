@@ -80,7 +80,8 @@ impl Feature {
             | Self::OutputFixes
             | Self::OpenCodeInWsl
             | Self::ApiProcessing
-            | Self::ApiTimestamps => Group::Output,
+            | Self::ApiTimestamps
+            | Self::PrintStart => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::HistoryMultiSelect

@@ -5,6 +5,7 @@
 
 use crate::app_settings::MAX_EXTRA_DICTATION_SHORTCUTS;
 use crate::audio::CaptureInstant;
+use crate::control::{PrintReply, PrintedTranscript};
 use crate::suppression::{DictationHotkey, HotkeyAction, InputEvent};
 
 /// One of the dictation shortcut machines.
@@ -56,6 +57,9 @@ pub(super) struct Hotkeys {
     /// The recording (or the last) skips processing: the raw shortcut or
     /// `hex dictation start --raw` started it.
     pub(super) raw_capture: bool,
+    /// The recording answers a `hex dictation start --print` instead of
+    /// pasting or copying, however it ends.
+    pub(super) print_capture: Option<PrintReply>,
     /// Whether the listener last saw shortcuts suspended, so that a capture
     /// a command starts during a pause is left alone.
     pub(super) suspended: bool,
@@ -72,6 +76,7 @@ impl Hotkeys {
             extra: std::array::from_fn(|_| None),
             caps_lock,
             raw_capture: false,
+            print_capture: None,
             suspended: false,
         }
     }
@@ -297,6 +302,46 @@ impl Hotkeys {
         }
     }
 
+    /// Keeps a `hex dictation start --print`'s reply for the recording it
+    /// just started, which answers it instead of pasting or copying.
+    pub(super) fn keep_print(&mut self, print: PrintReply) {
+        self.print_capture = Some(print);
+    }
+
+    /// Takes the print-only recording's reply for the shortcut `action` that
+    /// ends it. A finish hands the reply to transcription; a discard never
+    /// spoke, and anything else Hex or the person ends it with is refused.
+    /// An action that doesn't end the recording leaves the reply waiting.
+    pub(super) fn print_for(&mut self, action: HotkeyAction) -> Option<PrintReply> {
+        let print = self.print_capture.take()?;
+        match action {
+            HotkeyAction::Finish => return Some(print),
+            HotkeyAction::Discard(_) => print.send(PrintedTranscript::NoSpeech),
+            HotkeyAction::Start => self.print_capture = Some(print),
+            HotkeyAction::PasteLast
+            | HotkeyAction::PasteMeeting
+            | HotkeyAction::Cancel
+            | HotkeyAction::CancelShortcut => print.send(PrintedTranscript::Cancelled),
+        }
+        None
+    }
+
+    /// Answers a print-only recording that Hex itself ends without a
+    /// transcript (a microphone loss, a suspended shortcut, a closed
+    /// listener), so its command never waits for the full cap.
+    pub(super) fn fail_print(&mut self, why: &str) {
+        if let Some(print) = self.print_capture.take() {
+            print.send(PrintedTranscript::Failed(why.into()));
+        }
+    }
+
+    /// Answers a print-only recording that `hex dictation cancel` discards.
+    pub(super) fn cancel_print(&mut self) {
+        if let Some(print) = self.print_capture.take() {
+            print.send(PrintedTranscript::Cancelled);
+        }
+    }
+
     /// Feeds one input to every machine, and returns what each did with
     /// which machine it was. A machine that starts while another records
     /// stands down until its keys come up, and only the dictation machine
@@ -362,6 +407,8 @@ pub(super) fn rebind(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::app_settings::RuntimeHotkey;
 
@@ -394,5 +441,44 @@ mod tests {
         assert!(hotkeys.any_recording());
         assert!(hotkeys.suspend_when(true));
         assert!(!hotkeys.any_recording());
+    }
+
+    /// A `hex dictation start --print` recording is finished by the shortcut
+    /// itself, and its reply goes with the capture to transcription.
+    #[test]
+    fn a_printing_start_follows_the_shortcut_that_finishes_it() {
+        let base = CaptureInstant::ZERO;
+        let at = |ms: u64| base + Duration::from_millis(ms);
+        let mut hotkeys = hotkeys();
+        assert!(hotkeys.dictation.lock());
+        let (start, printed) = PrintReply::channel();
+        hotkeys.keep_print(start);
+
+        // The next shortcut press finishes the locked recording.
+        assert_eq!(
+            hotkeys.process(
+                InputEvent::Flags(crate::app_settings::OPTION_KEY_MASK),
+                at(0)
+            ),
+            [(Shortcut::Dictation, HotkeyAction::Finish)]
+        );
+        assert!(hotkeys.print_capture.is_none());
+        let print = hotkeys
+            .print_for(HotkeyAction::Finish)
+            .expect("the transcript goes to the printing start");
+        print.send(PrintedTranscript::Text("Ship it.".into()));
+        assert_eq!(
+            printed.recv_timeout(Duration::from_millis(50)),
+            Ok(PrintedTranscript::Text("Ship it.".into()))
+        );
+
+        // A cancel is refused rather than waited out.
+        let (start, printed) = PrintReply::channel();
+        hotkeys.keep_print(start);
+        assert!(hotkeys.print_for(HotkeyAction::Cancel).is_none());
+        assert!(matches!(
+            printed.recv_timeout(Duration::from_millis(50)),
+            Ok(PrintedTranscript::Cancelled)
+        ));
     }
 }

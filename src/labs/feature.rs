@@ -79,10 +79,11 @@ pub enum Feature {
     SpeakersOnly,
     MoreDictationShortcuts,
     PauseMenu,
+    PrintStart,
 }
 
 impl Feature {
-    pub const ALL: [Self; 74] = [
+    pub const ALL: [Self; 75] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -157,5 +158,6 @@ impl Feature {
         Self::SpeakersOnly,
         Self::MoreDictationShortcuts,
         Self::PauseMenu,
+        Self::PrintStart,
     ];
 }

@@ -54,6 +54,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
+├── Print-only CLI dictation no labs.print_start        (macOS)   hex dictation start --print answers with the transcript however the recording ends; never pasted or copied
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote", "quote … unquote" become line breaks and quotation marks; Spanish "nuevo párrafo", "nueva línea", "abre/cierra comillas", … too (#630, #1040)
 ├── Spoken symbols  no    labs.spoken_symbols          spoken "hashtag", "underscore", "comma", … become symbols joined to their words: "#release", "my_variable", "done, thanks"; Spanish "arroba", "guion bajo", "coma", … too (#678, #1040)
 ├── Remove filler words no labs.filler_words          English dictations lose um, umm, uh, uhh, erm, er, ah, with no model (#631)
@@ -621,6 +622,42 @@ in [labs.rs](../../src/labs.rs). Not yet observed: a real Mac with another app
 taking focus mid-dictation. The `mac-labs` and `mac-labs-link` goldens moved
 with the Labs and Output card counts and were regenerated on Linux; the card
 itself sits in a folded group there.
+
+Print-only CLI dictation (`print-start`, macOS): while on, `hex dictation
+start --print` records a dictation that belongs to the command instead of the
+focused app. `control_dictation` in [recognition.rs](../../src/recognition.rs)
+starts it exactly as a plain start does and keeps the command's `PrintReply`
+on the listener's `Hotkeys` (`print_capture`). Wherever that recording ends,
+the reply is read once: the shortcut's finish (`finish_hotkey_dictation`)
+hands it to `DictationWorker::transcribe_printed` (target `Print` or
+`RawPrint`; processed like a paste, History kind Printed, Paste Last skipped);
+`hex dictation stop` and `toggle` join their own reply with it so both
+commands get the one transcript; `hex dictation cancel`, Toggle's cancel
+shortcut, and the Paste Last shortcut answer it as cancelled; a short-tap
+discard and a near-silent kept clip answer `no-speech`; and a paused shortcut,
+an unopened microphone, or a microphone loss with no kept audio answers
+failed. Nothing pastes or copies the text, and a start while anything already
+records is refused with `busy`. Off, the command answers `disabled`; Linux and
+Windows answer `unsupported`; neither changes anything else. The printing
+start waits at most `PRINT_START_WAIT` (31 minutes), and
+`ControlCommand::deadline` gives its transport 5 s more; a timeout leaves the
+recording print-only. Checks:
+`a_printing_stop_answers_through_its_reply_channel` (a joined `PrintReply`
+answers both waiters, `start --print` is accepted, `toggle`/`cancel --print`
+are refused, and the two deadlines) and `cancel_parses_and_takes_no_flags` in
+[control.rs](../../src/control.rs); the Linux and Windows `unsupported` answer
+in `a_printing_stop_answers_with_the_transcript`
+([control/host.rs](../../src/control/host.rs));
+`a_printing_start_follows_the_shortcut_that_finishes_it` in
+[recognition/hotkeys.rs](../../src/recognition/hotkeys.rs) (compiled only on
+macOS); `print_start_is_its_own_bit_and_macos_only` in
+[labs.rs](../../src/labs.rs); the row in
+`contributed_options_are_labs_toggles_off_by_default`
+([panes.rs](../../src/rune_ui/tests/panes.rs)); `desktop::i18n`'s tables carry
+the row's name and description in every language. Not yet observed: a real Mac
+with a microphone, so every path that ends a recording is a unit test and a
+reading of the code, not an end-to-end run. The `mac-labs` goldens change with
+the new row and are regenerated on Linux.
 
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in

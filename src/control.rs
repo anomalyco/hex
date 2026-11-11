@@ -401,6 +401,8 @@ impl ControlError {
 
 /// How long `hex dictation stop --print` waits for its transcript.
 pub const PRINT_WAIT: Duration = Duration::from_secs(60);
+/// How long `hex dictation start --print` waits for its dictation to end.
+pub const PRINT_START_WAIT: Duration = Duration::from_secs(31 * 60);
 /// How long the app may take to carry out any other control command.
 const CONTROL_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -408,38 +410,55 @@ impl ControlCommand {
     /// How long a transport waits for the app's answer to this command.
     pub fn deadline(&self) -> Duration {
         match self {
+            Self::Dictation {
+                action: CaptureAction::Start,
+                print: true,
+                ..
+            } => PRINT_START_WAIT + Duration::from_secs(5),
             Self::Dictation { print: true, .. } => PRINT_WAIT + Duration::from_secs(5),
             _ => CONTROL_DEADLINE,
         }
     }
 }
 
-/// What a printing stop gets back from the listener once its dictation
-/// finishes: the transcript, processed as a paste would be, or why there is
-/// none. A printed transcript is never pasted.
-#[derive(Debug, Eq, PartialEq)]
+/// What a printing start or stop gets back from the listener once its
+/// dictation finishes: the transcript, processed as a paste would be, or why
+/// there is none. A printed transcript is never pasted.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PrintedTranscript {
     Text(String),
     NoSpeech,
+    /// The recording was cancelled before it finished.
+    Cancelled,
     /// The Linux and Windows listeners stop by themselves without a recording.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     NotRecording,
     Failed(String),
 }
 
-/// The one-shot channel a printing stop rides through the listener's queue.
+/// The channel a printing start or stop rides through the listener's queue.
+/// One transcript can answer more than one command: a `stop --print` of a
+/// print-only dictation joins the start's reply.
 #[derive(Clone, Debug)]
-pub struct PrintReply(SyncSender<PrintedTranscript>);
+pub struct PrintReply(Vec<SyncSender<PrintedTranscript>>);
 
 impl PrintReply {
     pub fn channel() -> (Self, Receiver<PrintedTranscript>) {
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        (Self(sender), receiver)
+        (Self(vec![sender]), receiver)
     }
 
-    /// Answers the waiting command; one that gave up is not told.
+    /// Answers both this reply's command and `other`'s with one transcript.
+    pub fn join(mut self, other: Self) -> Self {
+        self.0.extend(other.0);
+        self
+    }
+
+    /// Answers every waiting command; one that gave up is not told.
     pub fn send(self, transcript: PrintedTranscript) {
-        let _ = self.0.send(transcript);
+        for reply in self.0 {
+            let _ = reply.send(transcript.clone());
+        }
     }
 }
 
@@ -459,6 +478,9 @@ pub fn await_printed(receiver: &Receiver<PrintedTranscript>, wait: Duration) -> 
         Ok(PrintedTranscript::Text(text)) => ControlReply::Transcript { text },
         Ok(PrintedTranscript::NoSpeech) => {
             ControlReply::error("no-speech", "no speech was recorded; nothing to print")
+        }
+        Ok(PrintedTranscript::Cancelled) => {
+            ControlReply::error("failed", "the dictation was cancelled; nothing to print")
         }
         Ok(PrintedTranscript::NotRecording) => ControlReply::error(
             "not-recording",
@@ -481,16 +503,16 @@ pub fn await_printed(receiver: &Receiver<PrintedTranscript>, wait: Duration) -> 
     }
 }
 
-/// The action a request asks for; `print` applies only to `stop`.
+/// The action a request asks for; `print` applies only to `start` and `stop`.
 pub fn check_flags(
     action: CaptureAction,
     print: bool,
     raw: bool,
 ) -> Result<CaptureAction, ControlError> {
-    if print && action != CaptureAction::Stop {
+    if print && !matches!(action, CaptureAction::Start | CaptureAction::Stop) {
         return Err(ControlError::new(
             "invalid-value",
-            "--print works only with `hex dictation stop`",
+            "--print works only with `hex dictation start` and `hex dictation stop`",
         ));
     }
     if raw && !matches!(action, CaptureAction::Start | CaptureAction::Toggle) {
@@ -1008,11 +1030,47 @@ mod tests {
             await_printed(&printed, wait),
             ControlReply::Error { code, .. } if code == "failed"
         ));
-        // Only `stop` prints, and older requests without the field still parse.
-        assert!(check_flags(CaptureAction::Start, true, false).is_err());
+        // A joined reply answers every waiting command with one transcript.
+        let (start, started) = PrintReply::channel();
+        let (stop, stopped) = PrintReply::channel();
+        start
+            .join(stop)
+            .send(PrintedTranscript::Text("Ship it.".into()));
+        for printed in [&started, &stopped] {
+            assert_eq!(
+                await_printed(printed, wait),
+                ControlReply::Transcript {
+                    text: "Ship it.".into()
+                }
+            );
+        }
+        // Both start and stop print; toggle and cancel take no flag.
+        assert!(check_flags(CaptureAction::Start, true, false).is_ok());
+        assert!(check_flags(CaptureAction::Start, true, true).is_ok());
         assert!(check_flags(CaptureAction::Stop, true, false).is_ok());
+        assert!(check_flags(CaptureAction::Toggle, true, false).is_err());
+        assert!(check_flags(CaptureAction::Cancel, true, false).is_err());
         assert!(check_flags(CaptureAction::Toggle, false, true).is_ok());
         assert!(check_flags(CaptureAction::Stop, false, true).is_err());
+        // A printing start waits for the dictation, not for a paste.
+        assert_eq!(
+            ControlCommand::Dictation {
+                action: CaptureAction::Start,
+                print: true,
+                raw: false,
+            }
+            .deadline(),
+            PRINT_START_WAIT + Duration::from_secs(5)
+        );
+        assert_eq!(
+            ControlCommand::Dictation {
+                action: CaptureAction::Stop,
+                print: true,
+                raw: false,
+            }
+            .deadline(),
+            PRINT_WAIT + Duration::from_secs(5)
+        );
         assert_eq!(
             serde_json::from_str::<ControlRequest>(
                 r#"{"version":4,"command":"dictation","action":"stop"}"#

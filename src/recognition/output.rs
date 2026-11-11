@@ -17,22 +17,45 @@ use crate::parakeet::{DictationJobId, DictationWorker, TranscriptionTarget};
 use super::{DictationSink, FinishResult};
 
 /// Finishes a recording capture the microphone cut short. A kept clip becomes
-/// a copy-only dictation; anything else keeps the previous failure, with its
-/// error tone and Failed HUD.
+/// a copy-only dictation, or answers a print-only one; anything else keeps
+/// the previous failure, with its error tone and Failed HUD, and tells a
+/// printing command it failed.
 pub(super) fn interrupted_dictation(
     salvaged: Option<(DictationClip, ContextSnapshot)>,
+    mut print: Option<crate::control::PrintReply>,
     raw: bool,
     worker: &DictationWorker,
     device: &str,
     events: &mut EventLog,
     indicator: DictationSink<'_>,
 ) -> Result<()> {
-    if let Some((clip, context)) = salvaged
-        && salvage_dictation(clip, raw, worker, context, device, events, indicator)?.is_some()
-    {
-        // The capture ended with a job, not a failure: the HUD keeps
-        // transcribing until the copy completes.
-        return super::emit_engine_state(events, false, worker, device);
+    let mut silent = false;
+    if let Some((clip, context)) = salvaged {
+        if salvage_dictation(
+            clip,
+            print.take(),
+            raw,
+            worker,
+            context,
+            device,
+            events,
+            indicator,
+        )?
+        .is_some()
+        {
+            // The capture ended with a job, not a failure: the HUD keeps
+            // transcribing until the copy completes.
+            return super::emit_engine_state(events, false, worker, device);
+        }
+        silent = true;
+    }
+    if let Some(print) = print {
+        // A silent clip has no words to print; every other end failed.
+        print.send(if silent {
+            crate::control::PrintedTranscript::NoSpeech
+        } else {
+            crate::control::PrintedTranscript::Failed("the microphone was interrupted".into())
+        });
     }
     super::fail_capture(
         "Microphone capture was interrupted; reconnecting.".into(),
@@ -48,12 +71,14 @@ pub(super) fn interrupted_dictation(
 /// is transcribed and processed like an ordinary dictation; a raw one is
 /// transcribed as heard. Either way it is copied instead of pasted: the app
 /// or call that disrupted the microphone may have taken focus. Paste Last
-/// Dictation and History keep it like any other dictation.
+/// Dictation and History keep it like any other dictation. A print-only one
+/// answers the command that started it instead.
 ///
 /// Returns `None` for a near-silent clip, after saving its diagnostics: the
 /// caller keeps the previous microphone-loss failure for it.
 pub(super) fn salvage_dictation(
     clip: DictationClip,
+    print: Option<crate::control::PrintReply>,
     raw: bool,
     worker: &DictationWorker,
     context: ContextSnapshot,
@@ -72,7 +97,10 @@ pub(super) fn salvage_dictation(
     };
     submit_dictation(
         clip,
-        |clip| worker.transcribe(clip, target, context),
+        |clip| match print {
+            Some(print) => worker.transcribe_printed(clip, print, raw, context),
+            None => worker.transcribe(clip, target, context),
+        },
         true,
         device,
         events,

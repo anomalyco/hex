@@ -308,6 +308,17 @@ pub fn caps_lock_dictation() -> bool {
     on(CAPS_LOCK_DICTATION) && Feature::CapsLockDictation.on_this_os()
 }
 
+/// `hex dictation start --print` records a dictation whose transcript goes
+/// to the command that started it, never pasted or copied, however it ends
+/// (macOS; read as each printing start arrives).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn print_start() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    PRINT_START.load(Ordering::Acquire) && Feature::PrintStart.on_this_os()
+}
+
 /// Whether the Caps Lock light blinks slowly while recording instead of
 /// staying solid (macOS; read by the light model for each pattern).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
