@@ -2,6 +2,7 @@ use super::*;
 use crate::app_settings::{
     MeetingRetention, MeetingSettings, MeetingSummaries, RecordingAudioBehavior,
 };
+use crate::dictation::vocabulary::VocabularyEntry;
 use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 use serde::Deserialize;
 use serde_json::json;
@@ -102,16 +103,35 @@ fn saved_keys_are_sorted_at_every_level() {
     let file = SettingsFile::new(b"{}");
     let settings = AppSettings {
         sound_effect_volume: 0.37,
+        vocabulary: vec![VocabularyEntry {
+            term: "Cappuccino".into(),
+            sounds_like: vec!["capuchin".into()],
+        }],
         ..AppSettings::default()
     };
     settings.write_to(&file.path).unwrap();
     let raw = fs::read_to_string(&file.path).unwrap();
     let keys = assert_sorted_keys(&raw);
     assert!(keys > 40, "only {keys} keys checked");
+    // f32 settings keep their short form instead of widening through `Value`.
+    for (key, value) in [
+        ("sound_effect_volume", "0.37"),
+        ("recording_duck_volume", "0.2"),
+        ("hex_microphone_strength", "1.0"),
+    ] {
+        let line = format!("\"{key}\": {value}");
+        assert!(
+            raw.lines()
+                .any(|written| written.trim().trim_end_matches(',') == line),
+            "settings.json has no `{line}`"
+        );
+    }
     let saved: Value = serde_json::from_str(&raw).unwrap();
-    // These sections have several keys each, so nested objects are covered.
+    // These sections have several keys each, and the vocabulary entry is an
+    // object inside an array, so nested objects are covered.
     assert!(saved["meetings"].as_object().unwrap().len() > 1);
     assert!(saved["transcription"].as_object().unwrap().len() > 1);
+    assert_eq!(saved["vocabulary"][0]["sounds_like"], json!(["capuchin"]));
     assert_eq!(AppSettings::load_from(&file.path).unwrap(), settings);
 }
 

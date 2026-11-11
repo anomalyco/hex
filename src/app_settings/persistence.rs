@@ -243,11 +243,15 @@ impl AppSettings {
             }
             _ => {}
         }
-        // A `Value` object is a `BTreeMap` (serde_json's `preserve_order`
-        // feature is off), so going through one writes every object's keys
-        // alphabetically and leaves array order alone. A settings file kept in
-        // version control then changes only where a setting does.
-        let value = serde_json::to_value(&*self.as_saved(policy, original.as_deref()))?;
+        // Bytes first: a `Value` stores floats as f64, so building one from the
+        // struct prints an f32 such as 0.37 as 0.3700000047683716. A `Value`
+        // object is a `BTreeMap` (serde_json's `preserve_order` feature is
+        // off), so writing one sorts every object's keys alphabetically and
+        // leaves array order alone. A settings file kept in version control
+        // then changes only where a setting does.
+        let saved = self.as_saved(policy, original.as_deref());
+        let compact = serde_json::to_vec(&*saved)?;
+        let value: Value = serde_json::from_slice(&compact)?;
         let bytes = serde_json::to_vec_pretty(&value)?;
         crate::durable::write(path, &bytes)?;
         Ok(())
