@@ -2,7 +2,9 @@
 //! five seconds. Any stream that fails before proving steady delivery backs off
 //! to a minute instead, so a microphone that never starts cannot keep waking
 //! the machine every few seconds (#1681). A stream that delivered steadily
-//! reopens at once, as it always has (#1206).
+//! reopens at once, as it always has (#1206). A stream that delivered digital
+//! silence reopens at once too, and that one open makes the device renegotiate
+//! its sample rate first (#1575).
 
 use std::time::{Duration, Instant};
 
@@ -32,6 +34,10 @@ pub(super) struct MicrophoneRecovery {
     /// so a stream that never proves steady delivery cannot start the wait
     /// over on every reopen.
     stream_stall: bool,
+    /// Whether the next replacement must make the device renegotiate its
+    /// sample rate before it opens. Only a stream that delivered digital
+    /// silence asks for it, and the one open that follows takes it.
+    renegotiate: bool,
     pub(super) reason: Option<MicrophoneRecoveryReason>,
     pub(super) target_revision: Option<u64>,
 }
@@ -42,6 +48,7 @@ impl Default for MicrophoneRecovery {
             next_attempt: None,
             delay: MICROPHONE_RETRY_INITIAL,
             stream_stall: false,
+            renegotiate: false,
             reason: None,
             target_revision: None,
         }
@@ -54,6 +61,7 @@ impl MicrophoneRecovery {
             self.next_attempt = Some(now);
             self.delay = MICROPHONE_RETRY_INITIAL;
             self.stream_stall = false;
+            self.renegotiate = false;
             self.target_revision = Some(revision);
             if self.reason != Some(MicrophoneRecoveryReason::StreamFailed) {
                 self.reason = Some(MicrophoneRecoveryReason::SelectionChanged);
@@ -97,6 +105,22 @@ impl MicrophoneRecovery {
         }
     }
 
+    /// A finished dictation was exactly zero: the stream runs but delivers
+    /// digital silence, as a device a call app let go can (#1122). Reopen it
+    /// like a failed stream, and have that open renegotiate the device's
+    /// sample rate first: a device left on a stale clock delivers only zeros
+    /// until the rate changes (#1575).
+    pub(super) fn request_silence_recovery(&mut self, now: Instant) {
+        self.request_stream_recovery(now);
+        self.renegotiate = true;
+    }
+
+    /// Whether the next replacement must renegotiate the sample rate, taken
+    /// by the open it applies to and by no other.
+    pub(super) fn take_renegotiation(&mut self) -> bool {
+        std::mem::take(&mut self.renegotiate)
+    }
+
     /// A stream stopped before it proved steady delivery: wait out the stall
     /// backoff, doubling it up to [`MICROPHONE_STALL_RETRY_MAX`].
     pub(super) fn back_off_stream_recovery(&mut self, now: Instant) {
@@ -128,6 +152,7 @@ impl MicrophoneRecovery {
     pub(super) fn reopened(&mut self) {
         self.next_attempt = None;
         self.reason = None;
+        self.renegotiate = false;
         self.target_revision = None;
         if !self.stream_stall {
             self.delay = MICROPHONE_RETRY_INITIAL;
@@ -150,6 +175,7 @@ impl MicrophoneRecovery {
         self.next_attempt = None;
         self.delay = MICROPHONE_RETRY_INITIAL;
         self.stream_stall = false;
+        self.renegotiate = false;
         self.reason = None;
         self.target_revision = None;
     }
@@ -160,5 +186,52 @@ impl MicrophoneRecovery {
         if self.reason == Some(MicrophoneRecoveryReason::StreamFailed) {
             self.next_attempt = Some(now);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_silence_recovery_renegotiates_the_next_open() {
+        let now = Instant::now();
+
+        // Digital silence reopens like a failure and renegotiates once.
+        let mut silent = MicrophoneRecovery::default();
+        silent.request_silence_recovery(now);
+        assert_eq!(silent.reason, Some(MicrophoneRecoveryReason::StreamFailed));
+        assert!(silent.should_attempt(now));
+        assert!(silent.take_renegotiation());
+        // The one open that follows takes it; a second open does not.
+        assert!(!silent.take_renegotiation());
+
+        // A stream failure reopens without touching the device's rate.
+        let mut failed = MicrophoneRecovery::default();
+        failed.request_stream_recovery(now);
+        assert!(!failed.take_renegotiation());
+
+        // Neither does a stream that never proved itself stalling.
+        let mut stalled = MicrophoneRecovery::default();
+        stalled.back_off_stream_recovery(now);
+        assert!(!stalled.take_renegotiation());
+    }
+
+    #[test]
+    fn a_reopen_or_a_reset_forgets_a_renegotiation_no_open_took() {
+        let now = Instant::now();
+        let mut recovery = MicrophoneRecovery::default();
+        recovery.request_silence_recovery(now);
+        recovery.reopened();
+        assert!(!recovery.renegotiate);
+
+        recovery.request_silence_recovery(now);
+        recovery.recovered();
+        assert!(!recovery.renegotiate);
+
+        // Choosing another microphone is not the stuck device any more.
+        recovery.request_silence_recovery(now);
+        recovery.request_selection_change(7, now);
+        assert!(!recovery.renegotiate);
     }
 }
