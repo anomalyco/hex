@@ -55,9 +55,13 @@ impl MicrophoneLinger {
         false
     }
 
-    /// A capture started, or its stream went away: no earlier window keeps
-    /// the microphone.
-    #[cfg(test)]
+    /// A capture started, its stream went away (a lingering stream that heard
+    /// only digital silence closes now), or a capture sink took the
+    /// microphone: no earlier window keeps it.
+    ///
+    /// Windows has no digital-silence reopen, so nothing there calls this
+    /// outside tests.
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub(crate) fn clear(&mut self) {
         self.deadline = None;
     }

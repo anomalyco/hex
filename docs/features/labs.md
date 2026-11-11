@@ -395,37 +395,52 @@ card shows "Keep open for" (30 s, 1, 3, 5, or 30 minutes; default 1 minute).
 It applies only while General's Turn off the mic when not dictating
 (`release_microphone_while_idle`) is on: with that off the microphone is
 always open, so the lab has nothing to do. When both are on, a capture that
-finishes or is cancelled no longer closes the microphone at once. The one
-release check every listener now makes (`audio::linger::MicrophoneLinger`)
-arms a window on the first pass with nothing recording, clears it when a
-capture starts, and closes only once the window passes with still nothing
-recording: no dictation, no local API dictation, no release tail, and no
-capture copying the microphone (`capture_host`'s `ListenerTimeline`). A press
-inside the window takes the ordinary warm path: the microphone is already
-open, so the capture starts at once and keeps its pre-roll (up to 450 ms;
-none while "While dictating" mutes, pauses, or lowers audio) from the warm
-stream, instead of the cold open's asynchronous start with no pre-roll that
-happens today with the release setting on. Turning the lab off while the microphone
-lingers releases it at the next idle pass, exactly as before; turning the
-release setting off leaves the microphone open, as that setting always did.
-macOS reads the gate as `dictation/audio`'s owner reconciles the input (its
-loop ticks every 10 ms while the input is active, so the deadline is
-observed); Windows and Linux check it once per pass before their idle wait.
-The window has no room in the Labs state word beside Unload model when idle's
-minutes, so the switch holds the word's last free bit and the window lives in
-its own atomic, both written by `labs::apply`. Checks: the `audio::linger`
-tests (`the_microphone_closes_only_after_the_window`,
+finishes or is cancelled no longer closes the microphone at once. One
+`audio::linger::MicrophoneLinger` holds the window for every listener: the
+first idle pass with nothing recording arms it, a pass with something
+recording clears it, and closing waits until a later idle pass has passed the
+deadline with still nothing recording: no dictation, no local API dictation,
+no release tail, and no capture copying the microphone (`capture_host`'s
+`ListenerTimeline`). The window therefore also starts after an Annotate
+capture-sink session (the sink's microphone stays for the window once it
+closes) and after a local-API dictation (`POST /dictations`), which count as
+captures too. A press inside the window takes the ordinary warm path: the
+microphone is already open, so the capture starts at once and keeps its
+pre-roll (up to 450 ms; none while "While dictating" mutes, pauses, or lowers
+audio) from the warm stream, instead of the cold open's asynchronous start
+with no pre-roll that happens today with the release setting on. On macOS a
+stream interruption, or a stray reopen with no press waiting, closes the
+microphone directly as it always did, which ends the window there early.
+Turning the lab off during the window releases the microphone at the next
+idle pass, the same release the check always made, without the wait; turning
+the release setting off leaves the microphone open, as that setting always
+did. macOS reads the gate as `dictation/audio`'s owner reconciles the input
+(its loop ticks every 10 ms while the input is active, so the deadline is
+observed); Windows checks it once per pass before its idle wait, and Linux
+once per pass before it polls the microphone. On Windows and Linux the check
+is one small macro the pass and the old event sites (a submitted finish, a
+cancel, a discard before the microphone opened, a client dictation ending)
+share, so with the lab off a press handled in the same pass still sees a
+closed microphone at once, as before. That check also closes a released
+microphone an interrupted recording left open, which the old event sites
+never did, with the lab off too. The window has no room in the Labs state
+word beside Unload model when idle's minutes, so the switch holds the word's
+last free bit and the window lives in its own atomic, both written by
+`labs::apply`. Checks: the `audio::linger` tests
+(`the_microphone_closes_only_after_the_window`,
 `a_new_capture_clears_the_window_and_its_end_starts_a_fresh_one`,
 `no_window_keeps_the_plain_release_while_idle_close`,
 `a_cleared_window_waits_for_the_next_capture_to_end`),
 `keep_microphone_open_is_its_own_bit_and_carries_its_window` and
 `a_window_outside_the_choices_turns_the_linger_off` in
 [labs.rs](../../src/labs.rs), the persistence tests in
-[persistence/tests.rs](../../src/app_settings/persistence/tests.rs), and
+[persistence/tests.rs](../../src/app_settings/persistence/tests.rs),
 `a_microphone_linger_window_is_seconds_in_settings_json` in
-[control/settings.rs](../../src/control/settings.rs). Not yet observed on a
-real Mac, Windows PC, or Linux desktop: no capture has been run with the lab
-on, and the Labs page goldens need regenerating for the new card.
+[control/settings.rs](../../src/control/settings.rs), and
+`a_lingering_silent_stream_closes_instead_of_reopening` in
+[linux/dictation/silence.rs](../../src/linux/dictation/silence.rs). The Labs
+page goldens were regenerated for the new card. Not yet observed on a real
+Mac, Windows PC, or Linux desktop: no capture has been run with the lab on.
 
 Restore shortcut default (`restore-shortcut-default`, issue 613): while on,
 General › Advanced › Paste last dictation shows a Restore default shortcut

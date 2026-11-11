@@ -31,10 +31,12 @@ const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 
 mod gap;
 mod shortcuts;
+mod silence;
 mod typing;
 
 use gap::{ChunkStep, chunk_step};
 use shortcuts::shortcuts;
+use silence::reopen_silent_stream;
 use typing::CaptureTyping;
 
 struct Job {
@@ -555,6 +557,29 @@ pub(crate) fn run(
         )
     );
 
+    // Labs › Keep mic open after dictating: the one release check the pass and
+    // its event sites share, so a press handled in the same pass still sees a
+    // closed microphone at once when the lab is off.
+    macro_rules! release_microphone {
+        () => {
+            if release_while_idle
+                && input.is_active()
+                && linger.may_close(
+                    Instant::now(),
+                    capture.is_recording()
+                        || start_pending
+                        || finishing.is_some()
+                        || service.is_active()
+                        || timeline.wants_audio(),
+                )
+            {
+                input.close();
+                last_captured_through = None;
+                audio_ready = false;
+            }
+        };
+    }
+
     while !shutdown.load(Ordering::Relaxed) {
         // No microphone could be opened (none connected, or the default
         // went away): record why while it keeps retrying in the background.
@@ -725,9 +750,17 @@ pub(crate) fn run(
                 flavour,
                 &mut active_typing,
             )?;
-            if silent && reopen_silent_stream(&mut input, release_while_idle) {
+            if silent
+                && reopen_silent_stream(
+                    &mut input,
+                    release_while_idle,
+                    &mut linger,
+                    crate::audio::linger::window(),
+                )
+            {
                 // Recovery blocks audio until a reopened stream arrives, so
                 // a press must wait for it rather than start a dead capture.
+                // A lingering microphone closed instead, and opens fresh.
                 timeline.restart();
                 clock.reset();
                 last_captured_through = None;
@@ -737,6 +770,9 @@ pub(crate) fn run(
                 capture = DictationCapture::new(sample_rate);
             }
             suppressor.restore();
+            // The capture's end releases the microphone here, as before, when
+            // the lab is off.
+            release_microphone!();
             emit_state(
                 &mut events,
                 active_state(capture.is_recording(), pending),
@@ -803,6 +839,8 @@ pub(crate) fn run(
         if service_ended && !service.is_active() {
             capture.cancel();
             suppressor.restore();
+            // A client's dictation ended here before too.
+            release_microphone!();
         }
         for (id, result) in service_finished.try_iter() {
             service.complete(id, result);
@@ -881,6 +919,7 @@ pub(crate) fn run(
                         print.send(PrintedTranscript::NoSpeech);
                     }
                     suppressor.restore();
+                    release_microphone!();
                     events.dictation(
                         if action == HotkeyEvent::Cancel {
                             DictationPhase::Cancelled
@@ -939,6 +978,7 @@ pub(crate) fn run(
                     feedback::retract_start();
                     feedback::play(Tone::Cancel);
                     suppressor.restore();
+                    release_microphone!();
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_state(
                         &mut events,
@@ -991,24 +1031,12 @@ pub(crate) fn run(
             )?;
         }
 
-        // The one place a released microphone closes: once nothing records,
-        // no client dictates, no release tail runs, no capture copies it, and
-        // Labs › Keep mic open after dictating's window has passed.
-        if release_while_idle
-            && input.is_active()
-            && linger.may_close(
-                Instant::now(),
-                capture.is_recording()
-                    || start_pending
-                    || finishing.is_some()
-                    || service.is_active()
-                    || timeline.wants_audio(),
-            )
-        {
-            input.close();
-            last_captured_through = None;
-            audio_ready = false;
-        }
+        // The released microphone closes once nothing records, no client
+        // dictates, no release tail runs, no capture copies it, and Labs ›
+        // Keep mic open after dictating's window has passed. This also
+        // releases one a stream interruption left open, which the old
+        // latch-based sites never did.
+        release_microphone!();
 
         indicator.update(capture.is_recording() || start_pending, pending);
         match input.recv_timeout(
@@ -1387,24 +1415,6 @@ fn submit_capture(
     Ok(false)
 }
 
-/// A warm microphone whose finished dictation was exactly zero: the stream
-/// runs but its device was handed to another app, and stays silent until
-/// reopened (#1122). Reopen it as after a stream failure. A microphone
-/// released while idle already opens fresh for the next press. Returns
-/// whether recovery was requested; the caller must treat the stream as
-/// unavailable until it reopens.
-fn reopen_silent_stream(input: &mut RecoveringAudioInput, release_while_idle: bool) -> bool {
-    if release_while_idle || !input.is_open() || input.is_recovering() {
-        return false;
-    }
-    tracing::warn!(
-        device = %input.device_name(),
-        "dictation audio was digital silence; reopening the microphone"
-    );
-    input.request_recovery();
-    true
-}
-
 /// Starts Live typing at the hold threshold (or the Toggle press), before
 /// the stream opens so the engine sees the demand; see
 /// [`typing::begin`]. Short taps and chords create no input method.
@@ -1626,28 +1636,6 @@ mod tests {
         assert!(queued.try_recv().is_err());
         drop(events);
         let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn a_warm_silent_stream_reopens_once_unless_released() {
-        let (mut input, opened) = RecoveringAudioInput::pending_for_test();
-        let (replacement, _samples) = crate::audio::AudioInput::channel_for_test();
-        opened
-            .send((0, Ok(crate::audio::Opened::Input(Box::new(replacement)))))
-            .unwrap();
-        assert!(matches!(
-            input.recv_timeout(Duration::ZERO, true),
-            RecoveringAudioInputEvent::Reopened
-        ));
-        assert!(reopen_silent_stream(&mut input, false));
-        assert!(input.is_recovering());
-        // A second finish cannot queue another replacement.
-        assert!(!reopen_silent_stream(&mut input, false));
-
-        // Release while idle keeps the stream closed instead.
-        let (mut idle, _opened) = RecoveringAudioInput::pending_for_test();
-        assert!(!reopen_silent_stream(&mut idle, true));
-        assert!(!idle.is_recovering());
     }
 
     #[test]

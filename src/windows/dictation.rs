@@ -354,6 +354,28 @@ pub fn run(
         device_label, hotkey_label
     );
 
+    // Labs › Keep mic open after dictating: the one release check the pass and
+    // its event sites share, so a press handled in the same pass still sees a
+    // closed microphone at once when the lab is off.
+    macro_rules! release_microphone {
+        () => {
+            if release_while_idle
+                && input.is_active()
+                && linger.may_close(
+                    Instant::now(),
+                    recording
+                        || start_pending
+                        || finishing.is_some()
+                        || service.is_active()
+                        || timeline.wants_audio(),
+                )
+            {
+                input.close();
+                audio_ready = false;
+            }
+        };
+    }
+
     while !shutdown.load(Ordering::Relaxed) {
         if let Some(failed) = model.poll() {
             fail(&events, failed.error.clone())?;
@@ -518,6 +540,9 @@ pub fn run(
                 });
             }
             emit_current_state(&mut events, recording, pending, &device_label)?;
+            // The capture's end releases the microphone here, as before, when
+            // the lab is off.
+            release_microphone!();
         }
         // `/dictations`: a client's dictation never ends a shortcut capture,
         // and only its owner (or its lapsed lease) ends it.
@@ -585,6 +610,8 @@ pub fn run(
                 indicator.as_ref(),
                 &mut service_recording,
             );
+            // A client's dictation ended here before too.
+            release_microphone!();
         }
         for (id, result) in service_finished.try_iter() {
             service.complete(id, result);
@@ -675,6 +702,7 @@ pub fn run(
                     // nothing was captured, so treat it as a discard.
                     start_pending = false;
                     audio_suppressor.restore();
+                    release_microphone!();
                     if let Some(print) = print.take() {
                         print.send(PrintedTranscript::NoSpeech);
                     }
@@ -731,6 +759,7 @@ pub fn run(
                     }
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_current_state(&mut events, recording, pending, &device_label)?;
+                    release_microphone!();
                 }
                 HotkeyAction::PasteLast if !recording => {
                     submit_paste_last(
@@ -796,23 +825,12 @@ pub fn run(
             emit_current_state(&mut events, recording, pending, &device_label)?;
         }
 
-        // The one place a released microphone closes: once nothing records,
-        // no client dictates, no release tail runs, no capture copies it, and
-        // Labs › Keep mic open after dictating's window has passed.
-        if release_while_idle
-            && input.is_active()
-            && linger.may_close(
-                Instant::now(),
-                recording
-                    || start_pending
-                    || finishing.is_some()
-                    || service.is_active()
-                    || timeline.wants_audio(),
-            )
-        {
-            input.close();
-            audio_ready = false;
-        }
+        // The released microphone closes once nothing records, no client
+        // dictates, no release tail runs, no capture copies it, and Labs ›
+        // Keep mic open after dictating's window has passed. This also
+        // releases one a stream interruption left open, which the old
+        // latch-based sites never did.
+        release_microphone!();
 
         let idle = !recording
             && !start_pending

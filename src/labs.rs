@@ -909,6 +909,9 @@ fn state() -> u64 {
                 .compare_exchange(0, encode(&saved), Ordering::AcqRel, Ordering::Acquire)
                 .is_ok()
             {
+                // The switch and its window are two stores. A gate read just
+                // between them sees the switch on with no window, which reads
+                // as off, and the next read is right.
                 MICROPHONE_LINGER_SECONDS.store(linger_seconds(&saved), Ordering::Release);
             }
             STATE.load(Ordering::Acquire)
@@ -941,6 +944,9 @@ pub fn window_dark(labs: &LabsSettings, system_dark: bool) -> bool {
 
 /// Records the switches the loaded or saved settings hold.
 pub(crate) fn apply(settings: &LabsSettings) {
+    // The switch and its window are two stores, so a gate read between them
+    // sees Labs › Keep mic open after dictating off for one pass; the read
+    // after both is right.
     STATE.store(encode(settings), Ordering::Release);
     MICROPHONE_LINGER_SECONDS.store(linger_seconds(settings), Ordering::Release);
     // Labs › Pause from menu bar: turning it off resumes at once, without
