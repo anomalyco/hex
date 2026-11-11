@@ -94,6 +94,9 @@ impl Feature {
             Self::HistoryStats => {
                 "Add a Stats button to History that shows a summary of your retained dictations, with hex history stats"
             }
+            Self::HistoryMultiSelect => {
+                "Select several dictations at once with Shift-click, Command-click (Control on Windows and Linux), or a drag, then copy or delete them together"
+            }
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
             }

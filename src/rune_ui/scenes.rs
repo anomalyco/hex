@@ -99,6 +99,14 @@ pub(super) const SCENES: &[Scene] = &[
         crate::labs::apply(&ui.settings.labs);
         ui.pane = Pane::History;
     }),
+    // Labs › Select multiple dictations: two entries selected, with the card
+    // that copies or deletes them.
+    ("history-selection", |ui| {
+        *ui = portal_fixture();
+        ui.history = history::HistoryPane::fixture_selection();
+        ui.settings.labs.history_multi_select = true;
+        ui.pane = Pane::History;
+    }),
     // Labs › Screenshots' Captures: a shot, a recording with its words, and
     // an older shot; and before any.
     #[cfg(hex_capture)]

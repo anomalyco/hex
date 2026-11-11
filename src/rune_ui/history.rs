@@ -22,6 +22,8 @@ use crate::history::stats::{AppCount, HistoryStats};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention, Transcript};
 use crate::transcription::models::TranscriptionModelId;
 
+mod selection;
+
 /// The stats dialog's width and padding.
 const STATS_WIDTH: f32 = 460.0;
 const PADDING: f32 = 18.0;
@@ -44,6 +46,9 @@ pub(super) struct HistoryPane {
     pub(super) stats: Option<HistoryStats>,
     /// The stats dialog is open.
     pub(super) stats_open: bool,
+    /// Labs › Select multiple dictations: every selected entry, and the
+    /// Delete confirmation while the card shows one.
+    pub(super) selection: selection::Selection,
     /// Labs › Keep recordings: the installed models Transcribe again
     /// offers, read when its menu opens.
     models: Vec<(TranscriptionModelId, &'static str)>,
@@ -114,18 +119,19 @@ impl HistoryPane {
 
     fn reload_entries(&mut self) {
         self.searched = self.search.text.clone();
-        let Some(store) = &self.store else {
-            return;
-        };
-        let (revision, entries) = store.search_at(&self.searched);
-        self.revision = Some(revision);
-        self.entries = entries;
+        if let Some(store) = &self.store {
+            let (revision, entries) = store.search_at(&self.searched);
+            self.revision = Some(revision);
+            self.entries = entries;
+        }
         if self
             .selected
             .is_some_and(|id| !self.entries.iter().any(|entry| entry.id == id))
         {
             self.selected = None;
         }
+        // A search, a delete, or new dictations leave no selected id behind.
+        selection::prune(self);
     }
 
     /// Sums up every retained entry, only while Labs › Dictation stats is
@@ -148,12 +154,17 @@ impl HistoryPane {
     /// searches again only when the query or the store's revision changed,
     /// and sums the stats again when the entries or the toggle changed, or
     /// once when the dialog closes because the stats emptied.
-    pub(super) fn poll(&mut self, visible: bool, keep_audio: bool) -> bool {
+    pub(super) fn poll(&mut self, visible: bool, keep_audio: bool, multi: bool) -> bool {
         let answered = self.poll_again();
         // Playback's answer returns the card to Play; it is not a reason to
         // read the stats again.
         let played = self.poll_playback();
         let mut changed = false;
+        // Labs › Select multiple dictations off, History keeps one selected
+        // entry: the others fall away.
+        if !multi && selection::collapse(self) {
+            changed = true;
+        }
         // A playback belongs to the card that shows its Stop: leaving the
         // entry or History, turning the lab off, or hiding the window
         // quietly ends it.
@@ -221,6 +232,12 @@ impl HistoryPane {
         self.entries.iter().find(|entry| entry.id == id)
     }
 
+    /// Whether row `id` draws as selected: the one entry, or any of the
+    /// several Labs › Select multiple dictations holds.
+    pub(super) fn is_selected(&self, id: u64) -> bool {
+        self.selected == Some(id) || self.selection.contains(id)
+    }
+
     pub(super) fn fixture() -> Self {
         let now = crate::history::now_ms();
         let entry =
@@ -285,6 +302,15 @@ impl HistoryPane {
         Self::default()
     }
 
+    /// Labs › Select multiple dictations: two entries selected, for the
+    /// preview's card.
+    pub(super) fn fixture_selection() -> Self {
+        let mut pane = Self::fixture();
+        pane.selected = Some(2);
+        pane.selection.select(&[3, 2]);
+        pane
+    }
+
     /// A representative summary for the stats dialog's snapshots and tests.
     pub(super) fn fixture_stats() -> HistoryStats {
         HistoryStats {
@@ -343,6 +369,7 @@ fn clear(ui: &mut Ui) {
     } else {
         ui.history.entries.clear();
         ui.history.selected = None;
+        ui.history.selection.clear();
     }
 }
 
@@ -537,7 +564,14 @@ fn delete(ui: &mut Ui, id: u64) {
     } else {
         ui.history.entries.retain(|entry| entry.id != id);
         ui.history.selected = None;
+        ui.history.selection.clear();
     }
+}
+
+/// Labs › Select multiple dictations, as the pane reads it while drawing,
+/// polling, and taking a press.
+pub(super) fn multi(ui: &Ui) -> bool {
+    selection::on(ui)
 }
 
 /// The header's retention menu and the list + detail body.
@@ -567,8 +601,9 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                     meta.push_str(" · ");
                     meta.push_str(application);
                 }
+                let selected = pane.is_selected(id);
                 list = list.child(
-                    ld::item(
+                    ld::item_with_press(
                         p,
                         Item {
                             key: format!("history-entry{id}"),
@@ -577,12 +612,9 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                             meta_ink: None,
                             time: event_age(entry.timestamp_ms),
                             hover: vec![copy_action(ui, p, id, true)],
-                            selected: pane.selected == Some(id),
+                            selected,
                         },
-                        move |ui: &mut Ui| {
-                            ui.history.selected = Some(id);
-                            ui.history.clear_armed = false;
-                        },
+                        move |row| selection::gesture(row, id, selected),
                     )
                     .position_in_set(index + 1, count),
                 );
@@ -913,6 +945,9 @@ fn empty(ui: &Ui, p: Paint) -> Option<El> {
 
 fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let pane = &ui.history;
+    if multi(ui) && pane.selection.len() >= 2 {
+        return selection::card(ui, p);
+    }
     let Some(entry) = pane.selected.and_then(|id| pane.entry(id)) else {
         return empty(ui, p).unwrap_or_else(|| {
             ld::empty_state(

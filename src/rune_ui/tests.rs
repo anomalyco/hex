@@ -1390,6 +1390,168 @@ fn history_stats_button_opens_and_closes_the_dialog() {
     assert!(rt.find("history-stats-open").is_none());
 }
 
+/// History with Labs › Select multiple dictations on.
+fn history_multi() -> Runtime<Ui> {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    rt.state.settings.labs.history_multi_select = true;
+    rt.invalidate();
+    settle(&mut rt);
+    rt
+}
+
+/// Holds `mods` for the press that follows.
+fn hold(rt: &mut Runtime<Ui>, mods: Mods) {
+    rt.physical_input(rune::PhysicalInput::Modifiers(mods));
+    rt.frame(1.0 / 60.0);
+}
+
+/// Shift, which extends a list selection from its anchor.
+fn shift() -> Mods {
+    Mods {
+        shift: true,
+        ..Mods::default()
+    }
+}
+
+/// Command on macOS, Control elsewhere, which toggles a row.
+fn command() -> Mods {
+    Mods {
+        cmd: true,
+        ..Mods::default()
+    }
+}
+
+#[test]
+fn history_selects_several_with_shift_command_and_drag() {
+    let mut rt = history_multi();
+    // The rows are newest first: 3, 2, 1.
+    tap(&mut rt, "history-entry2");
+    assert_eq!(rt.state.history.selection.len(), 1);
+    assert!(
+        rt.find("history-selection-copy").is_none(),
+        "one entry keeps its own card"
+    );
+
+    // Shift-click selects every row between the anchor and the one clicked.
+    hold(&mut rt, shift());
+    tap(&mut rt, "history-entry1");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selected, Some(1));
+    assert_eq!(rt.state.history.selection.len(), 2);
+    assert!(rt.state.history.selection.contains(2));
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "2 dictations selected")
+    );
+    assert!(rt.find("history-selection-copy").is_some());
+
+    // Command-click toggles the row it lands on and becomes the anchor.
+    hold(&mut rt, command());
+    tap(&mut rt, "history-entry3");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 3);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "3 dictations selected")
+    );
+
+    hold(&mut rt, command());
+    tap(&mut rt, "history-entry2");
+    hold(&mut rt, Mods::default());
+    assert!(!rt.state.history.selection.contains(2));
+    assert_eq!(rt.state.history.selection.len(), 2);
+
+    // A press dragged over other rows selects from it through them.
+    let (x, y) = rt.find("history-entry2").unwrap();
+    let (to_x, to_y) = rt.find("history-entry1").unwrap();
+    rt.pointer_down(x, y);
+    rt.pointer_move(to_x, to_y);
+    rt.pointer_up(to_x, to_y);
+    settle(&mut rt);
+    assert_eq!(rt.state.history.selection.len(), 2);
+    assert!(rt.state.history.selection.contains(2));
+    assert!(rt.state.history.selection.contains(1));
+    assert!(!rt.state.history.selection.contains(3));
+}
+
+#[test]
+fn history_selection_copies_oldest_first() {
+    let mut rt = history_multi();
+    tap(&mut rt, "history-entry3");
+    hold(&mut rt, shift());
+    tap(&mut rt, "history-entry1");
+    hold(&mut rt, Mods::default());
+    tap(&mut rt, "history-selection-copy");
+    assert_eq!(
+        rt.copy_request.as_deref(),
+        Some(
+            "Thanks for sending this over! I'll review it today and follow up with comments.\n\n\
+             The deploy failed because the cache key changed.\n\n\
+             Let's move the standup to ten thirty tomorrow."
+        )
+    );
+    assert!(texts(&rt).iter().any(|text| text == "Copied"));
+}
+
+#[test]
+fn history_selection_deletes_in_two_steps() {
+    let mut rt = history_multi();
+    tap(&mut rt, "history-entry3");
+    hold(&mut rt, shift());
+    tap(&mut rt, "history-entry2");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 2);
+
+    tap(&mut rt, "history-selection-delete");
+    assert!(rt.state.history.selection.delete_armed);
+    assert_eq!(rt.state.history.entries.len(), 3, "Delete asks first");
+    tap(&mut rt, "history-selection-cancel-delete");
+    assert!(!rt.state.history.selection.delete_armed);
+    assert_eq!(rt.state.history.entries.len(), 3);
+
+    tap(&mut rt, "history-selection-delete");
+    assert!(texts(&rt).iter().any(|text| text == "Delete 2 dictations"));
+    tap(&mut rt, "history-selection-confirm-delete");
+    assert_eq!(rt.state.history.entries.len(), 1);
+    assert_eq!(rt.state.history.entries[0].id, 1);
+    assert_eq!(rt.state.history.selection.len(), 0);
+    assert_eq!(rt.state.history.selected, None);
+    assert!(rt.find("history-selection-copy").is_none());
+}
+
+#[test]
+fn history_shift_click_selects_one_without_the_lab() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    assert!(!rt.state.settings.labs.history_multi_select);
+    tap(&mut rt, "history-entry2");
+    hold(&mut rt, shift());
+    tap(&mut rt, "history-entry1");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selected, Some(1));
+    assert_eq!(rt.state.history.selection.len(), 0);
+    assert!(rt.find("history-selection-copy").is_none());
+}
+
+#[test]
+fn history_multi_select_turns_off_to_one_entry() {
+    let mut rt = history_multi();
+    tap(&mut rt, "history-entry3");
+    hold(&mut rt, shift());
+    tap(&mut rt, "history-entry2");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 2);
+
+    rt.state.settings.labs.history_multi_select = false;
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(rt.state.history.selection.len(), 0);
+    assert_eq!(rt.state.history.selected, Some(2));
+    assert!(rt.state.history.is_selected(2));
+    assert!(!rt.state.history.is_selected(3));
+}
+
 #[test]
 fn history_menu_sets_retention_and_keep_recordings() {
     let mut rt = runtime("history-menu", true, PANE_SIZE);

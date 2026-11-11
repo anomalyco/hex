@@ -192,6 +192,10 @@ const PATHS: &[(&str, &str)] = &[
     ("history-menu", "Window/History/Retention menu"),
     ("history-clear", "Window/History/Clear all asks first"),
     ("history-stats", "Window/History/Stats dialog"),
+    (
+        "history-selection",
+        "Window/History/Select multiple dictations",
+    ),
     ("history-empty", "Window/History/Empty"),
     #[cfg(hex_capture)]
     ("captures", "Window/Captures/Captures"),

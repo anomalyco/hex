@@ -1261,6 +1261,11 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Add shortcut", "Ajouter un raccourci"),
     ("Pause from menu bar", "Pause depuis la barre des menus"),
     ("Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys", "Ajoute Pause Hex à la barre des menus. En pause, Hex ignore ses raccourcis pour que les autres apps reçoivent les touches"),
+    ("Select multiple dictations", "Sélectionner plusieurs dictées"),
+    ("Shift-click, Cmd-click (Ctrl on Windows and Linux) or drag to select several dictations, then copy or delete them together", "Maj-clic, Cmd-clic (Ctrl sous Windows et Linux) ou glisser pour sélectionner plusieurs dictées, puis les copier ou les supprimer ensemble"),
+    ("{} dictations selected", "{} dictées sélectionnées"),
+    ("Copy puts the selected dictations on the clipboard, oldest first, with a blank line between each.", "Copier place les dictées sélectionnées dans le presse-papiers, de la plus ancienne à la plus récente, avec une ligne vide entre chacune"),
+    ("Delete {} dictations", "Supprimer {} dictées"),
 ];
 
 #[cfg(test)]

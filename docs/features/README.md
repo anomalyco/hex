@@ -845,6 +845,11 @@ Completed output                         // output
     ├── Retention ("Kept 7 days ▾" menu) -> Seven days by default, always hard-capped
     ├── Off ("History off") -> Stop new entries; preserve existing entries
     ├── Same menu > Clear all history… -> asks in the header; only the red confirm clears
+    ├── Labs > Select multiple dictations (off, every OS) -> one row as before   // labs.history_multi_select
+    │   ├── Plain click, Shift-click on the visible (searched) rows, Cmd-click (Ctrl), or a drag -> one, a range, or a toggled set
+    │   ├── Two or more selected -> "{count} dictations selected": Copy (final texts, oldest first, a blank line between each) / Delete… (asks once)
+    │   ├── One selected -> the ordinary card, Copy, Delete (and Transcribe again with Keep recordings)
+    │   └── A search, new entries, or a delete prune it; turning the lab off keeps one entry (labs.md)
     └── Labs > Keep recordings (off) -> new entries keep their 16 kHz audio   // labs.keep-recordings
         -> also "Keep audio too" in the retention menu while the lab is offered
         -> the card's "Transcribe again" menu runs it through any installed model

@@ -454,6 +454,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, and hex history stats",
     ),
     key(
+        "labs.history_multi_select",
+        Kind::Bool,
+        "Labs: select several dictations in History with Shift-click, Command-click (Control on Windows and Linux), or a drag, then copy or delete them together",
+    ),
+    key(
         "labs.recent_dictations",
         Kind::Bool,
         "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",

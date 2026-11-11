@@ -80,7 +80,10 @@ impl Feature {
             | Self::OpenCodeInWsl
             | Self::ApiProcessing
             | Self::ApiTimestamps => Group::Output,
-            Self::KeepRecordings | Self::HistoryStats | Self::RecentDictations => Group::History,
+            Self::KeepRecordings
+            | Self::HistoryStats
+            | Self::HistoryMultiSelect
+            | Self::RecentDictations => Group::History,
             Self::Meetings
             | Self::LiveChapters
             | Self::SubtitleExport
