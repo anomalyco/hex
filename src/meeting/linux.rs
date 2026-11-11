@@ -171,14 +171,9 @@ impl Drop for MonitorSource {
     }
 }
 
-/// Opens the folder holding `path` (or `path` itself, when a folder).
+/// Opens the folder holding the meeting file `path`.
 pub(crate) fn reveal(path: &Path) {
-    let folder = if path.is_dir() {
-        path
-    } else {
-        path.parent().unwrap_or(path)
-    };
-    open(folder);
+    open(path.parent().unwrap_or(path));
 }
 
 /// Opens the folder `path` itself.
@@ -194,7 +189,7 @@ fn open(folder: &Path) {
         .stderr(Stdio::null())
         .spawn()
     {
-        tracing::error!(%error, "could not reveal meeting file");
+        tracing::error!(%error, "could not open meeting path");
     }
 }
 

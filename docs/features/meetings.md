@@ -28,7 +28,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   └── Granted -> the Allow pill morphs into a green Allowed; moves to Advanced
 │   ├── After a meeting -> Summaries, Keep meetings, Keep audio
 │   │   (Labs › Expire meeting audio separately), Transcript folder
-│   │   (~/Documents/Hex Meetings; Reveal / choose; its error shows here)
+│   │   (~/Documents/Hex Meetings; Reveal opens the folder itself; choose
+│   │   another folder; its error shows here)
 │   │   └── Summaries pop-up (meetings.summaries; one-time migration
 │   │       "meeting-summaries-choice" from the two retired switches)
 │   │       ├── Off -> "No titles or summaries"

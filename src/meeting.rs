@@ -1210,11 +1210,17 @@ fn explorer_select(path: &Path) -> std::ffi::OsString {
     select
 }
 
-/// Explorer's argument that opens `path` itself: the path alone, with no
-/// select switch, so a folder opens rather than its parent selecting it.
+/// Explorer's argument that opens `path` itself: the quoted path alone, with
+/// no select switch, so a folder opens rather than its parent selecting it.
+///
+/// The path is quoted on its own because Explorer splits its command line on
+/// commas, and `Command` quotes only the paths that contain a space.
 #[cfg(any(windows, test))]
 fn explorer_open(path: &Path) -> std::ffi::OsString {
-    path.as_os_str().to_owned()
+    let mut open = std::ffi::OsString::from("\"");
+    open.push(path.as_os_str());
+    open.push("\"");
+    open
 }
 
 /// Moves a finished meeting to the Trash: its exported Markdown first, then

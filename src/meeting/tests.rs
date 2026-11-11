@@ -630,7 +630,11 @@ fn the_exported_markdown_is_the_reveal_target_only_while_it_exists() {
 fn explorer_opens_a_folder_itself_without_the_select_switch() {
     assert_eq!(
         explorer_open(Path::new(r"C:\Users\dax\Documents\Hex Meetings")).as_os_str(),
-        std::ffi::OsStr::new(r"C:\Users\dax\Documents\Hex Meetings")
+        std::ffi::OsStr::new(r#""C:\Users\dax\Documents\Hex Meetings""#)
+    );
+    assert_eq!(
+        explorer_open(Path::new(r"D:\Notes,2026")).as_os_str(),
+        std::ffi::OsStr::new(r#""D:\Notes,2026""#)
     );
 }
 
