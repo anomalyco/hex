@@ -433,8 +433,12 @@ mod tests {
 
     fn hotkeys() -> Hotkeys {
         let base = CaptureInstant::ZERO;
+        let option = RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers::option(),
+            key_code: None,
+        };
         Hotkeys::new(
-            DictationHotkey::new(base, true, RuntimeHotkey::default()),
+            DictationHotkey::new(base, true, option),
             DictationHotkey::new(base, false, RuntimeHotkey::default()),
         )
     }
