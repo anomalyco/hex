@@ -562,6 +562,10 @@ shortcut held past the hold threshold, or a `hex dictation start` capture
   -> no error tone or Failed HUD; the HUD transcribes, processes, completes
   -> no audio after the start, or a near-silent clip
      -> the previous failure, "Microphone capture was interrupted"
+  -> release or finishing press queued before the listener reads the loss
+     -> that finish takes the kept clip, once, with its own capture's target
+        and context, before a later press can start
+     └── the next press still records; the old loss arrives stale
 ```
 
 The copied text is processed exactly like a normal dictation, including mode
@@ -579,7 +583,13 @@ shortcut keeps its clip; a gap still keeps only a programmatic capture's),
 `cold_stream_failure_after_hold_threshold_still_fails_the_capture` (nothing to
 keep keeps nothing), and
 `cold_stream_failure_keeps_the_audio_a_held_capture_already_delivered` (a held
-cold capture keeps what it delivered). In [parakeet.rs](../../src/parakeet.rs):
+cold capture keeps what it delivered), and
+`a_shortcut_finish_takes_its_kept_clip_once_and_the_loss_stays_queued`. In
+[recognition.rs](../../src/recognition.rs):
+`a_release_queued_behind_a_microphone_loss_copies_the_kept_audio_before_the_next_press`
+(with Release microphone while idle, the release and the next press queued
+behind the loss: one salvaged submission, and the next press records). In
+[parakeet.rs](../../src/parakeet.rs):
 `a_salvaged_dictation_is_copied_and_kept_for_paste_last_and_history` (normal
 and raw clips are both copied, with normal and raw history). Proof limit:
 channel-backed audio and the output worker, not a physical microphone taken by

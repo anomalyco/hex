@@ -21,7 +21,7 @@ use crate::dictation::service::{
 use crate::dictation::{DictationClip, Finish, POST_RELEASE_TAIL};
 use crate::feedback::{self, Tone};
 use crate::parakeet::{
-    DictationJobId, DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,
+    DictationJobStage, DictationWorker, PasteKind, TranscriptionTarget, WorkerEvent,
 };
 use crate::suppression::{DictationHotkey, DiscardCause, HotkeyAction, InputMonitor};
 
@@ -35,7 +35,7 @@ use guards::{
     caps_lock_can_press, capture_boundary, capture_refusal, claims_escape, paste_last_refusal,
 };
 use hotkeys::{Hotkeys, Shortcut};
-use output::{interrupted_dictation, submit_dictation};
+use output::{finish_dictation, finish_dictation_with, interrupted_dictation};
 
 enum FinishResult {
     Discarded,
@@ -1027,6 +1027,11 @@ pub fn listen(
                     keep_hotkey,
                     ..
                 } => {
+                    if was_recording && keep_hotkey && kept.is_none() {
+                        // The shortcut's finish already took the kept clip
+                        // and submitted it; that capture is over.
+                        continue;
+                    }
                     hotkeys.suspend_all();
                     if was_recording {
                         // A recording shortcut keeps what it heard, copied
@@ -1332,7 +1337,8 @@ fn finish_hotkey_dictation(
             dictation,
             action_at,
             POST_RELEASE_TAIL,
-            |clip| worker.transcribe_printed(clip, print, raw, context.clone()),
+            // Narration lands on its screenshot either way, never pasted.
+            |clip, _| worker.transcribe_printed(clip, print, raw, context.clone()),
             device,
             events,
             indicator,
@@ -1590,62 +1596,6 @@ fn emit_voice_state(
         device: device.into(),
     })?;
     Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn finish_dictation(
-    capture: &DictationAudio,
-    ended_at: CaptureInstant,
-    tail: Duration,
-    worker: &DictationWorker,
-    target: TranscriptionTarget,
-    context: &ContextSnapshot,
-    device: &str,
-    events: &mut EventLog,
-    indicator: DictationSink<'_>,
-) -> Result<FinishResult> {
-    finish_dictation_with(
-        capture,
-        ended_at,
-        tail,
-        |clip| worker.transcribe(clip, target, context.clone()),
-        device,
-        events,
-        indicator,
-    )
-}
-
-/// Finishes the capture and hands its clip to `submit`.
-fn finish_dictation_with(
-    capture: &DictationAudio,
-    ended_at: CaptureInstant,
-    tail: Duration,
-    submit: impl FnOnce(DictationClip) -> Result<DictationJobId, &'static str>,
-    device: &str,
-    events: &mut EventLog,
-    indicator: DictationSink<'_>,
-) -> Result<FinishResult> {
-    let clip = match capture.finish_with_tail(ended_at, tail)? {
-        Finish::Transcribe(clip) if !clip.is_near_silent() => clip,
-        finish => {
-            events.dictation(DictationPhase::Discarded, "")?;
-            indicator.send(DictationIndicatorEvent::Discarded);
-            return Ok(match finish {
-                Finish::Discard => FinishResult::Discarded,
-                Finish::Transcribe(clip) => {
-                    crate::dictation::diagnostics::persist_near_silent(
-                        &clip.into_transcription_samples(),
-                    );
-                    FinishResult::Silent
-                }
-            });
-        }
-    };
-    // The audio owner already announced a release with a tail.
-    if tail.is_zero() {
-        feedback::play(Tone::DictationStop);
-    }
-    submit_dictation(clip, submit, false, device, events, indicator)
 }
 
 fn handle_dictation_event(
@@ -2315,5 +2265,59 @@ mod tests {
             LedPattern::Off,
             "a silent chunk turns nothing off"
         );
+    }
+
+    /// With Release microphone while idle, a lost microphone lets the next
+    /// press start at once, so a release and that press can both be queued
+    /// before the listener reads the loss. The release's finish claims the
+    /// audio the shortcut kept and copies it under its own capture's target;
+    /// the press still records, and the old loss arrives stale.
+    #[test]
+    fn a_release_queued_behind_a_microphone_loss_copies_the_kept_audio_before_the_next_press() {
+        let pressed_at = CaptureInstant::from_nanos(60_000_000_000);
+        let (mut owner, input) =
+            crate::dictation::audio::OwnerForTest::interrupted_hold(pressed_at);
+        let path = std::env::temp_dir().join(format!(
+            "hex-kept-hotkey-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut events = EventLog::create(&path).unwrap();
+        let caps_lock = crate::caps_lock_dictation::CapsLockDictation::for_test();
+        let indicator = DictationSink {
+            hud: None,
+            caps_lock: &caps_lock,
+        };
+        let released_at = pressed_at + Duration::from_millis(500);
+        let next_press = released_at + Duration::from_millis(150);
+        let mut submitted = Vec::new();
+        std::thread::scope(|scope| {
+            scope.spawn(|| owner.serve(2));
+            // The queued edges in order: the release, then the next press.
+            let finished = finish_dictation_with(
+                &input,
+                released_at,
+                Duration::ZERO,
+                |clip, salvaged| {
+                    submitted.push((clip.duration_ms(), salvaged));
+                    Ok(crate::parakeet::DictationJobId::for_test(1))
+                },
+                "Test microphone",
+                &mut events,
+                indicator,
+            )
+            .unwrap();
+            assert!(matches!(finished, FinishResult::Submitted));
+            assert!(input.start(next_press).unwrap());
+        });
+        let _ = std::fs::remove_file(&path);
+
+        // Submitted once, as a salvage, with the 300 ms heard before the loss.
+        let [(duration_ms, true)] = submitted[..] else {
+            panic!("expected one salvaged submission, got {submitted:?}");
+        };
+        assert!((295..=305).contains(&duration_ms), "{duration_ms}");
+        assert!(input.is_recording(), "the next press records");
+        assert!(input.try_recv_event().is_none(), "the old loss is stale");
     }
 }
