@@ -1352,10 +1352,7 @@ fn meetings_settings_save_and_ask_for_system_audio() {
         Some(MeetingPolicy::AlwaysRecord)
     );
     pick(&mut rt, "call8-policy", 0);
-    assert_eq!(
-        policy(&rt, "problems.kitlangton.com"),
-        Some(MeetingPolicy::Ask)
-    );
+    assert_eq!(policy(&rt, "example.com"), Some(MeetingPolicy::Ask));
     assert!(rt.find("call8").is_some());
     tap(&mut rt, "meetings-enabled");
     assert!(!rt.state.settings.meetings.enabled);
@@ -1566,7 +1563,7 @@ fn reveal_markdown_asks_for_the_exported_file_and_reveal_files_for_the_recording
         asked(&rt),
         [PlatformRequest::Meeting(MeetingRequest::Reveal(
             crate::meeting::RevealTarget::Markdown(
-                "/Users/kit/Documents/Hex Meetings/Arcade launch plan.md".into()
+                "~/Documents/Hex Meetings/Arcade launch plan.md".into()
             )
         ))]
     );
@@ -1579,7 +1576,7 @@ fn reveal_markdown_asks_for_the_exported_file_and_reveal_files_for_the_recording
         asked(&rt),
         [PlatformRequest::Meeting(MeetingRequest::Reveal(
             crate::meeting::RevealTarget::Folder(
-                "/Users/kit/Library/Application Support/hex/meetings/preview-notes".into()
+                "~/Library/Application Support/hex/meetings/preview-notes".into()
             )
         ))]
     );
@@ -1601,7 +1598,7 @@ fn reveal_markdown_asks_for_the_exported_file_and_reveal_files_for_the_recording
         asked(&rt),
         [PlatformRequest::Meeting(MeetingRequest::Reveal(
             crate::meeting::RevealTarget::Folder(
-                "/Users/kit/Library/Application Support/hex/meetings/preview-design".into()
+                "~/Library/Application Support/hex/meetings/preview-design".into()
             )
         ))]
     );

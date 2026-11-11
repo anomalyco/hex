@@ -1268,7 +1268,7 @@ pub(crate) mod tests {
             Window {
                 id: 1,
                 frame: [120.0, 90.0, 520.0, 340.0],
-                label: "Brave Browser — problems.kitlangton.com".into(),
+                label: "Brave Browser — example.com".into(),
             },
             Window {
                 id: 2,
@@ -1410,7 +1410,7 @@ pub(crate) mod tests {
         );
         assert!(window.camera);
         let badge = window.badge.unwrap();
-        assert_eq!(badge.text, "Brave Browser — problems.kitlangton.com");
+        assert_eq!(badge.text, "Brave Browser — example.com");
         // Centred on the window.
         assert!((badge.rect[0] + badge.rect[2] * 0.5 - 380.0).abs() < 0.5);
 

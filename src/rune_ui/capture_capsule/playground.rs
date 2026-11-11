@@ -383,12 +383,12 @@ fn recent() -> Vec<Dest> {
 
 /// A saved rule names no runner-up: its own session is all it suggests.
 fn rule() -> Route {
-    let to = Dest::new("SEER", "rule: problems.kitlangton.com");
+    let to = Dest::new("SEER", "rule: example.com");
     Route::Rule {
         to: to.clone(),
         suggested: vec![to],
         recent: recent(),
-        site: Some("problems.kitlangton.com".into()),
+        site: Some("example.com".into()),
     }
 }
 
@@ -400,7 +400,7 @@ fn guess() -> Route {
             dest("HOME", "mentioned", "home"),
         ],
         recent: recent(),
-        site: Some("problems.kitlangton.com".into()),
+        site: Some("example.com".into()),
     }
 }
 

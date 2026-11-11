@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn each_build_has_its_own_config_folder() {
-        let home = std::path::Path::new("/Users/kit");
+        let home = std::path::Path::new("/Users/alex");
         assert_eq!(
             user_config_dir_in(home, false),
             home.join(".config").join("hex")

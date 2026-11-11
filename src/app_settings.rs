@@ -2166,14 +2166,14 @@ mod tests {
         assert!(fresh.meetings.providers.is_empty());
 
         let legacy: AppSettings = serde_json::from_str(
-            r#"{"meetings":{"never_offer":[{"key":"problems.kitlangton.com","label":"problems.kitlangton.com"}]}}"#,
+            r#"{"meetings":{"never_offer":[{"key":"example.com","label":"example.com"}]}}"#,
         )
         .unwrap();
         assert_eq!(
             legacy.meetings.providers,
             vec![MeetingProviderChoice {
-                key: "problems.kitlangton.com".into(),
-                label: "problems.kitlangton.com".into(),
+                key: "example.com".into(),
+                label: "example.com".into(),
                 policy: MeetingPolicy::NeverOffer,
             }]
         );

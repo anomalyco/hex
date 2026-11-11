@@ -1935,7 +1935,7 @@ mod tests {
                 "system": {"file": "system.wav", "samples": 0, "dropped_packets": 0},
                 "microphone": {"file": "microphone.wav", "samples": 0, "dropped_packets": 0},
                 "error": null,
-                "export_path": "/Users/kit/Documents/Hex Meetings/Design sync.md"
+                "export_path": "/Users/alex/Documents/Hex Meetings/Design sync.md"
             }))
             .unwrap(),
         ))

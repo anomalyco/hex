@@ -23,8 +23,8 @@ use crate::meeting::query::{Library, ListQuery, OffsetRange, SearchQuery, Transc
 
 const RESOURCE_SCHEME: &str = "hex-meeting://";
 
-const INSTRUCTIONS: &str = "Kit's locally recorded Hex meetings (calls captured on his Mac). \
-Speakers are `You` (Kit, his microphone) and `Them` (everyone else, system audio); individual \
+const INSTRUCTIONS: &str = "Locally recorded Hex meetings (calls captured on this Mac). \
+Speakers are `You` (this Mac's microphone) and `Them` (everyone else, system audio); individual \
 remote speakers are not separated. Transcripts come from local speech recognition and contain \
 misheard words, so search is stemmed and fuzzy by default. Typical flow: list_meetings or \
 search_transcripts to find a meeting and timestamp, then get_transcript around it, and \

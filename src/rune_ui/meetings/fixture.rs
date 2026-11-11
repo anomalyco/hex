@@ -51,7 +51,7 @@ impl MeetingsPane {
         ];
         conversation[8].pause_before_ms = Some(55_000);
         fn preview_folder(id: &str) -> std::path::PathBuf {
-            format!("/Users/kit/Library/Application Support/hex/meetings/{id}").into()
+            format!("~/Library/Application Support/hex/meetings/{id}").into()
         }
         let meeting =
             |id: &str, title: &str, status, day: &str, clock: &str, minutes: u64| Meeting {
@@ -96,7 +96,7 @@ impl MeetingsPane {
         );
         notes.app = Some("Zoom".into());
         notes.reveal = crate::meeting::RevealTarget::Markdown(
-            "/Users/kit/Documents/Hex Meetings/Arcade launch plan.md".into(),
+            "~/Documents/Hex Meetings/Arcade launch plan.md".into(),
         );
         notes.summary = Some(
             "One login for every Anomaly Arcade game, aiming for twenty to thirty games over the next couple of months. The build screen needs a proposal before more polish."

@@ -25,7 +25,7 @@ fn guess() -> Route {
             Dest::new("HOME", "yesterday"),
             Dest::new("RUNE", "2 days ago"),
         ],
-        site: Some("problems.kitlangton.com".into()),
+        site: Some("example.com".into()),
     }
 }
 
@@ -40,7 +40,7 @@ fn rule() -> Route {
             Dest::new("HOME", "yesterday"),
             Dest::new("RUNE", "2 days ago"),
         ],
-        site: Some("problems.kitlangton.com".into()),
+        site: Some("example.com".into()),
     }
 }
 
@@ -1370,7 +1370,7 @@ fn shift_marks_and_saves_the_row_under_the_pointer() {
                 *actions.lock().unwrap(),
                 [Action::Send {
                     to: "RUNE".into(),
-                    always: Some("problems.kitlangton.com".into())
+                    always: Some("example.com".into())
                 }],
                 "search: {search}"
             );

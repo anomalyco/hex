@@ -422,7 +422,7 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         if let Ok(devices) = &mut ui.microphones {
             devices.system_default = Some("MacBook Pro Microphone".into());
-            devices.bluetooth_default_passed_over = Some("Kit Pods".into());
+            devices.bluetooth_default_passed_over = Some("Alex Pods".into());
         }
         ui.advanced = vec![Pane::General];
     }),
@@ -831,19 +831,19 @@ pub(super) fn mac_fixture() -> Ui {
             policy: crate::app_settings::MeetingPolicy::AlwaysRecord,
         },
         crate::app_settings::MeetingProviderChoice {
-            key: "problems.kitlangton.com".into(),
-            label: "problems.kitlangton.com".into(),
+            key: "example.com".into(),
+            label: "example.com".into(),
             policy: crate::app_settings::MeetingPolicy::NeverOffer,
         },
     ];
     ui.settings.experimental.hex_microphone = true;
     ui.microphones = Ok(crate::audio::InputDevices {
         names: vec![
-            "Kit Pods".into(),
+            "Alex Pods".into(),
             "MacBook Pro Microphone".into(),
             "Studio Display Microphone".into(),
         ],
-        system_default: Some("Kit Pods".into()),
+        system_default: Some("Alex Pods".into()),
         default_is_hex_microphone: false,
         ..Default::default()
     });
