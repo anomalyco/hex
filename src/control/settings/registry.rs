@@ -456,7 +456,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.history_multi_select",
         Kind::Bool,
-        "Labs: select several dictations in History with Shift-click, Command-click (Control on Windows and Linux), or a drag, then copy or delete them together",
+        "Labs: select several dictations in History with Shift-click, Cmd-click (Ctrl on Windows and Linux), or a drag, then copy or delete them together",
     ),
     key(
         "labs.recent_dictations",

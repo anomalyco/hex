@@ -1261,7 +1261,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Select multiple dictations", "Selecionar vários ditados"),
     ("Shift-click, Cmd-click (Ctrl on Windows and Linux) or drag to select several dictations, then copy or delete them together", "Shift-clique, Cmd-clique (Ctrl no Windows e no Linux) ou arraste para selecionar vários ditados e depois copiá-los ou excluí-los juntos"),
     ("{} dictations selected", "{} ditados selecionados"),
-    ("Copy puts the selected dictations on the clipboard, oldest first, with a blank line between each.", "Copiar coloca os ditados selecionados na área de transferência, do mais antigo para o mais novo, com uma linha em branco entre eles"),
+    ("Copy puts the selected dictations on the clipboard, oldest first, with a blank line between each", "Copiar coloca os ditados selecionados na área de transferência, do mais antigo para o mais novo, com uma linha em branco entre eles"),
     ("Delete {} dictations", "Excluir {} ditados"),
 ];
 

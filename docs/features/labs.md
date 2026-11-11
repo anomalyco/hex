@@ -1252,30 +1252,38 @@ Select multiple dictations (`history-multi-select`, every OS): while on,
 History's rows select as a list does. A plain click selects one entry and
 makes it the range anchor; Shift-click selects every visible row from the
 anchor through the row clicked (the search's matches, so a filter narrows the
-range); Command-click (Control on Windows and Linux) toggles one row and makes
-it the anchor; and a press dragged over other rows selects from the row it
+range); Cmd-click (Ctrl on Windows and Linux) toggles one row and makes it
+the anchor; and a press dragged over other rows selects from the row it
 started on through the row under the pointer (Rune resolves that row from the
 `history-entry{id}` key of the element picked at the drag's window point,
-[selection.rs](../../src/rune_ui/history/selection.rs)). Every selected row
-draws the selected fill, and while two or more are selected the detail area
-shows "{count} dictations selected" with Copy (the selected final texts,
-oldest first, a blank line between each, through the window's clipboard write
-like every other Copy) and Delete…, which asks once in the card ("Delete N
-dictations", with Cancel) and then deletes each entry through
-`History::delete`. One selected entry keeps the ordinary card with its facts,
-Copy, Delete, and, with Keep recordings, Transcribe again and its versions. A
-search, new dictations, and a delete prune the selection to rows that still
-show; turning the switch off collapses it to the one entry the card shows.
-Off, History is exactly as before: one selected entry, the same rows, and
-Shift and Command change nothing. The pane reads its own switch
+[selection.rs](../../src/rune_ui/history/selection.rs)). A Command press on an
+empty set adds the row History already had selected first, so a row selected
+before the lab was turned on stays selected. Every selected row draws the
+selected fill, and while two or more are selected the detail area shows
+"{count} dictations selected" with Copy (the selected final texts that have
+any, oldest first, a blank line between each, through the window's clipboard
+write like every other Copy) and Delete…, which asks once in the card ("Delete
+N dictations", then Cancel) and then deletes every selected entry in one save
+through `History::delete_many`; a failed save puts every removed entry back,
+keeps the selection, and shows the error the same way single Delete does, so
+the delete can be tried again. One selected entry keeps the ordinary card with
+its facts, Copy, Delete, and, with Keep recordings, Transcribe again and its
+versions. A search, new dictations, and a delete prune the selection to rows
+that still show; turning the switch off collapses it to the one entry the card
+shows. Off, History is exactly as before: one selected entry, the same rows,
+and Shift and Command change nothing. The pane reads its own switch
 (`ui.settings.labs.history_multi_select`, through `Feature::on`, as it reads
 Keep recordings); `labs::history_multi_select()` is the same switch for this
 process and is logged at launch with the other labs. Checks:
 `history_multi_select_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs);
+`delete_many_removes_only_the_listed_entries` and
+`failed_clear_and_delete_keep_entries_for_a_retry` in
+[history.rs](../../src/history.rs);
 `history_selects_several_with_shift_command_and_drag`,
 `history_selection_copies_oldest_first`,
 `history_selection_deletes_in_two_steps`,
+`history_command_click_keeps_the_row_selected_before_the_lab`,
 `history_shift_click_selects_one_without_the_lab`, and
 `history_multi_select_turns_off_to_one_entry` in
 [rune_ui/tests.rs](../../src/rune_ui/tests.rs), which press rows with Shift

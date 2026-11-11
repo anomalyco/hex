@@ -153,6 +153,14 @@ fn choose(ui: &mut Ui, id: u64, click: Click) {
     let rows = visible(&ui.history);
     let selection = &mut ui.history.selection;
     if click.cmd {
+        // A row selected before the lab was turned on is part of the set: a
+        // Command press adds it first, so toggling another row keeps it.
+        if selection.ids.is_empty()
+            && let Some(other) = ui.history.selected
+            && other != id
+        {
+            selection.select_only(other);
+        }
         selection.toggle(id);
         let primary = selection.primary();
         ui.history.selected = primary;
@@ -296,12 +304,16 @@ pub(super) fn collapse(pane: &mut HistoryPane) -> bool {
 }
 
 /// The selected entries' final texts, oldest first, a blank line between.
+/// Entries with no text are left out, so Copy never pastes blank lines.
 fn joined(pane: &HistoryPane) -> String {
     pane.entries
         .iter()
         .rev()
         .filter(|entry| pane.selection.contains(entry.id))
-        .map(|entry| entry.final_text.trim())
+        .filter_map(|entry| {
+            let text = entry.final_text.trim();
+            (!text.is_empty()).then_some(text)
+        })
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -317,14 +329,15 @@ fn copy(ui: &mut Ui, tx: &mut Tx) {
     ui.history.error = None;
 }
 
-/// Deletes every selected entry through the store, then forgets them.
+/// Deletes every selected entry with one save, then forgets them. A failed
+/// save keeps them selected, so the delete can be retried.
 fn delete(ui: &mut Ui) {
     let ids = ui.history.selection.ids.clone();
     if let Some(store) = &ui.history.store {
-        for id in ids {
-            if let Err(error) = store.delete(id) {
-                ui.history.error = Some(error.to_string());
-            }
+        if let Err(error) = store.delete_many(&ids) {
+            ui.history.error = Some(error.to_string());
+            ui.history.reload();
+            return;
         }
         ui.history.reload();
     } else {
@@ -354,17 +367,17 @@ pub(super) fn card(ui: &Ui, p: Paint) -> El {
         actions
             .child(button(
                 p,
-                "history-selection-cancel-delete",
-                tr("Cancel"),
-                ButtonKind::Secondary,
-                |ui: &mut Ui, _| ui.history.selection.delete_armed = false,
-            ))
-            .child(button(
-                p,
                 "history-selection-confirm-delete",
                 &tr_fill("Delete {} dictations", &count),
                 ButtonKind::Danger,
                 |ui: &mut Ui, _| delete(ui),
+            ))
+            .child(button(
+                p,
+                "history-selection-cancel-delete",
+                tr("Cancel"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| ui.history.selection.delete_armed = false,
             ))
     } else {
         actions.child(button(
@@ -391,7 +404,7 @@ pub(super) fn card(ui: &Ui, p: Paint) -> El {
                 .key("selection-body")
                 .gap(20.0)
                 .child(
-                    text(tr("Copy puts the selected dictations on the clipboard, oldest first, with a blank line between each."))
+                    text(tr("Copy puts the selected dictations on the clipboard, oldest first, with a blank line between each"))
                         .key("hint")
                         .font(DESCRIPTION)
                         .color(p.muted())

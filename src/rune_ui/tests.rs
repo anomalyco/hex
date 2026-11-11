@@ -1535,6 +1535,28 @@ fn history_shift_click_selects_one_without_the_lab() {
 }
 
 #[test]
+fn history_command_click_keeps_the_row_selected_before_the_lab() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    assert!(!rt.state.settings.labs.history_multi_select);
+    tap(&mut rt, "history-entry2");
+    assert_eq!(rt.state.history.selected, Some(2));
+
+    // A row selected before the lab was turned on joins the set first, so
+    // Command-clicking another row keeps it instead of dropping it.
+    rt.state.settings.labs.history_multi_select = true;
+    rt.invalidate();
+    settle(&mut rt);
+    hold(&mut rt, command());
+    tap(&mut rt, "history-entry3");
+    hold(&mut rt, Mods::default());
+    assert_eq!(rt.state.history.selection.len(), 2);
+    assert!(rt.state.history.selection.contains(2));
+    assert!(rt.state.history.selection.contains(3));
+    assert_eq!(rt.state.history.selected, Some(3));
+    assert!(rt.find("history-selection-copy").is_some());
+}
+
+#[test]
 fn history_multi_select_turns_off_to_one_entry() {
     let mut rt = history_multi();
     tap(&mut rt, "history-entry3");
