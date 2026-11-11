@@ -906,6 +906,9 @@ pub fn run(
                             chunk_captured_through,
                             input.sample_rate(),
                         );
+                        // A start that gave up releases the microphone here,
+                        // as before, when the lab is off.
+                        release_microphone!();
                     }
                     emit_current_state(&mut events, recording, pending, &device_label)?;
                     continue;

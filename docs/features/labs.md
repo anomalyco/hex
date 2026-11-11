@@ -408,7 +408,13 @@ captures too. A press inside the window takes the ordinary warm path: the
 microphone is already open, so the capture starts at once and keeps its
 pre-roll (up to 450 ms; none while "While dictating" mutes, pauses, or lowers
 audio) from the warm stream, instead of the cold open's asynchronous start
-with no pre-roll that happens today with the release setting on. On macOS a
+with no pre-roll that happens today with the release setting on. A
+digital-silence finish (the stream runs but delivers only zeros, #1122) ends
+the window and closes the microphone on macOS and Linux, so the next press
+opens a fresh stream; on macOS it does not close while a capture sink is
+copying the microphone, so Annotate's capture gets no gap, and on Windows,
+which has no silence reopen, a zero-only stream can linger for the window as
+it can in always-open mode. On macOS a
 stream interruption, or a stray reopen with no press waiting, closes the
 microphone directly as it always did, which ends the window there early.
 Turning the lab off during the window releases the microphone at the next
@@ -419,9 +425,9 @@ did. macOS reads the gate as `dictation/audio`'s owner reconciles the input
 observed); Windows checks it once per pass before its idle wait, and Linux
 once per pass before it polls the microphone. On Windows and Linux the check
 is one small macro the pass and the old event sites (a submitted finish, a
-cancel, a discard before the microphone opened, a client dictation ending)
-share, so with the lab off a press handled in the same pass still sees a
-closed microphone at once, as before. That check also closes a released
+cancel, a discard before the microphone opened, a client dictation ending or
+failing to start) share, so with the lab off a press handled in the same pass
+still sees a closed microphone at once, as before. That check also closes a released
 microphone an interrupted recording left open, which the old event sites
 never did, with the lab off too. The window has no room in the Labs state
 word beside Unload model when idle's minutes, so the switch holds the word's

@@ -74,10 +74,17 @@ mod tests {
         // A second finish cannot queue another replacement.
         assert!(!reopen_silent_stream(&mut input, false, &mut linger, None));
 
-        // Release while idle keeps the stream closed instead.
-        let (mut idle, _opened) = RecoveringAudioInput::pending_for_test();
-        assert!(!reopen_silent_stream(&mut idle, true, &mut linger, None));
-        assert!(!idle.is_recovering());
+        // Release while idle with the lab off keeps the open stream: no
+        // reopen, and it stays open for the next press.
+        let mut released = open_input();
+        assert!(!reopen_silent_stream(
+            &mut released,
+            true,
+            &mut linger,
+            None
+        ));
+        assert!(released.is_open(), "the stream stays open");
+        assert!(!released.is_recovering(), "and is not reopened");
     }
 
     #[test]

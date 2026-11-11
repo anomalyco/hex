@@ -1172,7 +1172,10 @@ impl Owner {
             return;
         }
         if self.release_while_idle {
-            if crate::audio::linger::window().is_none() {
+            // A capture sink is copying this microphone, so closing it would
+            // leave a gap in the capture: leave the stream as always-open
+            // mode does.
+            if crate::audio::linger::window().is_none() || self.capture_sink_open() {
                 return;
             }
             tracing::warn!(
