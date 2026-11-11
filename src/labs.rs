@@ -289,8 +289,8 @@ impl Feature {
             Self::TerminalPaste | Self::ShareShortcut | Self::OpenCodeInWsl => {
                 cfg!(target_os = "windows")
             }
-            Self::SectionKeyAlone
-            | Self::GnomeClipboardRestore
+            Self::SectionKeyAlone => cfg!(any(target_os = "linux", target_os = "macos")),
+            Self::GnomeClipboardRestore
             | Self::TypedText
             | Self::GnomeMeetingCapsules
             | Self::GnomeAnnotate

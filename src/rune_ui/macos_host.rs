@@ -32,7 +32,8 @@ use super::practice::PracticeFeed;
 use super::settings::Chord;
 use super::{HostState, ServiceView};
 use crate::app_settings::{
-    CalendarSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, modifiers_from_flags,
+    CalendarSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, ISO_SECTION_KEY_CODE,
+    modifiers_from_flags,
 };
 use crate::calendar::{AccessAnswer, CalendarAccess, CalendarSnapshot};
 use crate::desktop::host::DesktopAction;
@@ -251,7 +252,6 @@ impl Drop for ChordWatch {
 /// modifiers, or the most modifier keys held at once when they are all
 /// released without a key, with the sides `recorded_sides` keeps (or,
 /// with Labs › Sided modifier chords on, the side each was pressed on).
-#[derive(Default)]
 struct ChordCapture {
     peak: HotkeyModifiers,
     /// A key went down with these modifiers; their release records nothing.
@@ -259,12 +259,27 @@ struct ChordCapture {
     /// A modifier-only chord keeps every modifier's side, such as
     /// Right ⌘ + Right ⌥, instead of widening each to either side.
     sided: bool,
+    /// Names a key from the active layout when AppKit's characters are empty,
+    /// as they are for a dead key (`^`, `´`, `` ` ``).
+    layout_label: fn(u16) -> Option<String>,
+}
+
+impl Default for ChordCapture {
+    fn default() -> Self {
+        Self {
+            peak: HotkeyModifiers::default(),
+            keyed: false,
+            sided: false,
+            layout_label: |_| None,
+        }
+    }
 }
 
 impl ChordCapture {
     fn with_sides(sided: bool) -> Self {
         Self {
             sided,
+            layout_label: crate::keyboard::key_label,
             ..Self::default()
         }
     }
@@ -300,11 +315,17 @@ impl ChordCapture {
         // Only modifiers held with the key are spent by it.
         self.keyed = !modifiers.is_empty();
         self.peak = HotkeyModifiers::default();
-        let key = match hotkey_key(code, characters) {
+        let key = match hotkey_key(code, characters, || (self.layout_label)(code)) {
             Ok(key) => key,
             Err(message) => return Some(Chord::Captured(Err(message))),
         };
-        if modifiers.is_empty() && !is_function_key(&key.label) && !is_navigation_key(code) {
+        // A key that types nothing may be a shortcut alone as a function or
+        // navigation key, or the ISO section key. The recorder takes the
+        // section key either way; `settings::validate` refuses it while Labs ›
+        // Section key alone is off, as Linux's recorder does.
+        let stands_alone =
+            is_function_key(&key.label) || is_navigation_key(code) || code == ISO_SECTION_KEY_CODE;
+        if modifiers.is_empty() && !stands_alone {
             return Some(Chord::Captured(Err(tr("Add a modifier"))));
         }
         Some(Chord::Captured(Ok(HotkeyBinding {
@@ -356,8 +377,14 @@ fn is_navigation_key(code: u16) -> bool {
     matches!(code, 115 | 119 | 116 | 121 | 114)
 }
 
-/// The key a virtual key code records, and its label.
-fn hotkey_key(code: u16, characters: Option<&str>) -> Result<HotkeyKey, &'static str> {
+/// The key a virtual key code records, and its label. AppKit gives no
+/// characters for a dead key (`^`, `´`, `` ` ``), so `layout_label` names it
+/// from the active layout instead.
+fn hotkey_key(
+    code: u16,
+    characters: Option<&str>,
+    layout_label: impl FnOnce() -> Option<String>,
+) -> Result<HotkeyKey, &'static str> {
     let special = match code {
         49 => Some("Space"),
         48 => Some("Tab"),
@@ -401,13 +428,26 @@ fn hotkey_key(code: u16, characters: Option<&str>) -> Result<HotkeyKey, &'static
             label: label.into(),
         });
     }
-    let mut chars = characters.unwrap_or_default().chars();
-    match (chars.next(), chars.next()) {
-        (Some(character), None) if !character.is_control() => Ok(HotkeyKey {
+    let character = match single_key_character(characters) {
+        Some(character) => Some(character),
+        None => layout_label().and_then(|label| single_key_character(Some(label.as_str()))),
+    };
+    match character {
+        Some(character) => Ok(HotkeyKey {
             code,
             label: character.to_uppercase().collect(),
         }),
-        _ => Err(tr("Unsupported key")),
+        None => Err(tr("Unsupported key")),
+    }
+}
+
+/// The one visible character `text` holds, if it is exactly one non-control
+/// character.
+fn single_key_character(text: Option<&str>) -> Option<char> {
+    let mut characters = text.unwrap_or_default().chars();
+    match (characters.next(), characters.next()) {
+        (Some(character), None) if !character.is_control() => Some(character),
+        _ => None,
     }
 }
 
@@ -453,15 +493,19 @@ pub(super) fn hotkey_key_named(name: &str) -> Result<HotkeyKey, &'static str> {
             }),
     };
     if let Some(code) = code {
-        return hotkey_key(code, None);
+        return hotkey_key(code, None, || None);
     }
     let mut characters = name.chars();
     match (characters.next(), characters.next()) {
         (Some(character), None) => {
             let character = character.to_lowercase().next().unwrap_or(character);
-            let code =
-                crate::keyboard::key_code_for(character).map_err(|_| tr("Unsupported key"))?;
-            hotkey_key(code, Some(&character.to_string()))
+            // A dead key (`^`, `´`, `` ` ``) names itself on the active
+            // layout even though it types nothing until the next key.
+            let code = crate::keyboard::key_code_for(character)
+                .ok()
+                .or_else(|| crate::keyboard::key_code_for_base_label(character))
+                .ok_or(tr("Unsupported key"))?;
+            hotkey_key(code, Some(&character.to_string()), || None)
         }
         _ => Err(tr("Unsupported key")),
     }
@@ -1695,6 +1739,77 @@ mod tests {
             capture.key_down(ESCAPE_KEY_CODE, false, None, 0),
             Some(Chord::Cancelled)
         ));
+    }
+
+    /// The recorder names a dead key from the active layout when AppKit gives
+    /// no characters, and with neither it still refuses the key.
+    #[test]
+    fn a_dead_key_records_its_layout_label() {
+        let mut capture = ChordCapture {
+            layout_label: |code| (code == ISO_SECTION_KEY_CODE).then(|| "^".into()),
+            ..Default::default()
+        };
+        let binding =
+            captured(capture.key_down(ISO_SECTION_KEY_CODE, false, None, LEFT_OPTION)).unwrap();
+        assert_eq!(
+            binding.key,
+            Some(HotkeyKey {
+                code: ISO_SECTION_KEY_CODE,
+                label: "^".into()
+            })
+        );
+        assert!(
+            binding
+                .runtime()
+                .matches_key_press(ISO_SECTION_KEY_CODE, LEFT_OPTION)
+        );
+
+        let mut none = ChordCapture::default();
+        assert_eq!(
+            captured(none.key_down(ISO_SECTION_KEY_CODE, false, None, LEFT_OPTION)),
+            Err(tr("Unsupported key"))
+        );
+        assert_eq!(
+            hotkey_key(ISO_SECTION_KEY_CODE, None, || None),
+            Err(tr("Unsupported key"))
+        );
+        assert_eq!(
+            hotkey_key(ISO_SECTION_KEY_CODE, None, || Some("^".into()))
+                .unwrap()
+                .label,
+            "^"
+        );
+    }
+
+    /// The recorder takes the ISO section key alone, as Linux's does; Labs ›
+    /// Section key alone is enforced by `settings::validate` before saving,
+    /// not by the recorder.
+    #[test]
+    fn the_section_key_records_alone() {
+        let mut capture = ChordCapture {
+            layout_label: |_| Some("^".into()),
+            ..Default::default()
+        };
+        let binding = captured(capture.key_down(ISO_SECTION_KEY_CODE, false, None, 0)).unwrap();
+        assert!(binding.modifiers.is_empty());
+        assert_eq!(
+            binding.key,
+            Some(HotkeyKey {
+                code: ISO_SECTION_KEY_CODE,
+                label: "^".into()
+            })
+        );
+        assert!(binding.is_lone_section_key());
+        assert!(binding.runtime().matches_key_press(ISO_SECTION_KEY_CODE, 0));
+        // Another key alone still needs a modifier.
+        assert_eq!(
+            captured(capture.key_down(0, false, Some("a"), 0)),
+            Err(tr("Add a modifier"))
+        );
+        assert_eq!(single_key_character(Some("^")), Some('^'));
+        assert_eq!(single_key_character(Some("ab")), None);
+        assert_eq!(single_key_character(Some("\u{0}")), None);
+        assert_eq!(single_key_character(None), None);
     }
 
     fn calendar_answer(granted: bool, status: CalendarAccess) -> AccessAnswer {

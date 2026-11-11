@@ -441,7 +441,8 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.section_key_alone",
         Kind::Bool,
-        "Labs: a shortcut may be the § key, left of 1 on ISO keyboards, with no modifier (Linux); off puts such a shortcut back to its default",
+        "Labs: a shortcut may be the key left of 1 on ISO keyboards, § or a dead key such as ^, \
+         with no modifier (Linux, macOS); off puts such a shortcut back to its default",
     ),
     key(
         "labs.keep_recordings",

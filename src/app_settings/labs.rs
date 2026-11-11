@@ -134,7 +134,8 @@ pub struct LabsSettings {
     pub model_in_place: bool,
     /// The picker's All speech models view offers "Only downloaded models" (issue 1018).
     pub picker_downloaded: bool,
-    /// The ISO § key may be a shortcut on its own (Linux, issue 1050).
+    /// The ISO section key, left of 1, may be a shortcut on its own (Linux
+    /// and macOS, issue 1050).
     pub section_key_alone: bool,
     /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
     pub keep_recordings: bool,

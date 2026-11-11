@@ -71,7 +71,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Benchmark details no  labs.benchmark_details        picker rows show raw WER/CER (lower is better), language, dataset, source, and conditions; incomparable "Most accurate" badges drop (#647)
 ├── Parakeet Ultra  no    labs.parakeet_ultra          the picker offers Moondream's Parakeet Ultra (pinned Q8_0, CC BY 4.0) with a details view; stays on while it dictates (#648)
 ├── Special keys alone no labs.standalone_special_keys (Linux, Windows) Linux: Menu, Pause, Scroll Lock may be a shortcut's key, alone or with modifiers (#767); Windows: Insert, Home, End, Page Up, Page Down may stand alone (#794)
-├── Section key alone no  labs.section_key_alone       (Linux) the § key, left of 1 on ISO keyboards, may be a shortcut with no modifier (#1050)
+├── Section key alone no  labs.section_key_alone       (Linux, macOS) the key left of 1 on ISO keyboards, § or a dead key such as ^, may be a shortcut with no modifier (#1050)
 ├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations; hex history stats prints it (#790)
 ├── Select multiple dictations no labs.history_multi_select  History selects several dictations with Shift-click, Cmd-click (Ctrl on
 │                                        Windows and Linux), or a drag, and copies or deletes them together
@@ -1191,43 +1191,65 @@ Not yet observed: a real GNOME Wayland session granting Menu through the
 portal, or an X11 grab of it; the Labs page goldens need regenerating on Linux
 with the new row.
 
-Section key alone (`section-key`, issue 1050, Linux): for push-to-talk on
-the ISO § key, left of 1 above Tab, without a modifier.
+Section key alone (`section-key`, issue 1050, Linux and macOS): for
+push-to-talk on the ISO section key, left of 1 above Tab, without a
+modifier. Layouts label it § (U.S. ISO) or a dead key: on a German Mac the
+same key types `^`, and many layouts use `´` or `` ` ``.
 
 ```ts
-Settings › General › Shortcut, press § alone      // labs.section-key
-├── Toggle off -> "Add a modifier", as before; § with a modifier records as before
-├── Toggle on  -> saved as § (hex settings also takes `section`); Settings shows §
-│   ├── X11 -> grabs the keycode that types XK_section 0xa7
-│   └── Wayland portal -> preferred trigger `section`
+Settings › General › Shortcut, press the section key alone  // labs.section-key
+├── Toggle off -> saving the recording is refused: "Add a modifier", as before
+├── Toggle on  -> saved as § or the dead key's base character (^, ´, `)
+│   ├── Linux: hex settings also takes `section`; Settings shows §
+│   │   ├── X11 -> grabs the keycode that types XK_section 0xa7
+│   │   └── Wayland portal -> preferred trigger `section`
+│   └── macOS: key code 10 (kVK_ISO_Section) alone; hex settings takes `^` on
+│       a German layout and resolves it by scanning the layout's base labels
+├── macOS recorder -> AppKit gives no characters for a dead key, so the key
+│   is named from the active layout with UCKeyTranslate and
+│   kUCKeyTranslateNoDeadKeysBit: key 10 is saved as {code: 10, label: "^"};
+│   the recorder takes it alone either way, and `settings::validate` refuses
+│   it while the toggle is off, as Linux's recorder does
 ├── hex settings set dictation_hotkey §, off -> "section needs Labs › Section key
 │   alone: hex labs on section-key"
 └── Toggle turned off (row, hex labs off, hex settings), or settings load with
-    it off -> a Linux shortcut on § alone goes back to its default (Dictate
-    without processing unbound), so the listener never registers it
+    it off -> a Linux or macOS shortcut on the section key alone goes back to
+    its default (Dictate without processing unbound), so the listener never
+    registers it
 ```
 
-While bound, Hex takes § from every app (an X11 grab or a portal shortcut
-holds its key), so typing § needs another key. The window's
-`settings::recorded_binding` and `control/settings.rs`'s `parse_hotkey` let a
-lone § through on Linux; the gates are `AppSettings::section_key_allowed` in
-the window's `settings::validate` and in `control/settings.rs`'s `apply`
-(`special_key_refusal`), and `AppSettings::repair_section_key`
-(`app_settings/shortcut_repair.rs`) where settings load and where the toggle
-turns off. Off, Hex is unchanged: a lone § is refused everywhere, and the
-added `section` keysym names are reached only by a saved § shortcut (§ with a
-modifier now also resolves on X11 and the portal, where it was refused as an
-unsupported key). macOS and Windows don't have it. Checks:
-`section_alone_needs_its_labs_toggle` in
+While bound, Hex takes the section key from every app (an X11 grab, a portal
+shortcut, or the macOS session tap holds its key), so typing it needs another
+key. The window's `settings::recorded_binding` and `control/settings.rs`'s
+`parse_hotkey` let a lone section key through on Linux and macOS; the gates are
+`AppSettings::section_key_allowed` in the window's `settings::validate` and in
+`control/settings.rs`'s `apply` (`special_key_refusal`), and
+`AppSettings::repair_section_key` (`app_settings/shortcut_repair.rs`) where
+settings load and where the toggle turns off. On macOS, matching is by key
+code: `HotkeyKey::is_section` also accepts code 10 whatever its label, and
+`RuntimeHotkey::matches_key_press` compares `key_code` (saved from
+`HotkeyBinding::runtime()` with code 10 for a non-letter label), so
+`{code: 10, label: "^"}` with Option matches and the session tap swallows it
+like any keyed shortcut. Off, Hex is unchanged: a lone section key is refused
+everywhere, and the added `section` keysym names are reached only by a saved
+section-key shortcut (with a modifier it now also resolves on X11 and the
+portal, where it was refused as an unsupported key). Windows doesn't have it.
+Checks: `section_alone_needs_its_labs_toggle` in
 [control/settings.rs](../../src/control/settings.rs) and
 [rune_ui/settings.rs](../../src/rune_ui/settings.rs),
+`a_dead_key_section_binding_needs_its_labs_toggle_on_macos` in
+[rune_ui/settings.rs](../../src/rune_ui/settings.rs),
 `the_section_key_has_portal_and_x11_names` in
-[linux/input.rs](../../src/linux/input.rs), and
-`a_lone_section_key_goes_back_to_its_default_while_its_labs_toggle_is_off` in
-[app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs).
+[linux/input.rs](../../src/linux/input.rs),
+`a_lone_section_key_goes_back_to_its_default_while_its_labs_toggle_is_off` and
+`a_dead_key_label_is_the_section_key_only_on_macos` in
+[app_settings/shortcut_repair.rs](../../src/app_settings/shortcut_repair.rs),
+and `a_dead_key_records_its_layout_label` and
+`the_section_key_records_alone` in
+[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs) (macOS-only tests).
 Not yet observed: a real ISO keyboard on X11 or a Wayland portal granting
-`section`; whether Rune reports § as text on every layout; the Labs page
-goldens need regenerating on Linux with the new row.
+`section`, and a German Mac keyboard recorded end to end; the Labs page goldens
+need regenerating on Linux with the new row and wording.
 
 Dictation stats (`history-stats`, issue 790, every OS): while on, History's
 header shows a Secondary "Stats" button beside its retention select once

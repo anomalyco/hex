@@ -2445,7 +2445,7 @@ fn labs_groups_follow_each_os() {
     for (scene, has, lacks) in [
         ("windows-labs", "terminal-paste", "mouse-shortcuts"),
         ("linux-labs", "section-key", "terminal-paste"),
-        ("mac-labs", "mouse-shortcuts", "section-key"),
+        ("mac-labs", "section-key", "terminal-paste"),
     ] {
         let mut rt = runtime(scene, true, (980.0, 4000.0));
         unfold_labs(&mut rt);

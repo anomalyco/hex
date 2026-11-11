@@ -95,15 +95,19 @@ recorder refuses them, and a saved shortcut on one goes back to its default
 when settings load or the toggle turns off. On, the window's recorder takes
 them too (#1187). Details and checks in [labs.md](labs.md).
 
-Linux with Labs › Section key alone on (`labs.section_key_alone`, off by
-default; issue 1050): the ISO § key, left of 1, may be a shortcut with no
-modifier. The window's recorder takes § pressed alone and shows §, and
-`hex settings set dictation_hotkey §` (or `section`) saves it. It reaches X11
-grabs as keysym 0xa7 and the portal as `section`. Off, the recorder answers
-"Add a modifier" as before, `hex settings` refuses it, and a saved § shortcut
-without a modifier goes back to its default when settings load or the toggle
-turns off. While bound, § is Hex's in every app. Details and checks in
-[labs.md](labs.md).
+Linux and macOS with Labs › Section key alone on (`labs.section_key_alone`,
+off by default; issue 1050): the ISO section key, left of 1, may be a
+shortcut with no modifier. On Linux the window's recorder takes § pressed
+alone and shows §, and `hex settings set dictation_hotkey §` (or `section`)
+saves it; it reaches X11 grabs as keysym 0xa7 and the portal as `section`. On
+macOS the recorder takes key code 10 alone: AppKit gives no characters for a
+dead key, so the key is named from the active layout with the no-dead-keys
+translation and saved as its base character, `^` on a German layout
+(`{code: 10, label: "^"}`), or § where the layout types it. Off, saving the
+recording is refused and Settings shows "Add a modifier", as before;
+`hex settings` refuses it, and a saved section-key shortcut without a modifier
+goes back to its default when settings load or the toggle turns off. While
+bound, the key is Hex's in every app. Details and checks in [labs.md](labs.md).
 
 Checks: `mouse_buttons_record_with_or_without_modifiers`,
 `mouse_bindings_persist_and_conflict_only_with_the_same_trigger`,
@@ -155,6 +159,18 @@ For a shortcut that holds Fn, key code 179 is now neither a chord key nor HID
 chord evidence; any other key still is. Check:
 `globe_key_events_are_not_a_chord_with_the_function_shortcut` in
 `suppression/tests.rs` (constructed events; no physical-keyboard run).
+
+**Fixed November 11, 2026 (dead keys):** the macOS recorder named a key only
+from AppKit's `charactersIgnoringModifiers`, and a dead-key layout gives no
+character for the ISO section key (German `^`) or for `´` and `` ` `` on many
+layouts, so Option+^ answered "Unsupported key" where older builds accepted
+it. The recorder now falls back to the key's base character on the active
+layout (`keyboard::key_label`, `UCKeyTranslate` with
+`kUCKeyTranslateNoDeadKeysBit`), so it records as `^` and matches by its key
+code, and `hex settings` finds a typed `^` back to key code 10 the same way.
+The layout snapshot used for typing and Command shortcuts keeps processing
+dead keys as before. Check: `a_dead_key_records_its_layout_label` in
+`rune_ui/macos_host.rs` (macOS only; no physical German keyboard run).
 
 **Implemented November 7, 2026 (issue 37), unverified:** remapping Caps Lock to
 Control makes macOS's HID keyboard filter rewrite its usage (0x39) to Right
